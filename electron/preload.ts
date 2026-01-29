@@ -62,6 +62,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
       invoke("git:listFiles", projectPath, maxFiles),
     getRecentCommits: (projectPath: string, count?: number) =>
       invoke("git:getRecentCommits", projectPath, count),
+    commit: (projectPath: string, message: string, files?: string[]) =>
+      invoke("git:commit", projectPath, message, files),
+    getWorktreeInfo: (projectPath: string) =>
+      invoke("git:getWorktreeInfo", projectPath),
   },
 });
 

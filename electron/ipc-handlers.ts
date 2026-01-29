@@ -516,5 +516,28 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     },
   );
 
+  // Commit changes (optional file list; omit for git add -A)
+  ipcMain.handle(
+    "git:commit",
+    async (
+      _event,
+      projectPath: string,
+      message: string,
+      files?: string[],
+    ) => {
+      const gitService = new GitService(projectPath);
+      return gitService.commit(message, files);
+    },
+  );
+
+  // Get worktree info (isWorktree, worktreeRoot)
+  ipcMain.handle(
+    "git:getWorktreeInfo",
+    async (_event, projectPath: string) => {
+      const gitService = new GitService(projectPath);
+      return gitService.getWorktreeInfo();
+    },
+  );
+
   console.log("[IPC] All handlers registered");
 }

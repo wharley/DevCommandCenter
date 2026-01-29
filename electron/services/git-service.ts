@@ -307,6 +307,47 @@ export class GitService {
   }
 
   /**
+   * Verifica se o projeto está em um worktree (vs. repositório principal)
+   * e retorna o worktree root quando aplicável.
+   */
+  async getWorktreeInfo(): Promise<{
+    isWorktree: boolean;
+    worktreeRoot?: string;
+  }> {
+    try {
+      const isRepo = await this.isGitRepo();
+      if (!isRepo) return { isWorktree: false };
+
+      const { stdout: toplevel } = await execAsync(
+        "git rev-parse --show-toplevel",
+        { cwd: this.projectPath },
+      );
+      const ourRoot = path.resolve(this.projectPath, toplevel.trim());
+
+      const { stdout } = await execAsync("git worktree list --porcelain", {
+        cwd: this.projectPath,
+      });
+      const blocks = stdout.split(/\n\n+/).filter(Boolean);
+      const worktreePaths: string[] = [];
+      for (const block of blocks) {
+        const m = block.match(/^worktree\s+(.+)$/m);
+        if (m) worktreePaths.push(path.resolve(m[1].trim()));
+      }
+      if (worktreePaths.length === 0) return { isWorktree: false };
+      const mainRoot = worktreePaths[0];
+      const inMain = ourRoot === mainRoot;
+      const inOther = worktreePaths.slice(1).some((p) => p === ourRoot);
+      const isWorktree = !inMain && inOther;
+      return {
+        isWorktree,
+        worktreeRoot: isWorktree ? ourRoot : undefined,
+      };
+    } catch {
+      return { isWorktree: false };
+    }
+  }
+
+  /**
    * Cria um novo branch
    */
   async createBranch(branchName: string): Promise<boolean> {

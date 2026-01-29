@@ -14,6 +14,8 @@ import {
   ChevronRight,
   Clock,
   Sparkles,
+  GitBranch,
+  GitCommit,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +39,7 @@ import {
 } from "@/hooks/use-data";
 import { useAppStore } from "@/hooks/use-app-store";
 import { createAIService } from "@/lib/services/ai-service";
+import { CommitDialog } from "@/components/dialogs/commit-dialog";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import type {
@@ -95,8 +98,9 @@ export default function MissionPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [activeTab, setActiveTab] = useState("plan");
-
-  const isElectron = typeof window !== "undefined" && !!window.electronAPI?.ai;
+  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const [currentBranch, setCurrentBranch] = useState<string | null>(null);
+  const [isWorktree, setIsWorktree] = useState(false);
 
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
@@ -141,6 +145,38 @@ export default function MissionPage() {
     if (missionId) setCurrentMission(missionId);
     return () => setCurrentMission(null);
   }, [missionId, setCurrentMission]);
+
+  // Branch e worktree (Electron)
+  useEffect(() => {
+    const path = project?.path;
+    const git = typeof window !== "undefined" ? window.electronAPI?.git : null;
+    if (!path || !git) {
+      setCurrentBranch(null);
+      setIsWorktree(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [branch, wt] = await Promise.all([
+          git.getCurrentBranch(path),
+          git.getWorktreeInfo(path),
+        ]);
+        if (!cancelled) {
+          setCurrentBranch(branch ?? null);
+          setIsWorktree(wt?.isWorktree ?? false);
+        }
+      } catch {
+        if (!cancelled) {
+          setCurrentBranch(null);
+          setIsWorktree(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.path]);
 
   const isLoading =
     (projectId && projectsLoading) || (missionId && missionsLoading);
@@ -264,10 +300,6 @@ export default function MissionPage() {
   };
 
   const handleApplyChanges = async () => {
-    if (!isElectron) {
-      toast.info("Aplicar alterações estará disponível na versão Electron");
-      return;
-    }
     if (
       !missionId ||
       !mission ||
@@ -294,26 +326,64 @@ export default function MissionPage() {
         toast.success(
           `Alterações aplicadas: ${result.appliedFiles.length} arquivo(s)`,
         );
-        await refreshMissions();
-        await refreshLogs();
-        setActiveTab("logs");
+        try {
+          await refreshMissions();
+          await refreshLogs();
+          setTimeout(() => setActiveTab("logs"), 0);
+        } catch {
+          toast.warning(
+            "Alterações aplicadas, mas a interface pode estar desatualizada. Atualize a página se necessário.",
+          );
+        }
       } else {
         const detail =
           result.failedFiles.length > 0
             ? ` ${result.failedFiles.map((f) => `${f.path}: ${f.error}`).join("; ")}`
             : "";
         toast.error(`Falha ao aplicar alterações.${detail}`);
-        await refreshMissions();
-        await refreshLogs();
+        try {
+          await refreshMissions();
+          await refreshLogs();
+        } catch {
+          /* ignore */
+        }
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Erro desconhecido";
       toast.error(`Falha ao aplicar alterações: ${msg}`);
       addLog("error", msg);
-      await refreshMissions();
-      await refreshLogs();
+      try {
+        await refreshMissions();
+        await refreshLogs();
+      } catch {
+        /* ignore */
+      }
     } finally {
       setIsApplying(false);
+    }
+  };
+
+  const handleCommit = async (message: string) => {
+    if (
+      !project?.path ||
+      typeof window === "undefined" ||
+      !window.electronAPI?.git
+    ) {
+      toast.error("Commit indisponível");
+      throw new Error("Commit indisponível");
+    }
+    try {
+      const ok = await window.electronAPI.git.commit(project.path, message);
+      if (ok) {
+        toast.success("Commit realizado");
+      } else {
+        toast.error("Falha ao commitar. Verifique o status do repositório.");
+        throw new Error("Falha ao commitar");
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro desconhecido";
+      toast.error(`Falha ao commitar: ${msg}`);
+      throw e;
     }
   };
 
@@ -326,25 +396,47 @@ export default function MissionPage() {
     <div className="flex h-full flex-col">
       {/* Header */}
       <header className="border-b border-border bg-card px-6 py-4">
-        <div className="flex items-center gap-4 mb-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => navigate(`/project/${projectId}`)}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <Separator orientation="vertical" className="h-6" />
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Link
-              to={`/project/${projectId}`}
-              className="hover:text-foreground"
+        <div className="flex items-center justify-between gap-4 mb-3">
+          <div className="flex items-center gap-4 min-w-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate(`/project/${projectId}`)}
             >
-              {project.name}
-            </Link>
-            <ChevronRight className="h-4 w-4" />
-            <span className="text-foreground">Missão</span>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Link
+                to={`/project/${projectId}`}
+                className="hover:text-foreground"
+              >
+                {project.name}
+              </Link>
+              <ChevronRight className="h-4 w-4" />
+              <span className="text-foreground">Missão</span>
+            </div>
           </div>
+          {(currentBranch != null || isWorktree) && (
+            <div className="flex items-center gap-2 shrink-0 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm">
+              {currentBranch != null && (
+                <span className="flex items-center gap-1.5 font-medium text-foreground">
+                  <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+                  {currentBranch}
+                </span>
+              )}
+              {isWorktree && (
+                <>
+                  {currentBranch != null && (
+                    <Separator orientation="vertical" className="h-4" />
+                  )}
+                  <Badge variant="secondary" className="font-normal text-xs">
+                    Worktree
+                  </Badge>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex items-start justify-between">
@@ -391,6 +483,15 @@ export default function MissionPage() {
                   <Play className="mr-2 h-4 w-4" />
                 )}
                 Aplicar alterações
+              </Button>
+            )}
+            {mission.status === "completed" && (
+              <Button
+                onClick={() => setCommitDialogOpen(true)}
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <GitCommit className="mr-2 h-4 w-4" />
+                Commitar
               </Button>
             )}
           </div>
@@ -457,6 +558,13 @@ export default function MissionPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      <CommitDialog
+        open={commitDialogOpen}
+        onOpenChange={setCommitDialogOpen}
+        defaultMessage={`DevCommandCenter: ${mission.title}`}
+        onCommit={handleCommit}
+      />
     </div>
   );
 }
@@ -877,8 +985,13 @@ function LogsView({
 
   // Ordenação cronológica: mais recente no topo. Mesmo horário: nosso resumo (response) acima de info do Claude.
   const getTimestamp = (log: (typeof logs)[0]) => {
-    const t = new Date(log.createdAt).getTime();
+    const t = new Date(log.createdAt as string | Date).getTime();
     return Number.isNaN(t) ? 0 : t;
+  };
+  const safeFormatTime = (val: unknown) => {
+    if (val == null) return "—";
+    const d = val instanceof Date ? val : new Date(val as string | number);
+    return Number.isNaN(d.getTime()) ? "—" : format(d, "HH:mm:ss");
   };
   // Desempate: nossos resumos (response e error) acima de info do Claude (ex.: Recebendo resposta...)
   const typeOrderForTie = (type: MissionLogType) =>
@@ -893,7 +1006,7 @@ function LogsView({
   return (
     <div className="space-y-2">
       {sortedLogs.map((log) => {
-        const config = logTypeConfig[log.type];
+        const config = logTypeConfig[log.type] ?? logTypeConfig.info;
         const Icon = config.icon;
 
         return (
@@ -907,12 +1020,12 @@ function LogsView({
               <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <Clock className="h-3 w-3" />
-                  {format(log.createdAt, "HH:mm:ss")}
+                  {safeFormatTime(log.createdAt)}
                 </span>
-                {log.metadata?.tokensUsed && (
+                {typeof log.metadata?.tokensUsed === "number" && (
                   <span>{log.metadata.tokensUsed} tokens</span>
                 )}
-                {log.metadata?.durationMs && (
+                {typeof log.metadata?.durationMs === "number" && (
                   <span>{(log.metadata.durationMs / 1000).toFixed(1)}s</span>
                 )}
               </div>

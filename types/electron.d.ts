@@ -121,6 +121,8 @@ declare global {
         getCurrentBranch: (projectPath: string) => Promise<string>;
         listFiles: (projectPath: string, maxFiles?: number) => Promise<string[]>;
         getRecentCommits: (projectPath: string, count?: number) => Promise<GitCommit[]>;
+        commit: (projectPath: string, message: string, files?: string[]) => Promise<boolean>;
+        getWorktreeInfo: (projectPath: string) => Promise<{ isWorktree: boolean; worktreeRoot?: string }>;
       };
     };
 
