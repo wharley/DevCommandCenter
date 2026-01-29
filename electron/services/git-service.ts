@@ -1,6 +1,6 @@
 /**
  * Git Service - Serviço para operações Git
- * 
+ *
  * Fornece contexto do repositório para a IA e aplica mudanças
  */
 
@@ -8,7 +8,13 @@ import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { GitInfo, GitStatus, GitCommit, CodeSuggestion, ApplyChangesResult } from "./types";
+import type {
+  GitInfo,
+  GitStatus,
+  GitCommit,
+  CodeSuggestion,
+  ApplyChangesResult,
+} from "./types";
 
 const execAsync = promisify(exec);
 
@@ -149,7 +155,7 @@ export class GitService {
     try {
       const { stdout } = await execAsync(
         `git log -${count} --format="%H|%s|%an|%aI"`,
-        { cwd: this.projectPath }
+        { cwd: this.projectPath },
       );
 
       return stdout
@@ -191,7 +197,7 @@ export class GitService {
     try {
       const { stdout } = await execAsync(
         `git ls-files --cached --others --exclude-standard | head -${maxFiles}`,
-        { cwd: this.projectPath }
+        { cwd: this.projectPath },
       );
       return stdout.trim().split("\n").filter(Boolean);
     } catch {
@@ -223,7 +229,7 @@ export class GitService {
    */
   async applyChanges(
     changes: CodeSuggestion[],
-    options: { createBackup?: boolean; dryRun?: boolean } = {}
+    options: { createBackup?: boolean; dryRun?: boolean } = {},
   ): Promise<ApplyChangesResult> {
     const appliedFiles: string[] = [];
     const failedFiles: Array<{ path: string; error: string }> = [];
@@ -248,13 +254,21 @@ export class GitService {
         switch (change.action) {
           case "create":
             await fs.promises.mkdir(dir, { recursive: true });
-            await fs.promises.writeFile(fullPath, change.suggestedContent || "", "utf-8");
+            await fs.promises.writeFile(
+              fullPath,
+              change.suggestedContent || "",
+              "utf-8",
+            );
             appliedFiles.push(change.path);
             break;
 
           case "modify":
             if (change.suggestedContent) {
-              await fs.promises.writeFile(fullPath, change.suggestedContent, "utf-8");
+              await fs.promises.writeFile(
+                fullPath,
+                change.suggestedContent,
+                "utf-8",
+              );
               appliedFiles.push(change.path);
             }
             break;
@@ -283,12 +297,55 @@ export class GitService {
   }
 
   /**
+   * Garante que o .gitignore do projeto ignore .dcc-backups (evita commit acidental).
+   * Falha em silêncio para não impactar o backup.
+   */
+  private async ensureGitignoreIgnoresDccBackups(
+    projectPath: string,
+  ): Promise<void> {
+    try {
+      const gitignorePath = path.join(projectPath, ".gitignore");
+      const dccBackupPatterns = [
+        ".dcc-backups",
+        "/.dcc-backups/",
+        ".dcc-backups/",
+      ];
+      const hasIgnore = (content: string) =>
+        content.split(/\r?\n/).some((line) => {
+          const trimmed = line.replace(/#.*$/, "").trim();
+          return trimmed && dccBackupPatterns.some((p) => trimmed === p);
+        });
+
+      if (fs.existsSync(gitignorePath)) {
+        const content = await fs.promises.readFile(gitignorePath, "utf-8");
+        if (hasIgnore(content)) return;
+        const suffix = content.trimEnd().length ? "\n" : "";
+        await fs.promises.appendFile(
+          gitignorePath,
+          `${suffix}# DevCommandCenter backups\n.dcc-backups\n`,
+          "utf-8",
+        );
+      } else {
+        await fs.promises.writeFile(
+          gitignorePath,
+          "# DevCommandCenter backups\n.dcc-backups\n",
+          "utf-8",
+        );
+      }
+    } catch {
+      // Ignora erros; backup já foi criado
+    }
+  }
+
+  /**
    * Cria backup dos arquivos antes de aplicar mudanças
    */
   private async createBackup(filePaths: string[]): Promise<string> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const backupDir = path.join(this.projectPath, ".dcc-backups", timestamp);
     await fs.promises.mkdir(backupDir, { recursive: true });
+
+    await this.ensureGitignoreIgnoresDccBackups(this.projectPath);
 
     for (const filePath of filePaths) {
       try {
