@@ -188,9 +188,10 @@ export class CodexAdapter extends BaseAdapter {
       const code = this.parseJSONResponse<GeneratedCode>(response);
 
       if (!code) {
+        const snippet = response.slice(0, 600).trim();
         return {
           success: false,
-          error: "Failed to parse code from Codex response",
+          error: `Failed to parse code from Codex response. Raw response snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,

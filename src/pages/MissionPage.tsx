@@ -28,6 +28,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
+import { Alert } from "@/components/ui/alert";
 import {
   useProjects,
   useMissions,
@@ -524,6 +525,34 @@ function StepCard({ step, index }: { step: PlanStep; index: number }) {
   );
 }
 
+/** Só trata como mensagem (callout) frases curtas de "nenhuma alteração"; resto mostra como código */
+function isLikelyMessage(content: string): boolean {
+  const trimmed = content.trim();
+  const lines = trimmed.split(/\r?\n/).length;
+  if (lines > 1) return false; // multi-line = código
+  const lower = trimmed.toLowerCase();
+  const noChangePhrases =
+    /^(already|no further|no changes|nenhuma alteração|no edit|skip|unchanged)/i;
+  return noChangePhrases.test(lower) || trimmed.length < 120;
+}
+
+/** Detecta se o conteúdo parece diff unificado (linhas com +, -, ---, +++ ou contexto com espaço). */
+function looksLikeUnifiedDiff(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  const lines = trimmed.split(/\r?\n/);
+  return lines.some(
+    (line) =>
+      line.startsWith("+") ||
+      line.startsWith("-") ||
+      line.startsWith("--- ") ||
+      line.startsWith("+++ "),
+  );
+}
+
+const CODE_BLOCK_CLASS =
+  "p-4 text-xs font-mono whitespace-pre-wrap break-words bg-muted/30";
+
 function CodeView({
   code,
 }: {
@@ -532,6 +561,7 @@ function CodeView({
         files: {
           path: string;
           action: string;
+          originalContent?: string;
           suggestedContent?: string;
           diff?: string;
         }[];
@@ -574,35 +604,181 @@ function CodeView({
           Arquivos alterados ({code.files.length})
         </h3>
         <div className="space-y-4">
-          {code.files.map((file) => (
-            <Card key={file.path}>
-              <CardHeader className="py-3">
-                <div className="flex items-center justify-between">
-                  <code className="text-sm font-medium">{file.path}</code>
-                  <Badge
-                    variant={
-                      file.action === "create"
-                        ? "default"
-                        : file.action === "delete"
-                          ? "destructive"
-                          : "secondary"
-                    }
-                  >
-                    {file.action}
-                  </Badge>
-                </div>
-              </CardHeader>
-              {file.diff && (
-                <CardContent className="pt-0">
-                  <ScrollArea className="h-64 rounded border bg-muted/50">
-                    <pre className="p-4 text-xs font-mono whitespace-pre-wrap">
-                      {file.diff}
-                    </pre>
-                  </ScrollArea>
-                </CardContent>
-              )}
-            </Card>
-          ))}
+          {code.files.map((file) => {
+            const hasOriginal = (file.originalContent ?? "").trim().length > 0;
+            const hasSuggested =
+              (file.suggestedContent ?? "").trim().length > 0;
+            const hasDiff = (file.diff ?? "").trim().length > 0;
+            const suggestedIsMessage =
+              hasSuggested && isLikelyMessage(file.suggestedContent!);
+            const diffIsMessage =
+              hasDiff && !looksLikeUnifiedDiff(file.diff ?? "");
+            const tabCount = [hasOriginal, hasSuggested, hasDiff].filter(
+              Boolean,
+            ).length;
+            const showTabs = tabCount > 1;
+
+            return (
+              <Card key={file.path}>
+                <CardHeader className="py-3">
+                  <div className="flex items-center justify-between">
+                    <code className="text-sm font-medium">{file.path}</code>
+                    <Badge
+                      variant={
+                        file.action === "create"
+                          ? "default"
+                          : file.action === "delete"
+                            ? "destructive"
+                            : "secondary"
+                      }
+                    >
+                      {file.action}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                {(hasOriginal || hasSuggested || hasDiff) && (
+                  <CardContent className="pt-0">
+                    {showTabs ? (
+                      <Tabs
+                        defaultValue={
+                          hasOriginal
+                            ? "original"
+                            : hasSuggested
+                              ? "suggested"
+                              : "diff"
+                        }
+                        className="w-full"
+                      >
+                        <TabsList className="flex w-full">
+                          {hasOriginal && (
+                            <TabsTrigger value="original" className="flex-1">
+                              Original
+                            </TabsTrigger>
+                          )}
+                          {hasSuggested && (
+                            <TabsTrigger value="suggested" className="flex-1">
+                              Sugerido
+                            </TabsTrigger>
+                          )}
+                          {hasDiff && (
+                            <TabsTrigger value="diff" className="flex-1">
+                              Diff
+                            </TabsTrigger>
+                          )}
+                        </TabsList>
+                        {hasOriginal && (
+                          <TabsContent value="original" className="mt-3">
+                            <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                              <pre className={CODE_BLOCK_CLASS}>
+                                {file.originalContent}
+                              </pre>
+                            </ScrollArea>
+                          </TabsContent>
+                        )}
+                        {hasSuggested && (
+                          <TabsContent value="suggested" className="mt-3">
+                            {suggestedIsMessage ? (
+                              <Alert className="text-muted-foreground">
+                                <p className="text-sm whitespace-pre-wrap">
+                                  {file.suggestedContent}
+                                </p>
+                              </Alert>
+                            ) : (
+                              <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                                <pre className={CODE_BLOCK_CLASS}>
+                                  {file.suggestedContent}
+                                </pre>
+                              </ScrollArea>
+                            )}
+                          </TabsContent>
+                        )}
+                        {hasDiff && (
+                          <TabsContent value="diff" className="mt-3">
+                            {diffIsMessage ? (
+                              <Alert className="text-muted-foreground">
+                                <p className="text-xs font-medium text-muted-foreground mb-1">
+                                  Nota do assistente
+                                </p>
+                                <p className="text-sm whitespace-pre-wrap">
+                                  {file.diff}
+                                </p>
+                              </Alert>
+                            ) : (
+                              <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                                <pre className={CODE_BLOCK_CLASS}>
+                                  {file.diff}
+                                </pre>
+                              </ScrollArea>
+                            )}
+                          </TabsContent>
+                        )}
+                      </Tabs>
+                    ) : (
+                      <div className="space-y-4 mt-2">
+                        {hasOriginal && (
+                          <div>
+                            <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                              Conteúdo atual
+                            </h4>
+                            <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                              <pre className={CODE_BLOCK_CLASS}>
+                                {file.originalContent}
+                              </pre>
+                            </ScrollArea>
+                          </div>
+                        )}
+                        {hasSuggested && (
+                          <div>
+                            {suggestedIsMessage ? (
+                              <Alert className="text-muted-foreground">
+                                <p className="text-sm whitespace-pre-wrap">
+                                  {file.suggestedContent}
+                                </p>
+                              </Alert>
+                            ) : (
+                              <>
+                                <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                                  Código sugerido
+                                </h4>
+                                <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                                  <pre className={CODE_BLOCK_CLASS}>
+                                    {file.suggestedContent}
+                                  </pre>
+                                </ScrollArea>
+                              </>
+                            )}
+                          </div>
+                        )}
+                        {hasDiff && (
+                          <div>
+                            <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                              Alterações (diff)
+                            </h4>
+                            {diffIsMessage ? (
+                              <Alert className="text-muted-foreground">
+                                <p className="text-xs font-medium text-muted-foreground mb-1">
+                                  Nota do assistente
+                                </p>
+                                <p className="text-sm whitespace-pre-wrap">
+                                  {file.diff}
+                                </p>
+                              </Alert>
+                            ) : (
+                              <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                                <pre className={CODE_BLOCK_CLASS}>
+                                  {file.diff}
+                                </pre>
+                              </ScrollArea>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                )}
+              </Card>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -639,9 +815,24 @@ function LogsView({
     );
   }
 
+  // Ordenação cronológica: mais recente no topo. Mesmo horário: nosso resumo (response) acima de info do Claude.
+  const getTimestamp = (log: (typeof logs)[0]) => {
+    const t = new Date(log.createdAt).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  };
+  // Desempate: nossos resumos (response e error) acima de info do Claude (ex.: Recebendo resposta...)
+  const typeOrderForTie = (type: MissionLogType) =>
+    type === "response" ? 0 : type === "error" ? 1 : type === "info" ? 2 : 3;
+  const sortedLogs = [...logs].sort((a, b) => {
+    const ta = getTimestamp(a);
+    const tb = getTimestamp(b);
+    if (tb !== ta) return tb - ta; // mais recente primeiro
+    return typeOrderForTie(a.type) - typeOrderForTie(b.type); // response (nosso) acima de info (Claude)
+  });
+
   return (
     <div className="space-y-2">
-      {logs.map((log) => {
+      {sortedLogs.map((log) => {
         const config = logTypeConfig[log.type];
         const Icon = config.icon;
 

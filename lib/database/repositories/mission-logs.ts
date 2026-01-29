@@ -23,13 +23,24 @@ interface MissionLogRow {
   created_at: string;
 }
 
-/** Converte created_at do SQLite (UTC) para Date; formatação na UI usa hora local. */
+/**
+ * Converte created_at do SQLite para Date (instant correto).
+ * - Valores em ISO com timezone (Z ou +/-) são interpretados como estão.
+ * - Valores "YYYY-MM-DD HH:MM:SS" sem timezone: tratamos como UTC para que
+ *   a UI (format em hora local) exiba o horário certo.
+ * - Inserções novas usam sempre UTC via toISOString().
+ */
 function parseCreatedAt(createdAt: string): Date {
   if (!createdAt) return new Date();
   const trimmed = createdAt.trim();
   if (/[Z+-]\d{2}:?\d{2}$/.test(trimmed)) return new Date(trimmed);
   const iso = trimmed.replace(" ", "T") + "Z";
   return new Date(iso);
+}
+
+/** Retorna data/hora atual em UTC para gravar no banco (evita datetime('now') local). */
+function nowUtcIso(): string {
+  return new Date().toISOString();
 }
 
 function rowToMissionLog(row: MissionLogRow): MissionLog {
@@ -59,7 +70,7 @@ export const MissionLogsRepository = {
       // Se não tiver missionId, retorna todos os logs (cuidado com performance)
       const stmt = db.prepare(`
         SELECT * FROM mission_logs
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, rowid DESC
         LIMIT ? OFFSET ?
       `);
       const rows = stmt.all(limit, offset) as MissionLogRow[];
@@ -84,7 +95,7 @@ export const MissionLogsRepository = {
     const stmt = db.prepare(`
       SELECT * FROM mission_logs
       WHERE ${conditions.join(" AND ")}
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT ? OFFSET ?
     `);
 
@@ -116,7 +127,7 @@ export const MissionLogsRepository = {
     const stmt = db.prepare(`
       SELECT * FROM mission_logs
       WHERE mission_id = ?
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT ?
     `);
 
@@ -143,10 +154,11 @@ export const MissionLogsRepository = {
   create(data: CreateMissionLogDTO): MissionLog {
     const db = getDatabase();
     const id = generateId();
+    const createdAt = nowUtcIso();
 
     const stmt = db.prepare(`
-      INSERT INTO mission_logs (id, mission_id, type, content, metadata)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO mission_logs (id, mission_id, type, content, metadata, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -155,6 +167,7 @@ export const MissionLogsRepository = {
       data.type,
       data.content,
       data.metadata ? JSON.stringify(data.metadata) : null,
+      createdAt,
     );
 
     return this.findById(id)!;
@@ -167,8 +180,8 @@ export const MissionLogsRepository = {
     const db = getDatabase();
 
     const stmt = db.prepare(`
-      INSERT INTO mission_logs (id, mission_id, type, content, metadata)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO mission_logs (id, mission_id, type, content, metadata, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
 
     const insertMany = db.transaction((items: CreateMissionLogDTO[]) => {
@@ -181,6 +194,7 @@ export const MissionLogsRepository = {
           item.type,
           item.content,
           item.metadata ? JSON.stringify(item.metadata) : null,
+          nowUtcIso(),
         );
         ids.push(id);
       }
@@ -335,7 +349,7 @@ export const MissionLogsRepository = {
     const stmt = db.prepare(`
       SELECT * FROM mission_logs
       WHERE mission_id = ? AND type = ?
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT 1
     `);
 
@@ -380,7 +394,7 @@ export const MissionLogsRepository = {
       const stmt = db.prepare(`
         SELECT * FROM mission_logs
         WHERE type = ? AND mission_id = ?
-        ORDER BY created_at ASC
+        ORDER BY created_at ASC, rowid ASC
       `);
       const rows = stmt.all(level, missionId) as MissionLogRow[];
       return rows.map(rowToMissionLog);
@@ -389,7 +403,7 @@ export const MissionLogsRepository = {
     const stmt = db.prepare(`
       SELECT * FROM mission_logs
       WHERE type = ?
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT 100
     `);
     const rows = stmt.all(level) as MissionLogRow[];
@@ -407,7 +421,7 @@ export const MissionLogsRepository = {
       const stmt = db.prepare(`
         SELECT * FROM mission_logs
         WHERE content LIKE ? AND mission_id = ?
-        ORDER BY created_at ASC
+        ORDER BY created_at ASC, rowid ASC
       `);
       const rows = stmt.all(searchTerm, missionId) as MissionLogRow[];
       return rows.map(rowToMissionLog);
@@ -416,7 +430,7 @@ export const MissionLogsRepository = {
     const stmt = db.prepare(`
       SELECT * FROM mission_logs
       WHERE content LIKE ?
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT 100
     `);
     const rows = stmt.all(searchTerm) as MissionLogRow[];

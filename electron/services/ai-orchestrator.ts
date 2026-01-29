@@ -256,6 +256,15 @@ export class AIOrchestrator {
         // Salva o código e atualiza status
         db.missions.updateGeneratedCode(missionId, result.data);
         db.missions.updateStatus(missionId, "code_ready");
+        // Marca todas as etapas do plano como concluídas (progress 6/6)
+        const mission = db.missions.findById(missionId);
+        if (mission?.plan?.steps?.length) {
+          const steps = mission.plan.steps.map((s) => ({
+            ...s,
+            status: "completed" as const,
+          }));
+          db.missions.updatePlan(missionId, { ...mission.plan, steps });
+        }
         db.missionLogs.logInfo(
           missionId,
           `Code generated: ${result.data.files?.length || 0} files`,
