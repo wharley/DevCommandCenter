@@ -217,6 +217,16 @@ export class ClaudeCodeAdapter extends BaseAdapter {
   }
 
   /**
+   * Normaliza o modelo para o CLI: Sonnet 4.5 / Opus 4.5 usam aliases para ser à prova de novas datas.
+   */
+  private normalizeModelForCli(model: string): string {
+    if (/^claude-sonnet-4-5-/.test(model)) return "sonnet";
+    if (/^claude-opus-4-5-/.test(model)) return "opus";
+    if (/^claude-haiku-4-5-/.test(model)) return "haiku";
+    return model;
+  }
+
+  /**
    * Executa o comando Claude CLI com suporte a streaming e timeout inteligente
    *
    * Conforme documentação oficial (code.claude.com/docs/en/common-workflows):
@@ -239,18 +249,24 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         (this.provider.config?.timeout as number) || DEFAULT_TIMEOUT_MS;
       const inactivityTimeout = Math.min(INACTIVITY_TIMEOUT_MS, maxTimeout / 2);
 
-      // Argumentos conforme documentação oficial do Claude CLI:
+      // Argumentos conforme documentação oficial do Claude CLI (headless):
       // -p <prompt>: Especifica o prompt (obrigatório para modo não-interativo)
       // --output-format json: Formato de saída estruturado
+      // --allowedTools: Auto-aprova ferramentas sem pedir confirmação (evita bloqueio em "Do you want to make this edit?")
+      const allowedTools =
+        (this.provider.config?.allowedTools as string) || "Read,Edit,Bash";
       const args = [
         "-p",
         prompt, // Prompt como argumento de -p
         "--output-format",
         "json", // JSON para facilitar parse da resposta
+        "--allowedTools",
+        allowedTools,
       ];
 
-      // Adiciona modelo se configurado
-      const model = this.provider.config?.model as string;
+      // Adiciona modelo: usa alias do CLI (sonnet/opus) para 4.5 para ser à prova de novas datas
+      const rawModel = this.provider.config?.model as string;
+      const model = rawModel ? this.normalizeModelForCli(rawModel) : undefined;
       if (model) {
         args.unshift("--model", model);
       }
@@ -261,6 +277,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
       let inactivityTimeoutId: NodeJS.Timeout | undefined;
       let maxTimeoutId: NodeJS.Timeout;
       let chunksReceived = 0;
+      let anyOutputReceived = false;
       let isResolved = false;
       let inactivityTimerStarted = false;
 
@@ -313,12 +330,14 @@ export class ClaudeCodeAdapter extends BaseAdapter {
               this.provider.apiKey || process.env.ANTHROPIC_API_KEY,
           },
           shell: platform() === "win32",
+          stdio: ["ignore", "pipe", "pipe"],
         });
 
         child.stdout?.on("data", (data) => {
           const chunk = data.toString();
           stdout += chunk;
           chunksReceived++;
+          anyOutputReceived = true;
           if (!inactivityTimerStarted) inactivityTimerStarted = true;
           // Inicia/reseta o timeout de inatividade (só conta após o primeiro chunk)
           resetInactivityTimeout();
@@ -335,6 +354,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         child.stderr?.on("data", (data) => {
           const chunk = data.toString();
           stderr += chunk;
+          anyOutputReceived = true;
           // Stderr reseta o timeout só se já recebemos stdout (timer já iniciado)
           if (inactivityTimerStarted) resetInactivityTimeout();
         });
@@ -344,7 +364,17 @@ export class ClaudeCodeAdapter extends BaseAdapter {
             onProgress?.(
               `Resposta completa recebida (${(stdout.length / 1024).toFixed(1)} KB)`,
             );
-            handleResolve(stdout);
+            // Com --output-format json o CLI retorna { result, session_id, ... }; extrair result para parse do plano/código
+            let payload = stdout;
+            try {
+              const wrapper = JSON.parse(stdout) as { result?: string };
+              if (typeof wrapper?.result === "string") {
+                payload = wrapper.result;
+              }
+            } catch {
+              // stdout não é JSON wrapper; usar como está (fallback para texto puro)
+            }
+            handleResolve(payload);
           } else {
             // Inclui stderr na mensagem de erro para facilitar debug
             const errorDetails = [
@@ -362,20 +392,33 @@ export class ClaudeCodeAdapter extends BaseAdapter {
 
         // Timeout máximo absoluto (inatividade só após o primeiro chunk)
         maxTimeoutId = setTimeout(() => {
+          const stderrSnippet =
+            stderr.length > 0 ? ` Stderr: ${stderr.slice(-500).trim()}` : "";
           if (chunksReceived === 0) {
-            handleReject(
-              new Error(
-                "Nenhum dado recebido do Claude CLI dentro do tempo máximo. " +
-                  "O primeiro token pode demorar vários minutos em prompts longos. " +
-                  "Verifique conexão, aumente o timeout do provider ou simplifique o prompt.",
-              ),
-            );
+            if (anyOutputReceived) {
+              handleReject(
+                new Error(
+                  "Claude CLI não enviou resposta (stdout) dentro do tempo máximo. Saída em stderr:" +
+                    stderrSnippet,
+                ),
+              );
+            } else {
+              handleReject(
+                new Error(
+                  "Nenhum dado recebido do Claude CLI dentro do tempo máximo. " +
+                    "O primeiro token pode demorar vários minutos em prompts longos. " +
+                    "Verifique conexão, aumente o timeout do provider ou simplifique o prompt." +
+                    stderrSnippet,
+                ),
+              );
+            }
           } else {
             handleReject(
               new Error(
                 `Claude CLI timeout máximo (${maxTimeout / 60000} minutos). ` +
                   `Chunks recebidos: ${chunksReceived}. ` +
-                  `Resposta parcial: ${stdout.slice(0, 200)}...`,
+                  `Resposta parcial: ${stdout.slice(0, 200)}...` +
+                  stderrSnippet,
               ),
             );
           }

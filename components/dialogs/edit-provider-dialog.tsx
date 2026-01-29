@@ -50,8 +50,8 @@ const modelsByProviderType: Partial<
   Record<ProviderType, { value: string; label: string }[]>
 > = {
   "claude-code": [
-    { value: "claude-opus-4-5-20250514", label: "Claude Opus 4.5" },
-    { value: "claude-sonnet-4-5-20250514", label: "Claude Sonnet 4.5" },
+    { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5" },
+    { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
     { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
     { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
     { value: "claude-3-opus-20240229", label: "Claude 3 Opus" },
@@ -68,8 +68,8 @@ const modelsByProviderType: Partial<
     { value: "o4-mini", label: "o4-mini" },
   ],
   anthropic: [
-    { value: "claude-opus-4-5-20250514", label: "Claude Opus 4.5" },
-    { value: "claude-sonnet-4-5-20250514", label: "Claude Sonnet 4.5" },
+    { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5" },
+    { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
     { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
     { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
     { value: "claude-3-opus-20240229", label: "Claude 3 Opus" },
