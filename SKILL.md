@@ -12,7 +12,52 @@ O Dev Command Center é um aplicativo desktop cross-platform (macOS, Windows, Li
 - **Missões de código** estruturadas em linguagem natural
 - **Planos de ação** gerados por IA com passos claros
 - **Preview de diffs** antes de aplicar mudanças
+- **Worktrees Git** para tarefas paralelas sem trocar branch
 - **BYOK** - usuário traz suas próprias chaves de API
+
+---
+
+## Posicionamento e Referências
+
+O Dev Command Center se inspira no fluxo moderno de agentes de código (ex.: Commander), mas **não copia** a interface ou o produto. A meta é entregar uma experiência **local-first** e extensível, com foco em produtividade e transparência no fluxo de trabalho.
+
+### Fluxo principal (norte do produto)
+
+1. **Selecionar repositório** e contexto (branch/worktree)
+2. **Descrever a missão** em linguagem natural
+3. **Gerar plano** e revisar passos
+4. **Gerar alterações** e revisar diffs
+5. **Aplicar mudanças** e **commitar** com segurança
+
+### Diferenciais pretendidos
+
+- **Multi-provider real** (CLI e API) com fallback e validação
+- **Worktrees como feature de primeira classe** para paralelismo de tarefas
+- **Aplicação controlada** de mudanças (dry-run, backup, logs)
+- **Transparência**: logs detalhados de execução e métricas de tempo/tokens
+
+---
+
+## Proposta de Monetização (hipótese, pós-MVP)
+
+Esta seção é **apenas uma hipótese** para validar depois do MVP. A ideia é testar valor percebido sem travar o produto cedo demais.
+
+### Estratégia sugerida
+
+- **Free**: experiência completa para uso individual, com limites leves (ex.: número de projetos ativos, histórico curto).
+- **Pro (simbólico)**: remove limites, traz histórico completo e recursos avançados.
+
+### Possíveis recursos Pro
+
+- **Worktrees avançados** (templates, presets, gerenciamento em lote)
+- **Histórico expandido** de missões/diffs/logs
+- **Automations** (apply + tests + commit com confirmação)
+- **Perfis de providers** por projeto e presets de missão
+
+### Observações
+
+- O modelo **BYOK** reduz custos operacionais e facilita preço baixo.
+- Se a percepção de valor for alta, considerar planos mensais/anuais simples.
 
 ---
 
