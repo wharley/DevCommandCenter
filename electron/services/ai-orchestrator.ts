@@ -68,6 +68,10 @@ export class AIOrchestrator {
    * Gera um plano de ação para uma missão
    */
   async generatePlan(missionId: string): Promise<AIResponse<MissionPlan>> {
+    // Timestamp do último log de progresso para evitar spam
+    let lastProgressLog = 0;
+    const progressLogThrottleMs = 5000; // Log de progresso a cada 5 segundos no máximo
+
     try {
       // Busca a missão e o projeto
       const mission = db.missions.findById(missionId);
@@ -125,7 +129,17 @@ export class AIOrchestrator {
         `Starting plan generation with ${adapter.name}`,
       );
 
-      const result = await adapter.generatePlan(config);
+      // Callback de progresso que loga mensagens de status
+      const onProgress = (message: string) => {
+        const now = Date.now();
+        // Evita spam de logs - só loga a cada 5 segundos
+        if (now - lastProgressLog >= progressLogThrottleMs) {
+          lastProgressLog = now;
+          db.missionLogs.logInfo(missionId, message);
+        }
+      };
+
+      const result = await adapter.generatePlan(config, onProgress);
 
       if (result.success && result.data) {
         // Salva o plano e atualiza status
@@ -158,6 +172,10 @@ export class AIOrchestrator {
    * Gera código para uma missão
    */
   async generateCode(missionId: string): Promise<AIResponse<GeneratedCode>> {
+    // Timestamp do último log de progresso para evitar spam
+    let lastProgressLog = 0;
+    const progressLogThrottleMs = 5000; // Log de progresso a cada 5 segundos no máximo
+
     try {
       // Busca a missão e o projeto
       const mission = db.missions.findById(missionId);
@@ -222,7 +240,17 @@ export class AIOrchestrator {
         `Starting code generation with ${adapter.name}`,
       );
 
-      const result = await adapter.generateCode(config);
+      // Callback de progresso que loga mensagens de status
+      const onProgress = (message: string) => {
+        const now = Date.now();
+        // Evita spam de logs - só loga a cada 5 segundos
+        if (now - lastProgressLog >= progressLogThrottleMs) {
+          lastProgressLog = now;
+          db.missionLogs.logInfo(missionId, message);
+        }
+      };
+
+      const result = await adapter.generateCode(config, onProgress);
 
       if (result.success && result.data) {
         // Salva o código e atualiza status

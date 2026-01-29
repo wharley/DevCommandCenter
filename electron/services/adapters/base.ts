@@ -10,6 +10,7 @@ import type {
   MissionPlan,
   GeneratedCode,
   Provider,
+  ProgressCallback,
 } from "../types";
 
 export abstract class BaseAdapter implements AIProviderAdapter {
@@ -24,9 +25,15 @@ export abstract class BaseAdapter implements AIProviderAdapter {
 
   abstract validate(): ValidationResult;
 
-  abstract generatePlan(config: AdapterConfig): Promise<AIResponse<MissionPlan>>;
+  abstract generatePlan(
+    config: AdapterConfig,
+    onProgress?: ProgressCallback,
+  ): Promise<AIResponse<MissionPlan>>;
 
-  abstract generateCode(config: AdapterConfig): Promise<AIResponse<GeneratedCode>>;
+  abstract generateCode(
+    config: AdapterConfig,
+    onProgress?: ProgressCallback,
+  ): Promise<AIResponse<GeneratedCode>>;
 
   abstract testConnection(): Promise<{ success: boolean; message: string }>;
 
@@ -35,7 +42,7 @@ export abstract class BaseAdapter implements AIProviderAdapter {
    */
   protected buildPlanPrompt(config: AdapterConfig): string {
     const { mission, projectContext } = config;
-    
+
     return `You are an expert software engineer. Analyze the following task and create a detailed implementation plan.
 
 ## Project Context
@@ -79,7 +86,7 @@ Respond ONLY with valid JSON. Do not include any other text or markdown code blo
   protected buildCodePrompt(config: AdapterConfig): string {
     const { mission, projectContext } = config;
     const plan = mission.plan;
-    
+
     return `You are an expert software engineer. Based on the implementation plan, generate the code changes needed.
 
 ## Project Context

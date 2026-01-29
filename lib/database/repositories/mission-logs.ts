@@ -1,14 +1,14 @@
 // Dev Command Center - Mission Logs Repository
 // Camada de acesso aos logs de missões (histórico de interações)
 
-import { getDatabase, generateId } from '../connection';
+import { getDatabase, generateId } from "../connection";
 import type {
   MissionLog,
   MissionLogType,
   MissionLogMetadata,
   CreateMissionLogDTO,
   MissionLogsQueryOptions,
-} from '../types';
+} from "../types";
 
 // ============================================
 // Helpers de conversão
@@ -23,6 +23,15 @@ interface MissionLogRow {
   created_at: string;
 }
 
+/** Converte created_at do SQLite (UTC) para Date; formatação na UI usa hora local. */
+function parseCreatedAt(createdAt: string): Date {
+  if (!createdAt) return new Date();
+  const trimmed = createdAt.trim();
+  if (/[Z+-]\d{2}:?\d{2}$/.test(trimmed)) return new Date(trimmed);
+  const iso = trimmed.replace(" ", "T") + "Z";
+  return new Date(iso);
+}
+
 function rowToMissionLog(row: MissionLogRow): MissionLog {
   return {
     id: row.id,
@@ -30,7 +39,7 @@ function rowToMissionLog(row: MissionLogRow): MissionLog {
     type: row.type as MissionLogType,
     content: row.content,
     metadata: row.metadata ? JSON.parse(row.metadata) : null,
-    createdAt: new Date(row.created_at),
+    createdAt: parseCreatedAt(row.created_at),
   };
 }
 
@@ -45,7 +54,7 @@ export const MissionLogsRepository = {
   findAll(options: MissionLogsQueryOptions): MissionLog[] {
     const db = getDatabase();
     const { missionId, type, limit = 100, offset = 0 } = options;
-    
+
     if (!missionId) {
       // Se não tiver missionId, retorna todos os logs (cuidado com performance)
       const stmt = db.prepare(`
@@ -56,29 +65,29 @@ export const MissionLogsRepository = {
       const rows = stmt.all(limit, offset) as MissionLogRow[];
       return rows.map(rowToMissionLog);
     }
-    
-    const conditions: string[] = ['mission_id = ?'];
+
+    const conditions: string[] = ["mission_id = ?"];
     const values: (string | number)[] = [missionId];
-    
+
     if (type) {
       if (Array.isArray(type)) {
-        conditions.push(`type IN (${type.map(() => '?').join(', ')})`);
+        conditions.push(`type IN (${type.map(() => "?").join(", ")})`);
         values.push(...type);
       } else {
-        conditions.push('type = ?');
+        conditions.push("type = ?");
         values.push(type);
       }
     }
-    
+
     values.push(limit, offset);
-    
+
     const stmt = db.prepare(`
       SELECT * FROM mission_logs
-      WHERE ${conditions.join(' AND ')}
-      ORDER BY created_at ASC
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY created_at DESC
       LIMIT ? OFFSET ?
     `);
-    
+
     const rows = stmt.all(...values) as MissionLogRow[];
     return rows.map(rowToMissionLog);
   },
@@ -86,8 +95,16 @@ export const MissionLogsRepository = {
   /**
    * Lista todos os logs de uma missão.
    */
-  findByMission(missionId: string, limit?: number, offset?: number): MissionLog[] {
-    return this.findAll({ missionId, limit: limit || 1000, offset: offset || 0 });
+  findByMission(
+    missionId: string,
+    limit?: number,
+    offset?: number,
+  ): MissionLog[] {
+    return this.findAll({
+      missionId,
+      limit: limit || 1000,
+      offset: offset || 0,
+    });
   },
 
   /**
@@ -95,14 +112,14 @@ export const MissionLogsRepository = {
    */
   findRecent(missionId: string, limit: number = 20): MissionLog[] {
     const db = getDatabase();
-    
+
     const stmt = db.prepare(`
       SELECT * FROM mission_logs
       WHERE mission_id = ?
       ORDER BY created_at DESC
       LIMIT ?
     `);
-    
+
     const rows = stmt.all(missionId, limit) as MissionLogRow[];
     // Inverte para ordem cronológica
     return rows.map(rowToMissionLog).reverse();
@@ -113,10 +130,10 @@ export const MissionLogsRepository = {
    */
   findById(id: string): MissionLog | null {
     const db = getDatabase();
-    
-    const stmt = db.prepare('SELECT * FROM mission_logs WHERE id = ?');
+
+    const stmt = db.prepare("SELECT * FROM mission_logs WHERE id = ?");
     const row = stmt.get(id) as MissionLogRow | undefined;
-    
+
     return row ? rowToMissionLog(row) : null;
   },
 
@@ -126,20 +143,20 @@ export const MissionLogsRepository = {
   create(data: CreateMissionLogDTO): MissionLog {
     const db = getDatabase();
     const id = generateId();
-    
+
     const stmt = db.prepare(`
       INSERT INTO mission_logs (id, mission_id, type, content, metadata)
       VALUES (?, ?, ?, ?, ?)
     `);
-    
+
     stmt.run(
       id,
       data.missionId,
       data.type,
       data.content,
-      data.metadata ? JSON.stringify(data.metadata) : null
+      data.metadata ? JSON.stringify(data.metadata) : null,
     );
-    
+
     return this.findById(id)!;
   },
 
@@ -148,12 +165,12 @@ export const MissionLogsRepository = {
    */
   createMany(logs: CreateMissionLogDTO[]): MissionLog[] {
     const db = getDatabase();
-    
+
     const stmt = db.prepare(`
       INSERT INTO mission_logs (id, mission_id, type, content, metadata)
       VALUES (?, ?, ?, ?, ?)
     `);
-    
+
     const insertMany = db.transaction((items: CreateMissionLogDTO[]) => {
       const ids: string[] = [];
       for (const item of items) {
@@ -163,13 +180,13 @@ export const MissionLogsRepository = {
           item.missionId,
           item.type,
           item.content,
-          item.metadata ? JSON.stringify(item.metadata) : null
+          item.metadata ? JSON.stringify(item.metadata) : null,
         );
         ids.push(id);
       }
       return ids;
     });
-    
+
     const ids = insertMany(logs);
     return ids.map((id) => this.findById(id)!);
   },
@@ -177,43 +194,67 @@ export const MissionLogsRepository = {
   /**
    * Adiciona um log de informação.
    */
-  logInfo(missionId: string, content: string, metadata?: MissionLogMetadata): MissionLog {
-    return this.create({ missionId, type: 'info', content, metadata });
+  logInfo(
+    missionId: string,
+    content: string,
+    metadata?: MissionLogMetadata,
+  ): MissionLog {
+    return this.create({ missionId, type: "info", content, metadata });
   },
 
   /**
    * Adiciona um log de prompt enviado.
    */
-  logPrompt(missionId: string, content: string, metadata?: MissionLogMetadata): MissionLog {
-    return this.create({ missionId, type: 'prompt', content, metadata });
+  logPrompt(
+    missionId: string,
+    content: string,
+    metadata?: MissionLogMetadata,
+  ): MissionLog {
+    return this.create({ missionId, type: "prompt", content, metadata });
   },
 
   /**
    * Adiciona um log de resposta recebida.
    */
-  logResponse(missionId: string, content: string, metadata?: MissionLogMetadata): MissionLog {
-    return this.create({ missionId, type: 'response', content, metadata });
+  logResponse(
+    missionId: string,
+    content: string,
+    metadata?: MissionLogMetadata,
+  ): MissionLog {
+    return this.create({ missionId, type: "response", content, metadata });
   },
 
   /**
    * Adiciona um log de erro.
    */
-  logError(missionId: string, content: string, metadata?: MissionLogMetadata): MissionLog {
-    return this.create({ missionId, type: 'error', content, metadata });
+  logError(
+    missionId: string,
+    content: string,
+    metadata?: MissionLogMetadata,
+  ): MissionLog {
+    return this.create({ missionId, type: "error", content, metadata });
   },
 
   /**
    * Adiciona um log de ação.
    */
-  logAction(missionId: string, content: string, metadata?: MissionLogMetadata): MissionLog {
-    return this.create({ missionId, type: 'action', content, metadata });
+  logAction(
+    missionId: string,
+    content: string,
+    metadata?: MissionLogMetadata,
+  ): MissionLog {
+    return this.create({ missionId, type: "action", content, metadata });
   },
 
   /**
    * Adiciona um log de input do usuário.
    */
-  logUserInput(missionId: string, content: string, metadata?: MissionLogMetadata): MissionLog {
-    return this.create({ missionId, type: 'user_input', content, metadata });
+  logUserInput(
+    missionId: string,
+    content: string,
+    metadata?: MissionLogMetadata,
+  ): MissionLog {
+    return this.create({ missionId, type: "user_input", content, metadata });
   },
 
   /**
@@ -221,10 +262,10 @@ export const MissionLogsRepository = {
    */
   delete(id: string): boolean {
     const db = getDatabase();
-    
-    const stmt = db.prepare('DELETE FROM mission_logs WHERE id = ?');
+
+    const stmt = db.prepare("DELETE FROM mission_logs WHERE id = ?");
     const result = stmt.run(id);
-    
+
     return result.changes > 0;
   },
 
@@ -233,10 +274,10 @@ export const MissionLogsRepository = {
    */
   deleteByMission(missionId: string): number {
     const db = getDatabase();
-    
-    const stmt = db.prepare('DELETE FROM mission_logs WHERE mission_id = ?');
+
+    const stmt = db.prepare("DELETE FROM mission_logs WHERE mission_id = ?");
     const result = stmt.run(missionId);
-    
+
     return result.changes;
   },
 
@@ -245,10 +286,12 @@ export const MissionLogsRepository = {
    */
   countByMission(missionId: string): number {
     const db = getDatabase();
-    
-    const stmt = db.prepare('SELECT COUNT(*) as count FROM mission_logs WHERE mission_id = ?');
+
+    const stmt = db.prepare(
+      "SELECT COUNT(*) as count FROM mission_logs WHERE mission_id = ?",
+    );
     const row = stmt.get(missionId) as { count: number };
-    
+
     return row.count;
   },
 
@@ -257,16 +300,16 @@ export const MissionLogsRepository = {
    */
   countByType(missionId: string): Record<MissionLogType, number> {
     const db = getDatabase();
-    
+
     const stmt = db.prepare(`
       SELECT type, COUNT(*) as count
       FROM mission_logs
       WHERE mission_id = ?
       GROUP BY type
     `);
-    
+
     const rows = stmt.all(missionId) as { type: string; count: number }[];
-    
+
     const counts: Record<string, number> = {
       info: 0,
       prompt: 0,
@@ -275,11 +318,11 @@ export const MissionLogsRepository = {
       action: 0,
       user_input: 0,
     };
-    
+
     for (const row of rows) {
       counts[row.type] = row.count;
     }
-    
+
     return counts as Record<MissionLogType, number>;
   },
 
@@ -288,28 +331,31 @@ export const MissionLogsRepository = {
    */
   findLastByType(missionId: string, type: MissionLogType): MissionLog | null {
     const db = getDatabase();
-    
+
     const stmt = db.prepare(`
       SELECT * FROM mission_logs
       WHERE mission_id = ? AND type = ?
       ORDER BY created_at DESC
       LIMIT 1
     `);
-    
+
     const row = stmt.get(missionId, type) as MissionLogRow | undefined;
-    
+
     return row ? rowToMissionLog(row) : null;
   },
 
   /**
    * Calcula estatísticas de uso (tokens, tempo, etc.) de uma missão.
    */
-  getUsageStats(missionId: string): { totalTokens: number; totalDurationMs: number } {
+  getUsageStats(missionId: string): {
+    totalTokens: number;
+    totalDurationMs: number;
+  } {
     const logs = this.findByMission(missionId);
-    
+
     let totalTokens = 0;
     let totalDurationMs = 0;
-    
+
     for (const log of logs) {
       if (log.metadata) {
         if (log.metadata.tokensUsed) {
@@ -320,7 +366,7 @@ export const MissionLogsRepository = {
         }
       }
     }
-    
+
     return { totalTokens, totalDurationMs };
   },
 
@@ -329,7 +375,7 @@ export const MissionLogsRepository = {
    */
   findByLevel(level: MissionLogType, missionId?: string): MissionLog[] {
     const db = getDatabase();
-    
+
     if (missionId) {
       const stmt = db.prepare(`
         SELECT * FROM mission_logs
@@ -339,7 +385,7 @@ export const MissionLogsRepository = {
       const rows = stmt.all(level, missionId) as MissionLogRow[];
       return rows.map(rowToMissionLog);
     }
-    
+
     const stmt = db.prepare(`
       SELECT * FROM mission_logs
       WHERE type = ?
@@ -356,7 +402,7 @@ export const MissionLogsRepository = {
   search(query: string, missionId?: string): MissionLog[] {
     const db = getDatabase();
     const searchTerm = `%${query}%`;
-    
+
     if (missionId) {
       const stmt = db.prepare(`
         SELECT * FROM mission_logs
@@ -366,7 +412,7 @@ export const MissionLogsRepository = {
       const rows = stmt.all(searchTerm, missionId) as MissionLogRow[];
       return rows.map(rowToMissionLog);
     }
-    
+
     const stmt = db.prepare(`
       SELECT * FROM mission_logs
       WHERE content LIKE ?
@@ -380,31 +426,56 @@ export const MissionLogsRepository = {
   /**
    * Adiciona um log de aviso.
    */
-  logWarning(missionId: string, content: string, metadata?: MissionLogMetadata): MissionLog {
-    return this.create({ missionId, type: 'info', content: `[WARNING] ${content}`, metadata });
+  logWarning(
+    missionId: string,
+    content: string,
+    metadata?: MissionLogMetadata,
+  ): MissionLog {
+    return this.create({
+      missionId,
+      type: "info",
+      content: `[WARNING] ${content}`,
+      metadata,
+    });
   },
 
   /**
    * Adiciona um log de debug.
    */
-  logDebug(missionId: string, content: string, metadata?: MissionLogMetadata): MissionLog {
-    return this.create({ missionId, type: 'info', content: `[DEBUG] ${content}`, metadata });
+  logDebug(
+    missionId: string,
+    content: string,
+    metadata?: MissionLogMetadata,
+  ): MissionLog {
+    return this.create({
+      missionId,
+      type: "info",
+      content: `[DEBUG] ${content}`,
+      metadata,
+    });
   },
 
   /**
    * Adiciona um log de ação do agente.
    */
-  logAgentAction(missionId: string, action: string, details?: MissionLogMetadata): MissionLog {
+  logAgentAction(
+    missionId: string,
+    action: string,
+    details?: MissionLogMetadata,
+  ): MissionLog {
     return this.logAction(missionId, action, details);
   },
 
   /**
    * Obtém estatísticas de logs de uma missão.
    */
-  getStats(missionId: string): { total: number; byType: Record<MissionLogType, number> } {
+  getStats(missionId: string): {
+    total: number;
+    byType: Record<MissionLogType, number>;
+  } {
     const total = this.countByMission(missionId);
     const byType = this.countByType(missionId);
-    
+
     return { total, byType };
   },
 

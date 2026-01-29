@@ -57,6 +57,8 @@ export interface ProviderConfig {
   maxTokens?: number;
   temperature?: number;
   baseUrl?: string;
+  /** Timeout máximo em milissegundos para operações CLI (padrão: 10 minutos) */
+  timeout?: number;
   [key: string]: unknown;
 }
 

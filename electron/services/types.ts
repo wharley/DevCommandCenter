@@ -88,13 +88,23 @@ export interface AIProviderAdapter {
 
   /**
    * Gera um plano de ação para a missão
+   * @param config Configuração do adapter (provider, mission, projectContext)
+   * @param onProgress Callback opcional para notificar progresso
    */
-  generatePlan(config: AdapterConfig): Promise<AIResponse<MissionPlan>>;
+  generatePlan(
+    config: AdapterConfig,
+    onProgress?: ProgressCallback,
+  ): Promise<AIResponse<MissionPlan>>;
 
   /**
    * Gera sugestões de código baseadas no plano
+   * @param config Configuração do adapter (provider, mission, projectContext)
+   * @param onProgress Callback opcional para notificar progresso
    */
-  generateCode(config: AdapterConfig): Promise<AIResponse<GeneratedCode>>;
+  generateCode(
+    config: AdapterConfig,
+    onProgress?: ProgressCallback,
+  ): Promise<AIResponse<GeneratedCode>>;
 
   /**
    * Executa um comando/prompt direto (para interação em tempo real)
@@ -114,7 +124,7 @@ export interface ValidationResult {
 }
 
 // ============================================
-// Tipos para Streaming (futuro)
+// Tipos para Streaming e Progresso
 // ============================================
 
 export interface StreamCallback {
@@ -122,6 +132,12 @@ export interface StreamCallback {
   onError: (error: Error) => void;
   onComplete: () => void;
 }
+
+/**
+ * Callback para notificar progresso durante operações de IA
+ * Recebe uma mensagem de status que pode ser exibida ao usuário
+ */
+export type ProgressCallback = (message: string) => void;
 
 // ============================================
 // Tipos para Aplicação de Mudanças
@@ -142,4 +158,11 @@ export interface ApplyChangesResult {
 }
 
 // Re-exports para conveniência
-export type { Provider, Mission, MissionPlan, GeneratedCode, PlanStep, CodeSuggestion };
+export type {
+  Provider,
+  Mission,
+  MissionPlan,
+  GeneratedCode,
+  PlanStep,
+  CodeSuggestion,
+};

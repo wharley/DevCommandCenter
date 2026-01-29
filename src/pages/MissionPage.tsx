@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import {
@@ -106,20 +106,32 @@ export default function MissionPage() {
   const { logs, addLog } = useMissionLogs(missionId ?? "");
   const setCurrentMission = useAppStore((s) => s.setCurrentMission);
 
-  const project = projectId
-    ? (projects.find((p) => p.id === projectId) ?? null)
-    : null;
-  const mission = missionId
-    ? (missions.find((m) => m.id === missionId) ?? null)
-    : null;
-  const provider = mission?.providerId
-    ? (providers.find((p) => p.id === mission.providerId) ?? null)
-    : null;
+  // Usar useMemo para estabilizar as referências e evitar re-renders desnecessários
+  const project = useMemo(
+    () =>
+      projectId ? (projects.find((p) => p.id === projectId) ?? null) : null,
+    [projectId, projects],
+  );
 
+  const mission = useMemo(
+    () =>
+      missionId ? (missions.find((m) => m.id === missionId) ?? null) : null,
+    [missionId, missions],
+  );
+
+  const provider = useMemo(
+    () =>
+      mission?.providerId
+        ? (providers.find((p) => p.id === mission.providerId) ?? null)
+        : null,
+    [mission?.providerId, providers],
+  );
+
+  // Usar missionId como dependência em vez do objeto mission inteiro
   useEffect(() => {
-    if (mission) setCurrentMission(mission.id);
+    if (missionId) setCurrentMission(missionId);
     return () => setCurrentMission(null);
-  }, [mission, setCurrentMission]);
+  }, [missionId, setCurrentMission]);
 
   const isLoading =
     (projectId && projectsLoading) || (missionId && missionsLoading);
@@ -182,13 +194,14 @@ export default function MissionPage() {
         throw new Error(response.error || "Falha ao gerar plano");
       }
     } catch (error) {
-      updateStatus(missionId, "failed");
+      // Volta para "created" para permitir tentar novamente
+      updateStatus(missionId, "created");
       addLog(
         "error",
         error instanceof Error ? error.message : "Erro desconhecido",
         undefined,
       );
-      toast.error("Falha ao gerar plano");
+      toast.error("Falha ao gerar plano. Você pode tentar novamente.");
     } finally {
       setIsGenerating(false);
     }
@@ -228,13 +241,14 @@ export default function MissionPage() {
         throw new Error(response.error || "Falha ao gerar código");
       }
     } catch (error) {
+      // Volta para "plan_generated" para permitir tentar novamente
       updateStatus(missionId, "plan_generated");
       addLog(
         "error",
         error instanceof Error ? error.message : "Erro desconhecido",
         undefined,
       );
-      toast.error("Falha ao gerar código");
+      toast.error("Falha ao gerar código. Você pode tentar novamente.");
     } finally {
       setIsGenerating(false);
     }

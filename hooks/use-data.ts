@@ -70,7 +70,13 @@ function subscribeToDataChange(
 // ============================================
 
 export function useProjects() {
-  const store = useAppStore();
+  // Use seletores específicos para evitar re-renders desnecessários
+  const storeProjects = useAppStore((s) => s.projects);
+  const addProject = useAppStore((s) => s.addProject);
+  const updateProject = useAppStore((s) => s.updateProject);
+  const deleteProject = useAppStore((s) => s.deleteProject);
+  const getProjectById = useAppStore((s) => s.getProjectById);
+
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -81,12 +87,12 @@ export function useProjects() {
         const data = await window.db.projects.findAll();
         setProjects(normalizeProjects(data) as Project[]);
       } else {
-        setProjects(store.projects);
+        setProjects(storeProjects);
       }
     } finally {
       setIsLoading(false);
     }
-  }, [store.projects]);
+  }, [storeProjects]);
 
   // Carrega dados inicialmente e escuta mudanças de outras instâncias
   useEffect(() => {
@@ -106,7 +112,7 @@ export function useProjects() {
           project as unknown as Record<string, unknown>,
         ) as unknown as Project;
       } else {
-        const newProject = store.addProject({
+        const newProject = addProject({
           ...data,
           defaultProviderId: data.defaultProviderId ?? null,
           gitRemoteUrl: data.gitRemoteUrl ?? null,
@@ -116,7 +122,7 @@ export function useProjects() {
         return newProject;
       }
     },
-    [store],
+    [addProject],
   );
 
   const update = useCallback(
@@ -125,11 +131,11 @@ export function useProjects() {
         await window.db.projects.update(id, data);
         emitDataChange("projects");
       } else {
-        store.updateProject(id, data);
+        updateProject(id, data);
         emitDataChange("projects");
       }
     },
-    [store],
+    [updateProject],
   );
 
   const remove = useCallback(
@@ -138,11 +144,11 @@ export function useProjects() {
         await window.db.projects.delete(id);
         emitDataChange("projects");
       } else {
-        store.deleteProject(id);
+        deleteProject(id);
         emitDataChange("projects");
       }
     },
-    [store],
+    [deleteProject],
   );
 
   const getById = useCallback(
@@ -155,9 +161,9 @@ export function useProjects() {
             ) as unknown as Project)
           : undefined;
       }
-      return store.getProjectById(id);
+      return getProjectById(id);
     },
-    [store],
+    [getProjectById],
   );
 
   const search = useCallback(
@@ -166,18 +172,18 @@ export function useProjects() {
         const data = await window.db.projects.search(query);
         return normalizeProjects(data) as Project[];
       } else {
-        return store.projects.filter(
+        return storeProjects.filter(
           (p) =>
             p.name.toLowerCase().includes(query.toLowerCase()) ||
             p.description?.toLowerCase().includes(query.toLowerCase()),
         );
       }
     },
-    [store.projects],
+    [storeProjects],
   );
 
   return {
-    projects: isElectron() ? projects : store.projects,
+    projects: isElectron() ? projects : storeProjects,
     isLoading,
     refresh,
     create,
@@ -193,7 +199,13 @@ export function useProjects() {
 // ============================================
 
 export function useProviders() {
-  const store = useAppStore();
+  // Use seletores específicos para evitar re-renders desnecessários
+  const storeProviders = useAppStore((s) => s.providers);
+  const addProvider = useAppStore((s) => s.addProvider);
+  const updateProvider = useAppStore((s) => s.updateProvider);
+  const deleteProvider = useAppStore((s) => s.deleteProvider);
+  const getProviderById = useAppStore((s) => s.getProviderById);
+
   const [providers, setProviders] = useState<Provider[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -204,12 +216,12 @@ export function useProviders() {
         const data = await window.db.providers.findAll();
         setProviders(normalizeProviders(data) as Provider[]);
       } else {
-        setProviders(store.providers);
+        setProviders(storeProviders);
       }
     } finally {
       setIsLoading(false);
     }
-  }, [store.providers]);
+  }, [storeProviders]);
 
   useEffect(() => {
     refresh();
@@ -226,7 +238,7 @@ export function useProviders() {
           provider as unknown as Record<string, unknown>,
         ) as unknown as Provider;
       } else {
-        const newProvider = store.addProvider({
+        const newProvider = addProvider({
           ...data,
           apiKey: data.apiKey ?? null,
           cliPath: data.cliPath ?? null,
@@ -237,7 +249,7 @@ export function useProviders() {
         return newProvider;
       }
     },
-    [store],
+    [addProvider],
   );
 
   const update = useCallback(
@@ -246,11 +258,11 @@ export function useProviders() {
         await window.db.providers.update(id, data);
         emitDataChange("providers");
       } else {
-        store.updateProvider(id, data);
+        updateProvider(id, data);
         emitDataChange("providers");
       }
     },
-    [store],
+    [updateProvider],
   );
 
   const remove = useCallback(
@@ -259,11 +271,11 @@ export function useProviders() {
         await window.db.providers.delete(id);
         emitDataChange("providers");
       } else {
-        store.deleteProvider(id);
+        deleteProvider(id);
         emitDataChange("providers");
       }
     },
-    [store],
+    [deleteProvider],
   );
 
   const getById = useCallback(
@@ -276,9 +288,9 @@ export function useProviders() {
             ) as unknown as Provider)
           : undefined;
       }
-      return store.getProviderById(id);
+      return getProviderById(id);
     },
-    [store],
+    [getProviderById],
   );
 
   const getActive = useCallback(async () => {
@@ -286,8 +298,8 @@ export function useProviders() {
       const data = await window.db.providers.findActive();
       return normalizeProviders(data) as Provider[];
     }
-    return store.providers.filter((p) => p.isActive);
-  }, [store.providers]);
+    return storeProviders.filter((p) => p.isActive);
+  }, [storeProviders]);
 
   const testConnection = useCallback(async (id: string) => {
     if (isElectron() && window.db) {
@@ -300,7 +312,7 @@ export function useProviders() {
   }, []);
 
   return {
-    providers: isElectron() ? providers : store.providers,
+    providers: isElectron() ? providers : storeProviders,
     isLoading,
     refresh,
     create,
@@ -317,7 +329,17 @@ export function useProviders() {
 // ============================================
 
 export function useMissions(projectId?: string) {
-  const store = useAppStore();
+  // Use seletores específicos para evitar re-renders desnecessários
+  const storeMissions = useAppStore((s) => s.missions);
+  const getMissionsByProject = useAppStore((s) => s.getMissionsByProject);
+  const getMissionById = useAppStore((s) => s.getMissionById);
+  const addMission = useAppStore((s) => s.addMission);
+  const updateMission = useAppStore((s) => s.updateMission);
+  const deleteMission = useAppStore((s) => s.deleteMission);
+  const updateMissionStatus = useAppStore((s) => s.updateMissionStatus);
+  const setMissionPlan = useAppStore((s) => s.setMissionPlan);
+  const setMissionCode = useAppStore((s) => s.setMissionCode);
+
   const [missions, setMissions] = useState<Mission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -331,14 +353,14 @@ export function useMissions(projectId?: string) {
         setMissions(normalizeMissions(data) as Mission[]);
       } else {
         const data = projectId
-          ? store.getMissionsByProject(projectId)
-          : store.missions;
+          ? getMissionsByProject(projectId)
+          : storeMissions;
         setMissions(data);
       }
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, store]);
+  }, [projectId, getMissionsByProject, storeMissions]);
 
   useEffect(() => {
     refresh();
@@ -355,7 +377,7 @@ export function useMissions(projectId?: string) {
           mission as unknown as Record<string, unknown>,
         ) as unknown as Mission;
       } else {
-        const newMission = store.addMission({
+        const newMission = addMission({
           ...data,
           providerId: data.providerId ?? null,
           plan: null,
@@ -369,7 +391,7 @@ export function useMissions(projectId?: string) {
         return newMission;
       }
     },
-    [store],
+    [addMission],
   );
 
   const update = useCallback(
@@ -378,11 +400,11 @@ export function useMissions(projectId?: string) {
         await window.db.missions.update(id, data);
         emitDataChange("missions");
       } else {
-        store.updateMission(id, data);
+        updateMission(id, data);
         emitDataChange("missions");
       }
     },
-    [store],
+    [updateMission],
   );
 
   const remove = useCallback(
@@ -391,11 +413,11 @@ export function useMissions(projectId?: string) {
         await window.db.missions.delete(id);
         emitDataChange("missions");
       } else {
-        store.deleteMission(id);
+        deleteMission(id);
         emitDataChange("missions");
       }
     },
-    [store],
+    [deleteMission],
   );
 
   const getById = useCallback(
@@ -408,22 +430,22 @@ export function useMissions(projectId?: string) {
             ) as unknown as Mission)
           : undefined;
       }
-      return store.getMissionById(id);
+      return getMissionById(id);
     },
-    [store],
+    [getMissionById],
   );
 
-  const updateStatus = useCallback(
+  const updateStatusFn = useCallback(
     async (id: string, status: MissionStatus) => {
       if (isElectron() && window.db) {
         await window.db.missions.updateStatus(id, status);
         emitDataChange("missions");
       } else {
-        store.updateMissionStatus(id, status);
+        updateMissionStatus(id, status);
         emitDataChange("missions");
       }
     },
-    [store],
+    [updateMissionStatus],
   );
 
   const setPlan = useCallback(
@@ -432,11 +454,11 @@ export function useMissions(projectId?: string) {
         await window.db.missions.updatePlan(id, JSON.stringify(plan));
         emitDataChange("missions");
       } else {
-        store.setMissionPlan(id, plan);
+        setMissionPlan(id, plan);
         emitDataChange("missions");
       }
     },
-    [store],
+    [setMissionPlan],
   );
 
   const setCode = useCallback(
@@ -445,11 +467,11 @@ export function useMissions(projectId?: string) {
         await window.db.missions.updateGeneratedCode(id, JSON.stringify(code));
         emitDataChange("missions");
       } else {
-        store.setMissionCode(id, code);
+        setMissionCode(id, code);
         emitDataChange("missions");
       }
     },
-    [store],
+    [setMissionCode],
   );
 
   const start = useCallback(
@@ -458,11 +480,11 @@ export function useMissions(projectId?: string) {
         await window.db.missions.start(id);
         emitDataChange("missions");
       } else {
-        store.updateMissionStatus(id, "planning");
+        updateMissionStatus(id, "planning");
         emitDataChange("missions");
       }
     },
-    [store],
+    [updateMissionStatus],
   );
 
   const complete = useCallback(
@@ -471,11 +493,11 @@ export function useMissions(projectId?: string) {
         await window.db.missions.complete(id, summary);
         emitDataChange("missions");
       } else {
-        store.updateMissionStatus(id, "completed");
+        updateMissionStatus(id, "completed");
         emitDataChange("missions");
       }
     },
-    [store],
+    [updateMissionStatus],
   );
 
   const fail = useCallback(
@@ -484,12 +506,12 @@ export function useMissions(projectId?: string) {
         await window.db.missions.fail(id, error);
         emitDataChange("missions");
       } else {
-        store.updateMission(id, { errorMessage: error });
-        store.updateMissionStatus(id, "failed");
+        updateMission(id, { errorMessage: error });
+        updateMissionStatus(id, "failed");
         emitDataChange("missions");
       }
     },
-    [store],
+    [updateMission, updateMissionStatus],
   );
 
   const cancel = useCallback(
@@ -498,26 +520,29 @@ export function useMissions(projectId?: string) {
         await window.db.missions.cancel(id);
         emitDataChange("missions");
       } else {
-        store.updateMissionStatus(id, "cancelled");
+        updateMissionStatus(id, "cancelled");
         emitDataChange("missions");
       }
     },
-    [store],
+    [updateMissionStatus],
   );
 
+  // Para o modo browser, retorna diretamente do store para ter dados atualizados
+  const finalMissions = isElectron()
+    ? missions
+    : projectId
+      ? getMissionsByProject(projectId)
+      : storeMissions;
+
   return {
-    missions: isElectron()
-      ? missions
-      : projectId
-        ? store.getMissionsByProject(projectId)
-        : store.missions,
+    missions: finalMissions,
     isLoading,
     refresh,
     create,
     update,
     remove,
     getById,
-    updateStatus,
+    updateStatus: updateStatusFn,
     setPlan,
     setCode,
     start,
@@ -532,7 +557,10 @@ export function useMissions(projectId?: string) {
 // ============================================
 
 export function useMissionLogs(missionId: string) {
-  const store = useAppStore();
+  // Use seletores específicos para evitar re-renders desnecessários
+  const getLogsByMission = useAppStore((s) => s.getLogsByMission);
+  const addMissionLog = useAppStore((s) => s.addMissionLog);
+
   const [logs, setLogs] = useState<MissionLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -543,12 +571,12 @@ export function useMissionLogs(missionId: string) {
         const data = await window.db.missionLogs.findByMission(missionId);
         setLogs(normalizeMissionLogs(data) as MissionLog[]);
       } else {
-        setLogs(store.getLogsByMission(missionId));
+        setLogs(getLogsByMission(missionId));
       }
     } finally {
       setIsLoading(false);
     }
-  }, [missionId, store]);
+  }, [missionId, getLogsByMission]);
 
   useEffect(() => {
     refresh();
@@ -590,7 +618,7 @@ export function useMissionLogs(missionId: string) {
         }
         emitDataChange("missionLogs");
       } else {
-        store.addMissionLog(missionId, {
+        addMissionLog(missionId, {
           type,
           content,
           metadata: metadata ?? null,
@@ -598,7 +626,7 @@ export function useMissionLogs(missionId: string) {
         emitDataChange("missionLogs");
       }
     },
-    [missionId, store],
+    [missionId, addMissionLog],
   );
 
   const logAgentAction = useCallback(
@@ -607,7 +635,7 @@ export function useMissionLogs(missionId: string) {
         await window.db.missionLogs.logAgentAction(missionId, action, details);
         emitDataChange("missionLogs");
       } else {
-        store.addMissionLog(missionId, {
+        addMissionLog(missionId, {
           type: "action",
           content: action,
           metadata: details ?? null,
@@ -615,7 +643,7 @@ export function useMissionLogs(missionId: string) {
         emitDataChange("missionLogs");
       }
     },
-    [missionId, store],
+    [missionId, addMissionLog],
   );
 
   const logUserInput = useCallback(
@@ -624,7 +652,7 @@ export function useMissionLogs(missionId: string) {
         await window.db.missionLogs.logUserInput(missionId, input);
         emitDataChange("missionLogs");
       } else {
-        store.addMissionLog(missionId, {
+        addMissionLog(missionId, {
           type: "prompt",
           content: input,
           metadata: null,
@@ -632,11 +660,11 @@ export function useMissionLogs(missionId: string) {
         emitDataChange("missionLogs");
       }
     },
-    [missionId, store],
+    [missionId, addMissionLog],
   );
 
   return {
-    logs: isElectron() ? logs : store.getLogsByMission(missionId),
+    logs: isElectron() ? logs : getLogsByMission(missionId),
     isLoading,
     refresh,
     addLog,
