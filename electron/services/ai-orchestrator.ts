@@ -325,7 +325,7 @@ export class AIOrchestrator {
 
       // Atualiza status para "applying"
       db.missions.updateStatus(missionId, "applying");
-      db.missionLogs.logInfo(
+      db.missionLogs.logAction(
         missionId,
         `Applying ${mission.generatedCode.files.length} file changes`,
       );
@@ -345,7 +345,7 @@ export class AIOrchestrator {
           missionId,
           `Applied ${result.appliedFiles.length} files successfully`,
         );
-        db.missionLogs.logInfo(missionId, "Changes applied successfully", {
+        db.missionLogs.logAction(missionId, "Changes applied successfully", {
           appliedFiles: result.appliedFiles,
           backupPath: result.backupPath,
         });

@@ -33,7 +33,8 @@ interface MissionLogRow {
 function parseCreatedAt(createdAt: string): Date {
   if (!createdAt) return new Date();
   const trimmed = createdAt.trim();
-  if (/[Z+-]\d{2}:?\d{2}$/.test(trimmed)) return new Date(trimmed);
+  if (trimmed.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(trimmed))
+    return new Date(trimmed);
   const iso = trimmed.replace(" ", "T") + "Z";
   return new Date(iso);
 }

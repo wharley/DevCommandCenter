@@ -312,7 +312,7 @@ export default function MissionPage() {
     }
 
     setIsApplying(true);
-    addLog("info", "Aplicando alterações...");
+    addLog("action", "Aplicando alterações...");
 
     try {
       const aiService = createAIService({
