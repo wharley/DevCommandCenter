@@ -350,10 +350,15 @@ export class AIOrchestrator {
           backupPath: result.backupPath,
         });
       } else {
+        const errMsg =
+          result.failedFiles.length > 0
+            ? `Some files failed to apply: ${result.failedFiles.map((f) => `${f.path}: ${f.error}`).join("; ")}`
+            : "Some files failed to apply";
         db.missionLogs.logError(missionId, "Some files failed to apply", {
           appliedFiles: result.appliedFiles,
           failedFiles: result.failedFiles,
         });
+        db.missions.fail(missionId, errMsg);
       }
 
       return result;

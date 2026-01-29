@@ -93,7 +93,10 @@ export default function MissionPage() {
   const navigate = useNavigate();
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
   const [activeTab, setActiveTab] = useState("plan");
+
+  const isElectron = typeof window !== "undefined" && !!window.electronAPI?.ai;
 
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
@@ -101,10 +104,15 @@ export default function MissionPage() {
     updateStatus,
     setPlan,
     setCode,
+    refresh: refreshMissions,
     isLoading: missionsLoading,
   } = useMissions(projectId ?? undefined);
   const { providers } = useProviders();
-  const { logs, addLog } = useMissionLogs(missionId ?? "");
+  const {
+    logs,
+    addLog,
+    refresh: refreshLogs,
+  } = useMissionLogs(missionId ?? "");
   const setCurrentMission = useAppStore((s) => s.setCurrentMission);
 
   // Usar useMemo para estabilizar as referências e evitar re-renders desnecessários
@@ -255,6 +263,60 @@ export default function MissionPage() {
     }
   };
 
+  const handleApplyChanges = async () => {
+    if (!isElectron) {
+      toast.info("Aplicar alterações estará disponível na versão Electron");
+      return;
+    }
+    if (
+      !missionId ||
+      !mission ||
+      !project ||
+      !provider ||
+      !mission.generatedCode?.files?.length
+    ) {
+      toast.error("Dados insuficientes para aplicar alterações");
+      return;
+    }
+
+    setIsApplying(true);
+    addLog("info", "Aplicando alterações...");
+
+    try {
+      const aiService = createAIService({
+        provider,
+        mission,
+        projectContext: mission.context ?? undefined,
+      });
+      const result = await aiService.applyChanges({ createBackup: true });
+
+      if (result.success) {
+        toast.success(
+          `Alterações aplicadas: ${result.appliedFiles.length} arquivo(s)`,
+        );
+        await refreshMissions();
+        await refreshLogs();
+        setActiveTab("logs");
+      } else {
+        const detail =
+          result.failedFiles.length > 0
+            ? ` ${result.failedFiles.map((f) => `${f.path}: ${f.error}`).join("; ")}`
+            : "";
+        toast.error(`Falha ao aplicar alterações.${detail}`);
+        await refreshMissions();
+        await refreshLogs();
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Erro desconhecido";
+      toast.error(`Falha ao aplicar alterações: ${msg}`);
+      addLog("error", msg);
+      await refreshMissions();
+      await refreshLogs();
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
   const completedSteps =
     mission.plan?.steps.filter((s) => s.status === "completed").length ?? 0;
   const totalSteps = mission.plan?.steps.length ?? 0;
@@ -322,14 +384,12 @@ export default function MissionPage() {
               </Button>
             )}
             {mission.status === "code_ready" && (
-              <Button
-                onClick={() => {
-                  toast.info(
-                    "Aplicar alterações estará disponível na versão Electron",
-                  );
-                }}
-              >
-                <Play className="mr-2 h-4 w-4" />
+              <Button onClick={handleApplyChanges} disabled={isApplying}>
+                {isApplying ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="mr-2 h-4 w-4" />
+                )}
                 Aplicar alterações
               </Button>
             )}
