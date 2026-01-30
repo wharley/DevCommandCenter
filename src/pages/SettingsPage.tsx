@@ -83,6 +83,12 @@ const providerTypeConfig: Record<
   },
 };
 
+/** Rótulo do modelo quando o usuário deixou "padrão" (valor vazio) no diálogo */
+const defaultModelLabelByType: Partial<Record<ProviderType, string>> = {
+  codex: "Padrão do Codex",
+  cursor: "Padrão (auto)",
+};
+
 export default function SettingsPage() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
@@ -243,10 +249,15 @@ export default function SettingsPage() {
                               </code>
                             </div>
                           )}
-                          {provider.config?.model && (
+                          {(provider.config?.model ||
+                            defaultModelLabelByType[provider.type]) && (
                             <div className="flex items-center gap-2 text-muted-foreground">
                               <Bot className="h-4 w-4" />
-                              <span>Modelo: {provider.config.model}</span>
+                              <span>
+                                Modelo:{" "}
+                                {provider.config?.model ||
+                                  defaultModelLabelByType[provider.type]}
+                              </span>
                             </div>
                           )}
                           {!provider.apiKey && !provider.cliPath && (
