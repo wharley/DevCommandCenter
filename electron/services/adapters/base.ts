@@ -169,6 +169,96 @@ Important:
   }
 
   /**
+   * Dentro de strings JSON, escapa aspas duplas que o LLM esqueceu de escapar (ex.: código com "use strict").
+   * Só escapa quando a aspa não é o delimitador de fechamento (próximo char é estrutural: , } ] : ou espaço).
+   */
+  private fixUnescapedQuotesInJsonStrings(str: string): string {
+    let inString = false;
+    let escape = false;
+    const result: string[] = [];
+    const structuralAfterString = /^[\s,}\]:]/;
+    for (let i = 0; i < str.length; i++) {
+      const c = str[i];
+      const next = str[i + 1];
+      if (inString) {
+        if (escape) {
+          result.push(c);
+          escape = false;
+          continue;
+        }
+        if (c === "\\") {
+          result.push(c);
+          escape = true;
+          continue;
+        }
+        if (c === '"') {
+          if (structuralAfterString.test(next ?? "")) {
+            result.push(c);
+            inString = false;
+          } else {
+            result.push("\\", c);
+          }
+          continue;
+        }
+        result.push(c);
+        continue;
+      }
+      if (c === '"') {
+        result.push(c);
+        inString = true;
+        continue;
+      }
+      result.push(c);
+    }
+    return result.join("");
+  }
+
+  /**
+   * Substitui newlines literais dentro de strings JSON por \\n (comum em saídas de LLM).
+   * Percorre o texto e, apenas dentro de strings entre aspas duplas, troca \\n e \\r por \\n.
+   */
+  private fixUnescapedNewlinesInJsonStrings(str: string): string {
+    let inString = false;
+    let escape = false;
+    const result: string[] = [];
+    for (let i = 0; i < str.length; i++) {
+      const c = str[i];
+      const code = c.charCodeAt(0);
+      if (inString) {
+        if (escape) {
+          result.push(c);
+          escape = false;
+          continue;
+        }
+        if (c === "\\") {
+          result.push(c);
+          escape = true;
+          continue;
+        }
+        if (c === '"') {
+          result.push(c);
+          inString = false;
+          continue;
+        }
+        if (code === 10 || code === 13) {
+          result.push("\\n");
+          if (code === 13 && str[i + 1] === "\n") i++;
+          continue;
+        }
+        result.push(c);
+        continue;
+      }
+      if (c === '"') {
+        result.push(c);
+        inString = true;
+        continue;
+      }
+      result.push(c);
+    }
+    return result.join("");
+  }
+
+  /**
    * Tenta fazer parse de JSON de uma resposta que pode ter texto adicional
    */
   protected parseJSONResponse<T>(response: string): T | null {
@@ -181,7 +271,24 @@ Important:
       // segue
     }
 
-    // 2. Bloco markdown: conteúdo após ```json ou ``` (pode conter backticks no conteúdo)
+    // 2. Newlines literais dentro de strings (quebra JSON; comum em suggestedContent)
+    try {
+      const fixed = this.fixUnescapedNewlinesInJsonStrings(trimmed);
+      return JSON.parse(fixed) as T;
+    } catch {
+      // segue
+    }
+
+    // 2b. Newlines + aspas não escapadas (código com "use strict" etc.)
+    try {
+      const fixedNewlines = this.fixUnescapedNewlinesInJsonStrings(trimmed);
+      const fixedQuotes = this.fixUnescapedQuotesInJsonStrings(fixedNewlines);
+      return JSON.parse(fixedQuotes) as T;
+    } catch {
+      // segue
+    }
+
+    // 3. Bloco markdown: conteúdo após ```json ou ``` (pode conter backticks no conteúdo)
     const codeBlockOpen = /^```(?:json)?\s*\n?/;
     if (codeBlockOpen.test(trimmed)) {
       const afterFence = trimmed.replace(codeBlockOpen, "").trim();
@@ -194,9 +301,15 @@ Important:
       } catch {
         // segue
       }
+      try {
+        const fixed = this.fixUnescapedNewlinesInJsonStrings(content);
+        return JSON.parse(this.extractTopLevelJson(fixed) ?? fixed) as T;
+      } catch {
+        // segue
+      }
     }
 
-    // 3. Extração por contagem de chaves no texto inteiro
+    // 4. Extração por contagem de chaves no texto inteiro
     const byBrace = this.extractTopLevelJson(trimmed);
     if (byBrace) {
       try {
@@ -204,15 +317,84 @@ Important:
       } catch {
         // segue
       }
-    }
-
-    // 4. Regex guloso como último recurso
-    const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
       try {
-        return JSON.parse(jsonMatch[0]) as T;
+        return JSON.parse(this.fixUnescapedNewlinesInJsonStrings(byBrace)) as T;
       } catch {
         // segue
+      }
+      try {
+        const fixedBoth = this.fixUnescapedQuotesInJsonStrings(
+          this.fixUnescapedNewlinesInJsonStrings(byBrace),
+        );
+        return JSON.parse(fixedBoth) as T;
+      } catch {
+        // segue
+      }
+    }
+
+    // 4b. Fix newlines no texto inteiro e depois extrair JSON (cobre suggestedContent com newlines literais)
+    try {
+      const fixedTrimmed = this.fixUnescapedNewlinesInJsonStrings(trimmed);
+      const byBraceFromFixed = this.extractTopLevelJson(fixedTrimmed);
+      if (byBraceFromFixed) {
+        try {
+          return JSON.parse(byBraceFromFixed) as T;
+        } catch {
+          // segue
+        }
+        try {
+          const fixedQuotes = this.fixUnescapedQuotesInJsonStrings(byBraceFromFixed);
+          return JSON.parse(fixedQuotes) as T;
+        } catch {
+          // segue
+        }
+      }
+    } catch {
+      // segue
+    }
+
+    // 5. Regex guloso como último recurso
+    const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const raw = jsonMatch[0];
+      try {
+        return JSON.parse(raw) as T;
+      } catch {
+        // segue
+      }
+      try {
+        return JSON.parse(
+          this.fixUnescapedNewlinesInJsonStrings(raw),
+        ) as T;
+      } catch {
+        // segue
+      }
+      try {
+        return JSON.parse(
+          this.fixUnescapedQuotesInJsonStrings(
+            this.fixUnescapedNewlinesInJsonStrings(raw),
+          ),
+        ) as T;
+      } catch {
+        // segue
+      }
+    }
+
+    // 6. Reparo por truncamento: resposta cortada no meio de suggestedContent (fecha string + objeto atual + array files + objeto topo)
+    const trimmedEnd = trimmed.slice(-20);
+    if (!trimmedEnd.trimEnd().endsWith("}")) {
+      for (const suffix of ['"}]}', '"}]}]}', '"}]}]}]}', '"}]}]}]}]}']) {
+        try {
+          return JSON.parse(trimmed + suffix) as T;
+        } catch {
+          // segue
+        }
+        try {
+          const fixed = this.fixUnescapedNewlinesInJsonStrings(trimmed);
+          return JSON.parse(fixed + suffix) as T;
+        } catch {
+          // segue
+        }
       }
     }
 

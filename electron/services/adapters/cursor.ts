@@ -136,9 +136,24 @@ export class CursorAdapter extends BaseAdapter {
       );
 
       onProgress?.("Processando resposta...");
-      const plan = this.parseJSONResponse<MissionPlan>(response);
+      let plan = this.parseJSONResponse<MissionPlan>(response);
 
-      if (!plan) {
+      // Fallback: response may be full CLI wrapper (type, result) with result as string or object
+      if (!plan || !Array.isArray(plan.steps)) {
+        try {
+          const parsed = JSON.parse(response) as { type?: string; result?: unknown; output?: unknown };
+          const inner = parsed?.result ?? parsed?.output;
+          if (typeof inner === "string") {
+            plan = this.parseJSONResponse<MissionPlan>(inner) ?? plan ?? null;
+          } else if (inner && typeof inner === "object" && Array.isArray((inner as MissionPlan).steps)) {
+            plan = inner as MissionPlan;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!plan || !Array.isArray(plan.steps)) {
         return {
           success: false,
           error: "Failed to parse plan from Cursor response",
@@ -208,9 +223,56 @@ export class CursorAdapter extends BaseAdapter {
       );
 
       onProgress?.("Processando resposta...");
-      const code = this.parseJSONResponse<GeneratedCode>(response);
+      let code = this.parseJSONResponse<GeneratedCode>(response);
 
       if (!code) {
+        // Fallback 1: response may be wrapper JSON (e.g. { result: "<string>" } or { result: <object> })
+        try {
+          const parsed = JSON.parse(response) as {
+            type?: string;
+            result?: unknown;
+            output?: unknown;
+          };
+          const inner = parsed?.result ?? parsed?.output;
+          if (
+            inner &&
+            typeof inner === "object" &&
+            Array.isArray((inner as GeneratedCode).files)
+          ) {
+            code = inner as GeneratedCode;
+          } else if (typeof inner === "string") {
+            // Cursor CLI wrapper: result is the JSON string of GeneratedCode
+            code = this.parseJSONResponse<GeneratedCode>(inner);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // Normalize wrapper: CLI may return { result: GeneratedCode } or { output: GeneratedCode }
+      if (code && "result" in code && Array.isArray((code as { result?: GeneratedCode }).result?.files)) {
+        code = (code as { result: GeneratedCode }).result;
+      } else if (code && "output" in code && Array.isArray((code as { output?: GeneratedCode }).output?.files)) {
+        code = (code as { output: GeneratedCode }).output;
+      }
+
+      // Fallback 2: response was the full CLI wrapper (type, subtype, result) - parseJSONResponse returned it as "code"
+      if (
+        code &&
+        typeof code === "object" &&
+        "type" in code &&
+        (code as { type?: string }).type === "result" &&
+        ("result" in code || "output" in code)
+      ) {
+        const raw = (code as { result?: unknown; output?: unknown }).result ?? (code as { result?: unknown; output?: unknown }).output;
+        if (typeof raw === "string") {
+          code = this.parseJSONResponse<GeneratedCode>(raw) ?? code;
+        } else if (raw && typeof raw === "object" && Array.isArray((raw as GeneratedCode).files)) {
+          code = raw as GeneratedCode;
+        }
+      }
+
+      if (!code || !Array.isArray(code.files)) {
         const snippet = response.slice(0, 600).trim();
         return {
           success: false,
@@ -248,6 +310,78 @@ export class CursorAdapter extends BaseAdapter {
   }
 
   /**
+   * Extrai o payload útil da stdout do Cursor CLI.
+   * Documentação: https://docs.cursor.com/cli/reference/output-format
+   * - Com --output-format json o CLI pode retornar um único objeto: { type, subtype, result, ... }.
+   * - result pode ser string (JSON do modelo) ou objeto (GeneratedCode/MissionPlan).
+   * - Em alguns casos o CLI emite NDJSON (uma linha por evento); a última linha com type:"result" contém o resultado.
+   */
+  private extractPayloadFromCursorStdout(stdout: string): string {
+    const trimmed = stdout.trim();
+    if (!trimmed) return trimmed;
+
+    // 1. Tentar parse como JSON único (formato oficial com type/result)
+    try {
+      const wrapper = JSON.parse(trimmed) as {
+        type?: string;
+        result?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+        output?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+      };
+      const raw = wrapper?.result ?? wrapper?.output;
+      if (typeof raw === "string") return raw;
+      if (
+        raw &&
+        typeof raw === "object" &&
+        Array.isArray((raw as { files?: unknown[] }).files)
+      ) {
+        return JSON.stringify(raw);
+      }
+      if (
+        raw &&
+        typeof raw === "object" &&
+        Array.isArray((raw as { steps?: unknown[] }).steps)
+      ) {
+        return JSON.stringify(raw);
+      }
+    } catch {
+      // não é um único JSON; tentar NDJSON
+    }
+
+    // 2. NDJSON: última linha que seja JSON com type:"result"
+    const lines = trimmed.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const wrapper = JSON.parse(lines[i]!) as {
+          type?: string;
+          result?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+          output?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+        };
+        if (wrapper?.type !== "result") continue;
+        const raw = wrapper?.result ?? wrapper?.output;
+        if (typeof raw === "string") return raw;
+        if (
+          raw &&
+          typeof raw === "object" &&
+          Array.isArray((raw as { files?: unknown[] }).files)
+        ) {
+          return JSON.stringify(raw);
+        }
+        if (
+          raw &&
+          typeof raw === "object" &&
+          Array.isArray((raw as { steps?: unknown[] }).steps)
+        ) {
+          return JSON.stringify(raw);
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return trimmed;
+  }
+
+  /**
    * Executa o comando Cursor Agent CLI (agent chat "<prompt>")
    * Documentação: https://cursor.com/docs/cli
    */
@@ -267,8 +401,14 @@ export class CursorAdapter extends BaseAdapter {
       const model = this.provider.config?.model as string | undefined;
       const modelArgs =
         model && model !== "" && model !== "auto" ? ["--model", model] : [];
-      // agent [--model <model>] chat "<prompt>" — opções globais primeiro
-      const args = [...modelArgs, subcommand, prompt];
+      // agent [--model <model>] [--output-format json] chat "<prompt>" — JSON para parse do plano/código (como Claude)
+      const args = [
+        ...modelArgs,
+        "--output-format",
+        "json",
+        subcommand,
+        prompt,
+      ];
 
       let child: ChildProcess;
       let stdout = "";
@@ -349,7 +489,8 @@ export class CursorAdapter extends BaseAdapter {
             onProgress?.(
               `Resposta completa recebida (${(stdout.length / 1024).toFixed(1)} KB)`,
             );
-            handleResolve(stdout);
+            const payload = this.extractPayloadFromCursorStdout(stdout);
+            handleResolve(payload);
           } else {
             handleReject(
               new Error(

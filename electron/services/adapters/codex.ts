@@ -240,16 +240,21 @@ export class CodexAdapter extends BaseAdapter {
         (this.provider.config?.timeout as number) || DEFAULT_TIMEOUT_MS;
       const inactivityTimeout = Math.min(INACTIVITY_TIMEOUT_MS, maxTimeout / 2);
 
-      // Args para o Codex CLI - sem o prompt como argumento
+      // Args para o Codex CLI (codex exec = modo não-interativo para automação)
       const args = [
-        "--quiet", // Modo silencioso
+        "exec",
+        "--cd",
+        cwd,
+        "--full-auto",
+        "--skip-git-repo-check",
       ];
 
-      // Adiciona modelo se configurado
       const model = this.provider.config?.model as string;
       if (model) {
-        args.unshift("--model", model);
+        args.push("--model", model);
       }
+
+      args.push("-"); // prompt via stdin
 
       let child: ChildProcess;
       let stdout = "";
@@ -303,8 +308,11 @@ export class CodexAdapter extends BaseAdapter {
           cwd,
           env: {
             ...process.env,
-            // Passa API key se configurada
-            OPENAI_API_KEY: this.provider.apiKey || process.env.OPENAI_API_KEY,
+            OPENAI_API_KEY:
+              this.provider.apiKey || process.env.OPENAI_API_KEY,
+            ...(this.provider.apiKey && {
+              CODEX_API_KEY: this.provider.apiKey,
+            }),
           },
           shell: platform() === "win32",
         });

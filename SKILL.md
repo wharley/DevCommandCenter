@@ -754,6 +754,7 @@ export type ProviderType =
 - **Instalação do CLI:** `curl https://cursor.com/install -fsSL | bash` (ver cursor.com/docs/cli).
 - **Exemplo de uso no terminal:** `agent chat "descrição da missão"` (ou equivalente conforme documentação oficial).
 - O adapter em `electron/services/adapters/cursor.ts` invoca o binário `agent` (ou caminho configurável em `cliPath`) com a descrição da missão/contexto e parseia a resposta.
+- **Formato de saída com `--output-format json`:** O CLI pode retornar um único JSON no stdout, possivelmente envolvido em `{ "result": ... }` ou `{ "output": ... }` (string ou objeto). O adapter normaliza esse wrapper (string ou objeto com `.files`/`.steps`) e aplica correção de newlines literais (via `parseJSONResponse` na base) antes de interpretar como `GeneratedCode` ou `MissionPlan`.
 
 ### 2. Implementar Diff Real
 

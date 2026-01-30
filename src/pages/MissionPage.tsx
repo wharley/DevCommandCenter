@@ -33,6 +33,13 @@ import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Alert } from "@/components/ui/alert";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   useProjects,
   useMissions,
   useProviders,
@@ -110,6 +117,7 @@ export default function MissionPage() {
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
     missions,
+    update,
     updateStatus,
     setPlan,
     setCode,
@@ -516,14 +524,39 @@ export default function MissionPage() {
               </Button>
             )}
             {mission.status === "plan_generated" && (
-              <Button onClick={handleGenerateCode} disabled={isGenerating}>
-                {isGenerating ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Code2 className="mr-2 h-4 w-4" />
-                )}
-                Gerar código
-              </Button>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                  Gerar código com:
+                </span>
+                <Select
+                  value={mission.providerId ?? project?.defaultProviderId ?? ""}
+                  onValueChange={(value) => {
+                    if (missionId && value) update(missionId, { providerId: value });
+                  }}
+                  disabled={isGenerating}
+                >
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Selecione o provedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providers
+                      .filter((p) => p.isActive)
+                      .map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Button onClick={handleGenerateCode} disabled={isGenerating || !provider}>
+                  {isGenerating ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Code2 className="mr-2 h-4 w-4" />
+                  )}
+                  Gerar código
+                </Button>
+              </div>
             )}
             {mission.status === "code_ready" && (
               <Button onClick={handleApplyChanges} disabled={isApplying}>
