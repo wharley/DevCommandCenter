@@ -60,8 +60,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     isRepo: (projectPath: string) => invoke("git:isRepo", projectPath),
     getCurrentBranch: (projectPath: string) =>
       invoke("git:getCurrentBranch", projectPath),
-    createBranch: (projectPath: string, branchName: string) =>
-      invoke("git:createBranch", projectPath, branchName),
+    getDefaultBranch: (projectPath: string) =>
+      invoke("git:getDefaultBranch", projectPath),
+    createBranch: (
+      projectPath: string,
+      branchName: string,
+      fromBranch?: string,
+    ) => invoke("git:createBranch", projectPath, branchName, fromBranch),
     listFiles: (projectPath: string, maxFiles?: number) =>
       invoke("git:listFiles", projectPath, maxFiles),
     getRecentCommits: (projectPath: string, count?: number) =>
@@ -163,6 +168,8 @@ contextBridge.exposeInMainWorld("db", {
       invoke("db:missionLogs:logUserInput", missionId, input),
     getStats: (missionId: string) =>
       invoke("db:missionLogs:getStats", missionId),
+    getUsageStats: (missionId: string) =>
+      invoke("db:missionLogs:getUsageStats", missionId),
     getLatest: (missionId: string, count?: number) =>
       invoke("db:missionLogs:getLatest", missionId, count),
   },

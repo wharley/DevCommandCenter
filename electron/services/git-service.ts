@@ -419,10 +419,50 @@ export class GitService {
   }
 
   /**
-   * Cria um novo branch
+   * Descobre o branch padrão do repositório (main ou master).
+   * Usa origin/HEAD se existir; senão tenta main e depois master.
    */
-  async createBranch(branchName: string): Promise<boolean> {
+  async getDefaultBranch(): Promise<string> {
     try {
+      const { stdout: originHead } = await execAsync(
+        "git symbolic-ref refs/remotes/origin/HEAD",
+        { cwd: this.projectPath, encoding: "utf8" },
+      );
+      const ref = originHead.trim();
+      if (ref) {
+        const match = ref.match(/^refs\/remotes\/origin\/(.+)$/);
+        if (match?.[1]) return match[1];
+      }
+    } catch {
+      // origin/HEAD não configurado, tenta main/master
+    }
+    try {
+      await execAsync("git rev-parse --verify main", {
+        cwd: this.projectPath,
+      });
+      return "main";
+    } catch {
+      try {
+        await execAsync("git rev-parse --verify master", {
+          cwd: this.projectPath,
+        });
+        return "master";
+      } catch {
+        throw new Error("Nenhum branch padrão (main/master) encontrado.");
+      }
+    }
+  }
+
+  /**
+   * Cria um novo branch. Se fromBranch for informado, cria a partir dele (ex.: main/master).
+   */
+  async createBranch(branchName: string, fromBranch?: string): Promise<boolean> {
+    try {
+      if (fromBranch) {
+        await execAsync(`git checkout "${fromBranch}"`, {
+          cwd: this.projectPath,
+        });
+      }
       await execAsync(`git checkout -b "${branchName}"`, {
         cwd: this.projectPath,
       });

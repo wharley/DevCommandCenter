@@ -129,9 +129,11 @@ declare global {
         ) => Promise<string>;
         isRepo: (projectPath: string) => Promise<boolean>;
         getCurrentBranch: (projectPath: string) => Promise<string>;
+        getDefaultBranch: (projectPath: string) => Promise<string>;
         createBranch: (
           projectPath: string,
           branchName: string,
+          fromBranch?: string,
         ) => Promise<boolean>;
         listFiles: (
           projectPath: string,
@@ -266,6 +268,9 @@ declare global {
         ) => Promise<MissionLog>;
         logUserInput: (missionId: string, input: string) => Promise<MissionLog>;
         getStats: (missionId: string) => Promise<MissionLogStats>;
+        getUsageStats: (
+          missionId: string,
+        ) => Promise<{ totalTokens: number; totalDurationMs: number }>;
         getLatest: (missionId: string, count?: number) => Promise<MissionLog[]>;
       };
 

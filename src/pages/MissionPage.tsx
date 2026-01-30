@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   useProjects,
   useMissions,
@@ -117,6 +118,11 @@ export default function MissionPage() {
   const [isWorktree, setIsWorktree] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [createBranchForMission, setCreateBranchForMission] = useState(false);
+  const [branchNameForMission, setBranchNameForMission] = useState("");
+  const [usageStats, setUsageStats] = useState<{
+    totalTokens: number;
+    totalDurationMs: number;
+  }>({ totalTokens: 0, totalDurationMs: 0 });
 
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
@@ -215,6 +221,30 @@ export default function MissionPage() {
     };
   }, [commitDialogOpen, project?.path]);
 
+  // Total tokens e duração da missão (para exibição na aba Logs)
+  useEffect(() => {
+    if (!missionId || !window.db?.missionLogs.getUsageStats) {
+      setUsageStats({ totalTokens: 0, totalDurationMs: 0 });
+      return;
+    }
+    let cancelled = false;
+    window.db.missionLogs
+      .getUsageStats(missionId)
+      .then((stats) => {
+        if (!cancelled)
+          setUsageStats({
+            totalTokens: stats.totalTokens ?? 0,
+            totalDurationMs: stats.totalDurationMs ?? 0,
+          });
+      })
+      .catch(() => {
+        if (!cancelled) setUsageStats({ totalTokens: 0, totalDurationMs: 0 });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [missionId, logs]);
+
   // Poll logs while generating code so backend progress messages appear in the Logs tab
   useEffect(() => {
     if (!isGenerating || !missionId) return;
@@ -304,13 +334,29 @@ export default function MissionPage() {
 
     const git = typeof window !== "undefined" ? window.electronAPI?.git : null;
     if (createBranchForMission && project?.path && git) {
-      const branchName = `mission/${missionId}`;
-      const created = await git.createBranch(project.path, branchName);
-      if (!created) {
-        toast.error("Não foi possível criar o branch. Verifique se o repositório está em um estado válido.");
+      let baseBranch: string;
+      try {
+        baseBranch = await git.getDefaultBranch(project.path);
+      } catch {
+        toast.error(
+          "Não foi possível identificar o branch base (main/master). Configure o repositório e tente novamente.",
+        );
         return;
       }
-      addLog("action", `Branch criado: ${branchName}`, undefined);
+      const branchName =
+        branchNameForMission.trim() || `mission/${missionId}`;
+      const created = await git.createBranch(
+        project.path,
+        branchName,
+        baseBranch,
+      );
+      if (!created) {
+        toast.error(
+          "Não foi possível criar o branch. Verifique se o repositório está em um estado válido.",
+        );
+        return;
+      }
+      addLog("action", `Branch criado: ${branchName} (a partir de ${baseBranch})`, undefined);
       const newBranch = await git.getCurrentBranch(project.path);
       setCurrentBranch(newBranch ?? null);
     }
@@ -583,16 +629,36 @@ export default function MissionPage() {
                   </Button>
                 </div>
                 {project?.path && typeof window !== "undefined" && window.electronAPI?.git && (
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-                    <Checkbox
-                      checked={createBranchForMission}
-                      onCheckedChange={(checked) =>
-                        setCreateBranchForMission(checked === true)
-                      }
-                      disabled={isGenerating}
-                    />
-                    <span>Criar branch para esta missão</span>
-                  </label>
+                  <div className="flex flex-col gap-2">
+                    <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                      <Checkbox
+                        checked={createBranchForMission}
+                        onCheckedChange={(checked) =>
+                          setCreateBranchForMission(checked === true)
+                        }
+                        disabled={isGenerating}
+                      />
+                      <span>Criar branch para esta missão</span>
+                    </label>
+                    {createBranchForMission && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground whitespace-nowrap">
+                          Nome da branch:
+                        </span>
+                        <Input
+                          className="max-w-[280px]"
+                          placeholder={
+                            missionId ? `mission/${missionId}` : "mission/..."
+                          }
+                          value={branchNameForMission}
+                          onChange={(e) =>
+                            setBranchNameForMission(e.target.value)
+                          }
+                          disabled={isGenerating}
+                        />
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -695,7 +761,23 @@ export default function MissionPage() {
           </TabsContent>
 
           <TabsContent value="logs" className="flex-1 overflow-auto p-6 mt-0">
-            <LogsView logs={logs} />
+            <div className="space-y-3">
+              {(usageStats.totalTokens > 0 || usageStats.totalDurationMs > 0) && (
+                <p className="text-sm text-muted-foreground">
+                  Total:{" "}
+                  {usageStats.totalTokens > 0
+                    ? `${usageStats.totalTokens} tokens`
+                    : "—"}
+                  {usageStats.totalDurationMs > 0 && (
+                    <>
+                      {" · "}
+                      {(usageStats.totalDurationMs / 60000).toFixed(1)} min
+                    </>
+                  )}
+                </p>
+              )}
+              <LogsView logs={logs} />
+            </div>
           </TabsContent>
         </Tabs>
       </div>

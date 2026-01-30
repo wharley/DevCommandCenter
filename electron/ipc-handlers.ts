@@ -391,6 +391,10 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     return db.missionLogs.getStats(missionId);
   });
 
+  ipcMain.handle("db:missionLogs:getUsageStats", (_event, missionId: string) => {
+    return db.missionLogs.getUsageStats(missionId);
+  });
+
   ipcMain.handle(
     "db:missionLogs:getLatest",
     (_event, missionId: string, count?: number) => {
@@ -507,12 +511,26 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     },
   );
 
-  // Create a new branch
+  // Get default branch (main or master)
+  ipcMain.handle(
+    "git:getDefaultBranch",
+    async (_event, projectPath: string) => {
+      const gitService = new GitService(projectPath);
+      return gitService.getDefaultBranch();
+    },
+  );
+
+  // Create a new branch (optionally from a base branch)
   ipcMain.handle(
     "git:createBranch",
-    async (_event, projectPath: string, branchName: string) => {
+    async (
+      _event,
+      projectPath: string,
+      branchName: string,
+      fromBranch?: string,
+    ) => {
       const gitService = new GitService(projectPath);
-      return gitService.createBranch(branchName);
+      return gitService.createBranch(branchName, fromBranch);
     },
   );
 
