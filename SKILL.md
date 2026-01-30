@@ -954,6 +954,7 @@ npm install --global windows-build-tools
 - ✅ **Migração para Vite + React Router** (substituindo Next.js)
 - ✅ **Integração real com Claude Code CLI** - Adapter completo
 - ✅ **Integração real com OpenAI Codex CLI** - Adapter completo
+- ✅ **Integração real com Cursor Agent CLI** - Adapter completo (binário `agent`, auth no terminal)
 - ✅ **Integração real com OpenAI API** - Chamadas REST diretas (GPT-4)
 - ✅ **Integração real com Anthropic API** - Chamadas REST diretas (Claude)
 - ✅ **Git Service** - Detecção de branch, status, commits recentes
