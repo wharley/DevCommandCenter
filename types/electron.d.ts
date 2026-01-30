@@ -129,6 +129,10 @@ declare global {
         ) => Promise<string>;
         isRepo: (projectPath: string) => Promise<boolean>;
         getCurrentBranch: (projectPath: string) => Promise<string>;
+        createBranch: (
+          projectPath: string,
+          branchName: string,
+        ) => Promise<boolean>;
         listFiles: (
           projectPath: string,
           maxFiles?: number,

@@ -507,6 +507,15 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     },
   );
 
+  // Create a new branch
+  ipcMain.handle(
+    "git:createBranch",
+    async (_event, projectPath: string, branchName: string) => {
+      const gitService = new GitService(projectPath);
+      return gitService.createBranch(branchName);
+    },
+  );
+
   // List tracked files
   ipcMain.handle(
     "git:listFiles",

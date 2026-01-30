@@ -60,6 +60,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     isRepo: (projectPath: string) => invoke("git:isRepo", projectPath),
     getCurrentBranch: (projectPath: string) =>
       invoke("git:getCurrentBranch", projectPath),
+    createBranch: (projectPath: string, branchName: string) =>
+      invoke("git:createBranch", projectPath, branchName),
     listFiles: (projectPath: string, maxFiles?: number) =>
       invoke("git:listFiles", projectPath, maxFiles),
     getRecentCommits: (projectPath: string, count?: number) =>

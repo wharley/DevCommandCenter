@@ -39,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   useProjects,
   useMissions,
@@ -57,6 +58,8 @@ import type {
   MissionLogType,
   GeneratedCode,
 } from "@/lib/database/types";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 const statusConfig: Record<MissionStatus, { label: string; color: string }> = {
   created: { label: "Criada", color: "bg-muted text-muted-foreground" },
@@ -113,6 +116,7 @@ export default function MissionPage() {
   const [currentBranch, setCurrentBranch] = useState<string | null>(null);
   const [isWorktree, setIsWorktree] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
+  const [createBranchForMission, setCreateBranchForMission] = useState(false);
 
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
@@ -211,6 +215,13 @@ export default function MissionPage() {
     };
   }, [commitDialogOpen, project?.path]);
 
+  // Poll logs while generating code so backend progress messages appear in the Logs tab
+  useEffect(() => {
+    if (!isGenerating || !missionId) return;
+    const interval = setInterval(refreshLogs, 2500);
+    return () => clearInterval(interval);
+  }, [isGenerating, missionId, refreshLogs]);
+
   const isLoading =
     (projectId && projectsLoading) || (missionId && missionsLoading);
 
@@ -289,6 +300,19 @@ export default function MissionPage() {
     if (!provider || !mission.plan || !missionId) {
       toast.error("O plano é necessário antes de gerar o código");
       return;
+    }
+
+    const git = typeof window !== "undefined" ? window.electronAPI?.git : null;
+    if (createBranchForMission && project?.path && git) {
+      const branchName = `mission/${missionId}`;
+      const created = await git.createBranch(project.path, branchName);
+      if (!created) {
+        toast.error("Não foi possível criar o branch. Verifique se o repositório está em um estado válido.");
+        return;
+      }
+      addLog("action", `Branch criado: ${branchName}`, undefined);
+      const newBranch = await git.getCurrentBranch(project.path);
+      setCurrentBranch(newBranch ?? null);
     }
 
     setIsGenerating(true);
@@ -524,38 +548,52 @@ export default function MissionPage() {
               </Button>
             )}
             {mission.status === "plan_generated" && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground whitespace-nowrap">
-                  Gerar código com:
-                </span>
-                <Select
-                  value={mission.providerId ?? project?.defaultProviderId ?? ""}
-                  onValueChange={(value) => {
-                    if (missionId && value) update(missionId, { providerId: value });
-                  }}
-                  disabled={isGenerating}
-                >
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Selecione o provedor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {providers
-                      .filter((p) => p.isActive)
-                      .map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                <Button onClick={handleGenerateCode} disabled={isGenerating || !provider}>
-                  {isGenerating ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Code2 className="mr-2 h-4 w-4" />
-                  )}
-                  Gerar código
-                </Button>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                    Gerar código com:
+                  </span>
+                  <Select
+                    value={mission.providerId ?? project?.defaultProviderId ?? ""}
+                    onValueChange={(value) => {
+                      if (missionId && value) update(missionId, { providerId: value });
+                    }}
+                    disabled={isGenerating}
+                  >
+                    <SelectTrigger className="w-[200px]">
+                      <SelectValue placeholder="Selecione o provedor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providers
+                        .filter((p) => p.isActive)
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={handleGenerateCode} disabled={isGenerating || !provider}>
+                    {isGenerating ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Code2 className="mr-2 h-4 w-4" />
+                    )}
+                    {isGenerating ? "Gerando código..." : "Gerar código"}
+                  </Button>
+                </div>
+                {project?.path && typeof window !== "undefined" && window.electronAPI?.git && (
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                    <Checkbox
+                      checked={createBranchForMission}
+                      onCheckedChange={(checked) =>
+                        setCreateBranchForMission(checked === true)
+                      }
+                      disabled={isGenerating}
+                    />
+                    <span>Criar branch para esta missão</span>
+                  </label>
+                )}
               </div>
             )}
             {mission.status === "code_ready" && (
@@ -823,8 +861,73 @@ function looksLikeUnifiedDiff(content: string): boolean {
   );
 }
 
-const CODE_BLOCK_CLASS =
-  "p-4 text-xs font-mono whitespace-pre-wrap break-words bg-muted/30";
+/** Mapa de extensão de arquivo para linguagem do Prism/SyntaxHighlighter */
+const EXT_TO_LANG: Record<string, string> = {
+  ts: "typescript",
+  tsx: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  css: "css",
+  scss: "scss",
+  sass: "sass",
+  html: "html",
+  htm: "html",
+  json: "json",
+  md: "markdown",
+  mdx: "markdown",
+  py: "python",
+  rb: "ruby",
+  go: "go",
+  rs: "rust",
+  java: "java",
+  kt: "kotlin",
+  sql: "sql",
+  sh: "bash",
+  bash: "bash",
+  yaml: "yaml",
+  yml: "yaml",
+  xml: "xml",
+  svg: "xml",
+  diff: "diff",
+};
+
+function getLanguageFromPath(filePath: string, isDiff = false): string {
+  if (isDiff) return "diff";
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return EXT_TO_LANG[ext] ?? "text";
+}
+
+function CodeBlock({
+  filePath,
+  content,
+  isDiff,
+}: {
+  filePath: string;
+  content: string;
+  isDiff?: boolean;
+}) {
+  const lang = getLanguageFromPath(filePath, isDiff);
+  return (
+    <SyntaxHighlighter
+      language={lang}
+      style={oneDark}
+      showLineNumbers={false}
+      wrapLongLines
+      customStyle={{
+        margin: 0,
+        padding: "1rem",
+        fontSize: "0.75rem",
+        background: "hsl(var(--muted) / 0.3)",
+        borderRadius: "var(--radius)",
+      }}
+      codeTagProps={{ style: { fontFamily: "inherit" } }}
+    >
+      {content}
+    </SyntaxHighlighter>
+  );
+}
 
 function CodeView({
   code,
@@ -942,9 +1045,10 @@ function CodeView({
                         {hasOriginal && (
                           <TabsContent value="original" className="mt-3">
                             <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                              <pre className={CODE_BLOCK_CLASS}>
-                                {file.originalContent}
-                              </pre>
+                              <CodeBlock
+                                filePath={file.path}
+                                content={file.originalContent ?? ""}
+                              />
                             </ScrollArea>
                           </TabsContent>
                         )}
@@ -958,9 +1062,10 @@ function CodeView({
                               </Alert>
                             ) : (
                               <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                                <pre className={CODE_BLOCK_CLASS}>
-                                  {file.suggestedContent}
-                                </pre>
+                                <CodeBlock
+                                  filePath={file.path}
+                                  content={file.suggestedContent ?? ""}
+                                />
                               </ScrollArea>
                             )}
                           </TabsContent>
@@ -978,9 +1083,11 @@ function CodeView({
                               </Alert>
                             ) : (
                               <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                                <pre className={CODE_BLOCK_CLASS}>
-                                  {file.diff}
-                                </pre>
+                                <CodeBlock
+                                  filePath={file.path}
+                                  content={file.diff ?? ""}
+                                  isDiff
+                                />
                               </ScrollArea>
                             )}
                           </TabsContent>
@@ -994,9 +1101,10 @@ function CodeView({
                               Conteúdo atual
                             </h4>
                             <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                              <pre className={CODE_BLOCK_CLASS}>
-                                {file.originalContent}
-                              </pre>
+                              <CodeBlock
+                                filePath={file.path}
+                                content={file.originalContent ?? ""}
+                              />
                             </ScrollArea>
                           </div>
                         )}
@@ -1014,9 +1122,10 @@ function CodeView({
                                   Código sugerido
                                 </h4>
                                 <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                                  <pre className={CODE_BLOCK_CLASS}>
-                                    {file.suggestedContent}
-                                  </pre>
+                                  <CodeBlock
+                                    filePath={file.path}
+                                    content={file.suggestedContent ?? ""}
+                                  />
                                 </ScrollArea>
                               </>
                             )}
@@ -1038,9 +1147,11 @@ function CodeView({
                               </Alert>
                             ) : (
                               <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                                <pre className={CODE_BLOCK_CLASS}>
-                                  {file.diff}
-                                </pre>
+                                <CodeBlock
+                                  filePath={file.path}
+                                  content={file.diff ?? ""}
+                                  isDiff
+                                />
                               </ScrollArea>
                             )}
                           </div>

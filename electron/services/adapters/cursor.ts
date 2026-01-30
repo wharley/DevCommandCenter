@@ -23,6 +23,8 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
+/** Número de linhas do NDJSON a incluir em erro para diagnóstico (truncamento vs formato). */
+const NDJSON_DIAGNOSTIC_LINES = 30;
 
 const DEFAULT_CLI_NAME = "agent";
 
@@ -151,12 +153,26 @@ export class CursorAdapter extends BaseAdapter {
         } catch {
           // ignore
         }
+        // Fallback NDJSON: resposta multi-linha (extractPayload devolveu stdout inteiro)
+        if ((!plan || !Array.isArray(plan.steps)) && response.includes("\n")) {
+          const ndjsonPayload = this.tryExtractPayloadFromNDJSON(response);
+          if (ndjsonPayload) plan = this.parseJSONResponse<MissionPlan>(ndjsonPayload) ?? plan ?? null;
+        }
       }
 
       if (!plan || !Array.isArray(plan.steps)) {
+        const lines = response.trim().split(/\r?\n/).filter((l) => l.length > 0);
+        const looksNdjson = lines.length > 1;
+        const lastLineLooksResult = lines.length > 0 && lines[lines.length - 1]!.includes('"type"') && lines[lines.length - 1]!.includes('"result"');
+        const truncationHint = looksNdjson && lastLineLooksResult
+          ? " Cursor CLI result line may be truncated (incomplete JSON)."
+          : "";
+        const diagnosticHint = looksNdjson
+          ? ` For diagnosis, save the last ${NDJSON_DIAGNOSTIC_LINES} lines of the CLI output to a file.`
+          : "";
         return {
           success: false,
-          error: "Failed to parse plan from Cursor response",
+          error: `Failed to parse plan from Cursor response.${truncationHint}${diagnosticHint}`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,
@@ -247,6 +263,11 @@ export class CursorAdapter extends BaseAdapter {
         } catch {
           // ignore
         }
+        // Fallback NDJSON: resposta multi-linha (extractPayload devolveu stdout inteiro)
+        if (!code && response.includes("\n")) {
+          const ndjsonPayload = this.tryExtractPayloadFromNDJSON(response);
+          if (ndjsonPayload) code = this.parseJSONResponse<GeneratedCode>(ndjsonPayload);
+        }
       }
 
       // Normalize wrapper: CLI may return { result: GeneratedCode } or { output: GeneratedCode }
@@ -273,10 +294,19 @@ export class CursorAdapter extends BaseAdapter {
       }
 
       if (!code || !Array.isArray(code.files)) {
+        const lines = response.trim().split(/\r?\n/).filter((l) => l.length > 0);
+        const looksNdjson = lines.length > 1;
+        const lastLineLooksResult = lines.length > 0 && lines[lines.length - 1]!.includes('"type"') && lines[lines.length - 1]!.includes('"result"');
+        const truncationHint = looksNdjson && lastLineLooksResult
+          ? " Cursor CLI result line may be truncated (incomplete JSON)."
+          : "";
+        const diagnosticHint = looksNdjson
+          ? ` For diagnosis, save the last ${NDJSON_DIAGNOSTIC_LINES} lines of the CLI output to a file.`
+          : "";
         const snippet = response.slice(0, 600).trim();
         return {
           success: false,
-          error: `Failed to parse code from Cursor response. Raw response snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
+          error: `Failed to parse code from Cursor response.${truncationHint}${diagnosticHint} Raw response snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,
@@ -311,10 +341,25 @@ export class CursorAdapter extends BaseAdapter {
 
   /**
    * Extrai o payload útil da stdout do Cursor CLI.
+   *
    * Documentação: https://docs.cursor.com/cli/reference/output-format
-   * - Com --output-format json o CLI pode retornar um único objeto: { type, subtype, result, ... }.
-   * - result pode ser string (JSON do modelo) ou objeto (GeneratedCode/MissionPlan).
-   * - Em alguns casos o CLI emite NDJSON (uma linha por evento); a última linha com type:"result" contém o resultado.
+   *
+   * O CLI pode emitir NDJSON (um JSON por linha). A linha final costuma ser:
+   *   {"type":"result","subtype":"success", ... "result":"{...}"}
+   * O campo `result` não é um objeto: é uma string que contém JSON escapado (\"summary\", \\n, etc).
+   *
+   * Fluxo correto (duplo parse):
+   * 1. Ler stdout linha por linha (NDJSON) ou como único JSON.
+   * 2. JSON.parse(linha) ou JSON.parse(stdout).
+   * 3. Quando type === "result", pegar obj.result (ou obj.output).
+   * 4. Se result for string: segundo parse — JSON.parse(obj.result) — para obter o objeto interno.
+   *
+   * Com --output-format json o CLI pode retornar um único objeto ou NDJSON; esta função
+   * aplica o duplo parse quando result é string e devolve o JSON interno normalizado (string)
+   * para o caller fazer parseJSONResponse uma vez.
+   *
+   * Em caso de falha de parse no app, para diagnóstico: salvar as últimas NDJSON_DIAGNOSTIC_LINES
+   * linhas do stdout (ex.: tail -n 30 out.ndjson) e o comando exato (incl. --output-format json).
    */
   private extractPayloadFromCursorStdout(stdout: string): string {
     const trimmed = stdout.trim();
@@ -328,7 +373,15 @@ export class CursorAdapter extends BaseAdapter {
         output?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
       };
       const raw = wrapper?.result ?? wrapper?.output;
-      if (typeof raw === "string") return raw;
+      if (typeof raw === "string") {
+        // Duplo parse: result é string com JSON escapado → segundo parse aqui e devolver normalizado
+        try {
+          const inner = JSON.parse(raw) as unknown;
+          return JSON.stringify(inner);
+        } catch {
+          return raw;
+        }
+      }
       if (
         raw &&
         typeof raw === "object" &&
@@ -358,7 +411,15 @@ export class CursorAdapter extends BaseAdapter {
         };
         if (wrapper?.type !== "result") continue;
         const raw = wrapper?.result ?? wrapper?.output;
-        if (typeof raw === "string") return raw;
+        if (typeof raw === "string") {
+          // Duplo parse: result é string com JSON escapado → segundo parse aqui e devolver normalizado
+          try {
+            const inner = JSON.parse(raw) as unknown;
+            return JSON.stringify(inner);
+          } catch {
+            return raw;
+          }
+        }
         if (
           raw &&
           typeof raw === "object" &&
@@ -382,6 +443,92 @@ export class CursorAdapter extends BaseAdapter {
   }
 
   /**
+   * Tenta reparar uma linha NDJSON truncada (ex.: última linha cortada) fechando chaves/aspas.
+   * Se conseguir parsear e tiver type==="result", devolve o payload interno normalizado.
+   */
+  private tryRepairTruncatedResultLine(line: string): string | null {
+    const suffixes = ['"}}', '"}]}}', "}}", "}]}", "}]}]}"];
+    for (const suffix of suffixes) {
+      try {
+        const repaired = line.trimEnd() + suffix;
+        const wrapper = JSON.parse(repaired) as {
+          type?: string;
+          result?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+          output?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+        };
+        if (wrapper?.type !== "result") continue;
+        const raw = wrapper?.result ?? wrapper?.output;
+        if (typeof raw === "string") {
+          try {
+            const inner = JSON.parse(raw) as unknown;
+            return JSON.stringify(inner);
+          } catch {
+            return raw;
+          }
+        }
+        if (
+          raw &&
+          typeof raw === "object" &&
+          (Array.isArray((raw as { files?: unknown[] }).files) ||
+            Array.isArray((raw as { steps?: unknown[] }).steps))
+        ) {
+          return JSON.stringify(raw);
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Tenta extrair o payload interno de uma resposta multi-linha (NDJSON) quando
+   * extractPayloadFromCursorStdout devolveu o stdout inteiro (ex.: última linha truncada).
+   * Itera as linhas, faz primeiro parse por linha; na linha com type==="result" pega result/output;
+   * se for string, faz segundo parse (duplo parse) e devolve o JSON interno normalizado.
+   */
+  private tryExtractPayloadFromNDJSON(response: string): string | null {
+    const trimmed = response.trim();
+    const lines = trimmed.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (lines.length < 2) return null;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const wrapper = JSON.parse(lines[i]!) as {
+          type?: string;
+          result?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+          output?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+        };
+        if (wrapper?.type !== "result") continue;
+        const raw = wrapper?.result ?? wrapper?.output;
+        if (typeof raw === "string") {
+          try {
+            const inner = JSON.parse(raw) as unknown;
+            return JSON.stringify(inner);
+          } catch {
+            return raw;
+          }
+        }
+        if (
+          raw &&
+          typeof raw === "object" &&
+          (Array.isArray((raw as { files?: unknown[] }).files) ||
+            Array.isArray((raw as { steps?: unknown[] }).steps))
+        ) {
+          return JSON.stringify(raw);
+        }
+      } catch {
+        // Última linha pode estar truncada; tentar reparar
+        if (i === lines.length - 1 && lines[i]!.includes('"type"') && lines[i]!.includes('"result"')) {
+          const repaired = this.tryRepairTruncatedResultLine(lines[i]!);
+          if (repaired) return repaired;
+        }
+        continue;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Executa o comando Cursor Agent CLI (agent chat "<prompt>")
    * Documentação: https://cursor.com/docs/cli
    */
@@ -401,7 +548,9 @@ export class CursorAdapter extends BaseAdapter {
       const model = this.provider.config?.model as string | undefined;
       const modelArgs =
         model && model !== "" && model !== "auto" ? ["--model", model] : [];
-      // agent [--model <model>] [--output-format json] chat "<prompt>" — JSON para parse do plano/código (como Claude)
+      // agent [--model <model>] [--output-format json] chat "<prompt>" — JSON para parse do plano/código.
+      // Se a doc do Cursor indicar que NDJSON vem com --output-format stream-json, usar stream-json aqui
+      // e manter a mesma lógica (NDJSON + duplo parse na linha type=result).
       const args = [
         ...modelArgs,
         "--output-format",
