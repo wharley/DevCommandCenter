@@ -7,12 +7,14 @@ export { ClaudeCodeAdapter, createClaudeCodeAdapter } from "./claude-code";
 export { CodexAdapter, createCodexAdapter } from "./codex";
 export { OpenAIAdapter, createOpenAIAdapter } from "./openai";
 export { AnthropicAdapter, createAnthropicAdapter } from "./anthropic";
+export { CursorAdapter, createCursorAdapter } from "./cursor";
 
 import type { AIProviderAdapter, Provider } from "../types";
 import { ClaudeCodeAdapter } from "./claude-code";
 import { CodexAdapter } from "./codex";
 import { OpenAIAdapter } from "./openai";
 import { AnthropicAdapter } from "./anthropic";
+import { CursorAdapter } from "./cursor";
 
 /**
  * Factory para criar o adapter correto baseado no tipo do provider
@@ -27,14 +29,19 @@ export function createAdapter(provider: Provider): AIProviderAdapter {
       return new OpenAIAdapter(provider);
     case "anthropic":
       return new AnthropicAdapter(provider);
+    case "cursor":
+      return new CursorAdapter(provider);
     case "custom":
       // Para custom, tenta detectar o melhor adapter baseado na config
       if (provider.cliPath) {
         // Se tem CLI path, assume que é um CLI
         if (provider.cliPath.includes("claude")) {
           return new ClaudeCodeAdapter(provider);
-        } else if (provider.cliPath.includes("codex")) {
+        } else         if (provider.cliPath.includes("codex")) {
           return new CodexAdapter(provider);
+        }
+        if (provider.cliPath.includes("agent") || provider.cliPath.includes("cursor")) {
+          return new CursorAdapter(provider);
         }
       }
       if (provider.apiKey) {
@@ -78,6 +85,12 @@ export const adapterRegistry = {
     description: "Direct integration with Anthropic API (Claude)",
     requiresCli: false,
     requiresApiKey: true,
+  },
+  "cursor": {
+    name: "Cursor Agent CLI",
+    description: "Uses Cursor Agent CLI (agent) installed locally. Login is done in the terminal.",
+    requiresCli: true,
+    requiresApiKey: false,
   },
   "custom": {
     name: "Custom Provider",

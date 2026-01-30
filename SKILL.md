@@ -4,7 +4,7 @@
 
 ## Visão Geral
 
-O Dev Command Center é um aplicativo desktop cross-platform (macOS, Windows, Linux) desenvolvido em **Electron + Vite + React + TypeScript** que funciona como um "hub" para vários coding agents (Claude Code, Codex, OpenAI, Anthropic, etc.). O app não hospeda modelo próprio, apenas orquestra CLIs/APIs e oferece uma UX de alto nível.
+O Dev Command Center é um aplicativo desktop cross-platform (macOS, Windows, Linux) desenvolvido em **Electron + Vite + React + TypeScript** que funciona como um "hub" para vários coding agents (Claude Code, Codex, OpenAI, Anthropic, Cursor Agent CLI, etc.). O app não hospeda modelo próprio, apenas orquestra CLIs/APIs e oferece uma UX de alto nível.
 
 ### Proposta de Valor
 
@@ -69,7 +69,7 @@ Esta seção é **apenas uma hipótese** para validar depois do MVP. A ideia é 
 | ------------------ | -------------------- | -------- |
 | Desktop Runtime    | Electron             | ^33.0.0  |
 | Build Tool         | Vite                 | ^6.0.0   |
-| Frontend Framework | React + React Router | 19.2.0   |
+| Frontend Framework | React + React Router | React 19.2.0 / Router 7.x |
 | Linguagem          | TypeScript           | ^5       |
 | Database           | better-sqlite3       | ^11.8.0  |
 | State Management   | Zustand              | 5.0.10   |
@@ -116,6 +116,7 @@ DevCommandCenter/
 │   ├── dialogs/
 │   │   ├── add-project-dialog.tsx
 │   │   ├── add-provider-dialog.tsx
+│   │   ├── commit-dialog.tsx
 │   │   ├── edit-provider-dialog.tsx
 │   │   └── new-mission-dialog.tsx
 │   ├── layouts/
@@ -142,6 +143,7 @@ DevCommandCenter/
 │           ├── codex.ts          # OpenAI Codex CLI
 │           ├── openai.ts         # OpenAI API direta
 │           ├── anthropic.ts      # Anthropic API direta
+│           ├── cursor.ts         # Cursor Agent CLI
 │           └── index.ts          # Factory e registry
 │
 ├── hooks/
@@ -154,6 +156,7 @@ DevCommandCenter/
 │   ├── database/
 │   │   ├── connection.ts         # Conexão SQLite
 │   │   ├── index.ts              # Exports do database
+│   │   ├── normalize.ts          # Normalização de dados
 │   │   ├── schema.sql            # Schema DDL
 │   │   ├── types.ts              # Tipos TypeScript
 │   │   └── repositories/
@@ -190,7 +193,7 @@ DevCommandCenter/
 │                      UI Layer (React)                        │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │   Pages     │  │  Dialogs    │  │    Components       │  │
-│  │ (Next.js)   │  │  (Radix)    │  │   (shadcn/ui)       │  │
+│  │ (React Router) │  │  (Radix)    │  │   (shadcn/ui)       │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 ├─────────────────────────────────────────────────────────────┤
 │                    State Layer (Zustand)                     │
@@ -237,7 +240,7 @@ User Action → React Component → useAppStore (Zustand)
 CREATE TABLE providers (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('claude-code', 'openai', 'anthropic', 'custom')),
+  type TEXT NOT NULL CHECK (type IN ('claude-code', 'codex', 'openai', 'anthropic', 'cursor', 'custom')),
   api_key TEXT,
   cli_path TEXT,
   config TEXT,           -- JSON
@@ -504,6 +507,8 @@ db: {
 }
 ```
 
+A API completa (incluindo `electronAPI.ai` — generatePlan, generateCode, applyChanges, testConnection, validateProvider — e `electronAPI.git` — getInfo, getStatus, getCurrentBranch, listFiles, commit, push, etc. — além de métodos extras de `db` como findByType, findByPath, search, getStats, logWarning, logDebug) está definida em [electron/preload.ts](electron/preload.ts).
+
 ---
 
 ## Serviço de IA
@@ -693,18 +698,21 @@ ANTHROPIC_API_KEY=sk-ant-...
 CLAUDE_CLI_PATH=/usr/local/bin/claude
 ```
 
+### Autenticação de providers CLI
+
+Para **Cursor CLI**, **Claude Code CLI** e **Codex CLI**, o login é feito **no terminal**, não dentro do app. O usuário deve abrir o terminal e rodar o comando de autenticação do respectivo CLI (ex.: `claude login`, ou o equivalente do Cursor/Codex) quando necessário; o Dev Command Center apenas invoca o binário já autenticado. O app não gerencia credenciais dos CLIs — se precisar logar no CLI, faça-o no terminal.
+
 ### Scripts NPM
 
 ```bash
 # Desenvolvimento
-yarn dev                # Next.js dev server (http://localhost:3000)
-yarn electron:dev       # Electron + Next.js em paralelo
+yarn dev                # Vite dev server (http://localhost:5173)
+yarn electron:dev       # Electron + Vite em paralelo (wait-on porta 5173)
 
 # Build
-yarn build              # Build Next.js (web)
-yarn build:electron     # Build Next.js standalone (para Electron)
-yarn electron:compile   # Compila TypeScript do Electron
-yarn electron:build     # Build completo (Next.js + Electron)
+yarn build              # Vite build (saída em dist/)
+yarn electron:compile   # Compila electron/*.ts para .electron/ e copia schema.sql
+yarn electron:build     # electron:compile + vite build + electron-builder
 yarn electron:rebuild   # Recompila módulos nativos (better-sqlite3)
 
 # Produção
@@ -713,11 +721,11 @@ yarn electron:start     # Roda app compilado localmente
 
 ### Processo de Build
 
-1. `yarn electron:compile` → Compila `electron/*.ts` para `.electron/`
-2. `yarn build:electron` → Build Next.js standalone para `.next/standalone/`
-3. `electron-builder` → Empacota para cada plataforma com servidor Next.js embutido
+1. `yarn electron:compile` → Compila `electron/*.ts` para `.electron/` e copia `lib/database/schema.sql` para `.electron/lib/database/`
+2. `yarn build` (Vite) → Gera saída em `dist/`
+3. `electron-builder` → Empacota para cada plataforma usando `dist/` e main em `.electron/electron/main.js`
 
-**Nota:** O Electron 40 usa Node.js 24.x internamente. Certifique-se de usar Node.js >=22 no desenvolvimento.
+**Nota:** Electron 33 usa Node.js 22+. Certifique-se de usar Node.js >=22 no desenvolvimento.
 
 ---
 
@@ -735,10 +743,17 @@ export type ProviderType =
   | "custom";
 
 // 2. Atualizar schema.sql (CHECK constraint)
-// 3. Criar adapter em lib/services/adapters/gemini-adapter.ts
-// 4. Registrar no providerRegistry
+// 3. Criar adapter em electron/services/adapters/ (ex.: gemini-adapter.ts)
+// 4. Registrar no createAdapter e adapterRegistry em electron/services/adapters/index.ts
 // 5. Adicionar UI em components/dialogs/add-provider-dialog.tsx
 ```
+
+#### Cursor Agent CLI (tipo `cursor`)
+
+- **Necessidades:** CLI `agent` (needsCli: true, needsApiKey: false no app; autenticação é feita no terminal via Cursor instalado).
+- **Instalação do CLI:** `curl https://cursor.com/install -fsSL | bash` (ver cursor.com/docs/cli).
+- **Exemplo de uso no terminal:** `agent chat "descrição da missão"` (ou equivalente conforme documentação oficial).
+- O adapter em `electron/services/adapters/cursor.ts` invoca o binário `agent` (ou caminho configurável em `cliPath`) com a descrição da missão/contexto e parseia a resposta.
 
 ### 2. Implementar Diff Real
 
@@ -880,12 +895,13 @@ npx @electron/rebuild -f -w better-sqlite3
 // Verificar se canal está exposto em preload.ts
 ```
 
-**3. Next.js não carrega no Electron**
+**3. Vite não carrega no Electron**
 
 ```bash
-# Verificar se dev server está rodando
-curl http://localhost:3000
+# Verificar se dev server está rodando (porta 5173)
+curl http://localhost:5173
 # Verificar console do Electron (DevTools)
+# Em produção, verificar se dist/ foi gerado e se o main aponta para .electron/electron/main.js
 ```
 
 **4. Build falha no Windows**
@@ -900,11 +916,34 @@ npm install --global windows-build-tools
 ## Referências
 
 - [Electron Documentation](https://www.electronjs.org/docs)
-- [Next.js App Router](https://nextjs.org/docs/app)
+- [Vite](https://vitejs.dev/)
+- [React Router](https://reactrouter.com/)
 - [better-sqlite3](https://github.com/WiseLibs/better-sqlite3)
 - [Zustand](https://github.com/pmndrs/zustand)
 - [shadcn/ui](https://ui.shadcn.com/)
 - [Radix UI](https://www.radix-ui.com/)
+
+---
+
+## Checklist: Feito vs Pendente
+
+### Feito (condizente com o código hoje)
+
+- **Stack:** Electron 33, Vite 6, React 19, React Router 7, TypeScript 5, better-sqlite3, Zustand, Node 22+.
+- **Build:** Vite (`dist/`), electron:compile → `.electron/`, scripts documentados.
+- **Estrutura:** `src/`, `components/`, `electron/`, `hooks/`, `lib/`, rotas atuais.
+- **Providers com adapter real:** claude-code, codex, openai, anthropic, cursor (+ custom com fallback).
+- **DB:** schema SQLite (providers, projects, missions, mission_logs), repositórios, tipos TS.
+- **IPC:** electronAPI (dialog, shell, window, ai, git), db (providers, projects, missions, missionLogs, utils).
+- **Fluxo de missão:** estados, plano, código, apply, logs.
+- **UI:** Home, Project, Mission, Settings; dialogs (add/edit provider, add project, new mission, commit).
+- **Migração Next.js → Vite + React Router** concluída.
+
+### Pendente / a fazer
+
+- Schema: incluir `vscode` e `google` no CHECK de `providers.type` (se desejado) para alinhar com os tipos TypeScript.
+- Opcional: expandir lista completa de métodos na seção API IPC (referência a preload.ts já incluída).
+- Itens já listados em "Melhorias de UX Planejadas" e "Pontos de Extensão" que ainda não foram implementados.
 
 ---
 

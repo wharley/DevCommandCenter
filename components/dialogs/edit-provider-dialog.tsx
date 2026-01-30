@@ -75,6 +75,17 @@ const modelsByProviderType: Partial<
     { value: "claude-3-opus-20240229", label: "Claude 3 Opus" },
     { value: "claude-3-haiku-20240307", label: "Claude 3 Haiku" },
   ],
+  cursor: [
+    { value: "", label: "Padrão (auto)" },
+    { value: "gpt-5.2", label: "GPT-5.2" },
+    { value: "gpt-5.2-codex", label: "GPT-5.2 Codex" },
+    { value: "claude-4.5-opus", label: "Claude 4.5 Opus" },
+    { value: "claude-4.5-sonnet", label: "Claude 4.5 Sonnet" },
+    { value: "composer-1", label: "Composer 1" },
+    { value: "gemini-3-flash", label: "Gemini 3 Flash" },
+    { value: "gemini-3-pro", label: "Gemini 3 Pro" },
+    { value: "grok-code", label: "Grok Code" },
+  ],
 };
 
 export function EditProviderDialog({

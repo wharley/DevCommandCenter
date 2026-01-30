@@ -115,10 +115,53 @@ export function initDatabase(): Database.Database {
   // Executa o schema para criar/atualizar tabelas
   const schema = getSchema();
   db.exec(schema);
-  
+
+  // Migração: atualizar CHECK de providers se o banco foi criado com schema antigo (sem codex/cursor)
+  migrateProvidersTypeCheck(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
-  
+
   return db;
+}
+
+/**
+ * Migração única: recria a tabela providers com CHECK que inclui 'codex' e 'cursor'.
+ * Necessário porque SQLite não permite ALTER TABLE para mudar CHECK em tabelas existentes.
+ */
+function migrateProvidersTypeCheck(database: Database.Database): void {
+  const row = database
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'providers'",
+    )
+    .get() as { sql: string } | undefined;
+  if (!row?.sql || row.sql.includes("'cursor'")) {
+    return; // já tem o novo CHECK ou tabela não existe
+  }
+
+  database.pragma('foreign_keys = OFF');
+  database.exec(`
+    CREATE TABLE providers_new (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('claude-code', 'codex', 'openai', 'anthropic', 'cursor', 'custom')),
+      api_key TEXT,
+      cli_path TEXT,
+      config TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    INSERT INTO providers_new SELECT * FROM providers;
+    DROP TABLE providers;
+    ALTER TABLE providers_new RENAME TO providers;
+    CREATE TRIGGER update_providers_timestamp
+    AFTER UPDATE ON providers
+    BEGIN
+      UPDATE providers SET updated_at = datetime('now') WHERE id = NEW.id;
+    END;
+  `);
+  database.pragma('foreign_keys = ON');
+  console.log('[Database] Migration: providers type CHECK updated (codex, cursor added).');
 }
 
 /**

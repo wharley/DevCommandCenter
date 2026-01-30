@@ -67,9 +67,9 @@ const providerTypeConfig: Record<
     description: "Modelos Gemini via API",
   },
   cursor: {
-    label: "Cursor",
+    label: "Cursor CLI",
     icon: Terminal,
-    description: "Integração Cursor AI",
+    description: "Cursor Agent CLI (terminal) — não é o editor Cursor",
   },
   vscode: {
     label: "VS Code",

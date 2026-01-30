@@ -28,6 +28,7 @@ import type { ProviderType } from "@/lib/database/types";
 const providerTypeToCliCommand: Partial<Record<ProviderType, string>> = {
   "claude-code": "claude",
   codex: "codex",
+  cursor: "agent",
 };
 
 interface AddProviderDialogProps {
@@ -59,6 +60,12 @@ const providerTypes: {
     label: "Anthropic API",
     needsApiKey: true,
     needsCli: false,
+  },
+  {
+    value: "cursor",
+    label: "Cursor CLI",
+    needsApiKey: false,
+    needsCli: true,
   },
   {
     value: "custom",
@@ -96,6 +103,17 @@ const modelsByProviderType: Partial<
     { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
     { value: "claude-3-opus-20240229", label: "Claude 3 Opus" },
     { value: "claude-3-haiku-20240307", label: "Claude 3 Haiku" },
+  ],
+  cursor: [
+    { value: "", label: "Padrão (auto)" },
+    { value: "gpt-5.2", label: "GPT-5.2" },
+    { value: "gpt-5.2-codex", label: "GPT-5.2 Codex" },
+    { value: "claude-4.5-opus", label: "Claude 4.5 Opus" },
+    { value: "claude-4.5-sonnet", label: "Claude 4.5 Sonnet" },
+    { value: "composer-1", label: "Composer 1" },
+    { value: "gemini-3-flash", label: "Gemini 3 Flash" },
+    { value: "gemini-3-pro", label: "Gemini 3 Pro" },
+    { value: "grok-code", label: "Grok Code" },
   ],
 };
 
@@ -177,6 +195,8 @@ export function AddProviderDialog({
         return "gpt-4.1";
       case "anthropic":
         return "claude-sonnet-4-5-20250929";
+      case "cursor":
+        return "";
       default:
         return "";
     }
@@ -309,7 +329,9 @@ export function AddProviderDialog({
                   placeholder={
                     formData.type === "codex"
                       ? "/usr/local/bin/codex"
-                      : "/usr/local/bin/claude"
+                      : formData.type === "cursor"
+                        ? "agent"
+                        : "/usr/local/bin/claude"
                   }
                   value={formData.cliPath}
                   onChange={(e) =>
