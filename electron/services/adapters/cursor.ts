@@ -130,12 +130,13 @@ export class CursorAdapter extends BaseAdapter {
       const prompt = this.buildPlanPrompt(config);
 
       onProgress?.("Conectando ao Cursor Agent CLI...");
-      const response = await this.executeAgentCommand(
+      let response = await this.executeAgentCommand(
         "chat",
         prompt,
         config.projectContext.projectPath,
         onProgress,
       );
+      response = this.unwrapCursorCliResponse(response);
 
       onProgress?.("Processando resposta...");
       let plan = this.parseJSONResponse<MissionPlan>(response);
@@ -231,12 +232,13 @@ export class CursorAdapter extends BaseAdapter {
       const prompt = this.buildCodePrompt(config);
 
       onProgress?.("Conectando ao Cursor Agent CLI...");
-      const response = await this.executeAgentCommand(
+      let response = await this.executeAgentCommand(
         "chat",
         prompt,
         config.projectContext.projectPath,
         onProgress,
       );
+      response = this.unwrapCursorCliResponse(response);
 
       onProgress?.("Processando resposta...");
       let code = this.parseJSONResponse<GeneratedCode>(response);
@@ -288,6 +290,26 @@ export class CursorAdapter extends BaseAdapter {
         const raw = (code as { result?: unknown; output?: unknown }).result ?? (code as { result?: unknown; output?: unknown }).output;
         if (typeof raw === "string") {
           code = this.parseJSONResponse<GeneratedCode>(raw) ?? code;
+          if (!code || !Array.isArray(code.files)) {
+            const parsedWithFixes = this.tryParseWithFixes(raw);
+            if (parsedWithFixes && typeof parsedWithFixes === "object" && Array.isArray((parsedWithFixes as GeneratedCode).files)) {
+              code = parsedWithFixes as GeneratedCode;
+            }
+          }
+          if (!code || !Array.isArray(code.files)) {
+            const extracted = this.extractTopLevelJsonProtected(raw);
+            if (extracted) {
+              const parsed = this.parseJSONResponse<GeneratedCode>(extracted) ?? this.tryParseWithFixes(extracted) as GeneratedCode | null;
+              if (parsed && Array.isArray(parsed?.files)) code = parsed;
+            }
+          }
+          if ((!code || !Array.isArray(code.files)) && raw.includes("\n")) {
+            const ndjsonPayload = this.tryExtractPayloadFromNDJSON(raw);
+            if (ndjsonPayload) {
+              const parsed = this.parseJSONResponse<GeneratedCode>(ndjsonPayload);
+              if (parsed?.files) code = parsed;
+            }
+          }
         } else if (raw && typeof raw === "object" && Array.isArray((raw as GeneratedCode).files)) {
           code = raw as GeneratedCode;
         }
@@ -340,6 +362,51 @@ export class CursorAdapter extends BaseAdapter {
   }
 
   /**
+   * Desembrulha a resposta do Cursor CLI quando vem no formato wrapper (type/result).
+   * Se o response for o wrapper completo, extrai o payload interno (result/output) e retorna
+   * como string JSON normalizada. Caso contrário retorna o response inalterado.
+   */
+  private unwrapCursorCliResponse(response: string): string {
+    const trimmed = response.trim();
+    if (!trimmed) return response;
+
+    try {
+      const wrapper = JSON.parse(trimmed) as {
+        type?: string;
+        result?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+        output?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+      };
+      if (wrapper?.type !== "result") return response;
+
+      const raw = wrapper?.result ?? wrapper?.output;
+      if (typeof raw === "string") {
+        const inner = this.tryParseWithFixes(raw);
+        if (inner != null && typeof inner === "object") {
+          return JSON.stringify(inner);
+        }
+        return raw;
+      }
+      if (
+        raw &&
+        typeof raw === "object" &&
+        (Array.isArray((raw as { files?: unknown[] }).files) ||
+          Array.isArray((raw as { steps?: unknown[] }).steps))
+      ) {
+        return JSON.stringify(raw);
+      }
+    } catch {
+      // não é JSON único; tentar NDJSON (última linha com type=result)
+    }
+
+    if (trimmed.includes("\n")) {
+      const ndjsonPayload = this.tryExtractPayloadFromNDJSON(trimmed);
+      if (ndjsonPayload) return ndjsonPayload;
+    }
+
+    return response;
+  }
+
+  /**
    * Extrai o payload útil da stdout do Cursor CLI.
    *
    * Documentação: https://docs.cursor.com/cli/reference/output-format
@@ -379,6 +446,10 @@ export class CursorAdapter extends BaseAdapter {
           const inner = JSON.parse(raw) as unknown;
           return JSON.stringify(inner);
         } catch {
+          const innerWithFixes = this.tryParseWithFixes(raw);
+          if (innerWithFixes != null && typeof innerWithFixes === "object") {
+            return JSON.stringify(innerWithFixes);
+          }
           return raw;
         }
       }
@@ -417,6 +488,10 @@ export class CursorAdapter extends BaseAdapter {
             const inner = JSON.parse(raw) as unknown;
             return JSON.stringify(inner);
           } catch {
+            const innerWithFixes = this.tryParseWithFixes(raw);
+            if (innerWithFixes != null && typeof innerWithFixes === "object") {
+              return JSON.stringify(innerWithFixes);
+            }
             return raw;
           }
         }
@@ -463,6 +538,10 @@ export class CursorAdapter extends BaseAdapter {
             const inner = JSON.parse(raw) as unknown;
             return JSON.stringify(inner);
           } catch {
+            const innerWithFixes = this.tryParseWithFixes(raw);
+            if (innerWithFixes != null && typeof innerWithFixes === "object") {
+              return JSON.stringify(innerWithFixes);
+            }
             return raw;
           }
         }
@@ -505,6 +584,10 @@ export class CursorAdapter extends BaseAdapter {
             const inner = JSON.parse(raw) as unknown;
             return JSON.stringify(inner);
           } catch {
+            const innerWithFixes = this.tryParseWithFixes(raw);
+            if (innerWithFixes != null && typeof innerWithFixes === "object") {
+              return JSON.stringify(innerWithFixes);
+            }
             return raw;
           }
         }

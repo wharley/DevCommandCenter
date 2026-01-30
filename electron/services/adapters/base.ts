@@ -259,6 +259,67 @@ Important:
   }
 
   /**
+   * Tenta parsear JSON aplicando correções de newlines e aspas não escapadas (comum em LLM).
+   * Usado pelo Cursor adapter para parsear o inner payload dentro do wrapper do CLI.
+   */
+  protected tryParseWithFixes(json: string): unknown | null {
+    const trimmed = json.trim();
+    if (!trimmed) return null;
+
+    try {
+      return JSON.parse(trimmed) as unknown;
+    } catch {
+      // segue
+    }
+
+    try {
+      const fixed = this.fixUnescapedNewlinesInJsonStrings(trimmed);
+      return JSON.parse(fixed) as unknown;
+    } catch {
+      // segue
+    }
+
+    try {
+      const fixedNewlines = this.fixUnescapedNewlinesInJsonStrings(trimmed);
+      const fixedQuotes = this.fixUnescapedQuotesInJsonStrings(fixedNewlines);
+      return JSON.parse(fixedQuotes) as unknown;
+    } catch {
+      // segue
+    }
+
+    const byBrace = this.extractTopLevelJson(trimmed);
+    if (byBrace) {
+      try {
+        return JSON.parse(byBrace) as unknown;
+      } catch {
+        // segue
+      }
+      try {
+        return JSON.parse(this.fixUnescapedNewlinesInJsonStrings(byBrace)) as unknown;
+      } catch {
+        // segue
+      }
+      try {
+        const fixedBoth = this.fixUnescapedQuotesInJsonStrings(
+          this.fixUnescapedNewlinesInJsonStrings(byBrace),
+        );
+        return JSON.parse(fixedBoth) as unknown;
+      } catch {
+        // segue
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extrai o JSON de nível superior de uma string (para uso em fallbacks).
+   */
+  protected extractTopLevelJsonProtected(str: string): string | null {
+    return this.extractTopLevelJson(str);
+  }
+
+  /**
    * Tenta fazer parse de JSON de uma resposta que pode ter texto adicional
    */
   protected parseJSONResponse<T>(response: string): T | null {
