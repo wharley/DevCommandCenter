@@ -191,6 +191,20 @@ export class GitService {
   }
 
   /**
+   * Obtém o diff de um arquivo em relação ao HEAD (o que será commitado após git add -A)
+   */
+  async getFileDiffHead(filePath: string): Promise<string> {
+    try {
+      const { stdout } = await execAsync(`git diff HEAD -- "${filePath}"`, {
+        cwd: this.projectPath,
+      });
+      return stdout;
+    } catch {
+      return "";
+    }
+  }
+
+  /**
    * Lista arquivos do repositório (respeitando .gitignore)
    */
   async listTrackedFiles(maxFiles: number = 500): Promise<string[]> {
@@ -433,6 +447,33 @@ export class GitService {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Envia commits do branch atual para o remoto (origin)
+   */
+  async push(): Promise<{ success: boolean; error?: string }> {
+    try {
+      const branch = await this.getCurrentBranch();
+      if (!branch || branch === "unknown" || branch === "HEAD") {
+        return { success: false, error: "Branch atual não identificado." };
+      }
+      await execAsync(`git push origin ${branch}`, {
+        cwd: this.projectPath,
+      });
+      return { success: true };
+    } catch (err: unknown) {
+      let message = "Erro ao fazer push.";
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (err && typeof err === "object" && "stderr" in err) {
+        message = String((err as { stderr?: string }).stderr ?? "").trim();
+      }
+      return {
+        success: false,
+        error: message || "Erro ao fazer push.",
+      };
     }
   }
 }

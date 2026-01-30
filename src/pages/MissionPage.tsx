@@ -16,6 +16,7 @@ import {
   Sparkles,
   GitBranch,
   GitCommit,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -99,8 +100,12 @@ export default function MissionPage() {
   const [isApplying, setIsApplying] = useState(false);
   const [activeTab, setActiveTab] = useState("plan");
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const [commitDialogStatus, setCommitDialogStatus] = useState<
+    import("@/types/electron").GitStatus | null
+  >(null);
   const [currentBranch, setCurrentBranch] = useState<string | null>(null);
   const [isWorktree, setIsWorktree] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
 
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
@@ -177,6 +182,26 @@ export default function MissionPage() {
       cancelled = true;
     };
   }, [project?.path]);
+
+  // Status do repositório ao abrir o diálogo de commit
+  useEffect(() => {
+    if (!commitDialogOpen || !project?.path || !window.electronAPI?.git) {
+      if (!commitDialogOpen) setCommitDialogStatus(null);
+      return;
+    }
+    let cancelled = false;
+    window.electronAPI.git
+      .getStatus(project.path)
+      .then((s) => {
+        if (!cancelled) setCommitDialogStatus(s);
+      })
+      .catch(() => {
+        if (!cancelled) setCommitDialogStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [commitDialogOpen, project?.path]);
 
   const isLoading =
     (projectId && projectsLoading) || (missionId && missionsLoading);
@@ -387,6 +412,31 @@ export default function MissionPage() {
     }
   };
 
+  const handlePush = async () => {
+    if (
+      !project?.path ||
+      typeof window === "undefined" ||
+      !window.electronAPI?.git?.push
+    ) {
+      toast.error("Push indisponível");
+      return;
+    }
+    setIsPushing(true);
+    try {
+      const result = await window.electronAPI.git.push(project.path);
+      if (result.success) {
+        toast.success("Push realizado");
+      } else {
+        toast.error(result.error ?? "Falha ao fazer push.");
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro desconhecido";
+      toast.error(`Falha ao fazer push: ${msg}`);
+    } finally {
+      setIsPushing(false);
+    }
+  };
+
   const completedSteps =
     mission.plan?.steps.filter((s) => s.status === "completed").length ?? 0;
   const totalSteps = mission.plan?.steps.length ?? 0;
@@ -486,13 +536,33 @@ export default function MissionPage() {
               </Button>
             )}
             {mission.status === "completed" && (
-              <Button
-                onClick={() => setCommitDialogOpen(true)}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <GitCommit className="mr-2 h-4 w-4" />
-                Commitar
-              </Button>
+              <div className="flex flex-col gap-1.5">
+                <p className="text-xs text-muted-foreground">
+                  Commitar grava localmente · Push envia ao remoto
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => setCommitDialogOpen(true)}
+                    variant="outline"
+                    className="border-primary/50 hover:bg-primary/10"
+                  >
+                    <GitCommit className="mr-2 h-4 w-4" />
+                    Commitar
+                  </Button>
+                  <Button
+                    onClick={handlePush}
+                    disabled={isPushing}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
+                    {isPushing ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="mr-2 h-4 w-4" />
+                    )}
+                    Enviar ao remoto
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -564,6 +634,8 @@ export default function MissionPage() {
         onOpenChange={setCommitDialogOpen}
         defaultMessage={`DevCommandCenter: ${mission.title}`}
         onCommit={handleCommit}
+        projectPath={project?.path ?? ""}
+        status={commitDialogStatus}
       />
     </div>
   );

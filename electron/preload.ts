@@ -55,6 +55,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   git: {
     getInfo: (projectPath: string) => invoke("git:getInfo", projectPath),
     getStatus: (projectPath: string) => invoke("git:getStatus", projectPath),
+    getFileDiffHead: (projectPath: string, filePath: string) =>
+      invoke("git:getFileDiffHead", projectPath, filePath),
     isRepo: (projectPath: string) => invoke("git:isRepo", projectPath),
     getCurrentBranch: (projectPath: string) =>
       invoke("git:getCurrentBranch", projectPath),
@@ -64,6 +66,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       invoke("git:getRecentCommits", projectPath, count),
     commit: (projectPath: string, message: string, files?: string[]) =>
       invoke("git:commit", projectPath, message, files),
+    push: (projectPath: string) => invoke("git:push", projectPath),
     getWorktreeInfo: (projectPath: string) =>
       invoke("git:getWorktreeInfo", projectPath),
   },

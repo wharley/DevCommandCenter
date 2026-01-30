@@ -18,7 +18,7 @@ import type {
   MissionPlan,
   GeneratedCode,
   CodeSuggestion,
-} from '@/lib/database/types';
+} from "@/lib/database/types";
 
 // ============================================
 // AI Service Types
@@ -79,10 +79,14 @@ declare global {
   interface Window {
     electronAPI?: {
       platform: NodeJS.Platform;
-      
+
       dialog: {
         selectDirectory: () => Promise<string | null>;
-        showMessage: (options: { type: string; title: string; message: string }) => Promise<number>;
+        showMessage: (options: {
+          type: string;
+          title: string;
+          message: string;
+        }) => Promise<number>;
         confirm: (message: string) => Promise<boolean>;
       };
 
@@ -106,9 +110,11 @@ declare global {
         generateCode: (missionId: string) => Promise<AIResponse<GeneratedCode>>;
         applyChanges: (
           missionId: string,
-          options?: { createBackup?: boolean; dryRun?: boolean }
+          options?: { createBackup?: boolean; dryRun?: boolean },
         ) => Promise<ApplyChangesResult>;
-        testConnection: (providerId: string) => Promise<{ success: boolean; message: string }>;
+        testConnection: (
+          providerId: string,
+        ) => Promise<{ success: boolean; message: string }>;
         validateProvider: (provider: Provider) => Promise<ValidationResult>;
         invalidateAdapter: (providerId: string) => Promise<boolean>;
       };
@@ -117,12 +123,31 @@ declare global {
       git: {
         getInfo: (projectPath: string) => Promise<GitInfo | null>;
         getStatus: (projectPath: string) => Promise<GitStatus>;
+        getFileDiffHead: (
+          projectPath: string,
+          filePath: string,
+        ) => Promise<string>;
         isRepo: (projectPath: string) => Promise<boolean>;
         getCurrentBranch: (projectPath: string) => Promise<string>;
-        listFiles: (projectPath: string, maxFiles?: number) => Promise<string[]>;
-        getRecentCommits: (projectPath: string, count?: number) => Promise<GitCommit[]>;
-        commit: (projectPath: string, message: string, files?: string[]) => Promise<boolean>;
-        getWorktreeInfo: (projectPath: string) => Promise<{ isWorktree: boolean; worktreeRoot?: string }>;
+        listFiles: (
+          projectPath: string,
+          maxFiles?: number,
+        ) => Promise<string[]>;
+        getRecentCommits: (
+          projectPath: string,
+          count?: number,
+        ) => Promise<GitCommit[]>;
+        commit: (
+          projectPath: string,
+          message: string,
+          files?: string[],
+        ) => Promise<boolean>;
+        push: (
+          projectPath: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        getWorktreeInfo: (
+          projectPath: string,
+        ) => Promise<{ isWorktree: boolean; worktreeRoot?: string }>;
       };
     };
 
@@ -133,10 +158,18 @@ declare global {
         findByType: (type: string) => Promise<Provider[]>;
         findActive: () => Promise<Provider[]>;
         create: (data: ProviderCreate) => Promise<Provider>;
-        update: (id: string, data: ProviderUpdate) => Promise<Provider | undefined>;
+        update: (
+          id: string,
+          data: ProviderUpdate,
+        ) => Promise<Provider | undefined>;
         delete: (id: string) => Promise<boolean>;
-        setActive: (id: string, isActive: boolean) => Promise<Provider | undefined>;
-        testConnection: (id: string) => Promise<{ success: boolean; message: string }>;
+        setActive: (
+          id: string,
+          isActive: boolean,
+        ) => Promise<Provider | undefined>;
+        testConnection: (
+          id: string,
+        ) => Promise<{ success: boolean; message: string }>;
       };
 
       projects: {
@@ -145,7 +178,10 @@ declare global {
         findByPath: (path: string) => Promise<Project | undefined>;
         search: (query: string) => Promise<Project[]>;
         create: (data: ProjectCreate) => Promise<Project>;
-        update: (id: string, data: ProjectUpdate) => Promise<Project | undefined>;
+        update: (
+          id: string,
+          data: ProjectUpdate,
+        ) => Promise<Project | undefined>;
         delete: (id: string) => Promise<boolean>;
         getStats: (id: string) => Promise<ProjectStats>;
         updateLastOpened: (id: string) => Promise<Project | undefined>;
@@ -159,13 +195,25 @@ declare global {
         findActive: () => Promise<Mission[]>;
         search: (query: string, projectId?: string) => Promise<Mission[]>;
         create: (data: MissionCreate) => Promise<Mission>;
-        update: (id: string, data: MissionUpdate) => Promise<Mission | undefined>;
+        update: (
+          id: string,
+          data: MissionUpdate,
+        ) => Promise<Mission | undefined>;
         delete: (id: string) => Promise<boolean>;
-        updateStatus: (id: string, status: MissionStatus) => Promise<Mission | undefined>;
+        updateStatus: (
+          id: string,
+          status: MissionStatus,
+        ) => Promise<Mission | undefined>;
         updatePlan: (id: string, plan: string) => Promise<Mission | undefined>;
-        updateGeneratedCode: (id: string, code: string) => Promise<Mission | undefined>;
+        updateGeneratedCode: (
+          id: string,
+          code: string,
+        ) => Promise<Mission | undefined>;
         start: (id: string) => Promise<Mission | undefined>;
-        complete: (id: string, summary?: string) => Promise<Mission | undefined>;
+        complete: (
+          id: string,
+          summary?: string,
+        ) => Promise<Mission | undefined>;
         fail: (id: string, error: string) => Promise<Mission | undefined>;
         cancel: (id: string) => Promise<Mission | undefined>;
         getFullMission: (id: string) => Promise<MissionWithDetails | undefined>;
@@ -174,17 +222,44 @@ declare global {
       missionLogs: {
         findAll: () => Promise<MissionLog[]>;
         findById: (id: string) => Promise<MissionLog | undefined>;
-        findByMission: (missionId: string, limit?: number, offset?: number) => Promise<MissionLog[]>;
-        findByLevel: (level: LogLevel, missionId?: string) => Promise<MissionLog[]>;
+        findByMission: (
+          missionId: string,
+          limit?: number,
+          offset?: number,
+        ) => Promise<MissionLog[]>;
+        findByLevel: (
+          level: LogLevel,
+          missionId?: string,
+        ) => Promise<MissionLog[]>;
         search: (query: string, missionId?: string) => Promise<MissionLog[]>;
         create: (data: MissionLogCreate) => Promise<MissionLog>;
         delete: (id: string) => Promise<boolean>;
         deleteByMission: (missionId: string) => Promise<number>;
-        logInfo: (missionId: string, message: string, metadata?: Record<string, unknown>) => Promise<MissionLog>;
-        logWarning: (missionId: string, message: string, metadata?: Record<string, unknown>) => Promise<MissionLog>;
-        logError: (missionId: string, message: string, metadata?: Record<string, unknown>) => Promise<MissionLog>;
-        logDebug: (missionId: string, message: string, metadata?: Record<string, unknown>) => Promise<MissionLog>;
-        logAgentAction: (missionId: string, action: string, details?: Record<string, unknown>) => Promise<MissionLog>;
+        logInfo: (
+          missionId: string,
+          message: string,
+          metadata?: Record<string, unknown>,
+        ) => Promise<MissionLog>;
+        logWarning: (
+          missionId: string,
+          message: string,
+          metadata?: Record<string, unknown>,
+        ) => Promise<MissionLog>;
+        logError: (
+          missionId: string,
+          message: string,
+          metadata?: Record<string, unknown>,
+        ) => Promise<MissionLog>;
+        logDebug: (
+          missionId: string,
+          message: string,
+          metadata?: Record<string, unknown>,
+        ) => Promise<MissionLog>;
+        logAgentAction: (
+          missionId: string,
+          action: string,
+          details?: Record<string, unknown>,
+        ) => Promise<MissionLog>;
         logUserInput: (missionId: string, input: string) => Promise<MissionLog>;
         getStats: (missionId: string) => Promise<MissionLogStats>;
         getLatest: (missionId: string, count?: number) => Promise<MissionLog[]>;

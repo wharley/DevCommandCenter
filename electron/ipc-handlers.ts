@@ -483,6 +483,15 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     return gitService.getStatus();
   });
 
+  // Get file diff vs HEAD (what will be committed after git add -A)
+  ipcMain.handle(
+    "git:getFileDiffHead",
+    async (_event, projectPath: string, filePath: string) => {
+      const gitService = new GitService(projectPath);
+      return gitService.getFileDiffHead(filePath);
+    },
+  );
+
   // Check if directory is a git repo
   ipcMain.handle("git:isRepo", async (_event, projectPath: string) => {
     const gitService = new GitService(projectPath);
@@ -538,6 +547,12 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
       return gitService.getWorktreeInfo();
     },
   );
+
+  // Push current branch to origin
+  ipcMain.handle("git:push", async (_event, projectPath: string) => {
+    const gitService = new GitService(projectPath);
+    return gitService.push();
+  });
 
   console.log("[IPC] All handlers registered");
 }
