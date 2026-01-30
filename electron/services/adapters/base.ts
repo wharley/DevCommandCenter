@@ -2,6 +2,10 @@
  * Base Adapter - Classe base abstrata para adapters de IA
  */
 
+import {
+  missionPlanSchema,
+  generatedCodeSchema,
+} from "../schemas";
 import type {
   AIProviderAdapter,
   ValidationResult,
@@ -467,5 +471,100 @@ Important:
    */
   protected generateStepId(index: number): string {
     return `step-${Date.now()}-${index}`;
+  }
+
+  /**
+   * Pipeline de normalização: extrai payload, parseia com fixes, valida com Zod.
+   * Aceita wrappers comuns: { result }, { output }, JSON string dentro de JSON.
+   * @param raw Resposta bruta (stdout do CLI ou resposta da API)
+   * @param schema Zod schema (missionPlanSchema ou generatedCodeSchema)
+   * @returns Objeto validado ou erro de schema formatado
+   */
+  protected normalizeAndValidate<T>(
+    raw: string,
+    schema: { safeParse: (v: unknown) => { success: boolean; data?: T; error?: { message?: string; issues?: unknown[] } } },
+  ): { success: true; data: T } | { success: false; error: string } {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return { success: false, error: "Empty response" };
+    }
+
+    let candidate: unknown = null;
+
+    // 1. Unwrap common wrappers { type, result } | { type, output }
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        type?: string;
+        result?: unknown;
+        output?: unknown;
+      };
+      const inner = parsed?.result ?? parsed?.output;
+      if (inner != null) {
+        if (typeof inner === "string") {
+          candidate = this.tryParseWithFixes(inner);
+        } else if (typeof inner === "object") {
+          candidate = inner;
+        }
+      }
+    } catch {
+      // não é wrapper JSON
+    }
+
+    // 2. Parse direto ou com fixes
+    if (candidate == null) {
+      candidate = this.parseJSONResponse<unknown>(trimmed) ?? this.tryParseWithFixes(trimmed);
+    }
+
+    if (candidate == null) {
+      return { success: false, error: "Could not parse JSON from response" };
+    }
+
+    // 3. Validação Zod
+    const result = schema.safeParse(candidate);
+    if (result.success) {
+      return { success: true, data: result.data as T };
+    }
+
+    const err = result.error;
+    const msg = err?.message ?? "Schema validation failed";
+    const issues = err?.issues ?? [];
+    const details =
+      issues.length > 0
+        ? ` (${issues
+            .slice(0, 3)
+            .map((i) => (typeof i === "object" && i && "message" in i ? (i as { message: string }).message : String(i)))
+            .join("; ")})`
+        : "";
+    return { success: false, error: `${msg}${details}` };
+  }
+
+  /**
+   * Normaliza e valida resposta como MissionPlan (com Zod).
+   * Garante que cada step tenha id (usa generateStepId quando ausente).
+   */
+  protected parseAndValidateMissionPlan(
+    raw: string,
+  ): { success: true; data: MissionPlan } | { success: false; error: string } {
+    const result = this.normalizeAndValidate(raw, missionPlanSchema);
+    if (!result.success) return result;
+    const plan = result.data as MissionPlan;
+    if (plan.steps) {
+      plan.steps = plan.steps.map((step, index) => ({
+        ...step,
+        id: step.id ?? this.generateStepId(index),
+      }));
+    }
+    return { success: true, data: plan };
+  }
+
+  /**
+   * Normaliza e valida resposta como GeneratedCode (com Zod).
+   */
+  protected parseAndValidateGeneratedCode(
+    raw: string,
+  ): { success: true; data: GeneratedCode } | { success: false; error: string } {
+    const result = this.normalizeAndValidate(raw, generatedCodeSchema);
+    if (!result.success) return result;
+    return { success: true, data: result.data as GeneratedCode };
   }
 }

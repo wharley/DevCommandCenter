@@ -1,25 +1,34 @@
-# Dev Command Center - MVP Skill Document
+# Dev Command Center - Alpha Skill Document (v0.3+)
 
-> **Multi-engine Command Center**: Hub unificado para orquestração de coding agents com BYOK (Bring Your Own Key)
+> **Patch & Git Execution UI**: missão → plano → diffs → apply → commit, com vários providers (BYOK). Não é plataforma genérica de agentes.
 
 ## Visão Geral
 
-O Dev Command Center é um aplicativo desktop cross-platform (macOS, Windows, Linux) desenvolvido em **Electron + Vite + React + TypeScript** que funciona como um "hub" para vários coding agents (Claude Code, Codex, OpenAI, Anthropic, Cursor Agent CLI, etc.). O app não hospeda modelo próprio, apenas orquestra CLIs/APIs e oferece uma UX de alto nível.
+O Dev Command Center é um aplicativo desktop cross-platform (macOS, Windows, Linux) desenvolvido em **Electron + Vite + React + TypeScript**. O produto é um **fluxo de execução de patches e Git**: o usuário descreve uma missão em linguagem natural, revisa plano e diffs gerados por IA e aplica as mudanças no repositório com controle (dry-run, backup, commit). O app não hospeda modelo próprio; suporta vários provedores (Claude Code, Codex, OpenAI, Anthropic, Cursor Agent CLI, etc.) via CLIs/APIs, todos entrando no mesmo funil **Plan + Unified Diff + Apply + Git**.
 
 ### Proposta de Valor
 
-- **Painel único** para conectar diferentes provedores de IA de código
-- **Missões de código** estruturadas em linguagem natural
-- **Planos de ação** gerados por IA com passos claros
+- **Um fluxo único** para missões de código: plano → alterações → review de diffs → apply → commit
+- **Multi-provider** (CLI e API) com BYOK — usuário traz suas próprias chaves
 - **Preview de diffs** antes de aplicar mudanças
-- **Worktrees Git** para tarefas paralelas sem trocar branch
-- **BYOK** - usuário traz suas próprias chaves de API
+- **Worktrees Git** (policy definida, implementação pendente) para tarefas paralelas sem trocar branch
+- **Aplicação controlada** e transparência (logs, métricas)
+
+### Guardrails de Produto
+
+Manifesto técnico — princípios que impedem o produto de ir para o lado errado:
+
+- ✅ **Não somos agent platform** — Patch & Git Execution UI, não orquestrador genérico
+- ✅ **Diff-first apply** — `git apply` preferido; escrita de arquivo só como fallback
+- ✅ **Segurança BYOK** — API keys criptografadas (safeStorage em Alpha; keytar em Beta)
+- ✅ **Policy de worktree** — nome padrão, limpeza, lock; regras em [WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md)
+- ✅ **Sem ações Git sem confirmação do usuário** — apply, commit, push só após ação explícita na UI
 
 ---
 
 ## Posicionamento e Referências
 
-O Dev Command Center se inspira no fluxo moderno de agentes de código (ex.: Commander), mas **não copia** a interface ou o produto. A meta é entregar uma experiência **local-first** e extensível, com foco em produtividade e transparência no fluxo de trabalho.
+O Dev Command Center toma como **referência** o fluxo de ferramentas como Commander (missão → plano → código → apply) e o ecossistema de agentes de código, mas **não é clone** de Commander nem de orquestradores genéricos (ex.: Compozy). A meta é ser um **Commander melhorado**: mesma ideia de fluxo estruturado (Plan + Diff + Apply + Git), com multi-provider real, worktrees e UX local-first, sem virar “plataforma de agentes” com formatos de saída abertos ou triagem infinita. O produto é **Patch & Git Execution UI**, não agent platform.
 
 ### Fluxo principal (norte do produto)
 
@@ -35,6 +44,19 @@ O Dev Command Center se inspira no fluxo moderno de agentes de código (ex.: Com
 - **Worktrees como feature de primeira classe** para paralelismo de tarefas
 - **Aplicação controlada** de mudanças (dry-run, backup, logs)
 - **Transparência**: logs detalhados de execução e métricas de tempo/tokens
+
+### Princípios de Aplicação
+
+- **Diff-first:** O apply sempre tenta `git apply --check` + `git apply` quando há unified diff válido. Escrita direta de arquivo (`suggestedContent`) é fallback apenas quando patch não é aplicável ou está ausente. Isso garante aplicação precisa e rastreável via Git.
+
+### Worktree Policy
+
+Antes de implementar criação de worktrees, as regras de governança estão definidas em:
+
+- **Documento**: [docs/WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md)
+- **Constantes**: [electron/services/worktree-policy.ts](electron/services/worktree-policy.ts)
+
+Resumo: nome padrão `dcc-{id}-{timestamp}`, limpeza de worktrees antigos (>7 dias), listagem/reaproveitamento, lock durante missão em execução.
 
 ---
 
@@ -135,7 +157,9 @@ DevCommandCenter/
 │   ├── tsconfig.json             # Config TS do Electron
 │   └── services/                 # Serviços do backend
 │       ├── types.ts              # Tipos compartilhados
+│       ├── schemas/              # Schemas Zod (MissionPlan, GeneratedCode)
 │       ├── git-service.ts        # Operações Git
+│       ├── worktree-policy.ts    # Constantes Worktree Policy
 │       ├── ai-orchestrator.ts    # Orquestrador de IA
 │       └── adapters/             # Adapters de providers
 │           ├── base.ts           # Classe base abstrata
@@ -170,6 +194,9 @@ DevCommandCenter/
 │
 ├── types/
 │   └── electron.d.ts             # Tipos globais Electron
+│
+├── docs/                         # Documentação
+│   └── WORKTREE_POLICY.md        # Política de worktrees
 │
 ├── public/                       # Assets estáticos
 ├── styles/
@@ -298,14 +325,13 @@ CREATE TABLE mission_logs (
 ### Tipos TypeScript
 
 ```typescript
-// Provider Types
+// Provider Types (deve corresponder ao CHECK constraint em schema.sql)
 type ProviderType =
   | "claude-code"
+  | "codex"
   | "openai"
   | "anthropic"
-  | "google"
   | "cursor"
-  | "vscode"
   | "custom";
 
 interface Provider {
@@ -737,13 +763,15 @@ yarn electron:start     # Roda app compilado localmente
 // 1. Adicionar tipo em lib/database/types.ts
 export type ProviderType =
   | "claude-code"
+  | "codex"
   | "openai"
   | "anthropic"
+  | "cursor"
   | "gemini" // ← novo
   | "custom";
 
-// 2. Atualizar schema.sql (CHECK constraint)
-// 3. Criar adapter em electron/services/adapters/ (ex.: gemini-adapter.ts)
+// 2. Atualizar schema.sql (CHECK constraint) — OBRIGATÓRIO para alinhar com TS
+// 3. Criar adapter em electron/services/adapters/ (ex.: gemini.ts)
 // 4. Registrar no createAdapter e adapterRegistry em electron/services/adapters/index.ts
 // 5. Adicionar UI em components/dialogs/add-provider-dialog.tsx
 ```
@@ -859,10 +887,14 @@ __tests__/
 
 ### Armazenamento de Credenciais
 
-```typescript
-// Atualmente: API keys em SQLite (criptografia pendente)
-// TODO: Usar keytar ou @electron/safeStorage
+**Status:** API keys atualmente em texto plano no SQLite. Criptografia é requisito de Alpha.
 
+**Roadmap de segurança:**
+- **Alpha (requisito):** `@electron/safeStorage` — encrypt/decrypt no main process antes de persistir
+- **Beta:** `keytar` — integração com Keychain (macOS), Secret Service (Linux), Credential Manager (Windows)
+
+```typescript
+// Implementação planejada para Alpha
 import { safeStorage } from "electron";
 
 function encryptApiKey(key: string): Buffer {
@@ -872,6 +904,8 @@ function encryptApiKey(key: string): Buffer {
 function decryptApiKey(encrypted: Buffer): string {
   return safeStorage.decryptString(encrypted);
 }
+
+// Fluxo: UI envia key → main encripta → SQLite armazena blob → main decripta ao usar
 ```
 
 ---
@@ -942,7 +976,6 @@ npm install --global windows-build-tools
 
 ### Pendente / a fazer
 
-- Schema: incluir `vscode` e `google` no CHECK de `providers.type` (se desejado) para alinhar com os tipos TypeScript.
 - Opcional: expandir lista completa de métodos na seção API IPC (referência a preload.ts já incluída).
 - Itens já listados em "Melhorias de UX Planejadas" e "Pontos de Extensão" que ainda não foram implementados.
 
@@ -960,7 +993,7 @@ npm install --global windows-build-tools
 - ✅ **Integração real com Anthropic API** - Chamadas REST diretas (Claude)
 - ✅ **Git Service** - Detecção de branch, status, commits recentes
 - ✅ **AI Orchestrator** - Gerenciamento centralizado de adapters
-- ✅ **Aplicação real de diffs** - Escrita de arquivos com backup
+- ✅ **Aplicação real de diffs** - `git apply` (preferido) + fallback para escrita de arquivo com backup
 - ✅ **Contexto de projeto** - Lista de arquivos e info Git enviada à IA
 - ✅ Arquitetura de adapters extensível para novos providers
 - ✅ IPC handlers para todas as operações de IA

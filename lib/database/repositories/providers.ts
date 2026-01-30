@@ -242,7 +242,7 @@ export const ProvidersRepository = {
     }
     
     // Para provedores de API, verificamos se a API key está configurada
-    if (provider.type === 'openai' || provider.type === 'anthropic' || provider.type === 'google') {
+    if (provider.type === 'openai' || provider.type === 'anthropic') {
       if (!provider.apiKey) {
         return { success: false, error: 'API key not configured' };
       }
@@ -251,7 +251,7 @@ export const ProvidersRepository = {
     }
     
     // Para provedores CLI, verificamos se o path está configurado
-    if (provider.type === 'cursor' || provider.type === 'vscode') {
+    if (provider.type === 'cursor' || provider.type === 'claude-code' || provider.type === 'codex') {
       if (!provider.cliPath) {
         return { success: false, error: 'CLI path not configured' };
       }

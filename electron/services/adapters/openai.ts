@@ -152,12 +152,12 @@ export class OpenAIAdapter extends BaseAdapter {
         };
       }
 
-      const plan = this.parseJSONResponse<MissionPlan>(content);
+      const planResult = this.parseAndValidateMissionPlan(content);
 
-      if (!plan) {
+      if (!planResult.success) {
         return {
           success: false,
-          error: "Failed to parse plan from OpenAI response",
+          error: `Failed to parse plan: ${planResult.error}`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,
@@ -166,6 +166,7 @@ export class OpenAIAdapter extends BaseAdapter {
         };
       }
 
+      const plan = planResult.data;
       // Garante que os steps têm IDs únicos
       if (plan.steps) {
         plan.steps = plan.steps.map((step, index) => ({
@@ -235,12 +236,12 @@ export class OpenAIAdapter extends BaseAdapter {
         };
       }
 
-      const code = this.parseJSONResponse<GeneratedCode>(content);
+      const codeResult = this.parseAndValidateGeneratedCode(content);
 
-      if (!code) {
+      if (!codeResult.success) {
         return {
           success: false,
-          error: "Failed to parse code from OpenAI response",
+          error: `Failed to parse code: ${codeResult.error}`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,
@@ -249,6 +250,7 @@ export class OpenAIAdapter extends BaseAdapter {
         };
       }
 
+      const code = codeResult.data;
       return {
         success: true,
         data: code,

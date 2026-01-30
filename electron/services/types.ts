@@ -155,6 +155,8 @@ export interface ApplyChangesResult {
   appliedFiles: string[];
   failedFiles: Array<{ path: string; error: string }>;
   backupPath?: string;
+  /** How each file was applied (git-apply vs file-write) for transparency */
+  appliedVia?: Array<{ path: string; via: "git-apply" | "file-write" }>;
 }
 
 // Re-exports para conveniência

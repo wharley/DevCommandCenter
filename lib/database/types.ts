@@ -5,14 +5,13 @@
 // Enums e tipos base
 // ============================================
 
+// Deve corresponder ao CHECK constraint em schema.sql
 export type ProviderType =
   | "claude-code"
   | "codex"
   | "openai"
   | "anthropic"
-  | "google"
   | "cursor"
-  | "vscode"
   | "custom";
 
 export type MissionStatus =

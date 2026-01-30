@@ -4,10 +4,11 @@
  * Fornece contexto do repositório para a IA e aplica mudanças
  */
 
-import { exec, execSync } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import type {
   GitInfo,
   GitStatus,
@@ -17,6 +18,21 @@ import type {
 } from "./types";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+/** Detecta se o conteúdo parece diff unificado (linhas com +, -, ---, +++ ou contexto). */
+function looksLikeUnifiedDiff(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  const lines = trimmed.split(/\r?\n/);
+  return lines.some(
+    (line) =>
+      line.startsWith("+") ||
+      line.startsWith("-") ||
+      line.startsWith("--- ") ||
+      line.startsWith("+++ "),
+  );
+}
 
 export class GitService {
   private projectPath: string;
@@ -239,17 +255,64 @@ export class GitService {
   }
 
   /**
-   * Aplica mudanças de código ao repositório
+   * Aplica um patch unificado via git apply.
+   * Retorna { success: true } ou { success: false, error: string }.
+   */
+  private async applyPatch(unifiedDiff: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> {
+    const tmpFile = path.join(
+      os.tmpdir(),
+      `dcc-patch-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`,
+    );
+    try {
+      await fs.promises.writeFile(tmpFile, unifiedDiff, "utf-8");
+      const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+      await execFileAsync("git", ["apply", "--check", tmpFile], {
+        cwd: this.projectPath,
+        env,
+      });
+      await execFileAsync("git", ["apply", tmpFile], {
+        cwd: this.projectPath,
+        env,
+      });
+      return { success: true };
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : String(err);
+      const stderr =
+        err && typeof err === "object" && "stderr" in err
+          ? String((err as { stderr?: string }).stderr ?? "")
+          : "";
+      return {
+        success: false,
+        error: stderr.trim() || message,
+      };
+    } finally {
+      try {
+        await fs.promises.unlink(tmpFile);
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+  }
+
+  /**
+   * Aplica mudanças de código ao repositório.
+   * Ordem preferida: git apply (quando diff válido) → escrita de arquivo (fallback).
    */
   async applyChanges(
     changes: CodeSuggestion[],
     options: { createBackup?: boolean; dryRun?: boolean } = {},
   ): Promise<ApplyChangesResult> {
     const appliedFiles: string[] = [];
+    const appliedVia: Array<{ path: string; via: "git-apply" | "file-write" }> =
+      [];
     const failedFiles: Array<{ path: string; error: string }> = [];
     let backupPath: string | undefined;
 
-    // Criar backup se solicitado
+    // Criar backup se solicitado (antes de qualquer alteração)
     if (options.createBackup && !options.dryRun) {
       backupPath = await this.createBackup(changes.map((c) => c.path));
     }
@@ -262,28 +325,64 @@ export class GitService {
         if (options.dryRun) {
           console.log(`[DRY RUN] Would ${change.action}: ${change.path}`);
           appliedFiles.push(change.path);
+          appliedVia.push({
+            path: change.path,
+            via: looksLikeUnifiedDiff(change.diff ?? "") ? "git-apply" : "file-write",
+          });
           continue;
         }
 
+        const hasDiff =
+          (change.diff ?? "").trim().length > 0 &&
+          looksLikeUnifiedDiff(change.diff ?? "");
+        const hasContent =
+          (change.suggestedContent ?? "").trim().length > 0;
+
+        // 1. Tentar git apply quando há diff válido (create/modify/delete)
+        if (hasDiff) {
+          const result = await this.applyPatch(change.diff!);
+          if (result.success) {
+            appliedFiles.push(change.path);
+            appliedVia.push({ path: change.path, via: "git-apply" });
+            continue;
+          }
+          // git apply falhou — seguir para fallback
+        }
+
+        // 2. Fallback: escrita de arquivo com suggestedContent
         switch (change.action) {
           case "create":
-            await fs.promises.mkdir(dir, { recursive: true });
-            await fs.promises.writeFile(
-              fullPath,
-              change.suggestedContent || "",
-              "utf-8",
-            );
-            appliedFiles.push(change.path);
-            break;
-
-          case "modify":
-            if (change.suggestedContent) {
+            if (hasContent) {
+              await fs.promises.mkdir(dir, { recursive: true });
               await fs.promises.writeFile(
                 fullPath,
-                change.suggestedContent,
+                change.suggestedContent!,
                 "utf-8",
               );
               appliedFiles.push(change.path);
+              appliedVia.push({ path: change.path, via: "file-write" });
+            } else if (hasDiff) {
+              failedFiles.push({
+                path: change.path,
+                error: "git apply failed and no suggestedContent to fallback",
+              });
+            }
+            break;
+
+          case "modify":
+            if (hasContent) {
+              await fs.promises.writeFile(
+                fullPath,
+                change.suggestedContent!,
+                "utf-8",
+              );
+              appliedFiles.push(change.path);
+              appliedVia.push({ path: change.path, via: "file-write" });
+            } else if (hasDiff) {
+              failedFiles.push({
+                path: change.path,
+                error: "git apply failed and no suggestedContent to fallback",
+              });
             }
             break;
 
@@ -291,6 +390,7 @@ export class GitService {
             if (fs.existsSync(fullPath)) {
               await fs.promises.unlink(fullPath);
               appliedFiles.push(change.path);
+              appliedVia.push({ path: change.path, via: "file-write" });
             }
             break;
         }
@@ -307,6 +407,7 @@ export class GitService {
       appliedFiles,
       failedFiles,
       backupPath,
+      appliedVia,
     };
   }
 

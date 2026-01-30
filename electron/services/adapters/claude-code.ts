@@ -106,12 +106,12 @@ export class ClaudeCodeAdapter extends BaseAdapter {
       );
 
       onProgress?.("Processando resposta...");
-      const plan = this.parseJSONResponse<MissionPlan>(response);
+      const planResult = this.parseAndValidateMissionPlan(response);
 
-      if (!plan) {
+      if (!planResult.success) {
         return {
           success: false,
-          error: "Failed to parse plan from Claude response",
+          error: `Failed to parse plan: ${planResult.error}`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,
@@ -119,6 +119,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         };
       }
 
+      const plan = planResult.data;
       // Garante que os steps têm IDs únicos
       if (plan.steps) {
         plan.steps = plan.steps.map((step, index) => ({
@@ -178,13 +179,13 @@ export class ClaudeCodeAdapter extends BaseAdapter {
       );
 
       onProgress?.("Processando resposta...");
-      const code = this.parseJSONResponse<GeneratedCode>(response);
+      const codeResult = this.parseAndValidateGeneratedCode(response);
 
-      if (!code) {
+      if (!codeResult.success) {
         const snippet = response.slice(0, 600).trim();
         return {
           success: false,
-          error: `Failed to parse code from Claude response. Raw response snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
+          error: `Failed to parse code: ${codeResult.error}. Raw snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,
@@ -192,6 +193,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         };
       }
 
+      const code = codeResult.data;
       onProgress?.("Código gerado com sucesso!");
       return {
         success: true,

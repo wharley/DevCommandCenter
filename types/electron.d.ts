@@ -41,6 +41,7 @@ export interface ApplyChangesResult {
   appliedFiles: string[];
   failedFiles: Array<{ path: string; error: string }>;
   backupPath?: string;
+  appliedVia?: Array<{ path: string; via: "git-apply" | "file-write" }>;
 }
 
 export interface ValidationResult {

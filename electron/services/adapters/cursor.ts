@@ -139,41 +139,33 @@ export class CursorAdapter extends BaseAdapter {
       response = this.unwrapCursorCliResponse(response);
 
       onProgress?.("Processando resposta...");
-      let plan = this.parseJSONResponse<MissionPlan>(response);
+      let planResult = this.parseAndValidateMissionPlan(response);
 
-      // Fallback: response may be full CLI wrapper (type, result) with result as string or object
-      if (!plan || !Array.isArray(plan.steps)) {
-        try {
-          const parsed = JSON.parse(response) as { type?: string; result?: unknown; output?: unknown };
-          const inner = parsed?.result ?? parsed?.output;
-          if (typeof inner === "string") {
-            plan = this.parseJSONResponse<MissionPlan>(inner) ?? plan ?? null;
-          } else if (inner && typeof inner === "object" && Array.isArray((inner as MissionPlan).steps)) {
-            plan = inner as MissionPlan;
-          }
-        } catch {
-          // ignore
-        }
-        // Fallback NDJSON: resposta multi-linha (extractPayload devolveu stdout inteiro)
-        if ((!plan || !Array.isArray(plan.steps)) && response.includes("\n")) {
-          const ndjsonPayload = this.tryExtractPayloadFromNDJSON(response);
-          if (ndjsonPayload) plan = this.parseJSONResponse<MissionPlan>(ndjsonPayload) ?? plan ?? null;
+      // Fallback NDJSON: quando unwrap devolveu stdout inteiro
+      if (!planResult.success && response.includes("\n")) {
+        const ndjsonPayload = this.tryExtractPayloadFromNDJSON(response);
+        if (ndjsonPayload) {
+          planResult = this.parseAndValidateMissionPlan(ndjsonPayload);
         }
       }
 
-      if (!plan || !Array.isArray(plan.steps)) {
+      if (!planResult.success) {
         const lines = response.trim().split(/\r?\n/).filter((l) => l.length > 0);
         const looksNdjson = lines.length > 1;
-        const lastLineLooksResult = lines.length > 0 && lines[lines.length - 1]!.includes('"type"') && lines[lines.length - 1]!.includes('"result"');
-        const truncationHint = looksNdjson && lastLineLooksResult
-          ? " Cursor CLI result line may be truncated (incomplete JSON)."
-          : "";
+        const lastLineLooksResult =
+          lines.length > 0 &&
+          lines[lines.length - 1]!.includes('"type"') &&
+          lines[lines.length - 1]!.includes('"result"');
+        const truncationHint =
+          looksNdjson && lastLineLooksResult
+            ? " Cursor CLI result line may be truncated (incomplete JSON)."
+            : "";
         const diagnosticHint = looksNdjson
           ? ` For diagnosis, save the last ${NDJSON_DIAGNOSTIC_LINES} lines of the CLI output to a file.`
           : "";
         return {
           success: false,
-          error: `Failed to parse plan from Cursor response.${truncationHint}${diagnosticHint}`,
+          error: `Failed to parse plan: ${planResult.error}${truncationHint}${diagnosticHint}`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,
@@ -181,6 +173,7 @@ export class CursorAdapter extends BaseAdapter {
         };
       }
 
+      let plan = planResult.data;
       if (plan.steps) {
         plan.steps = plan.steps.map((step, index) => ({
           ...step,
@@ -241,94 +234,34 @@ export class CursorAdapter extends BaseAdapter {
       response = this.unwrapCursorCliResponse(response);
 
       onProgress?.("Processando resposta...");
-      let code = this.parseJSONResponse<GeneratedCode>(response);
+      let codeResult = this.parseAndValidateGeneratedCode(response);
 
-      if (!code) {
-        // Fallback 1: response may be wrapper JSON (e.g. { result: "<string>" } or { result: <object> })
-        try {
-          const parsed = JSON.parse(response) as {
-            type?: string;
-            result?: unknown;
-            output?: unknown;
-          };
-          const inner = parsed?.result ?? parsed?.output;
-          if (
-            inner &&
-            typeof inner === "object" &&
-            Array.isArray((inner as GeneratedCode).files)
-          ) {
-            code = inner as GeneratedCode;
-          } else if (typeof inner === "string") {
-            // Cursor CLI wrapper: result is the JSON string of GeneratedCode
-            code = this.parseJSONResponse<GeneratedCode>(inner);
-          }
-        } catch {
-          // ignore
-        }
-        // Fallback NDJSON: resposta multi-linha (extractPayload devolveu stdout inteiro)
-        if (!code && response.includes("\n")) {
-          const ndjsonPayload = this.tryExtractPayloadFromNDJSON(response);
-          if (ndjsonPayload) code = this.parseJSONResponse<GeneratedCode>(ndjsonPayload);
+      // Fallback NDJSON: quando unwrap devolveu stdout inteiro
+      if (!codeResult.success && response.includes("\n")) {
+        const ndjsonPayload = this.tryExtractPayloadFromNDJSON(response);
+        if (ndjsonPayload) {
+          codeResult = this.parseAndValidateGeneratedCode(ndjsonPayload);
         }
       }
 
-      // Normalize wrapper: CLI may return { result: GeneratedCode } or { output: GeneratedCode }
-      if (code && "result" in code && Array.isArray((code as { result?: GeneratedCode }).result?.files)) {
-        code = (code as { result: GeneratedCode }).result;
-      } else if (code && "output" in code && Array.isArray((code as { output?: GeneratedCode }).output?.files)) {
-        code = (code as { output: GeneratedCode }).output;
-      }
-
-      // Fallback 2: response was the full CLI wrapper (type, subtype, result) - parseJSONResponse returned it as "code"
-      if (
-        code &&
-        typeof code === "object" &&
-        "type" in code &&
-        (code as { type?: string }).type === "result" &&
-        ("result" in code || "output" in code)
-      ) {
-        const raw = (code as { result?: unknown; output?: unknown }).result ?? (code as { result?: unknown; output?: unknown }).output;
-        if (typeof raw === "string") {
-          code = this.parseJSONResponse<GeneratedCode>(raw) ?? code;
-          if (!code || !Array.isArray(code.files)) {
-            const parsedWithFixes = this.tryParseWithFixes(raw);
-            if (parsedWithFixes && typeof parsedWithFixes === "object" && Array.isArray((parsedWithFixes as GeneratedCode).files)) {
-              code = parsedWithFixes as GeneratedCode;
-            }
-          }
-          if (!code || !Array.isArray(code.files)) {
-            const extracted = this.extractTopLevelJsonProtected(raw);
-            if (extracted) {
-              const parsed = this.parseJSONResponse<GeneratedCode>(extracted) ?? this.tryParseWithFixes(extracted) as GeneratedCode | null;
-              if (parsed && Array.isArray(parsed?.files)) code = parsed;
-            }
-          }
-          if ((!code || !Array.isArray(code.files)) && raw.includes("\n")) {
-            const ndjsonPayload = this.tryExtractPayloadFromNDJSON(raw);
-            if (ndjsonPayload) {
-              const parsed = this.parseJSONResponse<GeneratedCode>(ndjsonPayload);
-              if (parsed?.files) code = parsed;
-            }
-          }
-        } else if (raw && typeof raw === "object" && Array.isArray((raw as GeneratedCode).files)) {
-          code = raw as GeneratedCode;
-        }
-      }
-
-      if (!code || !Array.isArray(code.files)) {
+      if (!codeResult.success) {
         const lines = response.trim().split(/\r?\n/).filter((l) => l.length > 0);
         const looksNdjson = lines.length > 1;
-        const lastLineLooksResult = lines.length > 0 && lines[lines.length - 1]!.includes('"type"') && lines[lines.length - 1]!.includes('"result"');
-        const truncationHint = looksNdjson && lastLineLooksResult
-          ? " Cursor CLI result line may be truncated (incomplete JSON)."
-          : "";
+        const lastLineLooksResult =
+          lines.length > 0 &&
+          lines[lines.length - 1]!.includes('"type"') &&
+          lines[lines.length - 1]!.includes('"result"');
+        const truncationHint =
+          looksNdjson && lastLineLooksResult
+            ? " Cursor CLI result line may be truncated (incomplete JSON)."
+            : "";
         const diagnosticHint = looksNdjson
           ? ` For diagnosis, save the last ${NDJSON_DIAGNOSTIC_LINES} lines of the CLI output to a file.`
           : "";
         const snippet = response.slice(0, 600).trim();
         return {
           success: false,
-          error: `Failed to parse code from Cursor response.${truncationHint}${diagnosticHint} Raw response snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
+          error: `Failed to parse code: ${codeResult.error}${truncationHint}${diagnosticHint} Raw snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,
@@ -336,6 +269,7 @@ export class CursorAdapter extends BaseAdapter {
         };
       }
 
+      const code = codeResult.data;
       onProgress?.("Código gerado com sucesso!");
       return {
         success: true,
