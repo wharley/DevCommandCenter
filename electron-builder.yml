@@ -38,7 +38,7 @@ mac:
       arch:
         - x64
         - arm64
-  # icon: build/icon.icns  # Uncomment when icon is available
+  icon: public/icon.png
   darkModeSupport: true
   hardenedRuntime: true
   gatekeeperAssess: false
@@ -62,7 +62,7 @@ win:
     - target: portable
       arch:
         - x64
-  # icon: build/icon.ico  # Uncomment when icon is available
+  icon: public/icon.png
 
 nsis:
   oneClick: false

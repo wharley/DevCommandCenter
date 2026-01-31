@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } from "electron";
 import path from "node:path";
 import { registerIpcHandlers } from "./ipc-handlers";
 import db, { setUserDataPath } from "../lib/database";
@@ -21,6 +21,8 @@ const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 // Vite dev server port
 const VITE_DEV_PORT = 5173;
 
+const ICON_PATH = path.join(__dirname, "..", "..", "public", "icon.png");
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -30,6 +32,7 @@ function createWindow() {
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: "#0a0a0f",
+    icon: ICON_PATH,
     show: false, // Show when ready to prevent flash
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -85,7 +88,7 @@ function initializeApp() {
     console.error("[Electron] Failed to initialize database:", error);
     dialog.showErrorBox(
       "Database Error",
-      `Failed to initialize the database. The app may not work correctly.\n\nError: ${error}`,
+      `Failed to initialize the database. The app may not work correctly.\n\nError: ${error}`
     );
   }
 
@@ -95,6 +98,12 @@ function initializeApp() {
 // App lifecycle
 app.whenReady().then(async () => {
   initializeApp();
+
+  // macOS: set dock icon explicitly (BrowserWindow icon doesn't affect dock)
+  if (process.platform === "darwin") {
+    app.dock.setIcon(nativeImage.createFromPath(ICON_PATH));
+  }
+
   createWindow();
 
   app.on("activate", () => {
@@ -127,7 +136,7 @@ if (isDev) {
     (event, _webContents, _url, _error, _certificate, callback) => {
       event.preventDefault();
       callback(true);
-    },
+    }
   );
 }
 
