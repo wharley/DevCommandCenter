@@ -7,6 +7,7 @@
 import { createAdapter } from "./adapters";
 import { GitService } from "./git-service";
 import db from "../../lib/database";
+import { providerService } from "./provider-service";
 import type {
   AIProviderAdapter,
   AIResponse,
@@ -93,7 +94,7 @@ export class AIOrchestrator {
         };
       }
 
-      const provider = db.providers.findById(providerId);
+      const provider = providerService.findById(providerId);
       if (!provider) {
         return { success: false, error: "Provider not found" };
       }
@@ -204,7 +205,7 @@ export class AIOrchestrator {
         };
       }
 
-      const provider = db.providers.findById(providerId);
+      const provider = providerService.findById(providerId);
       if (!provider) {
         return { success: false, error: "Provider not found" };
       }
@@ -380,7 +381,7 @@ export class AIOrchestrator {
   async testProviderConnection(
     providerId: string,
   ): Promise<{ success: boolean; message: string }> {
-    const provider = db.providers.findById(providerId);
+    const provider = providerService.findById(providerId);
     if (!provider) {
       return { success: false, message: "Provider not found" };
     }

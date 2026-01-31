@@ -5,6 +5,10 @@ import { execSync } from "node:child_process";
 import { platform } from "node:os";
 import db from "../lib/database";
 import { aiOrchestrator, GitService } from "./services";
+import {
+  providerService,
+  sanitizeForRenderer,
+} from "./services/provider-service";
 
 export function registerIpcHandlers(ipcMain: IpcMain) {
   // ==========================================
@@ -124,45 +128,53 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
   });
 
   // ==========================================
-  // Provider handlers
+  // Provider handlers (usam providerService para encrypt/decrypt)
   // ==========================================
   ipcMain.handle("db:providers:findAll", () => {
-    return db.providers.findAll();
+    return providerService.findAll().map(sanitizeForRenderer);
   });
 
   ipcMain.handle("db:providers:findById", (_event, id: string) => {
-    return db.providers.findById(id);
+    const p = providerService.findById(id);
+    return p ? sanitizeForRenderer(p) : null;
   });
 
   ipcMain.handle("db:providers:findByType", (_event, type: string) => {
-    return db.providers.findByType(type as any);
+    return providerService.findByType(type as any).map(sanitizeForRenderer);
   });
 
   ipcMain.handle("db:providers:findActive", () => {
-    return db.providers.findActive();
+    return providerService.findActive().map(sanitizeForRenderer);
   });
 
   ipcMain.handle("db:providers:create", (_event, data: any) => {
-    return db.providers.create(data);
+    const p = providerService.create(data);
+    return sanitizeForRenderer(p);
   });
 
   ipcMain.handle("db:providers:update", (_event, id: string, data: any) => {
-    return db.providers.update(id, data);
+    const p = providerService.update(id, data);
+    return p ? sanitizeForRenderer(p) : null;
   });
 
   ipcMain.handle("db:providers:delete", (_event, id: string) => {
-    return db.providers.delete(id);
+    return providerService.delete(id);
   });
 
   ipcMain.handle(
     "db:providers:setActive",
     (_event, id: string, isActive: boolean) => {
-      return db.providers.setActive(id, isActive);
+      const p = providerService.setActive(id, isActive);
+      return p ? sanitizeForRenderer(p) : null;
     },
   );
 
   ipcMain.handle("db:providers:testConnection", (_event, id: string) => {
-    return db.providers.testConnection(id);
+    return providerService.testConnection(id);
+  });
+
+  ipcMain.handle("db:providers:isEncryptionAvailable", () => {
+    return providerService.isEncryptionAvailable();
   });
 
   // ==========================================

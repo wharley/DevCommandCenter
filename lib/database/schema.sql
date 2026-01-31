@@ -2,11 +2,13 @@
 -- Este arquivo define a estrutura do banco de dados local
 
 -- Tabela de Provedores de IA (Claude Code, OpenAI, etc.)
+-- api_key: legado (texto plano, migração); api_key_encrypted: criptografado (preferido)
 CREATE TABLE IF NOT EXISTS providers (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   type TEXT NOT NULL CHECK (type IN ('claude-code', 'codex', 'openai', 'anthropic', 'cursor', 'custom')),
   api_key TEXT,
+  api_key_encrypted BLOB,
   cli_path TEXT,
   config TEXT, -- JSON com configurações adicionais
   is_active INTEGER DEFAULT 1,

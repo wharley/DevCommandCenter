@@ -176,7 +176,8 @@ declare global {
         ) => Promise<Provider | undefined>;
         testConnection: (
           id: string,
-        ) => Promise<{ success: boolean; message: string }>;
+        ) => Promise<{ success: boolean; error?: string }>;
+        isEncryptionAvailable: () => Promise<boolean>;
       };
 
       projects: {

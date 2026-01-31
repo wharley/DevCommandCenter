@@ -94,8 +94,8 @@ export function NewMissionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[550px]">
-        <form onSubmit={handleSubmit}>
+      <DialogContent className="sm:max-w-[550px] max-h-[90vh] flex flex-col overflow-hidden">
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1 overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-primary" />
@@ -106,64 +106,67 @@ export function NewMissionDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="title">Título da missão</Label>
-              <Input
-                id="title"
-                placeholder="ex.: Migrar checkout para Stripe"
-                value={formData.title}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, title: e.target.value }))
-                }
-              />
-            </div>
+          <div className="overflow-y-auto min-h-0 flex-1">
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="title">Título da missão</Label>
+                <Input
+                  id="title"
+                  placeholder="ex.: Migrar checkout para Stripe"
+                  value={formData.title}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, title: e.target.value }))
+                  }
+                />
+              </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="description">Descrição</Label>
-              <Textarea
-                id="description"
-                placeholder="Descreva em linguagem natural o que você quer realizar. Seja específico sobre requisitos, restrições e resultados esperados..."
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    description: e.target.value,
-                  }))
-                }
-                rows={5}
-              />
-              <p className="text-xs text-muted-foreground">
-                Quanto mais detalhada a descrição, melhor a IA poderá entender e
-                executar sua solicitação.
-              </p>
-            </div>
+              <div className="grid gap-2">
+                <Label htmlFor="description">Descrição</Label>
+                <Textarea
+                  id="description"
+                  placeholder="Descreva em linguagem natural o que você quer realizar. Seja específico sobre requisitos, restrições e resultados esperados..."
+                  value={formData.description}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      description: e.target.value,
+                    }))
+                  }
+                  rows={5}
+                  className="max-h-48 overflow-y-auto resize-none"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Quanto mais detalhada a descrição, melhor a IA poderá entender e
+                  executar sua solicitação.
+                </p>
+              </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="provider">Provedor de IA</Label>
-              <Select
-                value={formData.providerId}
-                onValueChange={(value) =>
-                  setFormData((prev) => ({ ...prev, providerId: value }))
-                }
-              >
-                <SelectTrigger id="provider">
-                  <SelectValue placeholder="Selecione o provedor de IA" />
-                </SelectTrigger>
-                <SelectContent>
-                  {activeProviders.length === 0 ? (
-                    <SelectItem value="none" disabled>
-                      Nenhum provedor configurado - vá em Configurações
-                    </SelectItem>
-                  ) : (
-                    activeProviders.map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        {provider.name}
+              <div className="grid gap-2">
+                <Label htmlFor="provider">Provedor de IA</Label>
+                <Select
+                  value={formData.providerId}
+                  onValueChange={(value) =>
+                    setFormData((prev) => ({ ...prev, providerId: value }))
+                  }
+                >
+                  <SelectTrigger id="provider">
+                    <SelectValue placeholder="Selecione o provedor de IA" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeProviders.length === 0 ? (
+                      <SelectItem value="none" disabled>
+                        Nenhum provedor configurado - vá em Configurações
                       </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+                    ) : (
+                      activeProviders.map((provider) => (
+                        <SelectItem key={provider.id} value={provider.id}>
+                          {provider.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 

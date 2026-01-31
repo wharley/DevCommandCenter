@@ -2,7 +2,7 @@
 
 Multi-engine command center for coding agents. A local-first desktop app that orchestrates multiple providers (CLI and API) with BYOK, structured missions, and diff-driven reviews.
 
-For the full product document, see `SKILL.md`.
+For the full product document, see `SKILL.md`. For product positioning and landing-page copy (non-technical), see [docs/POSICIONAMENTO_E_LANDING.md](docs/POSICIONAMENTO_E_LANDING.md).
 
 ## Why it exists
 

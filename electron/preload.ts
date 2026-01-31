@@ -94,6 +94,8 @@ contextBridge.exposeInMainWorld("db", {
     setActive: (id: string, isActive: boolean) =>
       invoke("db:providers:setActive", id, isActive),
     testConnection: (id: string) => invoke("db:providers:testConnection", id),
+    isEncryptionAvailable: () =>
+      invoke("db:providers:isEncryptionAvailable"),
   },
 
   // Projects

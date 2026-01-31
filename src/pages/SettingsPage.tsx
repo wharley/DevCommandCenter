@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty } from "@/components/ui/empty";
 import { Separator } from "@/components/ui/separator";
 import { AddProviderDialog } from "@/components/dialogs/add-provider-dialog";
@@ -61,20 +62,10 @@ const providerTypeConfig: Record<
     icon: Bot,
     description: "Claude via API direta",
   },
-  google: {
-    label: "Google AI",
-    icon: Bot,
-    description: "Modelos Gemini via API",
-  },
   cursor: {
     label: "Cursor CLI",
     icon: Terminal,
     description: "Cursor Agent CLI (terminal) — não é o editor Cursor",
-  },
-  vscode: {
-    label: "VS Code",
-    icon: Terminal,
-    description: "Integração VS Code Copilot",
   },
   custom: {
     label: "Personalizado",
@@ -94,6 +85,11 @@ export default function SettingsPage() {
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
 
   const { providers, update, remove } = useProviders();
+  const [encryptionAvailable, setEncryptionAvailable] = useState<boolean | null>(null);
+
+  React.useEffect(() => {
+    window.db?.providers?.isEncryptionAvailable?.().then(setEncryptionAvailable);
+  }, []);
 
   const handleToggleActive = (provider: Provider) => {
     update(provider.id, { isActive: !provider.isActive });
@@ -120,6 +116,17 @@ export default function SettingsPage() {
         <div className="w-full">
           {/* Providers Section */}
           <section>
+            {encryptionAvailable === false && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Criptografia indisponível</AlertTitle>
+                <AlertDescription>
+                  Neste ambiente, as chaves de API serão armazenadas em texto plano.
+                  Recomenda-se não usar em máquinas compartilhadas.
+                </AlertDescription>
+              </Alert>
+            )}
+
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-lg font-semibold">Provedores de IA</h2>
@@ -234,7 +241,7 @@ export default function SettingsPage() {
                       </CardHeader>
                       <CardContent>
                         <div className="flex flex-wrap gap-4 text-sm">
-                          {provider.apiKey && (
+                          {(provider.hasApiKey ?? provider.apiKey) && (
                             <div className="flex items-center gap-2 text-muted-foreground">
                               <Key className="h-4 w-4" />
                               <span>Chave de API configurada</span>
@@ -260,7 +267,7 @@ export default function SettingsPage() {
                               </span>
                             </div>
                           )}
-                          {!provider.apiKey && !provider.cliPath && (
+                          {!provider.hasApiKey && !provider.apiKey && !provider.cliPath && (
                             <div className="flex items-center gap-2 text-amber-500">
                               <AlertCircle className="h-4 w-4" />
                               <span>Não totalmente configurado</span>

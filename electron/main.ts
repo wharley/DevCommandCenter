@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
 import path from "node:path";
 import { registerIpcHandlers } from "./ipc-handlers";
 import db, { setUserDataPath } from "../lib/database";
+import { providerService } from "./services/provider-service";
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 try {
@@ -78,6 +79,7 @@ function initializeApp() {
     setUserDataPath(userDataPath);
 
     db.init();
+    providerService.migrateLegacyApiKeys();
     console.log("[Electron] Database initialized successfully");
   } catch (error) {
     console.error("[Electron] Failed to initialize database:", error);

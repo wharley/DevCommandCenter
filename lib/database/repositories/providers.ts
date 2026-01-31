@@ -19,6 +19,7 @@ interface ProviderRow {
   name: string;
   type: string;
   api_key: string | null;
+  api_key_encrypted: Buffer | null;
   cli_path: string | null;
   config: string | null;
   is_active: number;
@@ -27,11 +28,14 @@ interface ProviderRow {
 }
 
 function rowToProvider(row: ProviderRow): Provider {
+  const hasKey = !!(row.api_key || (row.api_key_encrypted && row.api_key_encrypted.length > 0));
   return {
     id: row.id,
     name: row.name,
     type: row.type as Provider['type'],
     apiKey: row.api_key,
+    apiKeyEncrypted: row.api_key_encrypted || undefined,
+    hasApiKey: hasKey,
     cliPath: row.cli_path,
     config: row.config ? JSON.parse(row.config) : null,
     isActive: row.is_active === 1,
@@ -112,22 +116,28 @@ export const ProvidersRepository = {
   create(data: CreateProviderDTO): Provider {
     const db = getDatabase();
     const id = generateId();
-    
+
+    // Preferência: apiKeyEncrypted > apiKey (fallback legado/plain)
+    const hasEncrypted = data.apiKeyEncrypted && Buffer.isBuffer(data.apiKeyEncrypted) && data.apiKeyEncrypted.length > 0;
+    const apiKeyToStore = hasEncrypted ? null : (data.apiKey || null);
+    const apiKeyEncryptedToStore = hasEncrypted ? data.apiKeyEncrypted : null;
+
     const stmt = db.prepare(`
-      INSERT INTO providers (id, name, type, api_key, cli_path, config, is_active)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO providers (id, name, type, api_key, api_key_encrypted, cli_path, config, is_active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    
+
     stmt.run(
       id,
       data.name,
       data.type,
-      data.apiKey || null,
+      apiKeyToStore,
+      apiKeyEncryptedToStore,
       data.cliPath || null,
       data.config ? JSON.stringify(data.config) : null,
       data.isActive !== false ? 1 : 0
     );
-    
+
     return this.findById(id)!;
   },
 
@@ -143,7 +153,7 @@ export const ProvidersRepository = {
     }
     
     const updates: string[] = [];
-    const values: (string | number | null)[] = [];
+    const values: (string | number | Buffer | null)[] = [];
     
     if (data.name !== undefined) {
       updates.push('name = ?');
@@ -153,9 +163,24 @@ export const ProvidersRepository = {
       updates.push('type = ?');
       values.push(data.type);
     }
-    if (data.apiKey !== undefined) {
+    if (data.apiKeyEncrypted !== undefined) {
+      updates.push('api_key_encrypted = ?');
+      values.push(
+        data.apiKeyEncrypted && Buffer.isBuffer(data.apiKeyEncrypted) && data.apiKeyEncrypted.length > 0
+          ? data.apiKeyEncrypted
+          : null
+      );
+      // Ao atualizar com encrypted, limpar api_key
+      if (data.apiKeyEncrypted && Buffer.isBuffer(data.apiKeyEncrypted) && data.apiKeyEncrypted.length > 0) {
+        updates.push('api_key = ?');
+        values.push(null);
+      }
+    } else if (data.apiKey !== undefined) {
       updates.push('api_key = ?');
       values.push(data.apiKey);
+      // Ao atualizar api_key em texto, limpar encrypted (evitar inconsistência)
+      updates.push('api_key_encrypted = ?');
+      values.push(null);
     }
     if (data.cliPath !== undefined) {
       updates.push('cli_path = ?');

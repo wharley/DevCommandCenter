@@ -119,6 +119,9 @@ export function initDatabase(): Database.Database {
   // Migração: atualizar CHECK de providers se o banco foi criado com schema antigo (sem codex/cursor)
   migrateProvidersTypeCheck(db);
 
+  // Migração: adicionar coluna api_key_encrypted se não existir
+  migrateApiKeyEncrypted(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
 
   return db;
@@ -162,6 +165,20 @@ function migrateProvidersTypeCheck(database: Database.Database): void {
   `);
   database.pragma('foreign_keys = ON');
   console.log('[Database] Migration: providers type CHECK updated (codex, cursor added).');
+}
+
+/**
+ * Migração: adiciona coluna api_key_encrypted se não existir.
+ */
+function migrateApiKeyEncrypted(database: Database.Database): void {
+  const row = database
+    .prepare("PRAGMA table_info(providers)")
+    .all() as Array<{ name: string }>;
+  const hasColumn = row.some((c) => c.name === "api_key_encrypted");
+  if (hasColumn) return;
+
+  database.exec("ALTER TABLE providers ADD COLUMN api_key_encrypted BLOB");
+  console.log("[Database] Migration: api_key_encrypted column added.");
 }
 
 /**

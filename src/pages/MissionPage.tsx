@@ -252,6 +252,20 @@ export default function MissionPage() {
     return () => clearInterval(interval);
   }, [isGenerating, missionId, refreshLogs]);
 
+  // Last progress message from logs (info/prompt) for the Code tab progress screen
+  const lastProgressMessage = useMemo(() => {
+    const progressLogs = logs.filter(
+      (l) => l.type === "info" || l.type === "prompt",
+    );
+    if (progressLogs.length === 0) return "Iniciando geração de código...";
+    const sorted = [...progressLogs].sort((a, b) => {
+      const ta = new Date(a.createdAt).getTime();
+      const tb = new Date(b.createdAt).getTime();
+      return tb - ta;
+    });
+    return sorted[0].content;
+  }, [logs]);
+
   const isLoading =
     (projectId && projectsLoading) || (missionId && missionsLoading);
 
@@ -363,6 +377,7 @@ export default function MissionPage() {
 
     setIsGenerating(true);
     updateStatus(missionId, "generating_code");
+    setActiveTab("code");
     addLog("prompt", "Iniciando geração de código com base no plano...", {
       model: provider.config?.model as string,
     });
@@ -731,7 +746,7 @@ export default function MissionPage() {
               <TabsTrigger
                 value="code"
                 className="gap-2"
-                disabled={!mission.generatedCode}
+                disabled={!mission.generatedCode && !isGenerating}
               >
                 <Code2 className="h-4 w-4" />
                 Código
@@ -757,7 +772,11 @@ export default function MissionPage() {
           </TabsContent>
 
           <TabsContent value="code" className="flex-1 overflow-auto p-6 mt-0">
-            <CodeView code={mission.generatedCode} />
+            <CodeView
+              code={mission.generatedCode}
+              isGenerating={isGenerating}
+              lastProgressMessage={lastProgressMessage}
+            />
           </TabsContent>
 
           <TabsContent value="logs" className="flex-1 overflow-auto p-6 mt-0">
@@ -1011,8 +1030,17 @@ function CodeBlock({
   );
 }
 
+const CODE_GENERATION_STEPS = [
+  { id: "prep", label: "Preparando ambiente" },
+  { id: "connect", label: "Conectando ao modelo" },
+  { id: "generate", label: "Gerando alterações" },
+  { id: "process", label: "Processando resposta" },
+] as const;
+
 function CodeView({
   code,
+  isGenerating = false,
+  lastProgressMessage,
 }: {
   code:
     | {
@@ -1027,7 +1055,49 @@ function CodeView({
       }
     | null
     | undefined;
+  isGenerating?: boolean;
+  lastProgressMessage?: string;
 }) {
+  if (isGenerating && !code) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="flex flex-col items-center justify-center py-12 px-8 max-w-lg mx-auto">
+          <div className="flex items-center gap-3 mb-6">
+            <Loader2 className="h-10 w-10 text-primary animate-spin shrink-0" />
+            <h3 className="text-lg font-medium">Gerando código...</h3>
+          </div>
+          <Progress variant="indeterminate" className="w-full mb-6 h-2" />
+          <ul className="w-full space-y-3 mb-6">
+            {CODE_GENERATION_STEPS.map((step, index) => (
+              <li
+                key={step.id}
+                className="flex items-center gap-3 text-sm text-muted-foreground"
+              >
+                {index < 2 ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                ) : index === 2 ? (
+                  <Loader2 className="h-4 w-4 text-primary animate-spin shrink-0" />
+                ) : (
+                  <Circle className="h-4 w-4 text-muted-foreground/50 shrink-0" />
+                )}
+                <span
+                  className={
+                    index === 2 ? "text-foreground font-medium" : undefined
+                  }
+                >
+                  {step.label}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm text-muted-foreground text-center w-full bg-muted/50 rounded-md px-4 py-3">
+            {lastProgressMessage ?? "Iniciando geração de código..."}
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (!code) {
     return (
       <Card className="border-dashed">

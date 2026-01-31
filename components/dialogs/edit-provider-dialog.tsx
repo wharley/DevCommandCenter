@@ -40,9 +40,7 @@ const providerTypeConfig: Record<
   codex: { needsApiKey: false, needsCli: true },
   openai: { needsApiKey: true, needsCli: false },
   anthropic: { needsApiKey: true, needsCli: false },
-  google: { needsApiKey: true, needsCli: false },
   cursor: { needsApiKey: false, needsCli: true },
-  vscode: { needsApiKey: false, needsCli: true },
   custom: { needsApiKey: true, needsCli: false },
 };
 
@@ -109,7 +107,8 @@ export function EditProviderDialog({
     if (provider) {
       setFormData({
         name: provider.name,
-        apiKey: provider.apiKey ?? "",
+        // Nunca preencher apiKey real (segurança); vazio = manter atual quando hasApiKey
+        apiKey: "",
         cliPath: provider.cliPath ?? "",
         model: (provider.config?.model as string) ?? "",
       });
@@ -190,7 +189,9 @@ export function EditProviderDialog({
                   }
                 />
                 <p className="text-xs text-muted-foreground">
-                  Deixe em branco para manter a chave atual.
+                  {(provider.hasApiKey ?? provider.apiKey)
+                    ? "Deixe em branco para manter a chave atual."
+                    : "Informe a chave de API."}
                 </p>
               </div>
             )}

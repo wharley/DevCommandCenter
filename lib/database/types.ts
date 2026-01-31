@@ -44,6 +44,10 @@ export interface Provider {
   name: string;
   type: ProviderType;
   apiKey?: string | null;
+  /** Interno: blob criptografado (para hydration no Electron) */
+  apiKeyEncrypted?: Buffer | null;
+  /** Para UI: true quando há key armazenada (sem expor o valor) */
+  hasApiKey?: boolean;
   cliPath?: string | null;
   config?: ProviderConfig | null;
   isActive: boolean;
@@ -149,6 +153,8 @@ export interface CreateProviderDTO {
   name: string;
   type: ProviderType;
   apiKey?: string;
+  /** Interno: blob criptografado (Electron encripta antes de chamar repo) */
+  apiKeyEncrypted?: Buffer;
   cliPath?: string;
   config?: ProviderConfig;
   isActive?: boolean;
@@ -157,7 +163,9 @@ export interface CreateProviderDTO {
 export interface UpdateProviderDTO {
   name?: string;
   type?: ProviderType;
-  apiKey?: string;
+  apiKey?: string | null;
+  /** Interno: blob criptografado */
+  apiKeyEncrypted?: Buffer;
   cliPath?: string;
   config?: ProviderConfig;
   isActive?: boolean;

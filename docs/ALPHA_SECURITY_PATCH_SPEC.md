@@ -72,9 +72,9 @@ ALTER TABLE providers ADD COLUMN api_key_encrypted BLOB;
 
 ## Critérios de aceite
 
-- [ ] Coluna `api_key_encrypted` adicionada ao schema
-- [ ] Migração automática de `api_key` → `api_key_encrypted` no startup (quando safeStorage disponível)
-- [ ] Repositories (create/update) usam encriptação
-- [ ] Repositories (read) decriptam ao retornar provider
-- [ ] Aviso na UI quando safeStorage indisponível (fallback em texto plano)
-- [ ] Testes unitários cobrindo roundtrip e migração
+- [x] Coluna `api_key_encrypted` adicionada ao schema
+- [x] Migração automática de `api_key` → `api_key_encrypted` no startup (quando safeStorage disponível)
+- [x] Repositories (create/update) usam encriptação
+- [x] Repositories (read) decriptam ao retornar provider
+- [x] Aviso na UI quando safeStorage indisponível (fallback em texto plano)
+- [ ] Testes unitários cobrindo roundtrip e migração (pendente)
