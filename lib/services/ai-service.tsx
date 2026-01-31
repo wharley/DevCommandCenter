@@ -287,7 +287,12 @@ export class AIService {
    * Aplica as mudanças ao projeto
    * Só funciona no Electron
    */
-  async applyChanges(options?: { createBackup?: boolean; dryRun?: boolean }): Promise<ApplyChangesResult> {
+  async applyChanges(options?: {
+    createBackup?: boolean;
+    dryRun?: boolean;
+    filePaths?: string[];
+    editedContent?: Record<string, string>;
+  }): Promise<ApplyChangesResult> {
     if (isElectron() && window.electronAPI?.ai) {
       try {
         return await window.electronAPI.ai.applyChanges(this.config.mission.id, options);

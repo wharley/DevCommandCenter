@@ -111,7 +111,12 @@ declare global {
         generateCode: (missionId: string) => Promise<AIResponse<GeneratedCode>>;
         applyChanges: (
           missionId: string,
-          options?: { createBackup?: boolean; dryRun?: boolean },
+          options?: {
+            createBackup?: boolean;
+            dryRun?: boolean;
+            filePaths?: string[];
+            editedContent?: Record<string, string>;
+          },
         ) => Promise<ApplyChangesResult>;
         testConnection: (
           providerId: string,

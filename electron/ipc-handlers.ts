@@ -461,9 +461,14 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (
       _event,
       missionId: string,
-      options?: { createBackup?: boolean; dryRun?: boolean },
+      options?: {
+        createBackup?: boolean;
+        dryRun?: boolean;
+        filePaths?: string[];
+        editedContent?: Record<string, string>;
+      },
     ) => {
-      return aiOrchestrator.applyChanges(missionId, options);
+      return aiOrchestrator.applyChanges(missionId, options ?? {});
     },
   );
 

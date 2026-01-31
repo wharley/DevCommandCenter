@@ -329,9 +329,33 @@ export class CursorAdapter extends BaseAdapter {
         return JSON.stringify(raw);
       }
     } catch {
-      // não é JSON único; tentar NDJSON (última linha com type=result)
+      // JSON único falhou; tentar reparar (truncamento) ou NDJSON
     }
 
+    // 1. Linha única truncada: tentar reparo (funciona para single-line também)
+    if (trimmed.includes('"type"') && trimmed.includes('"result"')) {
+      const repaired = this.tryRepairTruncatedResultLine(trimmed);
+      if (repaired) return repaired;
+
+      // 1b. Extração manual do "result" (wrapper truncado no meio do JSON interno)
+      const manualInner = this.tryExtractResultValueManually(trimmed);
+      if (manualInner) {
+        const parsed = this.tryParseWithFixes(manualInner);
+        if (parsed != null && typeof parsed === "object") {
+          return JSON.stringify(parsed);
+        }
+        const extracted = this.extractTopLevelJsonProtected(manualInner);
+        if (extracted) {
+          const parsedExtracted = this.tryParseWithFixes(extracted);
+          if (parsedExtracted != null && typeof parsedExtracted === "object") {
+            return JSON.stringify(parsedExtracted);
+          }
+        }
+        return manualInner;
+      }
+    }
+
+    // 2. NDJSON: múltiplas linhas
     if (trimmed.includes("\n")) {
       const ndjsonPayload = this.tryExtractPayloadFromNDJSON(trimmed);
       if (ndjsonPayload) return ndjsonPayload;
@@ -452,11 +476,51 @@ export class CursorAdapter extends BaseAdapter {
   }
 
   /**
+   * Extrai manualmente o valor de "result" ou "output" de uma string que parece wrapper
+   * mas não parseia (ex.: truncada). Útil quando tryRepairTruncatedResultLine falha.
+   */
+  private tryExtractResultValueManually(str: string): string | null {
+    const match = str.match(/"result"\s*:\s*"|"output"\s*:\s*"/);
+    if (!match) return null;
+    const start = (match.index ?? 0) + match[0].length;
+    let i = start;
+    while (i < str.length) {
+      const c = str[i];
+      if (c === "\\") {
+        i += 2;
+        continue;
+      }
+      if (c === '"') {
+        const inner = str.slice(start, i);
+        if (inner.startsWith("{") && (inner.includes("summary") || inner.includes("files"))) {
+          return inner;
+        }
+        return null;
+      }
+      i++;
+    }
+    // Truncado: não encontrou aspas de fechamento; usar o resto da string
+    const inner = str.slice(start);
+    if (inner.startsWith("{") && inner.length > 20) return inner;
+    return null;
+  }
+
+  /**
    * Tenta reparar uma linha NDJSON truncada (ex.: última linha cortada) fechando chaves/aspas.
    * Se conseguir parsear e tiver type==="result", devolve o payload interno normalizado.
    */
   private tryRepairTruncatedResultLine(line: string): string | null {
-    const suffixes = ['"}}', '"}]}}', "}}", "}]}", "}]}]}"];
+    const suffixes = [
+      '"}}',
+      '"}]}}',
+      '"}]}',
+      '"}]}]}',
+      '"}]}]}]}',
+      "}}",
+      "}]}",
+      "}]}]}",
+      "}]}]}]}",
+    ];
     for (const suffix of suffixes) {
       try {
         const repaired = line.trimEnd() + suffix;

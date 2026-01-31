@@ -47,6 +47,7 @@ export function NewMissionDialog({
   const [formData, setFormData] = useState({
     title: "",
     description: "",
+    preserveInstructions: "",
     providerId: defaultProviderId ?? "",
   });
 
@@ -73,6 +74,7 @@ export function NewMissionDialog({
         providerId: formData.providerId,
         title: formData.title.trim(),
         description: formData.description.trim(),
+        preserveInstructions: formData.preserveInstructions.trim() || undefined,
       });
 
       toast.success("Missão criada com sucesso");
@@ -83,6 +85,7 @@ export function NewMissionDialog({
       setFormData({
         title: "",
         description: "",
+        preserveInstructions: "",
         providerId: defaultProviderId ?? "",
       });
     } catch {
@@ -138,6 +141,29 @@ export function NewMissionDialog({
                 <p className="text-xs text-muted-foreground">
                   Quanto mais detalhada a descrição, melhor a IA poderá entender e
                   executar sua solicitação.
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="preserveInstructions">
+                  Preservar / Não alterar (opcional)
+                </Label>
+                <Textarea
+                  id="preserveInstructions"
+                  placeholder="Ex.: Mantenha 'Preview ao vivo' e 'Veja as mudanças em tempo real enquanto personaliza sua campanha.' Não use só NPS; a campanha pode ser eventos, NPS, etc."
+                  value={formData.preserveInstructions}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      preserveInstructions: e.target.value,
+                    }))
+                  }
+                  rows={2}
+                  className="max-h-24 overflow-y-auto resize-none"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Liste títulos, frases ou trechos que devem permanecer iguais. A
+                  IA receberá isso como instrução de não alterar.
                 </p>
               </div>
 

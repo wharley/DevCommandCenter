@@ -27,6 +27,7 @@ interface MissionRow {
   plan: string | null;
   generated_code: string | null;
   context: string | null;
+  preserve_instructions?: string | null;
   error_message: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -45,6 +46,7 @@ function rowToMission(row: MissionRow): Mission {
     plan: row.plan ? JSON.parse(row.plan) : null,
     generatedCode: row.generated_code ? JSON.parse(row.generated_code) : null,
     context: row.context ? JSON.parse(row.context) : null,
+    preserveInstructions: row.preserve_instructions ?? null,
     errorMessage: row.error_message,
     startedAt: row.started_at ? new Date(row.started_at) : null,
     completedAt: row.completed_at ? new Date(row.completed_at) : null,
@@ -160,8 +162,8 @@ export const MissionsRepository = {
     const id = generateId();
     
     const stmt = db.prepare(`
-      INSERT INTO missions (id, project_id, provider_id, title, description, status)
-      VALUES (?, ?, ?, ?, ?, 'created')
+      INSERT INTO missions (id, project_id, provider_id, title, description, preserve_instructions, status)
+      VALUES (?, ?, ?, ?, ?, ?, 'created')
     `);
     
     stmt.run(
@@ -169,7 +171,8 @@ export const MissionsRepository = {
       data.projectId,
       data.providerId || null,
       data.title,
-      data.description
+      data.description,
+      data.preserveInstructions ?? null
     );
     
     return this.findById(id)!;
@@ -216,6 +219,10 @@ export const MissionsRepository = {
     if (data.context !== undefined) {
       updates.push('context = ?');
       values.push(JSON.stringify(data.context));
+    }
+    if (data.preserveInstructions !== undefined) {
+      updates.push('preserve_instructions = ?');
+      values.push(data.preserveInstructions);
     }
     if (data.errorMessage !== undefined) {
       updates.push('error_message = ?');

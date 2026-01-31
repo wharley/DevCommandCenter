@@ -7,6 +7,7 @@ import {
   Circle,
   AlertCircle,
   Loader2,
+  Pencil,
   Play,
   Code2,
   FileText,
@@ -42,6 +43,12 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
   useProjects,
   useMissions,
   useProviders,
@@ -61,6 +68,23 @@ import type {
 } from "@/lib/database/types";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import Editor from "react-simple-code-editor";
+import Prism from "prismjs";
+import "prismjs/components/prism-clike";
+import "prismjs/components/prism-javascript";
+import "prismjs/components/prism-jsx";
+import "prismjs/components/prism-typescript";
+import "prismjs/components/prism-tsx";
+import "prismjs/components/prism-css";
+import "prismjs/components/prism-scss";
+import "prismjs/components/prism-json";
+import "prismjs/components/prism-markdown";
+import "prismjs/components/prism-markup";
+import "prismjs/components/prism-diff";
+import "prismjs/components/prism-bash";
+import "prismjs/components/prism-yaml";
+import "prismjs/components/prism-python";
+import "prismjs/themes/prism-tomorrow.css";
 
 const statusConfig: Record<MissionStatus, { label: string; color: string }> = {
   created: { label: "Criada", color: "bg-muted text-muted-foreground" },
@@ -123,6 +147,12 @@ export default function MissionPage() {
     totalTokens: number;
     totalDurationMs: number;
   }>({ totalTokens: 0, totalDurationMs: 0 });
+  const [selectedFilePaths, setSelectedFilePaths] = useState<Set<string>>(
+    new Set(),
+  );
+  const [editedSuggestions, setEditedSuggestions] = useState<
+    Record<string, string>
+  >({});
 
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
@@ -168,6 +198,13 @@ export default function MissionPage() {
     if (missionId) setCurrentMission(missionId);
     return () => setCurrentMission(null);
   }, [missionId, setCurrentMission]);
+
+  // Sincronizar seleção de arquivos e limpar edições quando o código gerado mudar
+  useEffect(() => {
+    const paths = mission?.generatedCode?.files?.map((f) => f.path) ?? [];
+    setSelectedFilePaths(new Set(paths));
+    setEditedSuggestions({});
+  }, [mission?.generatedCode?.files]);
 
   // Branch e worktree (Electron)
   useEffect(() => {
@@ -428,6 +465,13 @@ export default function MissionPage() {
       toast.error("Dados insuficientes para aplicar alterações");
       return;
     }
+    if (
+      mission.status === "code_ready" &&
+      selectedFilePaths.size === 0
+    ) {
+      toast.error("Selecione pelo menos um arquivo para aplicar.");
+      return;
+    }
 
     setIsApplying(true);
     addLog("action", "Aplicando alterações...");
@@ -438,7 +482,18 @@ export default function MissionPage() {
         mission,
         projectContext: mission.context ?? undefined,
       });
-      const result = await aiService.applyChanges({ createBackup: true });
+      const filePaths =
+        selectedFilePaths.size > 0 ? Array.from(selectedFilePaths) : undefined;
+      const editedContent: Record<string, string> = {};
+      for (const p of selectedFilePaths) {
+        if (editedSuggestions[p] !== undefined) editedContent[p] = editedSuggestions[p];
+      }
+      const result = await aiService.applyChanges({
+        createBackup: true,
+        filePaths,
+        editedContent:
+          Object.keys(editedContent).length > 0 ? editedContent : undefined,
+      });
 
       if (result.success) {
         toast.success(
@@ -584,13 +639,22 @@ export default function MissionPage() {
 
         <div className="flex items-start justify-between">
           <div className="flex-1">
-            <div className="flex items-center gap-3 mb-2">
+            <div className="flex items-center gap-3 mb-2 flex-wrap">
               <h1 className="text-xl font-semibold text-card-foreground">
                 {mission.title}
               </h1>
               <Badge className={statusConfig[mission.status].color}>
                 {statusConfig[mission.status].label}
               </Badge>
+              {mission.preserveInstructions?.trim() && (
+                <Badge
+                  variant="outline"
+                  className="font-normal text-muted-foreground"
+                  title={mission.preserveInstructions}
+                >
+                  Instruções de preservação ativas
+                </Badge>
+              )}
             </div>
             <p className="text-sm text-muted-foreground max-w-2xl">
               {mission.description}
@@ -776,6 +840,28 @@ export default function MissionPage() {
               code={mission.generatedCode}
               isGenerating={isGenerating}
               lastProgressMessage={lastProgressMessage}
+              selectedFilePaths={
+                mission.status === "code_ready"
+                  ? selectedFilePaths
+                  : undefined
+              }
+              onSelectionChange={
+                mission.status === "code_ready"
+                  ? (paths) => setSelectedFilePaths(new Set(paths))
+                  : undefined
+              }
+              editedSuggestions={
+                mission.status === "code_ready" ? editedSuggestions : undefined
+              }
+              onEditedSuggestionsChange={
+                mission.status === "code_ready"
+                  ? (path, content) =>
+                      setEditedSuggestions((prev) => ({
+                        ...prev,
+                        [path]: content,
+                      }))
+                  : undefined
+              }
             />
           </TabsContent>
 
@@ -1000,6 +1086,64 @@ function getLanguageFromPath(filePath: string, isDiff = false): string {
   return EXT_TO_LANG[ext] ?? "text";
 }
 
+/** Linguagem para Prism (react-simple-code-editor); Prism usa 'markup' para HTML, 'tsx' para .tsx, etc. */
+function getPrismLanguage(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const prismMap: Record<string, string> = {
+    tsx: "tsx",
+    ts: "typescript",
+    jsx: "jsx",
+    js: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    css: "css",
+    scss: "scss",
+    sass: "sass",
+    html: "markup",
+    htm: "markup",
+    json: "json",
+    md: "markdown",
+    mdx: "markdown",
+    py: "python",
+    yaml: "yaml",
+    yml: "yaml",
+    sh: "bash",
+    bash: "bash",
+    diff: "diff",
+  };
+  return prismMap[ext] ?? "markup";
+}
+
+function EditableCodeBlock({
+  filePath,
+  value,
+  onChange,
+}: {
+  filePath: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const lang = getPrismLanguage(filePath);
+  const grammar = Prism.languages[lang] ?? Prism.languages.markup;
+  return (
+    <Editor
+      value={value}
+      onValueChange={onChange}
+      highlight={(code: string) =>
+        Prism.highlight(code, grammar, lang)
+      }
+      padding={16}
+      style={{
+        fontFamily: "var(--font-mono), ui-monospace, monospace",
+        fontSize: "0.75rem",
+        minHeight: "360px",
+        background: "hsl(var(--muted) / 0.3)",
+      }}
+      textareaClassName="focus:outline-none"
+    />
+  );
+}
+
 function CodeBlock({
   filePath,
   content,
@@ -1041,6 +1185,10 @@ function CodeView({
   code,
   isGenerating = false,
   lastProgressMessage,
+  selectedFilePaths,
+  onSelectionChange,
+  editedSuggestions,
+  onEditedSuggestionsChange,
 }: {
   code:
     | {
@@ -1057,7 +1205,31 @@ function CodeView({
     | undefined;
   isGenerating?: boolean;
   lastProgressMessage?: string;
+  selectedFilePaths?: Set<string>;
+  onSelectionChange?: (paths: string[]) => void;
+  editedSuggestions?: Record<string, string>;
+  onEditedSuggestionsChange?: (path: string, content: string) => void;
 }) {
+  const getSuggestedContent = (path: string, fallback: string) =>
+    editedSuggestions?.[path] ?? fallback;
+  const isSuggestedEditable = Boolean(onEditedSuggestionsChange);
+  const toggleFileSelection = (path: string) => {
+    if (!selectedFilePaths || !onSelectionChange) return;
+    const next = new Set(selectedFilePaths);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    onSelectionChange(Array.from(next));
+  };
+
+  const selectAll = () => {
+    if (!code?.files.length || !onSelectionChange) return;
+    onSelectionChange(code.files.map((f) => f.path));
+  };
+
+  const selectNone = () => {
+    onSelectionChange?.([]);
+  };
+
   if (isGenerating && !code) {
     return (
       <Card className="border-dashed">
@@ -1128,10 +1300,38 @@ function CodeView({
       )}
 
       <div>
-        <h3 className="text-sm font-medium mb-4">
-          Arquivos alterados ({code.files.length})
-        </h3>
-        <div className="space-y-4">
+        <div className="flex items-center justify-between gap-4 mb-2">
+          <h3 className="text-sm font-medium">
+            Arquivos alterados ({code.files.length})
+          </h3>
+          {selectedFilePaths !== undefined && onSelectionChange && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <button
+                type="button"
+                onClick={selectAll}
+                className="hover:text-foreground underline"
+              >
+                Selecionar todos
+              </button>
+              <span>·</span>
+              <button
+                type="button"
+                onClick={selectNone}
+                className="hover:text-foreground underline"
+              >
+                Desmarcar todos
+              </button>
+            </div>
+          )}
+        </div>
+        {selectedFilePaths !== undefined && onSelectionChange && (
+          <p className="text-xs text-muted-foreground mb-4">
+            Marque os arquivos que deseja aplicar ao projeto. Ao clicar em{" "}
+            <strong>Aplicar alterações</strong>, apenas os selecionados serão
+            gravados.
+          </p>
+        )}
+        <Accordion type="multiple" className="w-full rounded-md border border-border">
           {code.files.map((file) => {
             const hasOriginal = (file.originalContent ?? "").trim().length > 0;
             const hasSuggested =
@@ -1145,12 +1345,36 @@ function CodeView({
               Boolean,
             ).length;
             const showTabs = tabCount > 1;
+            const isSelected =
+              selectedFilePaths === undefined ||
+              selectedFilePaths.has(file.path);
 
             return (
-              <Card key={file.path}>
-                <CardHeader className="py-3">
-                  <div className="flex items-center justify-between">
-                    <code className="text-sm font-medium">{file.path}</code>
+              <AccordionItem key={file.path} value={file.path}>
+                <AccordionTrigger className="py-3 hover:no-underline [&[data-state=open]>svg]:rotate-180">
+                  <div className="flex items-center justify-between gap-2 w-full pr-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {selectedFilePaths !== undefined && onSelectionChange && (
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          className="shrink-0"
+                        >
+                          <Checkbox
+                            id={`file-${file.path}`}
+                            checked={isSelected}
+                            onCheckedChange={() =>
+                              toggleFileSelection(file.path)
+                            }
+                          />
+                        </div>
+                      )}
+                      <code className="text-sm font-medium truncate">
+                        {file.path}
+                      </code>
+                    </div>
                     <Badge
                       variant={
                         file.action === "create"
@@ -1159,13 +1383,14 @@ function CodeView({
                             ? "destructive"
                             : "secondary"
                       }
+                      className="shrink-0"
                     >
                       {file.action}
                     </Badge>
                   </div>
-                </CardHeader>
+                </AccordionTrigger>
                 {(hasOriginal || hasSuggested || hasDiff) && (
-                  <CardContent className="pt-0">
+                  <AccordionContent>
                     {showTabs ? (
                       <Tabs
                         defaultValue={
@@ -1206,17 +1431,45 @@ function CodeView({
                         )}
                         {hasSuggested && (
                           <TabsContent value="suggested" className="mt-3">
-                            {suggestedIsMessage ? (
+                            {isSuggestedEditable ? (
+                              <>
+                                <p className="flex items-center gap-2 text-sm text-primary font-medium mb-2">
+                                  <Pencil className="h-4 w-4 shrink-0" />
+                                  Edite o conteúdo antes de aplicar.
+                                </p>
+                                <div className="rounded-md border border-border overflow-hidden">
+                                  <EditableCodeBlock
+                                    filePath={file.path}
+                                    value={getSuggestedContent(
+                                      file.path,
+                                      file.suggestedContent ?? "",
+                                    )}
+                                    onChange={(value) =>
+                                      onEditedSuggestionsChange!(
+                                        file.path,
+                                        value,
+                                      )
+                                    }
+                                  />
+                                </div>
+                              </>
+                            ) : suggestedIsMessage ? (
                               <Alert className="text-muted-foreground">
                                 <p className="text-sm whitespace-pre-wrap">
-                                  {file.suggestedContent}
+                                  {getSuggestedContent(
+                                    file.path,
+                                    file.suggestedContent ?? "",
+                                  )}
                                 </p>
                               </Alert>
                             ) : (
                               <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
                                 <CodeBlock
                                   filePath={file.path}
-                                  content={file.suggestedContent ?? ""}
+                                  content={getSuggestedContent(
+                                    file.path,
+                                    file.suggestedContent ?? "",
+                                  )}
                                 />
                               </ScrollArea>
                             )}
@@ -1262,24 +1515,55 @@ function CodeView({
                         )}
                         {hasSuggested && (
                           <div>
-                            {suggestedIsMessage ? (
+                            <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                              Código sugerido
+                              {isSuggestedEditable && (
+                                <span className="font-normal text-muted-foreground ml-1">
+                                  (editável)
+                                </span>
+                              )}
+                            </h4>
+                            {isSuggestedEditable ? (
+                              <>
+                                <p className="flex items-center gap-2 text-sm text-primary font-medium mb-2">
+                                  <Pencil className="h-4 w-4 shrink-0" />
+                                  Edite o conteúdo antes de aplicar.
+                                </p>
+                                <div className="rounded-md border border-border overflow-hidden">
+                                  <EditableCodeBlock
+                                    filePath={file.path}
+                                    value={getSuggestedContent(
+                                      file.path,
+                                      file.suggestedContent ?? "",
+                                    )}
+                                    onChange={(value) =>
+                                      onEditedSuggestionsChange!(
+                                        file.path,
+                                        value,
+                                      )
+                                    }
+                                  />
+                                </div>
+                              </>
+                            ) : suggestedIsMessage ? (
                               <Alert className="text-muted-foreground">
                                 <p className="text-sm whitespace-pre-wrap">
-                                  {file.suggestedContent}
+                                  {getSuggestedContent(
+                                    file.path,
+                                    file.suggestedContent ?? "",
+                                  )}
                                 </p>
                               </Alert>
                             ) : (
-                              <>
-                                <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                                  Código sugerido
-                                </h4>
-                                <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                                  <CodeBlock
-                                    filePath={file.path}
-                                    content={file.suggestedContent ?? ""}
-                                  />
-                                </ScrollArea>
-                              </>
+                              <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                                <CodeBlock
+                                  filePath={file.path}
+                                  content={getSuggestedContent(
+                                    file.path,
+                                    file.suggestedContent ?? "",
+                                  )}
+                                />
+                              </ScrollArea>
                             )}
                           </div>
                         )}
@@ -1310,12 +1594,12 @@ function CodeView({
                         )}
                       </div>
                     )}
-                  </CardContent>
+                  </AccordionContent>
                 )}
-              </Card>
+              </AccordionItem>
             );
           })}
-        </div>
+        </Accordion>
       </div>
     </div>
   );

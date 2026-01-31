@@ -87,6 +87,7 @@ export interface Mission {
   plan?: MissionPlan | null;
   generatedCode?: GeneratedCode | null;
   context?: MissionContext | null;
+  preserveInstructions?: string | null;
   errorMessage?: string | null;
   startedAt?: Date | null;
   completedAt?: Date | null;
@@ -192,12 +193,14 @@ export interface CreateMissionDTO {
   providerId?: string;
   title: string;
   description: string;
+  preserveInstructions?: string;
 }
 
 export interface UpdateMissionDTO {
   title?: string;
   description?: string;
   providerId?: string;
+  preserveInstructions?: string | null;
   status?: MissionStatus;
   plan?: MissionPlan;
   generatedCode?: GeneratedCode;

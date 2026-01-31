@@ -31,7 +31,7 @@ export const codeSuggestionSchema = z.object({
 });
 
 export const generatedCodeSchema = z.object({
-  files: z.array(codeSuggestionSchema).min(1, "GeneratedCode must have at least one file"),
+  files: z.array(codeSuggestionSchema).min(0),
   summary: z.string().optional(),
 });
 

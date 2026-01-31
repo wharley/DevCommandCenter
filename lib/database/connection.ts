@@ -122,6 +122,9 @@ export function initDatabase(): Database.Database {
   // Migração: adicionar coluna api_key_encrypted se não existir
   migrateApiKeyEncrypted(db);
 
+  // Migração: adicionar coluna preserve_instructions em missions se não existir
+  migratePreserveInstructions(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
 
   return db;
@@ -179,6 +182,20 @@ function migrateApiKeyEncrypted(database: Database.Database): void {
 
   database.exec("ALTER TABLE providers ADD COLUMN api_key_encrypted BLOB");
   console.log("[Database] Migration: api_key_encrypted column added.");
+}
+
+/**
+ * Migração: adiciona coluna preserve_instructions em missions se não existir.
+ */
+function migratePreserveInstructions(database: Database.Database): void {
+  const rows = database
+    .prepare("PRAGMA table_info(missions)")
+    .all() as Array<{ name: string }>;
+  const hasColumn = rows.some((c) => c.name === "preserve_instructions");
+  if (hasColumn) return;
+
+  database.exec("ALTER TABLE missions ADD COLUMN preserve_instructions TEXT");
+  console.log("[Database] Migration: preserve_instructions column added to missions.");
 }
 
 /**

@@ -63,6 +63,11 @@ ${projectContext.files.length > 50 ? `\n... and ${projectContext.files.length - 
 
 **Description**: 
 ${mission.description}
+${mission.preserveInstructions?.trim() ? `
+
+## Preserve / Do not change
+${mission.preserveInstructions.trim()}
+Do not modify or suggest changes to the above.` : ""}
 
 ## Instructions
 Create a detailed implementation plan with the following JSON structure:
@@ -103,6 +108,11 @@ ${plan ? JSON.stringify(plan, null, 2) : "No plan available"}
 ## Task
 **Title**: ${mission.title}
 **Description**: ${mission.description}
+${mission.preserveInstructions?.trim() ? `
+
+## Preserve / Do not change
+${mission.preserveInstructions.trim()}
+Do not modify or suggest changes to the above.` : ""}
 
 ## Instructions
 Generate the code changes with the following JSON structure:

@@ -293,7 +293,12 @@ export class AIOrchestrator {
    */
   async applyChanges(
     missionId: string,
-    options: { createBackup?: boolean; dryRun?: boolean } = {},
+    options: {
+      createBackup?: boolean;
+      dryRun?: boolean;
+      filePaths?: string[];
+      editedContent?: Record<string, string>;
+    } = {},
   ): Promise<ApplyChangesResult> {
     try {
       // Busca a missão e o projeto
@@ -323,17 +328,52 @@ export class AIOrchestrator {
         };
       }
 
+      const requestedPaths = options.filePaths;
+      let filesToApply =
+        requestedPaths && requestedPaths.length > 0
+          ? mission.generatedCode.files.filter((f) =>
+              requestedPaths.includes(f.path),
+            )
+          : mission.generatedCode.files;
+
+      if (options.editedContent && Object.keys(options.editedContent).length > 0) {
+        filesToApply = filesToApply.map((f) => {
+          const edited = options.editedContent![f.path];
+          if (edited !== undefined) {
+            return {
+              ...f,
+              suggestedContent: edited,
+              diff: undefined,
+            };
+          }
+          return f;
+        });
+      }
+
+      if (filesToApply.length === 0) {
+        return {
+          success: false,
+          appliedFiles: [],
+          failedFiles: [
+            {
+              path: "",
+              error: "Nenhum arquivo selecionado para aplicar.",
+            },
+          ],
+        };
+      }
+
       // Atualiza status para "applying"
       db.missions.updateStatus(missionId, "applying");
       db.missionLogs.logAction(
         missionId,
-        `Applying ${mission.generatedCode.files.length} file changes`,
+        `Applying ${filesToApply.length} file changes`,
       );
 
       // Aplica as mudanças
       const gitService = new GitService(project.path);
       const result = await gitService.applyChanges(
-        mission.generatedCode.files,
+        filesToApply,
         {
           createBackup: options.createBackup ?? true,
           dryRun: options.dryRun ?? false,

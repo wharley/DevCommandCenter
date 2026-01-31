@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS missions (
   plan TEXT, -- JSON com o plano de ação gerado
   generated_code TEXT, -- JSON com as sugestões de código/diffs
   context TEXT, -- JSON com contexto do repo usado na missão
+  preserve_instructions TEXT, -- texto livre: o que não alterar (ex.: "Não altere a seção Preview ao vivo")
   error_message TEXT,
   started_at TEXT,
   completed_at TEXT,

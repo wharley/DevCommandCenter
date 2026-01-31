@@ -41,7 +41,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     generateCode: (missionId: string) => invoke("ai:generateCode", missionId),
     applyChanges: (
       missionId: string,
-      options?: { createBackup?: boolean; dryRun?: boolean },
+      options?: {
+        createBackup?: boolean;
+        dryRun?: boolean;
+        filePaths?: string[];
+        editedContent?: Record<string, string>;
+      },
     ) => invoke("ai:applyChanges", missionId, options),
     testConnection: (providerId: string) =>
       invoke("ai:testConnection", providerId),
