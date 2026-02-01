@@ -153,6 +153,11 @@ export default function MissionPage() {
   const [editedSuggestions, setEditedSuggestions] = useState<
     Record<string, string>
   >({});
+  const [cliParseErrorWithRepoChanges, setCliParseErrorWithRepoChanges] =
+    useState(false);
+  const [recoveryCodeFromGit, setRecoveryCodeFromGit] = useState<
+    GeneratedCode | null
+  >(null);
 
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
@@ -205,6 +210,14 @@ export default function MissionPage() {
     setSelectedFilePaths(new Set(paths));
     setEditedSuggestions({});
   }, [mission?.generatedCode?.files]);
+
+  // Limpar estado de recovery quando a missão tiver generatedCode preenchido
+  useEffect(() => {
+    if (mission?.generatedCode?.files?.length) {
+      setCliParseErrorWithRepoChanges(false);
+      setRecoveryCodeFromGit(null);
+    }
+  }, [mission?.generatedCode?.files?.length]);
 
   // Branch e worktree (Electron)
   useEffect(() => {
@@ -383,6 +396,9 @@ export default function MissionPage() {
       return;
     }
 
+    setCliParseErrorWithRepoChanges(false);
+    setRecoveryCodeFromGit(null);
+
     const git = typeof window !== "undefined" ? window.electronAPI?.git : null;
     if (createBranchForMission && project?.path && git) {
       let baseBranch: string;
@@ -443,12 +459,71 @@ export default function MissionPage() {
     } catch (error) {
       // Volta para "plan_generated" para permitir tentar novamente
       updateStatus(missionId, "plan_generated");
-      addLog(
-        "error",
-        error instanceof Error ? error.message : "Erro desconhecido",
-        undefined,
-      );
+      const errorMessage =
+        error instanceof Error ? error.message : "Erro desconhecido";
+      addLog("error", errorMessage, undefined);
       toast.error("Falha ao gerar código. Você pode tentar novamente.");
+
+      const isParseError =
+        typeof errorMessage === "string" &&
+        (errorMessage.includes("Failed to parse code") ||
+          errorMessage.includes("Could not parse JSON"));
+      const isCliProvider =
+        provider?.type === "cursor" ||
+        provider?.type === "claude-code" ||
+        provider?.type === "codex";
+      if (
+        isParseError &&
+        isCliProvider &&
+        project?.path &&
+        window.electronAPI?.git
+      ) {
+        try {
+          const status = await window.electronAPI.git.getStatus(project.path);
+          const hasChanges =
+            status.isDirty ||
+            status.staged.length > 0 ||
+            status.unstaged.length > 0 ||
+            status.untracked.length > 0;
+          if (hasChanges) {
+            const allPaths = [
+              ...new Set([
+                ...status.staged,
+                ...status.unstaged,
+                ...status.untracked,
+              ]),
+            ];
+            const git = window.electronAPI?.git;
+            const files: GeneratedCode["files"] = await Promise.all(
+              allPaths.map(async (filePath) => {
+                const diff =
+                  (git
+                    ? await git.getFileDiffHead(project.path, filePath)
+                    : "") ?? "";
+                const isUntracked = status.untracked.includes(filePath);
+                return {
+                  path: filePath,
+                  action: isUntracked ? "create" : "modify",
+                  diff: diff || undefined,
+                };
+              }),
+            );
+            if (files.length > 0) {
+              setRecoveryCodeFromGit({
+                summary: "Diff recuperado do repositório (resposta do CLI truncada).",
+                files,
+              });
+              setCliParseErrorWithRepoChanges(true);
+              setActiveTab("code");
+              toast.info(
+                "A resposta do CLI não pôde ser exibida, mas há alterações no repositório. Revise o diff na aba Código e commite quando quiser.",
+              );
+            }
+          }
+        } catch {
+          // ignore recovery failure
+        }
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -662,7 +737,23 @@ export default function MissionPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {mission.status === "created" && (
+            {cliParseErrorWithRepoChanges && (
+              <div className="flex flex-col gap-2">
+                <p className="text-sm text-muted-foreground max-w-md">
+                  Alterações já aplicadas pelo CLI (resposta truncada). Revise o
+                  diff na aba Código e commite quando quiser.
+                </p>
+                <Button
+                  onClick={() => setCommitDialogOpen(true)}
+                  variant="outline"
+                  className="border-primary/50 hover:bg-primary/10"
+                >
+                  <GitCommit className="mr-2 h-4 w-4" />
+                  Commitar
+                </Button>
+              </div>
+            )}
+            {!cliParseErrorWithRepoChanges && mission.status === "created" && (
               <Button onClick={handleGeneratePlan} disabled={isGenerating}>
                 {isGenerating ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -672,7 +763,8 @@ export default function MissionPage() {
                 Gerar plano
               </Button>
             )}
-            {mission.status === "plan_generated" && (
+            {!cliParseErrorWithRepoChanges &&
+              mission.status === "plan_generated" && (
               <div className="flex flex-col gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground whitespace-nowrap">
@@ -810,7 +902,11 @@ export default function MissionPage() {
               <TabsTrigger
                 value="code"
                 className="gap-2"
-                disabled={!mission.generatedCode && !isGenerating}
+                disabled={
+                  !mission.generatedCode &&
+                  !isGenerating &&
+                  !cliParseErrorWithRepoChanges
+                }
               >
                 <Code2 className="h-4 w-4" />
                 Código
@@ -837,7 +933,7 @@ export default function MissionPage() {
 
           <TabsContent value="code" className="flex-1 overflow-auto p-6 mt-0">
             <CodeView
-              code={mission.generatedCode}
+              code={recoveryCodeFromGit ?? mission.generatedCode}
               isGenerating={isGenerating}
               lastProgressMessage={lastProgressMessage}
               selectedFilePaths={

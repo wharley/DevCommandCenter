@@ -783,6 +783,7 @@ export type ProviderType =
 - **Exemplo de uso no terminal:** `agent chat "descrição da missão"` (ou equivalente conforme documentação oficial).
 - O adapter em `electron/services/adapters/cursor.ts` invoca o binário `agent` (ou caminho configurável em `cliPath`) com a descrição da missão/contexto e parseia a resposta.
 - **Formato de saída com `--output-format json`:** O CLI pode retornar um único JSON no stdout, possivelmente envolvido em `{ "result": ... }` ou `{ "output": ... }` (string ou objeto). O adapter normaliza esse wrapper (string ou objeto com `.files`/`.steps`) e aplica correção de newlines literais (via `parseJSONResponse` na base) antes de interpretar como `GeneratedCode` ou `MissionPlan`.
+- **Truncamento:** A saída do CLI pode vir truncada (pipe/stream, timeout ou bug do CLI). O adapter aplica várias estratégias de reparo: reparo da linha wrapper com `tryRepairTruncatedResultLine`, extração manual do `result` com `tryExtractResultValueManually`, fallback NDJSON (`tryExtractPayloadFromNDJSON`) e reparo do payload interno truncado (`tryRepairTruncatedInnerPayload`). Se o erro "Failed to parse code" ou "Could not parse JSON" persistir, ver o item de troubleshooting abaixo.
 
 ### 2. Implementar Diff Real
 
@@ -945,6 +946,10 @@ curl http://localhost:5173
 # Instalar Visual Studio Build Tools
 npm install --global windows-build-tools
 ```
+
+**5. Cursor CLI: Failed to parse code / Could not parse JSON from response**
+
+Indica que a resposta do Cursor CLI veio truncada ou em formato inesperado. O app já tenta reparar (wrapper, NDJSON, payload interno). Se o erro persistir: salvar as últimas ~30 linhas do stdout do CLI (ex.: redirecionar saída para arquivo e enviar `tail -n 30`) para diagnóstico; verificar timeout e rede; conferir [Cursor CLI output format](https://docs.cursor.com/cli/reference/output-format).
 
 ---
 

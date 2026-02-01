@@ -149,6 +149,12 @@ export class CursorAdapter extends BaseAdapter {
         }
       }
 
+      // Reparo de payload interno truncado (inner com summary/files ou steps cortado)
+      if (!planResult.success && response.includes('"summary"') && (response.includes('"files"') || response.includes('"steps"'))) {
+        const repaired = this.tryRepairTruncatedInnerPayload(response, (raw) => this.parseAndValidateMissionPlan(raw));
+        if (repaired) planResult = repaired;
+      }
+
       if (!planResult.success) {
         const lines = response.trim().split(/\r?\n/).filter((l) => l.length > 0);
         const looksNdjson = lines.length > 1;
@@ -242,6 +248,12 @@ export class CursorAdapter extends BaseAdapter {
         if (ndjsonPayload) {
           codeResult = this.parseAndValidateGeneratedCode(ndjsonPayload);
         }
+      }
+
+      // Reparo de payload interno truncado (inner com summary/files cortado)
+      if (!codeResult.success && response.includes('"summary"') && response.includes('"files"')) {
+        const repaired = this.tryRepairTruncatedInnerPayload(response, (raw) => this.parseAndValidateGeneratedCode(raw));
+        if (repaired) codeResult = repaired;
       }
 
       if (!codeResult.success) {
@@ -605,6 +617,34 @@ export class CursorAdapter extends BaseAdapter {
         }
         continue;
       }
+    }
+    return null;
+  }
+
+  /**
+   * Tenta reparar payload interno truncado (ex.: JSON cortado no meio de suggestedContent).
+   * Quando a resposta já é o inner (summary + files ou steps) e está truncada, testa sufixos
+   * de fechamento; devolve o resultado validado do primeiro que passar no parse/validação.
+   */
+  private tryRepairTruncatedInnerPayload<T>(
+    response: string,
+    parseAndValidate: (raw: string) => { success: true; data: T } | { success: false; error: string },
+  ): { success: true; data: T } | null {
+    const trimmed = response.trim();
+    if (!trimmed.includes('"summary"')) return null;
+    if (!trimmed.includes('"files"') && !trimmed.includes('"steps"')) return null;
+
+    const suffixes = [
+      '"}]}',
+      '"}]}]}',
+      '"}]}]}]}',
+      '"}]}]}]}]}',
+      '\\"}]}', // truncamento logo após backslash
+    ];
+    for (const suffix of suffixes) {
+      const repaired = trimmed.trimEnd() + suffix;
+      const result = parseAndValidate(repaired);
+      if (result.success) return { success: true, data: result.data };
     }
     return null;
   }

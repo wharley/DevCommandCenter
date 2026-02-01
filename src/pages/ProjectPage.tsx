@@ -15,6 +15,7 @@ import {
   Trash2,
   Play,
   FileCode,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +39,7 @@ import { NewMissionDialog } from "@/components/dialogs/new-mission-dialog";
 import { useProjects, useMissions, useProviders } from "@/hooks/use-data";
 import { useAppStore } from "@/hooks/use-app-store";
 import { formatDistanceToNow } from "date-fns";
+import { toast } from "sonner";
 import { ptBR } from "date-fns/locale";
 import type { MissionStatus } from "@/lib/database/types";
 
@@ -78,6 +80,7 @@ export default function ProjectPage() {
   const {
     missions,
     remove: removeMission,
+    cancel: cancelMission,
     isLoading: missionsLoading,
   } = useMissions(projectId ?? undefined);
   const { providers } = useProviders();
@@ -345,6 +348,32 @@ export default function ProjectPage() {
                                 Abrir missão
                               </Link>
                             </DropdownMenuItem>
+                            {["created", "plan_generated", "code_ready", "failed"].includes(
+                              mission.status,
+                            ) && (
+                              <DropdownMenuItem
+                                onClick={async (e) => {
+                                  e.preventDefault();
+                                  if (
+                                    !window.confirm(
+                                      "Tem certeza que deseja cancelar esta missão?",
+                                    )
+                                  )
+                                    return;
+                                  try {
+                                    await cancelMission(mission.id);
+                                    toast.success("Missão cancelada");
+                                  } catch {
+                                    toast.error(
+                                      "Não foi possível cancelar a missão.",
+                                    );
+                                  }
+                                }}
+                              >
+                                <X className="mr-2 h-4 w-4" />
+                                Cancelar missão
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
