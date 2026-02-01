@@ -196,11 +196,14 @@ export class AIService {
    * No Electron, usa IPC para chamar o backend
    * No browser, usa mock
    */
-  async generatePlan(): Promise<AIResponse<MissionPlan>> {
+  async generatePlan(planFeedback?: string): Promise<AIResponse<MissionPlan>> {
     // Se estamos no Electron, usa o backend real
     if (isElectron() && window.electronAPI?.ai) {
       try {
-        const result = await window.electronAPI.ai.generatePlan(this.config.mission.id);
+        const result = await window.electronAPI.ai.generatePlan(
+          this.config.mission.id,
+          planFeedback ? { planFeedback } : undefined,
+        );
         return result as AIResponse<MissionPlan>;
       } catch (error) {
         return {

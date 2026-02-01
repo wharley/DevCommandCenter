@@ -67,8 +67,12 @@ export class AIOrchestrator {
 
   /**
    * Gera um plano de ação para uma missão
+   * @param options.planFeedback Feedback do usuário ao regenerar (o que ajustar no plano anterior)
    */
-  async generatePlan(missionId: string): Promise<AIResponse<MissionPlan>> {
+  async generatePlan(
+    missionId: string,
+    options?: { planFeedback?: string },
+  ): Promise<AIResponse<MissionPlan>> {
     // Timestamp do último log de progresso para evitar spam
     let lastProgressLog = 0;
     const progressLogThrottleMs = 5000; // Log de progresso a cada 5 segundos no máximo
@@ -121,6 +125,7 @@ export class AIOrchestrator {
         provider,
         mission,
         projectContext,
+        planFeedback: options?.planFeedback,
       };
 
       // Atualiza status para "planning"

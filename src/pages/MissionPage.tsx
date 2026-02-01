@@ -18,6 +18,7 @@ import {
   GitBranch,
   GitCommit,
   Upload,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +58,7 @@ import {
 import { useAppStore } from "@/hooks/use-app-store";
 import { createAIService } from "@/lib/services/ai-service";
 import { CommitDialog } from "@/components/dialogs/commit-dialog";
+import { RegeneratePlanDialog } from "@/components/dialogs/regenerate-plan-dialog";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import type {
@@ -135,6 +137,8 @@ export default function MissionPage() {
   const [isApplying, setIsApplying] = useState(false);
   const [activeTab, setActiveTab] = useState("plan");
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const [regeneratePlanDialogOpen, setRegeneratePlanDialogOpen] =
+    useState(false);
   const [commitDialogStatus, setCommitDialogStatus] = useState<
     import("@/types/electron").GitStatus | null
   >(null);
@@ -148,16 +152,15 @@ export default function MissionPage() {
     totalDurationMs: number;
   }>({ totalTokens: 0, totalDurationMs: 0 });
   const [selectedFilePaths, setSelectedFilePaths] = useState<Set<string>>(
-    new Set(),
+    new Set()
   );
   const [editedSuggestions, setEditedSuggestions] = useState<
     Record<string, string>
   >({});
   const [cliParseErrorWithRepoChanges, setCliParseErrorWithRepoChanges] =
     useState(false);
-  const [recoveryCodeFromGit, setRecoveryCodeFromGit] = useState<
-    GeneratedCode | null
-  >(null);
+  const [recoveryCodeFromGit, setRecoveryCodeFromGit] =
+    useState<GeneratedCode | null>(null);
 
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
@@ -166,6 +169,7 @@ export default function MissionPage() {
     updateStatus,
     setPlan,
     setCode,
+    cancel: cancelMission,
     refresh: refreshMissions,
     isLoading: missionsLoading,
   } = useMissions(projectId ?? undefined);
@@ -179,23 +183,21 @@ export default function MissionPage() {
 
   // Usar useMemo para estabilizar as referências e evitar re-renders desnecessários
   const project = useMemo(
-    () =>
-      projectId ? (projects.find((p) => p.id === projectId) ?? null) : null,
-    [projectId, projects],
+    () => (projectId ? projects.find((p) => p.id === projectId) ?? null : null),
+    [projectId, projects]
   );
 
   const mission = useMemo(
-    () =>
-      missionId ? (missions.find((m) => m.id === missionId) ?? null) : null,
-    [missionId, missions],
+    () => (missionId ? missions.find((m) => m.id === missionId) ?? null : null),
+    [missionId, missions]
   );
 
   const provider = useMemo(
     () =>
       mission?.providerId
-        ? (providers.find((p) => p.id === mission.providerId) ?? null)
+        ? providers.find((p) => p.id === mission.providerId) ?? null
         : null,
-    [mission?.providerId, providers],
+    [mission?.providerId, providers]
   );
 
   // Usar missionId como dependência em vez do objeto mission inteiro
@@ -305,7 +307,7 @@ export default function MissionPage() {
   // Last progress message from logs (info/prompt) for the Code tab progress screen
   const lastProgressMessage = useMemo(() => {
     const progressLogs = logs.filter(
-      (l) => l.type === "info" || l.type === "prompt",
+      (l) => l.type === "info" || l.type === "prompt"
     );
     if (progressLogs.length === 0) return "Iniciando geração de código...";
     const sorted = [...progressLogs].sort((a, b) => {
@@ -369,8 +371,10 @@ export default function MissionPage() {
         setPlan(missionId, response.data as MissionPlan);
         addLog(
           "response",
-          `Plano gerado com ${(response.data as MissionPlan).steps.length} etapas`,
-          response.metadata ?? undefined,
+          `Plano gerado com ${
+            (response.data as MissionPlan).steps.length
+          } etapas`,
+          response.metadata ?? undefined
         );
         toast.success("Plano gerado com sucesso");
       } else {
@@ -382,9 +386,57 @@ export default function MissionPage() {
       addLog(
         "error",
         error instanceof Error ? error.message : "Erro desconhecido",
-        undefined,
+        undefined
       );
       toast.error("Falha ao gerar plano. Você pode tentar novamente.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleRegeneratePlan = async (feedback: string) => {
+    if (!provider || !missionId) {
+      toast.error("Nenhum provedor selecionado para esta missão");
+      throw new Error("Provider or missionId missing");
+    }
+
+    setIsGenerating(true);
+    updateStatus(missionId, "planning");
+    addLog("prompt", "Regenerando plano com feedback do usuário...", {
+      model: provider.config?.model as string,
+    });
+
+    try {
+      const aiService = createAIService({
+        provider,
+        mission,
+        projectContext: mission.context ?? undefined,
+      });
+
+      const response = await aiService.generatePlan(feedback);
+
+      if (response.success && response.data) {
+        setPlan(missionId, response.data as MissionPlan);
+        addLog(
+          "response",
+          `Plano regenerado com ${
+            (response.data as MissionPlan).steps.length
+          } etapas`,
+          response.metadata ?? undefined
+        );
+        toast.success("Plano regenerado com sucesso");
+      } else {
+        throw new Error(response.error || "Falha ao regenerar plano");
+      }
+    } catch (error) {
+      updateStatus(missionId, "plan_generated");
+      addLog(
+        "error",
+        error instanceof Error ? error.message : "Erro desconhecido",
+        undefined
+      );
+      toast.error("Falha ao regenerar plano. Você pode tentar novamente.");
+      throw error;
     } finally {
       setIsGenerating(false);
     }
@@ -406,24 +458,27 @@ export default function MissionPage() {
         baseBranch = await git.getDefaultBranch(project.path);
       } catch {
         toast.error(
-          "Não foi possível identificar o branch base (main/master). Configure o repositório e tente novamente.",
+          "Não foi possível identificar o branch base (main/master). Configure o repositório e tente novamente."
         );
         return;
       }
-      const branchName =
-        branchNameForMission.trim() || `mission/${missionId}`;
+      const branchName = branchNameForMission.trim() || `mission/${missionId}`;
       const created = await git.createBranch(
         project.path,
         branchName,
-        baseBranch,
+        baseBranch
       );
       if (!created) {
         toast.error(
-          "Não foi possível criar o branch. Verifique se o repositório está em um estado válido.",
+          "Não foi possível criar o branch. Verifique se o repositório está em um estado válido."
         );
         return;
       }
-      addLog("action", `Branch criado: ${branchName} (a partir de ${baseBranch})`, undefined);
+      addLog(
+        "action",
+        `Branch criado: ${branchName} (a partir de ${baseBranch})`,
+        undefined
+      );
       const newBranch = await git.getCurrentBranch(project.path);
       setCurrentBranch(newBranch ?? null);
     }
@@ -448,8 +503,10 @@ export default function MissionPage() {
         setCode(missionId, response.data as GeneratedCode);
         addLog(
           "response",
-          `Código gerado: ${(response.data as { files: { path: string }[] }).files.length} arquivo(s) alterado(s)`,
-          response.metadata ?? undefined,
+          `Código gerado: ${
+            (response.data as { files: { path: string }[] }).files.length
+          } arquivo(s) alterado(s)`,
+          response.metadata ?? undefined
         );
         toast.success("Sugestões de código geradas");
         setActiveTab("code");
@@ -506,17 +563,18 @@ export default function MissionPage() {
                   action: isUntracked ? "create" : "modify",
                   diff: diff || undefined,
                 };
-              }),
+              })
             );
             if (files.length > 0) {
               setRecoveryCodeFromGit({
-                summary: "Diff recuperado do repositório (resposta do CLI truncada).",
+                summary:
+                  "Diff recuperado do repositório (resposta do CLI truncada).",
                 files,
               });
               setCliParseErrorWithRepoChanges(true);
               setActiveTab("code");
               toast.info(
-                "A resposta do CLI não pôde ser exibida, mas há alterações no repositório. Revise o diff na aba Código e commite quando quiser.",
+                "A resposta do CLI não pôde ser exibida, mas há alterações no repositório. Revise o diff na aba Código e commite quando quiser."
               );
             }
           }
@@ -540,10 +598,7 @@ export default function MissionPage() {
       toast.error("Dados insuficientes para aplicar alterações");
       return;
     }
-    if (
-      mission.status === "code_ready" &&
-      selectedFilePaths.size === 0
-    ) {
+    if (mission.status === "code_ready" && selectedFilePaths.size === 0) {
       toast.error("Selecione pelo menos um arquivo para aplicar.");
       return;
     }
@@ -561,7 +616,8 @@ export default function MissionPage() {
         selectedFilePaths.size > 0 ? Array.from(selectedFilePaths) : undefined;
       const editedContent: Record<string, string> = {};
       for (const p of selectedFilePaths) {
-        if (editedSuggestions[p] !== undefined) editedContent[p] = editedSuggestions[p];
+        if (editedSuggestions[p] !== undefined)
+          editedContent[p] = editedSuggestions[p];
       }
       const result = await aiService.applyChanges({
         createBackup: true,
@@ -572,7 +628,7 @@ export default function MissionPage() {
 
       if (result.success) {
         toast.success(
-          `Alterações aplicadas: ${result.appliedFiles.length} arquivo(s)`,
+          `Alterações aplicadas: ${result.appliedFiles.length} arquivo(s)`
         );
         try {
           await refreshMissions();
@@ -580,13 +636,15 @@ export default function MissionPage() {
           setTimeout(() => setActiveTab("logs"), 0);
         } catch {
           toast.warning(
-            "Alterações aplicadas, mas a interface pode estar desatualizada. Atualize a página se necessário.",
+            "Alterações aplicadas, mas a interface pode estar desatualizada. Atualize a página se necessário."
           );
         }
       } else {
         const detail =
           result.failedFiles.length > 0
-            ? ` ${result.failedFiles.map((f) => `${f.path}: ${f.error}`).join("; ")}`
+            ? ` ${result.failedFiles
+                .map((f) => `${f.path}: ${f.error}`)
+                .join("; ")}`
             : "";
         toast.error(`Falha ao aplicar alterações.${detail}`);
         try {
@@ -657,6 +715,36 @@ export default function MissionPage() {
       toast.error(`Falha ao fazer push: ${msg}`);
     } finally {
       setIsPushing(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!missionId || !project?.path || !window.electronAPI?.git?.reset) {
+      toast.error("Rejeitar indisponível");
+      return;
+    }
+    const status = await window.electronAPI.git.getStatus(project.path);
+    if (!status.isRepo) {
+      toast.error("Repositório Git não encontrado");
+      return;
+    }
+    const ref = status.isDirty ? "HEAD" : "HEAD~1";
+    const msg = status.isDirty
+      ? "Descartar alterações não commitadas e cancelar esta missão?"
+      : "Reverter o último commit e cancelar esta missão? O commit será removido.";
+    if (!window.confirm(msg)) return;
+    try {
+      const result = await window.electronAPI.git.reset(project.path, ref);
+      if (result.success) {
+        await cancelMission(missionId);
+        toast.success("Missão rejeitada e alterações descartadas");
+        navigate(`/project/${projectId}`);
+      } else {
+        toast.error(result.error ?? "Falha ao reverter alterações.");
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro desconhecido";
+      toast.error(`Falha ao rejeitar: ${msg}`);
     }
   };
 
@@ -765,74 +853,92 @@ export default function MissionPage() {
             )}
             {!cliParseErrorWithRepoChanges &&
               mission.status === "plan_generated" && (
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground whitespace-nowrap">
-                    Gerar código com:
-                  </span>
-                  <Select
-                    value={mission.providerId ?? project?.defaultProviderId ?? ""}
-                    onValueChange={(value) => {
-                      if (missionId && value) update(missionId, { providerId: value });
-                    }}
-                    disabled={isGenerating}
-                  >
-                    <SelectTrigger className="w-[200px]">
-                      <SelectValue placeholder="Selecione o provedor" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {providers
-                        .filter((p) => p.isActive)
-                        .map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                  <Button onClick={handleGenerateCode} disabled={isGenerating || !provider}>
-                    {isGenerating ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Code2 className="mr-2 h-4 w-4" />
-                    )}
-                    {isGenerating ? "Gerando código..." : "Gerar código"}
-                  </Button>
-                </div>
-                {project?.path && typeof window !== "undefined" && window.electronAPI?.git && (
-                  <div className="flex flex-col gap-2">
-                    <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-                      <Checkbox
-                        checked={createBranchForMission}
-                        onCheckedChange={(checked) =>
-                          setCreateBranchForMission(checked === true)
-                        }
-                        disabled={isGenerating}
-                      />
-                      <span>Criar branch para esta missão</span>
-                    </label>
-                    {createBranchForMission && (
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-muted-foreground whitespace-nowrap">
-                          Nome da branch:
-                        </span>
-                        <Input
-                          className="max-w-[280px]"
-                          placeholder={
-                            missionId ? `mission/${missionId}` : "mission/..."
-                          }
-                          value={branchNameForMission}
-                          onChange={(e) =>
-                            setBranchNameForMission(e.target.value)
-                          }
-                          disabled={isGenerating}
-                        />
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => setRegeneratePlanDialogOpen(true)}
+                      disabled={isGenerating}
+                    >
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Regenerar plano
+                    </Button>
+                    <span className="text-sm text-muted-foreground whitespace-nowrap">
+                      Gerar código com:
+                    </span>
+                    <Select
+                      value={
+                        mission.providerId ?? project?.defaultProviderId ?? ""
+                      }
+                      onValueChange={(value) => {
+                        if (missionId && value)
+                          update(missionId, { providerId: value });
+                      }}
+                      disabled={isGenerating}
+                    >
+                      <SelectTrigger className="w-[200px]">
+                        <SelectValue placeholder="Selecione o provedor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {providers
+                          .filter((p) => p.isActive)
+                          .map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      onClick={handleGenerateCode}
+                      disabled={isGenerating || !provider}
+                    >
+                      {isGenerating ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Code2 className="mr-2 h-4 w-4" />
+                      )}
+                      {isGenerating ? "Gerando código..." : "Gerar código"}
+                    </Button>
+                  </div>
+                  {project?.path &&
+                    typeof window !== "undefined" &&
+                    window.electronAPI?.git && (
+                      <div className="flex flex-col gap-2">
+                        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                          <Checkbox
+                            checked={createBranchForMission}
+                            onCheckedChange={(checked) =>
+                              setCreateBranchForMission(checked === true)
+                            }
+                            disabled={isGenerating}
+                          />
+                          <span>Criar branch para esta missão</span>
+                        </label>
+                        {createBranchForMission && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground whitespace-nowrap">
+                              Nome da branch:
+                            </span>
+                            <Input
+                              className="max-w-[280px]"
+                              placeholder={
+                                missionId
+                                  ? `mission/${missionId}`
+                                  : "mission/..."
+                              }
+                              value={branchNameForMission}
+                              onChange={(e) =>
+                                setBranchNameForMission(e.target.value)
+                              }
+                              disabled={isGenerating}
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
-                  </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
             {mission.status === "code_ready" && (
               <Button onClick={handleApplyChanges} disabled={isApplying}>
                 {isApplying ? (
@@ -848,7 +954,7 @@ export default function MissionPage() {
                 <p className="text-xs text-muted-foreground">
                   Commitar grava localmente · Push envia ao remoto
                 </p>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Button
                     onClick={() => setCommitDialogOpen(true)}
                     variant="outline"
@@ -868,6 +974,14 @@ export default function MissionPage() {
                       <Upload className="mr-2 h-4 w-4" />
                     )}
                     Enviar ao remoto
+                  </Button>
+                  <Button
+                    onClick={handleReject}
+                    variant="outline"
+                    className="border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <XCircle className="mr-2 h-4 w-4" />
+                    Rejeitar
                   </Button>
                 </div>
               </div>
@@ -937,9 +1051,7 @@ export default function MissionPage() {
               isGenerating={isGenerating}
               lastProgressMessage={lastProgressMessage}
               selectedFilePaths={
-                mission.status === "code_ready"
-                  ? selectedFilePaths
-                  : undefined
+                mission.status === "code_ready" ? selectedFilePaths : undefined
               }
               onSelectionChange={
                 mission.status === "code_ready"
@@ -963,7 +1075,8 @@ export default function MissionPage() {
 
           <TabsContent value="logs" className="flex-1 overflow-auto p-6 mt-0">
             <div className="space-y-3">
-              {(usageStats.totalTokens > 0 || usageStats.totalDurationMs > 0) && (
+              {(usageStats.totalTokens > 0 ||
+                usageStats.totalDurationMs > 0) && (
                 <p className="text-sm text-muted-foreground">
                   Total:{" "}
                   {usageStats.totalTokens > 0
@@ -990,6 +1103,12 @@ export default function MissionPage() {
         onCommit={handleCommit}
         projectPath={project?.path ?? ""}
         status={commitDialogStatus}
+      />
+      <RegeneratePlanDialog
+        open={regeneratePlanDialogOpen}
+        onOpenChange={setRegeneratePlanDialogOpen}
+        onSubmit={handleRegeneratePlan}
+        isLoading={isGenerating}
       />
     </div>
   );
@@ -1040,8 +1159,8 @@ function PlanView({
                   plan.estimatedComplexity === "high"
                     ? "destructive"
                     : plan.estimatedComplexity === "medium"
-                      ? "default"
-                      : "secondary"
+                    ? "default"
+                    : "secondary"
                 }
               >
                 Complexidade {plan.estimatedComplexity}
@@ -1140,7 +1259,7 @@ function looksLikeUnifiedDiff(content: string): boolean {
       line.startsWith("+") ||
       line.startsWith("-") ||
       line.startsWith("--- ") ||
-      line.startsWith("+++ "),
+      line.startsWith("+++ ")
   );
 }
 
@@ -1225,9 +1344,7 @@ function EditableCodeBlock({
     <Editor
       value={value}
       onValueChange={onChange}
-      highlight={(code: string) =>
-        Prism.highlight(code, grammar, lang)
-      }
+      highlight={(code: string) => Prism.highlight(code, grammar, lang)}
       padding={16}
       style={{
         fontFamily: "var(--font-mono), ui-monospace, monospace",
@@ -1427,7 +1544,10 @@ function CodeView({
             gravados.
           </p>
         )}
-        <Accordion type="multiple" className="w-full rounded-md border border-border">
+        <Accordion
+          type="multiple"
+          className="w-full rounded-md border border-border"
+        >
           {code.files.map((file) => {
             const hasOriginal = (file.originalContent ?? "").trim().length > 0;
             const hasSuggested =
@@ -1438,7 +1558,7 @@ function CodeView({
             const diffIsMessage =
               hasDiff && !looksLikeUnifiedDiff(file.diff ?? "");
             const tabCount = [hasOriginal, hasSuggested, hasDiff].filter(
-              Boolean,
+              Boolean
             ).length;
             const showTabs = tabCount > 1;
             const isSelected =
@@ -1476,8 +1596,8 @@ function CodeView({
                         file.action === "create"
                           ? "default"
                           : file.action === "delete"
-                            ? "destructive"
-                            : "secondary"
+                          ? "destructive"
+                          : "secondary"
                       }
                       className="shrink-0"
                     >
@@ -1493,8 +1613,8 @@ function CodeView({
                           hasOriginal
                             ? "original"
                             : hasSuggested
-                              ? "suggested"
-                              : "diff"
+                            ? "suggested"
+                            : "diff"
                         }
                         className="w-full"
                       >
@@ -1538,12 +1658,12 @@ function CodeView({
                                     filePath={file.path}
                                     value={getSuggestedContent(
                                       file.path,
-                                      file.suggestedContent ?? "",
+                                      file.suggestedContent ?? ""
                                     )}
                                     onChange={(value) =>
                                       onEditedSuggestionsChange!(
                                         file.path,
-                                        value,
+                                        value
                                       )
                                     }
                                   />
@@ -1554,7 +1674,7 @@ function CodeView({
                                 <p className="text-sm whitespace-pre-wrap">
                                   {getSuggestedContent(
                                     file.path,
-                                    file.suggestedContent ?? "",
+                                    file.suggestedContent ?? ""
                                   )}
                                 </p>
                               </Alert>
@@ -1564,7 +1684,7 @@ function CodeView({
                                   filePath={file.path}
                                   content={getSuggestedContent(
                                     file.path,
-                                    file.suggestedContent ?? "",
+                                    file.suggestedContent ?? ""
                                   )}
                                 />
                               </ScrollArea>
@@ -1630,12 +1750,12 @@ function CodeView({
                                     filePath={file.path}
                                     value={getSuggestedContent(
                                       file.path,
-                                      file.suggestedContent ?? "",
+                                      file.suggestedContent ?? ""
                                     )}
                                     onChange={(value) =>
                                       onEditedSuggestionsChange!(
                                         file.path,
-                                        value,
+                                        value
                                       )
                                     }
                                   />
@@ -1646,7 +1766,7 @@ function CodeView({
                                 <p className="text-sm whitespace-pre-wrap">
                                   {getSuggestedContent(
                                     file.path,
-                                    file.suggestedContent ?? "",
+                                    file.suggestedContent ?? ""
                                   )}
                                 </p>
                               </Alert>
@@ -1656,7 +1776,7 @@ function CodeView({
                                   filePath={file.path}
                                   content={getSuggestedContent(
                                     file.path,
-                                    file.suggestedContent ?? "",
+                                    file.suggestedContent ?? ""
                                   )}
                                 />
                               </ScrollArea>

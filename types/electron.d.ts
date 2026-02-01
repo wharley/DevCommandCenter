@@ -107,7 +107,10 @@ declare global {
 
       // AI Service APIs
       ai: {
-        generatePlan: (missionId: string) => Promise<AIResponse<MissionPlan>>;
+        generatePlan: (
+          missionId: string,
+          options?: { planFeedback?: string },
+        ) => Promise<AIResponse<MissionPlan>>;
         generateCode: (missionId: string) => Promise<AIResponse<GeneratedCode>>;
         applyChanges: (
           missionId: string,
@@ -156,6 +159,10 @@ declare global {
         ) => Promise<boolean>;
         push: (
           projectPath: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+        reset: (
+          projectPath: string,
+          ref?: "HEAD" | "HEAD~1",
         ) => Promise<{ success: boolean; error?: string }>;
         getWorktreeInfo: (
           projectPath: string,

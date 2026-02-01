@@ -100,7 +100,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
         }
       }
       return { path: null };
-    },
+    }
   );
 
   // ==========================================
@@ -166,7 +166,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     (_event, id: string, isActive: boolean) => {
       const p = providerService.setActive(id, isActive);
       return p ? sanitizeForRenderer(p) : null;
-    },
+    }
   );
 
   ipcMain.handle("db:providers:testConnection", (_event, id: string) => {
@@ -243,7 +243,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missions:search",
     (_event, query: string, projectId?: string) => {
       return db.missions.search(query, projectId);
-    },
+    }
   );
 
   ipcMain.handle("db:missions:create", (_event, data: any) => {
@@ -262,7 +262,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missions:updateStatus",
     (_event, id: string, status: string) => {
       return db.missions.updateStatus(id, status as any);
-    },
+    }
   );
 
   ipcMain.handle(
@@ -270,7 +270,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     (_event, id: string, plan: string | object) => {
       const planObj = typeof plan === "string" ? JSON.parse(plan) : plan;
       return db.missions.updatePlan(id, planObj);
-    },
+    }
   );
 
   ipcMain.handle(
@@ -278,7 +278,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     (_event, id: string, code: string | object) => {
       const codeObj = typeof code === "string" ? JSON.parse(code) : code;
       return db.missions.updateGeneratedCode(id, codeObj);
-    },
+    }
   );
 
   ipcMain.handle("db:missions:start", (_event, id: string) => {
@@ -289,7 +289,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missions:complete",
     (_event, id: string, summary?: string) => {
       return db.missions.complete(id, summary);
-    },
+    }
   );
 
   ipcMain.handle("db:missions:fail", (_event, id: string, error: string) => {
@@ -311,10 +311,10 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missionLogs:findAll",
     (
       _event,
-      options?: { missionId?: string; limit?: number; offset?: number },
+      options?: { missionId?: string; limit?: number; offset?: number }
     ) => {
       return db.missionLogs.findAll(options || { limit: 100, offset: 0 });
-    },
+    }
   );
 
   ipcMain.handle("db:missionLogs:findById", (_event, id: string) => {
@@ -325,21 +325,21 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missionLogs:findByMission",
     (_event, missionId: string, limit?: number, offset?: number) => {
       return db.missionLogs.findByMission(missionId, limit, offset);
-    },
+    }
   );
 
   ipcMain.handle(
     "db:missionLogs:findByLevel",
     (_event, level: string, missionId?: string) => {
       return db.missionLogs.findByLevel(level as any, missionId);
-    },
+    }
   );
 
   ipcMain.handle(
     "db:missionLogs:search",
     (_event, query: string, missionId?: string) => {
       return db.missionLogs.search(query, missionId);
-    },
+    }
   );
 
   ipcMain.handle("db:missionLogs:create", (_event, data: any) => {
@@ -354,64 +354,67 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missionLogs:deleteByMission",
     (_event, missionId: string) => {
       return db.missionLogs.deleteByMission(missionId);
-    },
+    }
   );
 
   ipcMain.handle(
     "db:missionLogs:logInfo",
     (_event, missionId: string, message: string, metadata?: any) => {
       return db.missionLogs.logInfo(missionId, message, metadata);
-    },
+    }
   );
 
   ipcMain.handle(
     "db:missionLogs:logWarning",
     (_event, missionId: string, message: string, metadata?: any) => {
       return db.missionLogs.logWarning(missionId, message, metadata);
-    },
+    }
   );
 
   ipcMain.handle(
     "db:missionLogs:logError",
     (_event, missionId: string, message: string, metadata?: any) => {
       return db.missionLogs.logError(missionId, message, metadata);
-    },
+    }
   );
 
   ipcMain.handle(
     "db:missionLogs:logDebug",
     (_event, missionId: string, message: string, metadata?: any) => {
       return db.missionLogs.logDebug(missionId, message, metadata);
-    },
+    }
   );
 
   ipcMain.handle(
     "db:missionLogs:logAgentAction",
     (_event, missionId: string, action: string, details?: any) => {
       return db.missionLogs.logAgentAction(missionId, action, details);
-    },
+    }
   );
 
   ipcMain.handle(
     "db:missionLogs:logUserInput",
     (_event, missionId: string, input: string) => {
       return db.missionLogs.logUserInput(missionId, input);
-    },
+    }
   );
 
   ipcMain.handle("db:missionLogs:getStats", (_event, missionId: string) => {
     return db.missionLogs.getStats(missionId);
   });
 
-  ipcMain.handle("db:missionLogs:getUsageStats", (_event, missionId: string) => {
-    return db.missionLogs.getUsageStats(missionId);
-  });
+  ipcMain.handle(
+    "db:missionLogs:getUsageStats",
+    (_event, missionId: string) => {
+      return db.missionLogs.getUsageStats(missionId);
+    }
+  );
 
   ipcMain.handle(
     "db:missionLogs:getLatest",
     (_event, missionId: string, count?: number) => {
       return db.missionLogs.getLatest(missionId, count);
-    },
+    }
   );
 
   // ==========================================
@@ -446,9 +449,12 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
   // ==========================================
 
   // Generate plan for a mission
-  ipcMain.handle("ai:generatePlan", async (_event, missionId: string) => {
-    return aiOrchestrator.generatePlan(missionId);
-  });
+  ipcMain.handle(
+    "ai:generatePlan",
+    async (_event, missionId: string, options?: { planFeedback?: string }) => {
+      return aiOrchestrator.generatePlan(missionId, options);
+    }
+  );
 
   // Generate code for a mission
   ipcMain.handle("ai:generateCode", async (_event, missionId: string) => {
@@ -466,10 +472,10 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
         dryRun?: boolean;
         filePaths?: string[];
         editedContent?: Record<string, string>;
-      },
+      }
     ) => {
       return aiOrchestrator.applyChanges(missionId, options ?? {});
-    },
+    }
   );
 
   // Test provider connection
@@ -510,7 +516,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string, filePath: string) => {
       const gitService = new GitService(projectPath);
       return gitService.getFileDiffHead(filePath);
-    },
+    }
   );
 
   // Check if directory is a git repo
@@ -525,7 +531,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string) => {
       const gitService = new GitService(projectPath);
       return gitService.getCurrentBranch();
-    },
+    }
   );
 
   // Get default branch (main or master)
@@ -534,7 +540,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string) => {
       const gitService = new GitService(projectPath);
       return gitService.getDefaultBranch();
-    },
+    }
   );
 
   // Create a new branch (optionally from a base branch)
@@ -544,11 +550,11 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
       _event,
       projectPath: string,
       branchName: string,
-      fromBranch?: string,
+      fromBranch?: string
     ) => {
       const gitService = new GitService(projectPath);
       return gitService.createBranch(branchName, fromBranch);
-    },
+    }
   );
 
   // List tracked files
@@ -557,7 +563,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string, maxFiles?: number) => {
       const gitService = new GitService(projectPath);
       return gitService.listTrackedFiles(maxFiles);
-    },
+    }
   );
 
   // Get recent commits
@@ -566,37 +572,38 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string, count?: number) => {
       const gitService = new GitService(projectPath);
       return gitService.getRecentCommits(count);
-    },
+    }
   );
 
   // Commit changes (optional file list; omit for git add -A)
   ipcMain.handle(
     "git:commit",
-    async (
-      _event,
-      projectPath: string,
-      message: string,
-      files?: string[],
-    ) => {
+    async (_event, projectPath: string, message: string, files?: string[]) => {
       const gitService = new GitService(projectPath);
       return gitService.commit(message, files);
-    },
+    }
   );
 
   // Get worktree info (isWorktree, worktreeRoot)
-  ipcMain.handle(
-    "git:getWorktreeInfo",
-    async (_event, projectPath: string) => {
-      const gitService = new GitService(projectPath);
-      return gitService.getWorktreeInfo();
-    },
-  );
+  ipcMain.handle("git:getWorktreeInfo", async (_event, projectPath: string) => {
+    const gitService = new GitService(projectPath);
+    return gitService.getWorktreeInfo();
+  });
 
   // Push current branch to origin
   ipcMain.handle("git:push", async (_event, projectPath: string) => {
     const gitService = new GitService(projectPath);
     return gitService.push();
   });
+
+  // Reset (discard changes or undo last commit)
+  ipcMain.handle(
+    "git:reset",
+    async (_event, projectPath: string, ref?: "HEAD" | "HEAD~1") => {
+      const gitService = new GitService(projectPath);
+      return gitService.reset(ref ?? "HEAD");
+    }
+  );
 
   console.log("[IPC] All handlers registered");
 }

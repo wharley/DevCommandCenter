@@ -37,7 +37,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // AI Service APIs
   ai: {
-    generatePlan: (missionId: string) => invoke("ai:generatePlan", missionId),
+    generatePlan: (missionId: string, options?: { planFeedback?: string }) =>
+      invoke("ai:generatePlan", missionId, options),
     generateCode: (missionId: string) => invoke("ai:generateCode", missionId),
     applyChanges: (
       missionId: string,
@@ -79,6 +80,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     commit: (projectPath: string, message: string, files?: string[]) =>
       invoke("git:commit", projectPath, message, files),
     push: (projectPath: string) => invoke("git:push", projectPath),
+    reset: (
+      projectPath: string,
+      ref?: "HEAD" | "HEAD~1",
+    ) => invoke("git:reset", projectPath, ref ?? "HEAD"),
     getWorktreeInfo: (projectPath: string) =>
       invoke("git:getWorktreeInfo", projectPath),
   },

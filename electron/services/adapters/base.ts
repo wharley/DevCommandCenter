@@ -45,7 +45,18 @@ export abstract class BaseAdapter implements AIProviderAdapter {
    * Monta o prompt base para geração de plano
    */
   protected buildPlanPrompt(config: AdapterConfig): string {
-    const { mission, projectContext } = config;
+    const { mission, projectContext, planFeedback } = config;
+
+    const feedbackSection = planFeedback?.trim()
+      ? `
+
+## Feedback sobre o plano anterior
+O usuário não estava satisfeito com um plano anterior. Sua solicitação:
+${planFeedback.trim()}
+
+Gere um NOVO plano que considere este feedback, mantendo o objetivo original da missão.
+`
+      : "";
 
     return `You are an expert software engineer. Analyze the following task and create a detailed implementation plan.
 
@@ -68,7 +79,7 @@ ${mission.preserveInstructions?.trim() ? `
 ## Preserve / Do not change
 ${mission.preserveInstructions.trim()}
 Do not modify or suggest changes to the above.` : ""}
-
+${feedbackSection}
 ## Instructions
 Create a detailed implementation plan with the following JSON structure:
 {

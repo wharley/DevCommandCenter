@@ -90,10 +90,10 @@ export default function ProjectPage() {
   const hasUpdatedLastOpenedRef = useRef<string | null>(null);
 
   const project = projectId
-    ? (projects.find((p) => p.id === projectId) ?? null)
+    ? projects.find((p) => p.id === projectId) ?? null
     : null;
   const defaultProvider = project?.defaultProviderId
-    ? (providers.find((p) => p.id === project.defaultProviderId) ?? null)
+    ? providers.find((p) => p.id === project.defaultProviderId) ?? null
     : null;
   const isLoading = projectsLoading;
 
@@ -157,7 +157,7 @@ export default function ProjectPage() {
   }
 
   const activeMissions = missions.filter(
-    (m) => !["completed", "failed", "cancelled"].includes(m.status),
+    (m) => !["completed", "failed", "cancelled"].includes(m.status)
   ).length;
 
   return (
@@ -276,8 +276,8 @@ export default function ProjectPage() {
                 "applying",
               ].includes(mission.status);
               const provider = mission.providerId
-                ? (providers.find((p) => p.id === mission.providerId) ??
-                  defaultProvider)
+                ? providers.find((p) => p.id === mission.providerId) ??
+                  defaultProvider
                 : defaultProvider;
 
               return (
@@ -298,8 +298,8 @@ export default function ProjectPage() {
                             mission.status === "completed"
                               ? "bg-green-500/10"
                               : mission.status === "failed"
-                                ? "bg-destructive/10"
-                                : "bg-primary/10"
+                              ? "bg-destructive/10"
+                              : "bg-primary/10"
                           }`}
                         >
                           <StatusIcon
@@ -309,8 +309,8 @@ export default function ProjectPage() {
                               mission.status === "completed"
                                 ? "text-green-600"
                                 : mission.status === "failed"
-                                  ? "text-destructive"
-                                  : "text-primary"
+                                ? "text-destructive"
+                                : "text-primary"
                             }`}
                           />
                         </div>
@@ -348,15 +348,19 @@ export default function ProjectPage() {
                                 Abrir missão
                               </Link>
                             </DropdownMenuItem>
-                            {["created", "plan_generated", "code_ready", "failed"].includes(
-                              mission.status,
-                            ) && (
+                            {[
+                              "created",
+                              "plan_generated",
+                              "code_ready",
+                              "completed",
+                              "failed",
+                            ].includes(mission.status) && (
                               <DropdownMenuItem
                                 onClick={async (e) => {
                                   e.preventDefault();
                                   if (
                                     !window.confirm(
-                                      "Tem certeza que deseja cancelar esta missão?",
+                                      "Tem certeza que deseja cancelar esta missão?"
                                     )
                                   )
                                     return;
@@ -365,7 +369,7 @@ export default function ProjectPage() {
                                     toast.success("Missão cancelada");
                                   } catch {
                                     toast.error(
-                                      "Não foi possível cancelar a missão.",
+                                      "Não foi possível cancelar a missão."
                                     );
                                   }
                                 }}

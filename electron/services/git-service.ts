@@ -592,6 +592,28 @@ export class GitService {
   }
 
   /**
+   * Executa git reset --hard para descartar alterações ou reverter último commit.
+   * @param ref "HEAD" = descarta alterações não commitadas; "HEAD~1" = reverte último commit
+   */
+  async reset(ref: "HEAD" | "HEAD~1" = "HEAD"): Promise<{ success: boolean; error?: string }> {
+    try {
+      await execAsync(`git reset --hard ${ref}`, { cwd: this.projectPath });
+      return { success: true };
+    } catch (err: unknown) {
+      let message = "Erro ao reverter alterações.";
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (err && typeof err === "object" && "stderr" in err) {
+        message = String((err as { stderr?: string }).stderr ?? "").trim();
+      }
+      return {
+        success: false,
+        error: message || "Erro ao reverter alterações.",
+      };
+    }
+  }
+
+  /**
    * Envia commits do branch atual para o remoto (origin)
    */
   async push(): Promise<{ success: boolean; error?: string }> {

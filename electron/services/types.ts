@@ -71,6 +71,8 @@ export interface AdapterConfig {
   provider: Provider;
   mission: Mission;
   projectContext: ProjectContext;
+  /** Feedback do usuário ao regenerar plano (o que ajustar no plano anterior) */
+  planFeedback?: string;
 }
 
 // ============================================
