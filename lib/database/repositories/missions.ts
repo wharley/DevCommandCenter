@@ -143,6 +143,34 @@ export const MissionsRepository = {
   },
 
   /**
+   * Busca missões em execução no mesmo projeto (planning, generating, applying).
+   * Usado para garantir apenas uma missão ativa por projeto (evita conflitos Git).
+   * @param projectId ID do projeto
+   * @param excludeMissionId ID da missão atual (excluída da busca)
+   */
+  findInProgress(
+    projectId: string,
+    excludeMissionId?: string,
+  ): Mission[] {
+    const inProgressStatuses: MissionStatus[] = [
+      'planning',
+      'plan_generated',
+      'generating_code',
+      'code_ready',
+      'applying',
+    ];
+    const options: { projectId: string; status: MissionStatus[] } = {
+      projectId,
+      status: inProgressStatuses,
+    };
+    const missions = this.findAll({ ...options, limit: 50, offset: 0 });
+    if (excludeMissionId) {
+      return missions.filter((m) => m.id !== excludeMissionId);
+    }
+    return missions;
+  },
+
+  /**
    * Busca uma missão por ID.
    */
   findById(id: string): Mission | null {

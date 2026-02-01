@@ -383,12 +383,9 @@ export default function MissionPage() {
     } catch (error) {
       // Volta para "created" para permitir tentar novamente
       updateStatus(missionId, "created");
-      addLog(
-        "error",
-        error instanceof Error ? error.message : "Erro desconhecido",
-        undefined
-      );
-      toast.error("Falha ao gerar plano. Você pode tentar novamente.");
+      const msg = error instanceof Error ? error.message : "Erro desconhecido";
+      addLog("error", msg, undefined);
+      toast.error(msg);
     } finally {
       setIsGenerating(false);
     }
@@ -430,12 +427,9 @@ export default function MissionPage() {
       }
     } catch (error) {
       updateStatus(missionId, "plan_generated");
-      addLog(
-        "error",
-        error instanceof Error ? error.message : "Erro desconhecido",
-        undefined
-      );
-      toast.error("Falha ao regenerar plano. Você pode tentar novamente.");
+      const msg = error instanceof Error ? error.message : "Erro desconhecido";
+      addLog("error", msg, undefined);
+      toast.error(msg);
       throw error;
     } finally {
       setIsGenerating(false);
@@ -519,7 +513,7 @@ export default function MissionPage() {
       const errorMessage =
         error instanceof Error ? error.message : "Erro desconhecido";
       addLog("error", errorMessage, undefined);
-      toast.error("Falha ao gerar código. Você pode tentar novamente.");
+      toast.error(errorMessage);
 
       const isParseError =
         typeof errorMessage === "string" &&
@@ -640,13 +634,16 @@ export default function MissionPage() {
           );
         }
       } else {
+        const firstError = result.failedFiles[0];
         const detail =
-          result.failedFiles.length > 0
-            ? ` ${result.failedFiles
-                .map((f) => `${f.path}: ${f.error}`)
-                .join("; ")}`
+          firstError?.error && !firstError?.path
+            ? firstError.error
+            : result.failedFiles.length > 0
+            ? result.failedFiles
+                .map((f) => (f.path ? `${f.path}: ${f.error}` : f.error))
+                .join("; ")
             : "";
-        toast.error(`Falha ao aplicar alterações.${detail}`);
+        toast.error(detail || "Falha ao aplicar alterações.");
         try {
           await refreshMissions();
           await refreshLogs();

@@ -47,7 +47,7 @@ export class AIOrchestrator {
    */
   async getProjectContext(
     projectPath: string,
-    projectName: string,
+    projectName: string
   ): Promise<ProjectContext> {
     const gitService = new GitService(projectPath);
 
@@ -71,7 +71,7 @@ export class AIOrchestrator {
    */
   async generatePlan(
     missionId: string,
-    options?: { planFeedback?: string },
+    options?: { planFeedback?: string }
   ): Promise<AIResponse<MissionPlan>> {
     // Timestamp do último log de progresso para evitar spam
     let lastProgressLog = 0;
@@ -82,6 +82,19 @@ export class AIOrchestrator {
       const mission = db.missions.findById(missionId);
       if (!mission) {
         return { success: false, error: "Mission not found" };
+      }
+
+      // Uma missão por projeto por vez (evita conflitos Git)
+      const othersInProgress = db.missions.findInProgress(
+        mission.projectId,
+        missionId
+      );
+      if (othersInProgress.length > 0) {
+        const other = othersInProgress[0];
+        return {
+          success: false,
+          error: `Já existe uma missão em andamento neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
+        };
       }
 
       const project = db.projects.findById(mission.projectId);
@@ -117,7 +130,7 @@ export class AIOrchestrator {
       // Obtém contexto do projeto
       const projectContext = await this.getProjectContext(
         project.path,
-        project.name,
+        project.name
       );
 
       // Configura e executa
@@ -132,7 +145,7 @@ export class AIOrchestrator {
       db.missions.updateStatus(missionId, "planning");
       db.missionLogs.logInfo(
         missionId,
-        `Starting plan generation with ${adapter.name}`,
+        `Starting plan generation with ${adapter.name}`
       );
 
       // Callback de progresso que loga mensagens de status
@@ -154,14 +167,14 @@ export class AIOrchestrator {
         db.missionLogs.logInfo(
           missionId,
           "Plan generated successfully",
-          result.metadata as Record<string, unknown>,
+          result.metadata as Record<string, unknown>
         );
       } else {
         // Log do erro
         db.missionLogs.logError(
           missionId,
           result.error || "Unknown error",
-          result.metadata as Record<string, unknown>,
+          result.metadata as Record<string, unknown>
         );
       }
 
@@ -187,6 +200,19 @@ export class AIOrchestrator {
       const mission = db.missions.findById(missionId);
       if (!mission) {
         return { success: false, error: "Mission not found" };
+      }
+
+      // Uma missão por projeto por vez (evita conflitos Git)
+      const othersInProgress = db.missions.findInProgress(
+        mission.projectId,
+        missionId
+      );
+      if (othersInProgress.length > 0) {
+        const other = othersInProgress[0];
+        return {
+          success: false,
+          error: `Já existe uma missão em andamento neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
+        };
       }
 
       if (!mission.plan) {
@@ -229,7 +255,7 @@ export class AIOrchestrator {
       // Obtém contexto do projeto
       const projectContext = await this.getProjectContext(
         project.path,
-        project.name,
+        project.name
       );
 
       // Configura e executa
@@ -243,7 +269,7 @@ export class AIOrchestrator {
       db.missions.updateStatus(missionId, "generating_code");
       db.missionLogs.logInfo(
         missionId,
-        `Starting code generation with ${adapter.name}`,
+        `Starting code generation with ${adapter.name}`
       );
 
       // Callback de progresso que loga mensagens de status
@@ -273,14 +299,14 @@ export class AIOrchestrator {
         db.missionLogs.logInfo(
           missionId,
           `Code generated: ${result.data.files?.length || 0} files`,
-          result.metadata as Record<string, unknown>,
+          result.metadata as Record<string, unknown>
         );
       } else {
         // Log do erro
         db.missionLogs.logError(
           missionId,
           result.error || "Unknown error",
-          result.metadata as Record<string, unknown>,
+          result.metadata as Record<string, unknown>
         );
       }
 
@@ -303,7 +329,7 @@ export class AIOrchestrator {
       dryRun?: boolean;
       filePaths?: string[];
       editedContent?: Record<string, string>;
-    } = {},
+    } = {}
   ): Promise<ApplyChangesResult> {
     try {
       // Busca a missão e o projeto
@@ -313,6 +339,25 @@ export class AIOrchestrator {
           success: false,
           appliedFiles: [],
           failedFiles: [{ path: "", error: "Mission not found" }],
+        };
+      }
+
+      // Uma missão por projeto por vez (evita conflitos Git)
+      const othersInProgress = db.missions.findInProgress(
+        mission.projectId,
+        missionId
+      );
+      if (othersInProgress.length > 0) {
+        const other = othersInProgress[0];
+        return {
+          success: false,
+          appliedFiles: [],
+          failedFiles: [
+            {
+              path: "",
+              error: `Já existe uma missão em andamento neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
+            },
+          ],
         };
       }
 
@@ -337,11 +382,14 @@ export class AIOrchestrator {
       let filesToApply =
         requestedPaths && requestedPaths.length > 0
           ? mission.generatedCode.files.filter((f) =>
-              requestedPaths.includes(f.path),
+              requestedPaths.includes(f.path)
             )
           : mission.generatedCode.files;
 
-      if (options.editedContent && Object.keys(options.editedContent).length > 0) {
+      if (
+        options.editedContent &&
+        Object.keys(options.editedContent).length > 0
+      ) {
         filesToApply = filesToApply.map((f) => {
           const edited = options.editedContent![f.path];
           if (edited !== undefined) {
@@ -372,23 +420,20 @@ export class AIOrchestrator {
       db.missions.updateStatus(missionId, "applying");
       db.missionLogs.logAction(
         missionId,
-        `Applying ${filesToApply.length} file changes`,
+        `Applying ${filesToApply.length} file changes`
       );
 
       // Aplica as mudanças
       const gitService = new GitService(project.path);
-      const result = await gitService.applyChanges(
-        filesToApply,
-        {
-          createBackup: options.createBackup ?? true,
-          dryRun: options.dryRun ?? false,
-        },
-      );
+      const result = await gitService.applyChanges(filesToApply, {
+        createBackup: options.createBackup ?? true,
+        dryRun: options.dryRun ?? false,
+      });
 
       if (result.success) {
         db.missions.complete(
           missionId,
-          `Applied ${result.appliedFiles.length} files successfully`,
+          `Applied ${result.appliedFiles.length} files successfully`
         );
         db.missionLogs.logAction(missionId, "Changes applied successfully", {
           appliedFiles: result.appliedFiles,
@@ -397,7 +442,9 @@ export class AIOrchestrator {
       } else {
         const errMsg =
           result.failedFiles.length > 0
-            ? `Some files failed to apply: ${result.failedFiles.map((f) => `${f.path}: ${f.error}`).join("; ")}`
+            ? `Some files failed to apply: ${result.failedFiles
+                .map((f) => `${f.path}: ${f.error}`)
+                .join("; ")}`
             : "Some files failed to apply";
         db.missionLogs.logError(missionId, "Some files failed to apply", {
           appliedFiles: result.appliedFiles,
@@ -424,7 +471,7 @@ export class AIOrchestrator {
    * Testa a conexão com um provider
    */
   async testProviderConnection(
-    providerId: string,
+    providerId: string
   ): Promise<{ success: boolean; message: string }> {
     const provider = providerService.findById(providerId);
     if (!provider) {
