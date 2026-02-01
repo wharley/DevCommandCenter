@@ -47,7 +47,7 @@ O Dev Command Center toma como **referência** o fluxo de ferramentas como Comma
 
 ### Princípios de Aplicação
 
-- **Diff-first:** O apply sempre tenta `git apply --check` + `git apply` quando há unified diff válido. Escrita direta de arquivo (`suggestedContent`) é fallback apenas quando patch não é aplicável ou está ausente. Isso garante aplicação precisa e rastreável via Git.
+- **Diff-first:** O apply sempre tenta `git apply --check` + `git apply` quando há unified diff válido. Escrita direta de arquivo (`suggestedContent`) é fallback apenas quando patch não é aplicável ou está ausente. O prompt de geração de código exige `diff` em modify e `suggestedContent` em create (reduz tokens em todos os providers).
 
 ### Worktree Policy
 
@@ -87,15 +87,15 @@ Esta seção é **apenas uma hipótese** para validar depois do MVP. A ideia é 
 
 ### Core
 
-| Camada             | Tecnologia           | Versão   |
-| ------------------ | -------------------- | -------- |
-| Desktop Runtime    | Electron             | ^33.0.0  |
-| Build Tool         | Vite                 | ^6.0.0   |
+| Camada             | Tecnologia           | Versão                    |
+| ------------------ | -------------------- | ------------------------- |
+| Desktop Runtime    | Electron             | ^33.0.0                   |
+| Build Tool         | Vite                 | ^6.0.0                    |
 | Frontend Framework | React + React Router | React 19.2.0 / Router 7.x |
-| Linguagem          | TypeScript           | ^5       |
-| Database           | better-sqlite3       | ^11.8.0  |
-| State Management   | Zustand              | 5.0.10   |
-| Node.js (runtime)  | Node.js              | >=22.0.0 |
+| Linguagem          | TypeScript           | ^5                        |
+| Database           | better-sqlite3       | ^11.8.0                   |
+| State Management   | Zustand              | 5.0.10                    |
+| Node.js (runtime)  | Node.js              | >=22.0.0                  |
 
 ### UI/UX
 
@@ -782,8 +782,10 @@ export type ProviderType =
 - **Instalação do CLI:** `curl https://cursor.com/install -fsSL | bash` (ver cursor.com/docs/cli).
 - **Exemplo de uso no terminal:** `agent chat "descrição da missão"` (ou equivalente conforme documentação oficial).
 - O adapter em `electron/services/adapters/cursor.ts` invoca o binário `agent` (ou caminho configurável em `cliPath`) com a descrição da missão/contexto e parseia a resposta.
-- **Formato de saída com `--output-format json`:** O CLI pode retornar um único JSON no stdout, possivelmente envolvido em `{ "result": ... }` ou `{ "output": ... }` (string ou objeto). O adapter normaliza esse wrapper (string ou objeto com `.files`/`.steps`) e aplica correção de newlines literais (via `parseJSONResponse` na base) antes de interpretar como `GeneratedCode` ou `MissionPlan`.
-- **Truncamento:** A saída do CLI pode vir truncada (pipe/stream, timeout ou bug do CLI). O adapter aplica várias estratégias de reparo: reparo da linha wrapper com `tryRepairTruncatedResultLine`, extração manual do `result` com `tryExtractResultValueManually`, fallback NDJSON (`tryExtractPayloadFromNDJSON`) e reparo do payload interno truncado (`tryRepairTruncatedInnerPayload`). Se o erro "Failed to parse code" ou "Could not parse JSON" persistir, ver o item de troubleshooting abaixo.
+- **Formato de saída com `--output-format json`:** NDJSON ou JSON único; linha final típica `{"type":"result","result":"..."}` com `result` como string JSON escapada (requer duplo parse). O adapter usa `extractPayloadFromCursorStdout` + `unwrapCursorCliResponse` e aplica correção de newlines/aspas.
+- **Mapeamento por provider:** Cursor → NDJSON/wrapper; Claude CLI → `{ "result": string }`; Codex CLI → JSON puro.
+- **Truncamento:** O adapter aplica várias estratégias: `tryRepairTruncatedResultLine`, `tryExtractResultValueManually`, `tryExtractPayloadFromNDJSON`, `tryRepairTruncatedInnerPayload`, `tryExtractLastJsonObject` (logs + JSON bare).
+- **Log de diagnóstico:** Em falha de parse, o stdout bruto é gravado em `{userData}/logs/cursor-raw-{timestamp}.log` (userData = `app.getPath("userData")` do Electron).
 
 ### 2. Implementar Diff Real
 
@@ -891,6 +893,7 @@ __tests__/
 **Status:** API keys atualmente em texto plano no SQLite. Criptografia é requisito de Alpha.
 
 **Roadmap de segurança:**
+
 - **Alpha (requisito):** `@electron/safeStorage` — encrypt/decrypt no main process antes de persistir
 - **Beta:** `keytar` — integração com Keychain (macOS), Secret Service (Linux), Credential Manager (Windows)
 
@@ -949,7 +952,7 @@ npm install --global windows-build-tools
 
 **5. Cursor CLI: Failed to parse code / Could not parse JSON from response**
 
-Indica que a resposta do Cursor CLI veio truncada ou em formato inesperado. O app já tenta reparar (wrapper, NDJSON, payload interno). Se o erro persistir: salvar as últimas ~30 linhas do stdout do CLI (ex.: redirecionar saída para arquivo e enviar `tail -n 30`) para diagnóstico; verificar timeout e rede; conferir [Cursor CLI output format](https://docs.cursor.com/cli/reference/output-format).
+Indica que a resposta do Cursor CLI veio truncada ou em formato inesperado. O app grava o stdout bruto em `{userData}/logs/cursor-raw-{timestamp}.log` quando o parse falha (userData = diretório de dados do app no Electron). Verificar esse arquivo para diagnóstico; conferir [Cursor CLI output format](https://docs.cursor.com/cli/reference/output-format).
 
 ---
 

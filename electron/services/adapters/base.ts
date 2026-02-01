@@ -2,10 +2,7 @@
  * Base Adapter - Classe base abstrata para adapters de IA
  */
 
-import {
-  missionPlanSchema,
-  generatedCodeSchema,
-} from "../schemas";
+import { missionPlanSchema, generatedCodeSchema } from "../schemas";
 import type {
   AIProviderAdapter,
   ValidationResult,
@@ -31,12 +28,12 @@ export abstract class BaseAdapter implements AIProviderAdapter {
 
   abstract generatePlan(
     config: AdapterConfig,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<AIResponse<MissionPlan>>;
 
   abstract generateCode(
     config: AdapterConfig,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<AIResponse<GeneratedCode>>;
 
   abstract testConnection(): Promise<{ success: boolean; message: string }>;
@@ -63,22 +60,34 @@ Gere um NOVO plano que considere este feedback, mantendo o objetivo original da 
 ## Project Context
 - **Project Name**: ${projectContext.projectName}
 - **Project Path**: ${projectContext.projectPath}
-${projectContext.gitInfo ? `- **Git Branch**: ${projectContext.gitInfo.branch}` : ""}
+${
+  projectContext.gitInfo
+    ? `- **Git Branch**: ${projectContext.gitInfo.branch}`
+    : ""
+}
 
 ## Available Files
 ${projectContext.files.slice(0, 50).join("\n")}
-${projectContext.files.length > 50 ? `\n... and ${projectContext.files.length - 50} more files` : ""}
+${
+  projectContext.files.length > 50
+    ? `\n... and ${projectContext.files.length - 50} more files`
+    : ""
+}
 
 ## Task
 **Title**: ${mission.title}
 
 **Description**: 
 ${mission.description}
-${mission.preserveInstructions?.trim() ? `
+${
+  mission.preserveInstructions?.trim()
+    ? `
 
 ## Preserve / Do not change
 ${mission.preserveInstructions.trim()}
-Do not modify or suggest changes to the above.` : ""}
+Do not modify or suggest changes to the above.`
+    : ""
+}
 ${feedbackSection}
 ## Instructions
 Create a detailed implementation plan with the following JSON structure:
@@ -119,11 +128,15 @@ ${plan ? JSON.stringify(plan, null, 2) : "No plan available"}
 ## Task
 **Title**: ${mission.title}
 **Description**: ${mission.description}
-${mission.preserveInstructions?.trim() ? `
+${
+  mission.preserveInstructions?.trim()
+    ? `
 
 ## Preserve / Do not change
 ${mission.preserveInstructions.trim()}
-Do not modify or suggest changes to the above.` : ""}
+Do not modify or suggest changes to the above.`
+    : ""
+}
 
 ## Instructions
 Generate the code changes with the following JSON structure:
@@ -133,18 +146,23 @@ Generate the code changes with the following JSON structure:
     {
       "path": "relative/path/to/file.ts",
       "action": "create" | "modify" | "delete",
-      "originalContent": "original content if modifying (optional)",
-      "suggestedContent": "the new/modified content",
-      "diff": "unified diff only: lines starting with +, -, ---, +++ or space for context. If no code changes are needed for this file, omit diff or set to empty string. Do NOT put explanatory text or comments in diff."
+      "originalContent": "optional - helps generate accurate diff when modifying",
+      "suggestedContent": "required for create; optional fallback for modify (when diff may fail)",
+      "diff": "required for modify - unified diff (lines with +, -, ---, +++); omit for create"
     }
   ]
 }
+
+Rules by action:
+- modify: diff is REQUIRED (unified diff with ---, +++, +, -, or context lines). suggestedContent is optional fallback.
+- create: suggestedContent is REQUIRED (full file content). diff is optional.
+- delete: path is REQUIRED. The file will be removed.
 
 Important:
 - Use proper indentation and formatting
 - Follow the project's existing code style
 - Include all necessary imports
-- The "diff" field must contain ONLY a unified diff (lines with +, -, ---, +++). If there are no changes for a file, leave diff empty or omit it; do not put messages like "No further changes needed" in diff.
+- The "diff" field must contain ONLY a unified diff. Do NOT put explanatory text or comments in diff.
 - Respond ONLY with valid JSON. Do not include any other text or markdown code blocks.
 - Output only a single JSON object. Do not wrap it in markdown code blocks or add any text before or after.`;
   }
@@ -320,13 +338,15 @@ Important:
         // segue
       }
       try {
-        return JSON.parse(this.fixUnescapedNewlinesInJsonStrings(byBrace)) as unknown;
+        return JSON.parse(
+          this.fixUnescapedNewlinesInJsonStrings(byBrace)
+        ) as unknown;
       } catch {
         // segue
       }
       try {
         const fixedBoth = this.fixUnescapedQuotesInJsonStrings(
-          this.fixUnescapedNewlinesInJsonStrings(byBrace),
+          this.fixUnescapedNewlinesInJsonStrings(byBrace)
         );
         return JSON.parse(fixedBoth) as unknown;
       } catch {
@@ -410,7 +430,7 @@ Important:
       }
       try {
         const fixedBoth = this.fixUnescapedQuotesInJsonStrings(
-          this.fixUnescapedNewlinesInJsonStrings(byBrace),
+          this.fixUnescapedNewlinesInJsonStrings(byBrace)
         );
         return JSON.parse(fixedBoth) as T;
       } catch {
@@ -429,7 +449,8 @@ Important:
           // segue
         }
         try {
-          const fixedQuotes = this.fixUnescapedQuotesInJsonStrings(byBraceFromFixed);
+          const fixedQuotes =
+            this.fixUnescapedQuotesInJsonStrings(byBraceFromFixed);
           return JSON.parse(fixedQuotes) as T;
         } catch {
           // segue
@@ -449,17 +470,15 @@ Important:
         // segue
       }
       try {
-        return JSON.parse(
-          this.fixUnescapedNewlinesInJsonStrings(raw),
-        ) as T;
+        return JSON.parse(this.fixUnescapedNewlinesInJsonStrings(raw)) as T;
       } catch {
         // segue
       }
       try {
         return JSON.parse(
           this.fixUnescapedQuotesInJsonStrings(
-            this.fixUnescapedNewlinesInJsonStrings(raw),
-          ),
+            this.fixUnescapedNewlinesInJsonStrings(raw)
+          )
         ) as T;
       } catch {
         // segue
@@ -503,7 +522,13 @@ Important:
    */
   protected normalizeAndValidate<T>(
     raw: string,
-    schema: { safeParse: (v: unknown) => { success: boolean; data?: T; error?: { message?: string; issues?: unknown[] } } },
+    schema: {
+      safeParse: (v: unknown) => {
+        success: boolean;
+        data?: T;
+        error?: { message?: string; issues?: unknown[] };
+      };
+    }
   ): { success: true; data: T } | { success: false; error: string } {
     const trimmed = raw.trim();
     if (!trimmed) {
@@ -533,7 +558,9 @@ Important:
 
     // 2. Parse direto ou com fixes
     if (candidate == null) {
-      candidate = this.parseJSONResponse<unknown>(trimmed) ?? this.tryParseWithFixes(trimmed);
+      candidate =
+        this.parseJSONResponse<unknown>(trimmed) ??
+        this.tryParseWithFixes(trimmed);
     }
 
     if (candidate == null) {
@@ -553,7 +580,11 @@ Important:
       issues.length > 0
         ? ` (${issues
             .slice(0, 3)
-            .map((i) => (typeof i === "object" && i && "message" in i ? (i as { message: string }).message : String(i)))
+            .map((i) =>
+              typeof i === "object" && i && "message" in i
+                ? (i as { message: string }).message
+                : String(i)
+            )
             .join("; ")})`
         : "";
     return { success: false, error: `${msg}${details}` };
@@ -564,7 +595,7 @@ Important:
    * Garante que cada step tenha id (usa generateStepId quando ausente).
    */
   protected parseAndValidateMissionPlan(
-    raw: string,
+    raw: string
   ): { success: true; data: MissionPlan } | { success: false; error: string } {
     const result = this.normalizeAndValidate(raw, missionPlanSchema);
     if (!result.success) return result;
@@ -582,8 +613,10 @@ Important:
    * Normaliza e valida resposta como GeneratedCode (com Zod).
    */
   protected parseAndValidateGeneratedCode(
-    raw: string,
-  ): { success: true; data: GeneratedCode } | { success: false; error: string } {
+    raw: string
+  ):
+    | { success: true; data: GeneratedCode }
+    | { success: false; error: string } {
     const result = this.normalizeAndValidate(raw, generatedCodeSchema);
     if (!result.success) return result;
     return { success: true, data: result.data as GeneratedCode };

@@ -10,6 +10,7 @@ import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { platform } from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { app } from "electron";
 import { BaseAdapter } from "./base";
 import type {
   ValidationResult,
@@ -61,7 +62,7 @@ export class CursorAdapter extends BaseAdapter {
     const cliPath = resolveCliPath(this.provider);
     if (!cliPath) {
       errors.push(
-        "Cursor Agent CLI not found. Please install it (curl https://cursor.com/install -fsSL | bash) or set the path to the 'agent' executable in the provider settings.",
+        "Cursor Agent CLI not found. Please install it (curl https://cursor.com/install -fsSL | bash) or set the path to the 'agent' executable in the provider settings."
       );
     }
 
@@ -105,7 +106,9 @@ export class CursorAdapter extends BaseAdapter {
       } catch (err) {
         return {
           success: false,
-          message: `Failed to run Cursor Agent CLI: ${err instanceof Error ? err.message : "Unknown error"}. Make sure you are logged in (run 'agent' in terminal if needed).`,
+          message: `Failed to run Cursor Agent CLI: ${
+            err instanceof Error ? err.message : "Unknown error"
+          }. Make sure you are logged in (run 'agent' in terminal if needed).`,
         };
       }
     }
@@ -113,7 +116,7 @@ export class CursorAdapter extends BaseAdapter {
 
   async generatePlan(
     config: AdapterConfig,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<AIResponse<MissionPlan>> {
     const startTime = Date.now();
     const validation = this.validate();
@@ -130,13 +133,13 @@ export class CursorAdapter extends BaseAdapter {
       const prompt = this.buildPlanPrompt(config);
 
       onProgress?.("Conectando ao Cursor Agent CLI...");
-      let response = await this.executeAgentCommand(
+      const { payload, raw } = await this.executeAgentCommand(
         "chat",
         prompt,
         config.projectContext.projectPath,
-        onProgress,
+        onProgress
       );
-      response = this.unwrapCursorCliResponse(response);
+      let response = this.unwrapCursorCliResponse(payload);
 
       onProgress?.("Processando resposta...");
       let planResult = this.parseAndValidateMissionPlan(response);
@@ -150,13 +153,23 @@ export class CursorAdapter extends BaseAdapter {
       }
 
       // Reparo de payload interno truncado (inner com summary/files ou steps cortado)
-      if (!planResult.success && response.includes('"summary"') && (response.includes('"files"') || response.includes('"steps"'))) {
-        const repaired = this.tryRepairTruncatedInnerPayload(response, (raw) => this.parseAndValidateMissionPlan(raw));
+      if (
+        !planResult.success &&
+        response.includes('"summary"') &&
+        (response.includes('"files"') || response.includes('"steps"'))
+      ) {
+        const repaired = this.tryRepairTruncatedInnerPayload(response, (r) =>
+          this.parseAndValidateMissionPlan(r)
+        );
         if (repaired) planResult = repaired;
       }
 
       if (!planResult.success) {
-        const lines = response.trim().split(/\r?\n/).filter((l) => l.length > 0);
+        await this.writeRawToLog(raw);
+        const lines = response
+          .trim()
+          .split(/\r?\n/)
+          .filter((l) => l.length > 0);
         const looksNdjson = lines.length > 1;
         const lastLineLooksResult =
           lines.length > 0 &&
@@ -214,7 +227,7 @@ export class CursorAdapter extends BaseAdapter {
 
   async generateCode(
     config: AdapterConfig,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<AIResponse<GeneratedCode>> {
     const startTime = Date.now();
     const validation = this.validate();
@@ -231,13 +244,13 @@ export class CursorAdapter extends BaseAdapter {
       const prompt = this.buildCodePrompt(config);
 
       onProgress?.("Conectando ao Cursor Agent CLI...");
-      let response = await this.executeAgentCommand(
+      const { payload, raw } = await this.executeAgentCommand(
         "chat",
         prompt,
         config.projectContext.projectPath,
-        onProgress,
+        onProgress
       );
-      response = this.unwrapCursorCliResponse(response);
+      let response = this.unwrapCursorCliResponse(payload);
 
       onProgress?.("Processando resposta...");
       let codeResult = this.parseAndValidateGeneratedCode(response);
@@ -251,13 +264,23 @@ export class CursorAdapter extends BaseAdapter {
       }
 
       // Reparo de payload interno truncado (inner com summary/files cortado)
-      if (!codeResult.success && response.includes('"summary"') && response.includes('"files"')) {
-        const repaired = this.tryRepairTruncatedInnerPayload(response, (raw) => this.parseAndValidateGeneratedCode(raw));
+      if (
+        !codeResult.success &&
+        response.includes('"summary"') &&
+        response.includes('"files"')
+      ) {
+        const repaired = this.tryRepairTruncatedInnerPayload(response, (r) =>
+          this.parseAndValidateGeneratedCode(r)
+        );
         if (repaired) codeResult = repaired;
       }
 
       if (!codeResult.success) {
-        const lines = response.trim().split(/\r?\n/).filter((l) => l.length > 0);
+        await this.writeRawToLog(raw);
+        const lines = response
+          .trim()
+          .split(/\r?\n/)
+          .filter((l) => l.length > 0);
         const looksNdjson = lines.length > 1;
         const lastLineLooksResult =
           lines.length > 0 &&
@@ -273,7 +296,11 @@ export class CursorAdapter extends BaseAdapter {
         const snippet = response.slice(0, 600).trim();
         return {
           success: false,
-          error: `Failed to parse code: ${codeResult.error}${truncationHint}${diagnosticHint} Raw snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
+          error: `Failed to parse code: ${
+            codeResult.error
+          }${truncationHint}${diagnosticHint} Raw snippet: ${snippet}${
+            response.length > 600 ? "..." : ""
+          }`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,
@@ -308,6 +335,21 @@ export class CursorAdapter extends BaseAdapter {
   }
 
   /**
+   * Grava o stdout bruto do Cursor CLI em arquivo de log (apenas em falha de parse).
+   */
+  private async writeRawToLog(raw: string): Promise<void> {
+    try {
+      const userData = app.getPath("userData");
+      const logDir = path.join(userData, "logs");
+      await fs.promises.mkdir(logDir, { recursive: true });
+      const logPath = path.join(logDir, `cursor-raw-${Date.now()}.log`);
+      await fs.promises.writeFile(logPath, raw, "utf8");
+    } catch {
+      // Silently ignore log write failures
+    }
+  }
+
+  /**
    * Desembrulha a resposta do Cursor CLI quando vem no formato wrapper (type/result).
    * Se o response for o wrapper completo, extrai o payload interno (result/output) e retorna
    * como string JSON normalizada. Caso contrário retorna o response inalterado.
@@ -319,8 +361,12 @@ export class CursorAdapter extends BaseAdapter {
     try {
       const wrapper = JSON.parse(trimmed) as {
         type?: string;
-        result?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
-        output?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+        result?:
+          | string
+          | { summary?: string; files?: unknown[]; steps?: unknown[] };
+        output?:
+          | string
+          | { summary?: string; files?: unknown[]; steps?: unknown[] };
       };
       if (wrapper?.type !== "result") return response;
 
@@ -373,7 +419,33 @@ export class CursorAdapter extends BaseAdapter {
       if (ndjsonPayload) return ndjsonPayload;
     }
 
+    // 3. Fallback: extrair último {...} (logs ou lixo antes do JSON)
+    const lastJson = this.tryExtractLastJsonObject(trimmed);
+    if (lastJson) {
+      const parsed = this.tryParseWithFixes(lastJson);
+      const obj = parsed as {
+        summary?: string;
+        files?: unknown[];
+        steps?: unknown[];
+      } | null;
+      if (
+        obj != null &&
+        typeof obj === "object" &&
+        (Array.isArray(obj.files) || Array.isArray(obj.steps))
+      ) {
+        return JSON.stringify(parsed);
+      }
+    }
+
     return response;
+  }
+
+  /**
+   * Extrai o último objeto JSON de uma string (útil quando há logs antes do JSON final).
+   */
+  private tryExtractLastJsonObject(raw: string): string | null {
+    const match = raw.match(/\{[\s\S]*\}$/);
+    return match ? match[0] : null;
   }
 
   /**
@@ -406,8 +478,12 @@ export class CursorAdapter extends BaseAdapter {
     try {
       const wrapper = JSON.parse(trimmed) as {
         type?: string;
-        result?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
-        output?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+        result?:
+          | string
+          | { summary?: string; files?: unknown[]; steps?: unknown[] };
+        output?:
+          | string
+          | { summary?: string; files?: unknown[]; steps?: unknown[] };
       };
       const raw = wrapper?.result ?? wrapper?.output;
       if (typeof raw === "string") {
@@ -447,8 +523,12 @@ export class CursorAdapter extends BaseAdapter {
       try {
         const wrapper = JSON.parse(lines[i]!) as {
           type?: string;
-          result?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
-          output?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+          result?:
+            | string
+            | { summary?: string; files?: unknown[]; steps?: unknown[] };
+          output?:
+            | string
+            | { summary?: string; files?: unknown[]; steps?: unknown[] };
         };
         if (wrapper?.type !== "result") continue;
         const raw = wrapper?.result ?? wrapper?.output;
@@ -504,7 +584,10 @@ export class CursorAdapter extends BaseAdapter {
       }
       if (c === '"') {
         const inner = str.slice(start, i);
-        if (inner.startsWith("{") && (inner.includes("summary") || inner.includes("files"))) {
+        if (
+          inner.startsWith("{") &&
+          (inner.includes("summary") || inner.includes("files"))
+        ) {
           return inner;
         }
         return null;
@@ -538,8 +621,12 @@ export class CursorAdapter extends BaseAdapter {
         const repaired = line.trimEnd() + suffix;
         const wrapper = JSON.parse(repaired) as {
           type?: string;
-          result?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
-          output?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+          result?:
+            | string
+            | { summary?: string; files?: unknown[]; steps?: unknown[] };
+          output?:
+            | string
+            | { summary?: string; files?: unknown[]; steps?: unknown[] };
         };
         if (wrapper?.type !== "result") continue;
         const raw = wrapper?.result ?? wrapper?.output;
@@ -584,8 +671,12 @@ export class CursorAdapter extends BaseAdapter {
       try {
         const wrapper = JSON.parse(lines[i]!) as {
           type?: string;
-          result?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
-          output?: string | { summary?: string; files?: unknown[]; steps?: unknown[] };
+          result?:
+            | string
+            | { summary?: string; files?: unknown[]; steps?: unknown[] };
+          output?:
+            | string
+            | { summary?: string; files?: unknown[]; steps?: unknown[] };
         };
         if (wrapper?.type !== "result") continue;
         const raw = wrapper?.result ?? wrapper?.output;
@@ -611,7 +702,11 @@ export class CursorAdapter extends BaseAdapter {
         }
       } catch {
         // Última linha pode estar truncada; tentar reparar
-        if (i === lines.length - 1 && lines[i]!.includes('"type"') && lines[i]!.includes('"result"')) {
+        if (
+          i === lines.length - 1 &&
+          lines[i]!.includes('"type"') &&
+          lines[i]!.includes('"result"')
+        ) {
           const repaired = this.tryRepairTruncatedResultLine(lines[i]!);
           if (repaired) return repaired;
         }
@@ -628,11 +723,14 @@ export class CursorAdapter extends BaseAdapter {
    */
   private tryRepairTruncatedInnerPayload<T>(
     response: string,
-    parseAndValidate: (raw: string) => { success: true; data: T } | { success: false; error: string },
+    parseAndValidate: (
+      raw: string
+    ) => { success: true; data: T } | { success: false; error: string }
   ): { success: true; data: T } | null {
     const trimmed = response.trim();
     if (!trimmed.includes('"summary"')) return null;
-    if (!trimmed.includes('"files"') && !trimmed.includes('"steps"')) return null;
+    if (!trimmed.includes('"files"') && !trimmed.includes('"steps"'))
+      return null;
 
     const suffixes = [
       '"}]}',
@@ -657,8 +755,8 @@ export class CursorAdapter extends BaseAdapter {
     subcommand: string,
     prompt: string,
     cwd: string,
-    onProgress?: ProgressCallback,
-  ): Promise<string> {
+    onProgress?: ProgressCallback
+  ): Promise<{ payload: string; raw: string }> {
     return new Promise((resolve, reject) => {
       const cliPath = resolveCliPath(this.provider)!;
 
@@ -695,7 +793,7 @@ export class CursorAdapter extends BaseAdapter {
         clearTimeout(maxTimeoutId);
       };
 
-      const handleResolve = (value: string) => {
+      const handleResolve = (value: { payload: string; raw: string }) => {
         if (isResolved) return;
         isResolved = true;
         cleanup();
@@ -719,8 +817,10 @@ export class CursorAdapter extends BaseAdapter {
         inactivityTimeoutId = setTimeout(() => {
           handleReject(
             new Error(
-              `Cursor Agent CLI inativo por ${inactivityTimeout / 60000} minutos. Chunks recebidos: ${chunksReceived}.`,
-            ),
+              `Cursor Agent CLI inativo por ${
+                inactivityTimeout / 60000
+              } minutos. Chunks recebidos: ${chunksReceived}.`
+            )
           );
         }, inactivityTimeout);
       };
@@ -744,7 +844,7 @@ export class CursorAdapter extends BaseAdapter {
           if (chunksReceived % 5 === 0 || chunk.length > 100) {
             const sizeKB = (stdout.length / 1024).toFixed(1);
             onProgress?.(
-              `Recebendo resposta... (${sizeKB} KB, ${chunksReceived} chunks)`,
+              `Recebendo resposta... (${sizeKB} KB, ${chunksReceived} chunks)`
             );
           }
         });
@@ -757,15 +857,15 @@ export class CursorAdapter extends BaseAdapter {
         child.on("close", (code) => {
           if (code === 0) {
             onProgress?.(
-              `Resposta completa recebida (${(stdout.length / 1024).toFixed(1)} KB)`,
+              `Resposta completa recebida (${(stdout.length / 1024).toFixed(
+                1
+              )} KB)`
             );
             const payload = this.extractPayloadFromCursorStdout(stdout);
-            handleResolve(payload);
+            handleResolve({ payload, raw: stdout });
           } else {
             handleReject(
-              new Error(
-                stderr || `Cursor Agent CLI exited with code ${code}.`,
-              ),
+              new Error(stderr || `Cursor Agent CLI exited with code ${code}.`)
             );
           }
         });
@@ -779,14 +879,16 @@ export class CursorAdapter extends BaseAdapter {
             handleReject(
               new Error(
                 "Nenhum dado recebido do Cursor Agent CLI dentro do tempo máximo. " +
-                  "Verifique se está logado no terminal (rode 'agent' se necessário) e aumente o timeout se precisar.",
-              ),
+                  "Verifique se está logado no terminal (rode 'agent' se necessário) e aumente o timeout se precisar."
+              )
             );
           } else {
             handleReject(
               new Error(
-                `Cursor Agent CLI timeout máximo (${maxTimeout / 60000} minutos). Chunks recebidos: ${chunksReceived}.`,
-              ),
+                `Cursor Agent CLI timeout máximo (${
+                  maxTimeout / 60000
+                } minutos). Chunks recebidos: ${chunksReceived}.`
+              )
             );
           }
         }, maxTimeout);
