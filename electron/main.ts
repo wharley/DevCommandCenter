@@ -1,4 +1,11 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } from "electron";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  dialog,
+  shell,
+  nativeImage,
+} from "electron";
 import path from "node:path";
 import { registerIpcHandlers } from "./ipc-handlers";
 import db, { setUserDataPath } from "../lib/database";
@@ -57,7 +64,8 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   } else {
     // Production: load from static build
-    const indexPath = path.join(__dirname, "..", "dist", "index.html");
+    // __dirname is .electron/electron/, so we need to go up 2 levels to reach dist/
+    const indexPath = path.join(__dirname, "..", "..", "dist", "index.html");
     console.log("[Electron] Loading app from static build:", indexPath);
     mainWindow.loadFile(indexPath);
   }

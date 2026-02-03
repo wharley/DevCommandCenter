@@ -12,6 +12,7 @@
 /dist-electron
 /.electron
 /dist
+/release
 
 # debug
 npm-debug.log*
