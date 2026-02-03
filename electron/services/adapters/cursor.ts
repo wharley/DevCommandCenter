@@ -732,18 +732,123 @@ export class CursorAdapter extends BaseAdapter {
     if (!trimmed.includes('"files"') && !trimmed.includes('"steps"'))
       return null;
 
+    // Sufixos expandidos para cobrir mais casos de truncagem em suggestedContent
     const suffixes = [
       '"}]}',
       '"}]}]}',
       '"}]}]}]}',
       '"}]}]}]}]}',
       '\\"}]}', // truncamento logo após backslash
+      '"}', // truncamento no meio de um campo string
+      '"}}', // truncamento após string, fecha objeto
+      '"}]}}', // truncamento em files dentro de wrapper
+      "null}]}", // truncamento com campo incompleto
+      '"},"suggestedContent":""}]}', // arquivo sem suggestedContent, adiciona vazio
     ];
     for (const suffix of suffixes) {
       const repaired = trimmed.trimEnd() + suffix;
       const result = parseAndValidate(repaired);
       if (result.success) return { success: true, data: result.data };
     }
+
+    // Estratégia 2: Tentar extrair files válidos descartando o último (truncado)
+    const extractedFiles = this.tryExtractValidFilesFromTruncated(trimmed);
+    if (extractedFiles) {
+      const result = parseAndValidate(extractedFiles);
+      if (result.success) return { success: true, data: result.data };
+    }
+
+    return null;
+  }
+
+  /**
+   * Tenta extrair arquivos válidos de uma resposta truncada, descartando o arquivo incompleto.
+   * Útil quando suggestedContent é muito grande e o JSON trunca no meio.
+   */
+  private tryExtractValidFilesFromTruncated(response: string): string | null {
+    // Procura pelo padrão de início de files array
+    const filesMatch = response.match(/"files"\s*:\s*\[/);
+    if (!filesMatch) return null;
+
+    const filesStart = filesMatch.index! + filesMatch[0].length;
+    const beforeFiles = response.slice(0, filesStart);
+
+    // Tenta encontrar objetos de arquivo completos (terminam em })
+    // Procura por padrões como }, { ou },{ que indicam separação de arquivos
+    const filesContent = response.slice(filesStart);
+    const fileObjects: string[] = [];
+    let depth = 0;
+    let currentFile = "";
+    let inString = false;
+    let escape = false;
+
+    for (let i = 0; i < filesContent.length; i++) {
+      const c = filesContent[i];
+
+      if (inString) {
+        currentFile += c;
+        if (escape) {
+          escape = false;
+          continue;
+        }
+        if (c === "\\") {
+          escape = true;
+          continue;
+        }
+        if (c === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (c === '"') {
+        inString = true;
+        currentFile += c;
+        continue;
+      }
+
+      if (c === "{") {
+        depth++;
+        currentFile += c;
+        continue;
+      }
+
+      if (c === "}") {
+        depth--;
+        currentFile += c;
+        if (depth === 0 && currentFile.trim()) {
+          // Validar se é um objeto de arquivo válido
+          try {
+            const parsed = JSON.parse(currentFile) as { path?: string };
+            if (parsed.path) {
+              fileObjects.push(currentFile);
+            }
+          } catch {
+            // Objeto incompleto, ignorar
+          }
+          currentFile = "";
+        }
+        continue;
+      }
+
+      if (depth > 0) {
+        currentFile += c;
+      }
+    }
+
+    // Se encontrou pelo menos um arquivo válido, reconstruir o JSON
+    if (fileObjects.length > 0) {
+      // Extrair summary se existir
+      const summaryMatch = response.match(
+        /"summary"\s*:\s*"([^"\\]*(\\.[^"\\]*)*)"/
+      );
+      const summary = summaryMatch
+        ? summaryMatch[0]
+        : '"summary":"Resposta parcial (truncada)"';
+
+      return `{${summary},"files":[${fileObjects.join(",")}]}`;
+    }
+
     return null;
   }
 

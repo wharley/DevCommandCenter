@@ -47,7 +47,7 @@ O Dev Command Center toma como **referência** o fluxo de ferramentas como Comma
 
 ### Princípios de Aplicação
 
-- **Diff-first:** O apply sempre tenta `git apply --check` + `git apply` quando há unified diff válido. Escrita direta de arquivo (`suggestedContent`) é fallback apenas quando patch não é aplicável ou está ausente. O prompt de geração de código exige `diff` em modify e `suggestedContent` em create (reduz tokens em todos os providers).
+- **Diff-first:** O apply sempre tenta `git apply --check` + `git apply` quando há unified diff válido. Escrita direta de arquivo (`suggestedContent`) é fallback quando patch não é aplicável. O prompt exige `diff` e `suggestedContent` em modify (garante fallback robusto) e `suggestedContent` em create.
 
 ### Worktree Policy
 

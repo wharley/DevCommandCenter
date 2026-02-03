@@ -147,14 +147,14 @@ Generate the code changes with the following JSON structure:
       "path": "relative/path/to/file.ts",
       "action": "create" | "modify" | "delete",
       "originalContent": "optional - helps generate accurate diff when modifying",
-      "suggestedContent": "required for create; optional fallback for modify (when diff may fail)",
-      "diff": "required for modify - unified diff (lines with +, -, ---, +++); omit for create"
+      "suggestedContent": "required for create and modify (guarantees fallback when diff fails)",
+      "diff": "required for modify - unified diff (lines with +, -, ---, +++); optional for create"
     }
   ]
 }
 
 Rules by action:
-- modify: diff is REQUIRED (unified diff with ---, +++, +, -, or context lines). suggestedContent is optional fallback.
+- modify: diff is REQUIRED. suggestedContent is REQUIRED (fallback when diff fails).
 - create: suggestedContent is REQUIRED (full file content). diff is optional.
 - delete: path is REQUIRED. The file will be removed.
 

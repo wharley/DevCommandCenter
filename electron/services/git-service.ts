@@ -80,6 +80,21 @@ function checkDiffAlreadyApplied(
   return true; // Todas as linhas encontradas
 }
 
+/**
+ * Normaliza os paths do header do diff para corresponder ao targetPath.
+ * LLMs frequentemente geram paths incorretos no header (ex.: a/src/file.ts vs a/file.ts).
+ */
+function normalizeDiffPaths(diff: string, targetPath: string): string {
+  return diff
+    .split("\n")
+    .map((line) => {
+      if (line.startsWith("--- ")) return `--- a/${targetPath}`;
+      if (line.startsWith("+++ ")) return `+++ b/${targetPath}`;
+      return line;
+    })
+    .join("\n");
+}
+
 export class GitService {
   private projectPath: string;
 
@@ -416,7 +431,8 @@ export class GitService {
 
         // 2. Tentar git apply quando há diff válido
         if (hasDiff) {
-          const result = await this.applyPatch(change.diff!);
+          const normalizedDiff = normalizeDiffPaths(change.diff!, change.path);
+          const result = await this.applyPatch(normalizedDiff);
           if (result.success) {
             appliedFiles.push(change.path);
             appliedVia.push({ path: change.path, via: "git-apply" });
