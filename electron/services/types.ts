@@ -95,7 +95,7 @@ export interface AIProviderAdapter {
    */
   generatePlan(
     config: AdapterConfig,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<AIResponse<MissionPlan>>;
 
   /**
@@ -105,7 +105,7 @@ export interface AIProviderAdapter {
    */
   generateCode(
     config: AdapterConfig,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<AIResponse<GeneratedCode>>;
 
   /**
@@ -157,8 +157,11 @@ export interface ApplyChangesResult {
   appliedFiles: string[];
   failedFiles: Array<{ path: string; error: string }>;
   backupPath?: string;
-  /** How each file was applied (git-apply vs file-write) for transparency */
-  appliedVia?: Array<{ path: string; via: "git-apply" | "file-write" }>;
+  /** How each file was applied (git-apply, file-write, or already-applied) for transparency */
+  appliedVia?: Array<{
+    path: string;
+    via: "git-apply" | "file-write" | "already-applied";
+  }>;
 }
 
 // Re-exports para conveniência

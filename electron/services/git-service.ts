@@ -30,8 +30,54 @@ function looksLikeUnifiedDiff(content: string): boolean {
       line.startsWith("+") ||
       line.startsWith("-") ||
       line.startsWith("--- ") ||
-      line.startsWith("+++ "),
+      line.startsWith("+++ ")
   );
+}
+
+/**
+ * Extrai as linhas adicionadas (+) de um diff unificado.
+ * Ignora headers (+++) e retorna apenas o conteúdo das linhas.
+ */
+function extractAddedLinesFromDiff(diff: string): string[] {
+  const lines = diff.split(/\r?\n/);
+  const addedLines: string[] = [];
+  for (const line of lines) {
+    // Ignora headers (+++ b/path)
+    if (line.startsWith("+++")) continue;
+    // Linha adicionada: começa com + (não é header)
+    if (line.startsWith("+")) {
+      addedLines.push(line.slice(1)); // Remove o + do início
+    }
+  }
+  return addedLines;
+}
+
+/**
+ * Verifica se as linhas adicionadas de um diff já estão presentes no conteúdo do arquivo.
+ * Retorna true se TODAS as linhas adicionadas estão presentes (diff já aplicado).
+ * Retorna false se alguma linha está faltando.
+ */
+function checkDiffAlreadyApplied(
+  currentContent: string,
+  diff: string
+): boolean {
+  const addedLines = extractAddedLinesFromDiff(diff);
+  if (addedLines.length === 0) return false; // Sem linhas adicionadas, não pode verificar
+
+  // Normaliza para comparação (trim de cada linha)
+  const contentLines = currentContent.split(/\r?\n/).map((l) => l.trimEnd());
+
+  // Verifica se TODAS as linhas adicionadas estão presentes no arquivo
+  for (const addedLine of addedLines) {
+    const normalizedAdded = addedLine.trimEnd();
+    // Linha vazia sempre "existe"
+    if (normalizedAdded === "") continue;
+    // Verifica se a linha existe no arquivo
+    if (!contentLines.some((cl) => cl === normalizedAdded)) {
+      return false; // Linha não encontrada, diff não foi aplicado
+    }
+  }
+  return true; // Todas as linhas encontradas
 }
 
 export class GitService {
@@ -171,7 +217,7 @@ export class GitService {
     try {
       const { stdout } = await execAsync(
         `git log -${count} --format="%H|%s|%an|%aI"`,
-        { cwd: this.projectPath },
+        { cwd: this.projectPath }
       );
 
       return stdout
@@ -227,7 +273,7 @@ export class GitService {
     try {
       const { stdout } = await execAsync(
         `git ls-files --cached --others --exclude-standard | head -${maxFiles}`,
-        { cwd: this.projectPath },
+        { cwd: this.projectPath }
       );
       return stdout.trim().split("\n").filter(Boolean);
     } catch {
@@ -264,7 +310,7 @@ export class GitService {
   }> {
     const tmpFile = path.join(
       os.tmpdir(),
-      `dcc-patch-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`,
+      `dcc-patch-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`
     );
     try {
       await fs.promises.writeFile(tmpFile, unifiedDiff, "utf-8");
@@ -279,8 +325,7 @@ export class GitService {
       });
       return { success: true };
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : String(err);
+      const message = err instanceof Error ? err.message : String(err);
       const stderr =
         err && typeof err === "object" && "stderr" in err
           ? String((err as { stderr?: string }).stderr ?? "")
@@ -300,15 +345,20 @@ export class GitService {
 
   /**
    * Aplica mudanças de código ao repositório.
-   * Ordem preferida: git apply (quando diff válido) → escrita de arquivo (fallback).
+   * Ordem preferida:
+   * 1. Verificar se diff já foi aplicado (CLIs como Cursor/Claude aplicam automaticamente)
+   * 2. Tentar git apply (quando diff válido)
+   * 3. Fallback: escrita de arquivo com suggestedContent
    */
   async applyChanges(
     changes: CodeSuggestion[],
-    options: { createBackup?: boolean; dryRun?: boolean } = {},
+    options: { createBackup?: boolean; dryRun?: boolean } = {}
   ): Promise<ApplyChangesResult> {
     const appliedFiles: string[] = [];
-    const appliedVia: Array<{ path: string; via: "git-apply" | "file-write" }> =
-      [];
+    const appliedVia: Array<{
+      path: string;
+      via: "git-apply" | "file-write" | "already-applied";
+    }> = [];
     const failedFiles: Array<{ path: string; error: string }> = [];
     let backupPath: string | undefined;
 
@@ -327,7 +377,9 @@ export class GitService {
           appliedFiles.push(change.path);
           appliedVia.push({
             path: change.path,
-            via: looksLikeUnifiedDiff(change.diff ?? "") ? "git-apply" : "file-write",
+            via: looksLikeUnifiedDiff(change.diff ?? "")
+              ? "git-apply"
+              : "file-write",
           });
           continue;
         }
@@ -335,10 +387,34 @@ export class GitService {
         const hasDiff =
           (change.diff ?? "").trim().length > 0 &&
           looksLikeUnifiedDiff(change.diff ?? "");
-        const hasContent =
-          (change.suggestedContent ?? "").trim().length > 0;
+        const hasContent = (change.suggestedContent ?? "").trim().length > 0;
 
-        // 1. Tentar git apply quando há diff válido (create/modify/delete)
+        // 1. Para modify/create com diff, verificar se já foi aplicado
+        // (CLIs como Cursor Agent e Claude Code aplicam automaticamente)
+        if (
+          hasDiff &&
+          (change.action === "modify" || change.action === "create")
+        ) {
+          // Verificar se o arquivo existe e se as mudanças já estão lá
+          if (fs.existsSync(fullPath)) {
+            try {
+              const currentContent = await fs.promises.readFile(
+                fullPath,
+                "utf-8"
+              );
+              if (checkDiffAlreadyApplied(currentContent, change.diff!)) {
+                // Diff já aplicado (provavelmente pelo CLI)
+                appliedFiles.push(change.path);
+                appliedVia.push({ path: change.path, via: "already-applied" });
+                continue;
+              }
+            } catch {
+              // Erro ao ler arquivo, seguir para git apply
+            }
+          }
+        }
+
+        // 2. Tentar git apply quando há diff válido
         if (hasDiff) {
           const result = await this.applyPatch(change.diff!);
           if (result.success) {
@@ -346,10 +422,27 @@ export class GitService {
             appliedVia.push({ path: change.path, via: "git-apply" });
             continue;
           }
-          // git apply falhou — seguir para fallback
+          // git apply falhou — verificar se foi aplicado de outra forma
+          // (pode ter sido aplicado pelo CLI entre a verificação e o apply)
+          if (fs.existsSync(fullPath) && change.action === "modify") {
+            try {
+              const currentContent = await fs.promises.readFile(
+                fullPath,
+                "utf-8"
+              );
+              if (checkDiffAlreadyApplied(currentContent, change.diff!)) {
+                appliedFiles.push(change.path);
+                appliedVia.push({ path: change.path, via: "already-applied" });
+                continue;
+              }
+            } catch {
+              // Erro ao ler, seguir para fallback
+            }
+          }
+          // git apply falhou e não foi aplicado — seguir para fallback
         }
 
-        // 2. Fallback: escrita de arquivo com suggestedContent
+        // 3. Fallback: escrita de arquivo com suggestedContent
         switch (change.action) {
           case "create":
             if (hasContent) {
@@ -357,7 +450,7 @@ export class GitService {
               await fs.promises.writeFile(
                 fullPath,
                 change.suggestedContent!,
-                "utf-8",
+                "utf-8"
               );
               appliedFiles.push(change.path);
               appliedVia.push({ path: change.path, via: "file-write" });
@@ -374,7 +467,7 @@ export class GitService {
               await fs.promises.writeFile(
                 fullPath,
                 change.suggestedContent!,
-                "utf-8",
+                "utf-8"
               );
               appliedFiles.push(change.path);
               appliedVia.push({ path: change.path, via: "file-write" });
@@ -416,7 +509,7 @@ export class GitService {
    * Falha em silêncio para não impactar o backup.
    */
   private async ensureGitignoreIgnoresDccBackups(
-    projectPath: string,
+    projectPath: string
   ): Promise<void> {
     try {
       const gitignorePath = path.join(projectPath, ".gitignore");
@@ -438,13 +531,13 @@ export class GitService {
         await fs.promises.appendFile(
           gitignorePath,
           `${suffix}# DevCommandCenter backups\n.dcc-backups\n`,
-          "utf-8",
+          "utf-8"
         );
       } else {
         await fs.promises.writeFile(
           gitignorePath,
           "# DevCommandCenter backups\n.dcc-backups\n",
-          "utf-8",
+          "utf-8"
         );
       }
     } catch {
@@ -492,7 +585,7 @@ export class GitService {
 
       const { stdout: toplevel } = await execAsync(
         "git rev-parse --show-toplevel",
-        { cwd: this.projectPath },
+        { cwd: this.projectPath }
       );
       const ourRoot = path.resolve(this.projectPath, toplevel.trim());
 
@@ -527,7 +620,7 @@ export class GitService {
     try {
       const { stdout: originHead } = await execAsync(
         "git symbolic-ref refs/remotes/origin/HEAD",
-        { cwd: this.projectPath, encoding: "utf8" },
+        { cwd: this.projectPath, encoding: "utf8" }
       );
       const ref = originHead.trim();
       if (ref) {
@@ -557,7 +650,10 @@ export class GitService {
   /**
    * Cria um novo branch. Se fromBranch for informado, cria a partir dele (ex.: main/master).
    */
-  async createBranch(branchName: string, fromBranch?: string): Promise<boolean> {
+  async createBranch(
+    branchName: string,
+    fromBranch?: string
+  ): Promise<boolean> {
     try {
       if (fromBranch) {
         await execAsync(`git checkout "${fromBranch}"`, {
@@ -595,7 +691,9 @@ export class GitService {
    * Executa git reset --hard para descartar alterações ou reverter último commit.
    * @param ref "HEAD" = descarta alterações não commitadas; "HEAD~1" = reverte último commit
    */
-  async reset(ref: "HEAD" | "HEAD~1" = "HEAD"): Promise<{ success: boolean; error?: string }> {
+  async reset(
+    ref: "HEAD" | "HEAD~1" = "HEAD"
+  ): Promise<{ success: boolean; error?: string }> {
     try {
       await execAsync(`git reset --hard ${ref}`, { cwd: this.projectPath });
       return { success: true };
