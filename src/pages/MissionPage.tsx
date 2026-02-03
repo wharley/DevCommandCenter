@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useCallback, memo } from "react";
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import {
@@ -1326,7 +1326,10 @@ function getPrismLanguage(filePath: string): string {
   return prismMap[ext] ?? "markup";
 }
 
-function EditableCodeBlock({
+/**
+ * Memoized EditableCodeBlock - prevents re-renders when props haven't changed
+ */
+const EditableCodeBlock = memo(function EditableCodeBlock({
   filePath,
   value,
   onChange,
@@ -1352,9 +1355,12 @@ function EditableCodeBlock({
       textareaClassName="focus:outline-none"
     />
   );
-}
+});
 
-function CodeBlock({
+/**
+ * Memoized CodeBlock - prevents expensive SyntaxHighlighter re-renders
+ */
+const CodeBlock = memo(function CodeBlock({
   filePath,
   content,
   isDiff,
@@ -1382,7 +1388,7 @@ function CodeBlock({
       {content}
     </SyntaxHighlighter>
   );
-}
+});
 
 const CODE_GENERATION_STEPS = [
   { id: "prep", label: "Preparando ambiente" },
@@ -1390,6 +1396,290 @@ const CODE_GENERATION_STEPS = [
   { id: "generate", label: "Gerando alterações" },
   { id: "process", label: "Processando resposta" },
 ] as const;
+
+/**
+ * Memoized FileAccordionItem - only renders content when open (lazy rendering)
+ * This prevents expensive SyntaxHighlighter processing for closed items
+ */
+const FileAccordionItem = memo(function FileAccordionItem({
+  file,
+  isOpen,
+  isSelected,
+  showCheckbox,
+  isSuggestedEditable,
+  getSuggestedContent,
+  toggleFileSelection,
+  onEditedSuggestionsChange,
+}: {
+  file: {
+    path: string;
+    action: string;
+    originalContent?: string;
+    suggestedContent?: string;
+    diff?: string;
+  };
+  isOpen: boolean;
+  isSelected: boolean;
+  showCheckbox: boolean;
+  isSuggestedEditable: boolean;
+  getSuggestedContent: (path: string, fallback: string) => string;
+  toggleFileSelection: (path: string) => void;
+  onEditedSuggestionsChange?: (path: string, content: string) => void;
+}) {
+  const hasOriginal = (file.originalContent ?? "").trim().length > 0;
+  const hasSuggested = (file.suggestedContent ?? "").trim().length > 0;
+  const hasDiff = (file.diff ?? "").trim().length > 0;
+  const suggestedIsMessage =
+    hasSuggested && isLikelyMessage(file.suggestedContent!);
+  const diffIsMessage = hasDiff && !looksLikeUnifiedDiff(file.diff ?? "");
+  const tabCount = [hasOriginal, hasSuggested, hasDiff].filter(Boolean).length;
+  const showTabs = tabCount > 1;
+
+  return (
+    <AccordionItem value={file.path}>
+      <AccordionTrigger className="py-3 hover:no-underline [&[data-state=open]>svg]:rotate-180">
+        <div className="flex items-center justify-between gap-2 w-full pr-2">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {showCheckbox && (
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+                className="shrink-0"
+              >
+                <Checkbox
+                  id={`file-${file.path}`}
+                  checked={isSelected}
+                  onCheckedChange={() => toggleFileSelection(file.path)}
+                />
+              </div>
+            )}
+            <code className="text-sm font-medium truncate">{file.path}</code>
+          </div>
+          <Badge
+            variant={
+              file.action === "create"
+                ? "default"
+                : file.action === "delete"
+                ? "destructive"
+                : "secondary"
+            }
+            className="shrink-0"
+          >
+            {file.action}
+          </Badge>
+        </div>
+      </AccordionTrigger>
+      {(hasOriginal || hasSuggested || hasDiff) && (
+        <AccordionContent>
+          {/* LAZY RENDERING: Only render expensive content when accordion is open */}
+          {isOpen && (
+            <>
+              {showTabs ? (
+                <Tabs
+                  defaultValue={
+                    hasOriginal
+                      ? "original"
+                      : hasSuggested
+                      ? "suggested"
+                      : "diff"
+                  }
+                  className="w-full"
+                >
+                  <TabsList className="flex w-full">
+                    {hasOriginal && (
+                      <TabsTrigger value="original" className="flex-1">
+                        Original
+                      </TabsTrigger>
+                    )}
+                    {hasSuggested && (
+                      <TabsTrigger value="suggested" className="flex-1">
+                        Sugerido
+                      </TabsTrigger>
+                    )}
+                    {hasDiff && (
+                      <TabsTrigger value="diff" className="flex-1">
+                        Diff
+                      </TabsTrigger>
+                    )}
+                  </TabsList>
+                  {hasOriginal && (
+                    <TabsContent value="original" className="mt-3">
+                      <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                        <CodeBlock
+                          filePath={file.path}
+                          content={file.originalContent ?? ""}
+                        />
+                      </ScrollArea>
+                    </TabsContent>
+                  )}
+                  {hasSuggested && (
+                    <TabsContent value="suggested" className="mt-3">
+                      {isSuggestedEditable ? (
+                        <>
+                          <p className="flex items-center gap-2 text-sm text-primary font-medium mb-2">
+                            <Pencil className="h-4 w-4 shrink-0" />
+                            Edite o conteúdo antes de aplicar.
+                          </p>
+                          <div className="rounded-md border border-border overflow-hidden">
+                            <EditableCodeBlock
+                              filePath={file.path}
+                              value={getSuggestedContent(
+                                file.path,
+                                file.suggestedContent ?? ""
+                              )}
+                              onChange={(value) =>
+                                onEditedSuggestionsChange!(file.path, value)
+                              }
+                            />
+                          </div>
+                        </>
+                      ) : suggestedIsMessage ? (
+                        <Alert className="text-muted-foreground">
+                          <p className="text-sm whitespace-pre-wrap">
+                            {getSuggestedContent(
+                              file.path,
+                              file.suggestedContent ?? ""
+                            )}
+                          </p>
+                        </Alert>
+                      ) : (
+                        <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                          <CodeBlock
+                            filePath={file.path}
+                            content={getSuggestedContent(
+                              file.path,
+                              file.suggestedContent ?? ""
+                            )}
+                          />
+                        </ScrollArea>
+                      )}
+                    </TabsContent>
+                  )}
+                  {hasDiff && (
+                    <TabsContent value="diff" className="mt-3">
+                      {diffIsMessage ? (
+                        <Alert className="text-muted-foreground">
+                          <p className="text-xs font-medium text-muted-foreground mb-1">
+                            Nota do assistente
+                          </p>
+                          <p className="text-sm whitespace-pre-wrap">
+                            {file.diff}
+                          </p>
+                        </Alert>
+                      ) : (
+                        <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                          <CodeBlock
+                            filePath={file.path}
+                            content={file.diff ?? ""}
+                            isDiff
+                          />
+                        </ScrollArea>
+                      )}
+                    </TabsContent>
+                  )}
+                </Tabs>
+              ) : (
+                <div className="space-y-4 mt-2">
+                  {hasOriginal && (
+                    <div>
+                      <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                        Conteúdo atual
+                      </h4>
+                      <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                        <CodeBlock
+                          filePath={file.path}
+                          content={file.originalContent ?? ""}
+                        />
+                      </ScrollArea>
+                    </div>
+                  )}
+                  {hasSuggested && (
+                    <div>
+                      <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                        Código sugerido
+                        {isSuggestedEditable && (
+                          <span className="font-normal text-muted-foreground ml-1">
+                            (editável)
+                          </span>
+                        )}
+                      </h4>
+                      {isSuggestedEditable ? (
+                        <>
+                          <p className="flex items-center gap-2 text-sm text-primary font-medium mb-2">
+                            <Pencil className="h-4 w-4 shrink-0" />
+                            Edite o conteúdo antes de aplicar.
+                          </p>
+                          <div className="rounded-md border border-border overflow-hidden">
+                            <EditableCodeBlock
+                              filePath={file.path}
+                              value={getSuggestedContent(
+                                file.path,
+                                file.suggestedContent ?? ""
+                              )}
+                              onChange={(value) =>
+                                onEditedSuggestionsChange!(file.path, value)
+                              }
+                            />
+                          </div>
+                        </>
+                      ) : suggestedIsMessage ? (
+                        <Alert className="text-muted-foreground">
+                          <p className="text-sm whitespace-pre-wrap">
+                            {getSuggestedContent(
+                              file.path,
+                              file.suggestedContent ?? ""
+                            )}
+                          </p>
+                        </Alert>
+                      ) : (
+                        <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                          <CodeBlock
+                            filePath={file.path}
+                            content={getSuggestedContent(
+                              file.path,
+                              file.suggestedContent ?? ""
+                            )}
+                          />
+                        </ScrollArea>
+                      )}
+                    </div>
+                  )}
+                  {hasDiff && (
+                    <div>
+                      <h4 className="text-xs font-medium text-muted-foreground mb-2">
+                        Alterações (diff)
+                      </h4>
+                      {diffIsMessage ? (
+                        <Alert className="text-muted-foreground">
+                          <p className="text-xs font-medium text-muted-foreground mb-1">
+                            Nota do assistente
+                          </p>
+                          <p className="text-sm whitespace-pre-wrap">
+                            {file.diff}
+                          </p>
+                        </Alert>
+                      ) : (
+                        <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
+                          <CodeBlock
+                            filePath={file.path}
+                            content={file.diff ?? ""}
+                            isDiff
+                          />
+                        </ScrollArea>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </AccordionContent>
+      )}
+    </AccordionItem>
+  );
+});
 
 function CodeView({
   code,
@@ -1420,25 +1710,40 @@ function CodeView({
   editedSuggestions?: Record<string, string>;
   onEditedSuggestionsChange?: (path: string, content: string) => void;
 }) {
-  const getSuggestedContent = (path: string, fallback: string) =>
-    editedSuggestions?.[path] ?? fallback;
-  const isSuggestedEditable = Boolean(onEditedSuggestionsChange);
-  const toggleFileSelection = (path: string) => {
-    if (!selectedFilePaths || !onSelectionChange) return;
-    const next = new Set(selectedFilePaths);
-    if (next.has(path)) next.delete(path);
-    else next.add(path);
-    onSelectionChange(Array.from(next));
-  };
+  // Track which accordion items are open for lazy rendering
+  const [openItems, setOpenItems] = useState<string[]>([]);
 
-  const selectAll = () => {
+  const getSuggestedContent = useCallback(
+    (path: string, fallback: string) => editedSuggestions?.[path] ?? fallback,
+    [editedSuggestions]
+  );
+
+  const isSuggestedEditable = Boolean(onEditedSuggestionsChange);
+
+  const toggleFileSelection = useCallback(
+    (path: string) => {
+      if (!selectedFilePaths || !onSelectionChange) return;
+      const next = new Set(selectedFilePaths);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      onSelectionChange(Array.from(next));
+    },
+    [selectedFilePaths, onSelectionChange]
+  );
+
+  const selectAll = useCallback(() => {
     if (!code?.files.length || !onSelectionChange) return;
     onSelectionChange(code.files.map((f) => f.path));
-  };
+  }, [code?.files, onSelectionChange]);
 
-  const selectNone = () => {
+  const selectNone = useCallback(() => {
     onSelectionChange?.([]);
-  };
+  }, [onSelectionChange]);
+
+  // Handler for accordion value changes (tracks open items for lazy rendering)
+  const handleAccordionValueChange = useCallback((value: string[]) => {
+    setOpenItems(value);
+  }, []);
 
   if (isGenerating && !code) {
     return (
@@ -1543,275 +1848,29 @@ function CodeView({
         )}
         <Accordion
           type="multiple"
+          value={openItems}
+          onValueChange={handleAccordionValueChange}
           className="w-full rounded-md border border-border"
         >
-          {code.files.map((file) => {
-            const hasOriginal = (file.originalContent ?? "").trim().length > 0;
-            const hasSuggested =
-              (file.suggestedContent ?? "").trim().length > 0;
-            const hasDiff = (file.diff ?? "").trim().length > 0;
-            const suggestedIsMessage =
-              hasSuggested && isLikelyMessage(file.suggestedContent!);
-            const diffIsMessage =
-              hasDiff && !looksLikeUnifiedDiff(file.diff ?? "");
-            const tabCount = [hasOriginal, hasSuggested, hasDiff].filter(
-              Boolean
-            ).length;
-            const showTabs = tabCount > 1;
-            const isSelected =
-              selectedFilePaths === undefined ||
-              selectedFilePaths.has(file.path);
-
-            return (
-              <AccordionItem key={file.path} value={file.path}>
-                <AccordionTrigger className="py-3 hover:no-underline [&[data-state=open]>svg]:rotate-180">
-                  <div className="flex items-center justify-between gap-2 w-full pr-2">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      {selectedFilePaths !== undefined && onSelectionChange && (
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => e.stopPropagation()}
-                          className="shrink-0"
-                        >
-                          <Checkbox
-                            id={`file-${file.path}`}
-                            checked={isSelected}
-                            onCheckedChange={() =>
-                              toggleFileSelection(file.path)
-                            }
-                          />
-                        </div>
-                      )}
-                      <code className="text-sm font-medium truncate">
-                        {file.path}
-                      </code>
-                    </div>
-                    <Badge
-                      variant={
-                        file.action === "create"
-                          ? "default"
-                          : file.action === "delete"
-                          ? "destructive"
-                          : "secondary"
-                      }
-                      className="shrink-0"
-                    >
-                      {file.action}
-                    </Badge>
-                  </div>
-                </AccordionTrigger>
-                {(hasOriginal || hasSuggested || hasDiff) && (
-                  <AccordionContent>
-                    {showTabs ? (
-                      <Tabs
-                        defaultValue={
-                          hasOriginal
-                            ? "original"
-                            : hasSuggested
-                            ? "suggested"
-                            : "diff"
-                        }
-                        className="w-full"
-                      >
-                        <TabsList className="flex w-full">
-                          {hasOriginal && (
-                            <TabsTrigger value="original" className="flex-1">
-                              Original
-                            </TabsTrigger>
-                          )}
-                          {hasSuggested && (
-                            <TabsTrigger value="suggested" className="flex-1">
-                              Sugerido
-                            </TabsTrigger>
-                          )}
-                          {hasDiff && (
-                            <TabsTrigger value="diff" className="flex-1">
-                              Diff
-                            </TabsTrigger>
-                          )}
-                        </TabsList>
-                        {hasOriginal && (
-                          <TabsContent value="original" className="mt-3">
-                            <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                              <CodeBlock
-                                filePath={file.path}
-                                content={file.originalContent ?? ""}
-                              />
-                            </ScrollArea>
-                          </TabsContent>
-                        )}
-                        {hasSuggested && (
-                          <TabsContent value="suggested" className="mt-3">
-                            {isSuggestedEditable ? (
-                              <>
-                                <p className="flex items-center gap-2 text-sm text-primary font-medium mb-2">
-                                  <Pencil className="h-4 w-4 shrink-0" />
-                                  Edite o conteúdo antes de aplicar.
-                                </p>
-                                <div className="rounded-md border border-border overflow-hidden">
-                                  <EditableCodeBlock
-                                    filePath={file.path}
-                                    value={getSuggestedContent(
-                                      file.path,
-                                      file.suggestedContent ?? ""
-                                    )}
-                                    onChange={(value) =>
-                                      onEditedSuggestionsChange!(
-                                        file.path,
-                                        value
-                                      )
-                                    }
-                                  />
-                                </div>
-                              </>
-                            ) : suggestedIsMessage ? (
-                              <Alert className="text-muted-foreground">
-                                <p className="text-sm whitespace-pre-wrap">
-                                  {getSuggestedContent(
-                                    file.path,
-                                    file.suggestedContent ?? ""
-                                  )}
-                                </p>
-                              </Alert>
-                            ) : (
-                              <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                                <CodeBlock
-                                  filePath={file.path}
-                                  content={getSuggestedContent(
-                                    file.path,
-                                    file.suggestedContent ?? ""
-                                  )}
-                                />
-                              </ScrollArea>
-                            )}
-                          </TabsContent>
-                        )}
-                        {hasDiff && (
-                          <TabsContent value="diff" className="mt-3">
-                            {diffIsMessage ? (
-                              <Alert className="text-muted-foreground">
-                                <p className="text-xs font-medium text-muted-foreground mb-1">
-                                  Nota do assistente
-                                </p>
-                                <p className="text-sm whitespace-pre-wrap">
-                                  {file.diff}
-                                </p>
-                              </Alert>
-                            ) : (
-                              <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                                <CodeBlock
-                                  filePath={file.path}
-                                  content={file.diff ?? ""}
-                                  isDiff
-                                />
-                              </ScrollArea>
-                            )}
-                          </TabsContent>
-                        )}
-                      </Tabs>
-                    ) : (
-                      <div className="space-y-4 mt-2">
-                        {hasOriginal && (
-                          <div>
-                            <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                              Conteúdo atual
-                            </h4>
-                            <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                              <CodeBlock
-                                filePath={file.path}
-                                content={file.originalContent ?? ""}
-                              />
-                            </ScrollArea>
-                          </div>
-                        )}
-                        {hasSuggested && (
-                          <div>
-                            <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                              Código sugerido
-                              {isSuggestedEditable && (
-                                <span className="font-normal text-muted-foreground ml-1">
-                                  (editável)
-                                </span>
-                              )}
-                            </h4>
-                            {isSuggestedEditable ? (
-                              <>
-                                <p className="flex items-center gap-2 text-sm text-primary font-medium mb-2">
-                                  <Pencil className="h-4 w-4 shrink-0" />
-                                  Edite o conteúdo antes de aplicar.
-                                </p>
-                                <div className="rounded-md border border-border overflow-hidden">
-                                  <EditableCodeBlock
-                                    filePath={file.path}
-                                    value={getSuggestedContent(
-                                      file.path,
-                                      file.suggestedContent ?? ""
-                                    )}
-                                    onChange={(value) =>
-                                      onEditedSuggestionsChange!(
-                                        file.path,
-                                        value
-                                      )
-                                    }
-                                  />
-                                </div>
-                              </>
-                            ) : suggestedIsMessage ? (
-                              <Alert className="text-muted-foreground">
-                                <p className="text-sm whitespace-pre-wrap">
-                                  {getSuggestedContent(
-                                    file.path,
-                                    file.suggestedContent ?? ""
-                                  )}
-                                </p>
-                              </Alert>
-                            ) : (
-                              <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                                <CodeBlock
-                                  filePath={file.path}
-                                  content={getSuggestedContent(
-                                    file.path,
-                                    file.suggestedContent ?? ""
-                                  )}
-                                />
-                              </ScrollArea>
-                            )}
-                          </div>
-                        )}
-                        {hasDiff && (
-                          <div>
-                            <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                              Alterações (diff)
-                            </h4>
-                            {diffIsMessage ? (
-                              <Alert className="text-muted-foreground">
-                                <p className="text-xs font-medium text-muted-foreground mb-1">
-                                  Nota do assistente
-                                </p>
-                                <p className="text-sm whitespace-pre-wrap">
-                                  {file.diff}
-                                </p>
-                              </Alert>
-                            ) : (
-                              <ScrollArea className="h-[360px] rounded-md border bg-muted/30">
-                                <CodeBlock
-                                  filePath={file.path}
-                                  content={file.diff ?? ""}
-                                  isDiff
-                                />
-                              </ScrollArea>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </AccordionContent>
-                )}
-              </AccordionItem>
-            );
-          })}
+          {code.files.map((file) => (
+            <FileAccordionItem
+              key={file.path}
+              file={file}
+              isOpen={openItems.includes(file.path)}
+              isSelected={
+                selectedFilePaths === undefined ||
+                selectedFilePaths.has(file.path)
+              }
+              showCheckbox={
+                selectedFilePaths !== undefined &&
+                onSelectionChange !== undefined
+              }
+              isSuggestedEditable={isSuggestedEditable}
+              getSuggestedContent={getSuggestedContent}
+              toggleFileSelection={toggleFileSelection}
+              onEditedSuggestionsChange={onEditedSuggestionsChange}
+            />
+          ))}
         </Accordion>
       </div>
     </div>

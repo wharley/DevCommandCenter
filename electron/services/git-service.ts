@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import * as crypto from "node:crypto";
 import type {
   GitInfo,
   GitStatus,
@@ -32,6 +33,141 @@ function looksLikeUnifiedDiff(content: string): boolean {
       line.startsWith("--- ") ||
       line.startsWith("+++ ")
   );
+}
+
+/**
+ * Validates a unified diff structure before attempting git apply.
+ * This saves I/O by avoiding temp file creation for malformed diffs.
+ *
+ * Returns { valid: true } if the diff has valid structure, or
+ * { valid: false, reason: string } if invalid.
+ */
+function validateDiff(diff: string): { valid: boolean; reason?: string } {
+  const trimmed = diff.trim();
+  if (!trimmed) {
+    return { valid: false, reason: "Empty diff" };
+  }
+
+  const lines = trimmed.split(/\r?\n/);
+
+  // Check for basic unified diff structure
+  let hasOldHeader = false;
+  let hasNewHeader = false;
+  let hasHunk = false;
+  let hasChanges = false;
+
+  for (const line of lines) {
+    // Check for file headers
+    if (line.startsWith("--- ")) {
+      hasOldHeader = true;
+    } else if (line.startsWith("+++ ")) {
+      hasNewHeader = true;
+    }
+    // Check for hunk header (@@ -x,y +x,y @@)
+    else if (line.match(/^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/)) {
+      hasHunk = true;
+    }
+    // Check for actual changes (additions or deletions)
+    else if (line.startsWith("+") && !line.startsWith("+++")) {
+      hasChanges = true;
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      hasChanges = true;
+    }
+  }
+
+  // Validate minimum requirements
+  if (!hasOldHeader) {
+    return { valid: false, reason: "Missing old file header (--- a/...)" };
+  }
+  if (!hasNewHeader) {
+    return { valid: false, reason: "Missing new file header (+++ b/...)" };
+  }
+  if (!hasHunk) {
+    return { valid: false, reason: "Missing hunk header (@@ -x,y +x,y @@)" };
+  }
+  if (!hasChanges) {
+    return { valid: false, reason: "No changes in diff (no + or - lines)" };
+  }
+
+  // Optional: Validate hunk line counts match actual content
+  // This is a more thorough validation but may be too strict for some LLM outputs
+  const hunkValidation = validateHunkLineCounts(lines);
+  if (!hunkValidation.valid) {
+    return hunkValidation;
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validates that hunk line counts roughly match actual content.
+ * Allows some tolerance for LLM-generated diffs that may have minor inconsistencies.
+ */
+function validateHunkLineCounts(lines: string[]): {
+  valid: boolean;
+  reason?: string;
+} {
+  let inHunk = false;
+  let expectedOld = 0;
+  let expectedNew = 0;
+  let actualOld = 0;
+  let actualNew = 0;
+
+  for (const line of lines) {
+    const hunkMatch = line.match(
+      /^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/
+    );
+
+    if (hunkMatch) {
+      // If we were in a previous hunk, check its counts
+      if (inHunk) {
+        // Allow some tolerance (within 20% or 5 lines, whichever is greater)
+        const tolerance = Math.max(5, Math.floor(expectedOld * 0.2));
+        if (
+          Math.abs(actualOld - expectedOld) > tolerance ||
+          Math.abs(actualNew - expectedNew) > tolerance
+        ) {
+          return {
+            valid: false,
+            reason: `Hunk line count mismatch: expected ${expectedOld}/${expectedNew}, got ${actualOld}/${actualNew}`,
+          };
+        }
+      }
+
+      // Start new hunk
+      inHunk = true;
+      expectedOld = parseInt(hunkMatch[2] ?? "1", 10);
+      expectedNew = parseInt(hunkMatch[4] ?? "1", 10);
+      actualOld = 0;
+      actualNew = 0;
+    } else if (inHunk) {
+      if (line.startsWith("+") && !line.startsWith("+++")) {
+        actualNew++;
+      } else if (line.startsWith("-") && !line.startsWith("---")) {
+        actualOld++;
+      } else if (line.startsWith(" ") || line === "") {
+        // Context line counts for both
+        actualOld++;
+        actualNew++;
+      }
+    }
+  }
+
+  // Check final hunk
+  if (inHunk) {
+    const tolerance = Math.max(5, Math.floor(expectedOld * 0.2));
+    if (
+      Math.abs(actualOld - expectedOld) > tolerance ||
+      Math.abs(actualNew - expectedNew) > tolerance
+    ) {
+      return {
+        valid: false,
+        reason: `Final hunk line count mismatch: expected ${expectedOld}/${expectedNew}, got ${actualOld}/${actualNew}`,
+      };
+    }
+  }
+
+  return { valid: true };
 }
 
 /**
@@ -431,43 +567,54 @@ export class GitService {
 
         // 2. Tentar git apply quando há diff válido
         if (hasDiff) {
-          const normalizedDiff = normalizeDiffPaths(change.diff!, change.path);
-          const result = await this.applyPatch(normalizedDiff);
-          if (result.success) {
-            appliedFiles.push(change.path);
-            appliedVia.push({ path: change.path, via: "git-apply" });
-            continue;
-          }
-          // git apply falhou — verificar se foi aplicado de outra forma
-          // (pode ter sido aplicado pelo CLI entre a verificação e o apply)
-          if (fs.existsSync(fullPath) && change.action === "modify") {
-            try {
-              const currentContent = await fs.promises.readFile(
-                fullPath,
-                "utf-8"
-              );
-              if (checkDiffAlreadyApplied(currentContent, change.diff!)) {
-                appliedFiles.push(change.path);
-                appliedVia.push({ path: change.path, via: "already-applied" });
-                continue;
+          // Pre-validate diff structure before creating temp file (performance optimization)
+          const validation = validateDiff(change.diff!);
+          if (!validation.valid) {
+            // Skip git apply and go directly to fallback (saves I/O)
+            console.log(
+              `[GitService] Skipping git apply for ${change.path}: ${validation.reason}`
+            );
+          } else {
+            const normalizedDiff = normalizeDiffPaths(
+              change.diff!,
+              change.path
+            );
+            const result = await this.applyPatch(normalizedDiff);
+            if (result.success) {
+              appliedFiles.push(change.path);
+              appliedVia.push({ path: change.path, via: "git-apply" });
+              continue;
+            }
+            // git apply falhou — verificar se foi aplicado de outra forma
+            // (pode ter sido aplicado pelo CLI entre a verificação e o apply)
+            if (fs.existsSync(fullPath) && change.action === "modify") {
+              try {
+                const currentContent = await fs.promises.readFile(
+                  fullPath,
+                  "utf-8"
+                );
+                if (checkDiffAlreadyApplied(currentContent, change.diff!)) {
+                  appliedFiles.push(change.path);
+                  appliedVia.push({
+                    path: change.path,
+                    via: "already-applied",
+                  });
+                  continue;
+                }
+              } catch {
+                // Erro ao ler, seguir para fallback
               }
-            } catch {
-              // Erro ao ler, seguir para fallback
             }
           }
-          // git apply falhou e não foi aplicado — seguir para fallback
+          // git apply falhou/skipped e não foi aplicado — seguir para fallback
         }
 
-        // 3. Fallback: escrita de arquivo com suggestedContent
+        // 3. Fallback: escrita de arquivo com suggestedContent (using atomic writes)
         switch (change.action) {
           case "create":
             if (hasContent) {
-              await fs.promises.mkdir(dir, { recursive: true });
-              await fs.promises.writeFile(
-                fullPath,
-                change.suggestedContent!,
-                "utf-8"
-              );
+              // Use atomic write for safety
+              await this.atomicWriteFile(fullPath, change.suggestedContent!);
               appliedFiles.push(change.path);
               appliedVia.push({ path: change.path, via: "file-write" });
             } else if (hasDiff) {
@@ -480,11 +627,8 @@ export class GitService {
 
           case "modify":
             if (hasContent) {
-              await fs.promises.writeFile(
-                fullPath,
-                change.suggestedContent!,
-                "utf-8"
-              );
+              // Use atomic write for safety
+              await this.atomicWriteFile(fullPath, change.suggestedContent!);
               appliedFiles.push(change.path);
               appliedVia.push({ path: change.path, via: "file-write" });
             } else if (hasDiff) {
@@ -562,7 +706,52 @@ export class GitService {
   }
 
   /**
-   * Cria backup dos arquivos antes de aplicar mudanças
+   * Computes MD5 hash of file content for comparison
+   */
+  private async computeFileHash(filePath: string): Promise<string | null> {
+    try {
+      const content = await fs.promises.readFile(filePath);
+      return crypto.createHash("md5").update(content).digest("hex");
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Writes content atomically using temp file + rename pattern.
+   * This prevents partial writes if the process is interrupted.
+   */
+  private async atomicWriteFile(
+    filePath: string,
+    content: string
+  ): Promise<void> {
+    const dir = path.dirname(filePath);
+    const tempFile = path.join(
+      dir,
+      `.${path.basename(filePath)}.${Date.now()}.tmp`
+    );
+
+    try {
+      // Ensure directory exists
+      await fs.promises.mkdir(dir, { recursive: true });
+      // Write to temp file
+      await fs.promises.writeFile(tempFile, content, "utf-8");
+      // Atomic rename
+      await fs.promises.rename(tempFile, filePath);
+    } catch (error) {
+      // Clean up temp file if it exists
+      try {
+        await fs.promises.unlink(tempFile);
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Cria backup dos arquivos antes de aplicar mudanças.
+   * Optimized: Uses incremental backup - only copies files that have changed.
    */
   private async createBackup(filePaths: string[]): Promise<string> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -571,16 +760,74 @@ export class GitService {
 
     await this.ensureGitignoreIgnoresDccBackups(this.projectPath);
 
+    // Track which files were actually backed up (for potential cleanup of empty backups)
+    let filesBackedUp = 0;
+
+    // Get previous backup directory for hash comparison (incremental backup)
+    const backupsRoot = path.join(this.projectPath, ".dcc-backups");
+    let previousBackupDir: string | null = null;
+    try {
+      const existingBackups = await fs.promises.readdir(backupsRoot);
+      const sortedBackups = existingBackups
+        .filter((name) => name !== timestamp)
+        .sort()
+        .reverse();
+      if (sortedBackups.length > 0) {
+        previousBackupDir = path.join(backupsRoot, sortedBackups[0]);
+      }
+    } catch {
+      // No previous backups exist
+    }
+
     for (const filePath of filePaths) {
       try {
         const sourcePath = path.join(this.projectPath, filePath);
-        if (fs.existsSync(sourcePath)) {
-          const destPath = path.join(backupDir, filePath);
-          await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
-          await fs.promises.copyFile(sourcePath, destPath);
+        if (!fs.existsSync(sourcePath)) continue;
+
+        const destPath = path.join(backupDir, filePath);
+
+        // Incremental backup: check if file changed since last backup
+        if (previousBackupDir) {
+          const previousBackupFile = path.join(previousBackupDir, filePath);
+          if (fs.existsSync(previousBackupFile)) {
+            const [currentHash, previousHash] = await Promise.all([
+              this.computeFileHash(sourcePath),
+              this.computeFileHash(previousBackupFile),
+            ]);
+
+            // Skip if file hasn't changed (same hash)
+            if (currentHash && previousHash && currentHash === previousHash) {
+              // Create hardlink to previous backup instead of copying
+              // This saves disk space and I/O
+              try {
+                await fs.promises.mkdir(path.dirname(destPath), {
+                  recursive: true,
+                });
+                await fs.promises.link(previousBackupFile, destPath);
+                filesBackedUp++;
+                continue;
+              } catch {
+                // Fall through to normal copy if hardlink fails
+              }
+            }
+          }
         }
+
+        // Normal copy for changed or new files
+        await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+        await fs.promises.copyFile(sourcePath, destPath);
+        filesBackedUp++;
       } catch {
-        // Ignora erros de backup
+        // Ignora erros de backup individual
+      }
+    }
+
+    // Clean up empty backup directory if no files were backed up
+    if (filesBackedUp === 0) {
+      try {
+        await fs.promises.rmdir(backupDir);
+      } catch {
+        // Ignore cleanup errors
       }
     }
 

@@ -44,6 +44,7 @@
     "@radix-ui/react-toggle": "1.1.1",
     "@radix-ui/react-toggle-group": "1.1.1",
     "@radix-ui/react-tooltip": "1.1.6",
+    "@tanstack/react-virtual": "^3.13.18",
     "autoprefixer": "^10.4.20",
     "better-sqlite3": "^11.8.0",
     "class-variance-authority": "^0.7.1",

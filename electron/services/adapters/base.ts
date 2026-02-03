@@ -111,6 +111,7 @@ Respond ONLY with valid JSON. Do not include any other text or markdown code blo
 
   /**
    * Monta o prompt para geração de código
+   * Optimized: requests diff-only for modify operations to reduce token output
    */
   protected buildCodePrompt(config: AdapterConfig): string {
     const { mission, projectContext } = config;
@@ -146,19 +147,24 @@ Generate the code changes with the following JSON structure:
     {
       "path": "relative/path/to/file.ts",
       "action": "create" | "modify" | "delete",
-      "originalContent": "optional - helps generate accurate diff when modifying",
-      "suggestedContent": "required for create and modify (guarantees fallback when diff fails)",
-      "diff": "required for modify - unified diff (lines with +, -, ---, +++); optional for create"
+      "originalContent": "optional - the original content before changes (helps generate accurate diff)",
+      "suggestedContent": "REQUIRED for create. For modify: ONLY include if file is small (<150 lines) or changes are extensive (>50% of file)",
+      "diff": "REQUIRED for modify - unified diff format (---, +++, @@, +, -). Optional for create."
     }
   ]
 }
 
 Rules by action:
-- modify: diff is REQUIRED. suggestedContent is REQUIRED (fallback when diff fails).
-- create: suggestedContent is REQUIRED (full file content). diff is optional.
-- delete: path is REQUIRED. The file will be removed.
+- modify: "diff" is REQUIRED (unified diff format). "suggestedContent" is OPTIONAL - only include for small files or extensive rewrites.
+- create: "suggestedContent" is REQUIRED (full file content). "diff" is optional.
+- delete: only "path" is needed. The file will be removed.
 
-Important:
+IMPORTANT - Output optimization:
+- For "modify": ALWAYS provide a valid unified diff. Only include suggestedContent if the file is small or changes are very extensive.
+- This reduces response size significantly and improves performance.
+- The diff MUST be a valid unified diff with proper headers (--- a/path, +++ b/path) and hunks (@@ -line,count +line,count @@).
+
+Format rules:
 - Use proper indentation and formatting
 - Follow the project's existing code style
 - Include all necessary imports
