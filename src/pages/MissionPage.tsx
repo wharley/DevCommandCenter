@@ -61,6 +61,7 @@ import { CommitDialog } from "@/components/dialogs/commit-dialog";
 import { RegeneratePlanDialog } from "@/components/dialogs/regenerate-plan-dialog";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 import type {
   MissionStatus,
   MissionPlan,
@@ -125,6 +126,65 @@ const logTypeConfig: Record<
   warning: { icon: AlertCircle, color: "text-amber-500" },
   debug: { icon: Circle, color: "text-muted-foreground" },
 };
+
+const CollapsibleMissionDescription = memo(
+  function CollapsibleMissionDescription({
+    description,
+  }: {
+    description: string;
+  }) {
+    const [isExpanded, setIsExpanded] = useState(false);
+    const shouldShowToggle = description.length > 150; // ~3 linhas
+
+    if (!shouldShowToggle) {
+      return <p className="text-sm text-muted-foreground">{description}</p>;
+    }
+
+    return (
+      <div className="space-y-2">
+        {!isExpanded ? (
+          <div className="relative">
+            <p className="text-sm text-muted-foreground line-clamp-3">
+              {description}
+            </p>
+            <div className="absolute bottom-0 right-0 bg-gradient-to-l from-card via-card to-transparent pl-8">
+              <button
+                type="button"
+                onClick={() => setIsExpanded(true)}
+                className="text-sm text-primary hover:text-primary/80 font-medium inline-flex items-center gap-1 py-1 px-2 -mr-2 rounded hover:bg-primary/10 transition-colors cursor-pointer"
+              >
+                Ver completo
+                <ChevronRight className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <ScrollArea className="max-h-[180px] pr-4">
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                {description}
+              </p>
+            </ScrollArea>
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsExpanded(false);
+                }}
+                className="relative z-10 text-sm text-primary hover:text-primary/80 font-medium flex items-center gap-1.5 py-2 px-4 rounded-md hover:bg-primary/10 transition-all cursor-pointer select-none"
+              >
+                <span>Recolher</span>
+                <ChevronRight className="h-3.5 w-3.5 -rotate-90" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+);
 
 export default function MissionPage() {
   const { id: projectId, missionId } = useParams<{
@@ -816,9 +876,11 @@ export default function MissionPage() {
                 </Badge>
               )}
             </div>
-            <p className="text-sm text-muted-foreground max-w-2xl">
-              {mission.description}
-            </p>
+            <div className="max-w-2xl">
+              <CollapsibleMissionDescription
+                description={mission.description}
+              />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
