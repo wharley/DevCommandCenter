@@ -37,6 +37,7 @@ import { Empty } from "@/components/ui/empty";
 import { Separator } from "@/components/ui/separator";
 import { NewMissionDialog } from "@/components/dialogs/new-mission-dialog";
 import { useProjects, useMissions, useProviders } from "@/hooks/use-data";
+import { MissionProgressPipeline } from "@/components/mission-progress-pipeline";
 import { useAppStore } from "@/hooks/use-app-store";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
@@ -90,10 +91,10 @@ export default function ProjectPage() {
   const hasUpdatedLastOpenedRef = useRef<string | null>(null);
 
   const project = projectId
-    ? projects.find((p) => p.id === projectId) ?? null
+    ? (projects.find((p) => p.id === projectId) ?? null)
     : null;
   const defaultProvider = project?.defaultProviderId
-    ? providers.find((p) => p.id === project.defaultProviderId) ?? null
+    ? (providers.find((p) => p.id === project.defaultProviderId) ?? null)
     : null;
   const isLoading = projectsLoading;
 
@@ -157,7 +158,7 @@ export default function ProjectPage() {
   }
 
   const activeMissions = missions.filter(
-    (m) => !["completed", "failed", "cancelled"].includes(m.status)
+    (m) => !["completed", "failed", "cancelled"].includes(m.status),
   ).length;
 
   return (
@@ -276,8 +277,8 @@ export default function ProjectPage() {
                 "applying",
               ].includes(mission.status);
               const provider = mission.providerId
-                ? providers.find((p) => p.id === mission.providerId) ??
-                  defaultProvider
+                ? (providers.find((p) => p.id === mission.providerId) ??
+                  defaultProvider)
                 : defaultProvider;
 
               return (
@@ -298,8 +299,8 @@ export default function ProjectPage() {
                             mission.status === "completed"
                               ? "bg-green-500/10"
                               : mission.status === "failed"
-                              ? "bg-destructive/10"
-                              : "bg-primary/10"
+                                ? "bg-destructive/10"
+                                : "bg-primary/10"
                           }`}
                         >
                           <StatusIcon
@@ -309,18 +310,25 @@ export default function ProjectPage() {
                               mission.status === "completed"
                                 ? "text-green-600"
                                 : mission.status === "failed"
-                                ? "text-destructive"
-                                : "text-primary"
+                                  ? "text-destructive"
+                                  : "text-primary"
                             }`}
                           />
                         </div>
-                        <div>
+                        <div className="flex-1 min-w-0">
                           <CardTitle className="text-base">
                             {mission.title}
                           </CardTitle>
                           <CardDescription className="line-clamp-1 mt-1">
                             {mission.description}
                           </CardDescription>
+                          {isActive && (
+                            <div className="mt-2">
+                              <MissionProgressPipeline
+                                status={mission.status}
+                              />
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -360,7 +368,7 @@ export default function ProjectPage() {
                                   e.preventDefault();
                                   if (
                                     !window.confirm(
-                                      "Tem certeza que deseja cancelar esta missão?"
+                                      "Tem certeza que deseja cancelar esta missão?",
                                     )
                                   )
                                     return;
@@ -369,7 +377,7 @@ export default function ProjectPage() {
                                     toast.success("Missão cancelada");
                                   } catch {
                                     toast.error(
-                                      "Não foi possível cancelar a missão."
+                                      "Não foi possível cancelar a missão.",
                                     );
                                   }
                                 }}

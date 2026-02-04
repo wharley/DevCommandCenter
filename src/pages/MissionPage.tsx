@@ -199,6 +199,7 @@ export default function MissionPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [activeTab, setActiveTab] = useState("plan");
+  const [previousStatus, setPreviousStatus] = useState<MissionStatus | null>(null);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [regeneratePlanDialogOpen, setRegeneratePlanDialogOpen] =
     useState(false);
@@ -369,6 +370,57 @@ export default function MissionPage() {
     const interval = setInterval(refreshLogs, 2500);
     return () => clearInterval(interval);
   }, [isGenerating, missionId, refreshLogs]);
+
+  // Auto-navegação inteligente entre abas baseada no status da missão
+  useEffect(() => {
+    if (!mission || previousStatus === mission.status) return;
+
+    const status = mission.status;
+    
+    // Navegação automática: quando começar a executar, vai para Logs
+    if (status === 'planning' && previousStatus !== 'planning') {
+      setActiveTab('logs');
+      toast.info('📋 Gerando plano...', { 
+        description: 'Acompanhe o progresso em tempo real na aba Logs',
+        duration: 3000,
+      });
+    } else if (status === 'generating_code' && previousStatus !== 'generating_code') {
+      setActiveTab('logs');
+      toast.info('💻 Gerando código...', { 
+        description: 'O modelo de IA está criando as alterações necessárias',
+        duration: 3000,
+      });
+    } else if (status === 'applying' && previousStatus !== 'applying') {
+      setActiveTab('logs');
+      toast.info('⚙️ Aplicando alterações...', { 
+        description: 'Gravando os arquivos no projeto',
+        duration: 3000,
+      });
+    }
+    // Quando terminar, volta para a aba relevante
+    else if (status === 'plan_generated' && previousStatus === 'planning') {
+      setTimeout(() => setActiveTab('plan'), 200); // Pequeno delay para transição suave
+      // toast.success já é exibido no handleGeneratePlan
+    } else if (status === 'code_ready' && previousStatus === 'generating_code') {
+      setTimeout(() => setActiveTab('code'), 200); // Pequeno delay para transição suave
+      // toast.success já é exibido no handleGenerateCode
+    } else if (status === 'completed' && previousStatus === 'applying') {
+      // Mantém na aba logs para mostrar resultado final
+      toast.success('✅ Missão concluída!', { 
+        description: 'Todas as alterações foram aplicadas com sucesso',
+        duration: 5000,
+      });
+    }
+
+    setPreviousStatus(status);
+  }, [mission?.status, previousStatus, mission]);
+
+  // Inicializar previousStatus
+  useEffect(() => {
+    if (mission && previousStatus === null) {
+      setPreviousStatus(mission.status);
+    }
+  }, [mission, previousStatus]);
 
   // Last progress message from logs (info/prompt) for the Code tab progress screen
   const lastProgressMessage = useMemo(() => {
@@ -545,7 +597,7 @@ export default function MissionPage() {
 
     setIsGenerating(true);
     updateStatus(missionId, "generating_code");
-    setActiveTab("code");
+    // Auto-navegação para logs é feita pelo useEffect
 
     // Incrementar contador de tentativas
     const attempts = (mission.codeGenerationAttempts ?? 0) + 1;
@@ -966,7 +1018,7 @@ export default function MissionPage() {
 
     setIsGenerating(true);
     updateStatus(missionId, "generating_code");
-    setActiveTab("code");
+    // Auto-navegação para logs é feita pelo useEffect
 
     // Incrementar contador de tentativas
     const attempts = (mission.codeGenerationAttempts ?? 0) + 1;
@@ -1025,6 +1077,25 @@ export default function MissionPage() {
     mission.plan?.steps.filter((s) => s.status === "completed").length ?? 0;
   const totalSteps = mission.plan?.steps.length ?? 0;
   const progress = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
+
+  // Determinar quais abas devem estar desabilitadas
+  const isTabDisabled = useCallback((tab: 'plan' | 'code' | 'logs') => {
+    if (tab === 'logs') return false; // Logs sempre acessível
+    
+    const status = mission.status;
+    
+    // Durante execução, desabilita a aba sendo processada
+    if (status === 'planning' && tab === 'plan') return true;
+    if (status === 'generating_code' && tab === 'code') return true;
+    if (status === 'applying' && tab === 'code') return true;
+    
+    // Code tab só fica disponível se tiver código gerado ou estiver gerando
+    if (tab === 'code' && !mission.generatedCode && !isGenerating && !cliParseErrorWithRepoChanges) {
+      return true;
+    }
+    
+    return false;
+  }, [mission.status, mission.generatedCode, isGenerating, cliParseErrorWithRepoChanges]);
 
   return (
     <div className="flex h-full flex-col">
@@ -1424,23 +1495,33 @@ export default function MissionPage() {
         >
           <div className="border-b border-border px-6">
             <TabsList className="h-12">
-              <TabsTrigger value="plan" className="gap-2 cursor-pointer">
+              <TabsTrigger 
+                value="plan" 
+                className="gap-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isTabDisabled('plan')}
+              >
                 <FileText className="h-4 w-4" />
                 Plano
+                {mission.status === 'planning' && (
+                  <Loader2 className="h-3 w-3 ml-1 animate-spin text-blue-500" />
+                )}
               </TabsTrigger>
               <TabsTrigger
                 value="code"
-                className="gap-2 cursor-pointer disabled:cursor-not-allowed"
-                disabled={
-                  !mission.generatedCode &&
-                  !isGenerating &&
-                  !cliParseErrorWithRepoChanges
-                }
+                className="gap-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isTabDisabled('code')}
               >
                 <Code2 className="h-4 w-4" />
                 Código
+                {(mission.status === 'generating_code' || mission.status === 'applying') && (
+                  <Loader2 className="h-3 w-3 ml-1 animate-spin text-blue-500" />
+                )}
               </TabsTrigger>
-              <TabsTrigger value="logs" className="gap-2 cursor-pointer">
+              <TabsTrigger 
+                value="logs" 
+                className="gap-2 cursor-pointer"
+                disabled={isTabDisabled('logs')}
+              >
                 <MessageSquare className="h-4 w-4" />
                 Logs
                 {logs.length > 0 && (
@@ -1452,7 +1533,10 @@ export default function MissionPage() {
             </TabsList>
           </div>
 
-          <TabsContent value="plan" className="flex-1 overflow-auto p-6 mt-0">
+          <TabsContent 
+            value="plan" 
+            className="flex-1 overflow-auto p-6 mt-0 data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:zoom-in-95 data-[state=inactive]:animate-out data-[state=inactive]:fade-out-0 data-[state=inactive]:zoom-out-95 duration-200"
+          >
             <PlanView
               plan={mission.plan}
               status={mission.status}
@@ -1460,7 +1544,10 @@ export default function MissionPage() {
             />
           </TabsContent>
 
-          <TabsContent value="code" className="flex-1 overflow-auto p-6 mt-0">
+          <TabsContent 
+            value="code" 
+            className="flex-1 overflow-auto p-6 mt-0 data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:zoom-in-95 data-[state=inactive]:animate-out data-[state=inactive]:fade-out-0 data-[state=inactive]:zoom-out-95 duration-200"
+          >
             <CodeView
               code={recoveryCodeFromGit ?? mission.generatedCode}
               isGenerating={isGenerating}
@@ -1492,7 +1579,10 @@ export default function MissionPage() {
             />
           </TabsContent>
 
-          <TabsContent value="logs" className="flex-1 overflow-auto p-6 mt-0">
+          <TabsContent 
+            value="logs" 
+            className="flex-1 overflow-auto p-6 mt-0 data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:zoom-in-95 data-[state=inactive]:animate-out data-[state=inactive]:fade-out-0 data-[state=inactive]:zoom-out-95 duration-200"
+          >
             <div className="space-y-3">
               {(usageStats.totalTokens > 0 ||
                 usageStats.totalDurationMs > 0) && (

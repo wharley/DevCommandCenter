@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   FolderGit2,
@@ -35,11 +35,21 @@ import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export default function HomePage() {
-  const [searchParams] = useSearchParams();
-  const showNewDialog = searchParams.get('new') === 'true';
+  const [searchParams, setSearchParams] = useSearchParams();
   
   const [search, setSearch] = useState('');
-  const [dialogOpen, setDialogOpen] = useState(showNewDialog);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  // Observa mudanças no parâmetro 'new' para abrir o diálogo
+  useEffect(() => {
+    const showNewDialog = searchParams.get('new') === 'true';
+    if (showNewDialog) {
+      setDialogOpen(true);
+      // Remove o parâmetro da URL após abrir o diálogo
+      searchParams.delete('new');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const { projects, remove } = useProjects();
   const { missions } = useMissions();
