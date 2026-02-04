@@ -133,12 +133,20 @@ export class CursorAdapter extends BaseAdapter {
       const prompt = this.buildPlanPrompt(config);
 
       onProgress?.("Conectando ao Cursor Agent CLI...");
+
+      // Start timer-based progress feedback for better UX
+      const progressTimer = this.startProgressFeedback(onProgress, "plan");
+
       const { payload, raw } = await this.executeAgentCommand(
         "chat",
         prompt,
         config.projectContext.projectPath,
         onProgress
       );
+
+      // Clear timer-based progress
+      if (progressTimer) clearInterval(progressTimer);
+
       let response = this.unwrapCursorCliResponse(payload);
 
       onProgress?.("Processando resposta...");
@@ -244,12 +252,20 @@ export class CursorAdapter extends BaseAdapter {
       const prompt = this.buildCodePrompt(config);
 
       onProgress?.("Conectando ao Cursor Agent CLI...");
+
+      // Start timer-based progress feedback for better UX
+      const progressTimer = this.startProgressFeedback(onProgress, "code");
+
       const { payload, raw } = await this.executeAgentCommand(
         "chat",
         prompt,
         config.projectContext.projectPath,
         onProgress
       );
+
+      // Clear timer-based progress
+      if (progressTimer) clearInterval(progressTimer);
+
       let response = this.unwrapCursorCliResponse(payload);
 
       onProgress?.("Processando resposta...");
@@ -936,6 +952,8 @@ export class CursorAdapter extends BaseAdapter {
           env: process.env,
           shell: platform() === "win32",
           stdio: ["ignore", "pipe", "pipe"],
+          // Note: spawn() uses streams, so it can handle unlimited output size
+          // Unlike exec() which has a 1MB maxBuffer default
         });
 
         child.stdout?.on("data", (data) => {

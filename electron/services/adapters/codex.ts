@@ -39,7 +39,7 @@ export class CodexAdapter extends BaseAdapter {
     // Verifica se o CLI path está configurado
     if (!this.provider.cliPath) {
       errors.push(
-        "CLI path is required for Codex. Please configure the path to the 'codex' executable.",
+        "CLI path is required for Codex. Please configure the path to the 'codex' executable."
       );
     } else if (!fs.existsSync(this.provider.cliPath)) {
       errors.push(`CLI not found at: ${this.provider.cliPath}`);
@@ -48,7 +48,7 @@ export class CodexAdapter extends BaseAdapter {
     // API Key é opcional se já estiver configurada no ambiente
     if (!this.provider.apiKey && !process.env.OPENAI_API_KEY) {
       warnings.push(
-        "No API key configured. Make sure OPENAI_API_KEY is set in your environment.",
+        "No API key configured. Make sure OPENAI_API_KEY is set in your environment."
       );
     }
 
@@ -82,14 +82,16 @@ export class CodexAdapter extends BaseAdapter {
     } catch (error) {
       return {
         success: false,
-        message: `Failed to run Codex CLI: ${error instanceof Error ? error.message : "Unknown error"}`,
+        message: `Failed to run Codex CLI: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
       };
     }
   }
 
   async generatePlan(
     config: AdapterConfig,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<AIResponse<MissionPlan>> {
     const startTime = Date.now();
     const validation = this.validate();
@@ -106,11 +108,18 @@ export class CodexAdapter extends BaseAdapter {
       const prompt = this.buildPlanPrompt(config);
 
       onProgress?.("Conectando ao Codex CLI...");
+
+      // Start timer-based progress feedback for better UX
+      const progressTimer = this.startProgressFeedback(onProgress, "plan");
+
       const response = await this.executeCodexCommand(
         prompt,
         config.projectContext.projectPath,
-        onProgress,
+        onProgress
       );
+
+      // Clear timer-based progress
+      if (progressTimer) clearInterval(progressTimer);
 
       onProgress?.("Processando resposta...");
       const planResult = this.parseAndValidateMissionPlan(response);
@@ -162,7 +171,7 @@ export class CodexAdapter extends BaseAdapter {
 
   async generateCode(
     config: AdapterConfig,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<AIResponse<GeneratedCode>> {
     const startTime = Date.now();
     const validation = this.validate();
@@ -179,11 +188,18 @@ export class CodexAdapter extends BaseAdapter {
       const prompt = this.buildCodePrompt(config);
 
       onProgress?.("Conectando ao Codex CLI...");
+
+      // Start timer-based progress feedback for better UX
+      const progressTimer = this.startProgressFeedback(onProgress, "code");
+
       const response = await this.executeCodexCommand(
         prompt,
         config.projectContext.projectPath,
-        onProgress,
+        onProgress
       );
+
+      // Clear timer-based progress
+      if (progressTimer) clearInterval(progressTimer);
 
       onProgress?.("Processando resposta...");
       const codeResult = this.parseAndValidateGeneratedCode(response);
@@ -192,7 +208,9 @@ export class CodexAdapter extends BaseAdapter {
         const snippet = response.slice(0, 600).trim();
         return {
           success: false,
-          error: `Failed to parse code: ${codeResult.error}. Raw snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
+          error: `Failed to parse code: ${
+            codeResult.error
+          }. Raw snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,
@@ -232,7 +250,7 @@ export class CodexAdapter extends BaseAdapter {
   private executeCodexCommand(
     prompt: string,
     cwd: string,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       const cliPath = this.provider.cliPath!;
@@ -299,8 +317,8 @@ export class CodexAdapter extends BaseAdapter {
           handleReject(
             new Error(
               `Codex CLI inativo por ${inactivityTimeout / 60000} minutos. ` +
-                `Chunks recebidos: ${chunksReceived}.`,
-            ),
+                `Chunks recebidos: ${chunksReceived}.`
+            )
           );
         }, inactivityTimeout);
       };
@@ -310,13 +328,14 @@ export class CodexAdapter extends BaseAdapter {
           cwd,
           env: {
             ...process.env,
-            OPENAI_API_KEY:
-              this.provider.apiKey || process.env.OPENAI_API_KEY,
+            OPENAI_API_KEY: this.provider.apiKey || process.env.OPENAI_API_KEY,
             ...(this.provider.apiKey && {
               CODEX_API_KEY: this.provider.apiKey,
             }),
           },
           shell: platform() === "win32",
+          // Note: spawn() uses streams, so it can handle unlimited output size
+          // Unlike exec() which has a 1MB maxBuffer default
         });
 
         // Envia o prompt via stdin
@@ -338,7 +357,7 @@ export class CodexAdapter extends BaseAdapter {
           if (chunksReceived % 5 === 0 || chunk.length > 100) {
             const sizeKB = (stdout.length / 1024).toFixed(1);
             onProgress?.(
-              `Recebendo resposta... (${sizeKB} KB, ${chunksReceived} chunks)`,
+              `Recebendo resposta... (${sizeKB} KB, ${chunksReceived} chunks)`
             );
           }
         });
@@ -351,12 +370,14 @@ export class CodexAdapter extends BaseAdapter {
         child.on("close", (code) => {
           if (code === 0) {
             onProgress?.(
-              `Resposta completa recebida (${(stdout.length / 1024).toFixed(1)} KB)`,
+              `Resposta completa recebida (${(stdout.length / 1024).toFixed(
+                1
+              )} KB)`
             );
             handleResolve(stdout);
           } else {
             handleReject(
-              new Error(stderr || `Codex CLI exited with code ${code}`),
+              new Error(stderr || `Codex CLI exited with code ${code}`)
             );
           }
         });
@@ -371,15 +392,15 @@ export class CodexAdapter extends BaseAdapter {
               new Error(
                 "Nenhum dado recebido do Codex CLI dentro do tempo máximo. " +
                   "O primeiro token pode demorar vários minutos em prompts longos. " +
-                  "Verifique conexão, aumente o timeout do provider ou simplifique o prompt.",
-              ),
+                  "Verifique conexão, aumente o timeout do provider ou simplifique o prompt."
+              )
             );
           } else {
             handleReject(
               new Error(
                 `Codex CLI timeout máximo (${maxTimeout / 60000} minutos). ` +
-                  `Chunks recebidos: ${chunksReceived}.`,
-              ),
+                  `Chunks recebidos: ${chunksReceived}.`
+              )
             );
           }
         }, maxTimeout);

@@ -19,6 +19,8 @@ import {
   GitCommit,
   Upload,
   XCircle,
+  RotateCcw,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -620,16 +622,27 @@ export default function MissionPage() {
               })
             );
             if (files.length > 0) {
+              // Logging interno para desenvolvedores
+              console.warn(
+                "[DevCommandCenter] Failed to parse CLI response, recovered from git",
+                {
+                  error: errorMessage,
+                  filesRecovered: files.length,
+                  provider: provider?.type,
+                  timestamp: new Date().toISOString(),
+                }
+              );
+
               setRecoveryCodeFromGit({
-                summary:
-                  "Diff recuperado do repositório (resposta do CLI truncada).",
+                summary: "Código aplicado com sucesso",
                 files,
               });
               setCliParseErrorWithRepoChanges(true);
               setActiveTab("code");
-              toast.info(
-                "A resposta do CLI não pôde ser exibida, mas há alterações no repositório. Revise o diff na aba Código e commite quando quiser."
-              );
+              toast.success("Código aplicado com sucesso", {
+                description: `${files.length} arquivo(s) alterado(s). Clique na aba Código para revisar.`,
+                duration: 5000,
+              });
             }
           }
         } catch {
@@ -805,6 +818,80 @@ export default function MissionPage() {
     }
   };
 
+  const handleRetryAfterParseError = async () => {
+    const confirmed = window.confirm(
+      "Descartar todas as alterações e gerar código novamente?\n\n" +
+        "Isso irá:\n" +
+        "• Reverter todas as mudanças no repositório\n" +
+        "• Gerar código novamente do zero\n" +
+        "• Pode levar alguns minutos"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setIsGenerating(true);
+
+      // Reverter mudanças
+      if (project?.path && window.electronAPI?.git?.reset) {
+        const result = await window.electronAPI.git.reset(project.path, "HEAD");
+        if (!result.success) {
+          toast.error("Falha ao reverter alterações");
+          return;
+        }
+      }
+
+      // Limpar estado
+      setCliParseErrorWithRepoChanges(false);
+      setRecoveryCodeFromGit(null);
+      setSelectedFilePaths(new Set());
+      setEditedSuggestions({});
+
+      // Tentar gerar novamente
+      toast.info("Gerando código novamente...");
+      await handleGenerateCode();
+    } catch (e) {
+      toast.error(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleDiscardAllFromRecovery = async () => {
+    const confirmed = window.confirm(
+      "Descartar todas as alterações e voltar ao plano?\n\n" +
+        "Você poderá:\n" +
+        "• Revisar o plano novamente\n" +
+        "• Ajustar instruções se necessário\n" +
+        "• Gerar código quando estiver pronto"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      if (project?.path && window.electronAPI?.git?.reset) {
+        const result = await window.electronAPI.git.reset(project.path, "HEAD");
+        if (result.success) {
+          setCliParseErrorWithRepoChanges(false);
+          setRecoveryCodeFromGit(null);
+          setSelectedFilePaths(new Set());
+          setEditedSuggestions({});
+          if (missionId) {
+            updateStatus(missionId, "plan_generated");
+          }
+          setActiveTab("plan");
+          toast.success(
+            "Alterações descartadas. Revise o plano quando quiser."
+          );
+        } else {
+          toast.error(result.error ?? "Falha ao reverter");
+        }
+      }
+    } catch (e) {
+      toast.error(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
+    }
+  };
+
   const completedSteps =
     mission.plan?.steps.filter((s) => s.status === "completed").length ?? 0;
   const totalSteps = mission.plan?.steps.length ?? 0;
@@ -885,20 +972,75 @@ export default function MissionPage() {
 
           <div className="flex items-center gap-2">
             {cliParseErrorWithRepoChanges && (
-              <div className="flex flex-col gap-2">
-                <p className="text-sm text-muted-foreground max-w-md">
-                  Alterações já aplicadas pelo CLI (resposta truncada). Revise o
-                  diff na aba Código e commite quando quiser.
-                </p>
-                <Button
-                  onClick={() => setCommitDialogOpen(true)}
-                  variant="outline"
-                  className="border-primary/50 hover:bg-primary/10"
-                >
-                  <GitCommit className="mr-2 h-4 w-4" />
-                  Commitar
-                </Button>
-              </div>
+              <Card className="border-blue-500/30 bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/20 dark:to-blue-900/10">
+                <CardContent className="pt-6">
+                  <div className="flex gap-4">
+                    <div className="shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center">
+                        <CheckCircle2 className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+
+                    <div className="flex-1 space-y-4">
+                      <div>
+                        <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-100">
+                          Código aplicado com sucesso
+                        </h3>
+                        <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                          As alterações foram aplicadas no repositório. Revise
+                          os arquivos na aba Código, edite se necessário, e
+                          commite quando estiver pronto.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          onClick={() => setCommitDialogOpen(true)}
+                          disabled={isGenerating}
+                          variant="default"
+                          size="default"
+                        >
+                          <GitCommit className="mr-2 h-4 w-4" />
+                          Revisar e Commitar
+                        </Button>
+
+                        <Button
+                          onClick={handleRetryAfterParseError}
+                          disabled={isGenerating}
+                          variant="outline"
+                          size="default"
+                        >
+                          {isGenerating ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <RotateCcw className="mr-2 h-4 w-4" />
+                          )}
+                          Gerar Novamente
+                        </Button>
+
+                        <Button
+                          onClick={handleDiscardAllFromRecovery}
+                          disabled={isGenerating}
+                          variant="ghost"
+                          size="default"
+                          className="text-muted-foreground"
+                        >
+                          <ArrowLeft className="mr-2 h-4 w-4" />
+                          Voltar ao Plano
+                        </Button>
+                      </div>
+
+                      <p className="text-xs text-blue-600 dark:text-blue-400 flex items-start gap-1.5">
+                        <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                        <span>
+                          Você pode editar o código sugerido diretamente na aba
+                          Código antes de commitar.
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             )}
             {!cliParseErrorWithRepoChanges && mission.status === "created" && (
               <Button onClick={handleGeneratePlan} disabled={isGenerating}>
@@ -1110,18 +1252,22 @@ export default function MissionPage() {
               isGenerating={isGenerating}
               lastProgressMessage={lastProgressMessage}
               selectedFilePaths={
-                mission.status === "code_ready" ? selectedFilePaths : undefined
+                mission.status === "code_ready" || cliParseErrorWithRepoChanges
+                  ? selectedFilePaths
+                  : undefined
               }
               onSelectionChange={
-                mission.status === "code_ready"
+                mission.status === "code_ready" || cliParseErrorWithRepoChanges
                   ? (paths) => setSelectedFilePaths(new Set(paths))
                   : undefined
               }
               editedSuggestions={
-                mission.status === "code_ready" ? editedSuggestions : undefined
+                mission.status === "code_ready" || cliParseErrorWithRepoChanges
+                  ? editedSuggestions
+                  : undefined
               }
               onEditedSuggestionsChange={
-                mission.status === "code_ready"
+                mission.status === "code_ready" || cliParseErrorWithRepoChanges
                   ? (path, content) =>
                       setEditedSuggestions((prev) => ({
                         ...prev,

@@ -39,7 +39,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
     // Verifica se o CLI path está configurado
     if (!this.provider.cliPath) {
       errors.push(
-        "CLI path is required for Claude Code. Please configure the path to the 'claude' executable.",
+        "CLI path is required for Claude Code. Please configure the path to the 'claude' executable."
       );
     } else if (!fs.existsSync(this.provider.cliPath)) {
       errors.push(`CLI not found at: ${this.provider.cliPath}`);
@@ -75,14 +75,16 @@ export class ClaudeCodeAdapter extends BaseAdapter {
     } catch (error) {
       return {
         success: false,
-        message: `Failed to run Claude Code CLI: ${error instanceof Error ? error.message : "Unknown error"}`,
+        message: `Failed to run Claude Code CLI: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
       };
     }
   }
 
   async generatePlan(
     config: AdapterConfig,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<AIResponse<MissionPlan>> {
     const startTime = Date.now();
     const validation = this.validate();
@@ -99,11 +101,18 @@ export class ClaudeCodeAdapter extends BaseAdapter {
       const prompt = this.buildPlanPrompt(config);
 
       onProgress?.("Conectando ao Claude CLI...");
+
+      // Start timer-based progress feedback for better UX
+      const progressTimer = this.startProgressFeedback(onProgress, "plan");
+
       const response = await this.executeClaudeCommand(
         prompt,
         config.projectContext.projectPath,
-        onProgress,
+        onProgress
       );
+
+      // Clear timer-based progress
+      if (progressTimer) clearInterval(progressTimer);
 
       onProgress?.("Processando resposta...");
       const planResult = this.parseAndValidateMissionPlan(response);
@@ -155,7 +164,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
 
   async generateCode(
     config: AdapterConfig,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<AIResponse<GeneratedCode>> {
     const startTime = Date.now();
     const validation = this.validate();
@@ -172,11 +181,18 @@ export class ClaudeCodeAdapter extends BaseAdapter {
       const prompt = this.buildCodePrompt(config);
 
       onProgress?.("Conectando ao Claude CLI...");
+
+      // Start timer-based progress feedback for better UX
+      const progressTimer = this.startProgressFeedback(onProgress, "code");
+
       const response = await this.executeClaudeCommand(
         prompt,
         config.projectContext.projectPath,
-        onProgress,
+        onProgress
       );
+
+      // Clear timer-based progress
+      if (progressTimer) clearInterval(progressTimer);
 
       onProgress?.("Processando resposta...");
       const codeResult = this.parseAndValidateGeneratedCode(response);
@@ -185,7 +201,9 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         const snippet = response.slice(0, 600).trim();
         return {
           success: false,
-          error: `Failed to parse code: ${codeResult.error}. Raw snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
+          error: `Failed to parse code: ${
+            codeResult.error
+          }. Raw snippet: ${snippet}${response.length > 600 ? "..." : ""}`,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,
@@ -242,7 +260,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
   private executeClaudeCommand(
     prompt: string,
     cwd: string,
-    onProgress?: ProgressCallback,
+    onProgress?: ProgressCallback
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       const cliPath = this.provider.cliPath!;
@@ -317,8 +335,8 @@ export class ClaudeCodeAdapter extends BaseAdapter {
             new Error(
               `Claude CLI inativo por ${inactivityTimeout / 60000} minutos. ` +
                 `Chunks recebidos: ${chunksReceived}. ` +
-                `Considere verificar a conexão ou aumentar o timeout.`,
-            ),
+                `Considere verificar a conexão ou aumentar o timeout.`
+            )
           );
         }, inactivityTimeout);
       };
@@ -334,6 +352,8 @@ export class ClaudeCodeAdapter extends BaseAdapter {
           },
           shell: platform() === "win32",
           stdio: ["ignore", "pipe", "pipe"],
+          // Note: spawn() uses streams, so it can handle unlimited output size
+          // Unlike exec() which has a 1MB maxBuffer default
         });
 
         child.stdout?.on("data", (data) => {
@@ -349,7 +369,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
           if (chunksReceived % 5 === 0 || chunk.length > 100) {
             const sizeKB = (stdout.length / 1024).toFixed(1);
             onProgress?.(
-              `Recebendo resposta... (${sizeKB} KB, ${chunksReceived} chunks)`,
+              `Recebendo resposta... (${sizeKB} KB, ${chunksReceived} chunks)`
             );
           }
         });
@@ -365,7 +385,9 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         child.on("close", (code) => {
           if (code === 0) {
             onProgress?.(
-              `Resposta completa recebida (${(stdout.length / 1024).toFixed(1)} KB)`,
+              `Resposta completa recebida (${(stdout.length / 1024).toFixed(
+                1
+              )} KB)`
             );
             // Com --output-format json o CLI retorna { result, session_id, ... }; extrair result para parse do plano/código
             let payload = stdout;
@@ -402,8 +424,8 @@ export class ClaudeCodeAdapter extends BaseAdapter {
               handleReject(
                 new Error(
                   "Claude CLI não enviou resposta (stdout) dentro do tempo máximo. Saída em stderr:" +
-                    stderrSnippet,
-                ),
+                    stderrSnippet
+                )
               );
             } else {
               handleReject(
@@ -411,8 +433,8 @@ export class ClaudeCodeAdapter extends BaseAdapter {
                   "Nenhum dado recebido do Claude CLI dentro do tempo máximo. " +
                     "O primeiro token pode demorar vários minutos em prompts longos. " +
                     "Verifique conexão, aumente o timeout do provider ou simplifique o prompt." +
-                    stderrSnippet,
-                ),
+                    stderrSnippet
+                )
               );
             }
           } else {
@@ -421,8 +443,8 @@ export class ClaudeCodeAdapter extends BaseAdapter {
                 `Claude CLI timeout máximo (${maxTimeout / 60000} minutos). ` +
                   `Chunks recebidos: ${chunksReceived}. ` +
                   `Resposta parcial: ${stdout.slice(0, 200)}...` +
-                  stderrSnippet,
-              ),
+                  stderrSnippet
+              )
             );
           }
         }, maxTimeout);

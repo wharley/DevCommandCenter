@@ -627,4 +627,39 @@ Format rules:
     if (!result.success) return result;
     return { success: true, data: result.data as GeneratedCode };
   }
+
+  /**
+   * Inicia feedback de progresso baseado em timer para melhorar UX durante operações longas.
+   * Retorna o ID do intervalo para poder cancelar depois.
+   */
+  protected startProgressFeedback(
+    onProgress?: ProgressCallback,
+    type: "plan" | "code" = "code"
+  ): NodeJS.Timeout | null {
+    if (!onProgress) return null;
+
+    let step = 0;
+    const messages =
+      type === "plan"
+        ? [
+            "Analisando contexto do projeto...",
+            "Identificando arquivos relevantes...",
+            "Planejando estrutura de implementação...",
+            "Definindo etapas do plano...",
+            "Finalizando plano...",
+          ]
+        : [
+            "Analisando contexto do projeto...",
+            "Planejando alterações...",
+            "Gerando sugestões de código...",
+            "Finalizando resposta...",
+          ];
+
+    return setInterval(() => {
+      if (step < messages.length) {
+        onProgress(messages[step]);
+        step++;
+      }
+    }, 8000); // A cada 8 segundos
+  }
 }
