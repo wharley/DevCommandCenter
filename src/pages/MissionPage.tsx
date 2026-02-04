@@ -61,6 +61,7 @@ import { useAppStore } from "@/hooks/use-app-store";
 import { createAIService } from "@/lib/services/ai-service";
 import { CommitDialog } from "@/components/dialogs/commit-dialog";
 import { RegeneratePlanDialog } from "@/components/dialogs/regenerate-plan-dialog";
+import { RegenerateCodeDialog } from "@/components/dialogs/regenerate-code-dialog";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -223,6 +224,9 @@ export default function MissionPage() {
     useState(false);
   const [recoveryCodeFromGit, setRecoveryCodeFromGit] =
     useState<GeneratedCode | null>(null);
+  const [regenerateCodeDialogOpen, setRegenerateCodeDialogOpen] =
+    useState(false);
+  const [codeFeedback, setCodeFeedback] = useState("");
 
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
@@ -542,9 +546,18 @@ export default function MissionPage() {
     setIsGenerating(true);
     updateStatus(missionId, "generating_code");
     setActiveTab("code");
-    addLog("prompt", "Iniciando geração de código com base no plano...", {
-      model: provider.config?.model as string,
-    });
+
+    // Incrementar contador de tentativas
+    const attempts = (mission.codeGenerationAttempts ?? 0) + 1;
+    await update(missionId, { codeGenerationAttempts: attempts });
+
+    addLog(
+      "prompt",
+      `Iniciando geração de código com base no plano... (tentativa ${attempts})`,
+      {
+        model: provider.config?.model as string,
+      }
+    );
 
     try {
       const aiService = createAIService({
@@ -892,6 +905,122 @@ export default function MissionPage() {
     }
   };
 
+  const handleDiscardCode = async () => {
+    if (!missionId) return;
+
+    const confirmed = window.confirm(
+      "Descartar o código gerado e voltar ao plano?\n\n" +
+        "O código gerado será descartado, mas você poderá:\n" +
+        "• Revisar o plano\n" +
+        "• Regenerar o plano se necessário\n" +
+        "• Gerar código novamente quando estiver pronto"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      // Limpar código gerado e resetar tentativas
+      await update(missionId, {
+        generatedCode: undefined,
+        status: "plan_generated",
+        codeGenerationAttempts: 0,
+      });
+
+      // Limpar estados locais
+      setSelectedFilePaths(new Set());
+      setEditedSuggestions({});
+      setActiveTab("plan");
+
+      toast.success("Código descartado. Você pode revisar o plano agora.");
+    } catch (e) {
+      toast.error(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
+    }
+  };
+
+  const handleCancelMission = async () => {
+    if (!missionId) return;
+
+    const confirmed = window.confirm(
+      "Cancelar esta missão?\n\n" +
+        "A missão será marcada como cancelada e você voltará à página do projeto."
+    );
+
+    if (!confirmed) return;
+
+    try {
+      await cancelMission(missionId);
+      toast.success("Missão cancelada");
+      navigate(`/project/${projectId}`);
+    } catch (e) {
+      toast.error(
+        `Erro ao cancelar: ${e instanceof Error ? e.message : "desconhecido"}`
+      );
+    }
+  };
+
+  const handleRegenerateCodeWithFeedback = async (feedback: string) => {
+    if (!provider || !mission.plan || !missionId) {
+      toast.error("O plano é necessário antes de gerar o código");
+      return;
+    }
+
+    setIsGenerating(true);
+    updateStatus(missionId, "generating_code");
+    setActiveTab("code");
+
+    // Incrementar contador de tentativas
+    const attempts = (mission.codeGenerationAttempts ?? 0) + 1;
+    await update(missionId, { codeGenerationAttempts: attempts });
+
+    const feedbackMsg = feedback.trim()
+      ? `Regenerando código (tentativa ${attempts}) com feedback do usuário...`
+      : `Regenerando código (tentativa ${attempts})...`;
+
+    addLog("prompt", feedbackMsg, {
+      model: provider.config?.model as string,
+    });
+
+    try {
+      const aiService = createAIService({
+        provider,
+        mission,
+        projectContext: mission.context ?? undefined,
+        codeFeedback: feedback.trim() || undefined,
+      });
+
+      const response = await aiService.generateCode();
+
+      if (response.success && response.data) {
+        setCode(missionId, response.data as GeneratedCode);
+        addLog(
+          "response",
+          `Código gerado: ${
+            (response.data as { files: { path: string }[] }).files.length
+          } arquivo(s) alterado(s)`,
+          response.metadata ?? undefined
+        );
+        toast.success("Sugestões de código geradas");
+        setActiveTab("code");
+      } else {
+        throw new Error(response.error || "Falha ao gerar código");
+      }
+    } catch (error) {
+      // Volta para "code_ready" se havia código anterior, senão para "plan_generated"
+      const fallbackStatus = mission.generatedCode
+        ? "code_ready"
+        : "plan_generated";
+      updateStatus(missionId, fallbackStatus);
+      const errorMessage =
+        error instanceof Error ? error.message : "Erro desconhecido";
+      addLog("error", errorMessage, undefined);
+      toast.error(errorMessage);
+    } finally {
+      setIsGenerating(false);
+      setRegenerateCodeDialogOpen(false);
+      setCodeFeedback("");
+    }
+  };
+
   const completedSteps =
     mission.plan?.steps.filter((s) => s.status === "completed").length ?? 0;
   const totalSteps = mission.plan?.steps.length ?? 0;
@@ -1141,14 +1270,99 @@ export default function MissionPage() {
                 </div>
               )}
             {mission.status === "code_ready" && (
-              <Button onClick={handleApplyChanges} disabled={isApplying}>
-                {isApplying ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Play className="mr-2 h-4 w-4" />
+              <div className="flex flex-col gap-3">
+                {/* Alerta inteligente para múltiplas tentativas */}
+                {(mission.codeGenerationAttempts ?? 0) >= 2 && (
+                  <Alert
+                    variant={
+                      (mission.codeGenerationAttempts ?? 0) >= 3
+                        ? "destructive"
+                        : "default"
+                    }
+                    className="max-w-2xl"
+                  >
+                    <AlertCircle className="h-4 w-4" />
+                    <div>
+                      <h4 className="font-semibold mb-1">
+                        Código gerado {mission.codeGenerationAttempts}x
+                      </h4>
+                      <p className="text-sm">
+                        {(mission.codeGenerationAttempts ?? 0) >= 3 ? (
+                          <>
+                            Múltiplas tentativas detectadas. Se continuar
+                            errado, o problema pode estar no{" "}
+                            <strong>plano</strong>, não no código. Considere
+                            voltar ao plano e regenerá-lo com feedback.
+                          </>
+                        ) : (
+                          <>
+                            Se continuar errado, o problema pode estar no{" "}
+                            <strong>plano</strong>, não no código. Considere
+                            voltar ao plano e regenerá-lo com feedback.
+                          </>
+                        )}
+                      </p>
+                      <Button
+                        variant="link"
+                        onClick={handleDiscardCode}
+                        className="mt-2 p-0 h-auto text-sm cursor-pointer"
+                      >
+                        Voltar ao plano agora →
+                      </Button>
+                    </div>
+                  </Alert>
                 )}
-                Aplicar alterações
-              </Button>
+
+                {/* Botões de ação */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Ação primária */}
+                  <Button
+                    onClick={handleApplyChanges}
+                    disabled={isApplying || isGenerating}
+                    className="cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    {isApplying ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Play className="mr-2 h-4 w-4" />
+                    )}
+                    Aplicar alterações
+                  </Button>
+
+                  {/* Ação secundária - retry */}
+                  <Button
+                    onClick={() => setRegenerateCodeDialogOpen(true)}
+                    variant="secondary"
+                    disabled={isApplying || isGenerating}
+                    className="cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Regenerar código
+                  </Button>
+
+                  {/* Escape hatch */}
+                  <Button
+                    onClick={handleDiscardCode}
+                    variant="outline"
+                    disabled={isApplying || isGenerating}
+                    className="cursor-pointer disabled:cursor-not-allowed hover:bg-muted hover:text-muted-foreground"
+                  >
+                    <ArrowLeft className="mr-2 h-4 w-4" />
+                    Voltar ao plano
+                  </Button>
+
+                  {/* Ação destrutiva */}
+                  <Button
+                    onClick={handleCancelMission}
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto text-muted-foreground hover:text-destructive cursor-pointer"
+                  >
+                    <XCircle className="mr-2 h-4 w-4" />
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
             )}
             {mission.status === "completed" && (
               <div className="flex flex-col gap-1.5">
@@ -1210,13 +1424,13 @@ export default function MissionPage() {
         >
           <div className="border-b border-border px-6">
             <TabsList className="h-12">
-              <TabsTrigger value="plan" className="gap-2">
+              <TabsTrigger value="plan" className="gap-2 cursor-pointer">
                 <FileText className="h-4 w-4" />
                 Plano
               </TabsTrigger>
               <TabsTrigger
                 value="code"
-                className="gap-2"
+                className="gap-2 cursor-pointer disabled:cursor-not-allowed"
                 disabled={
                   !mission.generatedCode &&
                   !isGenerating &&
@@ -1226,7 +1440,7 @@ export default function MissionPage() {
                 <Code2 className="h-4 w-4" />
                 Código
               </TabsTrigger>
-              <TabsTrigger value="logs" className="gap-2">
+              <TabsTrigger value="logs" className="gap-2 cursor-pointer">
                 <MessageSquare className="h-4 w-4" />
                 Logs
                 {logs.length > 0 && (
@@ -1314,6 +1528,13 @@ export default function MissionPage() {
         onOpenChange={setRegeneratePlanDialogOpen}
         onSubmit={handleRegeneratePlan}
         isLoading={isGenerating}
+      />
+      <RegenerateCodeDialog
+        open={regenerateCodeDialogOpen}
+        onOpenChange={setRegenerateCodeDialogOpen}
+        onSubmit={handleRegenerateCodeWithFeedback}
+        isLoading={isGenerating}
+        attempts={mission?.codeGenerationAttempts ?? 1}
       />
     </div>
   );

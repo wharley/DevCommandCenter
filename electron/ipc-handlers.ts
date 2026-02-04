@@ -457,9 +457,12 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
   );
 
   // Generate code for a mission
-  ipcMain.handle("ai:generateCode", async (_event, missionId: string) => {
-    return aiOrchestrator.generateCode(missionId);
-  });
+  ipcMain.handle(
+    "ai:generateCode",
+    async (_event, missionId: string, options?: { codeFeedback?: string }) => {
+      return aiOrchestrator.generateCode(missionId, options);
+    }
+  );
 
   // Apply changes to the project
   ipcMain.handle(

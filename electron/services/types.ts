@@ -73,6 +73,8 @@ export interface AdapterConfig {
   projectContext: ProjectContext;
   /** Feedback do usuário ao regenerar plano (o que ajustar no plano anterior) */
   planFeedback?: string;
+  /** Feedback do usuário ao regenerar código (o que deu errado na tentativa anterior) */
+  codeFeedback?: string;
 }
 
 // ============================================

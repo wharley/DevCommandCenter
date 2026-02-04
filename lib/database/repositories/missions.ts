@@ -29,6 +29,7 @@ interface MissionRow {
   context: string | null;
   preserve_instructions?: string | null;
   error_message: string | null;
+  code_generation_attempts: number | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -48,6 +49,7 @@ function rowToMission(row: MissionRow): Mission {
     context: row.context ? JSON.parse(row.context) : null,
     preserveInstructions: row.preserve_instructions ?? null,
     errorMessage: row.error_message,
+    codeGenerationAttempts: row.code_generation_attempts ?? 0,
     startedAt: row.started_at ? new Date(row.started_at) : null,
     completedAt: row.completed_at ? new Date(row.completed_at) : null,
     createdAt: new Date(row.created_at),
@@ -255,6 +257,10 @@ export const MissionsRepository = {
     if (data.errorMessage !== undefined) {
       updates.push('error_message = ?');
       values.push(data.errorMessage);
+    }
+    if (data.codeGenerationAttempts !== undefined) {
+      updates.push('code_generation_attempts = ?');
+      values.push(String(data.codeGenerationAttempts));
     }
     if (data.startedAt !== undefined) {
       updates.push('started_at = ?');

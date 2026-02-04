@@ -47,11 +47,11 @@ export abstract class BaseAdapter implements AIProviderAdapter {
     const feedbackSection = planFeedback?.trim()
       ? `
 
-## Feedback sobre o plano anterior
-O usuário não estava satisfeito com um plano anterior. Sua solicitação:
+## Feedback on Previous Plan
+The user was not satisfied with a previous plan. Their request:
 ${planFeedback.trim()}
 
-Gere um NOVO plano que considere este feedback, mantendo o objetivo original da missão.
+Generate a NEW plan that considers this feedback while maintaining the original mission objective.
 `
       : "";
 
@@ -92,7 +92,7 @@ ${feedbackSection}
 ## Instructions
 Create a detailed implementation plan with the following JSON structure:
 {
-  "summary": "Brief summary of the implementation approach",
+  "summary": "Brief summary of the implementation approach (write in Portuguese for user display)",
   "estimatedComplexity": "low" | "medium" | "high",
   "steps": [
     {
@@ -114,8 +114,19 @@ Respond ONLY with valid JSON. Do not include any other text or markdown code blo
    * Optimized: requests diff-only for modify operations to reduce token output
    */
   protected buildCodePrompt(config: AdapterConfig): string {
-    const { mission, projectContext } = config;
+    const { mission, projectContext, codeFeedback } = config;
     const plan = mission.plan;
+
+    const feedbackSection = codeFeedback?.trim()
+      ? `
+
+## Feedback on Previous Attempt
+The previous code generation did not meet expectations. User feedback:
+${codeFeedback.trim()}
+
+Please generate the code addressing this issue. Pay special attention to the mentioned details.
+`
+      : "";
 
     return `You are an expert software engineer. Based on the implementation plan, generate the code changes needed.
 
@@ -137,12 +148,12 @@ ${
 ${mission.preserveInstructions.trim()}
 Do not modify or suggest changes to the above.`
     : ""
-}
+}${feedbackSection}
 
 ## Instructions
 Generate the code changes with the following JSON structure:
 {
-  "summary": "Summary of changes made",
+  "summary": "Summary of changes made (write in Portuguese for user display)",
   "files": [
     {
       "path": "relative/path/to/file.ts",

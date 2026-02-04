@@ -190,7 +190,10 @@ export class AIOrchestrator {
   /**
    * Gera código para uma missão
    */
-  async generateCode(missionId: string): Promise<AIResponse<GeneratedCode>> {
+  async generateCode(
+    missionId: string,
+    options?: { codeFeedback?: string }
+  ): Promise<AIResponse<GeneratedCode>> {
     // Timestamp do último log de progresso para evitar spam
     let lastProgressLog = 0;
     const progressLogThrottleMs = 2000; // Log a cada 2s (front faz polling a cada 2.5s)
@@ -263,6 +266,7 @@ export class AIOrchestrator {
         provider,
         mission,
         projectContext,
+        ...(options?.codeFeedback && { codeFeedback: options.codeFeedback }),
       };
 
       // Atualiza status para "generating_code"

@@ -109,9 +109,12 @@ declare global {
       ai: {
         generatePlan: (
           missionId: string,
-          options?: { planFeedback?: string },
+          options?: { planFeedback?: string }
         ) => Promise<AIResponse<MissionPlan>>;
-        generateCode: (missionId: string) => Promise<AIResponse<GeneratedCode>>;
+        generateCode: (
+          missionId: string,
+          options?: { codeFeedback?: string }
+        ) => Promise<AIResponse<GeneratedCode>>;
         applyChanges: (
           missionId: string,
           options?: {
@@ -119,10 +122,10 @@ declare global {
             dryRun?: boolean;
             filePaths?: string[];
             editedContent?: Record<string, string>;
-          },
+          }
         ) => Promise<ApplyChangesResult>;
         testConnection: (
-          providerId: string,
+          providerId: string
         ) => Promise<{ success: boolean; message: string }>;
         validateProvider: (provider: Provider) => Promise<ValidationResult>;
         invalidateAdapter: (providerId: string) => Promise<boolean>;
@@ -134,7 +137,7 @@ declare global {
         getStatus: (projectPath: string) => Promise<GitStatus>;
         getFileDiffHead: (
           projectPath: string,
-          filePath: string,
+          filePath: string
         ) => Promise<string>;
         isRepo: (projectPath: string) => Promise<boolean>;
         getCurrentBranch: (projectPath: string) => Promise<string>;
@@ -142,30 +145,30 @@ declare global {
         createBranch: (
           projectPath: string,
           branchName: string,
-          fromBranch?: string,
+          fromBranch?: string
         ) => Promise<boolean>;
         listFiles: (
           projectPath: string,
-          maxFiles?: number,
+          maxFiles?: number
         ) => Promise<string[]>;
         getRecentCommits: (
           projectPath: string,
-          count?: number,
+          count?: number
         ) => Promise<GitCommit[]>;
         commit: (
           projectPath: string,
           message: string,
-          files?: string[],
+          files?: string[]
         ) => Promise<boolean>;
         push: (
-          projectPath: string,
+          projectPath: string
         ) => Promise<{ success: boolean; error?: string }>;
         reset: (
           projectPath: string,
-          ref?: "HEAD" | "HEAD~1",
+          ref?: "HEAD" | "HEAD~1"
         ) => Promise<{ success: boolean; error?: string }>;
         getWorktreeInfo: (
-          projectPath: string,
+          projectPath: string
         ) => Promise<{ isWorktree: boolean; worktreeRoot?: string }>;
       };
     };
@@ -179,15 +182,15 @@ declare global {
         create: (data: ProviderCreate) => Promise<Provider>;
         update: (
           id: string,
-          data: ProviderUpdate,
+          data: ProviderUpdate
         ) => Promise<Provider | undefined>;
         delete: (id: string) => Promise<boolean>;
         setActive: (
           id: string,
-          isActive: boolean,
+          isActive: boolean
         ) => Promise<Provider | undefined>;
         testConnection: (
-          id: string,
+          id: string
         ) => Promise<{ success: boolean; error?: string }>;
         isEncryptionAvailable: () => Promise<boolean>;
       };
@@ -200,7 +203,7 @@ declare global {
         create: (data: ProjectCreate) => Promise<Project>;
         update: (
           id: string,
-          data: ProjectUpdate,
+          data: ProjectUpdate
         ) => Promise<Project | undefined>;
         delete: (id: string) => Promise<boolean>;
         getStats: (id: string) => Promise<ProjectStats>;
@@ -217,22 +220,22 @@ declare global {
         create: (data: MissionCreate) => Promise<Mission>;
         update: (
           id: string,
-          data: MissionUpdate,
+          data: MissionUpdate
         ) => Promise<Mission | undefined>;
         delete: (id: string) => Promise<boolean>;
         updateStatus: (
           id: string,
-          status: MissionStatus,
+          status: MissionStatus
         ) => Promise<Mission | undefined>;
         updatePlan: (id: string, plan: string) => Promise<Mission | undefined>;
         updateGeneratedCode: (
           id: string,
-          code: string,
+          code: string
         ) => Promise<Mission | undefined>;
         start: (id: string) => Promise<Mission | undefined>;
         complete: (
           id: string,
-          summary?: string,
+          summary?: string
         ) => Promise<Mission | undefined>;
         fail: (id: string, error: string) => Promise<Mission | undefined>;
         cancel: (id: string) => Promise<Mission | undefined>;
@@ -245,11 +248,11 @@ declare global {
         findByMission: (
           missionId: string,
           limit?: number,
-          offset?: number,
+          offset?: number
         ) => Promise<MissionLog[]>;
         findByLevel: (
           level: LogLevel,
-          missionId?: string,
+          missionId?: string
         ) => Promise<MissionLog[]>;
         search: (query: string, missionId?: string) => Promise<MissionLog[]>;
         create: (data: MissionLogCreate) => Promise<MissionLog>;
@@ -258,32 +261,32 @@ declare global {
         logInfo: (
           missionId: string,
           message: string,
-          metadata?: Record<string, unknown>,
+          metadata?: Record<string, unknown>
         ) => Promise<MissionLog>;
         logWarning: (
           missionId: string,
           message: string,
-          metadata?: Record<string, unknown>,
+          metadata?: Record<string, unknown>
         ) => Promise<MissionLog>;
         logError: (
           missionId: string,
           message: string,
-          metadata?: Record<string, unknown>,
+          metadata?: Record<string, unknown>
         ) => Promise<MissionLog>;
         logDebug: (
           missionId: string,
           message: string,
-          metadata?: Record<string, unknown>,
+          metadata?: Record<string, unknown>
         ) => Promise<MissionLog>;
         logAgentAction: (
           missionId: string,
           action: string,
-          details?: Record<string, unknown>,
+          details?: Record<string, unknown>
         ) => Promise<MissionLog>;
         logUserInput: (missionId: string, input: string) => Promise<MissionLog>;
         getStats: (missionId: string) => Promise<MissionLogStats>;
         getUsageStats: (
-          missionId: string,
+          missionId: string
         ) => Promise<{ totalTokens: number; totalDurationMs: number }>;
         getLatest: (missionId: string, count?: number) => Promise<MissionLog[]>;
       };

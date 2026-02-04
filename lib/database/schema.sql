@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS missions (
   context TEXT, -- JSON com contexto do repo usado na missão
   preserve_instructions TEXT, -- texto livre: o que não alterar (ex.: "Não altere a seção Preview ao vivo")
   error_message TEXT,
+  code_generation_attempts INTEGER DEFAULT 0, -- Contador de tentativas de geração de código
   started_at TEXT,
   completed_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),

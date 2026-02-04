@@ -9,7 +9,7 @@ import type {
   GeneratedCode,
   PlanStep,
   CodeSuggestion,
-} from '@/lib/database/types';
+} from "@/lib/database/types";
 
 // ============================================
 // Tipos do serviço
@@ -22,6 +22,7 @@ export interface AIServiceConfig {
     files: string[];
     fileContents?: Record<string, string>;
   };
+  codeFeedback?: string;
 }
 
 export interface AIResponse<T = MissionPlan | GeneratedCode> {
@@ -54,7 +55,8 @@ export interface ValidationResult {
 // Detecta ambiente Electron
 // ============================================
 
-const isElectron = () => typeof window !== "undefined" && !!window.electronAPI?.ai;
+const isElectron = () =>
+  typeof window !== "undefined" && !!window.electronAPI?.ai;
 
 // ============================================
 // Simulação de respostas (para browser/dev)
@@ -63,45 +65,50 @@ const isElectron = () => typeof window !== "undefined" && !!window.electronAPI?.
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const generateMockPlan = (mission: Mission): MissionPlan => {
-  const baseSteps: Omit<PlanStep, 'id'>[] = [
+  const baseSteps: Omit<PlanStep, "id">[] = [
     {
       order: 1,
-      title: 'Analyze current implementation',
+      title: "Analyze current implementation",
       description: `Review existing code related to: ${mission.title}`,
-      files: ['src/components/', 'src/lib/'],
-      status: 'pending',
+      files: ["src/components/", "src/lib/"],
+      status: "pending",
     },
     {
       order: 2,
-      title: 'Design solution architecture',
-      description: 'Create technical design and identify affected components',
-      status: 'pending',
+      title: "Design solution architecture",
+      description: "Create technical design and identify affected components",
+      status: "pending",
     },
     {
       order: 3,
-      title: 'Implement core changes',
+      title: "Implement core changes",
       description: mission.description.slice(0, 100),
-      files: ['src/'],
-      status: 'pending',
+      files: ["src/"],
+      status: "pending",
     },
     {
       order: 4,
-      title: 'Update related components',
-      description: 'Modify dependent components and update imports',
-      status: 'pending',
+      title: "Update related components",
+      description: "Modify dependent components and update imports",
+      status: "pending",
     },
     {
       order: 5,
-      title: 'Add tests and documentation',
-      description: 'Write unit tests and update documentation',
-      files: ['__tests__/', 'docs/'],
-      status: 'pending',
+      title: "Add tests and documentation",
+      description: "Write unit tests and update documentation",
+      files: ["__tests__/", "docs/"],
+      status: "pending",
     },
   ];
 
   return {
     summary: `Implementation plan for: ${mission.title}. This plan covers analysis, implementation, and testing phases.`,
-    estimatedComplexity: mission.description.length > 200 ? 'high' : mission.description.length > 100 ? 'medium' : 'low',
+    estimatedComplexity:
+      mission.description.length > 200
+        ? "high"
+        : mission.description.length > 100
+        ? "medium"
+        : "low",
     steps: baseSteps.map((step, index) => ({
       ...step,
       id: `step-${Date.now()}-${index}`,
@@ -112,8 +119,8 @@ const generateMockPlan = (mission: Mission): MissionPlan => {
 const generateMockCode = (mission: Mission): GeneratedCode => {
   const suggestions: CodeSuggestion[] = [
     {
-      path: 'src/components/NewFeature.tsx',
-      action: 'create',
+      path: "src/components/NewFeature.tsx",
+      action: "create",
       suggestedContent: `// Generated component for: ${mission.title}
 import React from 'react';
 
@@ -142,8 +149,8 @@ export function NewFeature() {
 `,
     },
     {
-      path: 'src/lib/utils.ts',
-      action: 'modify',
+      path: "src/lib/utils.ts",
+      action: "modify",
       originalContent: `export function cn(...classes: string[]) {
   return classes.filter(Boolean).join(' ');
 }
@@ -202,40 +209,46 @@ export class AIService {
       try {
         const result = await window.electronAPI.ai.generatePlan(
           this.config.mission.id,
-          planFeedback ? { planFeedback } : undefined,
+          planFeedback ? { planFeedback } : undefined
         );
         return result as AIResponse<MissionPlan>;
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Unknown error calling AI service',
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown error calling AI service",
         };
       }
     }
 
     // Fallback para mock (browser ou dev sem Electron)
     const startTime = Date.now();
-    
+
     try {
       // Simula tempo de processamento
       await delay(2000 + Math.random() * 1000);
-      
+
       const plan = generateMockPlan(this.config.mission);
-      
+
       return {
         success: true,
         data: plan,
         metadata: {
           tokensUsed: 800 + Math.floor(Math.random() * 500),
           durationMs: Date.now() - startTime,
-          model: this.config.provider.config?.model as string || 'mock',
-          provider: 'Mock (Browser)',
+          model: (this.config.provider.config?.model as string) || "mock",
+          provider: "Mock (Browser)",
         },
       };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error generating plan',
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown error generating plan",
       };
     }
   }
@@ -249,39 +262,50 @@ export class AIService {
     // Se estamos no Electron, usa o backend real
     if (isElectron() && window.electronAPI?.ai) {
       try {
-        const result = await window.electronAPI.ai.generateCode(this.config.mission.id);
+        const result = await window.electronAPI.ai.generateCode(
+          this.config.mission.id,
+          this.config.codeFeedback
+            ? { codeFeedback: this.config.codeFeedback }
+            : undefined
+        );
         return result as AIResponse<GeneratedCode>;
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Unknown error calling AI service',
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown error calling AI service",
         };
       }
     }
 
     // Fallback para mock (browser ou dev sem Electron)
     const startTime = Date.now();
-    
+
     try {
       // Simula tempo de processamento maior
       await delay(3000 + Math.random() * 2000);
-      
+
       const code = generateMockCode(this.config.mission);
-      
+
       return {
         success: true,
         data: code,
         metadata: {
           tokensUsed: 1500 + Math.floor(Math.random() * 1000),
           durationMs: Date.now() - startTime,
-          model: this.config.provider.config?.model as string || 'mock',
-          provider: 'Mock (Browser)',
+          model: (this.config.provider.config?.model as string) || "mock",
+          provider: "Mock (Browser)",
         },
       };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error generating code',
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown error generating code",
       };
     }
   }
@@ -298,12 +322,20 @@ export class AIService {
   }): Promise<ApplyChangesResult> {
     if (isElectron() && window.electronAPI?.ai) {
       try {
-        return await window.electronAPI.ai.applyChanges(this.config.mission.id, options);
+        return await window.electronAPI.ai.applyChanges(
+          this.config.mission.id,
+          options
+        );
       } catch (error) {
         return {
           success: false,
           appliedFiles: [],
-          failedFiles: [{ path: '', error: error instanceof Error ? error.message : 'Unknown error' }],
+          failedFiles: [
+            {
+              path: "",
+              error: error instanceof Error ? error.message : "Unknown error",
+            },
+          ],
         };
       }
     }
@@ -312,9 +344,9 @@ export class AIService {
     await delay(1000);
     return {
       success: true,
-      appliedFiles: ['src/components/NewFeature.tsx', 'src/lib/utils.ts'],
+      appliedFiles: ["src/components/NewFeature.tsx", "src/lib/utils.ts"],
       failedFiles: [],
-      backupPath: '/mock/backup/path',
+      backupPath: "/mock/backup/path",
     };
   }
 
@@ -324,23 +356,23 @@ export class AIService {
   static validateProvider(provider: Provider): ValidationResult {
     const errors: string[] = [];
     const warnings: string[] = [];
-    
+
     if (!provider.name) {
-      errors.push('Provider name is required');
+      errors.push("Provider name is required");
     }
-    
-    if (provider.type === 'openai' || provider.type === 'anthropic') {
+
+    if (provider.type === "openai" || provider.type === "anthropic") {
       if (!provider.apiKey) {
-        errors.push('API key is required for this provider');
+        errors.push("API key is required for this provider");
       }
     }
-    
-    if (provider.type === 'claude-code' || provider.type === 'codex') {
+
+    if (provider.type === "claude-code" || provider.type === "codex") {
       if (!provider.cliPath) {
         errors.push(`CLI path is required for ${provider.type}`);
       }
     }
-    
+
     return {
       valid: errors.length === 0,
       errors,
@@ -351,14 +383,16 @@ export class AIService {
   /**
    * Valida o provider usando o backend (mais completo)
    */
-  static async validateProviderAsync(provider: Provider): Promise<ValidationResult> {
+  static async validateProviderAsync(
+    provider: Provider
+  ): Promise<ValidationResult> {
     if (isElectron() && window.electronAPI?.ai) {
       try {
         return await window.electronAPI.ai.validateProvider(provider);
       } catch (error) {
         return {
           valid: false,
-          errors: [error instanceof Error ? error.message : 'Unknown error'],
+          errors: [error instanceof Error ? error.message : "Unknown error"],
         };
       }
     }
@@ -368,14 +402,16 @@ export class AIService {
   /**
    * Testa a conexão com o provider
    */
-  static async testConnection(providerId: string): Promise<{ success: boolean; message: string }> {
+  static async testConnection(
+    providerId: string
+  ): Promise<{ success: boolean; message: string }> {
     if (isElectron() && window.electronAPI?.ai) {
       try {
         return await window.electronAPI.ai.testConnection(providerId);
       } catch (error) {
         return {
           success: false,
-          message: error instanceof Error ? error.message : 'Unknown error',
+          message: error instanceof Error ? error.message : "Unknown error",
         };
       }
     }
@@ -384,7 +420,7 @@ export class AIService {
     await delay(1500);
     return {
       success: true,
-      message: 'Connection successful (mock)',
+      message: "Connection successful (mock)",
     };
   }
 
@@ -409,11 +445,11 @@ export function createAIService(config: AIServiceConfig): AIService {
 
 export function useAIService(config: AIServiceConfig) {
   const service = new AIService(config);
-  
+
   return {
     generatePlan: () => service.generatePlan(),
     generateCode: () => service.generateCode(),
-    applyChanges: (options?: { createBackup?: boolean; dryRun?: boolean }) => 
+    applyChanges: (options?: { createBackup?: boolean; dryRun?: boolean }) =>
       service.applyChanges(options),
     validateProvider: () => AIService.validateProvider(config.provider),
     testConnection: () => AIService.testConnection(config.provider.id),

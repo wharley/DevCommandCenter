@@ -89,6 +89,7 @@ export interface Mission {
   context?: MissionContext | null;
   preserveInstructions?: string | null;
   errorMessage?: string | null;
+  codeGenerationAttempts?: number;
   startedAt?: Date | null;
   completedAt?: Date | null;
   createdAt: Date;
@@ -206,6 +207,7 @@ export interface UpdateMissionDTO {
   generatedCode?: GeneratedCode;
   context?: MissionContext;
   errorMessage?: string;
+  codeGenerationAttempts?: number;
   startedAt?: Date;
   completedAt?: Date;
 }
