@@ -1212,25 +1212,6 @@ export default function MissionPage() {
   const totalSteps = mission.plan?.steps.length ?? 0;
   const progress = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
 
-  // Determinar quais abas devem estar desabilitadas
-  const isTabDisabled = useCallback((tab: 'plan' | 'code' | 'logs') => {
-    if (tab === 'logs') return false; // Logs sempre acessível
-    
-    const status = mission.status;
-    
-    // Durante execução, desabilita a aba sendo processada
-    if (status === 'planning' && tab === 'plan') return true;
-    if (status === 'generating_code' && tab === 'code') return true;
-    if (status === 'applying' && tab === 'code') return true;
-    
-    // Code tab só fica disponível se tiver código gerado ou estiver gerando
-    if (tab === 'code' && !mission.generatedCode && !isGenerating && !cliParseErrorWithRepoChanges) {
-      return true;
-    }
-    
-    return false;
-  }, [mission.status, mission.generatedCode, isGenerating, cliParseErrorWithRepoChanges]);
-
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
