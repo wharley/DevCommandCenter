@@ -9,7 +9,7 @@ import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { platform } from "node:os";
 import * as fs from "node:fs";
 import { BaseAdapter } from "./base";
-import { spawnCliWithLoginShell } from "../shell-path";
+import { spawnCliWithLoginShell, getResolvedPathForNode } from "../shell-path";
 import type {
   ValidationResult,
   AdapterConfig,
@@ -63,10 +63,11 @@ export class ClaudeCodeAdapter extends BaseAdapter {
     }
 
     try {
-      // Tenta rodar --version para verificar se o CLI funciona
+      // Tenta rodar --version para verificar se o CLI funciona (env.PATH para app aberto pelo Finder)
       const result = execSync(`"${this.provider.cliPath}" --version`, {
         encoding: "utf-8",
         timeout: 10000,
+        env: { ...process.env, PATH: getResolvedPathForNode() },
       });
 
       return {

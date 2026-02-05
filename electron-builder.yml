@@ -29,6 +29,9 @@ npmRebuild: true
 
 mac:
   category: public.app-category.developer-tools
+  extendInfo:
+    LSEnvironment:
+      PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   target:
     - target: dmg
       arch:

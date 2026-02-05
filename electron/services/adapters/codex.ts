@@ -9,7 +9,7 @@ import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { platform } from "node:os";
 import * as fs from "node:fs";
 import { BaseAdapter } from "./base";
-import { spawnCliWithLoginShell } from "../shell-path";
+import { spawnCliWithLoginShell, getResolvedPathForNode } from "../shell-path";
 import type {
   ValidationResult,
   AdapterConfig,
@@ -70,11 +70,16 @@ export class CodexAdapter extends BaseAdapter {
     }
 
     try {
-      // Tenta rodar --version para verificar se o CLI funciona
-      const result = execSync(`"${this.provider.cliPath}" --version`, {
-        encoding: "utf-8",
-        timeout: 10000,
-      });
+      // Tenta rodar --version para verificar se o CLI funciona (env.PATH para app aberto pelo Finder; stdio + -c check_for_update_on_startup=false evitam bloqueio no prompt de update)
+      const result = execSync(
+        `"${this.provider.cliPath}" -c check_for_update_on_startup=false --version`,
+        {
+          encoding: "utf-8",
+          timeout: 10000,
+          env: { ...process.env, PATH: getResolvedPathForNode() },
+          stdio: ["ignore", "pipe", "pipe"],
+        }
+      );
 
       return {
         success: true,
@@ -262,11 +267,17 @@ export class CodexAdapter extends BaseAdapter {
       const inactivityTimeout = Math.min(INACTIVITY_TIMEOUT_MS, maxTimeout / 2);
 
       // Args para o Codex CLI (codex exec = modo não-interativo para automação)
+      // -a never: nunca pedir confirmação (rodar silencioso como Claude)
+      // -c check_for_update_on_startup=false: não exibir prompt de atualização
       const args = [
         "exec",
         "--cd",
         cwd,
         "--full-auto",
+        "--ask-for-approval",
+        "never",
+        "-c",
+        "check_for_update_on_startup=false",
         "--skip-git-repo-check",
       ];
 

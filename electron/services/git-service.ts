@@ -587,7 +587,10 @@ export class GitService {
             }
             // git apply falhou — verificar se foi aplicado de outra forma
             // (pode ter sido aplicado pelo CLI entre a verificação e o apply)
-            if (fs.existsSync(fullPath) && change.action === "modify") {
+            if (
+              fs.existsSync(fullPath) &&
+              (change.action === "modify" || change.action === "create")
+            ) {
               try {
                 const currentContent = await fs.promises.readFile(
                   fullPath,
@@ -618,6 +621,25 @@ export class GitService {
               appliedFiles.push(change.path);
               appliedVia.push({ path: change.path, via: "file-write" });
             } else if (hasDiff) {
+              // Final check: CLI may have already applied the file (e.g. Claude/Cursor/Codex CLI)
+              if (fs.existsSync(fullPath)) {
+                try {
+                  const currentContent = await fs.promises.readFile(
+                    fullPath,
+                    "utf-8"
+                  );
+                  if (checkDiffAlreadyApplied(currentContent, change.diff!)) {
+                    appliedFiles.push(change.path);
+                    appliedVia.push({
+                      path: change.path,
+                      via: "already-applied",
+                    });
+                    break;
+                  }
+                } catch {
+                  // Fall through to failedFiles
+                }
+              }
               failedFiles.push({
                 path: change.path,
                 error: "git apply failed and no suggestedContent to fallback",
@@ -632,6 +654,25 @@ export class GitService {
               appliedFiles.push(change.path);
               appliedVia.push({ path: change.path, via: "file-write" });
             } else if (hasDiff) {
+              // Final check: CLI may have already applied the file (e.g. Claude/Cursor/Codex CLI)
+              if (fs.existsSync(fullPath)) {
+                try {
+                  const currentContent = await fs.promises.readFile(
+                    fullPath,
+                    "utf-8"
+                  );
+                  if (checkDiffAlreadyApplied(currentContent, change.diff!)) {
+                    appliedFiles.push(change.path);
+                    appliedVia.push({
+                      path: change.path,
+                      via: "already-applied",
+                    });
+                    break;
+                  }
+                } catch {
+                  // Fall through to failedFiles
+                }
+              }
               failedFiles.push({
                 path: change.path,
                 error: "git apply failed and no suggestedContent to fallback",

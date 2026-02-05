@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { app } from "electron";
 import { BaseAdapter } from "./base";
-import { spawnCliWithLoginShell } from "../shell-path";
+import { spawnCliWithLoginShell, getResolvedPathForNode } from "../shell-path";
 import type {
   ValidationResult,
   AdapterConfig,
@@ -84,11 +84,13 @@ export class CursorAdapter extends BaseAdapter {
     }
 
     const cliPath = resolveCliPath(this.provider)!;
+    const cliEnv = { ...process.env, PATH: getResolvedPathForNode() };
     try {
       // Cursor CLI pode não ter --version; tentar --help como verificação não-interativa
       execSync(`"${cliPath}" --help`, {
         encoding: "utf-8",
         timeout: 10000,
+        env: cliEnv,
       });
       return {
         success: true,
@@ -99,6 +101,7 @@ export class CursorAdapter extends BaseAdapter {
         execSync(`"${cliPath}" --version`, {
           encoding: "utf-8",
           timeout: 10000,
+          env: cliEnv,
         });
         return {
           success: true,
