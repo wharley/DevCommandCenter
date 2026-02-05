@@ -1302,8 +1302,8 @@ export default function MissionPage() {
           )}
         </div>
 
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
+        <div className="flex items-start justify-between gap-6">
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2 flex-wrap">
               <h1 className="text-xl font-semibold text-card-foreground">
                 {mission.title}
@@ -1344,7 +1344,7 @@ export default function MissionPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {cliParseErrorWithRepoChanges && (
               <Card className="border-blue-500/30 bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/20 dark:to-blue-900/10">
                 <CardContent className="pt-6">
@@ -1429,45 +1429,6 @@ export default function MissionPage() {
               </Button>
             )}
 
-            {!cliParseErrorWithRepoChanges && mission.status === "created" && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm text-muted-foreground whitespace-nowrap">
-                  Gerar plano com:
-                </span>
-                <Select
-                  value={planProviderId || ""}
-                  onValueChange={(value) => {
-                    if (missionId && value)
-                      update(missionId, { planProviderId: value });
-                  }}
-                  disabled={isGenerating}
-                >
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Selecione o provedor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {providers
-                      .filter((p) => p.isActive)
-                      .map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  onClick={handleGeneratePlan}
-                  disabled={isGenerating || !planProvider}
-                >
-                  {isGenerating ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="mr-2 h-4 w-4" />
-                  )}
-                  Gerar plano
-                </Button>
-              </div>
-            )}
             {/* Botões para estado generating_code */}
             {mission.status === "generating_code" && (
               <div className="flex items-center gap-2">
@@ -1512,116 +1473,6 @@ export default function MissionPage() {
                 )}
               </div>
             )}
-            {!cliParseErrorWithRepoChanges &&
-              mission.status === "plan_generated" && (
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm text-muted-foreground whitespace-nowrap">
-                      Regenerar plano com:
-                    </span>
-                    <Select
-                      value={planProviderId || ""}
-                      onValueChange={(value) => {
-                        if (missionId && value)
-                          update(missionId, { planProviderId: value });
-                      }}
-                      disabled={isGenerating}
-                    >
-                      <SelectTrigger className="w-[200px]">
-                        <SelectValue placeholder="Selecione o provedor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {providers
-                          .filter((p) => p.isActive)
-                          .map((p) => (
-                            <SelectItem key={p.id} value={p.id}>
-                              {p.name}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      variant="outline"
-                      onClick={() => setRegeneratePlanDialogOpen(true)}
-                      disabled={isGenerating || !planProvider}
-                    >
-                      <Sparkles className="mr-2 h-4 w-4" />
-                      Regenerar plano
-                    </Button>
-                    <span className="text-sm text-muted-foreground whitespace-nowrap">
-                      Gerar código com:
-                    </span>
-                    <Select
-                      value={codeProviderId || ""}
-                      onValueChange={(value) => {
-                        if (missionId && value)
-                          update(missionId, { codeProviderId: value });
-                      }}
-                      disabled={isGenerating}
-                    >
-                      <SelectTrigger className="w-[200px]">
-                        <SelectValue placeholder="Selecione o provedor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {providers
-                          .filter((p) => p.isActive)
-                          .map((p) => (
-                            <SelectItem key={p.id} value={p.id}>
-                              {p.name}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      onClick={handleGenerateCode}
-                      disabled={isGenerating || !codeProvider}
-                    >
-                      {isGenerating ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Code2 className="mr-2 h-4 w-4" />
-                      )}
-                      {isGenerating ? "Gerando código..." : "Gerar código"}
-                    </Button>
-                  </div>
-                  {project?.path &&
-                    typeof window !== "undefined" &&
-                    window.electronAPI?.git && (
-                      <div className="flex flex-col gap-2">
-                        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-                          <Checkbox
-                            checked={createBranchForMission}
-                            onCheckedChange={(checked) =>
-                              setCreateBranchForMission(checked === true)
-                            }
-                            disabled={isGenerating}
-                          />
-                          <span>Criar branch para esta missão</span>
-                        </label>
-                        {createBranchForMission && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-muted-foreground whitespace-nowrap">
-                              Nome da branch:
-                            </span>
-                            <Input
-                              className="max-w-[280px]"
-                              placeholder={
-                                missionId
-                                  ? `mission/${missionId}`
-                                  : "mission/..."
-                              }
-                              value={branchNameForMission}
-                              onChange={(e) =>
-                                setBranchNameForMission(e.target.value)
-                              }
-                              disabled={isGenerating}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                </div>
-              )}
             {mission.status === "code_ready" && (
               <div className="flex flex-col gap-3">
                 {/* Alerta inteligente para múltiplas tentativas */}
@@ -1788,6 +1639,145 @@ export default function MissionPage() {
             )}
           </div>
         </div>
+
+        {/* Barra de ações em largura total: não espreme título/descrição */}
+        {!cliParseErrorWithRepoChanges && mission.status === "created" && (
+          <div className="mt-4 pt-4 border-t border-border flex flex-wrap items-center gap-3">
+            <span className="text-sm text-muted-foreground">Gerar plano com:</span>
+            <Select
+              value={planProviderId || ""}
+              onValueChange={(value) => {
+                if (missionId && value) update(missionId, { planProviderId: value });
+              }}
+              disabled={isGenerating}
+            >
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="Selecione o provedor" />
+              </SelectTrigger>
+              <SelectContent>
+                {providers
+                  .filter((p) => p.isActive)
+                  .map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={handleGeneratePlan}
+              disabled={isGenerating || !planProvider}
+            >
+              {isGenerating ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="mr-2 h-4 w-4" />
+              )}
+              Gerar plano
+            </Button>
+          </div>
+        )}
+        {!cliParseErrorWithRepoChanges && mission.status === "plan_generated" && (
+          <div className="mt-4 pt-4 border-t border-border space-y-3">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-muted-foreground">Plano:</span>
+                <Select
+                  value={planProviderId || ""}
+                  onValueChange={(value) => {
+                    if (missionId && value) update(missionId, { planProviderId: value });
+                  }}
+                  disabled={isGenerating}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Provedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providers
+                      .filter((p) => p.isActive)
+                      .map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRegeneratePlanDialogOpen(true)}
+                  disabled={isGenerating || !planProvider}
+                >
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  Regenerar plano
+                </Button>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-muted-foreground">Código:</span>
+                <Select
+                  value={codeProviderId || ""}
+                  onValueChange={(value) => {
+                    if (missionId && value) update(missionId, { codeProviderId: value });
+                  }}
+                  disabled={isGenerating}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Provedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providers
+                      .filter((p) => p.isActive)
+                      .map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  onClick={handleGenerateCode}
+                  disabled={isGenerating || !codeProvider}
+                >
+                  {isGenerating ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Code2 className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  {isGenerating ? "Gerando..." : "Gerar código"}
+                </Button>
+              </div>
+            </div>
+            {project?.path &&
+              typeof window !== "undefined" &&
+              window.electronAPI?.git && (
+                <div className="flex flex-wrap items-center gap-4">
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                    <Checkbox
+                      checked={createBranchForMission}
+                      onCheckedChange={(checked) =>
+                        setCreateBranchForMission(checked === true)
+                      }
+                      disabled={isGenerating}
+                    />
+                    <span>Criar branch para esta missão</span>
+                  </label>
+                  {createBranchForMission && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">Nome:</span>
+                      <Input
+                        className="w-[200px]"
+                        placeholder={missionId ? `mission/${missionId}` : "mission/..."}
+                        value={branchNameForMission}
+                        onChange={(e) => setBranchNameForMission(e.target.value)}
+                        disabled={isGenerating}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+          </div>
+        )}
 
         {/* Progress bar for missions with plans */}
         {mission.plan && (

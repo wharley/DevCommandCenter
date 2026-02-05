@@ -84,16 +84,17 @@ export class AIOrchestrator {
         return { success: false, error: "Mission not found" };
       }
 
-      // Uma missão por projeto por vez (evita conflitos Git)
-      const othersInProgress = db.missions.findInProgress(
+      // Bloqueia apenas se outra missão está gerando/aplicando código (modifica Git).
+      // Geração de plano só lê do repo — pode rodar em paralelo.
+      const othersModifyingGit = db.missions.findModifyingGit(
         mission.projectId,
         missionId
       );
-      if (othersInProgress.length > 0) {
-        const other = othersInProgress[0];
+      if (othersModifyingGit.length > 0) {
+        const other = othersModifyingGit[0];
         return {
           success: false,
-          error: `Já existe uma missão em andamento neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
+          error: `Há uma missão gerando ou aplicando código neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
         };
       }
 
@@ -208,16 +209,16 @@ export class AIOrchestrator {
         return { success: false, error: "Mission not found" };
       }
 
-      // Uma missão por projeto por vez (evita conflitos Git)
-      const othersInProgress = db.missions.findInProgress(
+      // Uma missão por projeto na pipeline de código (evita conflitos Git).
+      const othersModifyingGit = db.missions.findModifyingGit(
         mission.projectId,
         missionId
       );
-      if (othersInProgress.length > 0) {
-        const other = othersInProgress[0];
+      if (othersModifyingGit.length > 0) {
+        const other = othersModifyingGit[0];
         return {
           success: false,
-          error: `Já existe uma missão em andamento neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
+          error: `Já existe uma missão gerando ou aplicando código neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
         };
       }
 
@@ -352,20 +353,20 @@ export class AIOrchestrator {
         };
       }
 
-      // Uma missão por projeto por vez (evita conflitos Git)
-      const othersInProgress = db.missions.findInProgress(
+      // Uma missão por projeto na pipeline de código (evita conflitos git apply).
+      const othersModifyingGit = db.missions.findModifyingGit(
         mission.projectId,
         missionId
       );
-      if (othersInProgress.length > 0) {
-        const other = othersInProgress[0];
+      if (othersModifyingGit.length > 0) {
+        const other = othersModifyingGit[0];
         return {
           success: false,
           appliedFiles: [],
           failedFiles: [
             {
               path: "",
-              error: `Já existe uma missão em andamento neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
+              error: `Já existe uma missão gerando ou aplicando código neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
             },
           ],
         };

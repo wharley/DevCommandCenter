@@ -181,6 +181,33 @@ export const MissionsRepository = {
   },
 
   /**
+   * Busca missões que modificam ou dependem do working tree Git no mesmo projeto.
+   * Usado para serializar generateCode e applyChanges (evita conflitos de git apply).
+   * Não inclui planning/plan_generated pois essas etapas só leem do repositório.
+   * @param projectId ID do projeto
+   * @param excludeMissionId ID da missão atual (excluída da busca)
+   */
+  findModifyingGit(
+    projectId: string,
+    excludeMissionId?: string,
+  ): Mission[] {
+    const modifyingStatuses: MissionStatus[] = [
+      'generating_code',
+      'code_ready',
+      'applying',
+    ];
+    const options: { projectId: string; status: MissionStatus[] } = {
+      projectId,
+      status: modifyingStatuses,
+    };
+    const missions = this.findAll({ ...options, limit: 50, offset: 0 });
+    if (excludeMissionId) {
+      return missions.filter((m) => m.id !== excludeMissionId);
+    }
+    return missions;
+  },
+
+  /**
    * Busca uma missão por ID.
    */
   findById(id: string): Mission | null {
