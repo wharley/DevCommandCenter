@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { app } from "electron";
 import { BaseAdapter } from "./base";
-import { getLoginShellPath } from "../shell-path";
+import { spawnCliWithLoginShell } from "../shell-path";
 import type {
   ValidationResult,
   AdapterConfig,
@@ -948,18 +948,12 @@ export class CursorAdapter extends BaseAdapter {
       };
 
       try {
-        const shellPath = getLoginShellPath();
-        const env = {
-          ...process.env,
-          ...(shellPath && { PATH: shellPath }),
-        };
-        child = spawn(cliPath, args, {
+        const env = { ...process.env };
+        child = spawnCliWithLoginShell(cliPath, args, {
           cwd,
           env,
           shell: platform() === "win32",
           stdio: ["ignore", "pipe", "pipe"],
-          // Note: spawn() uses streams, so it can handle unlimited output size
-          // Unlike exec() which has a 1MB maxBuffer default
         });
 
         child.stdout?.on("data", (data) => {
