@@ -267,15 +267,12 @@ export class CodexAdapter extends BaseAdapter {
       const inactivityTimeout = Math.min(INACTIVITY_TIMEOUT_MS, maxTimeout / 2);
 
       // Args para o Codex CLI (codex exec = modo não-interativo para automação)
-      // -a never: nunca pedir confirmação (rodar silencioso como Claude)
       // -c check_for_update_on_startup=false: não exibir prompt de atualização
       const args = [
         "exec",
         "--cd",
         cwd,
         "--full-auto",
-        "--ask-for-approval",
-        "never",
         "-c",
         "check_for_update_on_startup=false",
         "--skip-git-repo-check",

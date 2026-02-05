@@ -16,6 +16,7 @@ import {
   Play,
   FileCode,
   X,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -76,6 +77,7 @@ export default function ProjectPage() {
   const navigate = useNavigate();
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
 
   const { projects, update, isLoading: projectsLoading } = useProjects();
   const {
@@ -93,6 +95,10 @@ export default function ProjectPage() {
   const project = projectId
     ? (projects.find((p) => p.id === projectId) ?? null)
     : null;
+  const editingMission =
+    editingMissionId != null
+      ? missions.find((m) => m.id === editingMissionId) ?? null
+      : null;
   const defaultProvider = project?.defaultProviderId
     ? (providers.find((p) => p.id === project.defaultProviderId) ?? null)
     : null;
@@ -356,6 +362,18 @@ export default function ProjectPage() {
                                 Abrir missão
                               </Link>
                             </DropdownMenuItem>
+                            {!mission.plan &&
+                              mission.status !== "planning" && (
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    setEditingMissionId(mission.id);
+                                  }}
+                                >
+                                  <Pencil className="mr-2 h-4 w-4" />
+                                  Editar
+                                </DropdownMenuItem>
+                              )}
                             {[
                               "created",
                               "plan_generated",
@@ -435,7 +453,27 @@ export default function ProjectPage() {
           open={dialogOpen}
           onOpenChange={setDialogOpen}
           projectId={projectId}
-          defaultProviderId={project.defaultProviderId ?? undefined}
+          defaultProviderId={project?.defaultProviderId ?? undefined}
+        />
+      )}
+      {/* Edit Mission Dialog (when mission has no plan yet) */}
+      {projectId && editingMission && (
+        <NewMissionDialog
+          open={editingMissionId !== null}
+          onOpenChange={(open) => {
+            if (!open) setEditingMissionId(null);
+          }}
+          projectId={projectId}
+          defaultProviderId={project?.defaultProviderId ?? undefined}
+          missionId={editingMission.id}
+          initialMission={{
+            title: editingMission.title,
+            description: editingMission.description,
+            preserveInstructions: editingMission.preserveInstructions ?? "",
+            providerId: editingMission.providerId ?? undefined,
+            planProviderId: editingMission.planProviderId ?? undefined,
+            codeProviderId: editingMission.codeProviderId ?? undefined,
+          }}
         />
       )}
     </div>

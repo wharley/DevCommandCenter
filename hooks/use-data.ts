@@ -380,6 +380,8 @@ export function useMissions(projectId?: string) {
         const newMission = addMission({
           ...data,
           providerId: data.providerId ?? null,
+          planProviderId: data.planProviderId ?? null,
+          codeProviderId: data.codeProviderId ?? null,
           plan: null,
           generatedCode: null,
           context: null,

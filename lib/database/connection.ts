@@ -131,6 +131,9 @@ export function initDatabase(): Database.Database {
   // Migração: adicionar colunas is_committed e is_pushed em missions se não existirem
   migrateCommitPushFlags(db);
 
+  // Migração: adicionar plan_provider_id e code_provider_id em missions se não existirem
+  migratePlanCodeProviderIds(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
 
   return db;
@@ -237,6 +240,28 @@ function migrateCommitPushFlags(database: Database.Database): void {
   if (!hasIsPushed) {
     database.exec("ALTER TABLE missions ADD COLUMN is_pushed INTEGER DEFAULT 0");
     console.log("[Database] Migration: is_pushed column added to missions.");
+  }
+}
+
+/**
+ * Migração: adiciona plan_provider_id e code_provider_id em missions se não existirem.
+ */
+function migratePlanCodeProviderIds(database: Database.Database): void {
+  const rows = database
+    .prepare("PRAGMA table_info(missions)")
+    .all() as Array<{ name: string }>;
+
+  const hasPlanProviderId = rows.some((c) => c.name === "plan_provider_id");
+  const hasCodeProviderId = rows.some((c) => c.name === "code_provider_id");
+
+  if (!hasPlanProviderId) {
+    database.exec("ALTER TABLE missions ADD COLUMN plan_provider_id TEXT");
+    console.log("[Database] Migration: plan_provider_id column added to missions.");
+  }
+
+  if (!hasCodeProviderId) {
+    database.exec("ALTER TABLE missions ADD COLUMN code_provider_id TEXT");
+    console.log("[Database] Migration: code_provider_id column added to missions.");
   }
 }
 

@@ -38,6 +38,8 @@ O Dev Command Center toma como **referência** o fluxo de ferramentas como Comma
 4. **Gerar alterações** e revisar diffs
 5. **Aplicar mudanças** e **commitar** com segurança
 
+Para o porquê de cada etapa, custo/tokens e boas práticas de uso (missões pequenas, revisar plano, uma missão por projeto), veja [docs/CONCEITOS_E_USO.md](docs/CONCEITOS_E_USO.md).
+
 ### Diferenciais pretendidos
 
 - **Multi-provider real** (CLI e API) com fallback e validação

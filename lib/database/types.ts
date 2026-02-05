@@ -81,6 +81,8 @@ export interface Mission {
   id: string;
   projectId: string;
   providerId?: string | null;
+  planProviderId?: string | null;
+  codeProviderId?: string | null;
   title: string;
   description: string;
   status: MissionStatus;
@@ -194,6 +196,8 @@ export interface UpdateProjectDTO {
 export interface CreateMissionDTO {
   projectId: string;
   providerId?: string;
+  planProviderId?: string;
+  codeProviderId?: string;
   title: string;
   description: string;
   preserveInstructions?: string;
@@ -203,6 +207,8 @@ export interface UpdateMissionDTO {
   title?: string;
   description?: string;
   providerId?: string;
+  planProviderId?: string | null;
+  codeProviderId?: string | null;
   preserveInstructions?: string | null;
   status?: MissionStatus;
   plan?: MissionPlan;

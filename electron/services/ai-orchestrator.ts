@@ -102,8 +102,11 @@ export class AIOrchestrator {
         return { success: false, error: "Project not found" };
       }
 
-      // Determina o provider a usar
-      const providerId = mission.providerId || project.defaultProviderId;
+      // Determina o provider a usar (plan: planProviderId > providerId > default)
+      const providerId =
+        mission.planProviderId ||
+        mission.providerId ||
+        project.defaultProviderId;
       if (!providerId) {
         return {
           success: false,
@@ -230,8 +233,11 @@ export class AIOrchestrator {
         return { success: false, error: "Project not found" };
       }
 
-      // Determina o provider a usar
-      const providerId = mission.providerId || project.defaultProviderId;
+      // Determina o provider a usar (code: codeProviderId > providerId > default)
+      const providerId =
+        mission.codeProviderId ||
+        mission.providerId ||
+        project.defaultProviderId;
       if (!providerId) {
         return {
           success: false,

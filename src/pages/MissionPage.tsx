@@ -60,6 +60,7 @@ import {
 import { useAppStore } from "@/hooks/use-app-store";
 import { createAIService } from "@/lib/services/ai-service";
 import { CommitDialog } from "@/components/dialogs/commit-dialog";
+import { NewMissionDialog } from "@/components/dialogs/new-mission-dialog";
 import { RegeneratePlanDialog } from "@/components/dialogs/regenerate-plan-dialog";
 import { RegenerateCodeDialog } from "@/components/dialogs/regenerate-code-dialog";
 import { toast } from "sonner";
@@ -230,6 +231,7 @@ export default function MissionPage() {
   const [regenerateCodeDialogOpen, setRegenerateCodeDialogOpen] =
     useState(false);
   const [codeFeedback, setCodeFeedback] = useState("");
+  const [editMissionDialogOpen, setEditMissionDialogOpen] = useState(false);
 
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
@@ -270,6 +272,38 @@ export default function MissionPage() {
         : null,
     [mission?.providerId, providers],
   );
+
+  const planProviderId =
+    mission?.planProviderId ??
+    mission?.providerId ??
+    project?.defaultProviderId ??
+    "";
+  const codeProviderId =
+    mission?.codeProviderId ??
+    mission?.providerId ??
+    project?.defaultProviderId ??
+    "";
+
+  const planProvider = useMemo(
+    () =>
+      planProviderId
+        ? (providers.find((p) => p.id === planProviderId) ?? null)
+        : null,
+    [planProviderId, providers],
+  );
+
+  const codeProvider = useMemo(
+    () =>
+      codeProviderId
+        ? (providers.find((p) => p.id === codeProviderId) ?? null)
+        : null,
+    [codeProviderId, providers],
+  );
+
+  const canEditMission =
+    mission &&
+    !mission.plan &&
+    mission.status !== "planning";
 
   // Usar missionId como dependência em vez do objeto mission inteiro
   useEffect(() => {
@@ -508,20 +542,20 @@ export default function MissionPage() {
   }
 
   const handleGeneratePlan = async () => {
-    if (!provider || !missionId) {
-      toast.error("Nenhum provedor selecionado para esta missão");
+    if (!planProvider || !missionId) {
+      toast.error("Nenhum provedor selecionado para o plano");
       return;
     }
 
     setIsGenerating(true);
     updateStatus(missionId, "planning");
     addLog("prompt", "Iniciando geração do plano...", {
-      model: provider.config?.model as string,
+      model: planProvider.config?.model as string,
     });
 
     try {
       const aiService = createAIService({
-        provider,
+        provider: planProvider,
         mission,
         projectContext: mission.context ?? undefined,
       });
@@ -553,20 +587,20 @@ export default function MissionPage() {
   };
 
   const handleRegeneratePlan = async (feedback: string) => {
-    if (!provider || !missionId) {
-      toast.error("Nenhum provedor selecionado para esta missão");
-      throw new Error("Provider or missionId missing");
+    if (!planProvider || !missionId) {
+      toast.error("Nenhum provedor selecionado para o plano");
+      throw new Error("Plan provider or missionId missing");
     }
 
     setIsGenerating(true);
     updateStatus(missionId, "planning");
     addLog("prompt", "Regenerando plano com feedback do usuário...", {
-      model: provider.config?.model as string,
+      model: planProvider.config?.model as string,
     });
 
     try {
       const aiService = createAIService({
-        provider,
+        provider: planProvider,
         mission,
         projectContext: mission.context ?? undefined,
       });
@@ -599,9 +633,9 @@ export default function MissionPage() {
 
   const handleGenerateCode = async () => {
     console.log("[DevCommandCenter] handleGenerateCode called", {
-      hasProvider: !!provider,
-      providerName: provider?.name,
-      providerType: provider?.type,
+      hasProvider: !!codeProvider,
+      providerName: codeProvider?.name,
+      providerType: codeProvider?.type,
       hasPlan: !!mission.plan,
       planSteps: mission.plan?.steps?.length,
       missionId,
@@ -616,17 +650,17 @@ export default function MissionPage() {
       return;
     }
 
-    if (!provider) {
-      console.error("[DevCommandCenter] No provider configured");
-      toast.error("Nenhum provedor de IA configurado para esta missão", {
-        description: "Configure um provedor nas configurações do projeto",
+    if (!codeProvider) {
+      console.error("[DevCommandCenter] No code provider configured");
+      toast.error("Nenhum provedor de IA configurado para gerar código", {
+        description: "Selecione um provedor em \"Gerar código com\" ou nas configurações do projeto",
       });
       return;
     }
 
-    if (!provider.isActive) {
-      console.error("[DevCommandCenter] Provider is not active");
-      toast.error(`O provedor ${provider.name} está inativo`, {
+    if (!codeProvider.isActive) {
+      console.error("[DevCommandCenter] Code provider is not active");
+      toast.error(`O provedor ${codeProvider.name} está inativo`, {
         description: "Ative o provedor nas configurações",
       });
       return;
@@ -708,7 +742,7 @@ export default function MissionPage() {
       "prompt",
       `Iniciando geração de código com base no plano... (tentativa ${attempts})`,
       {
-        model: provider.config?.model as string,
+        model: codeProvider.config?.model as string,
       },
     );
 
@@ -716,7 +750,7 @@ export default function MissionPage() {
 
     try {
       const aiService = createAIService({
-        provider,
+        provider: codeProvider,
         mission,
         projectContext: mission.context ?? undefined,
       });
@@ -759,9 +793,9 @@ export default function MissionPage() {
         (errorMessage.includes("Failed to parse code") ||
           errorMessage.includes("Could not parse JSON"));
       const isCliProvider =
-        provider?.type === "cursor" ||
-        provider?.type === "claude-code" ||
-        provider?.type === "codex";
+        codeProvider?.type === "cursor" ||
+        codeProvider?.type === "claude-code" ||
+        codeProvider?.type === "codex";
       if (
         isParseError &&
         isCliProvider &&
@@ -805,7 +839,7 @@ export default function MissionPage() {
                 {
                   error: errorMessage,
                   filesRecovered: files.length,
-                  provider: provider?.type,
+                  provider: codeProvider?.type,
                   timestamp: new Date().toISOString(),
                 },
               );
@@ -1153,8 +1187,8 @@ export default function MissionPage() {
   };
 
   const handleRegenerateCodeWithFeedback = async (feedback: string) => {
-    if (!provider || !mission.plan || !missionId) {
-      toast.error("O plano é necessário antes de gerar o código");
+    if (!codeProvider || !mission.plan || !missionId) {
+      toast.error("Selecione um provedor para gerar código e tenha um plano");
       return;
     }
 
@@ -1171,12 +1205,12 @@ export default function MissionPage() {
       : `Regenerando código (tentativa ${attempts})...`;
 
     addLog("prompt", feedbackMsg, {
-      model: provider.config?.model as string,
+      model: codeProvider.config?.model as string,
     });
 
     try {
       const aiService = createAIService({
-        provider,
+        provider: codeProvider,
         mission,
         projectContext: mission.context ?? undefined,
         codeFeedback: feedback.trim() || undefined,
@@ -1286,6 +1320,22 @@ export default function MissionPage() {
                   Instruções de preservação ativas
                 </Badge>
               )}
+              {canEditMission && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground -ml-1"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setEditMissionDialogOpen(true);
+                  }}
+                >
+                  <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                  Editar
+                </Button>
+              )}
             </div>
             <div className="max-w-2xl">
               <CollapsibleMissionDescription
@@ -1380,14 +1430,43 @@ export default function MissionPage() {
             )}
 
             {!cliParseErrorWithRepoChanges && mission.status === "created" && (
-              <Button onClick={handleGeneratePlan} disabled={isGenerating}>
-                {isGenerating ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="mr-2 h-4 w-4" />
-                )}
-                Gerar plano
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                  Gerar plano com:
+                </span>
+                <Select
+                  value={planProviderId || ""}
+                  onValueChange={(value) => {
+                    if (missionId && value)
+                      update(missionId, { planProviderId: value });
+                  }}
+                  disabled={isGenerating}
+                >
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Selecione o provedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providers
+                      .filter((p) => p.isActive)
+                      .map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={handleGeneratePlan}
+                  disabled={isGenerating || !planProvider}
+                >
+                  {isGenerating ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="mr-2 h-4 w-4" />
+                  )}
+                  Gerar plano
+                </Button>
+              </div>
             )}
             {/* Botões para estado generating_code */}
             {mission.status === "generating_code" && (
@@ -1437,10 +1516,34 @@ export default function MissionPage() {
               mission.status === "plan_generated" && (
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-muted-foreground whitespace-nowrap">
+                      Regenerar plano com:
+                    </span>
+                    <Select
+                      value={planProviderId || ""}
+                      onValueChange={(value) => {
+                        if (missionId && value)
+                          update(missionId, { planProviderId: value });
+                      }}
+                      disabled={isGenerating}
+                    >
+                      <SelectTrigger className="w-[200px]">
+                        <SelectValue placeholder="Selecione o provedor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {providers
+                          .filter((p) => p.isActive)
+                          .map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
                     <Button
                       variant="outline"
                       onClick={() => setRegeneratePlanDialogOpen(true)}
-                      disabled={isGenerating}
+                      disabled={isGenerating || !planProvider}
                     >
                       <Sparkles className="mr-2 h-4 w-4" />
                       Regenerar plano
@@ -1449,12 +1552,10 @@ export default function MissionPage() {
                       Gerar código com:
                     </span>
                     <Select
-                      value={
-                        mission.providerId ?? project?.defaultProviderId ?? ""
-                      }
+                      value={codeProviderId || ""}
                       onValueChange={(value) => {
                         if (missionId && value)
-                          update(missionId, { providerId: value });
+                          update(missionId, { codeProviderId: value });
                       }}
                       disabled={isGenerating}
                     >
@@ -1473,7 +1574,7 @@ export default function MissionPage() {
                     </Select>
                     <Button
                       onClick={handleGenerateCode}
-                      disabled={isGenerating || !provider}
+                      disabled={isGenerating || !codeProvider}
                     >
                       {isGenerating ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1754,7 +1855,7 @@ export default function MissionPage() {
             <PlanView
               plan={mission.plan}
               status={mission.status}
-              provider={provider?.name}
+              provider={planProvider?.name}
             />
           </TabsContent>
 
@@ -1846,6 +1947,23 @@ export default function MissionPage() {
         isLoading={isGenerating}
         attempts={mission?.codeGenerationAttempts ?? 1}
       />
+      {projectId && mission && (
+        <NewMissionDialog
+          open={editMissionDialogOpen}
+          onOpenChange={setEditMissionDialogOpen}
+          projectId={projectId}
+          defaultProviderId={project?.defaultProviderId ?? undefined}
+          missionId={missionId ?? undefined}
+          initialMission={{
+            title: mission.title,
+            description: mission.description,
+            preserveInstructions: mission.preserveInstructions ?? "",
+            providerId: mission.providerId ?? undefined,
+            planProviderId: mission.planProviderId ?? undefined,
+            codeProviderId: mission.codeProviderId ?? undefined,
+          }}
+        />
+      )}
     </div>
   );
 }

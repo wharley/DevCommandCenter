@@ -75,6 +75,8 @@ yarn lint
 5. Generate code and review diffs
 6. Apply changes (with backup) and commit
 
+For the rationale behind each step and best practices (small missions, review before code, one mission per project), see [docs/CONCEITOS_E_USO.md](docs/CONCEITOS_E_USO.md).
+
 ## Roadmap (proposal)
 
 - Worktrees as first-class workflow (create/list/open per mission)

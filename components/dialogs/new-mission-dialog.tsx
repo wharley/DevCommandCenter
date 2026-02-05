@@ -1,8 +1,8 @@
 import React from "react";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Pencil, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -25,11 +25,23 @@ import {
 import { useProviders, useMissions } from "@/hooks/use-data";
 import { toast } from "sonner";
 
+export interface InitialMissionForEdit {
+  title: string;
+  description: string;
+  preserveInstructions?: string;
+  providerId?: string;
+  planProviderId?: string;
+  codeProviderId?: string;
+}
+
 interface NewMissionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectId: string;
   defaultProviderId?: string;
+  /** When set, dialog runs in edit mode: title "Editar missão", submit calls update and does not navigate */
+  missionId?: string;
+  initialMission?: InitialMissionForEdit;
 }
 
 export function NewMissionDialog({
@@ -37,11 +49,15 @@ export function NewMissionDialog({
   onOpenChange,
   projectId,
   defaultProviderId,
+  missionId,
+  initialMission,
 }: NewMissionDialogProps) {
   const navigate = useNavigate();
   const { providers } = useProviders();
-  const { create } = useMissions(projectId);
+  const { create, update } = useMissions(projectId);
   const activeProviders = providers.filter((p) => p.isActive);
+
+  const isEditMode = Boolean(missionId && initialMission);
 
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -49,7 +65,33 @@ export function NewMissionDialog({
     description: "",
     preserveInstructions: "",
     providerId: defaultProviderId ?? "",
+    planProviderId: "",
+    codeProviderId: "",
   });
+
+  // When opening in edit mode, fill form from initialMission
+  useEffect(() => {
+    if (open && isEditMode && initialMission) {
+      setFormData({
+        title: initialMission.title ?? "",
+        description: initialMission.description ?? "",
+        preserveInstructions: initialMission.preserveInstructions ?? "",
+        providerId: initialMission.providerId ?? defaultProviderId ?? "",
+        planProviderId: initialMission.planProviderId ?? "",
+        codeProviderId: initialMission.codeProviderId ?? "",
+      });
+    }
+    if (open && !isEditMode) {
+      setFormData({
+        title: "",
+        description: "",
+        preserveInstructions: "",
+        providerId: defaultProviderId ?? "",
+        planProviderId: "",
+        codeProviderId: "",
+      });
+    }
+  }, [open, isEditMode, initialMission, defaultProviderId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,9 +111,25 @@ export function NewMissionDialog({
     try {
       await new Promise((resolve) => setTimeout(resolve, 300));
 
+      if (isEditMode && missionId) {
+        await update(missionId, {
+          title: formData.title.trim(),
+          description: formData.description.trim(),
+          preserveInstructions: formData.preserveInstructions.trim() || undefined,
+          providerId: formData.providerId || undefined,
+          planProviderId: formData.planProviderId || undefined,
+          codeProviderId: formData.codeProviderId || undefined,
+        });
+        toast.success("Missão atualizada");
+        onOpenChange(false);
+        return;
+      }
+
       const mission = await create({
         projectId,
         providerId: formData.providerId,
+        planProviderId: formData.planProviderId || undefined,
+        codeProviderId: formData.codeProviderId || undefined,
         title: formData.title.trim(),
         description: formData.description.trim(),
         preserveInstructions: formData.preserveInstructions.trim() || undefined,
@@ -81,15 +139,16 @@ export function NewMissionDialog({
       onOpenChange(false);
       navigate(`/project/${projectId}/mission/${mission.id}`);
 
-      // Reset form
       setFormData({
         title: "",
         description: "",
         preserveInstructions: "",
         providerId: defaultProviderId ?? "",
+        planProviderId: "",
+        codeProviderId: "",
       });
     } catch {
-      toast.error("Falha ao criar missão");
+      toast.error(isEditMode ? "Falha ao atualizar missão" : "Falha ao criar missão");
     } finally {
       setIsLoading(false);
     }
@@ -101,11 +160,22 @@ export function NewMissionDialog({
         <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1 overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-primary" />
-              Nova missão
+              {isEditMode ? (
+                <>
+                  <Pencil className="h-5 w-5 text-primary" />
+                  Editar missão
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  Nova missão
+                </>
+              )}
             </DialogTitle>
             <DialogDescription>
-              Descreva a tarefa de código com a qual o agente de IA deve ajudar.
+              {isEditMode
+                ? "Altere título, descrição ou provedor da missão."
+                : "Descreva a tarefa de código com a qual o agente de IA deve ajudar."}
             </DialogDescription>
           </DialogHeader>
 
@@ -168,7 +238,7 @@ export function NewMissionDialog({
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="provider">Provedor de IA</Label>
+                <Label htmlFor="provider">Provedor de IA (padrão)</Label>
                 <Select
                   value={formData.providerId}
                   onValueChange={(value) =>
@@ -192,6 +262,62 @@ export function NewMissionDialog({
                     )}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Usado quando não definir provedores específicos abaixo.
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="planProvider">Provider para plano (opcional)</Label>
+                <Select
+                  value={formData.planProviderId || "_default"}
+                  onValueChange={(value) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      planProviderId: value === "_default" ? "" : value,
+                    }))
+                  }
+                >
+                  <SelectTrigger id="planProvider">
+                    <SelectValue placeholder="Mesmo que o padrão" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_default">Mesmo que o padrão</SelectItem>
+                    {activeProviders.map((provider) => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        {provider.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="codeProvider">Provider para código (opcional)</Label>
+                <Select
+                  value={formData.codeProviderId || "_default"}
+                  onValueChange={(value) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      codeProviderId: value === "_default" ? "" : value,
+                    }))
+                  }
+                >
+                  <SelectTrigger id="codeProvider">
+                    <SelectValue placeholder="Mesmo que o padrão" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_default">Mesmo que o padrão</SelectItem>
+                    {activeProviders.map((provider) => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        {provider.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Ex.: plano com Codex e código com Claude.
+                </p>
               </div>
             </div>
           </div>
@@ -209,7 +335,7 @@ export function NewMissionDialog({
               disabled={isLoading || activeProviders.length === 0}
             >
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Criar missão
+              {isEditMode ? "Salvar" : "Criar missão"}
             </Button>
           </DialogFooter>
         </form>

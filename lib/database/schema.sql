@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS missions (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
   provider_id TEXT,
+  plan_provider_id TEXT,
+  code_provider_id TEXT,
   title TEXT NOT NULL,
   description TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created', 'planning', 'plan_generated', 'generating_code', 'code_ready', 'applying', 'completed', 'failed', 'cancelled')),
@@ -51,7 +53,9 @@ CREATE TABLE IF NOT EXISTS missions (
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-  FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE SET NULL
+  FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE SET NULL,
+  FOREIGN KEY (plan_provider_id) REFERENCES providers(id) ON DELETE SET NULL,
+  FOREIGN KEY (code_provider_id) REFERENCES providers(id) ON DELETE SET NULL
 );
 
 -- Tabela de Logs das Missões (histórico de interações)

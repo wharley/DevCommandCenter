@@ -21,6 +21,8 @@ interface MissionRow {
   id: string;
   project_id: string;
   provider_id: string | null;
+  plan_provider_id?: string | null;
+  code_provider_id?: string | null;
   title: string;
   description: string;
   status: string;
@@ -43,6 +45,8 @@ function rowToMission(row: MissionRow): Mission {
     id: row.id,
     projectId: row.project_id,
     providerId: row.provider_id,
+    planProviderId: row.plan_provider_id ?? null,
+    codeProviderId: row.code_provider_id ?? null,
     title: row.title,
     description: row.description,
     status: row.status as MissionStatus,
@@ -196,14 +200,16 @@ export const MissionsRepository = {
     const id = generateId();
     
     const stmt = db.prepare(`
-      INSERT INTO missions (id, project_id, provider_id, title, description, preserve_instructions, status)
-      VALUES (?, ?, ?, ?, ?, ?, 'created')
+      INSERT INTO missions (id, project_id, provider_id, plan_provider_id, code_provider_id, title, description, preserve_instructions, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'created')
     `);
     
     stmt.run(
       id,
       data.projectId,
       data.providerId || null,
+      data.planProviderId ?? null,
+      data.codeProviderId ?? null,
       data.title,
       data.description,
       data.preserveInstructions ?? null
@@ -237,6 +243,14 @@ export const MissionsRepository = {
     if (data.providerId !== undefined) {
       updates.push('provider_id = ?');
       values.push(data.providerId);
+    }
+    if (data.planProviderId !== undefined) {
+      updates.push('plan_provider_id = ?');
+      values.push(data.planProviderId);
+    }
+    if (data.codeProviderId !== undefined) {
+      updates.push('code_provider_id = ?');
+      values.push(data.codeProviderId);
     }
     if (data.status !== undefined) {
       updates.push('status = ?');
