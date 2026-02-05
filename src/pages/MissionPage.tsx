@@ -1516,126 +1516,7 @@ export default function MissionPage() {
                     </div>
                   </Alert>
                 )}
-
-                {/* Botões de ação */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {/* Ação primária */}
-                  <Button
-                    onClick={handleApplyChanges}
-                    disabled={isApplying || isGenerating}
-                    className="cursor-pointer disabled:cursor-not-allowed"
-                  >
-                    {isApplying ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Play className="mr-2 h-4 w-4" />
-                    )}
-                    Aplicar alterações
-                  </Button>
-
-                  {/* Ação secundária - retry */}
-                  <Button
-                    onClick={() => setRegenerateCodeDialogOpen(true)}
-                    variant="secondary"
-                    disabled={isApplying || isGenerating}
-                    className="cursor-pointer disabled:cursor-not-allowed"
-                  >
-                    <RotateCcw className="mr-2 h-4 w-4" />
-                    Regenerar código
-                  </Button>
-
-                  {/* Escape hatch */}
-                  <Button
-                    onClick={handleDiscardCode}
-                    variant="outline"
-                    disabled={isApplying || isGenerating}
-                    className="cursor-pointer disabled:cursor-not-allowed hover:bg-muted hover:text-muted-foreground"
-                  >
-                    <ArrowLeft className="mr-2 h-4 w-4" />
-                    Voltar ao plano
-                  </Button>
-
-                  {/* Ação destrutiva */}
-                  <Button
-                    onClick={handleCancelMission}
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto text-muted-foreground hover:text-destructive cursor-pointer"
-                  >
-                    <XCircle className="mr-2 h-4 w-4" />
-                    Cancelar
-                  </Button>
-                </div>
               </div>
-            )}
-            {mission.status === "completed" && (
-              <>
-                {/* Se ainda não commitou, mostra botão de commit */}
-                {!mission.isCommitted && (
-                  <div className="flex flex-col gap-1.5">
-                    <p className="text-xs text-muted-foreground">
-                      As alterações foram aplicadas mas ainda não foram commitadas
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        onClick={() => setCommitDialogOpen(true)}
-                        variant="default"
-                        className="border-primary/50 hover:bg-primary/10"
-                      >
-                        <GitCommit className="mr-2 h-4 w-4" />
-                        Commitar
-                      </Button>
-                      <Button
-                        onClick={handleReject}
-                        variant="outline"
-                        className="border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <XCircle className="mr-2 h-4 w-4" />
-                        Rejeitar
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Se commitou mas não deu push, mostra botão de push */}
-                {mission.isCommitted && !mission.isPushed && (
-                  <div className="flex flex-col gap-1.5">
-                    <p className="text-xs text-muted-foreground">
-                      Alterações commitadas localmente · Push envia ao remoto
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        onClick={handlePush}
-                        disabled={isPushing}
-                        variant="default"
-                      >
-                        {isPushing ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <Upload className="mr-2 h-4 w-4" />
-                        )}
-                        Enviar ao remoto
-                      </Button>
-                      <Button
-                        onClick={handleReject}
-                        variant="outline"
-                        className="border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <XCircle className="mr-2 h-4 w-4" />
-                        Rejeitar
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Se commitou e deu push, mostra mensagem de sucesso */}
-                {mission.isCommitted && mission.isPushed && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    <span>Missão concluída e sincronizada com o remoto</span>
-                  </div>
-                )}
-              </>
             )}
           </div>
         </div>
@@ -1776,6 +1657,115 @@ export default function MissionPage() {
                   )}
                 </div>
               )}
+          </div>
+        )}
+
+        {!cliParseErrorWithRepoChanges && mission.status === "code_ready" && (
+          <div className="mt-4 pt-4 border-t border-border flex flex-wrap items-center gap-2">
+            <Button
+              onClick={handleApplyChanges}
+              disabled={isApplying || isGenerating}
+              className="cursor-pointer disabled:cursor-not-allowed"
+            >
+              {isApplying ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="mr-2 h-4 w-4" />
+              )}
+              Aplicar alterações
+            </Button>
+            <Button
+              onClick={() => setRegenerateCodeDialogOpen(true)}
+              variant="secondary"
+              disabled={isApplying || isGenerating}
+              className="cursor-pointer disabled:cursor-not-allowed"
+            >
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Regenerar código
+            </Button>
+            <Button
+              onClick={handleDiscardCode}
+              variant="outline"
+              disabled={isApplying || isGenerating}
+              className="cursor-pointer disabled:cursor-not-allowed hover:bg-muted hover:text-muted-foreground"
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Voltar ao plano
+            </Button>
+            <Button
+              onClick={handleCancelMission}
+              variant="ghost"
+              size="sm"
+              className="ml-auto text-muted-foreground hover:text-destructive cursor-pointer"
+            >
+              <XCircle className="mr-2 h-4 w-4" />
+              Cancelar
+            </Button>
+          </div>
+        )}
+
+        {!cliParseErrorWithRepoChanges && mission.status === "completed" && (
+          <div className="mt-4 pt-4 border-t border-border flex flex-col gap-1.5">
+            {!mission.isCommitted && (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  As alterações foram aplicadas mas ainda não foram commitadas
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={() => setCommitDialogOpen(true)}
+                    variant="default"
+                    className="border-primary/50 hover:bg-primary/10"
+                  >
+                    <GitCommit className="mr-2 h-4 w-4" />
+                    Commitar
+                  </Button>
+                  <Button
+                    onClick={handleReject}
+                    variant="outline"
+                    className="border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <XCircle className="mr-2 h-4 w-4" />
+                    Rejeitar
+                  </Button>
+                </div>
+              </>
+            )}
+            {mission.isCommitted && !mission.isPushed && (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Alterações commitadas localmente · Push envia ao remoto
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={handlePush}
+                    disabled={isPushing}
+                    variant="default"
+                  >
+                    {isPushing ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="mr-2 h-4 w-4" />
+                    )}
+                    Enviar ao remoto
+                  </Button>
+                  <Button
+                    onClick={handleReject}
+                    variant="outline"
+                    className="border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <XCircle className="mr-2 h-4 w-4" />
+                    Rejeitar
+                  </Button>
+                </div>
+              </>
+            )}
+            {mission.isCommitted && mission.isPushed && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <span>Missão concluída e sincronizada com o remoto</span>
+              </div>
+            )}
           </div>
         )}
 
