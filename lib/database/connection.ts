@@ -125,6 +125,9 @@ export function initDatabase(): Database.Database {
   // Migração: adicionar coluna preserve_instructions em missions se não existir
   migratePreserveInstructions(db);
 
+  // Migração: adicionar coluna code_generation_attempts em missions se não existir
+  migrateCodeGenerationAttempts(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
 
   return db;
@@ -196,6 +199,20 @@ function migratePreserveInstructions(database: Database.Database): void {
 
   database.exec("ALTER TABLE missions ADD COLUMN preserve_instructions TEXT");
   console.log("[Database] Migration: preserve_instructions column added to missions.");
+}
+
+/**
+ * Migração: adiciona coluna code_generation_attempts em missions se não existir.
+ */
+function migrateCodeGenerationAttempts(database: Database.Database): void {
+  const rows = database
+    .prepare("PRAGMA table_info(missions)")
+    .all() as Array<{ name: string }>;
+  const hasColumn = rows.some((c) => c.name === "code_generation_attempts");
+  if (hasColumn) return;
+
+  database.exec("ALTER TABLE missions ADD COLUMN code_generation_attempts INTEGER DEFAULT 0");
+  console.log("[Database] Migration: code_generation_attempts column added to missions.");
 }
 
 /**

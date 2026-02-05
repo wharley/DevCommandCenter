@@ -186,7 +186,7 @@ const CollapsibleMissionDescription = memo(
         )}
       </div>
     );
-  }
+  },
 );
 
 export default function MissionPage() {
@@ -199,7 +199,9 @@ export default function MissionPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [activeTab, setActiveTab] = useState("plan");
-  const [previousStatus, setPreviousStatus] = useState<MissionStatus | null>(null);
+  const [previousStatus, setPreviousStatus] = useState<MissionStatus | null>(
+    null,
+  );
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [regeneratePlanDialogOpen, setRegeneratePlanDialogOpen] =
     useState(false);
@@ -216,7 +218,7 @@ export default function MissionPage() {
     totalDurationMs: number;
   }>({ totalTokens: 0, totalDurationMs: 0 });
   const [selectedFilePaths, setSelectedFilePaths] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
   const [editedSuggestions, setEditedSuggestions] = useState<
     Record<string, string>
@@ -250,21 +252,23 @@ export default function MissionPage() {
 
   // Usar useMemo para estabilizar as referências e evitar re-renders desnecessários
   const project = useMemo(
-    () => (projectId ? projects.find((p) => p.id === projectId) ?? null : null),
-    [projectId, projects]
+    () =>
+      projectId ? (projects.find((p) => p.id === projectId) ?? null) : null,
+    [projectId, projects],
   );
 
   const mission = useMemo(
-    () => (missionId ? missions.find((m) => m.id === missionId) ?? null : null),
-    [missionId, missions]
+    () =>
+      missionId ? (missions.find((m) => m.id === missionId) ?? null) : null,
+    [missionId, missions],
   );
 
   const provider = useMemo(
     () =>
       mission?.providerId
-        ? providers.find((p) => p.id === mission.providerId) ?? null
+        ? (providers.find((p) => p.id === mission.providerId) ?? null)
         : null,
-    [mission?.providerId, providers]
+    [mission?.providerId, providers],
   );
 
   // Usar missionId como dependência em vez do objeto mission inteiro
@@ -376,38 +380,44 @@ export default function MissionPage() {
     if (!mission || previousStatus === mission.status) return;
 
     const status = mission.status;
-    
+
     // Navegação automática: quando começar a executar, vai para Logs
-    if (status === 'planning' && previousStatus !== 'planning') {
-      setActiveTab('logs');
-      toast.info('📋 Gerando plano...', { 
-        description: 'Acompanhe o progresso em tempo real na aba Logs',
+    if (status === "planning" && previousStatus !== "planning") {
+      setActiveTab("logs");
+      toast.info("📋 Gerando plano...", {
+        description: "Acompanhe o progresso em tempo real na aba Logs",
         duration: 3000,
       });
-    } else if (status === 'generating_code' && previousStatus !== 'generating_code') {
-      setActiveTab('logs');
-      toast.info('💻 Gerando código...', { 
-        description: 'O modelo de IA está criando as alterações necessárias',
+    } else if (
+      status === "generating_code" &&
+      previousStatus !== "generating_code"
+    ) {
+      setActiveTab("logs");
+      toast.info("💻 Gerando código...", {
+        description: "O modelo de IA está criando as alterações necessárias",
         duration: 3000,
       });
-    } else if (status === 'applying' && previousStatus !== 'applying') {
-      setActiveTab('logs');
-      toast.info('⚙️ Aplicando alterações...', { 
-        description: 'Gravando os arquivos no projeto',
+    } else if (status === "applying" && previousStatus !== "applying") {
+      setActiveTab("logs");
+      toast.info("⚙️ Aplicando alterações...", {
+        description: "Gravando os arquivos no projeto",
         duration: 3000,
       });
     }
     // Quando terminar, volta para a aba relevante
-    else if (status === 'plan_generated' && previousStatus === 'planning') {
-      setTimeout(() => setActiveTab('plan'), 200); // Pequeno delay para transição suave
+    else if (status === "plan_generated" && previousStatus === "planning") {
+      setTimeout(() => setActiveTab("plan"), 200); // Pequeno delay para transição suave
       // toast.success já é exibido no handleGeneratePlan
-    } else if (status === 'code_ready' && previousStatus === 'generating_code') {
-      setTimeout(() => setActiveTab('code'), 200); // Pequeno delay para transição suave
+    } else if (
+      status === "code_ready" &&
+      previousStatus === "generating_code"
+    ) {
+      setTimeout(() => setActiveTab("code"), 200); // Pequeno delay para transição suave
       // toast.success já é exibido no handleGenerateCode
-    } else if (status === 'completed' && previousStatus === 'applying') {
+    } else if (status === "completed" && previousStatus === "applying") {
       // Mantém na aba logs para mostrar resultado final
-      toast.success('✅ Missão concluída!', { 
-        description: 'Todas as alterações foram aplicadas com sucesso',
+      toast.success("✅ Missão concluída!", {
+        description: "Todas as alterações foram aplicadas com sucesso",
         duration: 5000,
       });
     }
@@ -425,7 +435,7 @@ export default function MissionPage() {
   // Last progress message from logs (info/prompt) for the Code tab progress screen
   const lastProgressMessage = useMemo(() => {
     const progressLogs = logs.filter(
-      (l) => l.type === "info" || l.type === "prompt"
+      (l) => l.type === "info" || l.type === "prompt",
     );
     if (progressLogs.length === 0) return "Iniciando geração de código...";
     const sorted = [...progressLogs].sort((a, b) => {
@@ -437,24 +447,37 @@ export default function MissionPage() {
   }, [logs]);
 
   // Determinar quais abas devem estar desabilitadas
-  const isTabDisabled = useCallback((tab: 'plan' | 'code' | 'logs') => {
-    if (tab === 'logs') return false; // Logs sempre acessível
-    
-    const status = mission?.status;
-    if (!status) return false;
-    
-    // Durante execução, desabilita a aba sendo processada
-    if (status === 'planning' && tab === 'plan') return true;
-    if (status === 'generating_code' && tab === 'code') return true;
-    if (status === 'applying' && tab === 'code') return true;
-    
-    // Code tab só fica disponível se tiver código gerado ou estiver gerando
-    if (tab === 'code' && !mission?.generatedCode && !isGenerating && !cliParseErrorWithRepoChanges) {
-      return true;
-    }
-    
-    return false;
-  }, [mission?.status, mission?.generatedCode, isGenerating, cliParseErrorWithRepoChanges]);
+  const isTabDisabled = useCallback(
+    (tab: "plan" | "code" | "logs") => {
+      if (tab === "logs") return false; // Logs sempre acessível
+
+      const status = mission?.status;
+      if (!status) return false;
+
+      // Durante execução, desabilita a aba sendo processada
+      if (status === "planning" && tab === "plan") return true;
+      if (status === "generating_code" && tab === "code") return true;
+      if (status === "applying" && tab === "code") return true;
+
+      // Code tab só fica disponível se tiver código gerado ou estiver gerando
+      if (
+        tab === "code" &&
+        !mission?.generatedCode &&
+        !isGenerating &&
+        !cliParseErrorWithRepoChanges
+      ) {
+        return true;
+      }
+
+      return false;
+    },
+    [
+      mission?.status,
+      mission?.generatedCode,
+      isGenerating,
+      cliParseErrorWithRepoChanges,
+    ],
+  );
 
   const isLoading =
     (projectId && projectsLoading) || (missionId && missionsLoading);
@@ -512,7 +535,7 @@ export default function MissionPage() {
           `Plano gerado com ${
             (response.data as MissionPlan).steps.length
           } etapas`,
-          response.metadata ?? undefined
+          response.metadata ?? undefined,
         );
         toast.success("Plano gerado com sucesso");
       } else {
@@ -557,7 +580,7 @@ export default function MissionPage() {
           `Plano regenerado com ${
             (response.data as MissionPlan).steps.length
           } etapas`,
-          response.metadata ?? undefined
+          response.metadata ?? undefined,
         );
         toast.success("Plano regenerado com sucesso");
       } else {
@@ -575,7 +598,7 @@ export default function MissionPage() {
   };
 
   const handleGenerateCode = async () => {
-    console.log('[DevCommandCenter] handleGenerateCode called', {
+    console.log("[DevCommandCenter] handleGenerateCode called", {
       hasProvider: !!provider,
       providerName: provider?.name,
       providerType: provider?.type,
@@ -583,14 +606,53 @@ export default function MissionPage() {
       planSteps: mission.plan?.steps?.length,
       missionId,
       missionStatus: mission.status,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
 
-    if (!provider || !mission.plan || !missionId) {
-      console.error('[DevCommandCenter] Validation failed:', { provider: !!provider, plan: !!mission.plan, missionId });
-      toast.error("O plano é necessário antes de gerar o código");
+    // Validações explícitas com mensagens específicas
+    if (!missionId) {
+      console.error("[DevCommandCenter] Mission ID is missing");
+      toast.error("ID da missão não encontrado");
       return;
     }
+
+    if (!provider) {
+      console.error("[DevCommandCenter] No provider configured");
+      toast.error("Nenhum provedor de IA configurado para esta missão", {
+        description: "Configure um provedor nas configurações do projeto",
+      });
+      return;
+    }
+
+    if (!provider.isActive) {
+      console.error("[DevCommandCenter] Provider is not active");
+      toast.error(`O provedor ${provider.name} está inativo`, {
+        description: "Ative o provedor nas configurações",
+      });
+      return;
+    }
+
+    if (!mission.plan) {
+      console.error("[DevCommandCenter] Mission has no plan");
+      toast.error("O plano é necessário antes de gerar o código", {
+        description: "Gere um plano primeiro clicando em 'Gerar plano'",
+      });
+      return;
+    }
+
+    if (mission.status !== "plan_generated") {
+      console.error(
+        "[DevCommandCenter] Invalid mission status:",
+        mission.status,
+      );
+      toast.error(`Status da missão inválido: ${mission.status}`, {
+        description:
+          "A missão deve estar no status 'Plano pronto' para gerar código",
+      });
+      return;
+    }
+
+    console.log("[DevCommandCenter] All validations passed");
 
     setCliParseErrorWithRepoChanges(false);
     setRecoveryCodeFromGit(null);
@@ -602,7 +664,7 @@ export default function MissionPage() {
         baseBranch = await git.getDefaultBranch(project.path);
       } catch {
         toast.error(
-          "Não foi possível identificar o branch base (main/master). Configure o repositório e tente novamente."
+          "Não foi possível identificar o branch base (main/master). Configure o repositório e tente novamente.",
         );
         return;
       }
@@ -610,38 +672,47 @@ export default function MissionPage() {
       const created = await git.createBranch(
         project.path,
         branchName,
-        baseBranch
+        baseBranch,
       );
       if (!created) {
         toast.error(
-          "Não foi possível criar o branch. Verifique se o repositório está em um estado válido."
+          "Não foi possível criar o branch. Verifique se o repositório está em um estado válido.",
         );
         return;
       }
       addLog(
         "action",
         `Branch criado: ${branchName} (a partir de ${baseBranch})`,
-        undefined
+        undefined,
       );
       const newBranch = await git.getCurrentBranch(project.path);
       setCurrentBranch(newBranch ?? null);
     }
 
+    // Feedback imediato ANTES de qualquer operação assíncrona
     setIsGenerating(true);
+
+    // Atualizar UI imediatamente
+    toast.info("Iniciando geração de código...", { duration: 2000 });
+
+    // Mudar status e logar ANTES de operações lentas
     updateStatus(missionId, "generating_code");
-    // Auto-navegação para logs é feita pelo useEffect
+    console.log("[DevCommandCenter] Status updated to generating_code");
 
     // Incrementar contador de tentativas
     const attempts = (mission.codeGenerationAttempts ?? 0) + 1;
     await update(missionId, { codeGenerationAttempts: attempts });
 
+    // Log inicial visível
     addLog(
       "prompt",
       `Iniciando geração de código com base no plano... (tentativa ${attempts})`,
       {
         model: provider.config?.model as string,
-      }
+      },
     );
+
+    // Auto-navegação para logs é feita pelo useEffect
 
     try {
       const aiService = createAIService({
@@ -659,7 +730,7 @@ export default function MissionPage() {
           `Código gerado: ${
             (response.data as { files: { path: string }[] }).files.length
           } arquivo(s) alterado(s)`,
-          response.metadata ?? undefined
+          response.metadata ?? undefined,
         );
         toast.success("Sugestões de código geradas");
         setActiveTab("code");
@@ -669,10 +740,19 @@ export default function MissionPage() {
     } catch (error) {
       // Volta para "plan_generated" para permitir tentar novamente
       updateStatus(missionId, "plan_generated");
+
       const errorMessage =
         error instanceof Error ? error.message : "Erro desconhecido";
-      addLog("error", errorMessage, undefined);
-      toast.error(errorMessage);
+      const detailedError = `Erro ao gerar código: ${errorMessage}`;
+
+      addLog("error", detailedError, undefined);
+
+      // Toast com informação mais útil
+      toast.error(detailedError, {
+        description:
+          "Verifique os logs para mais detalhes. O console do navegador (F12) pode ter informações adicionais.",
+        duration: 8000,
+      });
 
       const isParseError =
         typeof errorMessage === "string" &&
@@ -716,7 +796,7 @@ export default function MissionPage() {
                   action: isUntracked ? "create" : "modify",
                   diff: diff || undefined,
                 };
-              })
+              }),
             );
             if (files.length > 0) {
               // Logging interno para desenvolvedores
@@ -727,7 +807,7 @@ export default function MissionPage() {
                   filesRecovered: files.length,
                   provider: provider?.type,
                   timestamp: new Date().toISOString(),
-                }
+                },
               );
 
               setRecoveryCodeFromGit({
@@ -792,7 +872,7 @@ export default function MissionPage() {
 
       if (result.success) {
         toast.success(
-          `Alterações aplicadas: ${result.appliedFiles.length} arquivo(s)`
+          `Alterações aplicadas: ${result.appliedFiles.length} arquivo(s)`,
         );
         try {
           await refreshMissions();
@@ -800,7 +880,7 @@ export default function MissionPage() {
           setTimeout(() => setActiveTab("logs"), 0);
         } catch {
           toast.warning(
-            "Alterações aplicadas, mas a interface pode estar desatualizada. Atualize a página se necessário."
+            "Alterações aplicadas, mas a interface pode estar desatualizada. Atualize a página se necessário.",
           );
         }
       } else {
@@ -809,10 +889,10 @@ export default function MissionPage() {
           firstError?.error && !firstError?.path
             ? firstError.error
             : result.failedFiles.length > 0
-            ? result.failedFiles
-                .map((f) => (f.path ? `${f.path}: ${f.error}` : f.error))
-                .join("; ")
-            : "";
+              ? result.failedFiles
+                  .map((f) => (f.path ? `${f.path}: ${f.error}` : f.error))
+                  .join("; ")
+              : "";
         toast.error(detail || "Falha ao aplicar alterações.");
         try {
           await refreshMissions();
@@ -921,7 +1001,7 @@ export default function MissionPage() {
         "Isso irá:\n" +
         "• Reverter todas as mudanças no repositório\n" +
         "• Gerar código novamente do zero\n" +
-        "• Pode levar alguns minutos"
+        "• Pode levar alguns minutos",
     );
 
     if (!confirmed) return;
@@ -960,7 +1040,7 @@ export default function MissionPage() {
         "Você poderá:\n" +
         "• Revisar o plano novamente\n" +
         "• Ajustar instruções se necessário\n" +
-        "• Gerar código quando estiver pronto"
+        "• Gerar código quando estiver pronto",
     );
 
     if (!confirmed) return;
@@ -978,7 +1058,7 @@ export default function MissionPage() {
           }
           setActiveTab("plan");
           toast.success(
-            "Alterações descartadas. Revise o plano quando quiser."
+            "Alterações descartadas. Revise o plano quando quiser.",
           );
         } else {
           toast.error(result.error ?? "Falha ao reverter");
@@ -997,7 +1077,7 @@ export default function MissionPage() {
         "O código gerado será descartado, mas você poderá:\n" +
         "• Revisar o plano\n" +
         "• Regenerar o plano se necessário\n" +
-        "• Gerar código novamente quando estiver pronto"
+        "• Gerar código novamente quando estiver pronto",
     );
 
     if (!confirmed) return;
@@ -1026,7 +1106,7 @@ export default function MissionPage() {
 
     const confirmed = window.confirm(
       "Cancelar esta missão?\n\n" +
-        "A missão será marcada como cancelada e você voltará à página do projeto."
+        "A missão será marcada como cancelada e você voltará à página do projeto.",
     );
 
     if (!confirmed) return;
@@ -1037,7 +1117,29 @@ export default function MissionPage() {
       navigate(`/project/${projectId}`);
     } catch (e) {
       toast.error(
-        `Erro ao cancelar: ${e instanceof Error ? e.message : "desconhecido"}`
+        `Erro ao cancelar: ${e instanceof Error ? e.message : "desconhecido"}`,
+      );
+    }
+  };
+
+  const handleResetToPlanning = async () => {
+    if (!missionId) return;
+
+    const confirmed = window.confirm(
+      "Resetar missão para o estado de plano gerado?\n\n" +
+        "Isso permitirá que você tente gerar o código novamente.\n" +
+        "Use isso se a geração de código ficou travada.",
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setIsGenerating(false);
+      updateStatus(missionId, "plan_generated");
+      toast.success("Missão resetada para 'Plano pronto'");
+    } catch (e) {
+      toast.error(
+        `Erro ao resetar: ${e instanceof Error ? e.message : "desconhecido"}`,
       );
     }
   };
@@ -1081,7 +1183,7 @@ export default function MissionPage() {
           `Código gerado: ${
             (response.data as { files: { path: string }[] }).files.length
           } arquivo(s) alterado(s)`,
-          response.metadata ?? undefined
+          response.metadata ?? undefined,
         );
         toast.success("Sugestões de código geradas");
         setActiveTab("code");
@@ -1256,7 +1358,7 @@ export default function MissionPage() {
                           disabled={isGenerating}
                           variant="ghost"
                           size="default"
-                          className="text-muted-foreground"
+                          className="text-muted-foreground hover:text-muted-foreground/80"
                         >
                           <ArrowLeft className="mr-2 h-4 w-4" />
                           Voltar ao Plano
@@ -1275,6 +1377,19 @@ export default function MissionPage() {
                 </CardContent>
               </Card>
             )}
+
+            {/* Botão de resetar para estado applying travado */}
+            {mission.status === "applying" && !isGenerating && (
+              <Button
+                variant="outline"
+                onClick={() => handleResetToPlanning()}
+                className="border-amber-500/50 hover:bg-amber-500/10"
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Voltar ao plano
+              </Button>
+            )}
+
             {!cliParseErrorWithRepoChanges && mission.status === "created" && (
               <Button onClick={handleGeneratePlan} disabled={isGenerating}>
                 {isGenerating ? (
@@ -1284,6 +1399,50 @@ export default function MissionPage() {
                 )}
                 Gerar plano
               </Button>
+            )}
+            {/* Botões para estado generating_code */}
+            {mission.status === "generating_code" && (
+              <div className="flex items-center gap-2">
+                {isGenerating ? (
+                  <>
+                    <Button
+                      variant="destructive"
+                      onClick={async () => {
+                        if (
+                          window.confirm(
+                            "Cancelar geração de código e voltar ao plano?\n\nVocê poderá tentar gerar novamente depois.",
+                          )
+                        ) {
+                          console.log(
+                            "[DevCommandCenter] User cancelled code generation",
+                          );
+                          setIsGenerating(false);
+                          if (missionId) {
+                            updateStatus(missionId, "plan_generated");
+                          }
+                          toast.info("Geração de código cancelada");
+                        }
+                      }}
+                    >
+                      <XCircle className="mr-2 h-4 w-4" />
+                      Cancelar geração
+                    </Button>
+                    <span className="text-sm text-muted-foreground flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Gerando código...
+                    </span>
+                  </>
+                ) : (
+                  <Button
+                    variant="outline"
+                    onClick={() => handleResetToPlanning()}
+                    className="border-amber-500/50 hover:bg-amber-500/10 hover:text-muted-foreground cursor-pointer"
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Voltar ao plano
+                  </Button>
+                )}
+              </div>
             )}
             {!cliParseErrorWithRepoChanges &&
               mission.status === "plan_generated" && (
@@ -1528,32 +1687,33 @@ export default function MissionPage() {
         >
           <div className="border-b border-border px-6">
             <TabsList className="h-12">
-              <TabsTrigger 
-                value="plan" 
+              <TabsTrigger
+                value="plan"
                 className="gap-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isTabDisabled('plan')}
+                disabled={isTabDisabled("plan")}
               >
                 <FileText className="h-4 w-4" />
                 Plano
-                {mission.status === 'planning' && (
+                {mission.status === "planning" && (
                   <Loader2 className="h-3 w-3 ml-1 animate-spin text-blue-500" />
                 )}
               </TabsTrigger>
               <TabsTrigger
                 value="code"
                 className="gap-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isTabDisabled('code')}
+                disabled={isTabDisabled("code")}
               >
                 <Code2 className="h-4 w-4" />
                 Código
-                {(mission.status === 'generating_code' || mission.status === 'applying') && (
+                {(mission.status === "generating_code" ||
+                  mission.status === "applying") && (
                   <Loader2 className="h-3 w-3 ml-1 animate-spin text-blue-500" />
                 )}
               </TabsTrigger>
-              <TabsTrigger 
-                value="logs" 
+              <TabsTrigger
+                value="logs"
                 className="gap-2 cursor-pointer"
-                disabled={isTabDisabled('logs')}
+                disabled={isTabDisabled("logs")}
               >
                 <MessageSquare className="h-4 w-4" />
                 Logs
@@ -1566,8 +1726,8 @@ export default function MissionPage() {
             </TabsList>
           </div>
 
-          <TabsContent 
-            value="plan" 
+          <TabsContent
+            value="plan"
             className="flex-1 overflow-auto p-6 mt-0 data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:zoom-in-95 data-[state=inactive]:animate-out data-[state=inactive]:fade-out-0 data-[state=inactive]:zoom-out-95 duration-200"
           >
             <PlanView
@@ -1577,8 +1737,8 @@ export default function MissionPage() {
             />
           </TabsContent>
 
-          <TabsContent 
-            value="code" 
+          <TabsContent
+            value="code"
             className="flex-1 overflow-auto p-6 mt-0 data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:zoom-in-95 data-[state=inactive]:animate-out data-[state=inactive]:fade-out-0 data-[state=inactive]:zoom-out-95 duration-200"
           >
             <CodeView
@@ -1612,8 +1772,8 @@ export default function MissionPage() {
             />
           </TabsContent>
 
-          <TabsContent 
-            value="logs" 
+          <TabsContent
+            value="logs"
             className="flex-1 overflow-auto p-6 mt-0 data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:zoom-in-95 data-[state=inactive]:animate-out data-[state=inactive]:fade-out-0 data-[state=inactive]:zoom-out-95 duration-200"
           >
             <div className="space-y-3">
@@ -1708,8 +1868,8 @@ function PlanView({
                   plan.estimatedComplexity === "high"
                     ? "destructive"
                     : plan.estimatedComplexity === "medium"
-                    ? "default"
-                    : "secondary"
+                      ? "default"
+                      : "secondary"
                 }
               >
                 Complexidade {plan.estimatedComplexity}
@@ -1808,7 +1968,7 @@ function looksLikeUnifiedDiff(content: string): boolean {
       line.startsWith("+") ||
       line.startsWith("-") ||
       line.startsWith("--- ") ||
-      line.startsWith("+++ ")
+      line.startsWith("+++ "),
   );
 }
 
@@ -2014,8 +2174,8 @@ const FileAccordionItem = memo(function FileAccordionItem({
               file.action === "create"
                 ? "default"
                 : file.action === "delete"
-                ? "destructive"
-                : "secondary"
+                  ? "destructive"
+                  : "secondary"
             }
             className="shrink-0"
           >
@@ -2034,8 +2194,8 @@ const FileAccordionItem = memo(function FileAccordionItem({
                     hasOriginal
                       ? "original"
                       : hasSuggested
-                      ? "suggested"
-                      : "diff"
+                        ? "suggested"
+                        : "diff"
                   }
                   className="w-full"
                 >
@@ -2079,7 +2239,7 @@ const FileAccordionItem = memo(function FileAccordionItem({
                               filePath={file.path}
                               value={getSuggestedContent(
                                 file.path,
-                                file.suggestedContent ?? ""
+                                file.suggestedContent ?? "",
                               )}
                               onChange={(value) =>
                                 onEditedSuggestionsChange!(file.path, value)
@@ -2092,7 +2252,7 @@ const FileAccordionItem = memo(function FileAccordionItem({
                           <p className="text-sm whitespace-pre-wrap">
                             {getSuggestedContent(
                               file.path,
-                              file.suggestedContent ?? ""
+                              file.suggestedContent ?? "",
                             )}
                           </p>
                         </Alert>
@@ -2102,7 +2262,7 @@ const FileAccordionItem = memo(function FileAccordionItem({
                             filePath={file.path}
                             content={getSuggestedContent(
                               file.path,
-                              file.suggestedContent ?? ""
+                              file.suggestedContent ?? "",
                             )}
                           />
                         </ScrollArea>
@@ -2168,7 +2328,7 @@ const FileAccordionItem = memo(function FileAccordionItem({
                               filePath={file.path}
                               value={getSuggestedContent(
                                 file.path,
-                                file.suggestedContent ?? ""
+                                file.suggestedContent ?? "",
                               )}
                               onChange={(value) =>
                                 onEditedSuggestionsChange!(file.path, value)
@@ -2181,7 +2341,7 @@ const FileAccordionItem = memo(function FileAccordionItem({
                           <p className="text-sm whitespace-pre-wrap">
                             {getSuggestedContent(
                               file.path,
-                              file.suggestedContent ?? ""
+                              file.suggestedContent ?? "",
                             )}
                           </p>
                         </Alert>
@@ -2191,7 +2351,7 @@ const FileAccordionItem = memo(function FileAccordionItem({
                             filePath={file.path}
                             content={getSuggestedContent(
                               file.path,
-                              file.suggestedContent ?? ""
+                              file.suggestedContent ?? "",
                             )}
                           />
                         </ScrollArea>
@@ -2267,7 +2427,7 @@ function CodeView({
 
   const getSuggestedContent = useCallback(
     (path: string, fallback: string) => editedSuggestions?.[path] ?? fallback,
-    [editedSuggestions]
+    [editedSuggestions],
   );
 
   const isSuggestedEditable = Boolean(onEditedSuggestionsChange);
@@ -2280,7 +2440,7 @@ function CodeView({
       else next.add(path);
       onSelectionChange(Array.from(next));
     },
-    [selectedFilePaths, onSelectionChange]
+    [selectedFilePaths, onSelectionChange],
   );
 
   const selectAll = useCallback(() => {
