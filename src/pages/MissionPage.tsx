@@ -162,13 +162,15 @@ const CollapsibleMissionDescription = memo(
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
-            <ScrollArea className="max-h-[180px] pr-4">
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                {description}
-              </p>
-            </ScrollArea>
-            <div className="flex justify-end pt-1">
+          <div className="space-y-2">
+            <div className="rounded-md border border-border bg-muted/30 p-3">
+              <ScrollArea className="max-h-[120px]">
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap pr-4">
+                  {description}
+                </p>
+              </ScrollArea>
+            </div>
+            <div className="flex justify-end">
               <button
                 type="button"
                 onClick={(e) => {
@@ -176,7 +178,7 @@ const CollapsibleMissionDescription = memo(
                   e.stopPropagation();
                   setIsExpanded(false);
                 }}
-                className="relative z-10 text-sm text-primary hover:text-primary/80 font-medium flex items-center gap-1.5 py-2 px-4 rounded-md hover:bg-primary/10 transition-all cursor-pointer select-none"
+                className="relative z-10 text-sm text-primary hover:text-primary/80 font-medium inline-flex items-center gap-1 py-1 px-2 -mr-2 rounded hover:bg-primary/10 transition-colors cursor-pointer"
               >
                 <span>Recolher</span>
                 <ChevronRight className="h-3.5 w-3.5 -rotate-90" />
@@ -435,6 +437,26 @@ export default function MissionPage() {
     });
     return sorted[0].content;
   }, [logs]);
+
+  // Determinar quais abas devem estar desabilitadas
+  const isTabDisabled = useCallback((tab: 'plan' | 'code' | 'logs') => {
+    if (tab === 'logs') return false; // Logs sempre acessível
+    
+    const status = mission?.status;
+    if (!status) return false;
+    
+    // Durante execução, desabilita a aba sendo processada
+    if (status === 'planning' && tab === 'plan') return true;
+    if (status === 'generating_code' && tab === 'code') return true;
+    if (status === 'applying' && tab === 'code') return true;
+    
+    // Code tab só fica disponível se tiver código gerado ou estiver gerando
+    if (tab === 'code' && !mission?.generatedCode && !isGenerating && !cliParseErrorWithRepoChanges) {
+      return true;
+    }
+    
+    return false;
+  }, [mission?.status, mission?.generatedCode, isGenerating, cliParseErrorWithRepoChanges]);
 
   const isLoading =
     (projectId && projectsLoading) || (missionId && missionsLoading);
