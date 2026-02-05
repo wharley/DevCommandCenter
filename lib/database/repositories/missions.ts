@@ -30,6 +30,8 @@ interface MissionRow {
   preserve_instructions?: string | null;
   error_message: string | null;
   code_generation_attempts: number | null;
+  is_committed: number | null;
+  is_pushed: number | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -50,6 +52,8 @@ function rowToMission(row: MissionRow): Mission {
     preserveInstructions: row.preserve_instructions ?? null,
     errorMessage: row.error_message,
     codeGenerationAttempts: row.code_generation_attempts ?? 0,
+    isCommitted: row.is_committed ? Boolean(row.is_committed) : false,
+    isPushed: row.is_pushed ? Boolean(row.is_pushed) : false,
     startedAt: row.started_at ? new Date(row.started_at) : null,
     completedAt: row.completed_at ? new Date(row.completed_at) : null,
     createdAt: new Date(row.created_at),
@@ -261,6 +265,14 @@ export const MissionsRepository = {
     if (data.codeGenerationAttempts !== undefined) {
       updates.push('code_generation_attempts = ?');
       values.push(String(data.codeGenerationAttempts));
+    }
+    if (data.isCommitted !== undefined) {
+      updates.push('is_committed = ?');
+      values.push(data.isCommitted ? '1' : '0');
+    }
+    if (data.isPushed !== undefined) {
+      updates.push('is_pushed = ?');
+      values.push(data.isPushed ? '1' : '0');
     }
     if (data.startedAt !== undefined) {
       updates.push('started_at = ?');

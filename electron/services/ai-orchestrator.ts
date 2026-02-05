@@ -439,6 +439,8 @@ export class AIOrchestrator {
           missionId,
           `Applied ${result.appliedFiles.length} files successfully`
         );
+        // Marca como committed (applyChanges já faz commit automático)
+        db.missions.update(missionId, { isCommitted: true });
         db.missionLogs.logAction(missionId, "Changes applied successfully", {
           appliedFiles: result.appliedFiles,
           backupPath: result.backupPath,

@@ -128,6 +128,9 @@ export function initDatabase(): Database.Database {
   // Migração: adicionar coluna code_generation_attempts em missions se não existir
   migrateCodeGenerationAttempts(db);
 
+  // Migração: adicionar colunas is_committed e is_pushed em missions se não existirem
+  migrateCommitPushFlags(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
 
   return db;
@@ -213,6 +216,28 @@ function migrateCodeGenerationAttempts(database: Database.Database): void {
 
   database.exec("ALTER TABLE missions ADD COLUMN code_generation_attempts INTEGER DEFAULT 0");
   console.log("[Database] Migration: code_generation_attempts column added to missions.");
+}
+
+/**
+ * Migração: adiciona colunas is_committed e is_pushed em missions se não existirem.
+ */
+function migrateCommitPushFlags(database: Database.Database): void {
+  const rows = database
+    .prepare("PRAGMA table_info(missions)")
+    .all() as Array<{ name: string }>;
+  
+  const hasIsCommitted = rows.some((c) => c.name === "is_committed");
+  const hasIsPushed = rows.some((c) => c.name === "is_pushed");
+  
+  if (!hasIsCommitted) {
+    database.exec("ALTER TABLE missions ADD COLUMN is_committed INTEGER DEFAULT 0");
+    console.log("[Database] Migration: is_committed column added to missions.");
+  }
+  
+  if (!hasIsPushed) {
+    database.exec("ALTER TABLE missions ADD COLUMN is_pushed INTEGER DEFAULT 0");
+    console.log("[Database] Migration: is_pushed column added to missions.");
+  }
 }
 
 /**

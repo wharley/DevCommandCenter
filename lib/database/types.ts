@@ -90,6 +90,8 @@ export interface Mission {
   preserveInstructions?: string | null;
   errorMessage?: string | null;
   codeGenerationAttempts?: number;
+  isCommitted?: boolean;
+  isPushed?: boolean;
   startedAt?: Date | null;
   completedAt?: Date | null;
   createdAt: Date;
@@ -208,6 +210,8 @@ export interface UpdateMissionDTO {
   context?: MissionContext;
   errorMessage?: string;
   codeGenerationAttempts?: number;
+  isCommitted?: boolean;
+  isPushed?: boolean;
   startedAt?: Date;
   completedAt?: Date;
 }

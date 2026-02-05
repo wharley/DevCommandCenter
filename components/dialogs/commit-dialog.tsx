@@ -29,6 +29,7 @@ interface CommitDialogProps {
   onCommit: (message: string) => Promise<void>;
   projectPath: string;
   status: GitStatus | null;
+  onPushComplete?: () => void;
 }
 
 function getFilesToCommit(
@@ -64,6 +65,7 @@ export function CommitDialog({
   onCommit,
   projectPath,
   status,
+  onPushComplete,
 }: CommitDialogProps) {
   const [message, setMessage] = useState(defaultMessage);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -149,6 +151,10 @@ export function CommitDialog({
       const result = await window.electronAPI.git.push(projectPath);
       if (result.success) {
         toast.success("Push realizado");
+        // Callback para atualizar missão
+        if (onPushComplete) {
+          onPushComplete();
+        }
         onOpenChange(false);
       } else {
         toast.error(result.error ?? "Falha ao fazer push.");
