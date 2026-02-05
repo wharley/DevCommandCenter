@@ -162,15 +162,13 @@ const CollapsibleMissionDescription = memo(
             </div>
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="rounded-md border border-border bg-muted/30 p-3">
-              <ScrollArea className="max-h-[120px]">
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap pr-4">
-                  {description}
-                </p>
-              </ScrollArea>
-            </div>
-            <div className="flex justify-end">
+          <div className="space-y-3">
+            <ScrollArea className="h-[180px] rounded-md border border-border bg-muted/30 px-3 py-2">
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap pr-3">
+                {description}
+              </p>
+            </ScrollArea>
+            <div className="flex justify-end pt-1">
               <button
                 type="button"
                 onClick={(e) => {
@@ -178,7 +176,7 @@ const CollapsibleMissionDescription = memo(
                   e.stopPropagation();
                   setIsExpanded(false);
                 }}
-                className="relative z-10 text-sm text-primary hover:text-primary/80 font-medium inline-flex items-center gap-1 py-1 px-2 -mr-2 rounded hover:bg-primary/10 transition-colors cursor-pointer"
+                className="relative z-10 text-sm text-primary hover:text-primary/80 font-medium flex items-center gap-1.5 py-2 px-4 rounded-md hover:bg-primary/10 transition-all cursor-pointer select-none"
               >
                 <span>Recolher</span>
                 <ChevronRight className="h-3.5 w-3.5 -rotate-90" />
@@ -577,7 +575,19 @@ export default function MissionPage() {
   };
 
   const handleGenerateCode = async () => {
+    console.log('[DevCommandCenter] handleGenerateCode called', {
+      hasProvider: !!provider,
+      providerName: provider?.name,
+      providerType: provider?.type,
+      hasPlan: !!mission.plan,
+      planSteps: mission.plan?.steps?.length,
+      missionId,
+      missionStatus: mission.status,
+      timestamp: new Date().toISOString()
+    });
+
     if (!provider || !mission.plan || !missionId) {
+      console.error('[DevCommandCenter] Validation failed:', { provider: !!provider, plan: !!mission.plan, missionId });
       toast.error("O plano é necessário antes de gerar o código");
       return;
     }
@@ -1128,6 +1138,7 @@ export default function MissionPage() {
             <Button
               variant="ghost"
               size="icon"
+              className="cursor-pointer"
               onClick={() => navigate(`/project/${projectId}`)}
             >
               <ArrowLeft className="h-4 w-4" />

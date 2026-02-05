@@ -166,7 +166,7 @@ export default function ProjectPage() {
       {/* Header */}
       <header className="border-b border-border bg-card px-6 py-4">
         <div className="flex items-center gap-4 mb-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/")}>
+          <Button variant="ghost" size="icon" className="cursor-pointer" onClick={() => navigate("/")}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <Separator orientation="vertical" className="h-6" />
