@@ -9,6 +9,7 @@ import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { platform } from "node:os";
 import * as fs from "node:fs";
 import { BaseAdapter } from "./base";
+import { getLoginShellPath } from "../shell-path";
 import type {
   ValidationResult,
   AdapterConfig,
@@ -324,15 +325,18 @@ export class CodexAdapter extends BaseAdapter {
       };
 
       try {
+        const shellPath = getLoginShellPath();
+        const env = {
+          ...process.env,
+          OPENAI_API_KEY: this.provider.apiKey || process.env.OPENAI_API_KEY,
+          ...(this.provider.apiKey && {
+            CODEX_API_KEY: this.provider.apiKey,
+          }),
+          ...(shellPath && { PATH: shellPath }),
+        };
         child = spawn(cliPath, args, {
           cwd,
-          env: {
-            ...process.env,
-            OPENAI_API_KEY: this.provider.apiKey || process.env.OPENAI_API_KEY,
-            ...(this.provider.apiKey && {
-              CODEX_API_KEY: this.provider.apiKey,
-            }),
-          },
+          env,
           shell: platform() === "win32",
           // Note: spawn() uses streams, so it can handle unlimited output size
           // Unlike exec() which has a 1MB maxBuffer default
