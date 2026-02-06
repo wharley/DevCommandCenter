@@ -917,6 +917,19 @@ export default function MissionPage() {
             "Alterações aplicadas, mas a interface pode estar desatualizada. Atualize a página se necessário.",
           );
         }
+      } else if (result.appliedFiles.length > 0) {
+        const failedList = result.failedFiles
+          .map((f) => (f.path ? `${f.path}: ${f.error}` : f.error))
+          .join("; ");
+        toast.warning(
+          `Aplicados ${result.appliedFiles.length} arquivo(s). ${result.failedFiles.length} falharam: ${failedList}. Verifique os logs.`,
+        );
+        try {
+          await refreshMissions();
+          await refreshLogs();
+        } catch {
+          /* ignore */
+        }
       } else {
         const firstError = result.failedFiles[0];
         const detail =

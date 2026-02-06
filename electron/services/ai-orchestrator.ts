@@ -450,6 +450,23 @@ export class AIOrchestrator {
           appliedFiles: result.appliedFiles,
           backupPath: result.backupPath,
         });
+      } else if (result.appliedFiles.length > 0) {
+        // Sucesso parcial: alguns arquivos aplicados, outros falharam
+        const appliedCount = result.appliedFiles.length;
+        const failedCount = result.failedFiles.length;
+        const failedDetail = result.failedFiles
+          .map((f) => `${f.path}: ${f.error}`)
+          .join("; ");
+        const msg = `Aplicados ${appliedCount} arquivo(s); ${failedCount} falharam: ${failedDetail}`;
+        db.missions.complete(missionId, msg);
+        db.missionLogs.logAction(missionId, "Changes applied with partial failures", {
+          appliedFiles: result.appliedFiles,
+          backupPath: result.backupPath,
+        });
+        db.missionLogs.logError(missionId, "Some files failed to apply", {
+          appliedFiles: result.appliedFiles,
+          failedFiles: result.failedFiles,
+        });
       } else {
         const errMsg =
           result.failedFiles.length > 0

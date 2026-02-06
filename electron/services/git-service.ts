@@ -454,23 +454,30 @@ export class GitService {
   /**
    * Aplica um patch unificado via git apply.
    * Retorna { success: true } ou { success: false, error: string }.
+   * Com ignoreWhitespace: true usa --ignore-whitespace (2ª tentativa tolerante).
    */
-  private async applyPatch(unifiedDiff: string): Promise<{
-    success: boolean;
-    error?: string;
-  }> {
+  private async applyPatch(
+    unifiedDiff: string,
+    options?: { ignoreWhitespace?: boolean }
+  ): Promise<{ success: boolean; error?: string }> {
     const tmpFile = path.join(
       os.tmpdir(),
       `dcc-patch-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`
     );
+    const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+    const checkArgs = options?.ignoreWhitespace
+      ? ["apply", "--ignore-whitespace", "--check", tmpFile]
+      : ["apply", "--check", tmpFile];
+    const applyArgs = options?.ignoreWhitespace
+      ? ["apply", "--ignore-whitespace", tmpFile]
+      : ["apply", tmpFile];
     try {
       await fs.promises.writeFile(tmpFile, unifiedDiff, "utf-8");
-      const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
-      await execFileAsync("git", ["apply", "--check", tmpFile], {
+      await execFileAsync("git", checkArgs, {
         cwd: this.projectPath,
         env,
       });
-      await execFileAsync("git", ["apply", tmpFile], {
+      await execFileAsync("git", applyArgs, {
         cwd: this.projectPath,
         env,
       });
@@ -565,51 +572,53 @@ export class GitService {
           }
         }
 
-        // 2. Tentar git apply quando há diff válido
+        // 2. Tentar git apply quando há diff (sempre tentar; git é o juiz)
         if (hasDiff) {
-          // Pre-validate diff structure before creating temp file (performance optimization)
           const validation = validateDiff(change.diff!);
           if (!validation.valid) {
-            // Skip git apply and go directly to fallback (saves I/O)
             console.log(
-              `[GitService] Skipping git apply for ${change.path}: ${validation.reason}`
+              `[GitService] Validation warning for ${change.path}: ${validation.reason}. Trying apply anyway.`
             );
-          } else {
-            const normalizedDiff = normalizeDiffPaths(
-              change.diff!,
-              change.path
-            );
-            const result = await this.applyPatch(normalizedDiff);
-            if (result.success) {
-              appliedFiles.push(change.path);
-              appliedVia.push({ path: change.path, via: "git-apply" });
-              continue;
-            }
-            // git apply falhou — verificar se foi aplicado de outra forma
-            // (pode ter sido aplicado pelo CLI entre a verificação e o apply)
-            if (
-              fs.existsSync(fullPath) &&
-              (change.action === "modify" || change.action === "create")
-            ) {
-              try {
-                const currentContent = await fs.promises.readFile(
-                  fullPath,
-                  "utf-8"
-                );
-                if (checkDiffAlreadyApplied(currentContent, change.diff!)) {
-                  appliedFiles.push(change.path);
-                  appliedVia.push({
-                    path: change.path,
-                    via: "already-applied",
-                  });
-                  continue;
-                }
-              } catch {
-                // Erro ao ler, seguir para fallback
+          }
+          const normalizedDiff = normalizeDiffPaths(
+            change.diff!,
+            change.path
+          );
+          let result = await this.applyPatch(normalizedDiff);
+          // 2ª tentativa: apply tolerante a whitespace (reduz falhas de LLM)
+          if (!result.success) {
+            result = await this.applyPatch(normalizedDiff, {
+              ignoreWhitespace: true,
+            });
+          }
+          if (result.success) {
+            appliedFiles.push(change.path);
+            appliedVia.push({ path: change.path, via: "git-apply" });
+            continue;
+          }
+          // git apply falhou (ambas tentativas) — verificar se foi aplicado de outra forma
+          if (
+            fs.existsSync(fullPath) &&
+            (change.action === "modify" || change.action === "create")
+          ) {
+            try {
+              const currentContent = await fs.promises.readFile(
+                fullPath,
+                "utf-8"
+              );
+              if (checkDiffAlreadyApplied(currentContent, change.diff!)) {
+                appliedFiles.push(change.path);
+                appliedVia.push({
+                  path: change.path,
+                  via: "already-applied",
+                });
+                continue;
               }
+            } catch {
+              // Erro ao ler, seguir para fallback
             }
           }
-          // git apply falhou/skipped e não foi aplicado — seguir para fallback
+          // git apply falhou e não foi aplicado — seguir para fallback
         }
 
         // 3. Fallback: escrita de arquivo com suggestedContent (using atomic writes)

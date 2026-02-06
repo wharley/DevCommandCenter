@@ -328,13 +328,11 @@ export default function ProjectPage() {
                           <CardDescription className="line-clamp-1 mt-1">
                             {mission.description}
                           </CardDescription>
-                          {isActive && (
-                            <div className="mt-2">
-                              <MissionProgressPipeline
-                                status={mission.status}
-                              />
-                            </div>
-                          )}
+                          <div className="mt-2">
+                            <MissionProgressPipeline
+                              status={mission.status}
+                            />
+                          </div>
                         </div>
                       </div>
 
