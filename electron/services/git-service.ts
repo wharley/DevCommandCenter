@@ -503,10 +503,11 @@ export class GitService {
 
   /**
    * Aplica mudanças de código ao repositório.
-   * Ordem preferida:
+   * Ordem preferida (Pilar 1: priorizar escrita direta):
    * 1. Verificar se diff já foi aplicado (CLIs como Cursor/Claude aplicam automaticamente)
-   * 2. Tentar git apply (quando diff válido)
-   * 3. Fallback: escrita de arquivo com suggestedContent
+   * 2. Escrita direta com suggestedContent quando disponível (evita falhas de git apply)
+   * 3. Tentar git apply (quando diff válido e sem suggestedContent)
+   * 4. Fallback: falha quando git apply falha e não há suggestedContent
    */
   async applyChanges(
     changes: CodeSuggestion[],
@@ -567,12 +568,24 @@ export class GitService {
                 continue;
               }
             } catch {
-              // Erro ao ler arquivo, seguir para git apply
+              // Erro ao ler arquivo, seguir para próximo passo
             }
           }
         }
 
-        // 2. Tentar git apply quando há diff (sempre tentar; git é o juiz)
+        // 2. Priorizar escrita direta quando suggestedContent existe (Pilar 1)
+        // Evita falhas de git apply quando temos o conteúdo completo
+        if (
+          hasContent &&
+          (change.action === "modify" || change.action === "create")
+        ) {
+          await this.atomicWriteFile(fullPath, change.suggestedContent!);
+          appliedFiles.push(change.path);
+          appliedVia.push({ path: change.path, via: "file-write" });
+          continue;
+        }
+
+        // 3. Tentar git apply quando há diff mas não há suggestedContent
         if (hasDiff) {
           const validation = validateDiff(change.diff!);
           if (!validation.valid) {
@@ -621,7 +634,7 @@ export class GitService {
           // git apply falhou e não foi aplicado — seguir para fallback
         }
 
-        // 3. Fallback: escrita de arquivo com suggestedContent (using atomic writes)
+        // 4. Fallback: quando git apply falhou e não temos suggestedContent (modify/create)
         switch (change.action) {
           case "create":
             if (hasContent) {

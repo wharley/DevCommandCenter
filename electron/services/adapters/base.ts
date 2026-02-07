@@ -128,6 +128,24 @@ Please generate the code addressing this issue. Pay special attention to the men
 `
       : "";
 
+    // Pilar 2: Conteúdo dos arquivos a modificar (para diffs mais precisos)
+    const fileContentsSection =
+      projectContext.fileContents &&
+      Object.keys(projectContext.fileContents).length > 0
+        ? `
+
+## Files to Modify (current content)
+Use this content as the base for generating accurate diffs and suggestedContent.
+
+${Object.entries(projectContext.fileContents)
+  .map(
+    ([path, content]) =>
+      `### ${path}\n\`\`\`\n${content}\n\`\`\``
+  )
+  .join("\n\n")}
+`
+        : "";
+
     return `You are an expert software engineer. Based on the implementation plan, generate the code changes needed.
 
 ## Project Context
@@ -135,7 +153,7 @@ Please generate the code addressing this issue. Pay special attention to the men
 - **Project Path**: ${projectContext.projectPath}
 
 ## Implementation Plan
-${plan ? JSON.stringify(plan, null, 2) : "No plan available"}
+${plan ? JSON.stringify(plan, null, 2) : "No plan available"}${fileContentsSection}
 
 ## Task
 **Title**: ${mission.title}
@@ -159,21 +177,20 @@ Generate the code changes with the following JSON structure:
       "path": "relative/path/to/file.ts",
       "action": "create" | "modify" | "delete",
       "originalContent": "optional - the original content before changes (helps generate accurate diff)",
-      "suggestedContent": "REQUIRED for create. For modify: ONLY include if file is small (<150 lines) or changes are extensive (>50% of file)",
+      "suggestedContent": "REQUIRED for create and modify - always include full file content (ensures reliable apply)",
       "diff": "REQUIRED for modify - unified diff format (---, +++, @@, +, -). Optional for create."
     }
   ]
 }
 
-Rules by action:
-- modify: "diff" is REQUIRED (unified diff format). "suggestedContent" is OPTIONAL - only include for small files or extensive rewrites.
+Rules by action (Pilar 3 - suggestedContent required for reliable apply):
+- modify: "suggestedContent" is REQUIRED (full file content). "diff" is REQUIRED (unified diff format).
 - create: "suggestedContent" is REQUIRED (full file content). "diff" is optional.
 - delete: only "path" is needed. The file will be removed.
 
-IMPORTANT - Output optimization:
-- For "modify": ALWAYS provide a valid unified diff. Only include suggestedContent if the file is small or changes are very extensive.
-- This reduces response size significantly and improves performance.
-- The diff MUST be a valid unified diff with proper headers (--- a/path, +++ b/path) and hunks (@@ -line,count +line,count @@).
+IMPORTANT - Reliability first:
+- For "modify" and "create": ALWAYS include suggestedContent with the complete file content. This ensures the apply works even when git patch fails.
+- For "modify": ALSO provide a valid unified diff for preview. The diff MUST have proper headers (--- a/path, +++ b/path) and hunks (@@ -line,count +line,count @@).
 
 Format rules:
 - Use proper indentation and formatting

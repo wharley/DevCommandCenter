@@ -268,6 +268,18 @@ export class AIOrchestrator {
         project.name
       );
 
+      // Pilar 2: Enriquecer contexto com conteúdo dos arquivos do plano
+      const filePathsFromPlan =
+        mission.plan?.steps?.flatMap((s) => s.files ?? []) ?? [];
+      const uniquePaths = [...new Set(filePathsFromPlan.filter(Boolean))];
+      if (uniquePaths.length > 0) {
+        const gitService = new GitService(project.path);
+        const fileContents = await gitService.readFiles(uniquePaths);
+        if (Object.keys(fileContents).length > 0) {
+          projectContext.fileContents = fileContents;
+        }
+      }
+
       // Configura e executa
       const config: AdapterConfig = {
         provider,

@@ -23,9 +23,9 @@ export const missionPlanSchema = z.object({
 });
 
 /**
- * Code suggestion schema with action-based validation:
+ * Code suggestion schema with action-based validation (Pilar 3):
  * - create: suggestedContent is REQUIRED
- * - modify: diff is REQUIRED, suggestedContent is OPTIONAL (fallback)
+ * - modify: suggestedContent is REQUIRED, diff is REQUIRED (for preview)
  * - delete: only path is required
  */
 export const codeSuggestionSchema = z
@@ -51,17 +51,16 @@ export const codeSuggestionSchema = z
   )
   .refine(
     (data) => {
-      // For "modify" action, either diff OR suggestedContent must be present
-      // This allows diff-only (optimized) or full content (fallback)
+      // For "modify" action, suggestedContent is required (Pilar 3 - reliable apply)
       if (data.action === "modify") {
-        return !!data.diff || !!data.suggestedContent;
+        return !!data.suggestedContent;
       }
       return true;
     },
     {
       message:
-        "For 'modify' action, either 'diff' or 'suggestedContent' must be provided",
-      path: ["diff"],
+        "suggestedContent is required for 'modify' action (ensures reliable apply)",
+      path: ["suggestedContent"],
     }
   );
 
