@@ -250,14 +250,21 @@ export class ClaudeCodeAdapter extends BaseAdapter {
   }
 
   /**
+   * Instrução curta passada em -p; o prompt completo vem via stdin.
+   * Evita exceder ARG_MAX (~256 KB no macOS) quando o prompt inclui fileContents.
+   */
+  private static readonly STDIN_PROMPT_INSTRUCTION =
+    "Execute the task described in the piped input. Respond ONLY with valid JSON as specified in the instructions. Do not include any other text or markdown.";
+
+  /**
    * Executa o comando Claude CLI com suporte a streaming e timeout inteligente
    *
    * Conforme documentação oficial (code.claude.com/docs/en/common-workflows):
-   * - Usa -p <prompt> para modo não-interativo
+   * - cat file | claude -p "query": conteúdo pipado é contexto adicional
+   * - Passamos o prompt completo via stdin para evitar ARG_MAX (~256 KB no macOS)
    * - Usa --output-format json para facilitar parsing
    * - Streaming de resposta com feedback de progresso
    * - Timeout com heartbeat (reseta a cada chunk recebido)
-   * - Timeout configurável via provider config
    */
   private executeClaudeCommand(
     prompt: string,
@@ -272,17 +279,14 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         (this.provider.config?.timeout as number) || DEFAULT_TIMEOUT_MS;
       const inactivityTimeout = Math.min(INACTIVITY_TIMEOUT_MS, maxTimeout / 2);
 
-      // Argumentos conforme documentação oficial do Claude CLI (headless):
-      // -p <prompt>: Especifica o prompt (obrigatório para modo não-interativo)
-      // --output-format json: Formato de saída estruturado
-      // --allowedTools: Auto-aprova ferramentas sem pedir confirmação (evita bloqueio em "Do you want to make this edit?")
+      // Argumentos: -p com instrução curta; prompt completo via stdin (evita ARG_MAX)
       const allowedTools =
         (this.provider.config?.allowedTools as string) || "Read,Edit,Bash";
       const args = [
         "-p",
-        prompt, // Prompt como argumento de -p
+        ClaudeCodeAdapter.STDIN_PROMPT_INSTRUCTION,
         "--output-format",
-        "json", // JSON para facilitar parse da resposta
+        "json",
         "--allowedTools",
         allowedTools,
       ];
@@ -353,8 +357,17 @@ export class ClaudeCodeAdapter extends BaseAdapter {
           cwd,
           env,
           shell: platform() === "win32",
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["pipe", "pipe", "pipe"],
         });
+
+        // Envia o prompt completo via stdin (evita ARG_MAX)
+        if (child.stdin) {
+          child.stdin.write(prompt, "utf8");
+          child.stdin.end();
+        } else {
+          handleReject(new Error("Failed to write to Claude CLI stdin"));
+          return;
+        }
 
         child.stdout?.on("data", (data) => {
           const chunk = data.toString();

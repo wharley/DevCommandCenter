@@ -7,7 +7,7 @@
  */
 
 import { spawn, execSync, type ChildProcess } from "node:child_process";
-import { platform } from "node:os";
+import { platform, tmpdir } from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { app } from "electron";
@@ -873,7 +873,15 @@ export class CursorAdapter extends BaseAdapter {
   }
 
   /**
+   * Instrução curta referenciando o arquivo temporário; evita ARG_MAX (~256 KB no macOS).
+   */
+  private static buildPromptFromFileInstruction(tempPath: string): string {
+    return `Read the task in ${tempPath} and execute it. Respond ONLY with valid JSON as specified in the file.`;
+  }
+
+  /**
    * Executa o comando Cursor Agent CLI (agent chat "<prompt>")
+   * Usa arquivo temporário para o prompt completo, evitando ARG_MAX (~256 KB no macOS).
    * Documentação: https://cursor.com/docs/cli
    */
   private executeAgentCommand(
@@ -892,16 +900,46 @@ export class CursorAdapter extends BaseAdapter {
       const model = this.provider.config?.model as string | undefined;
       const modelArgs =
         model && model !== "" && model !== "auto" ? ["--model", model] : [];
-      // agent [--model <model>] [--output-format json] chat "<prompt>" — JSON para parse do plano/código.
-      // Se a doc do Cursor indicar que NDJSON vem com --output-format stream-json, usar stream-json aqui
-      // e manter a mesma lógica (NDJSON + duplo parse na linha type=result).
+
+      // Escreve o prompt em arquivo temporário para evitar ARG_MAX
+      const tempPath = path.join(
+        tmpdir(),
+        `devcommandcenter-prompt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.txt`
+      );
+
+      let tempFileWritten = false;
+      try {
+        fs.writeFileSync(tempPath, prompt, "utf8");
+        tempFileWritten = true;
+      } catch (err) {
+        reject(
+          new Error(
+            `Failed to write prompt to temp file: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          )
+        );
+        return;
+      }
+
+      const promptArg = CursorAdapter.buildPromptFromFileInstruction(tempPath);
       const args = [
         ...modelArgs,
         "--output-format",
         "json",
         subcommand,
-        prompt,
+        promptArg,
       ];
+
+      const cleanupTempFile = () => {
+        try {
+          if (tempFileWritten && fs.existsSync(tempPath)) {
+            fs.unlinkSync(tempPath);
+          }
+        } catch {
+          // ignore cleanup errors
+        }
+      };
 
       let child: ChildProcess;
       let stdout = "";
@@ -916,6 +954,7 @@ export class CursorAdapter extends BaseAdapter {
       const cleanup = () => {
         clearTimeout(inactivityTimeoutId);
         clearTimeout(maxTimeoutId);
+        cleanupTempFile();
       };
 
       const handleResolve = (value: { payload: string; raw: string }) => {
