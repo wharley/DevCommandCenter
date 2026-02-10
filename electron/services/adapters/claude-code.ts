@@ -6,8 +6,9 @@
  */
 
 import { spawn, execSync, type ChildProcess } from "node:child_process";
-import { platform } from "node:os";
+import { platform, tmpdir } from "node:os";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { BaseAdapter } from "./base";
 import { spawnCliWithLoginShell, getResolvedPathForNode } from "../shell-path";
 import type {
@@ -250,18 +251,17 @@ export class ClaudeCodeAdapter extends BaseAdapter {
   }
 
   /**
-   * Instrução curta passada em -p; o prompt completo vem via stdin.
-   * Evita exceder ARG_MAX (~256 KB no macOS) quando o prompt inclui fileContents.
+   * Instrução curta referenciando o arquivo temporário; evita ARG_MAX (~256 KB no macOS).
    */
-  private static readonly STDIN_PROMPT_INSTRUCTION =
-    "Execute the task described in the piped input. Respond ONLY with valid JSON as specified in the instructions. Do not include any other text or markdown.";
+  private static buildPromptFromFileInstruction(tempPath: string): string {
+    return `Read the file at ${tempPath} and execute the task. Respond ONLY with valid JSON as specified in the file. Do not include any other text or markdown.`;
+  }
 
   /**
    * Executa o comando Claude CLI com suporte a streaming e timeout inteligente
    *
-   * Conforme documentação oficial (code.claude.com/docs/en/common-workflows):
-   * - cat file | claude -p "query": conteúdo pipado é contexto adicional
-   * - Passamos o prompt completo via stdin para evitar ARG_MAX (~256 KB no macOS)
+   * Usa arquivo temporário para o prompt completo, evitando ARG_MAX (~256 KB no macOS).
+   * O CLI lê o arquivo via ferramenta Read (--allowedTools).
    * - Usa --output-format json para facilitar parsing
    * - Streaming de resposta com feedback de progresso
    * - Timeout com heartbeat (reseta a cada chunk recebido)
@@ -279,12 +279,43 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         (this.provider.config?.timeout as number) || DEFAULT_TIMEOUT_MS;
       const inactivityTimeout = Math.min(INACTIVITY_TIMEOUT_MS, maxTimeout / 2);
 
-      // Argumentos: -p com instrução curta; prompt completo via stdin (evita ARG_MAX)
+      // Escreve o prompt em arquivo temporário para evitar ARG_MAX
+      const tempPath = path.join(
+        tmpdir(),
+        `devcommandcenter-prompt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.txt`
+      );
+
+      let tempFileWritten = false;
+      try {
+        fs.writeFileSync(tempPath, prompt, "utf8");
+        tempFileWritten = true;
+      } catch (err) {
+        reject(
+          new Error(
+            `Failed to write prompt to temp file: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          )
+        );
+        return;
+      }
+
+      const cleanupTempFile = () => {
+        try {
+          if (tempFileWritten && fs.existsSync(tempPath)) {
+            fs.unlinkSync(tempPath);
+          }
+        } catch {
+          // ignore cleanup errors
+        }
+      };
+
+      const promptArg = ClaudeCodeAdapter.buildPromptFromFileInstruction(tempPath);
       const allowedTools =
         (this.provider.config?.allowedTools as string) || "Read,Edit,Bash";
       const args = [
         "-p",
-        ClaudeCodeAdapter.STDIN_PROMPT_INSTRUCTION,
+        promptArg,
         "--output-format",
         "json",
         "--allowedTools",
@@ -311,6 +342,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
       const cleanup = () => {
         clearTimeout(inactivityTimeoutId);
         clearTimeout(maxTimeoutId);
+        cleanupTempFile();
       };
 
       const handleResolve = (value: string) => {
@@ -357,17 +389,8 @@ export class ClaudeCodeAdapter extends BaseAdapter {
           cwd,
           env,
           shell: platform() === "win32",
-          stdio: ["pipe", "pipe", "pipe"],
+          stdio: ["ignore", "pipe", "pipe"],
         });
-
-        // Envia o prompt completo via stdin (evita ARG_MAX)
-        if (child.stdin) {
-          child.stdin.write(prompt, "utf8");
-          child.stdin.end();
-        } else {
-          handleReject(new Error("Failed to write to Claude CLI stdin"));
-          return;
-        }
 
         child.stdout?.on("data", (data) => {
           const chunk = data.toString();

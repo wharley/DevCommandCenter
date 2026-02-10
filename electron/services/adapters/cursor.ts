@@ -63,7 +63,7 @@ export class CursorAdapter extends BaseAdapter {
     const cliPath = resolveCliPath(this.provider);
     if (!cliPath) {
       errors.push(
-        "Cursor Agent CLI not found. Please install it (curl https://cursor.com/install -fsSL | bash) or set the path to the 'agent' executable in the provider settings."
+        "Cursor Agent CLI not found. Please install it (curl https://cursor.com/install -fsSL | bash) or set the path to the 'agent' executable in the provider settings.",
       );
     }
 
@@ -120,7 +120,7 @@ export class CursorAdapter extends BaseAdapter {
 
   async generatePlan(
     config: AdapterConfig,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
   ): Promise<AIResponse<MissionPlan>> {
     const startTime = Date.now();
     const validation = this.validate();
@@ -145,7 +145,7 @@ export class CursorAdapter extends BaseAdapter {
         "chat",
         prompt,
         config.projectContext.projectPath,
-        onProgress
+        onProgress,
       );
 
       // Clear timer-based progress
@@ -171,7 +171,7 @@ export class CursorAdapter extends BaseAdapter {
         (response.includes('"files"') || response.includes('"steps"'))
       ) {
         const repaired = this.tryRepairTruncatedInnerPayload(response, (r) =>
-          this.parseAndValidateMissionPlan(r)
+          this.parseAndValidateMissionPlan(r),
         );
         if (repaired) planResult = repaired;
       }
@@ -239,7 +239,7 @@ export class CursorAdapter extends BaseAdapter {
 
   async generateCode(
     config: AdapterConfig,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
   ): Promise<AIResponse<GeneratedCode>> {
     const startTime = Date.now();
     const validation = this.validate();
@@ -264,7 +264,7 @@ export class CursorAdapter extends BaseAdapter {
         "chat",
         prompt,
         config.projectContext.projectPath,
-        onProgress
+        onProgress,
       );
 
       // Clear timer-based progress
@@ -290,7 +290,7 @@ export class CursorAdapter extends BaseAdapter {
         response.includes('"files"')
       ) {
         const repaired = this.tryRepairTruncatedInnerPayload(response, (r) =>
-          this.parseAndValidateGeneratedCode(r)
+          this.parseAndValidateGeneratedCode(r),
         );
         if (repaired) codeResult = repaired;
       }
@@ -744,8 +744,8 @@ export class CursorAdapter extends BaseAdapter {
   private tryRepairTruncatedInnerPayload<T>(
     response: string,
     parseAndValidate: (
-      raw: string
-    ) => { success: true; data: T } | { success: false; error: string }
+      raw: string,
+    ) => { success: true; data: T } | { success: false; error: string },
   ): { success: true; data: T } | null {
     const trimmed = response.trim();
     if (!trimmed.includes('"summary"')) return null;
@@ -860,7 +860,7 @@ export class CursorAdapter extends BaseAdapter {
     if (fileObjects.length > 0) {
       // Extrair summary se existir
       const summaryMatch = response.match(
-        /"summary"\s*:\s*"([^"\\]*(\\.[^"\\]*)*)"/
+        /"summary"\s*:\s*"([^"\\]*(\\.[^"\\]*)*)"/,
       );
       const summary = summaryMatch
         ? summaryMatch[0]
@@ -888,7 +888,7 @@ export class CursorAdapter extends BaseAdapter {
     subcommand: string,
     prompt: string,
     cwd: string,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
   ): Promise<{ payload: string; raw: string }> {
     return new Promise((resolve, reject) => {
       const cliPath = resolveCliPath(this.provider)!;
@@ -904,7 +904,7 @@ export class CursorAdapter extends BaseAdapter {
       // Escreve o prompt em arquivo temporário para evitar ARG_MAX
       const tempPath = path.join(
         tmpdir(),
-        `devcommandcenter-prompt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.txt`
+        `devcommandcenter-prompt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.txt`,
       );
 
       let tempFileWritten = false;
@@ -916,8 +916,8 @@ export class CursorAdapter extends BaseAdapter {
           new Error(
             `Failed to write prompt to temp file: ${
               err instanceof Error ? err.message : String(err)
-            }`
-          )
+            }`,
+          ),
         );
         return;
       }
@@ -983,8 +983,8 @@ export class CursorAdapter extends BaseAdapter {
             new Error(
               `Cursor Agent CLI inativo por ${
                 inactivityTimeout / 60000
-              } minutos. Chunks recebidos: ${chunksReceived}.`
-            )
+              } minutos. Chunks recebidos: ${chunksReceived}.`,
+            ),
           );
         }, inactivityTimeout);
       };
@@ -1009,7 +1009,7 @@ export class CursorAdapter extends BaseAdapter {
           if (chunksReceived % 5 === 0 || chunk.length > 100) {
             const sizeKB = (stdout.length / 1024).toFixed(1);
             onProgress?.(
-              `Recebendo resposta... (${sizeKB} KB, ${chunksReceived} chunks)`
+              `Recebendo resposta... (${sizeKB} KB, ${chunksReceived} chunks)`,
             );
           }
         });
@@ -1023,14 +1023,14 @@ export class CursorAdapter extends BaseAdapter {
           if (code === 0) {
             onProgress?.(
               `Resposta completa recebida (${(stdout.length / 1024).toFixed(
-                1
-              )} KB)`
+                1,
+              )} KB)`,
             );
             const payload = this.extractPayloadFromCursorStdout(stdout);
             handleResolve({ payload, raw: stdout });
           } else {
             handleReject(
-              new Error(stderr || `Cursor Agent CLI exited with code ${code}.`)
+              new Error(stderr || `Cursor Agent CLI exited with code ${code}.`),
             );
           }
         });
@@ -1044,16 +1044,16 @@ export class CursorAdapter extends BaseAdapter {
             handleReject(
               new Error(
                 "Nenhum dado recebido do Cursor Agent CLI dentro do tempo máximo. " +
-                  "Verifique se está logado no terminal (rode 'agent' se necessário) e aumente o timeout se precisar."
-              )
+                  "Verifique se está logado no terminal (rode 'agent' se necessário) e aumente o timeout se precisar.",
+              ),
             );
           } else {
             handleReject(
               new Error(
                 `Cursor Agent CLI timeout máximo (${
                   maxTimeout / 60000
-                } minutos). Chunks recebidos: ${chunksReceived}.`
-              )
+                } minutos). Chunks recebidos: ${chunksReceived}.`,
+              ),
             );
           }
         }, maxTimeout);
