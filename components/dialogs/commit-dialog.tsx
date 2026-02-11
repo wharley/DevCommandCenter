@@ -135,7 +135,8 @@ export function CommitDialog({
     setIsSubmitting(true);
     try {
       await onCommit(trimmed);
-      setShowPushAfterCommit(true);
+      // Fecha o diálogo e volta para a tela da missão para o usuário poder clicar em "Aplicar remoto"
+      onOpenChange(false);
     } finally {
       setIsSubmitting(false);
     }
