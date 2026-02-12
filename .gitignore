@@ -14,6 +14,9 @@
 /dist
 /release
 
+# Bundled Node binary (downloaded by scripts/download-node-binary.cjs before electron:build)
+/electron/resources/bin/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

@@ -10,6 +10,8 @@ import { execSync, spawn, type ChildProcess, type SpawnOptions } from "node:chil
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { platform, homedir } from "node:os";
+import { app } from "electron";
+import { getNodeBinaryPath } from "./node-binary";
 
 const SHELL_PATH_TIMEOUT_MS = 5000;
 
@@ -90,11 +92,15 @@ export function spawnCliWithLoginShell(
   options: SpawnOptions
 ): ChildProcess {
   if (!shouldRunCliViaLoginShell()) {
-    return spawn(cliPath, args, options);
+    const opts = { ...options };
+    if (app.isPackaged) {
+      opts.env = { ...opts.env, PATH: getResolvedPathForNode() };
+    }
+    return spawn(cliPath, args, opts);
   }
   const shell = "/bin/zsh";
   const command = buildLoginShellExecCommand(cliPath, args);
-  const resolvedPath = getLoginShellPath() || getFallbackPathForNode();
+  const resolvedPath = getResolvedPathForNode();
   const env = {
     ...options.env,
     ...(resolvedPath && { PATH: resolvedPath }),
@@ -110,12 +116,20 @@ export function spawnCliWithLoginShell(
 /**
  * Returns the PATH to use when invoking node-based CLIs (e.g. from execSync).
  * Use this so scripts with shebang #!/usr/bin/env node find node when the app
- * is launched from Finder/DMG (minimal PATH). Order: login shell, fallback, env.
+ * is launched from Finder/DMG (minimal PATH). When packaged, prepends the
+ * bundled Node's directory so the app does not depend on the user's PATH.
  */
 export function getResolvedPathForNode(): string {
-  const resolved =
+  const base =
     getLoginShellPath() || getFallbackPathForNode() || process.env.PATH;
-  return resolved ?? "";
+  const basePath = base ?? "";
+  if (app.isPackaged) {
+    const bundledNodeDir = path.dirname(getNodeBinaryPath());
+    return basePath
+      ? `${bundledNodeDir}${path.delimiter}${basePath}`
+      : bundledNodeDir;
+  }
+  return basePath;
 }
 
 /**

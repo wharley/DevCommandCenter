@@ -16,6 +16,11 @@ files:
   - "!**/*.map"
   - "!**/node_modules/.cache/**/*"
 
+extraResources:
+  - from: electron/resources/bin
+    to: bin
+    filter: ["**/*"]
+
 extraMetadata:
   main: .electron/electron/main.js
 

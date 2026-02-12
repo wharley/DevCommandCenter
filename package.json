@@ -10,7 +10,8 @@
     "electron:compile": "tsc -p electron/tsconfig.json && mkdir -p .electron/lib/database && cp lib/database/schema.sql .electron/lib/database/",
     "electron:dev": "yarn electron:compile && concurrently \"yarn dev\" \"wait-on http://localhost:5173 && NODE_ENV=development electron .\"",
     "electron:start": "yarn electron:compile && electron .",
-    "electron:build": "yarn electron:compile && yarn build && electron-builder",
+    "electron:build": "yarn electron:compile && yarn build && node scripts/download-node-binary.cjs && electron-builder",
+    "electron:download-node": "node scripts/download-node-binary.cjs",
     "electron:rebuild": "npx @electron/rebuild -f -w better-sqlite3",
     "postinstall": "electron-builder install-app-deps",
     "lint": "eslint ."
