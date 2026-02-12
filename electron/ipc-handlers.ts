@@ -1,14 +1,19 @@
-import { dialog, shell, BrowserWindow } from "electron";
+import { app, dialog, shell, BrowserWindow } from "electron";
 import type { IpcMain } from "electron";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
 import { platform } from "node:os";
 import db from "../lib/database";
+import { getActivation, setActivation } from "../lib/database/activation";
 import { aiOrchestrator, GitService } from "./services";
+import { getMachineId } from "./services/machine-id";
 import {
   providerService,
   sanitizeForRenderer,
 } from "./services/provider-service";
+
+const BETA_ACTIVATE_URL = "https://www.devcommandcenter.com/api/beta-activate";
+const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
 export function registerIpcHandlers(ipcMain: IpcMain) {
   // ==========================================
@@ -125,6 +130,80 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
 
   ipcMain.handle("window:isMaximized", (event) => {
     return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false;
+  });
+
+  // ==========================================
+  // License / activation (beta)
+  // ==========================================
+  ipcMain.handle("license:getStatus", () => {
+    if (isDev) {
+      const status = getActivation();
+        // Em dev: se já tiver ativado, retorna; senão pode retornar activated true para bypass
+      if (status?.activated) return status;
+      return { activated: false, email: undefined };
+    }
+    return getActivation() ?? { activated: false, email: undefined };
+  });
+
+  ipcMain.handle("license:getMachineId", () => {
+    const userDataPath = app.getPath("userData");
+    return getMachineId(userDataPath);
+  });
+
+  ipcMain.handle(
+    "license:activate",
+    async (_event, email: string): Promise<{ success: boolean; message?: string }> => {
+      const trimmed = String(email ?? "").trim().toLowerCase();
+      if (!trimmed) {
+        return { success: false, message: "Informe um e-mail válido." };
+      }
+      const machineId = getMachineId(app.getPath("userData"));
+
+      try {
+        const res = await fetch(BETA_ACTIVATE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: trimmed, machineId }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const msg =
+            (data && typeof data.message === "string" && data.message) ||
+            `Falha na ativação (${res.status}). Tente novamente.`;
+          return { success: false, message: msg };
+        }
+
+        if (data && data.ok === true) {
+          setActivation({
+            email: trimmed,
+            machineId,
+            token: data.token ?? null,
+          });
+          return { success: true };
+        }
+
+        return {
+          success: false,
+          message: (data && data.message) || "Resposta inválida do servidor.",
+        };
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Erro de conexão. Verifique sua internet.";
+        return { success: false, message };
+      }
+    }
+  );
+
+  ipcMain.handle("license:skipActivation", () => {
+    if (!isDev) return { success: false };
+    const machineId = getMachineId(app.getPath("userData"));
+    setActivation({
+      email: "dev@local",
+      machineId,
+      token: null,
+    });
+    return { success: true };
   });
 
   // ==========================================

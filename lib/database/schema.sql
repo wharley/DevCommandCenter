@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS mission_logs (
   FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
 );
 
+-- Tabela de Ativação (beta/licença) — singleton por instalação
+CREATE TABLE IF NOT EXISTS activation (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  email TEXT NOT NULL,
+  machine_id TEXT NOT NULL,
+  activated INTEGER DEFAULT 1,
+  token TEXT,
+  activated_at TEXT DEFAULT (datetime('now')),
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Índices para performance
 CREATE INDEX IF NOT EXISTS idx_projects_last_opened ON projects(last_opened_at DESC);
 CREATE INDEX IF NOT EXISTS idx_missions_project ON missions(project_id);

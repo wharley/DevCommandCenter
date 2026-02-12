@@ -134,6 +134,9 @@ export function initDatabase(): Database.Database {
   // Migração: adicionar plan_provider_id e code_provider_id em missions se não existirem
   migratePlanCodeProviderIds(db);
 
+  // Migração: criar tabela activation se não existir
+  migrateActivationTable(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
 
   return db;
@@ -263,6 +266,32 @@ function migratePlanCodeProviderIds(database: Database.Database): void {
     database.exec("ALTER TABLE missions ADD COLUMN code_provider_id TEXT");
     console.log("[Database] Migration: code_provider_id column added to missions.");
   }
+}
+
+/**
+ * Migração: cria tabela activation (beta/licença) se não existir.
+ */
+function migrateActivationTable(database: Database.Database): void {
+  const row = database
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'activation'",
+    )
+    .get();
+  if (row) return;
+
+  database.exec(`
+    CREATE TABLE activation (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      email TEXT NOT NULL,
+      machine_id TEXT NOT NULL,
+      activated INTEGER DEFAULT 1,
+      token TEXT,
+      activated_at TEXT DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+  console.log("[Database] Migration: activation table created.");
 }
 
 /**

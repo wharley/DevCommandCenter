@@ -105,6 +105,20 @@ declare global {
         isMaximized: () => Promise<boolean>;
       };
 
+      license: {
+        getStatus: () => Promise<{
+          activated: boolean;
+          email?: string;
+          activatedAt?: string;
+        }>;
+        getMachineId: () => Promise<string>;
+        activate: (email: string) => Promise<{
+          success: boolean;
+          message?: string;
+        }>;
+        skipActivation: () => Promise<{ success: boolean }>;
+      };
+
       // AI Service APIs
       ai: {
         generatePlan: (

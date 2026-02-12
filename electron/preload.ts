@@ -35,6 +35,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
     isMaximized: () => invoke("window:isMaximized"),
   },
 
+  // License / activation (beta)
+  license: {
+    getStatus: () =>
+      invoke("license:getStatus") as Promise<{
+        activated: boolean;
+        email?: string;
+        activatedAt?: string;
+      }>,
+    getMachineId: () => invoke("license:getMachineId") as Promise<string>,
+    activate: (email: string) =>
+      invoke("license:activate", email) as Promise<{
+        success: boolean;
+        message?: string;
+      }>,
+    skipActivation: () =>
+      invoke("license:skipActivation") as Promise<{ success: boolean }>,
+  },
+
   // AI Service APIs
   ai: {
     generatePlan: (missionId: string, options?: { planFeedback?: string }) =>
