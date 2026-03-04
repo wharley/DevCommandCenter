@@ -42,6 +42,8 @@ interface NewMissionDialogProps {
   /** When set, dialog runs in edit mode: title "Editar missão", submit calls update and does not navigate */
   missionId?: string;
   initialMission?: InitialMissionForEdit;
+  /** Optional: called when user clicks "Dicas para acertar mais" to open the tips dialog */
+  onOpenTips?: () => void;
 }
 
 export function NewMissionDialog({
@@ -51,6 +53,7 @@ export function NewMissionDialog({
   defaultProviderId,
   missionId,
   initialMission,
+  onOpenTips,
 }: NewMissionDialogProps) {
   const navigate = useNavigate();
   const { providers } = useProviders();
@@ -212,6 +215,15 @@ export function NewMissionDialog({
                   Quanto mais detalhada a descrição, melhor a IA poderá entender e
                   executar sua solicitação.
                 </p>
+                {onOpenTips && (
+                  <button
+                    type="button"
+                    onClick={onOpenTips}
+                    className="text-xs text-primary hover:text-primary/80 hover:underline focus:outline-none focus:underline"
+                  >
+                    Dicas para acertar mais
+                  </button>
+                )}
               </div>
 
               <div className="grid gap-2">

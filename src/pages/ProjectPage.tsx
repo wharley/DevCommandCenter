@@ -17,6 +17,7 @@ import {
   FileCode,
   X,
   Pencil,
+  Lightbulb,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +38,7 @@ import {
 import { Empty } from "@/components/ui/empty";
 import { Separator } from "@/components/ui/separator";
 import { NewMissionDialog } from "@/components/dialogs/new-mission-dialog";
+import { MissionTipsDialog } from "@/components/dialogs/mission-tips-dialog";
 import { useProjects, useMissions, useProviders } from "@/hooks/use-data";
 import { MissionProgressPipeline } from "@/components/mission-progress-pipeline";
 import { useAppStore } from "@/hooks/use-app-store";
@@ -77,6 +79,7 @@ export default function ProjectPage() {
   const navigate = useNavigate();
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
 
   const { projects, update, isLoading: projectsLoading } = useProjects();
@@ -186,6 +189,10 @@ export default function ProjectPage() {
               </p>
             )}
           </div>
+          <Button variant="outline" onClick={() => setTipsDialogOpen(true)}>
+            <Lightbulb className="mr-2 h-4 w-4" />
+            Dicas
+          </Button>
           <Button onClick={() => setDialogOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Nova missão
@@ -452,8 +459,10 @@ export default function ProjectPage() {
           onOpenChange={setDialogOpen}
           projectId={projectId}
           defaultProviderId={project?.defaultProviderId ?? undefined}
+          onOpenTips={() => setTipsDialogOpen(true)}
         />
       )}
+      <MissionTipsDialog open={tipsDialogOpen} onOpenChange={setTipsDialogOpen} />
       {/* Edit Mission Dialog (when mission has no plan yet) */}
       {projectId && editingMission && (
         <NewMissionDialog
@@ -472,6 +481,7 @@ export default function ProjectPage() {
             planProviderId: editingMission.planProviderId ?? undefined,
             codeProviderId: editingMission.codeProviderId ?? undefined,
           }}
+          onOpenTips={() => setTipsDialogOpen(true)}
         />
       )}
     </div>

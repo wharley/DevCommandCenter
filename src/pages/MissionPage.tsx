@@ -21,6 +21,7 @@ import {
   XCircle,
   RotateCcw,
   Info,
+  Lightbulb,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -63,6 +64,7 @@ import { CommitDialog } from "@/components/dialogs/commit-dialog";
 import { NewMissionDialog } from "@/components/dialogs/new-mission-dialog";
 import { RegeneratePlanDialog } from "@/components/dialogs/regenerate-plan-dialog";
 import { RegenerateCodeDialog } from "@/components/dialogs/regenerate-code-dialog";
+import { MissionTipsDialog } from "@/components/dialogs/mission-tips-dialog";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -232,6 +234,7 @@ export default function MissionPage() {
     useState(false);
   const [codeFeedback, setCodeFeedback] = useState("");
   const [editMissionDialogOpen, setEditMissionDialogOpen] = useState(false);
+  const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
 
   const { projects, isLoading: projectsLoading } = useProjects();
   const {
@@ -1314,6 +1317,20 @@ export default function MissionPage() {
                   Instruções de preservação ativas
                 </Badge>
               )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-foreground -ml-1"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setTipsDialogOpen(true);
+                }}
+              >
+                <Lightbulb className="mr-1.5 h-3.5 w-3.5" />
+                Dicas
+              </Button>
               {canEditMission && (
                 <Button
                   type="button"
@@ -1921,6 +1938,7 @@ export default function MissionPage() {
         isLoading={isGenerating}
         attempts={mission?.codeGenerationAttempts ?? 1}
       />
+      <MissionTipsDialog open={tipsDialogOpen} onOpenChange={setTipsDialogOpen} />
       {projectId && mission && (
         <NewMissionDialog
           open={editMissionDialogOpen}
@@ -1936,6 +1954,7 @@ export default function MissionPage() {
             planProviderId: mission.planProviderId ?? undefined,
             codeProviderId: mission.codeProviderId ?? undefined,
           }}
+          onOpenTips={() => setTipsDialogOpen(true)}
         />
       )}
     </div>
