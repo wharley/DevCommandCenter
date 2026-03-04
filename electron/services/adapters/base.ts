@@ -14,6 +14,24 @@ import type {
   ProgressCallback,
 } from "../types";
 
+// ---------------------------------------------------------------------------
+// Plan parse guard-rail: warnings and user-facing message
+// ---------------------------------------------------------------------------
+
+export type PlanRepairWarning =
+  | { type: "EMPTY_STEPS_DROPPED" }
+  | { type: "STEP_COERCED_TO_NUMBER"; stepIndex: number; rawOrder: unknown }
+  | { type: "STEP_MISSING_ORDER"; stepIndex: number }
+  | { type: "STEP_MISSING_REQUIRED_FIELDS"; stepIndex: number; missing: string[] }
+  | { type: "NON_ARRAY_STEPS_COERCED" }
+  | { type: "UNKNOWN_SHAPE"; detail?: string };
+
+export const PLAN_PARSE_ERROR_USER_MESSAGE =
+  "Não foi possível processar o plano. Tente regenerar o plano.";
+
+export const PLAN_RETRY_HINT =
+  "The previous response was not valid JSON. Reply with only the MissionPlan JSON object (keys: summary, estimatedComplexity, steps). No markdown, no extra text.";
+
 export abstract class BaseAdapter implements AIProviderAdapter {
   abstract readonly name: string;
   abstract readonly type: Provider["type"];
@@ -42,7 +60,7 @@ export abstract class BaseAdapter implements AIProviderAdapter {
    * Monta o prompt base para geração de plano
    */
   protected buildPlanPrompt(config: AdapterConfig): string {
-    const { mission, projectContext, planFeedback } = config;
+    const { mission, projectContext, planFeedback, planRetryHint } = config;
 
     const feedbackSection = planFeedback?.trim()
       ? `
@@ -106,7 +124,14 @@ Create a detailed implementation plan with the following JSON structure:
   ]
 }
 
-Respond ONLY with valid JSON. Do not include any other text or markdown code blocks.`;
+Respond ONLY with valid JSON. Do not include any other text or markdown code blocks.${
+      planRetryHint?.trim()
+        ? `
+
+## Important
+${planRetryHint.trim()}`
+        : ""
+    }`;
   }
 
   /**
@@ -548,6 +573,205 @@ Format rules:
   }
 
   /**
+   * Normaliza shape de alto nível para algo parecido com MissionPlan (steps array ou wrapper plan/missionPlan).
+   */
+  private coerceToMissionPlanLike(
+    input: unknown,
+    warnings: PlanRepairWarning[]
+  ): { steps: unknown[]; summary?: string; estimatedComplexity?: string } | null {
+    if (Array.isArray(input)) {
+      warnings.push({ type: "NON_ARRAY_STEPS_COERCED" });
+      return { steps: input };
+    }
+    if (input && typeof input === "object") {
+      const obj = input as Record<string, unknown>;
+      if (Array.isArray(obj.steps)) {
+        return {
+          steps: obj.steps,
+          summary: typeof obj.summary === "string" ? obj.summary : undefined,
+          estimatedComplexity:
+            typeof obj.estimatedComplexity === "string"
+              ? obj.estimatedComplexity
+              : undefined,
+        };
+      }
+      const plan = obj.plan as Record<string, unknown> | undefined;
+      if (plan && Array.isArray(plan.steps)) {
+        return {
+          steps: plan.steps,
+          summary:
+            (typeof obj.summary === "string" ? obj.summary : undefined) ??
+            (typeof plan.summary === "string" ? plan.summary : undefined),
+          estimatedComplexity:
+            typeof plan.estimatedComplexity === "string"
+              ? plan.estimatedComplexity
+              : undefined,
+        };
+      }
+      const missionPlan = obj.missionPlan as Record<string, unknown> | undefined;
+      if (missionPlan && Array.isArray(missionPlan.steps)) {
+        return {
+          steps: missionPlan.steps,
+          summary:
+            (typeof obj.summary === "string" ? obj.summary : undefined) ??
+            (typeof missionPlan.summary === "string" ? missionPlan.summary : undefined),
+          estimatedComplexity:
+            typeof missionPlan.estimatedComplexity === "string"
+              ? missionPlan.estimatedComplexity
+              : undefined,
+        };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Parse + reparo específico para MissionPlan. Retorna plan válido ou null e lista de warnings.
+   * Se plan === null e há warning UNKNOWN_SHAPE, o chamador pode fazer retry com hint.
+   */
+  protected parseAndRepairPlan(
+    raw: string
+  ): { plan: MissionPlan | null; warnings: PlanRepairWarning[] } {
+    const warnings: PlanRepairWarning[] = [];
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return { plan: null, warnings: [{ type: "UNKNOWN_SHAPE" }] };
+    }
+
+    let parsed: unknown = null;
+    try {
+      const wrapper = JSON.parse(trimmed) as {
+        result?: unknown;
+        output?: unknown;
+      };
+      const inner = wrapper?.result ?? wrapper?.output;
+      if (inner != null) {
+        if (typeof inner === "string") {
+          parsed = this.tryParseWithFixes(inner);
+        } else if (typeof inner === "object") {
+          parsed = inner;
+        }
+      }
+    } catch {
+      // not a wrapper
+    }
+    if (parsed == null) {
+      parsed =
+        this.parseJSONResponse<unknown>(trimmed) ?? this.tryParseWithFixes(trimmed);
+    }
+    if (parsed == null) {
+      return { plan: null, warnings: [{ type: "UNKNOWN_SHAPE" }] };
+    }
+
+    const planLike = this.coerceToMissionPlanLike(parsed, warnings);
+    if (!planLike || !Array.isArray(planLike.steps)) {
+      return { plan: null, warnings: [...warnings, { type: "UNKNOWN_SHAPE" }] };
+    }
+
+    const validSteps: Array<Record<string, unknown> & { order: number }> = [];
+    for (let index = 0; index < planLike.steps.length; index++) {
+      const step = planLike.steps[index];
+      if (!step || typeof step !== "object") {
+        warnings.push({
+          type: "STEP_MISSING_REQUIRED_FIELDS",
+          stepIndex: index,
+          missing: ["order", "title", "description"],
+        });
+        continue;
+      }
+      const stepObj = step as Record<string, unknown>;
+      const missing: string[] = [];
+      if (typeof stepObj.title !== "string") missing.push("title");
+      if (typeof stepObj.description !== "string") missing.push("description");
+      if (missing.length) {
+        warnings.push({
+          type: "STEP_MISSING_REQUIRED_FIELDS",
+          stepIndex: index,
+          missing,
+        });
+        continue;
+      }
+      let order = stepObj.order;
+      if (
+        typeof order === "string" &&
+        order.trim() !== "" &&
+        !Number.isNaN(Number(order))
+      ) {
+        warnings.push({
+          type: "STEP_COERCED_TO_NUMBER",
+          stepIndex: index,
+          rawOrder: order,
+        });
+        order = Number(order) as number;
+      }
+      validSteps.push({ ...stepObj, order } as Record<string, unknown> & { order: number });
+    }
+
+    if (validSteps.length === 0) {
+      warnings.push({ type: "EMPTY_STEPS_DROPPED" });
+      return { plan: null, warnings };
+    }
+
+    const normalizedSteps = validSteps.map((step, index) => {
+      let order = step.order;
+      if (typeof order !== "number" || !Number.isFinite(order)) {
+        warnings.push({ type: "STEP_MISSING_ORDER", stepIndex: index });
+        order = index + 1;
+      }
+      let files = step.files;
+      if (typeof files === "string") files = [files];
+      if (!Array.isArray(files)) files = undefined;
+      let status = step.status;
+      if (
+        typeof status !== "string" ||
+        !["pending", "in_progress", "completed", "skipped"].includes(status)
+      ) {
+        status = undefined;
+      }
+      return {
+        ...step,
+        order,
+        id: (step.id as string) ?? this.generateStepId(index),
+        title: step.title as string,
+        description: step.description as string,
+        files,
+        status,
+      };
+    });
+
+    let complexity = planLike.estimatedComplexity;
+    if (
+      typeof complexity !== "string" ||
+      !["low", "medium", "high"].includes(complexity)
+    ) {
+      complexity = undefined;
+    }
+    const summary =
+      typeof planLike.summary === "string" ? planLike.summary : undefined;
+
+    const candidate = {
+      steps: normalizedSteps,
+      summary,
+      estimatedComplexity: complexity,
+    };
+
+    const result = missionPlanSchema.safeParse(candidate);
+    if (!result.success) {
+      return {
+        plan: null,
+        warnings: [
+          ...warnings,
+          {
+            type: "UNKNOWN_SHAPE",
+            detail: result.error?.message,
+          },
+        ],
+      };
+    }
+    return { plan: result.data as MissionPlan, warnings };
+  }
+
+  /**
    * Pipeline de normalização: extrai payload, parseia com fixes, valida com Zod.
    * Aceita wrappers comuns: { result }, { output }, JSON string dentro de JSON.
    * @param raw Resposta bruta (stdout do CLI ou resposta da API)
@@ -625,22 +849,24 @@ Format rules:
   }
 
   /**
-   * Normaliza e valida resposta como MissionPlan (com Zod).
-   * Garante que cada step tenha id (usa generateStepId quando ausente).
+   * Normaliza e valida resposta como MissionPlan via parseAndRepairPlan.
+   * Em falha, retorna mensagem genérica e retryable quando o motivo for UNKNOWN_SHAPE.
    */
   protected parseAndValidateMissionPlan(
     raw: string
-  ): { success: true; data: MissionPlan } | { success: false; error: string } {
-    const result = this.normalizeAndValidate(raw, missionPlanSchema);
-    if (!result.success) return result;
-    const plan = result.data as MissionPlan;
-    if (plan.steps) {
-      plan.steps = plan.steps.map((step, index) => ({
-        ...step,
-        id: step.id ?? this.generateStepId(index),
-      }));
+  ):
+    | { success: true; data: MissionPlan }
+    | { success: false; error: string; retryable?: boolean } {
+    const { plan, warnings } = this.parseAndRepairPlan(raw);
+    if (plan != null) {
+      return { success: true, data: plan };
     }
-    return { success: true, data: plan };
+    const retryable = warnings.some((w) => w.type === "UNKNOWN_SHAPE");
+    return {
+      success: false,
+      error: PLAN_PARSE_ERROR_USER_MESSAGE,
+      retryable,
+    };
   }
 
   /**

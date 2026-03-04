@@ -133,7 +133,8 @@ export class CodexAdapter extends BaseAdapter {
       if (!planResult.success) {
         return {
           success: false,
-          error: `Failed to parse plan: ${planResult.error}`,
+          error: planResult.error,
+          retryable: planResult.retryable,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,

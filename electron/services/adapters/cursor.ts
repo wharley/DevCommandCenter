@@ -178,25 +178,10 @@ export class CursorAdapter extends BaseAdapter {
 
       if (!planResult.success) {
         await this.writeRawToLog(raw);
-        const lines = response
-          .trim()
-          .split(/\r?\n/)
-          .filter((l) => l.length > 0);
-        const looksNdjson = lines.length > 1;
-        const lastLineLooksResult =
-          lines.length > 0 &&
-          lines[lines.length - 1]!.includes('"type"') &&
-          lines[lines.length - 1]!.includes('"result"');
-        const truncationHint =
-          looksNdjson && lastLineLooksResult
-            ? " Cursor CLI result line may be truncated (incomplete JSON)."
-            : "";
-        const diagnosticHint = looksNdjson
-          ? ` For diagnosis, save the last ${NDJSON_DIAGNOSTIC_LINES} lines of the CLI output to a file.`
-          : "";
         return {
           success: false,
-          error: `Failed to parse plan: ${planResult.error}${truncationHint}${diagnosticHint}`,
+          error: planResult.error,
+          retryable: planResult.retryable,
           metadata: {
             durationMs: Date.now() - startTime,
             provider: this.name,

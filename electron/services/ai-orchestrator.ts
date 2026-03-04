@@ -5,6 +5,7 @@
  */
 
 import { createAdapter } from "./adapters";
+import { PLAN_RETRY_HINT } from "./adapters/base";
 import { GitService } from "./git-service";
 import db from "../../lib/database";
 import { providerService } from "./provider-service";
@@ -162,7 +163,16 @@ export class AIOrchestrator {
         }
       };
 
-      const result = await adapter.generatePlan(config, onProgress);
+      let result = await adapter.generatePlan(config, onProgress);
+
+      if (!result.success && result.retryable) {
+        db.missionLogs.logInfo(
+          missionId,
+          "Plan parse failed (UNKNOWN_SHAPE), retrying once with hint"
+        );
+        const retryConfig = { ...config, planRetryHint: PLAN_RETRY_HINT };
+        result = await adapter.generatePlan(retryConfig, onProgress);
+      }
 
       if (result.success && result.data) {
         // Salva o plano e atualiza status
