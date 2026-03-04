@@ -1089,68 +1089,49 @@ export default function MissionPage() {
     }
   };
 
-  const handleDiscardAllFromRecovery = async () => {
+  /**
+   * Descartar alterações e voltar ao plano.
+   * Se veio de recovery (parse error + git), faz git reset e limpa estado.
+   * Senão, apenas limpa generatedCode e status no DB.
+   */
+  const handleDiscardChanges = async () => {
     const confirmed = window.confirm(
-      "Descartar todas as alterações e voltar ao plano?\n\n" +
-        "Você poderá:\n" +
-        "• Revisar o plano novamente\n" +
-        "• Ajustar instruções se necessário\n" +
-        "• Gerar código quando estiver pronto",
+      "Descartar alterações e voltar ao plano?\n\n" +
+        "Você poderá revisar o plano e gerar código de novo quando quiser.",
     );
 
     if (!confirmed) return;
 
+    const wasRecovery = cliParseErrorWithRepoChanges;
+
     try {
-      if (project?.path && window.electronAPI?.git?.reset) {
+      if (wasRecovery && project?.path && window.electronAPI?.git?.reset) {
         const result = await window.electronAPI.git.reset(project.path, "HEAD");
-        if (result.success) {
-          setCliParseErrorWithRepoChanges(false);
-          setRecoveryCodeFromGit(null);
-          setSelectedFilePaths(new Set());
-          setEditedSuggestions({});
-          if (missionId) {
-            updateStatus(missionId, "plan_generated");
-          }
-          setActiveTab("plan");
-          toast.success(
-            "Alterações descartadas. Revise o plano quando quiser.",
-          );
-        } else {
+        if (!result.success) {
           toast.error(result.error ?? "Falha ao reverter");
+          return;
         }
       }
-    } catch (e) {
-      toast.error(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
-    }
-  };
 
-  const handleDiscardCode = async () => {
-    if (!missionId) return;
-
-    const confirmed = window.confirm(
-      "Descartar o código gerado e voltar ao plano?\n\n" +
-        "O código gerado será descartado, mas você poderá:\n" +
-        "• Revisar o plano\n" +
-        "• Regenerar o plano se necessário\n" +
-        "• Gerar código novamente quando estiver pronto",
-    );
-
-    if (!confirmed) return;
-
-    try {
-      // Limpar código gerado e resetar tentativas
-      await update(missionId, {
-        generatedCode: undefined,
-        status: "plan_generated",
-        codeGenerationAttempts: 0,
-      });
-
-      // Limpar estados locais
+      setCliParseErrorWithRepoChanges(false);
+      setRecoveryCodeFromGit(null);
       setSelectedFilePaths(new Set());
       setEditedSuggestions({});
       setActiveTab("plan");
 
-      toast.success("Código descartado. Você pode revisar o plano agora.");
+      if (missionId) {
+        if (wasRecovery) {
+          updateStatus(missionId, "plan_generated");
+        } else {
+          await update(missionId, {
+            generatedCode: undefined,
+            status: "plan_generated",
+            codeGenerationAttempts: 0,
+          });
+        }
+      }
+
+      toast.success("Alterações descartadas. Revise o plano quando quiser.");
     } catch (e) {
       toast.error(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
     }
@@ -1402,18 +1383,18 @@ export default function MissionPage() {
                           ) : (
                             <RotateCcw className="mr-2 h-4 w-4" />
                           )}
-                          Gerar Novamente
+                          Tentar novamente
                         </Button>
 
                         <Button
-                          onClick={handleDiscardAllFromRecovery}
+                          onClick={handleDiscardChanges}
                           disabled={isGenerating}
                           variant="ghost"
                           size="default"
                           className="text-muted-foreground hover:text-muted-foreground/80"
                         >
                           <ArrowLeft className="mr-2 h-4 w-4" />
-                          Voltar ao Plano
+                          Descartar alterações
                         </Button>
                       </div>
 
@@ -1521,10 +1502,10 @@ export default function MissionPage() {
                       </p>
                       <Button
                         variant="link"
-                        onClick={handleDiscardCode}
+                        onClick={handleDiscardChanges}
                         className="mt-2 p-0 h-auto text-sm cursor-pointer"
                       >
-                        Voltar ao plano agora →
+                        Descartar alterações →
                       </Button>
                     </div>
                   </Alert>
@@ -1694,16 +1675,16 @@ export default function MissionPage() {
               className="cursor-pointer disabled:cursor-not-allowed"
             >
               <RotateCcw className="mr-2 h-4 w-4" />
-              Regenerar código
+              Tentar novamente
             </Button>
             <Button
-              onClick={handleDiscardCode}
+              onClick={handleDiscardChanges}
               variant="outline"
               disabled={isApplying || isGenerating}
               className="cursor-pointer disabled:cursor-not-allowed hover:bg-muted hover:text-muted-foreground"
             >
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Voltar ao plano
+              Descartar alterações
             </Button>
             <Button
               onClick={handleCancelMission}
@@ -2368,9 +2349,10 @@ const FileAccordionItem = memo(function FileAccordionItem({
                     <TabsContent value="suggested" className="mt-3">
                       {isSuggestedEditable ? (
                         <>
-                          <p className="flex items-center gap-2 text-sm text-primary font-medium mb-2">
+                          <p className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
                             <Pencil className="h-4 w-4 shrink-0" />
-                            Edite o conteúdo antes de aplicar.
+                            Ajustes leves aqui; para refatorações maiores use
+                            sua IDE.
                           </p>
                           <div className="rounded-md border border-border overflow-hidden">
                             <EditableCodeBlock
@@ -2457,9 +2439,10 @@ const FileAccordionItem = memo(function FileAccordionItem({
                       </h4>
                       {isSuggestedEditable ? (
                         <>
-                          <p className="flex items-center gap-2 text-sm text-primary font-medium mb-2">
+                          <p className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
                             <Pencil className="h-4 w-4 shrink-0" />
-                            Edite o conteúdo antes de aplicar.
+                            Ajustes leves aqui; para refatorações maiores use
+                            sua IDE.
                           </p>
                           <div className="rounded-md border border-border overflow-hidden">
                             <EditableCodeBlock
@@ -2694,6 +2677,12 @@ function CodeView({
             Marque os arquivos que deseja aplicar ao projeto. Ao clicar em{" "}
             <strong>Aplicar alterações</strong>, apenas os selecionados serão
             gravados.
+          </p>
+        )}
+        {isSuggestedEditable && (
+          <p className="text-xs text-muted-foreground mb-4">
+            Edite pequenos ajustes aqui; para mudanças maiores, copie o código
+            para sua IDE.
           </p>
         )}
         <Accordion

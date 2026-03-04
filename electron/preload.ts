@@ -57,7 +57,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   ai: {
     generatePlan: (missionId: string, options?: { planFeedback?: string }) =>
       invoke("ai:generatePlan", missionId, options),
-    generateCode: (missionId: string) => invoke("ai:generateCode", missionId),
+    generateCode: (missionId: string, options?: { codeFeedback?: string }) =>
+      invoke("ai:generateCode", missionId, options),
     applyChanges: (
       missionId: string,
       options?: {
