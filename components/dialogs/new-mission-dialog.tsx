@@ -275,60 +275,8 @@ export function NewMissionDialog({
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Usado quando não definir provedores específicos abaixo.
-                </p>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="planProvider">Provider para plano (opcional)</Label>
-                <Select
-                  value={formData.planProviderId || "_default"}
-                  onValueChange={(value) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      planProviderId: value === "_default" ? "" : value,
-                    }))
-                  }
-                >
-                  <SelectTrigger id="planProvider">
-                    <SelectValue placeholder="Mesmo que o padrão" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_default">Mesmo que o padrão</SelectItem>
-                    {activeProviders.map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        {provider.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="codeProvider">Provider para código (opcional)</Label>
-                <Select
-                  value={formData.codeProviderId || "_default"}
-                  onValueChange={(value) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      codeProviderId: value === "_default" ? "" : value,
-                    }))
-                  }
-                >
-                  <SelectTrigger id="codeProvider">
-                    <SelectValue placeholder="Mesmo que o padrão" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_default">Mesmo que o padrão</SelectItem>
-                    {activeProviders.map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        {provider.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Ex.: plano com Codex e código com Claude.
+                  Na tela da missão você pode escolher provedores específicos para
+                  plano e código, se quiser.
                 </p>
               </div>
             </div>
