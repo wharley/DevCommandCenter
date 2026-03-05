@@ -65,9 +65,9 @@ import { NewMissionDialog } from "@/components/dialogs/new-mission-dialog";
 import { RegeneratePlanDialog } from "@/components/dialogs/regenerate-plan-dialog";
 import { RegenerateCodeDialog } from "@/components/dialogs/regenerate-code-dialog";
 import { MissionTipsDialog } from "@/components/dialogs/mission-tips-dialog";
+import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { cn } from "@/lib/utils";
 import type {
   MissionStatus,
   MissionPlan,
@@ -254,6 +254,7 @@ export default function MissionPage() {
     refresh: refreshLogs,
   } = useMissionLogs(missionId ?? "");
   const setCurrentMission = useAppStore((s) => s.setCurrentMission);
+  const { confirmDialog } = useConfirmDialog();
 
   // Usar useMemo para estabilizar as referências e evitar re-renders desnecessários
   const project = useMemo(
@@ -304,9 +305,7 @@ export default function MissionPage() {
   );
 
   const canEditMission =
-    mission &&
-    !mission.plan &&
-    mission.status !== "planning";
+    mission && !mission.plan && mission.status !== "planning";
 
   // Usar missionId como dependência em vez do objeto mission inteiro
   useEffect(() => {
@@ -656,7 +655,8 @@ export default function MissionPage() {
     if (!codeProvider) {
       console.error("[DevCommandCenter] No code provider configured");
       toast.error("Nenhum provedor de IA configurado para gerar código", {
-        description: "Selecione um provedor em \"Gerar código com\" ou nas configurações do projeto",
+        description:
+          'Selecione um provedor em "Gerar código com" ou nas configurações do projeto',
       });
       return;
     }
@@ -1034,10 +1034,15 @@ export default function MissionPage() {
       return;
     }
     const ref = status.isDirty ? "HEAD" : "HEAD~1";
-    const msg = status.isDirty
-      ? "Descartar alterações não commitadas e cancelar esta missão?"
-      : "Reverter o último commit e cancelar esta missão? O commit será removido.";
-    if (!window.confirm(msg)) return;
+    const confirmed = await confirmDialog({
+      title: status.isDirty
+        ? "Descartar alterações e cancelar missão?"
+        : "Reverter commit e cancelar missão?",
+      description: status.isDirty
+        ? "As alterações não commitadas serão descartadas e esta missão será cancelada."
+        : "O último commit será removido e esta missão será cancelada.",
+    });
+    if (!confirmed) return;
     try {
       const result = await window.electronAPI.git.reset(project.path, ref);
       if (result.success) {
@@ -1054,13 +1059,11 @@ export default function MissionPage() {
   };
 
   const handleRetryAfterParseError = async () => {
-    const confirmed = window.confirm(
-      "Descartar todas as alterações e gerar código novamente?\n\n" +
-        "Isso irá:\n" +
-        "• Reverter todas as mudanças no repositório\n" +
-        "• Gerar código novamente do zero\n" +
-        "• Pode levar alguns minutos",
-    );
+    const confirmed = await confirmDialog({
+      title: "Descartar alterações e gerar código novamente?",
+      description:
+        "Isso irá reverter todas as mudanças no repositório, gerar código novamente do zero e pode levar alguns minutos.",
+    });
 
     if (!confirmed) return;
 
@@ -1098,10 +1101,11 @@ export default function MissionPage() {
    * Senão, apenas limpa generatedCode e status no DB.
    */
   const handleDiscardChanges = async () => {
-    const confirmed = window.confirm(
-      "Descartar alterações e voltar ao plano?\n\n" +
+    const confirmed = await confirmDialog({
+      title: "Descartar alterações e voltar ao plano?",
+      description:
         "Você poderá revisar o plano e gerar código de novo quando quiser.",
-    );
+    });
 
     if (!confirmed) return;
 
@@ -1143,10 +1147,11 @@ export default function MissionPage() {
   const handleCancelMission = async () => {
     if (!missionId) return;
 
-    const confirmed = window.confirm(
-      "Cancelar esta missão?\n\n" +
+    const confirmed = await confirmDialog({
+      title: "Cancelar esta missão?",
+      description:
         "A missão será marcada como cancelada e você voltará à página do projeto.",
-    );
+    });
 
     if (!confirmed) return;
 
@@ -1164,11 +1169,11 @@ export default function MissionPage() {
   const handleResetToPlanning = async () => {
     if (!missionId) return;
 
-    const confirmed = window.confirm(
-      "Resetar missão para o estado de plano gerado?\n\n" +
-        "Isso permitirá que você tente gerar o código novamente.\n" +
-        "Use isso se a geração de código ficou travada.",
-    );
+    const confirmed = await confirmDialog({
+      title: "Resetar missão para o estado de plano gerado?",
+      description:
+        "Isso permitirá que você tente gerar o código novamente. Use isso se a geração de código ficou travada.",
+    });
 
     if (!confirmed) return;
 
@@ -1448,11 +1453,12 @@ export default function MissionPage() {
                     <Button
                       variant="destructive"
                       onClick={async () => {
-                        if (
-                          window.confirm(
-                            "Cancelar geração de código e voltar ao plano?\n\nVocê poderá tentar gerar novamente depois.",
-                          )
-                        ) {
+                        const confirmed = await confirmDialog({
+                          title: "Cancelar geração de código?",
+                          description:
+                            "Você voltará ao plano e poderá tentar gerar novamente depois.",
+                        });
+                        if (confirmed) {
                           console.log(
                             "[DevCommandCenter] User cancelled code generation",
                           );
@@ -1535,11 +1541,14 @@ export default function MissionPage() {
         {/* Barra de ações em largura total: não espreme título/descrição */}
         {!cliParseErrorWithRepoChanges && mission.status === "created" && (
           <div className="mt-4 pt-4 border-t border-border flex flex-wrap items-center gap-3">
-            <span className="text-sm text-muted-foreground">Gerar plano com:</span>
+            <span className="text-sm text-muted-foreground">
+              Gerar plano com:
+            </span>
             <Select
               value={planProviderId || ""}
               onValueChange={(value) => {
-                if (missionId && value) update(missionId, { planProviderId: value });
+                if (missionId && value)
+                  update(missionId, { planProviderId: value });
               }}
               disabled={isGenerating}
             >
@@ -1569,107 +1578,116 @@ export default function MissionPage() {
             </Button>
           </div>
         )}
-        {!cliParseErrorWithRepoChanges && mission.status === "plan_generated" && (
-          <div className="mt-4 pt-4 border-t border-border space-y-3">
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm text-muted-foreground">Plano:</span>
-                <Select
-                  value={planProviderId || ""}
-                  onValueChange={(value) => {
-                    if (missionId && value) update(missionId, { planProviderId: value });
-                  }}
-                  disabled={isGenerating}
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Provedor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {providers
-                      .filter((p) => p.isActive)
-                      .map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setRegeneratePlanDialogOpen(true)}
-                  disabled={isGenerating || !planProvider}
-                >
-                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-                  Regenerar plano
-                </Button>
+        {!cliParseErrorWithRepoChanges &&
+          mission.status === "plan_generated" && (
+            <div className="mt-4 pt-4 border-t border-border space-y-3">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm text-muted-foreground">Plano:</span>
+                  <Select
+                    value={planProviderId || ""}
+                    onValueChange={(value) => {
+                      if (missionId && value)
+                        update(missionId, { planProviderId: value });
+                    }}
+                    disabled={isGenerating}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Provedor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providers
+                        .filter((p) => p.isActive)
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setRegeneratePlanDialogOpen(true)}
+                    disabled={isGenerating || !planProvider}
+                  >
+                    <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                    Regenerar plano
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm text-muted-foreground">Código:</span>
+                  <Select
+                    value={codeProviderId || ""}
+                    onValueChange={(value) => {
+                      if (missionId && value)
+                        update(missionId, { codeProviderId: value });
+                    }}
+                    disabled={isGenerating}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Provedor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providers
+                        .filter((p) => p.isActive)
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    size="sm"
+                    onClick={handleGenerateCode}
+                    disabled={isGenerating || !codeProvider}
+                  >
+                    {isGenerating ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Code2 className="mr-1.5 h-3.5 w-3.5" />
+                    )}
+                    {isGenerating ? "Gerando..." : "Gerar código"}
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm text-muted-foreground">Código:</span>
-                <Select
-                  value={codeProviderId || ""}
-                  onValueChange={(value) => {
-                    if (missionId && value) update(missionId, { codeProviderId: value });
-                  }}
-                  disabled={isGenerating}
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Provedor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {providers
-                      .filter((p) => p.isActive)
-                      .map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  size="sm"
-                  onClick={handleGenerateCode}
-                  disabled={isGenerating || !codeProvider}
-                >
-                  {isGenerating ? (
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Code2 className="mr-1.5 h-3.5 w-3.5" />
-                  )}
-                  {isGenerating ? "Gerando..." : "Gerar código"}
-                </Button>
-              </div>
-            </div>
-            {project?.path &&
-              typeof window !== "undefined" &&
-              window.electronAPI?.git && (
-                <div className="flex flex-wrap items-center gap-4">
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-                    <Checkbox
-                      checked={createBranchForMission}
-                      onCheckedChange={(checked) =>
-                        setCreateBranchForMission(checked === true)
-                      }
-                      disabled={isGenerating}
-                    />
-                    <span>Criar branch para esta missão</span>
-                  </label>
-                  {createBranchForMission && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground">Nome:</span>
-                      <Input
-                        className="w-[200px]"
-                        placeholder={missionId ? `mission/${missionId}` : "mission/..."}
-                        value={branchNameForMission}
-                        onChange={(e) => setBranchNameForMission(e.target.value)}
+              {project?.path &&
+                typeof window !== "undefined" &&
+                window.electronAPI?.git && (
+                  <div className="flex flex-wrap items-center gap-4">
+                    <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                      <Checkbox
+                        checked={createBranchForMission}
+                        onCheckedChange={(checked) =>
+                          setCreateBranchForMission(checked === true)
+                        }
                         disabled={isGenerating}
                       />
-                    </div>
-                  )}
-                </div>
-              )}
-          </div>
-        )}
+                      <span>Criar branch para esta missão</span>
+                    </label>
+                    {createBranchForMission && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">
+                          Nome:
+                        </span>
+                        <Input
+                          className="w-[200px]"
+                          placeholder={
+                            missionId ? `mission/${missionId}` : "mission/..."
+                          }
+                          value={branchNameForMission}
+                          onChange={(e) =>
+                            setBranchNameForMission(e.target.value)
+                          }
+                          disabled={isGenerating}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+            </div>
+          )}
 
         {!cliParseErrorWithRepoChanges && mission.status === "code_ready" && (
           <div className="mt-4 pt-4 border-t border-border flex flex-wrap items-center gap-2">
@@ -1938,7 +1956,10 @@ export default function MissionPage() {
         isLoading={isGenerating}
         attempts={mission?.codeGenerationAttempts ?? 1}
       />
-      <MissionTipsDialog open={tipsDialogOpen} onOpenChange={setTipsDialogOpen} />
+      <MissionTipsDialog
+        open={tipsDialogOpen}
+        onOpenChange={setTipsDialogOpen}
+      />
       {projectId && mission && (
         <NewMissionDialog
           open={editMissionDialogOpen}

@@ -39,6 +39,7 @@ import { Empty } from "@/components/ui/empty";
 import { Separator } from "@/components/ui/separator";
 import { NewMissionDialog } from "@/components/dialogs/new-mission-dialog";
 import { MissionTipsDialog } from "@/components/dialogs/mission-tips-dialog";
+import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { useProjects, useMissions, useProviders } from "@/hooks/use-data";
 import { MissionProgressPipeline } from "@/components/mission-progress-pipeline";
 import { useAppStore } from "@/hooks/use-app-store";
@@ -91,6 +92,7 @@ export default function ProjectPage() {
   } = useMissions(projectId ?? undefined);
   const { providers } = useProviders();
   const setCurrentProject = useAppStore((s) => s.setCurrentProject);
+  const { confirmDialog } = useConfirmDialog();
 
   // Ref para evitar múltiplas atualizações de lastOpenedAt
   const hasUpdatedLastOpenedRef = useRef<string | null>(null);
@@ -389,12 +391,12 @@ export default function ProjectPage() {
                               <DropdownMenuItem
                                 onClick={async (e) => {
                                   e.preventDefault();
-                                  if (
-                                    !window.confirm(
+                                  const confirmed = await confirmDialog({
+                                    title: "Cancelar missão",
+                                    description:
                                       "Tem certeza que deseja cancelar esta missão?",
-                                    )
-                                  )
-                                    return;
+                                  });
+                                  if (!confirmed) return;
                                   try {
                                     await cancelMission(mission.id);
                                     toast.success("Missão cancelada");
