@@ -40,8 +40,10 @@ export function AppSidebar() {
   const currentProjectId = useAppStore((s) => s.currentProjectId);
   const recentProjects = projects
     .sort((a, b) => {
-      const dateA = a.lastOpenedAt?.getTime() ?? 0;
-      const dateB = b.lastOpenedAt?.getTime() ?? 0;
+      const dateA =
+        a.lastOpenedAt?.getTime() ?? a.createdAt.getTime();
+      const dateB =
+        b.lastOpenedAt?.getTime() ?? b.createdAt.getTime();
       return dateB - dateA;
     })
     .slice(0, 5);

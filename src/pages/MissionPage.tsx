@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback, memo } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -236,7 +236,8 @@ export default function MissionPage() {
   const [editMissionDialogOpen, setEditMissionDialogOpen] = useState(false);
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
 
-  const { projects, isLoading: projectsLoading } = useProjects();
+  const { projects, update: updateProject, isLoading: projectsLoading } =
+    useProjects();
   const {
     missions,
     update,
@@ -312,6 +313,15 @@ export default function MissionPage() {
     if (missionId) setCurrentMission(missionId);
     return () => setCurrentMission(null);
   }, [missionId, setCurrentMission]);
+
+  // Atualizar lastOpenedAt do projeto ao entrar na missão (para "projetos recentes" na sidebar)
+  const hasUpdatedLastOpenedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (projectId && hasUpdatedLastOpenedRef.current !== projectId) {
+      hasUpdatedLastOpenedRef.current = projectId;
+      updateProject(projectId, { lastOpenedAt: new Date() });
+    }
+  }, [projectId, updateProject]);
 
   // Sincronizar seleção de arquivos e limpar edições quando o código gerado mudar
   useEffect(() => {
@@ -1617,7 +1627,9 @@ export default function MissionPage() {
               </div>
               <Button
                 size="sm"
-                onClick={() => missionId && updateStatus(missionId, "completed")}
+                onClick={() =>
+                  missionId && updateStatus(missionId, "completed")
+                }
                 disabled={isGenerating}
               >
                 <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
