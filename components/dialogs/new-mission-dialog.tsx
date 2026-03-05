@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { useProviders, useMissions } from "@/hooks/use-data";
 import { toast } from "sonner";
+import type { MissionType } from "@/lib/database/types";
 
 export interface InitialMissionForEdit {
   title: string;
@@ -32,6 +33,7 @@ export interface InitialMissionForEdit {
   providerId?: string;
   planProviderId?: string;
   codeProviderId?: string;
+  missionType?: MissionType;
 }
 
 interface NewMissionDialogProps {
@@ -63,13 +65,22 @@ export function NewMissionDialog({
   const isEditMode = Boolean(missionId && initialMission);
 
   const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    title: string;
+    description: string;
+    preserveInstructions: string;
+    providerId: string;
+    planProviderId: string;
+    codeProviderId: string;
+    missionType: MissionType;
+  }>({
     title: "",
     description: "",
     preserveInstructions: "",
     providerId: defaultProviderId ?? "",
     planProviderId: "",
     codeProviderId: "",
+    missionType: "implementation",
   });
 
   // When opening in edit mode, fill form from initialMission
@@ -82,6 +93,7 @@ export function NewMissionDialog({
         providerId: initialMission.providerId ?? defaultProviderId ?? "",
         planProviderId: initialMission.planProviderId ?? "",
         codeProviderId: initialMission.codeProviderId ?? "",
+        missionType: initialMission.missionType ?? "implementation",
       });
     }
     if (open && !isEditMode) {
@@ -92,6 +104,7 @@ export function NewMissionDialog({
         providerId: defaultProviderId ?? "",
         planProviderId: "",
         codeProviderId: "",
+        missionType: "implementation",
       });
     }
   }, [open, isEditMode, initialMission, defaultProviderId]);
@@ -122,6 +135,7 @@ export function NewMissionDialog({
           providerId: formData.providerId || undefined,
           planProviderId: formData.planProviderId || undefined,
           codeProviderId: formData.codeProviderId || undefined,
+          missionType: formData.missionType,
         });
         toast.success("Missão atualizada");
         onOpenChange(false);
@@ -136,6 +150,7 @@ export function NewMissionDialog({
         title: formData.title.trim(),
         description: formData.description.trim(),
         preserveInstructions: formData.preserveInstructions.trim() || undefined,
+        missionType: formData.missionType,
       });
 
       toast.success("Missão criada com sucesso");
@@ -149,6 +164,7 @@ export function NewMissionDialog({
         providerId: defaultProviderId ?? "",
         planProviderId: "",
         codeProviderId: "",
+        missionType: "implementation",
       });
     } catch {
       toast.error(isEditMode ? "Falha ao atualizar missão" : "Falha ao criar missão");
@@ -246,6 +262,32 @@ export function NewMissionDialog({
                 <p className="text-xs text-muted-foreground">
                   Liste títulos, frases ou trechos que devem permanecer iguais. A
                   IA receberá isso como instrução de não alterar.
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="missionType">Tipo de missão</Label>
+                <Select
+                  value={formData.missionType}
+                  onValueChange={(value: MissionType) =>
+                    setFormData((prev) => ({ ...prev, missionType: value }))
+                  }
+                >
+                  <SelectTrigger id="missionType">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="implementation">
+                      Implementação (plano → código → aplicar)
+                    </SelectItem>
+                    <SelectItem value="analysis">
+                      Análise / revisão (apenas plano)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Análise gera só o plano; você revisa e marca como concluída sem
+                  gerar nem aplicar código.
                 </p>
               </div>
 

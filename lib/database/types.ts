@@ -35,6 +35,9 @@ export type MissionLogType =
   | "warning"
   | "debug";
 
+/** implementation = plano → código → aplicar; analysis = apenas plano (review/diagnóstico) */
+export type MissionType = "implementation" | "analysis";
+
 // ============================================
 // Entidades do banco
 // ============================================
@@ -86,6 +89,8 @@ export interface Mission {
   title: string;
   description: string;
   status: MissionStatus;
+  /** implementation = plano → código → aplicar; analysis = apenas plano. Default implementation. */
+  missionType?: MissionType | null;
   plan?: MissionPlan | null;
   generatedCode?: GeneratedCode | null;
   context?: MissionContext | null;
@@ -201,6 +206,7 @@ export interface CreateMissionDTO {
   title: string;
   description: string;
   preserveInstructions?: string;
+  missionType?: MissionType;
 }
 
 export interface UpdateMissionDTO {
@@ -210,6 +216,7 @@ export interface UpdateMissionDTO {
   planProviderId?: string | null;
   codeProviderId?: string | null;
   preserveInstructions?: string | null;
+  missionType?: MissionType | null;
   status?: MissionStatus;
   plan?: MissionPlan;
   generatedCode?: GeneratedCode;

@@ -26,6 +26,7 @@ interface MissionRow {
   title: string;
   description: string;
   status: string;
+  mission_type?: string | null;
   plan: string | null;
   generated_code: string | null;
   context: string | null;
@@ -41,6 +42,7 @@ interface MissionRow {
 }
 
 function rowToMission(row: MissionRow): Mission {
+  const missionType = row.mission_type === 'analysis' ? 'analysis' : 'implementation';
   return {
     id: row.id,
     projectId: row.project_id,
@@ -50,6 +52,7 @@ function rowToMission(row: MissionRow): Mission {
     title: row.title,
     description: row.description,
     status: row.status as MissionStatus,
+    missionType,
     plan: row.plan ? JSON.parse(row.plan) : null,
     generatedCode: row.generated_code ? JSON.parse(row.generated_code) : null,
     context: row.context ? JSON.parse(row.context) : null,
@@ -226,9 +229,10 @@ export const MissionsRepository = {
     const db = getDatabase();
     const id = generateId();
     
+    const missionType = data.missionType ?? 'implementation';
     const stmt = db.prepare(`
-      INSERT INTO missions (id, project_id, provider_id, plan_provider_id, code_provider_id, title, description, preserve_instructions, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'created')
+      INSERT INTO missions (id, project_id, provider_id, plan_provider_id, code_provider_id, title, description, preserve_instructions, mission_type, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'created')
     `);
     
     stmt.run(
@@ -239,7 +243,8 @@ export const MissionsRepository = {
       data.codeProviderId ?? null,
       data.title,
       data.description,
-      data.preserveInstructions ?? null
+      data.preserveInstructions ?? null,
+      missionType
     );
     
     return this.findById(id)!;
@@ -278,6 +283,10 @@ export const MissionsRepository = {
     if (data.codeProviderId !== undefined) {
       updates.push('code_provider_id = ?');
       values.push(data.codeProviderId);
+    }
+    if (data.missionType !== undefined) {
+      updates.push('mission_type = ?');
+      values.push(data.missionType);
     }
     if (data.status !== undefined) {
       updates.push('status = ?');

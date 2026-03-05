@@ -134,6 +134,9 @@ export function initDatabase(): Database.Database {
   // Migração: adicionar plan_provider_id e code_provider_id em missions se não existirem
   migratePlanCodeProviderIds(db);
 
+  // Migração: adicionar mission_type em missions se não existir
+  migrateMissionType(db);
+
   // Migração: criar tabela activation se não existir
   migrateActivationTable(db);
 
@@ -266,6 +269,22 @@ function migratePlanCodeProviderIds(database: Database.Database): void {
     database.exec("ALTER TABLE missions ADD COLUMN code_provider_id TEXT");
     console.log("[Database] Migration: code_provider_id column added to missions.");
   }
+}
+
+/**
+ * Migração: adiciona mission_type em missions se não existir.
+ */
+function migrateMissionType(database: Database.Database): void {
+  const rows = database
+    .prepare("PRAGMA table_info(missions)")
+    .all() as Array<{ name: string }>;
+  const hasColumn = rows.some((c) => c.name === "mission_type");
+  if (hasColumn) return;
+
+  database.exec(
+    "ALTER TABLE missions ADD COLUMN mission_type TEXT DEFAULT 'implementation'",
+  );
+  console.log("[Database] Migration: mission_type column added to missions.");
 }
 
 /**

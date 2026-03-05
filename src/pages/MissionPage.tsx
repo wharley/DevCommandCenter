@@ -1579,7 +1579,55 @@ export default function MissionPage() {
           </div>
         )}
         {!cliParseErrorWithRepoChanges &&
-          mission.status === "plan_generated" && (
+          mission.status === "plan_generated" &&
+          mission.missionType === "analysis" && (
+            <div className="mt-4 pt-4 border-t border-border flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-muted-foreground">Plano:</span>
+                <Select
+                  value={planProviderId || ""}
+                  onValueChange={(value) => {
+                    if (missionId && value)
+                      update(missionId, { planProviderId: value });
+                  }}
+                  disabled={isGenerating}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Provedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providers
+                      .filter((p) => p.isActive)
+                      .map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRegeneratePlanDialogOpen(true)}
+                  disabled={isGenerating || !planProvider}
+                >
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  Regenerar plano
+                </Button>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => missionId && updateStatus(missionId, "completed")}
+                disabled={isGenerating}
+              >
+                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                Marcar missão como concluída
+              </Button>
+            </div>
+          )}
+        {!cliParseErrorWithRepoChanges &&
+          mission.status === "plan_generated" &&
+          mission.missionType !== "analysis" && (
             <div className="mt-4 pt-4 border-t border-border space-y-3">
               <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -1974,6 +2022,7 @@ export default function MissionPage() {
             providerId: mission.providerId ?? undefined,
             planProviderId: mission.planProviderId ?? undefined,
             codeProviderId: mission.codeProviderId ?? undefined,
+            missionType: mission.missionType ?? undefined,
           }}
           onOpenTips={() => setTipsDialogOpen(true)}
         />

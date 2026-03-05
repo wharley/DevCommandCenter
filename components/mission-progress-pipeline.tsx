@@ -1,32 +1,54 @@
 import React from 'react';
 import { CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { MissionStatus } from '@/lib/database/types';
+import type { MissionStatus, MissionType } from '@/lib/database/types';
 
 interface PipelineStage {
-  id: 'plan' | 'code' | 'apply';
+  id: 'plan' | 'code' | 'apply' | 'done';
   label: string;
   status: 'completed' | 'active' | 'pending' | 'failed';
 }
 
 interface MissionProgressPipelineProps {
   status: MissionStatus;
+  /** Quando "analysis", mostra 2 estágios: Plano → Concluído */
+  missionType?: MissionType | null;
   className?: string;
 }
 
 /**
- * Componente visual que mostra o progresso da missão em formato de pipeline
- * Plano → Código → Aplicar
- * 
+ * Componente visual que mostra o progresso da missão em formato de pipeline.
+ * Implementação: Plano → Código → Aplicar.
+ * Análise: Plano → Concluído.
+ *
  * Estados:
  * - completed (verde): Etapa concluída
  * - active (azul animado): Etapa em execução
  * - pending (cinza): Etapa pendente
  * - failed (vermelho): Etapa falhou
  */
-export function MissionProgressPipeline({ status, className }: MissionProgressPipelineProps) {
+export function MissionProgressPipeline({ status, missionType, className }: MissionProgressPipelineProps) {
+  const isAnalysis = missionType === 'analysis';
+
   const stages: PipelineStage[] = React.useMemo(() => {
-    // Mapear status da missão para estados do pipeline
+    if (isAnalysis) {
+      const planStatus =
+        status === 'planning'
+          ? 'active'
+          : ['plan_generated', 'completed'].includes(status)
+          ? 'completed'
+          : status === 'failed'
+          ? 'failed'
+          : 'pending';
+      const doneStatus =
+        status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : planStatus === 'completed' ? 'pending' : 'pending';
+      return [
+        { id: 'plan', label: 'Plano', status: planStatus },
+        { id: 'done', label: 'Concluído', status: doneStatus },
+      ];
+    }
+
+    // Implementação: 3 estágios
     const planStatus =
       status === 'planning'
         ? 'active'
@@ -62,8 +84,8 @@ export function MissionProgressPipeline({ status, className }: MissionProgressPi
       { id: 'plan', label: 'Plano', status: planStatus },
       { id: 'code', label: 'Código', status: codeStatus },
       { id: 'apply', label: 'Aplicar', status: applyStatus },
-    ] as PipelineStage[];
-  }, [status]);
+    ];
+  }, [status, isAnalysis]);
 
   const getStageIcon = (stage: PipelineStage) => {
     switch (stage.status) {

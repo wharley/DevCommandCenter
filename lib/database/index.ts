@@ -25,6 +25,7 @@ export type {
   // Enums e tipos base
   ProviderType,
   MissionStatus,
+  MissionType,
   MissionLogType,
 
   // Entidades

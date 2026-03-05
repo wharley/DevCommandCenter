@@ -340,6 +340,7 @@ export default function ProjectPage() {
                           <div className="mt-2">
                             <MissionProgressPipeline
                               status={mission.status}
+                              missionType={mission.missionType ?? undefined}
                             />
                           </div>
                         </div>
@@ -482,6 +483,7 @@ export default function ProjectPage() {
             providerId: editingMission.providerId ?? undefined,
             planProviderId: editingMission.planProviderId ?? undefined,
             codeProviderId: editingMission.codeProviderId ?? undefined,
+            missionType: editingMission.missionType ?? undefined,
           }}
           onOpenTips={() => setTipsDialogOpen(true)}
         />

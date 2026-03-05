@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS missions (
   title TEXT NOT NULL,
   description TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created', 'planning', 'plan_generated', 'generating_code', 'code_ready', 'applying', 'completed', 'failed', 'cancelled')),
+  mission_type TEXT DEFAULT 'implementation' CHECK (mission_type IN ('implementation', 'analysis')),
   plan TEXT, -- JSON com o plano de ação gerado
   generated_code TEXT, -- JSON com as sugestões de código/diffs
   context TEXT, -- JSON com contexto do repo usado na missão
