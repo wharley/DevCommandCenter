@@ -10,7 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { useProjects } from "@/hooks/use-data";
+import { useProjects, useMissions } from "@/hooks/use-data";
 import { useAppStore } from "@/hooks/use-app-store";
 
 const navItems = [
@@ -18,9 +18,25 @@ const navItems = [
   { href: "/settings", label: "Configurações", icon: Settings },
 ];
 
+/** Gera uma cor estável por projeto (HSL) para uso em badges/círculos. */
+function projectAccentColor(projectId: string): { bg: string; fg: string } {
+  let hash = 0;
+  for (let i = 0; i < projectId.length; i++) {
+    hash = projectId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash % 360);
+  const sat = 52;
+  const light = 42;
+  return {
+    bg: `hsl(${hue}, ${sat}%, ${light}%)`,
+    fg: "hsl(0, 0%, 100%)",
+  };
+}
+
 export function AppSidebar() {
   const { pathname } = useLocation();
   const { projects } = useProjects();
+  const { missions } = useMissions();
   const currentProjectId = useAppStore((s) => s.currentProjectId);
   const recentProjects = projects
     .sort((a, b) => {
@@ -94,6 +110,10 @@ export function AppSidebar() {
           ) : (
             recentProjects.map((project) => {
               const isActive = currentProjectId === project.id;
+              const missionCount = missions.filter(
+                (m) => m.projectId === project.id
+              ).length;
+              const accent = projectAccentColor(project.id);
               return (
                 <Link
                   key={project.id}
@@ -106,8 +126,22 @@ export function AppSidebar() {
                   )}
                 >
                   <FolderGit2 className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{project.name}</span>
-                  <ChevronRight className="ml-auto h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
+                  <span className="truncate flex-1 min-w-0">
+                    {project.name}
+                  </span>
+                  {missionCount > 0 && (
+                    <span
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold tabular-nums shadow-sm ring-2 ring-sidebar/80"
+                      style={{
+                        backgroundColor: accent.bg,
+                        color: accent.fg,
+                      }}
+                      title={`${missionCount} missão${missionCount !== 1 ? "ões" : ""}`}
+                    >
+                      {missionCount > 99 ? "99+" : missionCount}
+                    </span>
+                  )}
+                  <ChevronRight className="h-4 w-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
                 </Link>
               );
             })
