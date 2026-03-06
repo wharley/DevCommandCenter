@@ -908,8 +908,13 @@ export class CursorAdapter extends BaseAdapter {
       }
 
       const promptArg = CursorAdapter.buildPromptFromFileInstruction(tempPath);
+      // --trust: avoid "Workspace Trust Required" in headless mode (required when running non-interactively)
+      // --workspace: make the workspace explicit so the CLI trusts the correct directory
       const args = [
         ...modelArgs,
+        "--trust",
+        "--workspace",
+        cwd,
         "--output-format",
         "json",
         subcommand,
