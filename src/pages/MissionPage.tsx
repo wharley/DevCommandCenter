@@ -2411,11 +2411,11 @@ const FileAccordionItem = memo(function FileAccordionItem({
               {showTabs ? (
                 <Tabs
                   defaultValue={
-                    hasOriginal
-                      ? "original"
-                      : hasSuggested
-                        ? "suggested"
-                        : "diff"
+                    hasDiff
+                      ? "diff"
+                      : hasOriginal
+                        ? "original"
+                        : "suggested"
                   }
                   className="w-full"
                 >
