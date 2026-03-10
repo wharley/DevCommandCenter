@@ -13,6 +13,10 @@ import * as path from "node:path";
 import { app } from "electron";
 import { BaseAdapter } from "./base";
 import { spawnCliWithLoginShell, getResolvedPathForNode } from "../shell-path";
+import {
+  extractCommandsFromPlan,
+  extractCommandsFromCode,
+} from "../../../lib/command-detector";
 import type {
   ValidationResult,
   AdapterConfig,
@@ -173,7 +177,12 @@ export class CursorAdapter extends BaseAdapter {
         const repaired = this.tryRepairTruncatedInnerPayload(response, (r) =>
           this.parseAndValidateMissionPlan(r),
         );
-        if (repaired) planResult = repaired;
+        if (repaired)
+          planResult = {
+            success: true,
+            data: repaired.data,
+            pendingCommands: extractCommandsFromPlan(repaired.data),
+          };
       }
 
       if (!planResult.success) {
@@ -278,7 +287,12 @@ export class CursorAdapter extends BaseAdapter {
         const repaired = this.tryRepairTruncatedInnerPayload(response, (r) =>
           this.parseAndValidateGeneratedCode(r),
         );
-        if (repaired) codeResult = repaired;
+        if (repaired)
+          codeResult = {
+            success: true,
+            data: repaired.data,
+            pendingCommands: extractCommandsFromCode(repaired.data),
+          };
       }
 
       if (!codeResult.success) {
