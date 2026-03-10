@@ -9,6 +9,7 @@ import type {
   GeneratedCode,
   PlanStep,
   CodeSuggestion,
+  PendingCommand,
 } from "../../lib/database/types";
 
 // ============================================
@@ -22,6 +23,8 @@ export interface AIResponse<T = MissionPlan | GeneratedCode> {
   /** When true and success is false, orchestrator may retry once (e.g. plan parse UNKNOWN_SHAPE). */
   retryable?: boolean;
   metadata?: AIResponseMetadata;
+  /** Comandos pendentes detectados que o usuário deve executar manualmente */
+  pendingCommands?: PendingCommand[];
 }
 
 export interface AIResponseMetadata {
@@ -178,4 +181,5 @@ export type {
   GeneratedCode,
   PlanStep,
   CodeSuggestion,
+  PendingCommand,
 };

@@ -8,6 +8,7 @@ export { CodexAdapter, createCodexAdapter } from "./codex";
 export { OpenAIAdapter, createOpenAIAdapter } from "./openai";
 export { AnthropicAdapter, createAnthropicAdapter } from "./anthropic";
 export { CursorAdapter, createCursorAdapter } from "./cursor";
+export { GeminiAdapter, createGeminiAdapter } from "./gemini";
 
 import type { AIProviderAdapter, Provider } from "../types";
 import { ClaudeCodeAdapter } from "./claude-code";
@@ -15,6 +16,7 @@ import { CodexAdapter } from "./codex";
 import { OpenAIAdapter } from "./openai";
 import { AnthropicAdapter } from "./anthropic";
 import { CursorAdapter } from "./cursor";
+import { GeminiAdapter } from "./gemini";
 
 /**
  * Factory para criar o adapter correto baseado no tipo do provider
@@ -31,6 +33,8 @@ export function createAdapter(provider: Provider): AIProviderAdapter {
       return new AnthropicAdapter(provider);
     case "cursor":
       return new CursorAdapter(provider);
+    case "gemini":
+      return new GeminiAdapter(provider);
     case "custom":
       // Para custom, tenta detectar o melhor adapter baseado na config
       if (provider.cliPath) {
@@ -42,6 +46,9 @@ export function createAdapter(provider: Provider): AIProviderAdapter {
         }
         if (provider.cliPath.includes("agent") || provider.cliPath.includes("cursor")) {
           return new CursorAdapter(provider);
+        }
+        if (provider.cliPath.includes("gemini")) {
+          return new GeminiAdapter(provider);
         }
       }
       if (provider.apiKey) {
@@ -89,6 +96,12 @@ export const adapterRegistry = {
   "cursor": {
     name: "Cursor Agent CLI",
     description: "Uses Cursor Agent CLI (agent) installed locally. Login is done in the terminal.",
+    requiresCli: true,
+    requiresApiKey: false,
+  },
+  "gemini": {
+    name: "Gemini CLI",
+    description: "Uses Gemini CLI (@google/gemini-cli) installed locally. Authenticate via terminal or GEMINI_API_KEY.",
     requiresCli: true,
     requiresApiKey: false,
   },

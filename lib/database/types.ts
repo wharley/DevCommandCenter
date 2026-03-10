@@ -12,6 +12,7 @@ export type ProviderType =
   | "openai"
   | "anthropic"
   | "cursor"
+  | "gemini"
   | "custom";
 
 export type MissionStatus =
@@ -99,6 +100,8 @@ export interface Mission {
   codeGenerationAttempts?: number;
   isCommitted?: boolean;
   isPushed?: boolean;
+  /** Comandos pendentes detectados que o usuário precisa executar manualmente */
+  pendingCommands?: PendingCommand[] | null;
   startedAt?: Date | null;
   completedAt?: Date | null;
   createdAt: Date;
@@ -138,6 +141,17 @@ export interface MissionContext {
   fileContents?: Record<string, string>;
   gitBranch?: string;
   gitStatus?: string;
+}
+
+/** Comando pendente detectado que o usuário precisa executar manualmente */
+export interface PendingCommand {
+  id: string;
+  command: string;
+  description?: string;
+  /** Onde o comando foi detectado: plan, code ou file (ex: package.json) */
+  source: "plan" | "code" | "file";
+  /** Data/hora em que o usuário confirmou ter executado o comando */
+  confirmedAt?: Date | null;
 }
 
 export interface MissionLog {
@@ -225,6 +239,7 @@ export interface UpdateMissionDTO {
   codeGenerationAttempts?: number;
   isCommitted?: boolean;
   isPushed?: boolean;
+  pendingCommands?: PendingCommand[] | null;
   startedAt?: Date;
   completedAt?: Date;
 }

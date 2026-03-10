@@ -178,6 +178,16 @@ export class AIOrchestrator {
         // Salva o plano e atualiza status
         db.missions.updatePlan(missionId, result.data);
         db.missions.updateStatus(missionId, "plan_generated");
+        
+        // Salva comandos pendentes detectados no plano
+        if (result.pendingCommands && result.pendingCommands.length > 0) {
+          db.missions.update(missionId, { pendingCommands: result.pendingCommands });
+          db.missionLogs.logInfo(
+            missionId,
+            `Detected ${result.pendingCommands.length} pending command(s) to execute`
+          );
+        }
+        
         db.missionLogs.logInfo(
           missionId,
           "Plan generated successfully",
@@ -329,6 +339,27 @@ export class AIOrchestrator {
           }));
           db.missions.updatePlan(missionId, { ...mission.plan, steps });
         }
+        
+        // Merge comandos pendentes do código com os existentes do plano
+        if (result.pendingCommands && result.pendingCommands.length > 0) {
+          const existingCommands = mission?.pendingCommands ?? [];
+          const existingCommandStrings = new Set(
+            existingCommands.map((c) => c.command.toLowerCase())
+          );
+          const newCommands = result.pendingCommands.filter(
+            (c) => !existingCommandStrings.has(c.command.toLowerCase())
+          );
+          
+          if (newCommands.length > 0) {
+            const mergedCommands = [...existingCommands, ...newCommands];
+            db.missions.update(missionId, { pendingCommands: mergedCommands });
+            db.missionLogs.logInfo(
+              missionId,
+              `Detected ${newCommands.length} additional pending command(s) in generated code`
+            );
+          }
+        }
+        
         db.missionLogs.logInfo(
           missionId,
           `Code generated: ${result.data.files?.length || 0} files`,

@@ -75,6 +75,8 @@ import type {
   MissionLogType,
   GeneratedCode,
 } from "@/lib/database/types";
+import { PendingCommandsAlert } from "@/components/pending-commands-alert";
+import { getUnconfirmedCommands } from "@/lib/command-detector";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import Editor from "react-simple-code-editor";
@@ -1013,6 +1015,20 @@ export default function MissionPage() {
       toast.error("Push indisponível");
       return;
     }
+
+    // Verificar comandos pendentes não confirmados
+    const unconfirmed = getUnconfirmedCommands(mission?.pendingCommands);
+    if (unconfirmed.length > 0) {
+      const proceed = await confirmDialog({
+        title: "Comandos Pendentes",
+        description: `Há ${unconfirmed.length} comando(s) que você ainda não confirmou ter executado (ex: npm install, migrations). Prosseguir com push mesmo assim?`,
+        confirmLabel: "Prosseguir",
+        cancelLabel: "Voltar e Confirmar",
+      });
+
+      if (!proceed) return;
+    }
+
     setIsPushing(true);
     try {
       const result = await window.electronAPI.git.push(project.path);
@@ -1030,6 +1046,23 @@ export default function MissionPage() {
       toast.error(`Falha ao fazer push: ${msg}`);
     } finally {
       setIsPushing(false);
+    }
+  };
+
+  const handleConfirmPendingCommands = async (commandIds: string[]) => {
+    if (!missionId || !mission?.pendingCommands) return;
+
+    const now = new Date();
+    const updatedCommands = mission.pendingCommands.map((cmd) =>
+      commandIds.includes(cmd.id) ? { ...cmd, confirmedAt: now } : cmd
+    );
+
+    try {
+      await update(missionId, { pendingCommands: updatedCommands });
+      toast.success("Comandos confirmados");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro desconhecido";
+      toast.error(`Falha ao confirmar comandos: ${msg}`);
     }
   };
 
@@ -1790,6 +1823,16 @@ export default function MissionPage() {
               <XCircle className="mr-2 h-4 w-4" />
               Cancelar
             </Button>
+          </div>
+        )}
+
+        {/* Pending Commands Alert */}
+        {mission.pendingCommands && mission.pendingCommands.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-border">
+            <PendingCommandsAlert
+              commands={mission.pendingCommands}
+              onConfirm={handleConfirmPendingCommands}
+            />
           </div>
         )}
 

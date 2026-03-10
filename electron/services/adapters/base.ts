@@ -3,6 +3,11 @@
  */
 
 import { missionPlanSchema, generatedCodeSchema } from "../schemas";
+import {
+  extractCommandsFromPlan,
+  extractCommandsFromCode,
+  mergeCommands,
+} from "../../../lib/command-detector";
 import type {
   AIProviderAdapter,
   ValidationResult,
@@ -12,6 +17,7 @@ import type {
   GeneratedCode,
   Provider,
   ProgressCallback,
+  PendingCommand,
 } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -851,15 +857,17 @@ Format rules:
   /**
    * Normaliza e valida resposta como MissionPlan via parseAndRepairPlan.
    * Em falha, retorna mensagem genérica e retryable quando o motivo for UNKNOWN_SHAPE.
+   * Também extrai comandos pendentes detectados no plano.
    */
   protected parseAndValidateMissionPlan(
     raw: string
   ):
-    | { success: true; data: MissionPlan }
+    | { success: true; data: MissionPlan; pendingCommands: PendingCommand[] }
     | { success: false; error: string; retryable?: boolean } {
     const { plan, warnings } = this.parseAndRepairPlan(raw);
     if (plan != null) {
-      return { success: true, data: plan };
+      const pendingCommands = extractCommandsFromPlan(plan);
+      return { success: true, data: plan, pendingCommands };
     }
     const retryable = warnings.some((w) => w.type === "UNKNOWN_SHAPE");
     return {
@@ -871,15 +879,30 @@ Format rules:
 
   /**
    * Normaliza e valida resposta como GeneratedCode (com Zod).
+   * Também extrai comandos pendentes detectados no código.
    */
   protected parseAndValidateGeneratedCode(
     raw: string
   ):
-    | { success: true; data: GeneratedCode }
+    | { success: true; data: GeneratedCode; pendingCommands: PendingCommand[] }
     | { success: false; error: string } {
     const result = this.normalizeAndValidate(raw, generatedCodeSchema);
     if (!result.success) return result;
-    return { success: true, data: result.data as GeneratedCode };
+    const code = result.data as GeneratedCode;
+    const pendingCommands = extractCommandsFromCode(code);
+    return { success: true, data: code, pendingCommands };
+  }
+
+  /**
+   * Combina comandos pendentes de múltiplas fontes, removendo duplicatas.
+   */
+  protected mergePendingCommands(
+    ...commandArrays: (PendingCommand[] | undefined)[]
+  ): PendingCommand[] {
+    const filtered = commandArrays.filter(
+      (arr): arr is PendingCommand[] => arr !== undefined
+    );
+    return mergeCommands(...filtered);
   }
 
   /**

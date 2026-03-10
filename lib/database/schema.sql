@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS providers (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('claude-code', 'codex', 'openai', 'anthropic', 'cursor', 'custom')),
+  type TEXT NOT NULL CHECK (type IN ('claude-code', 'codex', 'openai', 'anthropic', 'cursor', 'gemini', 'custom')),
   api_key TEXT,
   api_key_encrypted BLOB,
   cli_path TEXT,
@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS missions (
   code_generation_attempts INTEGER DEFAULT 0, -- Contador de tentativas de geração de código
   is_committed INTEGER DEFAULT 0, -- Se as alterações já foram commitadas
   is_pushed INTEGER DEFAULT 0, -- Se o commit já foi enviado ao remoto
+  pending_commands TEXT, -- JSON com comandos pendentes que o usuário precisa executar
   started_at TEXT,
   completed_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),

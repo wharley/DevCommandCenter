@@ -1,13 +1,17 @@
 /**
- * Codex CLI Adapter
+ * Gemini CLI Adapter
  *
- * Integração com o OpenAI Codex CLI
- * Usa o CLI instalado localmente para executar comandos
+ * Integração com o Gemini CLI (https://github.com/google-gemini/gemini-cli)
+ * Usa o CLI instalado localmente para executar comandos em modo headless.
+ * Workspace: sempre passar cwd no spawn para o diretório do projeto; se o CLI
+ * ganhar flags tipo --trust/--workspace no futuro, adicionar aqui para evitar
+ * problema de permissão como no Cursor.
  */
 
-import { spawn, execSync, type ChildProcess } from "node:child_process";
+import { execSync, type ChildProcess } from "node:child_process";
 import { platform } from "node:os";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { BaseAdapter } from "./base";
 import { spawnCliWithLoginShell, getResolvedPathForNode } from "../shell-path";
 import type {
@@ -20,14 +24,30 @@ import type {
   ProgressCallback,
 } from "../types";
 
-// Timeout padrão de 10 minutos (em ms)
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
-// Timeout de inatividade (sem receber chunks) - 2 minutos
 const INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
 
-export class CodexAdapter extends BaseAdapter {
-  readonly name = "OpenAI Codex";
-  readonly type = "codex" as const;
+/**
+ * Resolve o caminho do binário Gemini CLI.
+ * Se provider.cliPath estiver definido, usa esse; senão tenta "gemini" no PATH.
+ */
+function resolveCliPath(provider: Provider): string | null {
+  if (provider.cliPath && fs.existsSync(provider.cliPath)) {
+    return provider.cliPath;
+  }
+  const name = platform() === "win32" ? "gemini.cmd" : "gemini";
+  const pathEnv = process.env.PATH || "";
+  const sep = platform() === "win32" ? ";" : ":";
+  for (const dir of pathEnv.split(sep)) {
+    const candidate = path.join(dir.trim(), name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+export class GeminiAdapter extends BaseAdapter {
+  readonly name = "Gemini CLI";
+  readonly type = "gemini" as const;
 
   constructor(provider: Provider) {
     super(provider);
@@ -37,19 +57,16 @@ export class CodexAdapter extends BaseAdapter {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // Verifica se o CLI path está configurado
-    if (!this.provider.cliPath) {
+    const cliPath = resolveCliPath(this.provider);
+    if (!cliPath) {
       errors.push(
-        "CLI path is required for Codex. Please configure the path to the 'codex' executable."
+        "Gemini CLI not found. Please install it (npm install -g @google/gemini-cli) or set the path to the 'gemini' executable in the provider settings.",
       );
-    } else if (!fs.existsSync(this.provider.cliPath)) {
-      errors.push(`CLI not found at: ${this.provider.cliPath}`);
     }
 
-    // API Key é opcional se já estiver configurada no ambiente
-    if (!this.provider.apiKey && !process.env.OPENAI_API_KEY) {
+    if (!this.provider.apiKey && !process.env.GEMINI_API_KEY) {
       warnings.push(
-        "No API key configured. Make sure OPENAI_API_KEY is set in your environment."
+        "No API key configured. Make sure GEMINI_API_KEY is set in your environment or configure it in the provider. You can also authenticate via the CLI (run 'gemini' in terminal and sign in with Google).",
       );
     }
 
@@ -69,35 +86,43 @@ export class CodexAdapter extends BaseAdapter {
       };
     }
 
+    const cliPath = resolveCliPath(this.provider)!;
+    const cliEnv = { ...process.env, PATH: getResolvedPathForNode() };
     try {
-      // Tenta rodar --version para verificar se o CLI funciona (env.PATH para app aberto pelo Finder; stdio + -c check_for_update_on_startup=false evitam bloqueio no prompt de update)
-      const result = execSync(
-        `"${this.provider.cliPath}" -c check_for_update_on_startup=false --version`,
-        {
-          encoding: "utf-8",
-          timeout: 10000,
-          env: { ...process.env, PATH: getResolvedPathForNode() },
-          stdio: ["ignore", "pipe", "pipe"],
-        }
-      );
-
+      execSync(`"${cliPath}" --help`, {
+        encoding: "utf-8",
+        timeout: 10000,
+        env: cliEnv,
+      });
       return {
         success: true,
-        message: `Codex CLI detected: ${result.trim()}`,
+        message: "Gemini CLI detected.",
       };
-    } catch (error) {
-      return {
-        success: false,
-        message: `Failed to run Codex CLI: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`,
-      };
+    } catch {
+      try {
+        execSync(`"${cliPath}" --version`, {
+          encoding: "utf-8",
+          timeout: 10000,
+          env: cliEnv,
+        });
+        return {
+          success: true,
+          message: "Gemini CLI detected.",
+        };
+      } catch (err) {
+        return {
+          success: false,
+          message: `Failed to run Gemini CLI: ${
+            err instanceof Error ? err.message : "Unknown error"
+          }. Make sure you are authenticated (run 'gemini' in terminal if needed).`,
+        };
+      }
     }
   }
 
   async generatePlan(
     config: AdapterConfig,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
   ): Promise<AIResponse<MissionPlan>> {
     const startTime = Date.now();
     const validation = this.validate();
@@ -113,18 +138,16 @@ export class CodexAdapter extends BaseAdapter {
       onProgress?.("Preparando prompt para geração do plano...");
       const prompt = this.buildPlanPrompt(config);
 
-      onProgress?.("Conectando ao Codex CLI...");
+      onProgress?.("Conectando ao Gemini CLI...");
 
-      // Start timer-based progress feedback for better UX
       const progressTimer = this.startProgressFeedback(onProgress, "plan");
 
-      const response = await this.executeCodexCommand(
+      const response = await this.executeGeminiCommand(
         prompt,
         config.projectContext.projectPath,
-        onProgress
+        onProgress,
       );
 
-      // Clear timer-based progress
       if (progressTimer) clearInterval(progressTimer);
 
       onProgress?.("Processando resposta...");
@@ -143,7 +166,6 @@ export class CodexAdapter extends BaseAdapter {
       }
 
       const plan = planResult.data;
-      // Garante que os steps têm IDs únicos
       if (plan.steps) {
         plan.steps = plan.steps.map((step, index) => ({
           ...step,
@@ -159,7 +181,7 @@ export class CodexAdapter extends BaseAdapter {
         metadata: {
           durationMs: Date.now() - startTime,
           provider: this.name,
-          model: (this.provider.config?.model as string) || "codex",
+          model: (this.provider.config?.model as string) || "gemini",
         },
       };
     } catch (error) {
@@ -179,7 +201,7 @@ export class CodexAdapter extends BaseAdapter {
 
   async generateCode(
     config: AdapterConfig,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
   ): Promise<AIResponse<GeneratedCode>> {
     const startTime = Date.now();
     const validation = this.validate();
@@ -195,18 +217,16 @@ export class CodexAdapter extends BaseAdapter {
       onProgress?.("Preparando prompt para geração de código...");
       const prompt = this.buildCodePrompt(config);
 
-      onProgress?.("Conectando ao Codex CLI...");
+      onProgress?.("Conectando ao Gemini CLI...");
 
-      // Start timer-based progress feedback for better UX
       const progressTimer = this.startProgressFeedback(onProgress, "code");
 
-      const response = await this.executeCodexCommand(
+      const response = await this.executeGeminiCommand(
         prompt,
         config.projectContext.projectPath,
-        onProgress
+        onProgress,
       );
 
-      // Clear timer-based progress
       if (progressTimer) clearInterval(progressTimer);
 
       onProgress?.("Processando resposta...");
@@ -235,7 +255,7 @@ export class CodexAdapter extends BaseAdapter {
         metadata: {
           durationMs: Date.now() - startTime,
           provider: this.name,
-          model: (this.provider.config?.model as string) || "codex",
+          model: (this.provider.config?.model as string) || "gemini",
         },
       };
     } catch (error) {
@@ -254,39 +274,29 @@ export class CodexAdapter extends BaseAdapter {
   }
 
   /**
-   * Executa o comando Codex CLI com suporte a streaming e timeout inteligente
+   * Executa o comando Gemini CLI em modo headless.
+   * cwd é obrigatório para o CLI rodar no workspace correto (evitar problema de
+   * permissão como no Cursor). Se o Gemini CLI ganhar flags --trust/--workspace,
+   * adicionar aqui.
    */
-  private executeCodexCommand(
+  private executeGeminiCommand(
     prompt: string,
     cwd: string,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const cliPath = this.provider.cliPath!;
+      const cliPath = resolveCliPath(this.provider)!;
 
-      // Obtém timeout configurável do provider ou usa o padrão
       const maxTimeout =
         (this.provider.config?.timeout as number) || DEFAULT_TIMEOUT_MS;
       const inactivityTimeout = Math.min(INACTIVITY_TIMEOUT_MS, maxTimeout / 2);
 
-      // Args para o Codex CLI (codex exec = modo não-interativo para automação)
-      // -c check_for_update_on_startup=false: não exibir prompt de atualização
+      const model = this.provider.config?.model as string | undefined;
       const args = [
-        "exec",
-        "--cd",
-        cwd,
-        "--full-auto",
-        "-c",
-        "check_for_update_on_startup=false",
-        "--skip-git-repo-check",
+        "--output-format",
+        "json",
+        ...(model && model.trim() ? ["--model", model] : []),
       ];
-
-      const model = this.provider.config?.model as string;
-      if (model) {
-        args.push("--model", model);
-      }
-
-      args.push("-"); // prompt via stdin
 
       let child: ChildProcess;
       let stdout = "";
@@ -316,21 +326,19 @@ export class CodexAdapter extends BaseAdapter {
         try {
           child?.kill();
         } catch {
-          // Ignora erros ao matar o processo
+          // ignore
         }
         reject(error);
       };
 
-      // Timeout de inatividade só após o primeiro chunk (período de graça para TTFT).
-      // Reseta a cada chunk recebido.
       const resetInactivityTimeout = () => {
         clearTimeout(inactivityTimeoutId);
         inactivityTimeoutId = setTimeout(() => {
           handleReject(
             new Error(
-              `Codex CLI inativo por ${inactivityTimeout / 60000} minutos. ` +
-                `Chunks recebidos: ${chunksReceived}.`
-            )
+              `Gemini CLI inativo por ${inactivityTimeout / 60000} minutos. ` +
+                `Chunks recebidos: ${chunksReceived}.`,
+            ),
           );
         }, inactivityTimeout);
       };
@@ -338,10 +346,8 @@ export class CodexAdapter extends BaseAdapter {
       try {
         const env = {
           ...process.env,
-          OPENAI_API_KEY: this.provider.apiKey || process.env.OPENAI_API_KEY,
-          ...(this.provider.apiKey && {
-            CODEX_API_KEY: this.provider.apiKey,
-          }),
+          GEMINI_API_KEY:
+            this.provider.apiKey || process.env.GEMINI_API_KEY,
         };
         child = spawnCliWithLoginShell(cliPath, args, {
           cwd,
@@ -350,12 +356,11 @@ export class CodexAdapter extends BaseAdapter {
           stdio: ["pipe", "pipe", "pipe"],
         });
 
-        // Envia o prompt via stdin
         if (child.stdin) {
           child.stdin.write(prompt);
           child.stdin.end();
         } else {
-          handleReject(new Error("Failed to write to Codex CLI stdin"));
+          handleReject(new Error("Failed to write to Gemini CLI stdin"));
           return;
         }
 
@@ -369,7 +374,7 @@ export class CodexAdapter extends BaseAdapter {
           if (chunksReceived % 5 === 0 || chunk.length > 100) {
             const sizeKB = (stdout.length / 1024).toFixed(1);
             onProgress?.(
-              `Recebendo resposta... (${sizeKB} KB, ${chunksReceived} chunks)`
+              `Recebendo resposta... (${sizeKB} KB, ${chunksReceived} chunks)`,
             );
           }
         });
@@ -382,14 +387,33 @@ export class CodexAdapter extends BaseAdapter {
         child.on("close", (code) => {
           if (code === 0) {
             onProgress?.(
-              `Resposta completa recebida (${(stdout.length / 1024).toFixed(
-                1
-              )} KB)`
+              `Resposta completa recebida (${(stdout.length / 1024).toFixed(1)} KB)`,
             );
-            handleResolve(stdout);
+            try {
+              const parsed = JSON.parse(stdout) as {
+                response?: string;
+                error?: { message?: string; type?: string };
+              };
+              if (parsed.error) {
+                handleReject(
+                  new Error(
+                    parsed.error.message ||
+                      String(parsed.error.type || "Gemini CLI error"),
+                  ),
+                );
+                return;
+              }
+              const responseText =
+                typeof parsed.response === "string"
+                  ? parsed.response
+                  : stdout;
+              handleResolve(responseText);
+            } catch {
+              handleResolve(stdout);
+            }
           } else {
             handleReject(
-              new Error(stderr || `Codex CLI exited with code ${code}`)
+              new Error(stderr || `Gemini CLI exited with code ${code}`),
             );
           }
         });
@@ -402,17 +426,16 @@ export class CodexAdapter extends BaseAdapter {
           if (chunksReceived === 0) {
             handleReject(
               new Error(
-                "Nenhum dado recebido do Codex CLI dentro do tempo máximo. " +
-                  "O primeiro token pode demorar vários minutos em prompts longos. " +
-                  "Verifique conexão, aumente o timeout do provider ou simplifique o prompt."
-              )
+                "Nenhum dado recebido do Gemini CLI dentro do tempo máximo. " +
+                  "Verifique autenticação (rode 'gemini' no terminal se necessário) e aumente o timeout se precisar.",
+              ),
             );
           } else {
             handleReject(
               new Error(
-                `Codex CLI timeout máximo (${maxTimeout / 60000} minutos). ` +
-                  `Chunks recebidos: ${chunksReceived}.`
-              )
+                `Gemini CLI timeout máximo (${maxTimeout / 60000} minutos). ` +
+                  `Chunks recebidos: ${chunksReceived}.`,
+              ),
             );
           }
         }, maxTimeout);
@@ -423,7 +446,6 @@ export class CodexAdapter extends BaseAdapter {
   }
 }
 
-// Factory function
-export function createCodexAdapter(provider: Provider): CodexAdapter {
-  return new CodexAdapter(provider);
+export function createGeminiAdapter(provider: Provider): GeminiAdapter {
+  return new GeminiAdapter(provider);
 }

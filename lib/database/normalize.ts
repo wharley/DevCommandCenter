@@ -40,7 +40,19 @@ export function normalizeProvider(raw: Record<string, unknown>): Record<string, 
 }
 
 export function normalizeMission(raw: Record<string, unknown>): Record<string, unknown> {
-  return normalizeDates(raw, DATE_KEYS.mission);
+  const normalized = normalizeDates(raw, DATE_KEYS.mission);
+  
+  // Normalize dates inside pendingCommands array
+  if (Array.isArray(normalized.pendingCommands)) {
+    normalized.pendingCommands = normalized.pendingCommands.map((cmd: Record<string, unknown>) => {
+      if (cmd && typeof cmd === 'object' && cmd.confirmedAt) {
+        return { ...cmd, confirmedAt: parseDate(cmd.confirmedAt) };
+      }
+      return cmd;
+    });
+  }
+  
+  return normalized;
 }
 
 export function normalizeMissionLog(raw: Record<string, unknown>): Record<string, unknown> {

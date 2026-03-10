@@ -176,6 +176,7 @@ export class AnthropicAdapter extends BaseAdapter {
       return {
         success: true,
         data: plan,
+        pendingCommands: planResult.pendingCommands,
         metadata: {
           durationMs: Date.now() - startTime,
           provider: this.name,
@@ -250,6 +251,7 @@ export class AnthropicAdapter extends BaseAdapter {
       return {
         success: true,
         data: code,
+        pendingCommands: codeResult.pendingCommands,
         metadata: {
           durationMs: Date.now() - startTime,
           provider: this.name,

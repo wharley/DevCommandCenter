@@ -8,6 +8,7 @@ import type {
   MissionPlan,
   GeneratedCode,
   MissionContext,
+  PendingCommand,
   CreateMissionDTO,
   UpdateMissionDTO,
   MissionsQueryOptions,
@@ -35,6 +36,7 @@ interface MissionRow {
   code_generation_attempts: number | null;
   is_committed: number | null;
   is_pushed: number | null;
+  pending_commands: string | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -61,6 +63,7 @@ function rowToMission(row: MissionRow): Mission {
     codeGenerationAttempts: row.code_generation_attempts ?? 0,
     isCommitted: row.is_committed ? Boolean(row.is_committed) : false,
     isPushed: row.is_pushed ? Boolean(row.is_pushed) : false,
+    pendingCommands: row.pending_commands ? JSON.parse(row.pending_commands) : null,
     startedAt: row.started_at ? new Date(row.started_at) : null,
     completedAt: row.completed_at ? new Date(row.completed_at) : null,
     createdAt: new Date(row.created_at),
@@ -323,6 +326,10 @@ export const MissionsRepository = {
     if (data.isPushed !== undefined) {
       updates.push('is_pushed = ?');
       values.push(data.isPushed ? '1' : '0');
+    }
+    if (data.pendingCommands !== undefined) {
+      updates.push('pending_commands = ?');
+      values.push(data.pendingCommands ? JSON.stringify(data.pendingCommands) : null);
     }
     if (data.startedAt !== undefined) {
       updates.push('started_at = ?');

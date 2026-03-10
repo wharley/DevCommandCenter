@@ -29,6 +29,7 @@ const providerTypeToCliCommand: Partial<Record<ProviderType, string>> = {
   "claude-code": "claude",
   codex: "codex",
   cursor: "agent",
+  gemini: "gemini",
 };
 
 interface AddProviderDialogProps {
@@ -64,6 +65,12 @@ const providerTypes: {
   {
     value: "cursor",
     label: "Cursor CLI",
+    needsApiKey: false,
+    needsCli: true,
+  },
+  {
+    value: "gemini",
+    label: "Gemini CLI",
     needsApiKey: false,
     needsCli: true,
   },
@@ -114,6 +121,15 @@ const modelsByProviderType: Partial<
     { value: "gemini-3-flash", label: "Gemini 3 Flash" },
     { value: "gemini-3-pro", label: "Gemini 3 Pro" },
     { value: "grok-code", label: "Grok Code" },
+  ],
+  gemini: [
+    { value: "", label: "Padrão do CLI (auto)" },
+    { value: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
+    { value: "gemini-3-flash", label: "Gemini 3 Flash" },
+    { value: "gemini-3-pro", label: "Gemini 3 Pro" },
+    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
   ],
 };
 

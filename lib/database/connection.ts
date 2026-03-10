@@ -122,6 +122,9 @@ export function initDatabase(): Database.Database {
   // Migração: adicionar coluna api_key_encrypted se não existir
   migrateApiKeyEncrypted(db);
 
+  // Migração: atualizar CHECK de providers para incluir 'gemini'
+  migrateProvidersTypeCheckAddGemini(db);
+
   // Migração: adicionar coluna preserve_instructions em missions se não existir
   migratePreserveInstructions(db);
 
@@ -183,6 +186,47 @@ function migrateProvidersTypeCheck(database: Database.Database): void {
   `);
   database.pragma('foreign_keys = ON');
   console.log('[Database] Migration: providers type CHECK updated (codex, cursor added).');
+}
+
+/**
+ * Migração: recria a tabela providers com CHECK que inclui 'gemini'.
+ * Necessário porque SQLite não permite ALTER TABLE para mudar CHECK em tabelas existentes.
+ */
+function migrateProvidersTypeCheckAddGemini(database: Database.Database): void {
+  const row = database
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'providers'",
+    )
+    .get() as { sql: string } | undefined;
+  if (!row?.sql || row.sql.includes("'gemini'")) {
+    return; // já tem gemini no CHECK ou tabela não existe
+  }
+
+  database.pragma('foreign_keys = OFF');
+  database.exec(`
+    CREATE TABLE providers_new (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('claude-code', 'codex', 'openai', 'anthropic', 'cursor', 'gemini', 'custom')),
+      api_key TEXT,
+      api_key_encrypted BLOB,
+      cli_path TEXT,
+      config TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    INSERT INTO providers_new SELECT id, name, type, api_key, api_key_encrypted, cli_path, config, is_active, created_at, updated_at FROM providers;
+    DROP TABLE providers;
+    ALTER TABLE providers_new RENAME TO providers;
+    CREATE TRIGGER update_providers_timestamp
+    AFTER UPDATE ON providers
+    BEGIN
+      UPDATE providers SET updated_at = datetime('now') WHERE id = NEW.id;
+    END;
+  `);
+  database.pragma('foreign_keys = ON');
+  console.log('[Database] Migration: providers type CHECK updated (gemini added).');
 }
 
 /**
