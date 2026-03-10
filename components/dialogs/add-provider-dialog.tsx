@@ -37,7 +37,17 @@ interface AddProviderDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const providerTypes: {
+/** Tipos de provedor atualmente implementados (com adapter). Os demais ficam ocultos na UI. */
+const IMPLEMENTED_PROVIDER_TYPES: ProviderType[] = [
+  "claude-code",
+  "codex",
+  "openai",
+  "anthropic",
+  "cursor",
+  "gemini",
+];
+
+const providerTypesAll: {
   value: ProviderType;
   label: string;
   needsApiKey: boolean;
@@ -81,6 +91,10 @@ const providerTypes: {
     needsCli: false,
   },
 ];
+
+const providerTypes = providerTypesAll.filter((t) =>
+  IMPLEMENTED_PROVIDER_TYPES.includes(t.value),
+);
 
 const modelsByProviderType: Partial<
   Record<ProviderType, { value: string; label: string }[]>

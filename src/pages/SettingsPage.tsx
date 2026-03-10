@@ -67,6 +67,11 @@ const providerTypeConfig: Record<
     icon: Terminal,
     description: "Cursor Agent CLI (terminal) — não é o editor Cursor",
   },
+  gemini: {
+    label: "Gemini",
+    icon: Bot,
+    description: "Google Gemini via API",
+  },
   custom: {
     label: "Personalizado",
     icon: Bot,
@@ -163,7 +168,9 @@ export default function SettingsPage() {
             ) : (
               <div className="space-y-4">
                 {providers.map((provider) => {
-                  const config = providerTypeConfig[provider.type];
+                  const config =
+                    providerTypeConfig[provider.type] ??
+                    providerTypeConfig.custom;
                   const Icon = config.icon;
 
                   return (
