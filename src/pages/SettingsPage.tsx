@@ -1,5 +1,5 @@
-import React from "react";
-import { useState } from "react";
+import React, { useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   Bot,
   Plus,
@@ -10,7 +10,10 @@ import {
   Edit,
   Check,
   AlertCircle,
+  RefreshCw,
+  Loader2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -92,9 +95,75 @@ export default function SettingsPage() {
   const { providers, update, remove } = useProviders();
   const [encryptionAvailable, setEncryptionAvailable] = useState<boolean | null>(null);
 
+  const [appVersion, setAppVersion] = useState<string>("—");
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const gotUpdateEventRef = useRef(false);
+  const hasAppUpdateAPI =
+    typeof window !== "undefined" && !!window.electronAPI?.app;
+
   React.useEffect(() => {
     window.db?.providers?.isEncryptionAvailable?.().then(setEncryptionAvailable);
   }, []);
+
+  useEffect(() => {
+    if (!hasAppUpdateAPI) return;
+    window.electronAPI!.app.getVersion().then(setAppVersion);
+  }, [hasAppUpdateAPI]);
+
+  useEffect(() => {
+    if (!hasAppUpdateAPI || !window.electronAPI?.app?.onUpdateStatus) return;
+    const unsubscribe = window.electronAPI.app.onUpdateStatus((payload) => {
+      gotUpdateEventRef.current = true;
+      setCheckingUpdate(false);
+      switch (payload.type) {
+        case "available":
+          toast.info(
+            `Nova versão ${payload.version ?? ""} disponível. Baixando...`,
+            { duration: 4000 }
+          );
+          break;
+        case "not-available":
+          toast.success("Você está na versão mais recente.");
+          break;
+        case "downloaded":
+          toast.success("Atualização baixada.", {
+            duration: 10000,
+            action: {
+              label: "Reiniciar agora",
+              onClick: () => window.electronAPI?.app?.quitAndInstall(),
+            },
+          });
+          break;
+        case "error":
+          toast.error(
+            payload.message ?? "Erro ao verificar atualização."
+          );
+          break;
+      }
+    });
+    return () => unsubscribe();
+  }, [hasAppUpdateAPI]);
+
+  const handleCheckForUpdates = async () => {
+    if (!hasAppUpdateAPI || !window.electronAPI?.app) return;
+    gotUpdateEventRef.current = false;
+    setCheckingUpdate(true);
+    try {
+      await window.electronAPI.app.checkForUpdates();
+      setTimeout(() => {
+        setCheckingUpdate((prev) => {
+          if (!prev) return prev;
+          if (!gotUpdateEventRef.current) {
+            toast.success("Você está na versão mais recente.");
+          }
+          return false;
+        });
+      }, 3000);
+    } catch {
+      setCheckingUpdate(false);
+      toast.error("Falha ao verificar atualização.");
+    }
+  };
 
   const handleToggleActive = (provider: Provider) => {
     update(provider.id, { isActive: !provider.isActive });
@@ -296,6 +365,36 @@ export default function SettingsPage() {
               </div>
             )}
           </section>
+
+          {/* Atualizações */}
+          {hasAppUpdateAPI && (
+            <section className="mt-8">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Atualizações</CardTitle>
+                  <CardDescription>
+                    Versão instalada: {appVersion}. Verifique se há uma nova
+                    versão disponível.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCheckForUpdates}
+                    disabled={checkingUpdate}
+                  >
+                    {checkingUpdate ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Verificar atualizações
+                  </Button>
+                </CardContent>
+              </Card>
+            </section>
+          )}
         </div>
       </div>
 
@@ -308,9 +407,9 @@ export default function SettingsPage() {
           <div className="min-w-0">
             <h3 className="font-semibold text-sm">Dev Command Center</h3>
             <p className="text-xs text-muted-foreground truncate">
-              Versão 0.1.0 — Seu hub para agentes de código com IA. Conecte
-              vários provedores como Claude Code e OpenAI para criar e gerenciar
-              missões de código com facilidade.
+              Versão {appVersion} — Seu hub para agentes de código com IA.
+              Conecte vários provedores como Claude Code e OpenAI para criar e
+              gerenciar missões de código com facilidade.
             </p>
           </div>
         </div>

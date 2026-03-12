@@ -18,6 +18,8 @@ import {
   X,
   Pencil,
   Lightbulb,
+  LayoutList,
+  LayoutGrid,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,7 +43,9 @@ import { NewMissionDialog } from "@/components/dialogs/new-mission-dialog";
 import { MissionTipsDialog } from "@/components/dialogs/mission-tips-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { useProjects, useMissions, useProviders } from "@/hooks/use-data";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { MissionProgressPipeline } from "@/components/mission-progress-pipeline";
+import { MissionBoard } from "@/components/mission-board";
 import { useAppStore } from "@/hooks/use-app-store";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
@@ -82,6 +86,7 @@ export default function ProjectPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"list" | "board">("board");
 
   const { projects, update, isLoading: projectsLoading } = useProjects();
   const {
@@ -93,6 +98,7 @@ export default function ProjectPage() {
   const { providers } = useProviders();
   const setCurrentProject = useAppStore((s) => s.setCurrentProject);
   const { confirmDialog } = useConfirmDialog();
+  const isMobile = useIsMobile();
 
   // Ref para evitar múltiplas atualizações de lastOpenedAt
   const hasUpdatedLastOpenedRef = useRef<string | null>(null);
@@ -259,10 +265,34 @@ export default function ProjectPage() {
           </Card>
         </div>
 
-        {/* Missions List */}
-        <div className="mb-4 flex items-center justify-between">
+        {/* Missions List / Board */}
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-semibold">Missões</h2>
-          <Badge variant="secondary">{missions.length} no total</Badge>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-md border border-input bg-muted/30 p-0.5" role="tablist" aria-label="Visualização de missões">
+              <Button
+                variant={viewMode === "list" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-8 gap-1.5 px-2.5"
+                onClick={() => setViewMode("list")}
+                aria-pressed={viewMode === "list"}
+              >
+                <LayoutList className="h-4 w-4" />
+                Lista
+              </Button>
+              <Button
+                variant={viewMode === "board" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-8 gap-1.5 px-2.5"
+                onClick={() => setViewMode("board")}
+                aria-pressed={viewMode === "board"}
+              >
+                <LayoutGrid className="h-4 w-4" />
+                Board
+              </Button>
+            </div>
+            <Badge variant="secondary">{missions.length} no total</Badge>
+          </div>
         </div>
 
         {sortedMissions.length === 0 ? (
@@ -281,6 +311,25 @@ export default function ProjectPage() {
               </Button>
             </Empty.Actions>
           </Empty>
+        ) : viewMode === "board" && !isMobile ? (
+          <MissionBoard
+            projectId={projectId ?? project.id}
+            missions={sortedMissions}
+            providers={providers}
+            defaultProvider={defaultProvider}
+            onRemove={removeMission}
+            onCancel={async (missionId) => {
+              try {
+                await cancelMission(missionId);
+                toast.success("Missão cancelada");
+              } catch {
+                toast.error("Não foi possível cancelar a missão.");
+              }
+            }}
+            onEdit={setEditingMissionId}
+            onOpenNewMission={() => setDialogOpen(true)}
+            confirmDialog={confirmDialog}
+          />
         ) : (
           <div className="space-y-3">
             {sortedMissions.map((mission) => {

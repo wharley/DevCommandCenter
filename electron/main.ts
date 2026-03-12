@@ -7,6 +7,7 @@ import {
   nativeImage,
 } from "electron";
 import path from "node:path";
+import { autoUpdater } from "electron-updater";
 import { registerIpcHandlers } from "./ipc-handlers";
 import db, { setUserDataPath } from "../lib/database";
 import { providerService } from "./services/provider-service";
@@ -81,6 +82,38 @@ function createWindow() {
   });
 }
 
+const UPDATE_FEED_URL = "https://www.devcommandcenter.com/updates";
+
+function sendUpdateStatus(payload: {
+  type: "available" | "not-available" | "downloaded" | "error";
+  version?: string;
+  message?: string;
+}) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("app:update-status", payload);
+  }
+}
+
+function setupAutoUpdater() {
+  if (!app.isPackaged || isDev) return;
+  autoUpdater.setFeedURL({ provider: "generic", url: UPDATE_FEED_URL });
+  autoUpdater.on("update-available", (info) => {
+    sendUpdateStatus({ type: "available", version: info.version });
+  });
+  autoUpdater.on("update-not-available", () => {
+    sendUpdateStatus({ type: "not-available" });
+  });
+  autoUpdater.on("update-downloaded", () => {
+    sendUpdateStatus({ type: "downloaded" });
+  });
+  autoUpdater.on("error", (err) => {
+    sendUpdateStatus({
+      type: "error",
+      message: err?.message ?? "Erro ao verificar atualização",
+    });
+  });
+}
+
 // Initialize database and register IPC handlers
 function initializeApp() {
   try {
@@ -113,6 +146,7 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+  setupAutoUpdater();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

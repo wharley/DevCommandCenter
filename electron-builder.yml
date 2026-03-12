@@ -92,4 +92,4 @@ linux:
 
 publish:
   provider: generic
-  url: https://example.com/updates
+  url: https://www.devcommandcenter.com/updates

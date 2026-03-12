@@ -119,6 +119,19 @@ declare global {
         skipActivation: () => Promise<{ success: boolean }>;
       };
 
+      app: {
+        getVersion: () => Promise<string>;
+        checkForUpdates: () => Promise<void>;
+        quitAndInstall: () => Promise<void>;
+        onUpdateStatus: (
+          callback: (payload: {
+            type: "available" | "not-available" | "downloaded" | "error";
+            version?: string;
+            message?: string;
+          }) => void
+        ) => () => void;
+      };
+
       // AI Service APIs
       ai: {
         generatePlan: (

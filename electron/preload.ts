@@ -10,6 +10,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // App info
   platform: process.platform,
 
+  // App update (version, check, install, status events)
+  app: {
+    getVersion: () => invoke("app:getVersion") as Promise<string>,
+    checkForUpdates: () => invoke("app:checkForUpdates") as Promise<void>,
+    quitAndInstall: () => invoke("app:quitAndInstall") as Promise<void>,
+    onUpdateStatus: (
+      callback: (payload: {
+        type: "available" | "not-available" | "downloaded" | "error";
+        version?: string;
+        message?: string;
+      }) => void
+    ) => {
+      const fn = (_: unknown, payload: Parameters<typeof callback>[0]) =>
+        callback(payload);
+      ipcRenderer.on("app:update-status", fn);
+      return () => {
+        ipcRenderer.removeListener("app:update-status", fn);
+      };
+    },
+  },
+
   // Dialog APIs
   dialog: {
     selectDirectory: () => invoke("dialog:selectDirectory"),

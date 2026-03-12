@@ -1,5 +1,6 @@
 import { app, dialog, shell, BrowserWindow } from "electron";
 import type { IpcMain } from "electron";
+import { autoUpdater } from "electron-updater";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
 import { platform } from "node:os";
@@ -16,6 +17,23 @@ const BETA_ACTIVATE_URL = "https://www.devcommandcenter.com/api/beta-activate";
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
 export function registerIpcHandlers(ipcMain: IpcMain) {
+  // ==========================================
+  // App update (only when packaged)
+  // ==========================================
+  ipcMain.handle("app:getVersion", () => {
+    return app.getVersion();
+  });
+
+  ipcMain.handle("app:checkForUpdates", async () => {
+    if (isDev || !app.isPackaged) return;
+    await autoUpdater.checkForUpdates();
+  });
+
+  ipcMain.handle("app:quitAndInstall", () => {
+    if (isDev || !app.isPackaged) return;
+    autoUpdater.quitAndInstall(false, true);
+  });
+
   // ==========================================
   // Dialog handlers
   // ==========================================
