@@ -637,7 +637,7 @@ export default function MissionPage() {
         <p className="text-muted-foreground">Missão não encontrada</p>
         <Button
           variant="outline"
-          onClick={() => navigate(`/project/${projectId}`)}
+          onClick={() => navigate(`/project/${projectId}/pipeline`)}
         >
           <ArrowLeft className="mr-2 h-4 w-4" />
           Voltar ao projeto
@@ -1202,7 +1202,7 @@ export default function MissionPage() {
       if (result.success) {
         await cancelMission(missionId);
         toast.success("Missão rejeitada e alterações descartadas");
-        navigate(`/project/${projectId}`);
+        navigate(`/project/${projectId}/pipeline`);
       } else {
         toast.error(result.error ?? "Falha ao reverter alterações.");
       }
@@ -1312,7 +1312,7 @@ export default function MissionPage() {
     try {
       await cancelMission(missionId);
       toast.success("Missão cancelada");
-      navigate(`/project/${projectId}`);
+      navigate(`/project/${projectId}/pipeline`);
     } catch (e) {
       toast.error(
         `Erro ao cancelar: ${e instanceof Error ? e.message : "desconhecido"}`,
@@ -1540,7 +1540,7 @@ export default function MissionPage() {
               variant="ghost"
               size="icon"
               className="cursor-pointer"
-              onClick={() => navigate(`/project/${projectId}`)}
+              onClick={() => navigate(`/project/${projectId}/pipeline`)}
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>
@@ -1560,7 +1560,7 @@ export default function MissionPage() {
             <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Link
-                to={`/project/${projectId}`}
+                to={`/project/${projectId}/pipeline`}
                 className="hover:text-foreground"
               >
                 {project.name}

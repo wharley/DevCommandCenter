@@ -37,34 +37,34 @@ export function WorkflowChoiceDialog({
           <Button
             type="button"
             variant="outline"
-            className="h-auto flex-col items-start gap-2 p-4 text-left"
+            className="h-auto min-w-0 flex-col items-start gap-2 p-4 text-left whitespace-normal"
             onClick={() => {
               onSelect("pipeline");
               onOpenChange(false);
             }}
           >
             <span className="flex items-center gap-2 font-medium">
-              <GitBranch className="h-5 w-5 text-primary" />
+              <GitBranch className="h-5 w-5 shrink-0 text-primary" />
               Pipeline
             </span>
-            <span className="text-sm font-normal text-muted-foreground">
+            <span className="text-wrap text-sm font-normal text-muted-foreground">
               Plano → Código → Aplicar no app. Gere e revise plano e diff antes de aplicar.
             </span>
           </Button>
           <Button
             type="button"
             variant="outline"
-            className="h-auto flex-col items-start gap-2 p-4 text-left"
+            className="h-auto min-w-0 flex-col items-start gap-2 p-4 text-left whitespace-normal"
             onClick={() => {
               onSelect("agents_cli");
               onOpenChange(false);
             }}
           >
             <span className="flex items-center gap-2 font-medium">
-              <Terminal className="h-5 w-5 text-primary" />
+              <Terminal className="h-5 w-5 shrink-0 text-primary" />
               Terminal (agentes)
             </span>
-            <span className="text-sm font-normal text-muted-foreground">
+            <span className="text-wrap text-sm font-normal text-muted-foreground">
               Crie tarefas e abra cada uma no terminal com um agente (Codex, Claude, Cursor, etc.). Uma tarefa = um agente = um branch.
             </span>
           </Button>

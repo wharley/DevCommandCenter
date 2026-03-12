@@ -6,7 +6,10 @@ import { ThemeProvider } from "@/components/theme-provider";
 // Pages
 import HomePage from "@/src/pages/HomePage";
 import SettingsPage from "@/src/pages/SettingsPage";
-import ProjectPage from "@/src/pages/ProjectPage";
+import ProjectWorkspacePage from "@/src/pages/ProjectWorkspacePage";
+import ProjectWorkspaceIndexRedirect from "@/src/pages/ProjectWorkspaceIndexRedirect";
+import ProjectPipelinePage from "@/src/pages/ProjectPipelinePage";
+import ProjectAgentsPage from "@/src/pages/ProjectAgentsPage";
 import MissionPage from "@/src/pages/MissionPage";
 import TaskPage from "@/src/pages/TaskPage";
 import ActivationPage from "@/src/pages/ActivationPage";
@@ -65,7 +68,11 @@ function AppContent() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/project/:id" element={<ProjectPage />} />
+        <Route path="/project/:id" element={<ProjectWorkspacePage />}>
+          <Route index element={<ProjectWorkspaceIndexRedirect />} />
+          <Route path="pipeline" element={<ProjectPipelinePage />} />
+          <Route path="agents" element={<ProjectAgentsPage />} />
+        </Route>
         <Route
           path="/project/:id/mission/:missionId"
           element={<MissionPage />}

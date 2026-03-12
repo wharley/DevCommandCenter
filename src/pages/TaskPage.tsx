@@ -150,7 +150,7 @@ export default function TaskPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">Tarefa não encontrada</p>
-        <Button variant="outline" onClick={() => navigate(`/project/${projectId}`)}>
+        <Button variant="outline" onClick={() => navigate(`/project/${projectId}/agents`)}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           Voltar ao projeto
         </Button>
@@ -168,7 +168,7 @@ export default function TaskPage() {
       <header className="shrink-0 border-b border-border px-6 py-4">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" asChild>
-            <Link to={`/project/${projectId}`}>
+            <Link to={`/project/${projectId}/agents`}>
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
