@@ -7,7 +7,9 @@ import {
   Terminal,
   Plus,
   ChevronRight,
+  ChevronLeft,
   HelpCircle,
+  PanelLeftOpen,
 } from "lucide-react";
 import { HelpDialog } from "@/components/dialogs/help-dialog";
 import { cn } from "@/lib/utils";
@@ -42,6 +44,8 @@ export function AppSidebar() {
   const { projects } = useProjects();
   const { missions } = useMissions();
   const currentProjectId = useAppStore((s) => s.currentProjectId);
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const recentProjects = projects
     .sort((a, b) => {
       const dateA =
@@ -52,14 +56,99 @@ export function AppSidebar() {
     })
     .slice(0, 5);
 
+  if (sidebarCollapsed) {
+    return (
+      <aside className="flex h-screen w-14 min-h-0 flex-col items-center border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-200">
+        <div className="flex h-14 items-center justify-center border-b border-sidebar-border mt-8 w-full">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary">
+            <Terminal className="h-4 w-4 text-sidebar-primary-foreground" />
+          </div>
+        </div>
+
+        <nav className="flex flex-col items-center gap-1 p-2 w-full">
+          {navItems.map((item) => {
+            const isActive = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                to={item.href}
+                title={item.label}
+                className={cn(
+                  "electron-no-drag flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+                  isActive
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+                )}
+              >
+                <item.icon className="h-4 w-4" />
+              </Link>
+            );
+          })}
+        </nav>
+
+        <Separator className="my-2 bg-sidebar-border" />
+
+        <div className="flex-1 min-h-0 overflow-y-auto w-full flex flex-col items-center gap-1 px-1 py-2">
+          {recentProjects.map((project) => {
+            const isActive = currentProjectId === project.id;
+            const accent = projectAccentColor(project.id);
+            return (
+              <Link
+                key={project.id}
+                to={`/project/${project.id}`}
+                title={project.name}
+                className={cn(
+                  "electron-no-drag flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+                  isActive
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+                )}
+              >
+                <span
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold"
+                  style={{ backgroundColor: accent.bg, color: accent.fg }}
+                >
+                  {project.name.charAt(0).toUpperCase()}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+
+        <div className="border-t border-sidebar-border p-2 w-full flex justify-center">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="electron-no-drag h-9 w-9 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            onClick={() => setSidebarCollapsed(false)}
+            title="Expandir sidebar"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
+      </aside>
+    );
+  }
+
   return (
-    <aside className="flex h-screen w-64 min-h-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+    <aside className="flex h-screen w-64 min-h-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-200">
       {/* Logo */}
       <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-4 mt-8">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary">
           <Terminal className="h-4 w-4 text-sidebar-primary-foreground" />
         </div>
         <span className="font-semibold tracking-tight">Dev Command</span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="electron-no-drag ml-auto h-7 w-7 text-sidebar-foreground/50 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          onClick={() => setSidebarCollapsed(true)}
+          title="Colapsar sidebar"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
       </div>
 
       {/* Navigation - no Tooltip to avoid ref/setState loop with Link + asChild */}

@@ -28,6 +28,8 @@ interface AppState {
   currentProjectId: string | null;
   currentMissionId: string | null;
   isLoading: boolean;
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed: (collapsed: boolean) => void;
 
   // Actions - Projects
   addProject: (
@@ -87,6 +89,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentProjectId: null,
   currentMissionId: null,
   isLoading: false,
+  sidebarCollapsed: false,
+  setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
 
   // Actions - Projects
   addProject: (projectData) => {

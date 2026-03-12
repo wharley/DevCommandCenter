@@ -9,7 +9,8 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { WORKTREE_SUBDIR } from "./worktree-policy";
+import { createHash } from "node:crypto";
+import { app } from "electron";
 
 const execAsync = promisify(exec);
 
@@ -28,9 +29,19 @@ export interface WorktreeServiceResult {
   error?: string;
 }
 
+function getRepoHash(projectPath: string): string {
+  return createHash("sha1").update(path.resolve(projectPath)).digest("hex").slice(0, 12);
+}
+
+function getGlobalWorktreeDir(projectPath: string, branch: string): string {
+  const userData = app.getPath("userData");
+  const repoHash = getRepoHash(projectPath);
+  return path.join(userData, "worktrees", repoHash, branch);
+}
+
 /**
  * Cria um worktree para uma missão a partir do repositório principal.
- * Path: <projectPath>/.dcc-worktrees/<branch>
+ * Path: <userData>/worktrees/<repoHash>/<branch>
  * Branch: dcc-mission-<missionId>
  */
 export async function createWorktreeForMission(
@@ -39,7 +50,7 @@ export async function createWorktreeForMission(
 ): Promise<{ success: true; data: CreateWorktreeResult } | { success: false; error: string }> {
   const resolvedProject = path.resolve(projectPath);
   const branch = safeBranchName(missionId);
-  const worktreeDir = path.join(resolvedProject, WORKTREE_SUBDIR, branch);
+  const worktreeDir = getGlobalWorktreeDir(resolvedProject, branch);
 
   try {
     const stat = await fs.promises.stat(resolvedProject);
@@ -55,7 +66,7 @@ export async function createWorktreeForMission(
       return { success: false, error: "Project is not a Git repository" };
     }
 
-    await fs.promises.mkdir(path.join(resolvedProject, WORKTREE_SUBDIR), {
+    await fs.promises.mkdir(path.dirname(worktreeDir), {
       recursive: true,
     });
 

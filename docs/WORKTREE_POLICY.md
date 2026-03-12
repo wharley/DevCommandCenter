@@ -43,8 +43,12 @@ Objetivo: evitar colisões e permitir identificação rápida da origem.
 
 ## 5. Localização no disco
 
-- Worktrees devem ser criados em subdiretório do repositório principal ou em pasta configurável (ex: `{repo}/.dcc-worktrees/` ou `~/dev/dcc-worktrees/{repoName}/`).
-- Evitar poluir a raiz do projeto com pastas `dcc-*` misturadas a outros diretórios.
+- Padrão recomendado e adotado: worktrees em pasta global do app (fora do repositório), por exemplo:
+  - macOS: `~/Library/Application Support/dev-command-center/worktrees/{repoHash}/{branch}`
+  - Linux: `~/.local/share/dev-command-center/worktrees/{repoHash}/{branch}`
+  - Windows: `%APPDATA%/dev-command-center/worktrees/{repoHash}/{branch}`
+- Objetivo: evitar poluição do projeto e reduzir risco de confusão em commit/push.
+- Se houver modo avançado local no futuro, manter como opt-in e nunca como padrão.
 
 ## 6. Referência de implementação futura
 

@@ -5,12 +5,15 @@ import {
   ArrowRight,
   Clock,
   Copy,
+  GitCommit,
   Loader2,
   Play,
   Plus,
   Terminal,
+  Upload,
   XCircle,
 } from "lucide-react";
+import { CommitDialog } from "@/components/dialogs/commit-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,9 +30,13 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { NewTaskDialog } from "@/components/dialogs/new-task-dialog";
 import type { InitialTaskForCreate } from "@/components/dialogs/new-task-dialog";
+import { EmbeddedTerminal } from "@/components/embedded-terminal";
+import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { useMissions, useProviders } from "@/hooks/use-data";
+import { useAppStore } from "@/hooks/use-app-store";
 import { useProjectWorkspaceContext } from "@/src/pages/ProjectWorkspacePage";
 import type { Mission, Provider } from "@/lib/database/types";
+import type { GitStatus } from "@/types/electron";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -39,6 +46,7 @@ const TERMINAL_RUNNING_STATUSES = ["planning", "generating_code", "applying"] as
 const FINAL_STATUSES = ["completed", "failed", "cancelled"] as const;
 type AgentPriority = "high" | "normal" | "low";
 type QueueUrgency = "ok" | "warning" | "critical";
+type AgentsView = "wall" | "queue";
 const PRIORITY_SCORE: Record<AgentPriority, number> = {
   high: 3,
   normal: 2,
@@ -111,6 +119,13 @@ function AgentMissionMeta({
       </span>
       {provider && <span>Agente: {provider.name}</span>}
       {mission.worktreePath && <Badge variant="outline">Worktree</Badge>}
+      <Badge
+        variant="outline"
+        className="max-w-[280px] truncate font-mono text-[11px]"
+        title={mission.worktreeBranch ?? (mission.worktreePath ? "preparando..." : "não criada")}
+      >
+        branch: {mission.worktreeBranch ?? (mission.worktreePath ? "preparando..." : "não criada")}
+      </Badge>
     </div>
   );
 }
@@ -148,17 +163,61 @@ function AgentMissionActions({
   );
 }
 
+function AgentGitFlowStatus({ mission }: { mission: Mission }) {
+  const steps = [
+    {
+      key: "branch",
+      label: mission.worktreePath ? "Branch pronta" : "Branch pendente",
+      done: Boolean(mission.worktreePath),
+    },
+    {
+      key: "commit",
+      label: mission.isCommitted ? "Commitado" : "Commit pendente",
+      done: Boolean(mission.isCommitted),
+    },
+    {
+      key: "push",
+      label: mission.isPushed ? "Enviado" : "Push pendente",
+      done: Boolean(mission.isPushed),
+    },
+  ] as const;
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {steps.map((step) => (
+        <span
+          key={step.key}
+          className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+            step.done
+              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              : "border-border bg-muted/40 text-muted-foreground"
+          }`}
+        >
+          {step.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function ProjectAgentsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { projectId, project } = useProjectWorkspaceContext();
+  const { confirmDialog } = useConfirmDialog();
+  const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
 
   const { providers } = useProviders();
   const {
     missions,
     create,
+    getById,
+    update,
+    remove: removeMission,
     cancel: cancelMission,
     start: startMission,
+    complete: completeMission,
+    fail: failMission,
     refresh: refreshMissions,
     isLoading,
   } = useMissions(projectId);
@@ -166,6 +225,7 @@ export default function ProjectAgentsPage() {
   const [quickTitle, setQuickTitle] = useState("");
   const [quickDescription, setQuickDescription] = useState("");
   const [quickProviderId, setQuickProviderId] = useState("");
+  const [agentsView, setAgentsView] = useState<AgentsView>("wall");
   const [isQuickCreating, setIsQuickCreating] = useState(false);
   const [newTaskDialogOpen, setNewTaskDialogOpen] = useState(false);
   const [newTaskInitial, setNewTaskInitial] = useState<InitialTaskForCreate | null>(null);
@@ -183,6 +243,11 @@ export default function ProjectAgentsPage() {
     succeeded: number;
     failed: number;
   } | null>(null);
+  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const [commitDialogMission, setCommitDialogMission] = useState<Mission | null>(null);
+  const [commitDialogStatus, setCommitDialogStatus] = useState<GitStatus | null>(null);
+  const [isFinishingMissionId, setIsFinishingMissionId] = useState<string | null>(null);
+  const [isPushingMissionId, setIsPushingMissionId] = useState<string | null>(null);
   const [lastFailedMissionIds, setLastFailedMissionIds] = useState<string[]>([]);
   const batchRunIdRef = useRef(0);
   const autoLaunchInFlightRef = useRef<Set<string>>(new Set());
@@ -236,6 +301,10 @@ export default function ProjectAgentsPage() {
         setSlaCriticalHours(String(DEFAULT_SLA_CRITICAL_HOURS));
       }
     }
+    const savedView = localStorage.getItem(`dcc:project:${projectId}:agents:view`);
+    if (savedView === "wall" || savedView === "queue") {
+      setAgentsView(savedView);
+    }
   }, [projectId]);
 
   useEffect(() => {
@@ -247,6 +316,42 @@ export default function ProjectAgentsPage() {
     if (!projectId || typeof window === "undefined") return;
     localStorage.setItem(`dcc:project:${projectId}:agents:autoRun`, isAutoRunEnabled ? "1" : "0");
   }, [projectId, isAutoRunEnabled]);
+
+  useEffect(() => {
+    if (!projectId || typeof window === "undefined") return;
+    localStorage.setItem(`dcc:project:${projectId}:agents:view`, agentsView);
+  }, [agentsView, projectId]);
+
+  useEffect(() => {
+    if (agentsView === "wall") {
+      setSidebarCollapsed(true);
+      return () => setSidebarCollapsed(false);
+    }
+  }, [agentsView, setSidebarCollapsed]);
+
+  useEffect(() => {
+    const targetPath = commitDialogMission?.worktreePath ?? project?.path;
+    if (!commitDialogOpen || !targetPath || !window.electronAPI?.git) {
+      if (!commitDialogOpen) setCommitDialogStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+    setCommitDialogStatus(null);
+
+    window.electronAPI.git
+      .getStatus(targetPath)
+      .then((status) => {
+        if (!cancelled) setCommitDialogStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setCommitDialogStatus(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [commitDialogMission?.worktreePath, commitDialogOpen, project?.path]);
 
   useEffect(() => {
     if (!projectId || typeof window === "undefined") return;
@@ -358,10 +463,15 @@ export default function ProjectAgentsPage() {
     () => queued.filter((mission) => getMissionUrgency(mission) === "critical"),
     [queued, normalizedSlaCriticalHours, normalizedSlaWarningHours]
   );
+  const wallQueuedPreview = useMemo(
+    () => queued.slice(0, Math.max(0, 6 - running.length)),
+    [queued, running.length]
+  );
+  const wallMissions = useMemo(() => [...running, ...wallQueuedPreview], [running, wallQueuedPreview]);
 
   const handleQuickCreate = async () => {
-    if (!quickTitle.trim() || !quickDescription.trim()) {
-      toast.error("Preencha título e descrição para criar a tarefa");
+    if (!quickTitle.trim()) {
+      toast.error("Descreva rapidamente a tarefa para iniciar o agente");
       return;
     }
     if (!quickProviderId) {
@@ -376,15 +486,16 @@ export default function ProjectAgentsPage() {
         planProviderId: quickProviderId,
         codeProviderId: quickProviderId,
         title: quickTitle.trim(),
-        description: quickDescription.trim(),
+        description: quickDescription.trim() || quickTitle.trim(),
         missionType: "agents_cli",
       });
-      toast.success("Tarefa criada. Abrindo terminal...");
+      await launchMissionSession(mission);
+      await refreshMissions();
+      toast.success("Agente iniciado no Wall");
       setQuickTitle("");
       setQuickDescription("");
-      navigate(`/project/${projectId}/task/${mission.id}`);
     } catch {
-      toast.error("Não foi possível criar a tarefa");
+      toast.error("Não foi possível iniciar o agente");
     } finally {
       setIsQuickCreating(false);
     }
@@ -451,6 +562,145 @@ export default function ProjectAgentsPage() {
       throw new Error(result.error);
     }
     await startMission(mission.id);
+  };
+
+  const openCommitDialog = (mission: Mission) => {
+    setCommitDialogMission(mission);
+    setCommitDialogOpen(true);
+  };
+
+  const handleCommitFromWall = async (message: string) => {
+    const mission = commitDialogMission;
+    const targetPath = mission?.worktreePath ?? project?.path;
+
+    if (!mission || !targetPath || typeof window === "undefined" || !window.electronAPI?.git) {
+      toast.error("Commit indisponível");
+      throw new Error("Commit indisponível");
+    }
+
+    try {
+      const ok = await window.electronAPI.git.commit(targetPath, message);
+      if (!ok) {
+        toast.error("Falha ao commitar. Verifique o status do repositório.");
+        throw new Error("Falha ao commitar");
+      }
+
+      await update(mission.id, { isCommitted: true });
+      await refreshMissions();
+      toast.success("Commit realizado");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro desconhecido";
+      toast.error(`Falha ao commitar: ${msg}`);
+      throw e;
+    }
+  };
+
+  const handlePushFromWall = async (mission: Mission) => {
+    const targetPath = mission.worktreePath ?? project?.path;
+    if (!targetPath || typeof window === "undefined" || !window.electronAPI?.git?.push) {
+      toast.error("Push indisponível");
+      return;
+    }
+
+    setIsPushingMissionId(mission.id);
+    try {
+      const result = await window.electronAPI.git.push(targetPath);
+      if (result.success) {
+        await update(mission.id, { isPushed: true });
+        await refreshMissions();
+        toast.success("Push realizado");
+      } else {
+        toast.error(result.error ?? "Falha ao fazer push.");
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro desconhecido";
+      toast.error(`Falha ao fazer push: ${msg}`);
+    } finally {
+      setIsPushingMissionId(null);
+    }
+  };
+
+  const finishMissionIfActive = async (
+    missionId: string,
+    result: "completed" | "failed",
+    message?: string
+  ): Promise<boolean> => {
+    const latestMission = await getById(missionId);
+    if (!latestMission || latestMission.missionType !== "agents_cli") return false;
+    if (FINAL_STATUSES.includes(latestMission.status as (typeof FINAL_STATUSES)[number])) {
+      return false;
+    }
+
+    if (result === "completed") {
+      await completeMission(missionId, message);
+    } else {
+      await failMission(missionId, message ?? "Agent finalizado com falha");
+    }
+
+    return true;
+  };
+
+  const handleAgentTerminalExit = async (mission: Mission, code: number) => {
+    try {
+      const didUpdate = await finishMissionIfActive(
+        mission.id,
+        code === 0 ? "completed" : "failed",
+        code === 0
+          ? `Agent finalizado com sucesso (exit code ${code})`
+          : `Agent finalizado com falha (exit code ${code})`
+      );
+      if (didUpdate) {
+        toast[code === 0 ? "success" : "error"](
+          code === 0 ? `Agent finalizado: ${mission.title}` : `Agent falhou: ${mission.title}`
+        );
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "erro desconhecido";
+      toast.error(`Não foi possível sincronizar o término de "${mission.title}": ${msg}`);
+    } finally {
+      await refreshMissions();
+    }
+  };
+
+  const handleManualFinish = async (mission: Mission) => {
+    if (!window.electronAPI?.dialog?.showMessage) {
+      toast.error("Finalização manual indisponível");
+      return;
+    }
+
+    setIsFinishingMissionId(mission.id);
+    try {
+      const response = await window.electronAPI.dialog.showMessage({
+        type: "question",
+        title: "Finalizar agente",
+        message: `Como deseja encerrar "${mission.title}"?`,
+        detail: "Use Concluir quando o agent terminou bem e Falha quando ele encerrou com problema.",
+        buttons: ["Concluir", "Falha", "Cancelar"],
+        defaultId: 0,
+        cancelId: 2,
+      });
+
+      if (response === 2) return;
+
+      const didUpdate = await finishMissionIfActive(
+        mission.id,
+        response === 0 ? "completed" : "failed",
+        response === 0 ? "Finalizado manualmente pelo usuário" : "Marcado manualmente como falha"
+      );
+
+      if (!didUpdate) {
+        toast.info("A missão já estava finalizada ou não pôde ser atualizada.");
+        return;
+      }
+
+      toast.success(response === 0 ? "Agent marcado como concluído" : "Agent marcado como falha");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "erro desconhecido";
+      toast.error(`Não foi possível finalizar "${mission.title}": ${msg}`);
+    } finally {
+      setIsFinishingMissionId(null);
+      await refreshMissions();
+    }
   };
 
   const runBatchLaunch = async (targets?: Mission[]) => {
@@ -601,8 +851,273 @@ export default function ProjectAgentsPage() {
     );
   }
 
+  if (agentsView === "wall") {
+    return (
+      <div className="p-6 space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold">Agents Wall</h2>
+            <p className="text-sm text-muted-foreground">
+              Acompanhe execuções em tempo real. A fila continua disponível como apoio operacional.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setAgentsView("wall")}>
+              Wall
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setAgentsView("queue")}>
+              Fila
+            </Button>
+          </div>
+        </div>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Novo agente (start direto)</CardTitle>
+            <CardDescription>
+              Digite a missão, escolha o agente e inicie. A tarefa é criada automaticamente.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Input
+              placeholder="Ex.: refatorar checkout e adicionar testes de regressão"
+              value={quickTitle}
+              onChange={(e) => setQuickTitle(e.target.value)}
+            />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="min-w-[220px] flex-1">
+                <Select value={quickProviderId} onValueChange={setQuickProviderId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um agente" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cliProviders.length === 0 ? (
+                      <SelectItem value="none" disabled>
+                        Nenhum agente CLI ativo em Configurações
+                      </SelectItem>
+                    ) : (
+                      cliProviders.map((provider) => (
+                        <SelectItem key={provider.id} value={provider.id}>
+                          {provider.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button onClick={handleQuickCreate} disabled={isQuickCreating || cliProviders.length === 0}>
+                {isQuickCreating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                Iniciar agente
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {wallMissions.length === 0 ? (
+          <Empty className="mt-8">
+            <Empty.Icon>
+              <Terminal className="h-10 w-10" />
+            </Empty.Icon>
+            <Empty.Title>Sem agentes no mural</Empty.Title>
+            <Empty.Description>
+              Inicie um agente para acompanhar a execução em tempo real.
+            </Empty.Description>
+          </Empty>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {wallMissions.map((mission) => {
+              const isRunningMission = getQueueStatusLabel(mission) === "Em execução";
+              const isFinalMission = FINAL_STATUSES.includes(
+                mission.status as (typeof FINAL_STATUSES)[number]
+              );
+              const canFinalizeFromWall = isRunningMission;
+              const canCommitFromWall = Boolean(mission.worktreePath) && isFinalMission && !mission.isCommitted;
+              const canPushFromWall =
+                Boolean(mission.worktreePath) && isFinalMission && Boolean(mission.isCommitted) && !mission.isPushed;
+              const provider = mission.providerId ? providerById.get(mission.providerId) ?? null : null;
+              const suggestedCommand = buildSuggestedCliCommand(provider);
+              const prompt = buildMissionPrompt(mission);
+              return (
+                <Card key={mission.id} className="flex min-h-[320px] flex-col overflow-hidden text-left">
+                  <CardHeader className="min-w-0 pb-2 text-left">
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <CardTitle className="line-clamp-2 max-w-full wrap-break-word text-sm">
+                          {mission.title}
+                        </CardTitle>
+                        <CardDescription className="line-clamp-1 wrap-break-word">
+                          {provider ? provider.name : "Sem agente"}
+                        </CardDescription>
+                      </div>
+                      <Badge
+                        variant={getStatusVariant(getQueueStatusLabel(mission))}
+                        className="shrink-0"
+                      >
+                        {getQueueStatusLabel(mission)}
+                      </Badge>
+                    </div>
+                    <p
+                      className="mt-2 block max-w-full overflow-hidden truncate rounded-md border border-border bg-muted/30 px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                      title={mission.worktreeBranch ?? (mission.worktreePath ? "preparando..." : "não criada")}
+                    >
+                      branch: {mission.worktreeBranch ?? (mission.worktreePath ? "preparando..." : "não criada")}
+                    </p>
+                    <AgentGitFlowStatus mission={mission} />
+                  </CardHeader>
+                  <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+                    {isRunningMission ? (
+                      <div className="min-h-0 flex-1">
+                        <EmbeddedTerminal
+                          cwd={mission.worktreePath ?? project.path}
+                          command={suggestedCommand}
+                          args={prompt ? [prompt] : []}
+                          onExit={(code) => {
+                            void handleAgentTerminalExit(mission, code);
+                          }}
+                          title={mission.title}
+                          missionId={mission.id}
+                        />
+                      </div>
+                    ) : (
+                      <div className="rounded-md border bg-muted/20 p-3 text-left text-sm text-muted-foreground whitespace-pre-wrap wrap-break-word">
+                        {mission.description}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-2">
+                      {canFinalizeFromWall && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="w-full justify-center"
+                          onClick={() => void handleManualFinish(mission)}
+                          disabled={isFinishingMissionId === mission.id}
+                        >
+                          {isFinishingMissionId === mission.id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : null}
+                          Finalizar
+                        </Button>
+                      )}
+                      {!isRunningMission && (
+                        <Button
+                          size="sm"
+                          className="w-full justify-center"
+                          onClick={async () => {
+                            try {
+                              await launchMissionSession(mission);
+                              await refreshMissions();
+                              toast.success(`Agente iniciado: ${mission.title}`);
+                            } catch (e) {
+                              toast.error(
+                                e instanceof Error ? e.message : `Falha ao iniciar ${mission.title}`
+                              );
+                            }
+                          }}
+                        >
+                          <Play className="mr-2 h-4 w-4" />
+                          Iniciar
+                        </Button>
+                      )}
+                      {canCommitFromWall && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="w-full justify-center"
+                          onClick={() => openCommitDialog(mission)}
+                        >
+                          <GitCommit className="mr-2 h-4 w-4" />
+                          Commitar
+                        </Button>
+                      )}
+                      {canPushFromWall && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="w-full justify-center"
+                          onClick={() => void handlePushFromWall(mission)}
+                          disabled={isPushingMissionId === mission.id}
+                        >
+                          {isPushingMissionId === mission.id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Upload className="mr-2 h-4 w-4" />
+                          )}
+                          Push
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" className="w-full justify-center" asChild>
+                        <Link to={`/project/${projectId}/task/${mission.id}`}>Abrir detalhe</Link>
+                      </Button>
+                      {!FINAL_STATUSES.includes(mission.status as (typeof FINAL_STATUSES)[number]) && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="w-full justify-center"
+                          onClick={async () => {
+                            try {
+                              await cancelMission(mission.id);
+                              await refreshMissions();
+                              toast.success("Tarefa arquivada");
+                            } catch {
+                              toast.error("Não foi possível arquivar a tarefa");
+                            }
+                          }}
+                        >
+                          Arquivar
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="w-full justify-center"
+                        onClick={async () => {
+                          const confirmed = await confirmDialog({
+                            title: "Excluir tarefa de agente?",
+                            description:
+                              `Esta ação removerá a tarefa "${mission.title}" da lista. ` +
+                              "Se houver terminal/worktree ativo, ele também será encerrado e descartado.",
+                            confirmLabel: "Excluir",
+                            cancelLabel: "Cancelar",
+                          });
+                          if (!confirmed) return;
+                          try {
+                            if (window.electronAPI?.terminal?.killByMissionId) {
+                              await window.electronAPI.terminal.killByMissionId(mission.id);
+                            }
+                            if (mission.worktreePath && window.electronAPI?.worktree?.discard) {
+                              await window.electronAPI.worktree.discard(mission.id);
+                            }
+                            await removeMission(mission.id);
+                            await refreshMissions();
+                            toast.success("Tarefa excluída");
+                          } catch {
+                            toast.error("Não foi possível excluir a tarefa");
+                          }
+                        }}
+                      >
+                        Excluir
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
+      <div className="mb-4 flex justify-end gap-2">
+        <Button variant="outline" size="sm" onClick={() => setAgentsView("wall")}>
+          Wall
+        </Button>
+        <Button variant="secondary" size="sm" onClick={() => setAgentsView("queue")}>
+          Fila
+        </Button>
+      </div>
       <div className="mb-6 grid gap-4 lg:grid-cols-[1.7fr_1fr]">
         <Card>
           <CardHeader>
@@ -1073,6 +1588,27 @@ export default function ProjectAgentsPage() {
         }}
         projectId={projectId}
         initialTask={newTaskInitial ?? undefined}
+      />
+      <CommitDialog
+        open={commitDialogOpen}
+        onOpenChange={(open) => {
+          setCommitDialogOpen(open);
+          if (!open) {
+            setCommitDialogMission(null);
+            setCommitDialogStatus(null);
+          }
+        }}
+        defaultMessage={
+          commitDialogMission ? `DevCommandCenter: ${commitDialogMission.title}` : "DevCommandCenter:"
+        }
+        onCommit={handleCommitFromWall}
+        projectPath={commitDialogMission?.worktreePath ?? project?.path ?? ""}
+        status={commitDialogStatus}
+        onPushComplete={async () => {
+          if (!commitDialogMission) return;
+          await update(commitDialogMission.id, { isPushed: true });
+          await refreshMissions();
+        }}
       />
     </div>
   );

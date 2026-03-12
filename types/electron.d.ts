@@ -87,6 +87,10 @@ declare global {
           type: string;
           title: string;
           message: string;
+          detail?: string;
+          buttons?: string[];
+          defaultId?: number;
+          cancelId?: number;
         }) => Promise<number>;
         confirm: (message: string) => Promise<boolean>;
       };

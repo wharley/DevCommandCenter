@@ -12,6 +12,7 @@ export interface EmbeddedTerminalProps {
   command?: string;
   args?: string[];
   onClose?: () => void;
+  onExit?: (code: number) => void;
   /** Optional label for the terminal (e.g. mission title) */
   title?: string;
   /**
@@ -26,6 +27,7 @@ export function EmbeddedTerminal({
   command,
   args = [],
   onClose,
+  onExit,
   title,
   missionId,
 }: EmbeddedTerminalProps) {
@@ -87,6 +89,7 @@ export function EmbeddedTerminal({
       if (id === ptyIdRef.current) {
         ptyIdRef.current = null;
         setExited(code);
+        onExit?.(code);
       }
     });
 
@@ -144,7 +147,7 @@ export function EmbeddedTerminal({
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [cwd, command, args, missionId]);
+  }, [args, command, cwd, missionId, onExit]);
 
   return (
     <div className="flex h-full flex-col rounded-lg border border-border bg-background">

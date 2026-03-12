@@ -16,7 +16,7 @@ export const WORKTREE_MAX_AGE_DAYS = 7;
 /** Nome do arquivo de lock no root do worktree */
 export const WORKTREE_LOCK_FILE = ".dcc-worktree-lock";
 
-/** Subdiretório opcional para worktrees DCC (ex: .dcc-worktrees/) */
+/** @deprecated Legacy local mode. Default storage is now global (outside repo). */
 export const WORKTREE_SUBDIR = ".dcc-worktrees";
 
 /**

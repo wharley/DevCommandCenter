@@ -36,7 +36,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Dialog APIs
   dialog: {
     selectDirectory: () => invoke("dialog:selectDirectory"),
-    showMessage: (options: { type: string; title: string; message: string }) =>
+    showMessage: (options: {
+      type: string;
+      title: string;
+      message: string;
+      detail?: string;
+      buttons?: string[];
+      defaultId?: number;
+      cancelId?: number;
+    }) =>
       invoke("dialog:showMessage", options),
     confirm: (message: string) => invoke("dialog:confirm", message),
   },
