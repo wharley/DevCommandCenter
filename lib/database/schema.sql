@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS missions (
   title TEXT NOT NULL,
   description TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created', 'planning', 'plan_generated', 'generating_code', 'code_ready', 'applying', 'completed', 'failed', 'cancelled')),
-  mission_type TEXT DEFAULT 'implementation' CHECK (mission_type IN ('implementation', 'analysis')),
+  mission_type TEXT DEFAULT 'implementation' CHECK (mission_type IN ('implementation', 'analysis', 'agents_cli')),
   plan TEXT, -- JSON com o plano de ação gerado
   generated_code TEXT, -- JSON com as sugestões de código/diffs
   context TEXT, -- JSON com contexto do repo usado na missão
@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS missions (
   is_committed INTEGER DEFAULT 0, -- Se as alterações já foram commitadas
   is_pushed INTEGER DEFAULT 0, -- Se o commit já foi enviado ao remoto
   pending_commands TEXT, -- JSON com comandos pendentes que o usuário precisa executar
+  worktree_path TEXT, -- Path do worktree Git da missão (pipeline paralelo)
+  worktree_branch TEXT, -- Branch do worktree (ex.: dcc-mission-<id>)
   started_at TEXT,
   completed_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),

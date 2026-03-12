@@ -37,6 +37,8 @@ interface MissionRow {
   is_committed: number | null;
   is_pushed: number | null;
   pending_commands: string | null;
+  worktree_path?: string | null;
+  worktree_branch?: string | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -44,7 +46,12 @@ interface MissionRow {
 }
 
 function rowToMission(row: MissionRow): Mission {
-  const missionType = row.mission_type === 'analysis' ? 'analysis' : 'implementation';
+  const missionType =
+    row.mission_type === 'agents_cli'
+      ? 'agents_cli'
+      : row.mission_type === 'analysis'
+        ? 'analysis'
+        : 'implementation';
   return {
     id: row.id,
     projectId: row.project_id,
@@ -64,6 +71,8 @@ function rowToMission(row: MissionRow): Mission {
     isCommitted: row.is_committed ? Boolean(row.is_committed) : false,
     isPushed: row.is_pushed ? Boolean(row.is_pushed) : false,
     pendingCommands: row.pending_commands ? JSON.parse(row.pending_commands) : null,
+    worktreePath: row.worktree_path ?? null,
+    worktreeBranch: row.worktree_branch ?? null,
     startedAt: row.started_at ? new Date(row.started_at) : null,
     completedAt: row.completed_at ? new Date(row.completed_at) : null,
     createdAt: new Date(row.created_at),
@@ -338,6 +347,14 @@ export const MissionsRepository = {
     if (data.completedAt !== undefined) {
       updates.push('completed_at = ?');
       values.push(data.completedAt ? data.completedAt.toISOString() : null);
+    }
+    if (data.worktreePath !== undefined) {
+      updates.push('worktree_path = ?');
+      values.push(data.worktreePath);
+    }
+    if (data.worktreeBranch !== undefined) {
+      updates.push('worktree_branch = ?');
+      values.push(data.worktreeBranch);
     }
     
     if (updates.length === 0) {

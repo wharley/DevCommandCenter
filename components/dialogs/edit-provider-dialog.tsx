@@ -23,8 +23,26 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useProviders } from "@/hooks/use-data";
+import { useElectron } from "@/hooks/use-electron";
 import { toast } from "sonner";
-import type { Provider, ProviderType } from "@/lib/database/types";
+import type {
+  Provider,
+  ProviderType,
+  PermissionMode,
+} from "@/lib/database/types";
+
+const PROVIDER_TYPES_WITH_PERMISSION_MODES: ProviderType[] = [
+  "claude-code",
+  "codex",
+  "gemini",
+];
+
+const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string }[] = [
+  { value: "", label: "Padrão (aceitar edições)" },
+  { value: "plan", label: "Só planejar (exige aprovação)" },
+  { value: "acceptEdits", label: "Aceitar edições automaticamente" },
+  { value: "bypass", label: "Bypass (máxima automação)" },
+];
 
 interface EditProviderDialogProps {
   open: boolean;
@@ -96,12 +114,24 @@ const modelsByProviderType: Partial<
   ],
 };
 
+const CLI_PROVIDER_TYPES_EDIT: ProviderType[] = [
+  "claude-code",
+  "codex",
+  "cursor",
+  "gemini",
+];
+
 export function EditProviderDialog({
   open,
   onOpenChange,
   provider,
 }: EditProviderDialogProps) {
   const { update } = useProviders();
+  const { validateCliPath, detectCliForProvider } = useElectron();
+  const [cliStatus, setCliStatus] = useState<{
+    valid: boolean;
+    message?: string;
+  } | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -109,6 +139,7 @@ export function EditProviderDialog({
     apiKey: "",
     cliPath: "",
     model: "",
+    permissionMode: "" as PermissionMode | "",
   });
 
   const config = providerTypeConfig[provider.type];
@@ -117,13 +148,31 @@ export function EditProviderDialog({
     if (provider) {
       setFormData({
         name: provider.name,
-        // Nunca preencher apiKey real (segurança); vazio = manter atual quando hasApiKey
         apiKey: "",
         cliPath: provider.cliPath ?? "",
         model: (provider.config?.model as string) ?? "",
+        permissionMode:
+          (provider.config?.permissionMode as PermissionMode | undefined) ?? "",
       });
     }
   }, [provider]);
+
+  useEffect(() => {
+    if (
+      !formData.cliPath.trim() ||
+      !CLI_PROVIDER_TYPES_EDIT.includes(provider.type)
+    ) {
+      setCliStatus(null);
+      return;
+    }
+    let cancelled = false;
+    validateCliPath(provider.type, formData.cliPath).then((result) => {
+      if (!cancelled) setCliStatus(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider.type, formData.cliPath, validateCliPath]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,13 +187,19 @@ export function EditProviderDialog({
     try {
       await new Promise((resolve) => setTimeout(resolve, 300));
 
+      const newConfig = {
+        ...(provider.config ?? {}),
+        ...(formData.model && { model: formData.model }),
+        ...(PROVIDER_TYPES_WITH_PERMISSION_MODES.includes(provider.type) &&
+          formData.permissionMode !== undefined && {
+            permissionMode: formData.permissionMode || null,
+          }),
+      };
       update(provider.id, {
         name: formData.name.trim(),
         apiKey: formData.apiKey.trim() || undefined,
         cliPath: formData.cliPath.trim() || undefined,
-        config: formData.model
-          ? { ...(provider.config ?? {}), model: formData.model }
-          : (provider.config ?? undefined),
+        config: Object.keys(newConfig).length ? newConfig : undefined,
       });
 
       toast.success("Provedor atualizado com sucesso");
@@ -208,10 +263,32 @@ export function EditProviderDialog({
 
             {config.needsCli && (
               <div className="grid gap-2">
-                <Label htmlFor="cliPath" className="flex items-center gap-2">
-                  <Terminal className="h-4 w-4" />
-                  Caminho do CLI
-                </Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="cliPath" className="flex items-center gap-2">
+                    <Terminal className="h-4 w-4" />
+                    Caminho do CLI
+                  </Label>
+                  {CLI_PROVIDER_TYPES_EDIT.includes(provider.type) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => {
+                        detectCliForProvider(provider.type).then((path) => {
+                          if (path)
+                            setFormData((prev) => ({
+                              ...prev,
+                              cliPath: path,
+                            }));
+                          else toast.error("CLI não encontrado no PATH");
+                        });
+                      }}
+                    >
+                      Detectar automaticamente
+                    </Button>
+                  )}
+                </div>
                 <Input
                   id="cliPath"
                   placeholder="/usr/local/bin/claude"
@@ -223,6 +300,53 @@ export function EditProviderDialog({
                     }))
                   }
                 />
+                {cliStatus !== null && (
+                  <p
+                    className={
+                      cliStatus.valid
+                        ? "text-xs text-green-600 dark:text-green-500"
+                        : "text-xs text-destructive"
+                    }
+                  >
+                    {cliStatus.valid
+                      ? "CLI encontrado e funcionando."
+                      : `CLI não encontrado${cliStatus.message ? `: ${cliStatus.message}` : "."}`}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {PROVIDER_TYPES_WITH_PERMISSION_MODES.includes(provider.type) && (
+              <div className="grid gap-2">
+                <Label htmlFor="permissionMode">Modo de permissão</Label>
+                <Select
+                  value={formData.permissionMode || "__default__"}
+                  onValueChange={(value) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      permissionMode:
+                        value === "__default__" ? "" : (value as PermissionMode),
+                    }))
+                  }
+                >
+                  <SelectTrigger id="permissionMode">
+                    <SelectValue placeholder="Modo de permissão" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PERMISSION_MODE_OPTIONS.map((opt) => (
+                      <SelectItem
+                        key={opt.value || "default"}
+                        value={opt.value || "__default__"}
+                      >
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Controla se o agente só planeja, aceita edições automaticamente
+                  ou bypass de aprovações.
+                </p>
               </div>
             )}
 

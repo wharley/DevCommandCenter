@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getVersion: () => invoke("app:getVersion") as Promise<string>,
     checkForUpdates: () => invoke("app:checkForUpdates") as Promise<void>,
     quitAndInstall: () => invoke("app:quitAndInstall") as Promise<void>,
+    showNotification: (payload: { title: string; body?: string }) =>
+      invoke("app:showNotification", payload),
     onUpdateStatus: (
       callback: (payload: {
         type: "available" | "not-available" | "downloaded" | "error";
@@ -46,6 +48,67 @@ contextBridge.exposeInMainWorld("electronAPI", {
     showItemInFolder: (path: string) => invoke("shell:showItemInFolder", path),
     resolveCliPath: (command: string) =>
       invoke("shell:resolveCliPath", command),
+    detectCliForProvider: (providerType: string) =>
+      invoke("shell:detectCliForProvider", providerType),
+    validateCliPath: (providerType: string, cliPath: string) =>
+      invoke("shell:validateCliPath", providerType, cliPath),
+    openTerminalAtPath: (
+      dirPath: string,
+      suggestedCommand?: string | { cliCommand: string; prompt: string },
+    ) => invoke("shell:openTerminalAtPath", dirPath, suggestedCommand),
+  },
+
+  terminal: {
+    spawn: (options: {
+      cwd: string;
+      command?: string;
+      args?: string[];
+      cols?: number;
+      rows?: number;
+    }) =>
+      invoke("terminal:spawn", options) as Promise<{
+        ptyId?: string;
+        error?: string;
+      }>,
+    getOrCreate: (missionId: string, options: {
+      cwd: string;
+      command?: string;
+      args?: string[];
+      cols?: number;
+      rows?: number;
+    }) =>
+      invoke("terminal:getOrCreate", missionId, options) as Promise<{
+        ptyId?: string;
+        error?: string;
+      }>,
+    write: (ptyId: string, data: string) =>
+      invoke("terminal:write", ptyId, data) as Promise<{ ok: boolean }>,
+    resize: (ptyId: string, cols: number, rows: number) =>
+      invoke("terminal:resize", ptyId, cols, rows) as Promise<{ ok: boolean }>,
+    kill: (ptyId: string) =>
+      invoke("terminal:kill", ptyId) as Promise<{ ok: boolean }>,
+    killByMissionId: (missionId: string) =>
+      invoke("terminal:killByMissionId", missionId) as Promise<{ ok: boolean }>,
+    onData: (callback: (ptyId: string, data: string) => void) => {
+      const fn = (_: unknown, ptyId: string, data: string) =>
+        callback(ptyId, data);
+      ipcRenderer.on("terminal:data", fn);
+      return () => ipcRenderer.removeListener("terminal:data", fn);
+    },
+    onExit: (callback: (ptyId: string, code: number) => void) => {
+      const fn = (_: unknown, ptyId: string, code: number) =>
+        callback(ptyId, code);
+      ipcRenderer.on("terminal:exit", fn);
+      return () => ipcRenderer.removeListener("terminal:exit", fn);
+    },
+  },
+
+  worktree: {
+    ensureForMission: (missionId: string) =>
+      invoke("worktree:ensureForMission", missionId),
+    mergeIntoMain: (missionId: string) =>
+      invoke("worktree:mergeIntoMain", missionId),
+    discard: (missionId: string) => invoke("worktree:discard", missionId),
   },
 
   // Window APIs

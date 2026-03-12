@@ -73,6 +73,27 @@ export function useElectron() {
     [api]
   );
 
+  const detectCliForProvider = useCallback(
+    async (providerType: string): Promise<string | null> => {
+      if (!api?.shell?.detectCliForProvider) return null;
+      const result = await api.shell.detectCliForProvider(providerType);
+      return result?.path ?? null;
+    },
+    [api]
+  );
+
+  const validateCliPath = useCallback(
+    async (
+      providerType: string,
+      cliPath: string
+    ): Promise<{ valid: boolean; message?: string }> => {
+      if (!api?.shell?.validateCliPath)
+        return { valid: false, message: "Not available" };
+      return api.shell.validateCliPath(providerType, cliPath);
+    },
+    [api]
+  );
+
   return {
     isElectron,
     platform,
@@ -86,6 +107,8 @@ export function useElectron() {
     openPath,
     showItemInFolder,
     resolveCliPath,
+    detectCliForProvider,
+    validateCliPath,
   };
 }
 

@@ -140,6 +140,12 @@ export function initDatabase(): Database.Database {
   // Migração: adicionar mission_type em missions se não existir
   migrateMissionType(db);
 
+  // Migração: adicionar worktree_path e worktree_branch em missions se não existirem (antes de agents_cli para a recriação ter 24 colunas)
+  migrateMissionWorktree(db);
+
+  // Migração: atualizar CHECK de missions para incluir 'agents_cli'
+  migrateMissionTypeAgentsCli(db);
+
   // Migração: criar tabela activation se não existir
   migrateActivationTable(db);
 
@@ -332,6 +338,70 @@ function migrateMissionType(database: Database.Database): void {
 }
 
 /**
+ * Migração: recria a tabela missions com CHECK que inclui 'agents_cli' em mission_type.
+ * Usa as colunas reais da tabela atual para o INSERT, assim funciona com 23 ou 24 colunas.
+ */
+function migrateMissionTypeAgentsCli(database: Database.Database): void {
+  const row = database
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'missions'",
+    )
+    .get() as { sql: string } | undefined;
+  if (!row?.sql || row.sql.includes("'agents_cli'")) {
+    return;
+  }
+
+  const columns = database
+    .prepare("PRAGMA table_info(missions)")
+    .all() as Array<{ name: string }>;
+  const colList = columns.map((c) => c.name).join(", ");
+
+  database.pragma('foreign_keys = OFF');
+  database.exec(`
+    DROP TABLE IF EXISTS missions_new;
+    CREATE TABLE missions_new (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      provider_id TEXT,
+      plan_provider_id TEXT,
+      code_provider_id TEXT,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created', 'planning', 'plan_generated', 'generating_code', 'code_ready', 'applying', 'completed', 'failed', 'cancelled')),
+      mission_type TEXT DEFAULT 'implementation' CHECK (mission_type IN ('implementation', 'analysis', 'agents_cli')),
+      plan TEXT,
+      generated_code TEXT,
+      context TEXT,
+      preserve_instructions TEXT,
+      error_message TEXT,
+      code_generation_attempts INTEGER DEFAULT 0,
+      is_committed INTEGER DEFAULT 0,
+      is_pushed INTEGER DEFAULT 0,
+      pending_commands TEXT,
+      worktree_path TEXT,
+      worktree_branch TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE SET NULL,
+      FOREIGN KEY (plan_provider_id) REFERENCES providers(id) ON DELETE SET NULL,
+      FOREIGN KEY (code_provider_id) REFERENCES providers(id) ON DELETE SET NULL
+    );
+  `);
+  database.exec(
+    `INSERT INTO missions_new (${colList}) SELECT ${colList} FROM missions`,
+  );
+  database.exec(`
+    DROP TABLE missions;
+    ALTER TABLE missions_new RENAME TO missions;
+  `);
+  database.pragma('foreign_keys = ON');
+  console.log("[Database] Migration: missions mission_type CHECK updated (agents_cli added).");
+}
+
+/**
  * Migração: cria tabela activation (beta/licença) se não existir.
  */
 function migrateActivationTable(database: Database.Database): void {
@@ -355,6 +425,25 @@ function migrateActivationTable(database: Database.Database): void {
     );
   `);
   console.log("[Database] Migration: activation table created.");
+}
+
+/**
+ * Migração: adiciona worktree_path e worktree_branch em missions (worktrees por missão).
+ */
+function migrateMissionWorktree(database: Database.Database): void {
+  const rows = database
+    .prepare("PRAGMA table_info(missions)")
+    .all() as Array<{ name: string }>;
+  const hasWorktreePath = rows.some((c) => c.name === "worktree_path");
+  const hasWorktreeBranch = rows.some((c) => c.name === "worktree_branch");
+  if (!hasWorktreePath) {
+    database.exec("ALTER TABLE missions ADD COLUMN worktree_path TEXT");
+    console.log("[Database] Migration: worktree_path column added to missions.");
+  }
+  if (!hasWorktreeBranch) {
+    database.exec("ALTER TABLE missions ADD COLUMN worktree_branch TEXT");
+    console.log("[Database] Migration: worktree_branch column added to missions.");
+  }
 }
 
 /**

@@ -96,6 +96,68 @@ declare global {
         openPath: (path: string) => Promise<void>;
         showItemInFolder: (path: string) => Promise<void>;
         resolveCliPath: (command: string) => Promise<{ path: string | null }>;
+        detectCliForProvider: (providerType: string) => Promise<{
+          path: string | null;
+        }>;
+        validateCliPath: (
+          providerType: string,
+          cliPath: string
+        ) => Promise<{ valid: boolean; message?: string }>;
+        openTerminalAtPath: (
+          dirPath: string,
+          suggestedCommand?: string | { cliCommand: string; prompt: string }
+        ) => Promise<{ success: boolean; error?: string }>;
+      };
+
+      terminal: {
+        spawn: (options: {
+          cwd: string;
+          command?: string;
+          args?: string[];
+          cols?: number;
+          rows?: number;
+        }) => Promise<{ ptyId?: string; error?: string }>;
+        getOrCreate: (
+          missionId: string,
+          options: {
+            cwd: string;
+            command?: string;
+            args?: string[];
+            cols?: number;
+            rows?: number;
+          }
+        ) => Promise<{ ptyId?: string; error?: string }>;
+        write: (ptyId: string, data: string) => Promise<{ ok: boolean }>;
+        resize: (
+          ptyId: string,
+          cols: number,
+          rows: number
+        ) => Promise<{ ok: boolean }>;
+        kill: (ptyId: string) => Promise<{ ok: boolean }>;
+        killByMissionId: (missionId: string) => Promise<{ ok: boolean }>;
+        onData: (
+          callback: (ptyId: string, data: string) => void
+        ) => () => void;
+        onExit: (
+          callback: (ptyId: string, code: number) => void
+        ) => () => void;
+      };
+
+      worktree: {
+        ensureForMission: (missionId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          worktreePath?: string;
+          worktreeBranch?: string;
+        }>;
+        mergeIntoMain: (missionId: string) => Promise<{
+          success: boolean;
+          error?: string;
+        }>;
+        discard: (missionId: string) => Promise<{
+          success: boolean;
+          error?: string;
+        }>;
       };
 
       window: {
@@ -123,6 +185,10 @@ declare global {
         getVersion: () => Promise<string>;
         checkForUpdates: () => Promise<void>;
         quitAndInstall: () => Promise<void>;
+        showNotification: (payload: {
+          title: string;
+          body?: string;
+        }) => Promise<void>;
         onUpdateStatus: (
           callback: (payload: {
             type: "available" | "not-available" | "downloaded" | "error";

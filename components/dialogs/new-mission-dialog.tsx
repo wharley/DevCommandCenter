@@ -83,7 +83,7 @@ export function NewMissionDialog({
     missionType: "implementation",
   });
 
-  // When opening in edit mode, fill form from initialMission
+  // When opening in edit mode or quick-create, fill form from initialMission
   useEffect(() => {
     if (open && isEditMode && initialMission) {
       setFormData({
@@ -95,8 +95,18 @@ export function NewMissionDialog({
         codeProviderId: initialMission.codeProviderId ?? "",
         missionType: initialMission.missionType ?? "implementation",
       });
-    }
-    if (open && !isEditMode) {
+    } else if (open && !isEditMode && initialMission?.title != null) {
+      // Quick create: prefill from initialMission (title + description)
+      setFormData({
+        title: initialMission.title ?? "",
+        description: initialMission.description ?? "",
+        preserveInstructions: initialMission.preserveInstructions ?? "",
+        providerId: initialMission.providerId ?? defaultProviderId ?? "",
+        planProviderId: initialMission.planProviderId ?? "",
+        codeProviderId: initialMission.codeProviderId ?? "",
+        missionType: initialMission.missionType ?? "implementation",
+      });
+    } else if (open && !isEditMode) {
       setFormData({
         title: "",
         description: "",

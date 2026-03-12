@@ -1,17 +1,31 @@
-import { app, dialog, shell, BrowserWindow } from "electron";
+import { app, dialog, shell, BrowserWindow, Notification } from "electron";
 import type { IpcMain } from "electron";
 import { autoUpdater } from "electron-updater";
 import fs from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync, spawn } from "node:child_process";
 import { platform } from "node:os";
 import db from "../lib/database";
 import { getActivation, setActivation } from "../lib/database/activation";
 import { aiOrchestrator, GitService } from "./services";
+import {
+  createWorktreeForMission,
+  mergeWorktreeIntoMain,
+  discardWorktree,
+} from "./services/worktree-service";
 import { getMachineId } from "./services/machine-id";
 import {
   providerService,
   sanitizeForRenderer,
 } from "./services/provider-service";
+import { detectCliPath, validateCliPath } from "./services/cli-detection";
+import {
+  spawnPty,
+  getOrCreatePty,
+  writeToPty,
+  resizePty,
+  killPty,
+  killPtyByMissionId,
+} from "./services/terminal-pty-service";
 
 const BETA_ACTIVATE_URL = "https://www.devcommandcenter.com/api/beta-activate";
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
@@ -33,6 +47,18 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     if (isDev || !app.isPackaged) return;
     autoUpdater.quitAndInstall(false, true);
   });
+
+  ipcMain.handle(
+    "app:showNotification",
+    (_event, payload: { title: string; body?: string }) => {
+      if (!Notification.isSupported()) return;
+      const n = new Notification({
+        title: payload.title ?? "Dev Command Center",
+        body: payload.body,
+      });
+      n.show();
+    },
+  );
 
   // ==========================================
   // Dialog handlers
@@ -123,7 +149,26 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
         }
       }
       return { path: null };
-    }
+    },
+  );
+
+  ipcMain.handle(
+    "shell:detectCliForProvider",
+    async (_event, providerType: string): Promise<{ path: string | null }> => {
+      const path = detectCliPath(providerType);
+      return { path };
+    },
+  );
+
+  ipcMain.handle(
+    "shell:validateCliPath",
+    async (
+      _event,
+      providerType: string,
+      cliPath: string,
+    ): Promise<{ valid: boolean; message?: string }> => {
+      return validateCliPath(providerType, cliPath);
+    },
   );
 
   // ==========================================
@@ -156,7 +201,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
   ipcMain.handle("license:getStatus", () => {
     if (isDev) {
       const status = getActivation();
-        // Em dev: se já tiver ativado, retorna; senão pode retornar activated true para bypass
+      // Em dev: se já tiver ativado, retorna; senão pode retornar activated true para bypass
       if (status?.activated) return status;
       return { activated: false, email: undefined };
     }
@@ -170,8 +215,13 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
 
   ipcMain.handle(
     "license:activate",
-    async (_event, email: string): Promise<{ success: boolean; message?: string }> => {
-      const trimmed = String(email ?? "").trim().toLowerCase();
+    async (
+      _event,
+      email: string,
+    ): Promise<{ success: boolean; message?: string }> => {
+      const trimmed = String(email ?? "")
+        .trim()
+        .toLowerCase();
       if (!trimmed) {
         return { success: false, message: "Informe um e-mail válido." };
       }
@@ -207,10 +257,12 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
         };
       } catch (err) {
         const message =
-          err instanceof Error ? err.message : "Erro de conexão. Verifique sua internet.";
+          err instanceof Error
+            ? err.message
+            : "Erro de conexão. Verifique sua internet.";
         return { success: false, message };
       }
-    }
+    },
   );
 
   ipcMain.handle("license:skipActivation", () => {
@@ -263,7 +315,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     (_event, id: string, isActive: boolean) => {
       const p = providerService.setActive(id, isActive);
       return p ? sanitizeForRenderer(p) : null;
-    }
+    },
   );
 
   ipcMain.handle("db:providers:testConnection", (_event, id: string) => {
@@ -340,7 +392,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missions:search",
     (_event, query: string, projectId?: string) => {
       return db.missions.search(query, projectId);
-    }
+    },
   );
 
   ipcMain.handle("db:missions:create", (_event, data: any) => {
@@ -359,7 +411,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missions:updateStatus",
     (_event, id: string, status: string) => {
       return db.missions.updateStatus(id, status as any);
-    }
+    },
   );
 
   ipcMain.handle(
@@ -367,7 +419,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     (_event, id: string, plan: string | object) => {
       const planObj = typeof plan === "string" ? JSON.parse(plan) : plan;
       return db.missions.updatePlan(id, planObj);
-    }
+    },
   );
 
   ipcMain.handle(
@@ -375,7 +427,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     (_event, id: string, code: string | object) => {
       const codeObj = typeof code === "string" ? JSON.parse(code) : code;
       return db.missions.updateGeneratedCode(id, codeObj);
-    }
+    },
   );
 
   ipcMain.handle("db:missions:start", (_event, id: string) => {
@@ -386,7 +438,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missions:complete",
     (_event, id: string, summary?: string) => {
       return db.missions.complete(id, summary);
-    }
+    },
   );
 
   ipcMain.handle("db:missions:fail", (_event, id: string, error: string) => {
@@ -408,10 +460,10 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missionLogs:findAll",
     (
       _event,
-      options?: { missionId?: string; limit?: number; offset?: number }
+      options?: { missionId?: string; limit?: number; offset?: number },
     ) => {
       return db.missionLogs.findAll(options || { limit: 100, offset: 0 });
-    }
+    },
   );
 
   ipcMain.handle("db:missionLogs:findById", (_event, id: string) => {
@@ -422,21 +474,21 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missionLogs:findByMission",
     (_event, missionId: string, limit?: number, offset?: number) => {
       return db.missionLogs.findByMission(missionId, limit, offset);
-    }
+    },
   );
 
   ipcMain.handle(
     "db:missionLogs:findByLevel",
     (_event, level: string, missionId?: string) => {
       return db.missionLogs.findByLevel(level as any, missionId);
-    }
+    },
   );
 
   ipcMain.handle(
     "db:missionLogs:search",
     (_event, query: string, missionId?: string) => {
       return db.missionLogs.search(query, missionId);
-    }
+    },
   );
 
   ipcMain.handle("db:missionLogs:create", (_event, data: any) => {
@@ -451,49 +503,49 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missionLogs:deleteByMission",
     (_event, missionId: string) => {
       return db.missionLogs.deleteByMission(missionId);
-    }
+    },
   );
 
   ipcMain.handle(
     "db:missionLogs:logInfo",
     (_event, missionId: string, message: string, metadata?: any) => {
       return db.missionLogs.logInfo(missionId, message, metadata);
-    }
+    },
   );
 
   ipcMain.handle(
     "db:missionLogs:logWarning",
     (_event, missionId: string, message: string, metadata?: any) => {
       return db.missionLogs.logWarning(missionId, message, metadata);
-    }
+    },
   );
 
   ipcMain.handle(
     "db:missionLogs:logError",
     (_event, missionId: string, message: string, metadata?: any) => {
       return db.missionLogs.logError(missionId, message, metadata);
-    }
+    },
   );
 
   ipcMain.handle(
     "db:missionLogs:logDebug",
     (_event, missionId: string, message: string, metadata?: any) => {
       return db.missionLogs.logDebug(missionId, message, metadata);
-    }
+    },
   );
 
   ipcMain.handle(
     "db:missionLogs:logAgentAction",
     (_event, missionId: string, action: string, details?: any) => {
       return db.missionLogs.logAgentAction(missionId, action, details);
-    }
+    },
   );
 
   ipcMain.handle(
     "db:missionLogs:logUserInput",
     (_event, missionId: string, input: string) => {
       return db.missionLogs.logUserInput(missionId, input);
-    }
+    },
   );
 
   ipcMain.handle("db:missionLogs:getStats", (_event, missionId: string) => {
@@ -504,14 +556,14 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "db:missionLogs:getUsageStats",
     (_event, missionId: string) => {
       return db.missionLogs.getUsageStats(missionId);
-    }
+    },
   );
 
   ipcMain.handle(
     "db:missionLogs:getLatest",
     (_event, missionId: string, count?: number) => {
       return db.missionLogs.getLatest(missionId, count);
-    }
+    },
   );
 
   // ==========================================
@@ -550,7 +602,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "ai:generatePlan",
     async (_event, missionId: string, options?: { planFeedback?: string }) => {
       return aiOrchestrator.generatePlan(missionId, options);
-    }
+    },
   );
 
   // Generate code for a mission
@@ -558,7 +610,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "ai:generateCode",
     async (_event, missionId: string, options?: { codeFeedback?: string }) => {
       return aiOrchestrator.generateCode(missionId, options);
-    }
+    },
   );
 
   // Apply changes to the project
@@ -572,10 +624,10 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
         dryRun?: boolean;
         filePaths?: string[];
         editedContent?: Record<string, string>;
-      }
+      },
     ) => {
       return aiOrchestrator.applyChanges(missionId, options ?? {});
-    }
+    },
   );
 
   // Test provider connection
@@ -616,7 +668,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string, filePath: string) => {
       const gitService = new GitService(projectPath);
       return gitService.getFileDiffHead(filePath);
-    }
+    },
   );
 
   // Check if directory is a git repo
@@ -631,7 +683,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string) => {
       const gitService = new GitService(projectPath);
       return gitService.getCurrentBranch();
-    }
+    },
   );
 
   // Get default branch (main or master)
@@ -640,7 +692,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string) => {
       const gitService = new GitService(projectPath);
       return gitService.getDefaultBranch();
-    }
+    },
   );
 
   // Create a new branch (optionally from a base branch)
@@ -650,11 +702,11 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
       _event,
       projectPath: string,
       branchName: string,
-      fromBranch?: string
+      fromBranch?: string,
     ) => {
       const gitService = new GitService(projectPath);
       return gitService.createBranch(branchName, fromBranch);
-    }
+    },
   );
 
   // List tracked files
@@ -663,7 +715,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string, maxFiles?: number) => {
       const gitService = new GitService(projectPath);
       return gitService.listTrackedFiles(maxFiles);
-    }
+    },
   );
 
   // Get recent commits
@@ -672,7 +724,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string, count?: number) => {
       const gitService = new GitService(projectPath);
       return gitService.getRecentCommits(count);
-    }
+    },
   );
 
   // Commit changes (optional file list; omit for git add -A)
@@ -681,7 +733,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string, message: string, files?: string[]) => {
       const gitService = new GitService(projectPath);
       return gitService.commit(message, files);
-    }
+    },
   );
 
   // Get worktree info (isWorktree, worktreeRoot)
@@ -702,6 +754,223 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (_event, projectPath: string, ref?: "HEAD" | "HEAD~1") => {
       const gitService = new GitService(projectPath);
       return gitService.reset(ref ?? "HEAD");
+    },
+  );
+
+  // ==========================================
+  // Worktree (por missão, pipeline paralelo)
+  // ==========================================
+  ipcMain.handle(
+    "worktree:ensureForMission",
+    async (_event, missionId: string) => {
+      const mission = db.missions.findById(missionId);
+      if (!mission) return { success: false, error: "Mission not found" };
+      const project = db.projects.findById(mission.projectId);
+      if (!project) return { success: false, error: "Project not found" };
+      const result = await createWorktreeForMission(project.path, missionId);
+      if (!result.success) return result;
+      db.missions.update(missionId, {
+        worktreePath: result.data.worktreePath,
+        worktreeBranch: result.data.worktreeBranch,
+      });
+      return {
+        success: true,
+        worktreePath: result.data.worktreePath,
+        worktreeBranch: result.data.worktreeBranch,
+      };
+    },
+  );
+
+  ipcMain.handle(
+    "worktree:mergeIntoMain",
+    async (_event, missionId: string) => {
+      const mission = db.missions.findById(missionId);
+      if (!mission?.worktreePath || !mission?.worktreeBranch)
+        return { success: false, error: "Mission has no worktree" };
+      const project = db.projects.findById(mission.projectId);
+      if (!project) return { success: false, error: "Project not found" };
+      const gitService = new GitService(project.path);
+      const mainBranch = await gitService
+        .getDefaultBranch()
+        .catch(() => "main");
+      const result = await mergeWorktreeIntoMain(
+        project.path,
+        mission.worktreeBranch,
+        mission.worktreePath,
+        mainBranch,
+      );
+      if (result.success)
+        db.missions.update(missionId, {
+          worktreePath: null,
+          worktreeBranch: null,
+        });
+      return result;
+    },
+  );
+
+  ipcMain.handle("worktree:discard", async (_event, missionId: string) => {
+    const mission = db.missions.findById(missionId);
+    if (!mission?.worktreePath || !mission?.worktreeBranch)
+      return { success: false, error: "Mission has no worktree" };
+    const project = db.projects.findById(mission.projectId);
+    if (!project) return { success: false, error: "Project not found" };
+    const result = await discardWorktree(
+      project.path,
+      mission.worktreePath,
+      mission.worktreeBranch,
+    );
+    if (result.success) {
+      db.missions.update(missionId, {
+        worktreePath: null,
+        worktreeBranch: null,
+      });
+      killPtyByMissionId(missionId);
+    }
+    return result;
+  });
+
+  // Escape string for use inside AppleScript do script "..." (backslash and double-quote)
+  function escapeForAppleScriptDoScript(s: string): string {
+    return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  }
+
+  /** Escape prompt for use inside double-quoted shell argument (darwin/linux: \ and "; win32: ") */
+  function escapePromptForShell(
+    plat: NodeJS.Platform,
+    prompt: string,
+  ): string {
+    if (plat === "win32") {
+      return prompt.replace(/"/g, '""');
+    }
+    return prompt.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  }
+
+  /** Build full command from cli + prompt; second arg can be string (opaque) or { cliCommand, prompt }. */
+  function normalizeSuggestedCommand(
+    plat: NodeJS.Platform,
+    suggestedCommand: string | { cliCommand: string; prompt: string } | undefined,
+  ): string | undefined {
+    if (suggestedCommand == null) return undefined;
+    if (typeof suggestedCommand === "string") return suggestedCommand;
+    const { cliCommand, prompt } = suggestedCommand;
+    const escaped = escapePromptForShell(plat, prompt);
+    return `${cliCommand} "${escaped}"`;
+  }
+
+  // Abre o terminal do OS no path; opcionalmente sugere um comando (ex.: codex) ou { cliCommand, prompt }
+  ipcMain.handle(
+    "shell:openTerminalAtPath",
+    async (
+      _event,
+      dirPath: string,
+      suggestedCommand?: string | { cliCommand: string; prompt: string },
+    ): Promise<{ success: boolean; error?: string }> => {
+      const plat = platform();
+      const fullCommand = normalizeSuggestedCommand(plat, suggestedCommand);
+      try {
+        if (plat === "darwin") {
+          const pathEscaped = escapeForAppleScriptDoScript(dirPath);
+          const cmdEscaped = fullCommand
+            ? " && " + escapeForAppleScriptDoScript(fullCommand)
+            : "";
+          const script = `tell application "Terminal" to do script "cd \\"${pathEscaped}\\"${cmdEscaped}"`;
+          execFileSync("osascript", ["-e", script]);
+        } else if (plat === "win32") {
+          const quoted = `"${dirPath.replace(/"/g, '""')}"`;
+          const winCmd = fullCommand
+            ? `start cmd /k "cd /d ${quoted} && ${fullCommand}"`
+            : `start cmd /k "cd /d ${quoted}"`;
+          execSync(winCmd, { windowsHide: true });
+        } else {
+          const term: string =
+            process.env.COLORTERM || process.env.TERM || "xterm";
+          const cmd = fullCommand
+            ? `cd "${dirPath}" && ${fullCommand}`
+            : `cd "${dirPath}"`;
+          const sub = spawn(term, ["-e", `bash -c '${cmd.replace(/'/g, "'\"'\"'")}'`], {
+            detached: true,
+            stdio: "ignore",
+          });
+          sub.unref();
+        }
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { success: false, error: message };
+      }
+    },
+  );
+
+  // Embedded terminal (node-pty + xterm.js)
+  ipcMain.handle(
+    "terminal:spawn",
+    async (
+      event,
+      options: { cwd: string; command?: string; args?: string[]; cols?: number; rows?: number }
+    ): Promise<{ ptyId?: string; error?: string }> => {
+      const result = spawnPty(
+        {
+          cwd: options.cwd,
+          command: options.command,
+          args: options.args ?? [],
+          cols: options.cols ?? 80,
+          rows: options.rows ?? 24,
+        },
+        event.sender
+      );
+      if (result.error) return { error: result.error };
+      return { ptyId: result.ptyId };
+    }
+  );
+
+  ipcMain.handle(
+    "terminal:getOrCreate",
+    async (
+      event,
+      missionId: string,
+      options: { cwd: string; command?: string; args?: string[]; cols?: number; rows?: number }
+    ): Promise<{ ptyId?: string; error?: string }> => {
+      const result = getOrCreatePty(
+        {
+          missionId,
+          cwd: options.cwd,
+          command: options.command,
+          args: options.args ?? [],
+          cols: options.cols ?? 80,
+          rows: options.rows ?? 24,
+        },
+        event.sender
+      );
+      if (result.error) return { error: result.error };
+      return { ptyId: result.ptyId };
+    }
+  );
+
+  ipcMain.handle(
+    "terminal:write",
+    (_event, ptyId: string, data: string): { ok: boolean } => {
+      return { ok: writeToPty(ptyId, data) };
+    }
+  );
+
+  ipcMain.handle(
+    "terminal:resize",
+    (_event, ptyId: string, cols: number, rows: number): { ok: boolean } => {
+      return { ok: resizePty(ptyId, cols, rows) };
+    }
+  );
+
+  ipcMain.handle(
+    "terminal:kill",
+    (_event, ptyId: string): { ok: boolean } => {
+      return { ok: killPty(ptyId) };
+    }
+  );
+
+  ipcMain.handle(
+    "terminal:killByMissionId",
+    (_event, missionId: string): { ok: boolean } => {
+      return { ok: killPtyByMissionId(missionId) };
     }
   );
 

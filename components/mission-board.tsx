@@ -210,7 +210,16 @@ function MissionColumn({
       </div>
       <ScrollArea className="max-h-[calc(100vh-20rem)] flex-1">
         <div className="space-y-2 p-2">
-          {missions.map((mission) => (
+          {missions.length === 0 ? (
+            <div
+              className="rounded-md border border-dashed border-muted-foreground/25 bg-muted/20 px-3 py-6 text-center text-xs text-muted-foreground"
+              role="status"
+              aria-label={`${title}: nenhuma missão`}
+            >
+              Nenhuma missão nesta coluna
+            </div>
+          ) : (
+            missions.map((mission) => (
             <MissionBoardCard
               key={mission.id}
               mission={mission}
@@ -223,7 +232,8 @@ function MissionColumn({
               onEdit={onEdit}
               confirmDialog={confirmDialog}
             />
-          ))}
+          ))
+          )}
         </div>
       </ScrollArea>
     </div>
@@ -264,12 +274,14 @@ function MissionBoardCard({
     ? providers.find((p) => p.id === mission.providerId) ?? defaultProvider
     : defaultProvider;
 
+  const missionPath =
+    mission.missionType === "agents_cli"
+      ? `/project/${projectId}/task/${mission.id}`
+      : `/project/${projectId}/mission/${mission.id}`;
+
   return (
     <Card className="group relative min-w-0 overflow-hidden transition-shadow hover:shadow-md">
-      <Link
-        to={`/project/${projectId}/mission/${mission.id}`}
-        className="absolute inset-0 z-10"
-      />
+      <Link to={missionPath} className="absolute inset-0 z-10" />
       <CardHeader className="p-3 pb-1">
         <div className="flex items-start justify-between gap-1">
           <div className="min-w-0 flex-1 overflow-hidden">
@@ -290,9 +302,11 @@ function MissionBoardCard({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild>
-                <Link to={`/project/${projectId}/mission/${mission.id}`}>
+                <Link to={missionPath}>
                   <Play className="mr-2 h-4 w-4" />
-                  Abrir missão
+                  {mission.missionType === "agents_cli"
+                    ? "Abrir tarefa"
+                    : "Abrir missão"}
                 </Link>
               </DropdownMenuItem>
               {!mission.plan && mission.status !== "planning" && (
@@ -345,6 +359,12 @@ function MissionBoardCard({
       </CardHeader>
       <CardContent className="min-w-0 overflow-hidden p-3 pt-0">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden text-xs text-muted-foreground">
+          {mission.plan?.steps?.length != null && mission.plan.steps.length > 0 && (
+            <span className="shrink-0">
+              {mission.plan.steps.filter((s) => s.status === "completed").length}/
+              {mission.plan.steps.length} etapas
+            </span>
+          )}
           {isActive && (
             <span className="flex shrink-0 items-center gap-1 text-primary">
               <Loader2 className="h-3 w-3 animate-spin" />

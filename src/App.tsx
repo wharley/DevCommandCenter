@@ -8,6 +8,7 @@ import HomePage from "@/src/pages/HomePage";
 import SettingsPage from "@/src/pages/SettingsPage";
 import ProjectPage from "@/src/pages/ProjectPage";
 import MissionPage from "@/src/pages/MissionPage";
+import TaskPage from "@/src/pages/TaskPage";
 import ActivationPage from "@/src/pages/ActivationPage";
 
 const isElectron = typeof window !== "undefined" && !!window.electronAPI;
@@ -68,6 +69,10 @@ function AppContent() {
         <Route
           path="/project/:id/mission/:missionId"
           element={<MissionPage />}
+        />
+        <Route
+          path="/project/:id/task/:missionId"
+          element={<TaskPage />}
         />
       </Routes>
     </MainLayout>

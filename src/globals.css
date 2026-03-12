@@ -29,6 +29,9 @@
   --chart-4: oklch(0.7 0.15 200);
   --chart-5: oklch(0.55 0.22 25);
   --radius: 0.5rem;
+  --spacing-unit: 8px;
+  --transition-fast: 150ms ease;
+  --transition-base: 200ms ease;
   --sidebar: oklch(0.12 0.02 260);
   --sidebar-foreground: oklch(0.92 0.01 260);
   --sidebar-primary: oklch(0.55 0.2 260);
@@ -85,6 +88,8 @@
 @theme inline {
   --font-sans: "Geist", "Geist Fallback";
   --font-mono: "Geist Mono", "Geist Mono Fallback";
+  --animate-duration-fast: 150ms;
+  --animate-duration-base: 200ms;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -145,6 +150,11 @@
 
 .electron-no-drag {
   -webkit-app-region: no-drag;
+}
+
+/* Modo foco na missão: conteúdo mais focado (opcional) */
+.mission-focus-mode header.border-b {
+  @apply bg-card/95;
 }
 
 @keyframes progress-indeterminate {

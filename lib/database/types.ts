@@ -36,8 +36,16 @@ export type MissionLogType =
   | "warning"
   | "debug";
 
-/** implementation = plano → código → aplicar; analysis = apenas plano (review/diagnóstico) */
-export type MissionType = "implementation" | "analysis";
+/** implementation = plano → código → aplicar; analysis = apenas plano; agents_cli = tarefa 1:1 com agente no terminal */
+export type MissionType = "implementation" | "analysis" | "agents_cli";
+
+/**
+ * Permission mode for CLI agents (Codex, Claude Code, etc.).
+ * - plan: only plan, require approval for edits
+ * - acceptEdits: auto-accept edits (e.g. --full-auto for Codex)
+ * - bypass: skip approvals and sandbox (maximum automation)
+ */
+export type PermissionMode = "" | "plan" | "acceptEdits" | "bypass";
 
 // ============================================
 // Entidades do banco
@@ -66,6 +74,8 @@ export interface ProviderConfig {
   baseUrl?: string;
   /** Timeout máximo em milissegundos para operações CLI (padrão: 10 minutos) */
   timeout?: number;
+  /** Permission mode for CLI agents: plan (approval required), acceptEdits (auto-accept), bypass (skip approvals) */
+  permissionMode?: PermissionMode | null;
   [key: string]: unknown;
 }
 
@@ -102,6 +112,10 @@ export interface Mission {
   isPushed?: boolean;
   /** Comandos pendentes detectados que o usuário precisa executar manualmente */
   pendingCommands?: PendingCommand[] | null;
+  /** Path do worktree Git associado à missão (para pipeline paralelo) */
+  worktreePath?: string | null;
+  /** Branch do worktree (ex.: dcc-mission-<id>) */
+  worktreeBranch?: string | null;
   startedAt?: Date | null;
   completedAt?: Date | null;
   createdAt: Date;
@@ -240,6 +254,8 @@ export interface UpdateMissionDTO {
   isCommitted?: boolean;
   isPushed?: boolean;
   pendingCommands?: PendingCommand[] | null;
+  worktreePath?: string | null;
+  worktreeBranch?: string | null;
   startedAt?: Date;
   completedAt?: Date;
 }

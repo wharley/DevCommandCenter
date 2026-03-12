@@ -65,6 +65,11 @@ export function createAdapter(provider: Provider): AIProviderAdapter {
   }
 }
 
+export {
+  adapterPermissionFlags,
+  getPermissionFlagsForAdapter,
+} from "./permission-modes";
+
 /**
  * Registry de adapters disponíveis
  */
@@ -74,41 +79,48 @@ export const adapterRegistry = {
     description: "Uses Claude Code CLI installed locally",
     requiresCli: true,
     requiresApiKey: false,
+    supportsPermissionModes: true,
   },
   "codex": {
     name: "OpenAI Codex CLI",
     description: "Uses OpenAI Codex CLI installed locally",
     requiresCli: true,
     requiresApiKey: true,
+    supportsPermissionModes: true,
   },
   "openai": {
     name: "OpenAI API",
     description: "Direct integration with OpenAI API (GPT-4, etc.)",
     requiresCli: false,
     requiresApiKey: true,
+    supportsPermissionModes: false,
   },
   "anthropic": {
     name: "Anthropic API",
     description: "Direct integration with Anthropic API (Claude)",
     requiresCli: false,
     requiresApiKey: true,
+    supportsPermissionModes: false,
   },
   "cursor": {
     name: "Cursor Agent CLI",
     description: "Uses Cursor Agent CLI (agent) installed locally. Login is done in the terminal.",
     requiresCli: true,
     requiresApiKey: false,
+    supportsPermissionModes: false,
   },
   "gemini": {
     name: "Gemini CLI",
     description: "Uses Gemini CLI (@google/gemini-cli) installed locally. Authenticate via terminal or GEMINI_API_KEY.",
     requiresCli: true,
     requiresApiKey: false,
+    supportsPermissionModes: true,
   },
   "custom": {
     name: "Custom Provider",
     description: "Custom provider configuration",
     requiresCli: false,
     requiresApiKey: false,
+    supportsPermissionModes: false,
   },
 } as const;

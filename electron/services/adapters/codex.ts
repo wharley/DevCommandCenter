@@ -9,6 +9,7 @@ import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { platform } from "node:os";
 import * as fs from "node:fs";
 import { BaseAdapter } from "./base";
+import { getPermissionFlagsForAdapter } from "./permission-modes";
 import { spawnCliWithLoginShell, getResolvedPathForNode } from "../shell-path";
 import type {
   ValidationResult,
@@ -19,6 +20,7 @@ import type {
   Provider,
   ProgressCallback,
 } from "../types";
+import type { PermissionMode } from "../../../lib/database/types";
 
 // Timeout padrão de 10 minutos (em ms)
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -271,11 +273,15 @@ export class CodexAdapter extends BaseAdapter {
 
       // Args para o Codex CLI (codex exec = modo não-interativo para automação)
       // -c check_for_update_on_startup=false: não exibir prompt de atualização
+      const permissionMode = (this.provider.config?.permissionMode ?? "acceptEdits") as PermissionMode;
+      const permissionArgs = getPermissionFlagsForAdapter("codex", permissionMode);
+      // Default: acceptEdits (--full-auto) when no flags from registry
+      const hasPermissionFlags = permissionArgs.length > 0;
       const args = [
         "exec",
         "--cd",
         cwd,
-        "--full-auto",
+        ...(hasPermissionFlags ? permissionArgs : ["--full-auto"]),
         "-c",
         "check_for_update_on_startup=false",
         "--skip-git-repo-check",

@@ -12,7 +12,7 @@
     "electron:start": "yarn electron:compile && electron .",
     "electron:build": "yarn electron:compile && yarn build && node scripts/download-node-binary.cjs && electron-builder",
     "electron:download-node": "node scripts/download-node-binary.cjs",
-    "electron:rebuild": "npx @electron/rebuild -f -w better-sqlite3",
+    "electron:rebuild": "npx @electron/rebuild -f -w better-sqlite3,node-pty",
     "postinstall": "electron-builder install-app-deps",
     "lint": "eslint ."
   },
@@ -57,6 +57,7 @@
     "electron-updater": "^6.3.9",
     "embla-carousel-react": "8.5.1",
     "immer": "latest",
+    "node-pty": "^1.0.0",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
     "prismjs": "^1.30.0",
@@ -74,6 +75,8 @@
     "tailwindcss-animate": "^1.0.7",
     "use-sync-external-store": "latest",
     "vaul": "^1.1.2",
+    "@xterm/addon-fit": "^0.11.0",
+    "xterm": "^5.3.0",
     "zod": "3.25.76",
     "zustand": "5.0.10"
   },

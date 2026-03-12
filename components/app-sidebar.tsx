@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   FolderGit2,
@@ -6,7 +7,9 @@ import {
   Terminal,
   Plus,
   ChevronRight,
+  HelpCircle,
 } from "lucide-react";
+import { HelpDialog } from "@/components/dialogs/help-dialog";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -35,6 +38,7 @@ function projectAccentColor(projectId: string): { bg: string; fg: string } {
 
 export function AppSidebar() {
   const { pathname } = useLocation();
+  const [helpOpen, setHelpOpen] = useState(false);
   const { projects } = useProjects();
   const { missions } = useMissions();
   const currentProjectId = useAppStore((s) => s.currentProjectId);
@@ -151,6 +155,20 @@ export function AppSidebar() {
         </div>
       </div>
 
+      {/* Ajuda */}
+      <div className="border-t border-sidebar-border p-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="electron-no-drag w-full justify-start gap-3 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          onClick={() => setHelpOpen(true)}
+          title="Ajuda e atalhos (⌘/)"
+        >
+          <HelpCircle className="h-4 w-4" />
+          Ajuda
+        </Button>
+      </div>
+
       {/* Footer */}
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
@@ -163,6 +181,8 @@ export function AppSidebar() {
           </div>
         </div>
       </div>
+
+      <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
     </aside>
   );
 }

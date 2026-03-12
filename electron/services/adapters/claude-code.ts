@@ -10,6 +10,7 @@ import { platform, tmpdir } from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { BaseAdapter } from "./base";
+import { getPermissionFlagsForAdapter } from "./permission-modes";
 import { spawnCliWithLoginShell, getResolvedPathForNode } from "../shell-path";
 import type {
   ValidationResult,
@@ -20,6 +21,7 @@ import type {
   Provider,
   ProgressCallback,
 } from "../types";
+import type { PermissionMode } from "../../../lib/database/types";
 
 // Timeout padrão de 10 minutos (em ms)
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -316,6 +318,8 @@ export class ClaudeCodeAdapter extends BaseAdapter {
       const promptArg = ClaudeCodeAdapter.buildPromptFromFileInstruction(tempPath);
       const allowedTools =
         (this.provider.config?.allowedTools as string) || "Read,Edit,Bash";
+      const permissionMode = (this.provider.config?.permissionMode ?? "acceptEdits") as PermissionMode;
+      const permissionArgs = getPermissionFlagsForAdapter("claude-code", permissionMode);
       const args = [
         "-p",
         promptArg,
@@ -323,6 +327,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         "json",
         "--allowedTools",
         allowedTools,
+        ...permissionArgs,
       ];
 
       // Adiciona modelo: usa alias do CLI (sonnet/opus) para 4.5 para ser à prova de novas datas

@@ -13,6 +13,7 @@ import { platform } from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { BaseAdapter } from "./base";
+import { getPermissionFlagsForAdapter } from "./permission-modes";
 import { spawnCliWithLoginShell, getResolvedPathForNode } from "../shell-path";
 import type {
   ValidationResult,
@@ -23,6 +24,7 @@ import type {
   Provider,
   ProgressCallback,
 } from "../types";
+import type { PermissionMode } from "../../../lib/database/types";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
@@ -292,10 +294,14 @@ export class GeminiAdapter extends BaseAdapter {
       const inactivityTimeout = Math.min(INACTIVITY_TIMEOUT_MS, maxTimeout / 2);
 
       const model = this.provider.config?.model as string | undefined;
+      const permissionMode = (this.provider.config?.permissionMode ??
+        "acceptEdits") as PermissionMode;
+      const permissionArgs = getPermissionFlagsForAdapter("gemini", permissionMode);
       const args = [
         "--output-format",
         "json",
         ...(model && model.trim() ? ["--model", model] : []),
+        ...permissionArgs,
       ];
 
       let child: ChildProcess;

@@ -38,6 +38,10 @@ import { AddProviderDialog } from "@/components/dialogs/add-provider-dialog";
 import { EditProviderDialog } from "@/components/dialogs/edit-provider-dialog";
 import { useProviders } from "@/hooks/use-data";
 import type { Provider, ProviderType } from "@/lib/database/types";
+import {
+  areNotificationsEnabled,
+  setNotificationsEnabled,
+} from "@/lib/notifications";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -91,6 +95,9 @@ const defaultModelLabelByType: Partial<Record<ProviderType, string>> = {
 export default function SettingsPage() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
+  const [notificationsEnabled, setNotificationsEnabledState] = useState(
+    () => areNotificationsEnabled()
+  );
 
   const { providers, update, remove } = useProviders();
   const [encryptionAvailable, setEncryptionAvailable] = useState<boolean | null>(null);
@@ -364,6 +371,33 @@ export default function SettingsPage() {
                 })}
               </div>
             )}
+          </section>
+
+          {/* Notificações nativas */}
+          <section className="mt-8">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">
+                  Notificações nativas
+                </CardTitle>
+                <CardDescription>
+                  Exibir notificações do sistema quando uma missão terminar uma
+                  etapa (plano pronto, código pronto, aplicado ou falha).
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Ativar notificações</span>
+                  <Switch
+                    checked={notificationsEnabled}
+                    onCheckedChange={(checked) => {
+                      setNotificationsEnabled(checked);
+                      setNotificationsEnabledState(checked);
+                    }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
           </section>
 
           {/* Atualizações */}

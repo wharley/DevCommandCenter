@@ -7,6 +7,7 @@
 import { createAdapter } from "./adapters";
 import { PLAN_RETRY_HINT } from "./adapters/base";
 import { GitService } from "./git-service";
+import { createWorktreeForMission } from "./worktree-service";
 import db from "../../lib/database";
 import { providerService } from "./provider-service";
 import type {
@@ -67,6 +68,33 @@ export class AIOrchestrator {
   }
 
   /**
+   * Garante que a missão tem worktree; cria se não tiver. Retorna path efetivo (worktree ou projeto).
+   */
+  private async ensureWorktreeForMission(
+    missionId: string
+  ): Promise<{ effectivePath: string; error?: string } | null> {
+    const mission = db.missions.findById(missionId);
+    if (!mission) return null;
+    const project = db.projects.findById(mission.projectId);
+    if (!project) return null;
+
+    if (mission.worktreePath) {
+      return { effectivePath: mission.worktreePath };
+    }
+
+    const result = await createWorktreeForMission(project.path, missionId);
+    if (!result.success) {
+      return { effectivePath: project.path, error: (result as { error: string }).error };
+    }
+    const data = (result as { data: { worktreePath: string; worktreeBranch: string } }).data;
+    db.missions.update(missionId, {
+      worktreePath: data.worktreePath,
+      worktreeBranch: data.worktreeBranch,
+    });
+    return { effectivePath: data.worktreePath };
+  }
+
+  /**
    * Gera um plano de ação para uma missão
    * @param options.planFeedback Feedback do usuário ao regenerar (o que ajustar no plano anterior)
    */
@@ -85,23 +113,38 @@ export class AIOrchestrator {
         return { success: false, error: "Mission not found" };
       }
 
-      // Bloqueia apenas se outra missão está gerando/aplicando código (modifica Git).
-      // Geração de plano só lê do repo — pode rodar em paralelo.
+      const project = db.projects.findById(mission.projectId);
+      if (!project) {
+        return { success: false, error: "Project not found" };
+      }
+
+      // Garante worktree para esta missão (permite paralelo)
+      const ensure = await this.ensureWorktreeForMission(missionId);
+      if (!ensure) {
+        return { success: false, error: "Mission or project not found" };
+      }
+      if (ensure.error) {
+        return {
+          success: false,
+          error: `Não foi possível criar worktree para esta missão: ${ensure.error}. Verifique se o projeto é um repositório Git.`,
+        };
+      }
+
+      // Bloqueia apenas se outra missão está usando o mesmo diretório (mesmo path efetivo)
+      const effectivePath = ensure.effectivePath;
       const othersModifyingGit = db.missions.findModifyingGit(
         mission.projectId,
         missionId
       );
-      if (othersModifyingGit.length > 0) {
-        const other = othersModifyingGit[0];
+      const conflicting = othersModifyingGit.filter(
+        (m) => (m.worktreePath ?? project.path) === effectivePath
+      );
+      if (conflicting.length > 0) {
+        const other = conflicting[0];
         return {
           success: false,
-          error: `Há uma missão gerando ou aplicando código neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
+          error: `Há uma missão gerando ou aplicando código no mesmo diretório ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
         };
-      }
-
-      const project = db.projects.findById(mission.projectId);
-      if (!project) {
-        return { success: false, error: "Project not found" };
       }
 
       // Determina o provider a usar (plan: planProviderId > providerId > default)
@@ -132,9 +175,9 @@ export class AIOrchestrator {
         return { success: false, error: validation.errors.join("; ") };
       }
 
-      // Obtém contexto do projeto
+      // Obtém contexto do projeto (worktree quando existir)
       const projectContext = await this.getProjectContext(
-        project.path,
+        effectivePath,
         project.name
       );
 
@@ -229,16 +272,36 @@ export class AIOrchestrator {
         return { success: false, error: "Mission not found" };
       }
 
-      // Uma missão por projeto na pipeline de código (evita conflitos Git).
+      const project = db.projects.findById(mission.projectId);
+      if (!project) {
+        return { success: false, error: "Project not found" };
+      }
+
+      // Garante worktree para esta missão (permite paralelo)
+      const ensure = await this.ensureWorktreeForMission(missionId);
+      if (!ensure) {
+        return { success: false, error: "Mission or project not found" };
+      }
+      if (ensure.error) {
+        return {
+          success: false,
+          error: `Não foi possível criar worktree para esta missão: ${ensure.error}. Verifique se o projeto é um repositório Git.`,
+        };
+      }
+
+      const effectivePath = ensure.effectivePath;
       const othersModifyingGit = db.missions.findModifyingGit(
         mission.projectId,
         missionId
       );
-      if (othersModifyingGit.length > 0) {
-        const other = othersModifyingGit[0];
+      const conflicting = othersModifyingGit.filter(
+        (m) => (m.worktreePath ?? project.path) === effectivePath
+      );
+      if (conflicting.length > 0) {
+        const other = conflicting[0];
         return {
           success: false,
-          error: `Já existe uma missão gerando ou aplicando código neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
+          error: `Já existe uma missão gerando ou aplicando código no mesmo diretório ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
         };
       }
 
@@ -247,11 +310,6 @@ export class AIOrchestrator {
           success: false,
           error: "Mission has no plan. Generate a plan first.",
         };
-      }
-
-      const project = db.projects.findById(mission.projectId);
-      if (!project) {
-        return { success: false, error: "Project not found" };
       }
 
       // Determina o provider a usar (code: codeProviderId > providerId > default)
@@ -282,9 +340,9 @@ export class AIOrchestrator {
         return { success: false, error: validation.errors.join("; ") };
       }
 
-      // Obtém contexto do projeto
+      // Obtém contexto do projeto (worktree quando existir)
       const projectContext = await this.getProjectContext(
-        project.path,
+        effectivePath,
         project.name
       );
 
@@ -293,7 +351,7 @@ export class AIOrchestrator {
         mission.plan?.steps?.flatMap((s) => s.files ?? []) ?? [];
       const uniquePaths = [...new Set(filePathsFromPlan.filter(Boolean))];
       if (uniquePaths.length > 0) {
-        const gitService = new GitService(project.path);
+        const gitService = new GitService(effectivePath);
         const fileContents = await gitService.readFiles(uniquePaths);
         if (Object.keys(fileContents).length > 0) {
           projectContext.fileContents = fileContents;
@@ -406,20 +464,32 @@ export class AIOrchestrator {
         };
       }
 
-      // Uma missão por projeto na pipeline de código (evita conflitos git apply).
+      const project = db.projects.findById(mission.projectId);
+      if (!project) {
+        return {
+          success: false,
+          appliedFiles: [],
+          failedFiles: [{ path: "", error: "Project not found" }],
+        };
+      }
+
+      const effectivePath = mission.worktreePath ?? project.path;
       const othersModifyingGit = db.missions.findModifyingGit(
         mission.projectId,
         missionId
       );
-      if (othersModifyingGit.length > 0) {
-        const other = othersModifyingGit[0];
+      const conflicting = othersModifyingGit.filter(
+        (m) => (m.worktreePath ?? project.path) === effectivePath
+      );
+      if (conflicting.length > 0) {
+        const other = conflicting[0];
         return {
           success: false,
           appliedFiles: [],
           failedFiles: [
             {
               path: "",
-              error: `Já existe uma missão gerando ou aplicando código neste projeto ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
+              error: `Já existe uma missão gerando ou aplicando código no mesmo diretório ("${other.title}"). Aguarde a conclusão ou cancele a missão atual.`,
             },
           ],
         };
@@ -430,15 +500,6 @@ export class AIOrchestrator {
           success: false,
           appliedFiles: [],
           failedFiles: [{ path: "", error: "No code to apply" }],
-        };
-      }
-
-      const project = db.projects.findById(mission.projectId);
-      if (!project) {
-        return {
-          success: false,
-          appliedFiles: [],
-          failedFiles: [{ path: "", error: "Project not found" }],
         };
       }
 
@@ -487,8 +548,8 @@ export class AIOrchestrator {
         `Applying ${filesToApply.length} file changes`
       );
 
-      // Aplica as mudanças
-      const gitService = new GitService(project.path);
+      // Aplica as mudanças no worktree da missão (ou projeto quando sem worktree)
+      const gitService = new GitService(effectivePath);
       const result = await gitService.applyChanges(filesToApply, {
         createBackup: options.createBackup ?? true,
         dryRun: options.dryRun ?? false,

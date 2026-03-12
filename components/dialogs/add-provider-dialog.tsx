@@ -1,6 +1,6 @@
 import React from "react";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Loader2, Bot, Terminal, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,7 +23,20 @@ import {
 import { useProviders } from "@/hooks/use-data";
 import { useElectron } from "@/hooks/use-electron";
 import { toast } from "sonner";
-import type { ProviderType } from "@/lib/database/types";
+import type { ProviderType, PermissionMode } from "@/lib/database/types";
+
+const PROVIDER_TYPES_WITH_PERMISSION_MODES: ProviderType[] = [
+  "claude-code",
+  "codex",
+  "gemini",
+];
+
+const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string }[] = [
+  { value: "", label: "Padrão (aceitar edições)" },
+  { value: "plan", label: "Só planejar (exige aprovação)" },
+  { value: "acceptEdits", label: "Aceitar edições automaticamente" },
+  { value: "bypass", label: "Bypass (máxima automação)" },
+];
 
 const providerTypeToCliCommand: Partial<Record<ProviderType, string>> = {
   "claude-code": "claude",
@@ -147,12 +160,23 @@ const modelsByProviderType: Partial<
   ],
 };
 
+const CLI_PROVIDER_TYPES: ProviderType[] = [
+  "claude-code",
+  "codex",
+  "cursor",
+  "gemini",
+];
+
 export function AddProviderDialog({
   open,
   onOpenChange,
 }: AddProviderDialogProps) {
   const { create } = useProviders();
-  const { resolveCliPath } = useElectron();
+  const { detectCliForProvider, validateCliPath } = useElectron();
+  const [cliStatus, setCliStatus] = useState<{
+    valid: boolean;
+    message?: string;
+  } | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -161,9 +185,28 @@ export function AddProviderDialog({
     apiKey: "",
     cliPath: "",
     model: "",
+    permissionMode: "" as PermissionMode | "",
   });
 
   const selectedType = providerTypes.find((t) => t.value === formData.type);
+
+  useEffect(() => {
+    if (
+      !formData.cliPath.trim() ||
+      !formData.type ||
+      !CLI_PROVIDER_TYPES.includes(formData.type as ProviderType)
+    ) {
+      setCliStatus(null);
+      return;
+    }
+    let cancelled = false;
+    validateCliPath(formData.type, formData.cliPath).then((result) => {
+      if (!cancelled) setCliStatus(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.type, formData.cliPath, validateCliPath]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -188,25 +231,35 @@ export function AddProviderDialog({
     try {
       await new Promise((resolve) => setTimeout(resolve, 300));
 
+      const config: Record<string, unknown> = {};
+      if (formData.model) config.model = formData.model;
+      if (
+        PROVIDER_TYPES_WITH_PERMISSION_MODES.includes(
+          formData.type as ProviderType,
+        ) &&
+        formData.permissionMode
+      ) {
+        config.permissionMode = formData.permissionMode;
+      }
       await create({
         name: formData.name.trim(),
         type: formData.type as ProviderType,
         apiKey: formData.apiKey.trim() || undefined,
         cliPath: formData.cliPath.trim() || undefined,
-        config: formData.model ? { model: formData.model } : undefined,
+        config: Object.keys(config).length ? config : undefined,
         isActive: true,
       });
 
       toast.success("Provedor adicionado com sucesso");
       onOpenChange(false);
 
-      // Reset form
       setFormData({
         name: "",
         type: "",
         apiKey: "",
         cliPath: "",
         model: "",
+        permissionMode: "",
       });
     } catch {
       toast.error("Falha ao adicionar provedor");
@@ -253,21 +306,13 @@ export function AddProviderDialog({
               <Select
                 value={formData.type}
                 onValueChange={(value: ProviderType) => {
-                  const needsCli = providerTypes.find(
-                    (t) => t.value === value,
-                  )?.needsCli;
-                  const cmd =
-                    needsCli &&
-                    providerTypeToCliCommand[
-                      value as keyof typeof providerTypeToCliCommand
-                    ];
                   setFormData((prev) => ({
                     ...prev,
                     type: value,
                     model: getDefaultModel(value),
                   }));
-                  if (cmd) {
-                    resolveCliPath(cmd).then((path) => {
+                  if (CLI_PROVIDER_TYPES.includes(value)) {
+                    detectCliForProvider(value).then((path) => {
                       if (path)
                         setFormData((prev) =>
                           prev.cliPath ? prev : { ...prev, cliPath: path },
@@ -336,19 +381,14 @@ export function AddProviderDialog({
                     size="sm"
                     className="h-8 text-xs"
                     onClick={() => {
-                      const cmd =
-                        providerTypeToCliCommand[
-                          formData.type as keyof typeof providerTypeToCliCommand
-                        ];
-                      if (cmd)
-                        resolveCliPath(cmd).then((path) => {
-                          if (path)
-                            setFormData((prev) => ({
-                              ...prev,
-                              cliPath: path,
-                            }));
-                          else toast.error("CLI não encontrado no PATH");
-                        });
+                      detectCliForProvider(formData.type).then((path) => {
+                        if (path)
+                          setFormData((prev) => ({
+                            ...prev,
+                            cliPath: path,
+                          }));
+                        else toast.error("CLI não encontrado no PATH");
+                      });
                     }}
                   >
                     Detectar automaticamente
@@ -374,8 +414,60 @@ export function AddProviderDialog({
                 <p className="text-xs text-muted-foreground">
                   Caminho do executável do CLI no seu sistema.
                 </p>
+                {cliStatus !== null && (
+                  <p
+                    className={
+                      cliStatus.valid
+                        ? "text-xs text-green-600 dark:text-green-500"
+                        : "text-xs text-destructive"
+                    }
+                  >
+                    {cliStatus.valid
+                      ? "CLI encontrado e funcionando."
+                      : `CLI não encontrado${cliStatus.message ? `: ${cliStatus.message}` : "."}`}
+                  </p>
+                )}
               </div>
             )}
+
+            {formData.type &&
+              PROVIDER_TYPES_WITH_PERMISSION_MODES.includes(
+                formData.type as ProviderType,
+              ) && (
+                <div className="grid gap-2">
+                  <Label htmlFor="permissionMode">Modo de permissão</Label>
+                  <Select
+                    value={formData.permissionMode || "__default__"}
+                    onValueChange={(value) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        permissionMode:
+                          value === "__default__"
+                            ? ""
+                            : (value as PermissionMode),
+                      }))
+                    }
+                  >
+                    <SelectTrigger id="permissionMode">
+                      <SelectValue placeholder="Modo de permissão" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PERMISSION_MODE_OPTIONS.map((opt) => (
+                        <SelectItem
+                          key={opt.value || "default"}
+                          value={opt.value || "__default__"}
+                        >
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Controla se o agente só planeja, aceita edições
+                    automaticamente ou bypass de aprovações.
+                  </p>
+                </div>
+              )}
 
             {formData.type && (
               <div className="grid gap-2">

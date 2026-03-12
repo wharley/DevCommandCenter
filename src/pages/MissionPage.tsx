@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, memo } from "react";
 import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -22,6 +22,11 @@ import {
   RotateCcw,
   Info,
   Lightbulb,
+  Terminal,
+  GitMerge,
+  Trash2,
+  Focus,
+  Minimize2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +70,7 @@ import { NewMissionDialog } from "@/components/dialogs/new-mission-dialog";
 import { RegeneratePlanDialog } from "@/components/dialogs/regenerate-plan-dialog";
 import { RegenerateCodeDialog } from "@/components/dialogs/regenerate-code-dialog";
 import { MissionTipsDialog } from "@/components/dialogs/mission-tips-dialog";
+import { EmbeddedTerminal } from "@/components/embedded-terminal";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -77,6 +83,7 @@ import type {
 } from "@/lib/database/types";
 import { PendingCommandsAlert } from "@/components/pending-commands-alert";
 import { getUnconfirmedCommands } from "@/lib/command-detector";
+import { showNativeNotification } from "@/lib/notifications";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import Editor from "react-simple-code-editor";
@@ -200,6 +207,8 @@ export default function MissionPage() {
     missionId: string;
   }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isFocusMode = searchParams.get("view") === "focus";
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
@@ -237,6 +246,20 @@ export default function MissionPage() {
   const [codeFeedback, setCodeFeedback] = useState("");
   const [editMissionDialogOpen, setEditMissionDialogOpen] = useState(false);
   const [tipsDialogOpen, setTipsDialogOpen] = useState(false);
+  const [isOpeningTerminal, setIsOpeningTerminal] = useState(false);
+  const [isWorktreeAction, setIsWorktreeAction] = useState(false);
+  const [embeddedTerminalCwd, setEmbeddedTerminalCwd] = useState<string | null>(
+    null
+  );
+  const [embeddedTerminalCommand, setEmbeddedTerminalCommand] = useState<
+    string | undefined
+  >(undefined);
+  const [embeddedTerminalArgs, setEmbeddedTerminalArgs] = useState<string[]>(
+    [],
+  );
+  const [terminalProviderId, setTerminalProviderId] = useState<string | null>(
+    null,
+  );
 
   const { projects, update: updateProject, isLoading: projectsLoading } =
     useProjects();
@@ -325,12 +348,16 @@ export default function MissionPage() {
     }
   }, [projectId, updateProject]);
 
-  // Sincronizar seleção de arquivos e limpar edições quando o código gerado mudar
+  // Sincronizar seleção de arquivos e limpar edições quando o código gerado mudar.
+  // Dependemos de uma chave estável (paths serializados) para evitar loop: mission?.generatedCode?.files
+  // pode ser nova referência a cada render e dispararia o effect indefinidamente.
+  const generatedCodePathsKey =
+    mission?.generatedCode?.files?.map((f) => f.path).join("\0") ?? "";
   useEffect(() => {
     const paths = mission?.generatedCode?.files?.map((f) => f.path) ?? [];
     setSelectedFilePaths(new Set(paths));
     setEditedSuggestions({});
-  }, [mission?.generatedCode?.files]);
+  }, [missionId, generatedCodePathsKey]);
 
   // Limpar estado de recovery quando a missão tiver generatedCode preenchido
   useEffect(() => {
@@ -527,6 +554,70 @@ export default function MissionPage() {
     ],
   );
 
+  const CLI_PROVIDER_TYPES = ["codex", "claude-code", "gemini", "cursor"] as const;
+  const cliProviders = useMemo(
+    () =>
+      providers.filter(
+        (p) => p.isActive && CLI_PROVIDER_TYPES.includes(p.type as (typeof CLI_PROVIDER_TYPES)[number]),
+      ),
+    [providers],
+  );
+
+  const effectiveTerminalProviderId =
+    terminalProviderId ??
+    mission?.codeProviderId ??
+    mission?.planProviderId ??
+    mission?.providerId ??
+    cliProviders[0]?.id ??
+    null;
+
+  const suggestedCliCommand = useMemo(() => {
+    const prov = effectiveTerminalProviderId
+      ? providers.find((p) => p.id === effectiveTerminalProviderId)
+      : null;
+    if (!prov) return undefined;
+    const t = prov.type;
+    const cliPath = prov.cliPath?.trim();
+    const usePath =
+      cliPath && (cliPath.startsWith("/") || /^[A-Za-z]:\\/.test(cliPath));
+    if (t === "codex") return usePath ? cliPath : "codex";
+    if (t === "claude-code") return usePath ? cliPath : "claude";
+    if (t === "gemini") return usePath ? cliPath : "gemini";
+    if (t === "cursor") return usePath ? cliPath : "cursor-agent";
+    return undefined;
+  }, [providers, effectiveTerminalProviderId]);
+
+  const missionPrompt = useMemo(() => {
+    if (!mission) return "";
+    const parts = [mission.title, mission.description];
+    if (mission.preserveInstructions?.trim()) {
+      parts.push(`Não alterar: ${mission.preserveInstructions.trim()}`);
+    }
+    return parts.join("\n\n");
+  }, [mission?.title, mission?.description, mission?.preserveInstructions]);
+
+  const toggleFocusMode = useCallback(() => {
+    const next = searchParams.get("view") !== "focus";
+    if (next) searchParams.set("view", "focus");
+    else searchParams.delete("view");
+    setSearchParams(new URLSearchParams(searchParams), { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        e.preventDefault();
+        toggleFocusMode();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleFocusMode]);
+
+  useEffect(() => {
+    setTerminalProviderId(null);
+  }, [missionId]);
+
   const isLoading =
     (projectId && projectsLoading) || (missionId && missionsLoading);
 
@@ -586,6 +677,10 @@ export default function MissionPage() {
           response.metadata ?? undefined,
         );
         toast.success("Plano gerado com sucesso");
+        showNativeNotification(
+          "Plano pronto",
+          `${mission?.title ?? "Missão"}: plano gerado com sucesso.`
+        );
       } else {
         throw new Error(response.error || "Falha ao gerar plano");
       }
@@ -595,6 +690,10 @@ export default function MissionPage() {
       const msg = error instanceof Error ? error.message : "Erro desconhecido";
       addLog("error", msg, undefined);
       toast.error(msg);
+      showNativeNotification(
+        "Falha ao gerar plano",
+        `${mission?.title ?? "Missão"}: ${msg}`
+      );
     } finally {
       setIsGenerating(false);
     }
@@ -783,6 +882,10 @@ export default function MissionPage() {
         );
         toast.success("Sugestões de código geradas");
         setActiveTab("code");
+        showNativeNotification(
+          "Código pronto",
+          `${mission?.title ?? "Missão"}: sugestões de código geradas. Revise e aplique.`
+        );
       } else {
         throw new Error(response.error || "Falha ao gerar código");
       }
@@ -792,6 +895,10 @@ export default function MissionPage() {
 
       const errorMessage =
         error instanceof Error ? error.message : "Erro desconhecido";
+      showNativeNotification(
+        "Falha ao gerar código",
+        `${mission?.title ?? "Missão"}: ${errorMessage}`
+      );
       const detailedError = `Erro ao gerar código: ${errorMessage}`;
 
       addLog("error", detailedError, undefined);
@@ -922,6 +1029,10 @@ export default function MissionPage() {
       if (result.success) {
         toast.success(
           `Alterações aplicadas: ${result.appliedFiles.length} arquivo(s)`,
+        );
+        showNativeNotification(
+          "Alterações aplicadas",
+          `${mission?.title ?? "Missão"}: ${result.appliedFiles.length} arquivo(s) aplicado(s).`
         );
         try {
           await refreshMissions();
@@ -1209,6 +1320,123 @@ export default function MissionPage() {
     }
   };
 
+  const handleOpenEmbeddedTerminal = async () => {
+    if (
+      !missionId ||
+      !project?.path ||
+      !window.electronAPI?.worktree?.ensureForMission ||
+      !window.electronAPI?.terminal?.spawn
+    )
+      return;
+    setIsOpeningTerminal(true);
+    try {
+      const ensure =
+        await window.electronAPI.worktree.ensureForMission(missionId);
+      if (!ensure.success) {
+        toast.error(ensure.error ?? "Não foi possível criar/obter worktree");
+        return;
+      }
+      const pathToOpen = ensure.worktreePath ?? project.path;
+      setEmbeddedTerminalCwd(pathToOpen);
+      setEmbeddedTerminalCommand(suggestedCliCommand ?? undefined);
+      setEmbeddedTerminalArgs(missionPrompt ? [missionPrompt] : []);
+      setActiveTab("terminal");
+      if (ensure.worktreePath) refreshMissions();
+    } catch (e) {
+      toast.error(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
+    } finally {
+      setIsOpeningTerminal(false);
+    }
+  };
+
+  const handleOpenInSystemTerminal = async () => {
+    if (
+      !missionId ||
+      !project?.path ||
+      !window.electronAPI?.worktree?.ensureForMission ||
+      !window.electronAPI?.shell?.openTerminalAtPath
+    )
+      return;
+    setIsOpeningTerminal(true);
+    try {
+      const ensure =
+        await window.electronAPI.worktree.ensureForMission(missionId);
+      if (!ensure.success) {
+        toast.error(ensure.error ?? "Não foi possível criar/obter worktree");
+        return;
+      }
+      const pathToOpen = ensure.worktreePath ?? project.path;
+      const suggestedCommand =
+        suggestedCliCommand && missionPrompt
+          ? { cliCommand: suggestedCliCommand, prompt: missionPrompt }
+          : suggestedCliCommand;
+      const result = await window.electronAPI.shell.openTerminalAtPath(
+        pathToOpen,
+        suggestedCommand,
+      );
+      if (result?.success) {
+        toast.success(
+          "Terminal aberto no diretório da missão. Se o CLI não iniciar, verifique o caminho nas Configurações."
+        );
+        if (ensure.worktreePath) refreshMissions();
+      } else {
+        toast.error(result?.error ?? "Erro ao abrir terminal");
+      }
+    } catch (e) {
+      toast.error(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
+    } finally {
+      setIsOpeningTerminal(false);
+    }
+  };
+
+  const handleMergeWorktree = async () => {
+    if (!missionId || !window.electronAPI?.worktree?.mergeIntoMain) return;
+    const confirmed = await confirmDialog({
+      title: "Incorporar alterações no branch principal?",
+      description:
+        "O branch da missão será feito merge no branch principal (main/master) e o worktree será removido.",
+    });
+    if (!confirmed) return;
+    setIsWorktreeAction(true);
+    try {
+      const result = await window.electronAPI.worktree.mergeIntoMain(missionId);
+      if (result?.success) {
+        toast.success("Alterações incorporadas ao branch principal");
+        refreshMissions();
+      } else {
+        toast.error(result?.error ?? "Erro ao incorporar");
+      }
+    } catch (e) {
+      toast.error(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
+    } finally {
+      setIsWorktreeAction(false);
+    }
+  };
+
+  const handleDiscardWorktree = async () => {
+    if (!missionId || !window.electronAPI?.worktree?.discard) return;
+    const confirmed = await confirmDialog({
+      title: "Descartar worktree?",
+      description:
+        "O worktree e o branch da missão serão removidos. As alterações não commitadas serão perdidas.",
+    });
+    if (!confirmed) return;
+    setIsWorktreeAction(true);
+    try {
+      const result = await window.electronAPI.worktree.discard(missionId);
+      if (result?.success) {
+        toast.success("Worktree descartado");
+        refreshMissions();
+      } else {
+        toast.error(result?.error ?? "Erro ao descartar");
+      }
+    } catch (e) {
+      toast.error(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
+    } finally {
+      setIsWorktreeAction(false);
+    }
+  };
+
   const handleResetToPlanning = async () => {
     if (!missionId) return;
 
@@ -1300,7 +1528,10 @@ export default function MissionPage() {
   const progress = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className={`flex h-full flex-col ${isFocusMode ? "mission-focus-mode" : ""}`}
+      data-focus={isFocusMode || undefined}
+    >
       {/* Header */}
       <header className="border-b border-border bg-card px-6 py-4">
         <div className="flex items-center justify-between gap-4 mb-3">
@@ -1312,6 +1543,19 @@ export default function MissionPage() {
               onClick={() => navigate(`/project/${projectId}`)}
             >
               <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="cursor-pointer"
+              onClick={toggleFocusMode}
+              title={isFocusMode ? "Sair do modo foco (⌘F)" : "Modo foco (⌘F)"}
+            >
+              {isFocusMode ? (
+                <Minimize2 className="h-4 w-4" />
+              ) : (
+                <Focus className="h-4 w-4" />
+              )}
             </Button>
             <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -1581,8 +1825,10 @@ export default function MissionPage() {
           </div>
         </div>
 
-        {/* Barra de ações em largura total: não espreme título/descrição */}
-        {!cliParseErrorWithRepoChanges && mission.status === "created" && (
+        {/* Barra de ações em largura total: não espreme título/descrição (Pipeline apenas; agents_cli usa só terminal) */}
+        {!cliParseErrorWithRepoChanges &&
+          mission.missionType !== "agents_cli" &&
+          mission.status === "created" && (
           <div className="mt-4 pt-4 border-t border-border flex flex-wrap items-center gap-3">
             <span className="text-sm text-muted-foreground">
               Gerar plano com:
@@ -1622,6 +1868,7 @@ export default function MissionPage() {
           </div>
         )}
         {!cliParseErrorWithRepoChanges &&
+          mission.missionType !== "agents_cli" &&
           mission.status === "plan_generated" &&
           mission.missionType === "analysis" && (
             <div className="mt-4 pt-4 border-t border-border flex flex-wrap items-center gap-3">
@@ -1671,6 +1918,7 @@ export default function MissionPage() {
             </div>
           )}
         {!cliParseErrorWithRepoChanges &&
+          mission.missionType !== "agents_cli" &&
           mission.status === "plan_generated" &&
           mission.missionType !== "analysis" && (
             <div className="mt-4 pt-4 border-t border-border space-y-3">
@@ -1782,7 +2030,9 @@ export default function MissionPage() {
             </div>
           )}
 
-        {!cliParseErrorWithRepoChanges && mission.status === "code_ready" && (
+        {!cliParseErrorWithRepoChanges &&
+          mission.missionType !== "agents_cli" &&
+          mission.status === "code_ready" && (
           <div className="mt-4 pt-4 border-t border-border flex flex-wrap items-center gap-2">
             <Button
               onClick={handleApplyChanges}
@@ -1836,7 +2086,9 @@ export default function MissionPage() {
           </div>
         )}
 
-        {!cliParseErrorWithRepoChanges && mission.status === "completed" && (
+        {!cliParseErrorWithRepoChanges &&
+          mission.missionType !== "agents_cli" &&
+          mission.status === "completed" && (
           <div className="mt-4 pt-4 border-t border-border flex flex-col gap-1.5">
             {!mission.isCommitted && (
               <>
@@ -1901,6 +2153,102 @@ export default function MissionPage() {
           </div>
         )}
 
+        {/* Worktree: Abrir no terminal (embutido ou sistema) + Incorporar/Descartar (Electron) */}
+        {typeof window !== "undefined" &&
+          window.electronAPI &&
+          project?.path &&
+          !cliParseErrorWithRepoChanges && (
+          <div className="mt-4 pt-4 border-t border-border flex flex-wrap items-center gap-2">
+            {cliProviders.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Abrir com:</span>
+                <Select
+                  value={effectiveTerminalProviderId ?? ""}
+                  onValueChange={(v) => setTerminalProviderId(v || null)}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Agente" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cliProviders.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {window.electronAPI.terminal ? (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenEmbeddedTerminal}
+                  disabled={isOpeningTerminal}
+                >
+                  {isOpeningTerminal ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Terminal className="mr-2 h-4 w-4" />
+                  )}
+                  Abrir no terminal
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleOpenInSystemTerminal}
+                  disabled={isOpeningTerminal}
+                  className="text-muted-foreground"
+                >
+                  Abrir no Terminal do sistema
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleOpenInSystemTerminal}
+                disabled={isOpeningTerminal}
+              >
+                {isOpeningTerminal ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Terminal className="mr-2 h-4 w-4" />
+                )}
+                Abrir no terminal
+              </Button>
+            )}
+            {mission.worktreePath && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleMergeWorktree}
+                  disabled={isWorktreeAction}
+                >
+                  {isWorktreeAction ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <GitMerge className="mr-2 h-4 w-4" />
+                  )}
+                  Incorporar alterações
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDiscardWorktree}
+                  disabled={isWorktreeAction}
+                  className="hover:bg-destructive/10 hover:text-destructive"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Descartar worktree
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Progress bar for missions with plans */}
         {mission.plan && (
           <div className="mt-4 flex items-center gap-4">
@@ -1957,6 +2305,16 @@ export default function MissionPage() {
                   </Badge>
                 )}
               </TabsTrigger>
+              {typeof window !== "undefined" &&
+                window.electronAPI?.terminal && (
+                <TabsTrigger
+                  value="terminal"
+                  className="gap-2 cursor-pointer"
+                >
+                  <Terminal className="h-4 w-4" />
+                  Terminal
+                </TabsTrigger>
+              )}
             </TabsList>
           </div>
 
@@ -2005,6 +2363,47 @@ export default function MissionPage() {
               }
             />
           </TabsContent>
+
+          {typeof window !== "undefined" &&
+            window.electronAPI?.terminal && (
+            <TabsContent
+              value="terminal"
+              className="flex-1 flex flex-col overflow-hidden p-0 mt-0 data-[state=active]:flex data-[state=inactive]:hidden"
+            >
+              {embeddedTerminalCwd ? (
+                <div className="flex-1 min-h-0 p-4">
+                  <EmbeddedTerminal
+                    cwd={embeddedTerminalCwd}
+                    command={embeddedTerminalCommand}
+                    args={embeddedTerminalArgs}
+                    onClose={() => setEmbeddedTerminalCwd(null)}
+                    title={mission?.title ?? "Missão"}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+                  <Terminal className="h-12 w-12 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    Terminal da missão no diretório da worktree. Clique em
+                    &quot;Abrir no terminal&quot; na barra acima para iniciar.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleOpenEmbeddedTerminal}
+                    disabled={isOpeningTerminal}
+                  >
+                    {isOpeningTerminal ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Terminal className="mr-2 h-4 w-4" />
+                    )}
+                    Abrir no terminal
+                  </Button>
+                </div>
+              )}
+            </TabsContent>
+          )}
 
           <TabsContent
             value="logs"
