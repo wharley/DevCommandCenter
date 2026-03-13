@@ -21,6 +21,8 @@ import { detectCliPath, validateCliPath } from "./services/cli-detection";
 import {
   spawnPty,
   getOrCreatePty,
+  getMissionSession,
+  onTerminalSessionEvent,
   writeToPty,
   resizePty,
   killPty,
@@ -31,6 +33,111 @@ const BETA_ACTIVATE_URL = "https://www.devcommandcenter.com/api/beta-activate";
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
 export function registerIpcHandlers(ipcMain: IpcMain) {
+  const terminalSessionFlushTimers = new Map<string, NodeJS.Timeout>();
+
+  const snapshotGitForMission = async (missionId: string) => {
+    const mission = db.missions.findById(missionId);
+    if (!mission) return null;
+    const project = db.projects.findById(mission.projectId);
+    if (!project) return null;
+    const targetPath = mission.worktreePath ?? project.path;
+    try {
+      const branchState = await new GitService(targetPath).getBranchState();
+      return {
+        branch: branchState.branch,
+        upstreamBranch: branchState.upstreamBranch ?? null,
+        defaultBranch: branchState.defaultBranch ?? null,
+        isRepo: branchState.isRepo,
+        isDirty: branchState.isDirty,
+        changedFiles: branchState.changedFiles,
+        stagedCount: branchState.staged.length,
+        unstagedCount: branchState.unstaged.length,
+        untrackedCount: branchState.untracked.length,
+        aheadCount: branchState.aheadCount,
+        behindCount: branchState.behindCount,
+        aheadOfDefaultCount: branchState.aheadOfDefaultCount,
+        behindOfDefaultCount: branchState.behindOfDefaultCount,
+        hasUpstream: branchState.hasUpstream,
+        mergeReadiness: branchState.mergeReadiness,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const persistMissionSession = async (missionId: string) => {
+    const mission = db.missions.findById(missionId);
+    if (!mission) return;
+    const session = getMissionSession(missionId);
+    const gitSnapshot = await snapshotGitForMission(missionId);
+    db.missions.update(missionId, {
+      context: {
+        ...(mission.context ?? { files: [] }),
+        files: mission.context?.files ?? [],
+        agentSession: session,
+        gitSnapshot,
+      },
+    });
+  };
+
+  const schedulePersistMissionSession = (missionId: string) => {
+    const existingTimer = terminalSessionFlushTimers.get(missionId);
+    if (existingTimer) clearTimeout(existingTimer);
+    const nextTimer = setTimeout(() => {
+      terminalSessionFlushTimers.delete(missionId);
+      void persistMissionSession(missionId);
+    }, 400);
+    terminalSessionFlushTimers.set(missionId, nextTimer);
+  };
+
+  onTerminalSessionEvent((event) => {
+    if (!event.missionId) return;
+    if (event.type === "data") {
+      schedulePersistMissionSession(event.missionId);
+      return;
+    }
+
+    void persistMissionSession(event.missionId);
+
+    if (event.type === "started") {
+      const mission = db.missions.findById(event.missionId);
+      if (
+        mission &&
+        !["planning", "generating_code", "applying"].includes(mission.status) &&
+        !["completed", "failed", "cancelled"].includes(mission.status)
+      ) {
+        db.missions.start(event.missionId);
+      } else if (
+        mission &&
+        ["completed", "failed", "cancelled"].includes(mission.status)
+      ) {
+        db.missions.update(event.missionId, {
+          status: "planning",
+          startedAt: new Date(),
+          completedAt: null,
+          errorMessage: null,
+        });
+      }
+      return;
+    }
+
+    if (event.type === "exit") {
+      const mission = db.missions.findById(event.missionId);
+      if (!mission || ["completed", "failed", "cancelled"].includes(mission.status)) return;
+      if ((event.exitCode ?? 0) === 0) {
+        db.missions.complete(
+          event.missionId,
+          `Agent finalizado com sucesso (exit code ${event.exitCode ?? 0})`,
+        );
+      } else {
+        db.missions.fail(
+          event.missionId,
+          `Agent finalizado com falha (exit code ${event.exitCode ?? -1})`,
+        );
+      }
+    }
+  });
+
   // ==========================================
   // App update (only when packaged)
   // ==========================================
@@ -662,12 +769,25 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     return gitService.getStatus();
   });
 
+  ipcMain.handle("git:getBranchState", async (_event, projectPath: string) => {
+    const gitService = new GitService(projectPath);
+    return gitService.getBranchState();
+  });
+
   // Get file diff vs HEAD (what will be committed after git add -A)
   ipcMain.handle(
     "git:getFileDiffHead",
     async (_event, projectPath: string, filePath: string) => {
       const gitService = new GitService(projectPath);
       return gitService.getFileDiffHead(filePath);
+    },
+  );
+
+  ipcMain.handle(
+    "git:getFileDiffAgainstBase",
+    async (_event, projectPath: string, filePath: string, baseRef: string) => {
+      const gitService = new GitService(projectPath);
+      return gitService.getFileDiffAgainstBase(filePath, baseRef);
     },
   );
 
@@ -767,7 +887,11 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
       if (!mission) return { success: false, error: "Mission not found" };
       const project = db.projects.findById(mission.projectId);
       if (!project) return { success: false, error: "Project not found" };
-      const result = await createWorktreeForMission(project.path, missionId);
+      const result = await createWorktreeForMission(
+        project.path,
+        missionId,
+        mission.title,
+      );
       if (!result.success) return result;
       db.missions.update(missionId, {
         worktreePath: result.data.worktreePath,
@@ -929,7 +1053,11 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
       event,
       missionId: string,
       options: { cwd: string; command?: string; args?: string[]; cols?: number; rows?: number }
-    ): Promise<{ ptyId?: string; error?: string }> => {
+    ): Promise<{
+      ptyId?: string;
+      error?: string;
+      session?: import("../lib/database/types").MissionAgentSession | null;
+    }> => {
       const result = getOrCreatePty(
         {
           missionId,
@@ -942,7 +1070,17 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
         event.sender
       );
       if (result.error) return { error: result.error };
-      return { ptyId: result.ptyId };
+      return { ptyId: result.ptyId, session: result.session ?? null };
+    }
+  );
+
+  ipcMain.handle(
+    "terminal:getSession",
+    async (
+      _event,
+      missionId: string
+    ): Promise<import("../lib/database/types").MissionAgentSession | null> => {
+      return getMissionSession(missionId);
     }
   );
 

@@ -2,6 +2,7 @@
  * Worktree Service - Cria e gerencia worktrees Git por missão
  *
  * Permite N missões em paralelo no mesmo projeto, cada uma em sua worktree.
+ * Worktrees ficam dentro do projeto (estilo dmux): project/.dcc/worktrees/<branch>
  * Ver: docs/WORKTREE_POLICY.md e docs/PLAN_REMAINING_IMPLEMENTATION.md
  */
 
@@ -9,14 +10,30 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
-import { app } from "electron";
 
 const execAsync = promisify(exec);
 
+/** Diretório relativo ao projeto onde as worktrees são criadas (estilo dmux) */
+export const WORKTREE_RELATIVE_DIR = ".dcc/worktrees";
+
+function slugifyForBranch(input?: string | null): string {
+  if (!input) return "mission";
+  const normalized = input
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "mission";
+}
+
 /** Branch name safe for Git (no spaces, no slash) */
-function safeBranchName(missionId: string): string {
-  return `dcc-mission-${missionId.replace(/[^a-zA-Z0-9-_]/g, "-").slice(0, 80)}`;
+function safeBranchName(missionId: string, missionTitle?: string | null): string {
+  const slug = slugifyForBranch(missionTitle).slice(0, 36);
+  const shortId =
+    missionId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toLowerCase() ||
+    "unknown";
+  return `dcc-mission-${slug}-${shortId}`;
 }
 
 export interface CreateWorktreeResult {
@@ -29,28 +46,28 @@ export interface WorktreeServiceResult {
   error?: string;
 }
 
-function getRepoHash(projectPath: string): string {
-  return createHash("sha1").update(path.resolve(projectPath)).digest("hex").slice(0, 12);
-}
-
-function getGlobalWorktreeDir(projectPath: string, branch: string): string {
-  const userData = app.getPath("userData");
-  const repoHash = getRepoHash(projectPath);
-  return path.join(userData, "worktrees", repoHash, branch);
+/**
+ * Retorna o path da worktree dentro do projeto (project/.dcc/worktrees/<branch>).
+ * Igual ao dmux: worktrees ficam no próprio repo, não em pasta global.
+ */
+function getProjectWorktreeDir(projectPath: string, branch: string): string {
+  const resolvedProject = path.resolve(projectPath);
+  return path.join(resolvedProject, WORKTREE_RELATIVE_DIR, branch);
 }
 
 /**
  * Cria um worktree para uma missão a partir do repositório principal.
- * Path: <userData>/worktrees/<repoHash>/<branch>
- * Branch: dcc-mission-<missionId>
+ * Path: <projectPath>/.dcc/worktrees/<branch> (dentro do projeto, como no dmux)
+ * Branch: dcc-mission-<mission-slug>-<missionIdShort>
  */
 export async function createWorktreeForMission(
   projectPath: string,
-  missionId: string
+  missionId: string,
+  missionTitle?: string | null,
 ): Promise<{ success: true; data: CreateWorktreeResult } | { success: false; error: string }> {
   const resolvedProject = path.resolve(projectPath);
-  const branch = safeBranchName(missionId);
-  const worktreeDir = getGlobalWorktreeDir(resolvedProject, branch);
+  const branch = safeBranchName(missionId, missionTitle);
+  const worktreeDir = getProjectWorktreeDir(resolvedProject, branch);
 
   try {
     const stat = await fs.promises.stat(resolvedProject);

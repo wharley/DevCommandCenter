@@ -61,6 +61,25 @@ export interface GitStatus {
   untracked: string[];
 }
 
+export interface GitBranchState extends GitStatus {
+  branch: string;
+  upstreamBranch?: string | null;
+  defaultBranch?: string | null;
+  hasUpstream: boolean;
+  aheadCount: number;
+  behindCount: number;
+  aheadOfDefaultCount: number;
+  behindOfDefaultCount: number;
+  changedFiles: string[];
+  mergeReadiness:
+    | "ready"
+    | "dirty"
+    | "behind_default"
+    | "diverged"
+    | "already_merged"
+    | "not_applicable";
+}
+
 export interface GitCommit {
   hash: string;
   message: string;

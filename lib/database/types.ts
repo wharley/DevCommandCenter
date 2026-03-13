@@ -155,6 +155,47 @@ export interface MissionContext {
   fileContents?: Record<string, string>;
   gitBranch?: string;
   gitStatus?: string;
+  completionSummary?: string;
+  agentSession?: MissionAgentSession | null;
+  gitSnapshot?: MissionGitSnapshot | null;
+}
+
+export interface MissionAgentSession {
+  ptyId?: string | null;
+  cwd?: string;
+  command?: string | null;
+  args?: string[];
+  status?: "idle" | "running" | "exited";
+  startedAt?: string;
+  lastActivityAt?: string;
+  exitedAt?: string | null;
+  lastExitCode?: number | null;
+  outputPreview?: string;
+  outputLineCount?: number;
+}
+
+export interface MissionGitSnapshot {
+  branch?: string;
+  upstreamBranch?: string | null;
+  defaultBranch?: string | null;
+  isRepo: boolean;
+  isDirty: boolean;
+  changedFiles?: string[];
+  stagedCount?: number;
+  unstagedCount?: number;
+  untrackedCount?: number;
+  aheadCount?: number;
+  behindCount?: number;
+  aheadOfDefaultCount?: number;
+  behindOfDefaultCount?: number;
+  hasUpstream?: boolean;
+  mergeReadiness?:
+    | "ready"
+    | "dirty"
+    | "behind_default"
+    | "diverged"
+    | "already_merged"
+    | "not_applicable";
 }
 
 /** Comando pendente detectado que o usuário precisa executar manualmente */
@@ -249,15 +290,15 @@ export interface UpdateMissionDTO {
   plan?: MissionPlan;
   generatedCode?: GeneratedCode;
   context?: MissionContext;
-  errorMessage?: string;
+  errorMessage?: string | null;
   codeGenerationAttempts?: number;
   isCommitted?: boolean;
   isPushed?: boolean;
   pendingCommands?: PendingCommand[] | null;
   worktreePath?: string | null;
   worktreeBranch?: string | null;
-  startedAt?: Date;
-  completedAt?: Date;
+  startedAt?: Date | null;
+  completedAt?: Date | null;
 }
 
 export interface CreateMissionLogDTO {

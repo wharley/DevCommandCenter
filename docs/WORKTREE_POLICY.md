@@ -43,12 +43,11 @@ Objetivo: evitar colisões e permitir identificação rápida da origem.
 
 ## 5. Localização no disco
 
-- Padrão recomendado e adotado: worktrees em pasta global do app (fora do repositório), por exemplo:
-  - macOS: `~/Library/Application Support/dev-command-center/worktrees/{repoHash}/{branch}`
-  - Linux: `~/.local/share/dev-command-center/worktrees/{repoHash}/{branch}`
-  - Windows: `%APPDATA%/dev-command-center/worktrees/{repoHash}/{branch}`
-- Objetivo: evitar poluição do projeto e reduzir risco de confusão em commit/push.
-- Se houver modo avançado local no futuro, manter como opt-in e nunca como padrão.
+- Padrão adotado (estilo dmux): worktrees **dentro do próprio projeto**, em pasta dedicada:
+  - Path: `<projectRoot>/.dcc/worktrees/<branch>`
+  - Exemplo: `meu-projeto/.dcc/worktrees/dcc-mission-abc123`
+- Objetivo: tudo fica no repo, fácil de encontrar; `git worktree list` mostra paths relativos ao projeto; alinhado ao fluxo do dmux.
+- Recomendação: adicionar `.dcc/` ao `.gitignore` do projeto para não versionar dados de worktrees do DCC.
 
 ## 6. Referência de implementação futura
 

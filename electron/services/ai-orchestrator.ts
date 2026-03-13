@@ -82,7 +82,11 @@ export class AIOrchestrator {
       return { effectivePath: mission.worktreePath };
     }
 
-    const result = await createWorktreeForMission(project.path, missionId);
+    const result = await createWorktreeForMission(
+      project.path,
+      missionId,
+      mission.title,
+    );
     if (!result.success) {
       return { effectivePath: project.path, error: (result as { error: string }).error };
     }

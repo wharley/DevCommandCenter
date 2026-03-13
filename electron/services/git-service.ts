@@ -13,6 +13,7 @@ import * as crypto from "node:crypto";
 import type {
   GitInfo,
   GitStatus,
+  GitBranchState,
   GitCommit,
   CodeSuggestion,
   ApplyChangesResult,
@@ -362,6 +363,123 @@ export class GitService {
   }
 
   /**
+   * Obtém um snapshot do branch atual para revisão operacional.
+   */
+  async getBranchState(): Promise<GitBranchState> {
+    const status = await this.getStatus();
+    if (!status.isRepo) {
+      return {
+        ...status,
+        branch: "unknown",
+        upstreamBranch: null,
+        defaultBranch: null,
+        hasUpstream: false,
+        aheadCount: 0,
+        behindCount: 0,
+        aheadOfDefaultCount: 0,
+        behindOfDefaultCount: 0,
+        changedFiles: [],
+        mergeReadiness: "not_applicable",
+      };
+    }
+
+    const branch = await this.getCurrentBranch();
+    const defaultBranch = await this.getDefaultBranch().catch(() => null);
+    const workingTreeFiles = Array.from(
+      new Set([...status.staged, ...status.unstaged, ...status.untracked]),
+    );
+
+    let upstreamBranch: string | null = null;
+    let hasUpstream = false;
+    let aheadCount = 0;
+    let behindCount = 0;
+
+    try {
+      const { stdout } = await execAsync("git status --porcelain --branch", {
+        cwd: this.projectPath,
+      });
+      const branchLine = stdout.split(/\r?\n/)[0] ?? "";
+      const upstreamMatch = branchLine.match(/^## [^.]+(?:\.\.\.([^\s]+))?/);
+      upstreamBranch = upstreamMatch?.[1] ?? null;
+      hasUpstream = Boolean(upstreamBranch);
+      const aheadMatch = branchLine.match(/ahead (\d+)/);
+      const behindMatch = branchLine.match(/behind (\d+)/);
+      aheadCount = aheadMatch ? Number(aheadMatch[1]) : 0;
+      behindCount = behindMatch ? Number(behindMatch[1]) : 0;
+    } catch {
+      // Keep default values when branch metadata is unavailable.
+    }
+
+    let aheadOfDefaultCount = 0;
+    let behindOfDefaultCount = 0;
+    if (defaultBranch && branch !== "unknown" && branch !== "HEAD") {
+      try {
+        const { stdout } = await execAsync(
+          `git rev-list --left-right --count "${defaultBranch}...HEAD"`,
+          { cwd: this.projectPath },
+        );
+        const [behindRaw, aheadRaw] = stdout.trim().split(/\s+/);
+        behindOfDefaultCount = Number(behindRaw ?? 0) || 0;
+        aheadOfDefaultCount = Number(aheadRaw ?? 0) || 0;
+      } catch {
+        // Ignore when the comparison branch does not exist locally.
+      }
+    }
+
+    let changedFiles = [...workingTreeFiles];
+    if (
+      defaultBranch &&
+      branch !== "unknown" &&
+      branch !== "HEAD" &&
+      branch !== defaultBranch
+    ) {
+      try {
+        const { stdout } = await execAsync(
+          `git diff --name-only "${defaultBranch}...HEAD"`,
+          { cwd: this.projectPath },
+        );
+        const committedFiles = stdout.trim().split(/\r?\n/).filter(Boolean);
+        changedFiles = Array.from(
+          new Set([...workingTreeFiles, ...committedFiles]),
+        );
+      } catch {
+        changedFiles = [...workingTreeFiles];
+      }
+    }
+
+    let mergeReadiness: GitBranchState["mergeReadiness"] = "not_applicable";
+    if (!defaultBranch || branch === "unknown" || branch === "HEAD") {
+      mergeReadiness = "not_applicable";
+    } else if (branch === defaultBranch) {
+      mergeReadiness = "not_applicable";
+    } else if (status.isDirty) {
+      mergeReadiness = "dirty";
+    } else if (aheadOfDefaultCount === 0) {
+      mergeReadiness = "already_merged";
+    } else if (behindOfDefaultCount > 0 && aheadOfDefaultCount > 0) {
+      mergeReadiness = "diverged";
+    } else if (behindOfDefaultCount > 0) {
+      mergeReadiness = "behind_default";
+    } else {
+      mergeReadiness = "ready";
+    }
+
+    return {
+      ...status,
+      branch,
+      upstreamBranch,
+      defaultBranch,
+      hasUpstream,
+      aheadCount,
+      behindCount,
+      aheadOfDefaultCount,
+      behindOfDefaultCount,
+      changedFiles,
+      mergeReadiness,
+    };
+  }
+
+  /**
    * Obtém os commits mais recentes
    */
   async getRecentCommits(count: number = 10): Promise<GitCommit[]> {
@@ -411,6 +529,24 @@ export class GitService {
       const { stdout } = await execAsync(`git diff HEAD -- "${filePath}"`, {
         cwd: this.projectPath,
       });
+      return stdout;
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Obtém o diff de um arquivo comparando o branch atual com uma base.
+   * Útil para revisar mudanças já commitadas na branch do worktree.
+   */
+  async getFileDiffAgainstBase(filePath: string, baseRef: string): Promise<string> {
+    try {
+      const { stdout } = await execAsync(
+        `git diff "${baseRef}...HEAD" -- "${filePath}"`,
+        {
+          cwd: this.projectPath,
+        },
+      );
       return stdout;
     } catch {
       return "";

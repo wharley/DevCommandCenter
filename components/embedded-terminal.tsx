@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Terminal as XTerm } from "xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "xterm/css/xterm.css";
@@ -35,8 +35,15 @@ export function EmbeddedTerminal({
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
+  const onExitRef = useRef<typeof onExit>(onExit);
   const [error, setError] = useState<string | null>(null);
   const [exited, setExited] = useState<number | null>(null);
+  const argsKey = useMemo(() => JSON.stringify(args), [args]);
+  const stableArgs = useMemo(() => args, [argsKey]);
+
+  useEffect(() => {
+    onExitRef.current = onExit;
+  }, [onExit]);
 
   const killPty = useCallback(() => {
     const id = ptyIdRef.current;
@@ -89,7 +96,7 @@ export function EmbeddedTerminal({
       if (id === ptyIdRef.current) {
         ptyIdRef.current = null;
         setExited(code);
-        onExit?.(code);
+        onExitRef.current?.(code);
       }
     });
 
@@ -101,7 +108,7 @@ export function EmbeddedTerminal({
     const spawnOptions = {
       cwd,
       command,
-      args,
+      args: stableArgs,
       cols: term.cols,
       rows: term.rows,
     };
@@ -113,6 +120,12 @@ export function EmbeddedTerminal({
           return;
         }
         if (result.ptyId) ptyIdRef.current = result.ptyId;
+        if (result.session?.outputPreview) {
+          term.write(result.session.outputPreview);
+        }
+        if (typeof result.session?.lastExitCode === "number") {
+          setExited(result.session.lastExitCode);
+        }
       });
     } else {
       api.spawn(spawnOptions).then((result) => {
@@ -147,7 +160,7 @@ export function EmbeddedTerminal({
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [args, command, cwd, missionId, onExit]);
+  }, [command, cwd, missionId, stableArgs]);
 
   return (
     <div className="flex h-full flex-col rounded-lg border border-border bg-background">

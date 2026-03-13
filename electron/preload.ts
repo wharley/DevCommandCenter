@@ -88,7 +88,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
       invoke("terminal:getOrCreate", missionId, options) as Promise<{
         ptyId?: string;
         error?: string;
+        session?: import("../lib/database/types").MissionAgentSession | null;
       }>,
+    getSession: (missionId: string) =>
+      invoke("terminal:getSession", missionId) as Promise<
+        import("../lib/database/types").MissionAgentSession | null
+      >,
     write: (ptyId: string, data: string) =>
       invoke("terminal:write", ptyId, data) as Promise<{ ok: boolean }>,
     resize: (ptyId: string, cols: number, rows: number) =>
@@ -172,8 +177,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   git: {
     getInfo: (projectPath: string) => invoke("git:getInfo", projectPath),
     getStatus: (projectPath: string) => invoke("git:getStatus", projectPath),
+    getBranchState: (projectPath: string) =>
+      invoke("git:getBranchState", projectPath),
     getFileDiffHead: (projectPath: string, filePath: string) =>
       invoke("git:getFileDiffHead", projectPath, filePath),
+    getFileDiffAgainstBase: (
+      projectPath: string,
+      filePath: string,
+      baseRef: string,
+    ) => invoke("git:getFileDiffAgainstBase", projectPath, filePath, baseRef),
     isRepo: (projectPath: string) => invoke("git:isRepo", projectPath),
     getCurrentBranch: (projectPath: string) =>
       invoke("git:getCurrentBranch", projectPath),

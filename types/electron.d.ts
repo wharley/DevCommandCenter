@@ -18,6 +18,7 @@ import type {
   MissionPlan,
   GeneratedCode,
   CodeSuggestion,
+  MissionAgentSession,
 } from "@/lib/database/types";
 
 // ============================================
@@ -67,6 +68,25 @@ export interface GitStatus {
   staged: string[];
   unstaged: string[];
   untracked: string[];
+}
+
+export interface GitBranchState extends GitStatus {
+  branch: string;
+  upstreamBranch?: string | null;
+  defaultBranch?: string | null;
+  hasUpstream: boolean;
+  aheadCount: number;
+  behindCount: number;
+  aheadOfDefaultCount: number;
+  behindOfDefaultCount: number;
+  changedFiles: string[];
+  mergeReadiness:
+    | "ready"
+    | "dirty"
+    | "behind_default"
+    | "diverged"
+    | "already_merged"
+    | "not_applicable";
 }
 
 export interface GitCommit {
@@ -130,7 +150,8 @@ declare global {
             cols?: number;
             rows?: number;
           }
-        ) => Promise<{ ptyId?: string; error?: string }>;
+        ) => Promise<{ ptyId?: string; error?: string; session?: MissionAgentSession | null }>;
+        getSession: (missionId: string) => Promise<MissionAgentSession | null>;
         write: (ptyId: string, data: string) => Promise<{ ok: boolean }>;
         resize: (
           ptyId: string,
@@ -232,9 +253,15 @@ declare global {
       git: {
         getInfo: (projectPath: string) => Promise<GitInfo | null>;
         getStatus: (projectPath: string) => Promise<GitStatus>;
+        getBranchState: (projectPath: string) => Promise<GitBranchState>;
         getFileDiffHead: (
           projectPath: string,
           filePath: string
+        ) => Promise<string>;
+        getFileDiffAgainstBase: (
+          projectPath: string,
+          filePath: string,
+          baseRef: string
         ) => Promise<string>;
         isRepo: (projectPath: string) => Promise<boolean>;
         getCurrentBranch: (projectPath: string) => Promise<string>;
