@@ -103,10 +103,10 @@ function isCliProviderType(
 function getQueueStatusLabel(
   mission: Mission,
 ): "Nova" | "Em execução" | "Concluída" | "Falha" | "Cancelada" {
-  if (mission.context?.agentSession?.status === "running") return "Em execução";
   if (mission.status === "completed") return "Concluída";
   if (mission.status === "failed") return "Falha";
   if (mission.status === "cancelled") return "Cancelada";
+  if (mission.context?.agentSession?.status === "running") return "Em execução";
   if (
     TERMINAL_RUNNING_STATUSES.includes(
       mission.status as (typeof TERMINAL_RUNNING_STATUSES)[number],
@@ -119,6 +119,13 @@ function getQueueStatusLabel(
 }
 
 function hasActiveSession(mission: Mission): boolean {
+  if (
+    FINAL_STATUSES.includes(
+      mission.status as (typeof FINAL_STATUSES)[number],
+    )
+  ) {
+    return false;
+  }
   return (
     mission.context?.agentSession?.status === "running" ||
     getQueueStatusLabel(mission) === "Em execução"
@@ -1914,7 +1921,7 @@ export default function ProjectAgentsPage() {
                           Iniciar
                         </Button>
                       )}
-                      {canCommitFromWall && (
+                      {!isFinalMission && canCommitFromWall && (
                         <Button
                           size="sm"
                           variant="secondary"
@@ -1925,7 +1932,7 @@ export default function ProjectAgentsPage() {
                           Commitar
                         </Button>
                       )}
-                      {canPushFromWall && (
+                      {!isFinalMission && canPushFromWall && (
                         <Button
                           size="sm"
                           variant="secondary"
@@ -1941,7 +1948,7 @@ export default function ProjectAgentsPage() {
                           Push
                         </Button>
                       )}
-                      {mission.worktreePath && isFinalMission && (
+                      {!isFinalMission && mission.worktreePath && isFinalMission && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -1959,7 +1966,7 @@ export default function ProjectAgentsPage() {
                           Incorporar
                         </Button>
                       )}
-                      {mission.worktreePath && isFinalMission && (
+                      {!isFinalMission && mission.worktreePath && isFinalMission && (
                         <Button
                           size="sm"
                           variant="outline"
