@@ -483,10 +483,7 @@ function ReviewMissionCard({
   compareUrl,
   isExpanded,
   diffState,
-  isPushing,
   isWorktreeAction,
-  onOpenCommit,
-  onPush,
   onMerge,
   onDiscard,
   onToggleExpanded,
@@ -503,26 +500,12 @@ function ReviewMissionCard({
     error?: string;
     files: Array<{ path: string; diff: string }>;
   };
-  isPushing: boolean;
   isWorktreeAction: boolean;
-  onOpenCommit: (mission: Mission) => void;
-  onPush: (mission: Mission) => void;
   onMerge: (mission: Mission) => void;
   onDiscard: (mission: Mission) => void;
   onToggleExpanded: (mission: Mission) => void;
   onDuplicate: (mission: Mission) => void;
 }) {
-  const canCommit = Boolean(
-    mission.worktreePath &&
-    gitState &&
-    (gitState.isDirty || gitState.changedFiles.length > 0),
-  );
-  const canPush = Boolean(
-    mission.worktreePath &&
-    gitState &&
-    !gitState.isDirty &&
-    (gitState.aheadCount > 0 || !gitState.hasUpstream),
-  );
   const reviewHighlights = [
     {
       label: "Integração",
@@ -577,35 +560,6 @@ function ReviewMissionCard({
           ))}
         </div>
 
-        <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-md border px-3 py-2">
-            Branch atual:{" "}
-            <span className="font-mono">
-              {gitState?.branch ?? mission.worktreeBranch ?? "—"}
-            </span>
-          </div>
-          <div className="rounded-md border px-3 py-2">
-            Arquivos alterados:{" "}
-            <span className="font-medium">
-              {gitState?.changedFiles.length ?? 0}
-            </span>
-          </div>
-          <div className="rounded-md border px-3 py-2">
-            Ahead/behind:{" "}
-            <span className="font-medium">
-              {gitState
-                ? `${gitState.aheadCount}/${gitState.behindCount}`
-                : "—"}
-            </span>
-          </div>
-          <div className="rounded-md border px-3 py-2">
-            Base:{" "}
-            <span className="font-medium">
-              {gitState?.defaultBranch ?? "—"}
-            </span>
-          </div>
-        </div>
-
         <div className="flex flex-wrap gap-2 rounded-lg border bg-muted/10 p-2">
           <Button asChild size="sm">
             <Link to={`/project/${projectId}/task/${mission.id}`}>
@@ -619,27 +573,6 @@ function ReviewMissionCard({
           >
             {isExpanded ? "Ocultar diff" : "Mostrar diff"}
           </Button>
-          {canCommit && (
-            <Button size="sm" onClick={() => onOpenCommit(mission)}>
-              <GitCommit className="mr-2 h-4 w-4" />
-              Commitar branch
-            </Button>
-          )}
-          {canPush && (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={isPushing}
-              onClick={() => onPush(mission)}
-            >
-              {isPushing ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="mr-2 h-4 w-4" />
-              )}
-              {gitState?.hasUpstream ? "Enviar branch" : "Publicar branch"}
-            </Button>
-          )}
           {compareUrl && (
             <Button
               size="sm"
@@ -661,15 +594,17 @@ function ReviewMissionCard({
             <GitMerge className="mr-2 h-4 w-4" />
             Incorporar ao principal
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={isWorktreeAction}
-            onClick={() => onDiscard(mission)}
-          >
-            <Trash2 className="mr-2 h-4 w-4" />
-            Descartar branch
-          </Button>
+          {!(mission.isCommitted && mission.isPushed) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={isWorktreeAction}
+              onClick={() => onDiscard(mission)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Descartar branch
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
@@ -2147,12 +2082,7 @@ export default function ProjectAgentsPage() {
                     )}
                     isExpanded={Boolean(reviewExpandedByMissionId[mission.id])}
                     diffState={reviewDiffsByMissionId[mission.id]}
-                    isPushing={isPushingMissionId === mission.id}
                     isWorktreeAction={isWorktreeActionMissionId === mission.id}
-                    onOpenCommit={openCommitDialog}
-                    onPush={(targetMission) =>
-                      void handlePushFromWall(targetMission)
-                    }
                     onMerge={(targetMission) =>
                       void handleMergeWorktreeFromWall(targetMission)
                     }
@@ -2891,13 +2821,8 @@ export default function ProjectAgentsPage() {
                         reviewExpandedByMissionId[mission.id],
                       )}
                       diffState={reviewDiffsByMissionId[mission.id]}
-                      isPushing={isPushingMissionId === mission.id}
                       isWorktreeAction={
                         isWorktreeActionMissionId === mission.id
-                      }
-                      onOpenCommit={openCommitDialog}
-                      onPush={(targetMission) =>
-                        void handlePushFromWall(targetMission)
                       }
                       onMerge={(targetMission) =>
                         void handleMergeWorktreeFromWall(targetMission)
