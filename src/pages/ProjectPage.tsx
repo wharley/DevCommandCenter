@@ -747,6 +747,7 @@ export default function ProjectPage() {
             if (!open) setNewTaskInitial(null);
           }}
           projectId={projectId}
+          projectPath={project?.path ?? undefined}
           initialTask={newTaskInitial ?? undefined}
         />
       )}

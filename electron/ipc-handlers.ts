@@ -914,14 +914,16 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
       const project = db.projects.findById(mission.projectId);
       if (!project) return { success: false, error: "Project not found" };
       const gitService = new GitService(project.path);
-      const mainBranch = await gitService
-        .getDefaultBranch()
-        .catch(() => "main");
+      // Merge into the branch currently checked out in the project (e.g. main or ffeat/migrate-nextjs)
+      let targetBranch = await gitService.getCurrentBranch();
+      if (!targetBranch || targetBranch === "HEAD" || targetBranch === "unknown") {
+        targetBranch = await gitService.getDefaultBranch().catch(() => "main");
+      }
       const result = await mergeWorktreeIntoMain(
         project.path,
         mission.worktreeBranch,
         mission.worktreePath,
-        mainBranch,
+        targetBranch,
       );
       if (result.success)
         db.missions.update(missionId, {

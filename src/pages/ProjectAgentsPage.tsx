@@ -12,6 +12,7 @@ import {
   Clock,
   Copy,
   ExternalLink,
+  GitBranch,
   GitCommit,
   GitMerge,
   Loader2,
@@ -721,6 +722,8 @@ export default function ProjectAgentsPage() {
   const [gitStateByMissionId, setGitStateByMissionId] = useState<
     Record<string, GitBranchState | null>
   >({});
+  const [projectBranch, setProjectBranch] = useState<string | null>(null);
+  const [projectBranchLoading, setProjectBranchLoading] = useState(false);
   const [reviewExpandedByMissionId, setReviewExpandedByMissionId] = useState<
     Record<string, boolean>
   >({});
@@ -861,6 +864,32 @@ export default function ProjectAgentsPage() {
       cancelled = true;
     };
   }, [commitDialogMission?.worktreePath, commitDialogOpen, project?.path]);
+
+  useEffect(() => {
+    const path = project?.path;
+    if (!path?.trim() || typeof window === "undefined" || !window.electronAPI?.git?.getCurrentBranch) {
+      setProjectBranch(null);
+      setProjectBranchLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setProjectBranchLoading(true);
+    setProjectBranch(null);
+    window.electronAPI.git
+      .getCurrentBranch(path.trim())
+      .then((branch) => {
+        if (!cancelled) setProjectBranch(branch?.trim() || null);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectBranch(null);
+      })
+      .finally(() => {
+        if (!cancelled) setProjectBranchLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.path]);
 
   useEffect(() => {
     if (!projectId || typeof window === "undefined") return;
@@ -1631,9 +1660,23 @@ export default function ProjectAgentsPage() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">
-              Novo agente (start direto)
-            </CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base">
+                Novo agente (start direto)
+              </CardTitle>
+              {project?.path && (
+                <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-sm shrink-0">
+                  <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  {projectBranchLoading ? (
+                    <span className="text-muted-foreground text-xs">Carregando…</span>
+                  ) : (
+                    <span className="font-mono font-medium text-foreground">
+                      {projectBranch ?? "—"}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
             <CardDescription>
               Digite a missão, escolha o agente e inicie. A tarefa é criada
               automaticamente.
@@ -2185,6 +2228,7 @@ export default function ProjectAgentsPage() {
             if (!open) setNewTaskInitial(null);
           }}
           projectId={projectId}
+          projectPath={project?.path ?? undefined}
           initialTask={newTaskInitial ?? undefined}
         />
         <CommitDialog
@@ -2305,6 +2349,21 @@ export default function ProjectAgentsPage() {
                 projeto (main) você não vê essas alterações.
               </span>
             </CardDescription>
+            {project?.path && (
+              <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm mt-2">
+                <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
+                {projectBranchLoading ? (
+                  <span className="text-muted-foreground">Carregando branch…</span>
+                ) : (
+                  <span className="text-foreground">
+                    Branch base do projeto:{" "}
+                    <span className="font-mono font-medium">
+                      {projectBranch ?? "—"}
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
           </CardHeader>
           <CardContent className="space-y-3">
             <Input
@@ -2949,6 +3008,7 @@ export default function ProjectAgentsPage() {
           if (!open) setNewTaskInitial(null);
         }}
         projectId={projectId}
+        projectPath={project?.path ?? undefined}
         initialTask={newTaskInitial ?? undefined}
       />
       <CommitDialog
