@@ -10,6 +10,7 @@ import ProjectWorkspacePage from "@/src/pages/ProjectWorkspacePage";
 import ProjectWorkspaceIndexRedirect from "@/src/pages/ProjectWorkspaceIndexRedirect";
 import ProjectPipelinePage from "@/src/pages/ProjectPipelinePage";
 import ProjectAgentsPage from "@/src/pages/ProjectAgentsPage";
+import ProjectReviewPage from "@/src/pages/ProjectReviewPage";
 import MissionPage from "@/src/pages/MissionPage";
 import TaskPage from "@/src/pages/TaskPage";
 import ActivationPage from "@/src/pages/ActivationPage";
@@ -72,6 +73,7 @@ function AppContent() {
           <Route index element={<ProjectWorkspaceIndexRedirect />} />
           <Route path="pipeline" element={<ProjectPipelinePage />} />
           <Route path="agents" element={<ProjectAgentsPage />} />
+          <Route path="review" element={<ProjectReviewPage />} />
         </Route>
         <Route
           path="/project/:id/mission/:missionId"

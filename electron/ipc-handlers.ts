@@ -11,6 +11,7 @@ import {
   createWorktreeForMission,
   mergeWorktreeIntoMain,
   discardWorktree,
+  applyMissionPatch as applyMissionPatchService,
 } from "./services/worktree-service";
 import { getMachineId } from "./services/machine-id";
 import {
@@ -70,14 +71,46 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     if (!mission) return;
     const session = getMissionSession(missionId);
     const gitSnapshot = await snapshotGitForMission(missionId);
-    db.missions.update(missionId, {
+    const updates: Parameters<typeof db.missions.update>[1] = {
       context: {
         ...(mission.context ?? { files: [] }),
         files: mission.context?.files ?? [],
         agentSession: session,
         gitSnapshot,
       },
-    });
+    };
+    if (session?.outputPreview != null) {
+      const summary =
+        session.outputPreview.length > 2000
+          ? session.outputPreview.slice(-2000)
+          : session.outputPreview;
+      updates.lastOutputSummary = summary.trim() || null;
+    }
+    if (
+      mission.missionType === "agents_cli" &&
+      mission.worktreePath &&
+      gitSnapshot?.changedFiles
+    ) {
+      try {
+        const gitService = new GitService(mission.worktreePath);
+        const shortStat = await gitService.getShortStat();
+        updates.lastGitSummary = {
+          changedFiles: shortStat.changedFiles,
+          insertions: shortStat.insertions,
+          deletions: shortStat.deletions,
+        };
+      } catch {
+        updates.lastGitSummary =
+          gitSnapshot.changedFiles?.length != null
+            ? {
+                changedFiles: gitSnapshot.changedFiles.length,
+                insertions: 0,
+                deletions: 0,
+              }
+            : null;
+      }
+    }
+    db.missions.update(missionId, updates);
   };
 
   const schedulePersistMissionSession = (missionId: string) => {
@@ -124,16 +157,26 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     if (event.type === "exit") {
       const mission = db.missions.findById(event.missionId);
       if (!mission || ["completed", "failed", "cancelled"].includes(mission.status)) return;
+      const wallStatusUpdate: { wallStatus?: "ready_for_review" | "error" } =
+        mission.missionType === "agents_cli"
+          ? { wallStatus: (event.exitCode ?? 0) === 0 ? "ready_for_review" : "error" }
+          : {};
       if ((event.exitCode ?? 0) === 0) {
         db.missions.complete(
           event.missionId,
           `Agent finalizado com sucesso (exit code ${event.exitCode ?? 0})`,
         );
+        if (Object.keys(wallStatusUpdate).length > 0) {
+          db.missions.update(event.missionId!, wallStatusUpdate);
+        }
       } else {
         db.missions.fail(
           event.missionId,
           `Agent finalizado com falha (exit code ${event.exitCode ?? -1})`,
         );
+        if (Object.keys(wallStatusUpdate).length > 0) {
+          db.missions.update(event.missionId!, wallStatusUpdate);
+        }
       }
     }
   });
@@ -815,6 +858,14 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     },
   );
 
+  ipcMain.handle(
+    "git:getLocalBranches",
+    async (_event, projectPath: string) => {
+      const gitService = new GitService(projectPath);
+      return gitService.getLocalBranches();
+    },
+  );
+
   // Create a new branch (optionally from a base branch)
   ipcMain.handle(
     "git:createBranch",
@@ -891,12 +942,17 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
         project.path,
         missionId,
         mission.title,
+        mission.baseBranch ?? undefined,
       );
       if (!result.success) return result;
-      db.missions.update(missionId, {
+      const updatePayload: Parameters<typeof db.missions.update>[1] = {
         worktreePath: result.data.worktreePath,
         worktreeBranch: result.data.worktreeBranch,
-      });
+      };
+      if (mission.missionType === "agents_cli" && mission.wallStatus == null) {
+        updatePayload.wallStatus = "running";
+      }
+      db.missions.update(missionId, updatePayload);
       return {
         success: true,
         worktreePath: result.data.worktreePath,
@@ -946,14 +1002,102 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
       mission.worktreeBranch,
     );
     if (result.success) {
-      db.missions.update(missionId, {
+      const updatePayload: Parameters<typeof db.missions.update>[1] = {
         worktreePath: null,
         worktreeBranch: null,
-      });
+      };
+      if (mission.missionType === "agents_cli") {
+        updatePayload.wallStatus = "discarded";
+      }
+      db.missions.update(missionId, updatePayload);
       killPtyByMissionId(missionId);
     }
     return result;
   });
+
+  ipcMain.handle(
+    "missions:getDiffs",
+    async (_event, missionId: string) => {
+      const mission = db.missions.findById(missionId);
+      if (!mission) return { success: false, error: "Mission not found", files: [], summary: null };
+      if (mission.missionType !== "agents_cli" || !mission.worktreePath) {
+        return {
+          success: false,
+          error: "Mission has no worktree or is not agents_cli",
+          files: [],
+          summary: null,
+        };
+      }
+      try {
+        const gitService = new GitService(mission.worktreePath);
+        const branchState = await gitService.getBranchState();
+        const shortStat = await gitService.getShortStat();
+        const changedFiles = branchState.changedFiles ?? [];
+        const files: Array<{ path: string; status: string; diff: string }> = [];
+        for (const filePath of changedFiles) {
+          const diff = await gitService.getFileDiffHead(filePath);
+          const status = branchState.staged?.includes(filePath)
+            ? "staged"
+            : branchState.untracked?.includes(filePath)
+              ? "untracked"
+              : "modified";
+          files.push({ path: filePath, status, diff });
+        }
+        return {
+          success: true,
+          files,
+          summary: {
+            changedFiles: shortStat.changedFiles,
+            insertions: shortStat.insertions,
+            deletions: shortStat.deletions,
+          },
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          success: false,
+          error: message,
+          files: [],
+          summary: null,
+        };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "worktree:applyMissionPatch",
+    async (
+      _event,
+      missionId: string,
+      targetBranch: string,
+      options?: { includeFiles?: string[]; commit?: boolean; message?: string },
+    ) => {
+      const mission = db.missions.findById(missionId);
+      if (!mission?.worktreePath)
+        return { success: false, error: "Mission has no worktree" };
+      const project = db.projects.findById(mission.projectId);
+      if (!project) return { success: false, error: "Project not found" };
+      const result = await applyMissionPatchService(
+        project.path,
+        mission.worktreePath,
+        targetBranch,
+        {
+          includeFiles: options?.includeFiles ?? [],
+          commit: options?.commit ?? false,
+          message: options?.message ?? "Apply mission patch",
+        },
+      );
+      if (result.success) {
+        db.missions.update(missionId, {
+          targetBranch,
+          wallStatus: "applied",
+        });
+      } else if (result.applyFailed) {
+        db.missions.update(missionId, { wallStatus: "apply_failed" });
+      }
+      return result;
+    },
+  );
 
   // Escape string for use inside AppleScript do script "..." (backslash and double-quote)
   function escapeForAppleScriptDoScript(s: string): string {

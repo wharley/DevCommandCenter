@@ -17,12 +17,15 @@ interface WorkflowChoiceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (choice: WorkflowChoice) => void;
+  /** Quando false, esconde a opção Pipeline (Wall focado em agentes). */
+  showPipelineOption?: boolean;
 }
 
 export function WorkflowChoiceDialog({
   open,
   onOpenChange,
   onSelect,
+  showPipelineOption = true,
 }: WorkflowChoiceDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -34,23 +37,25 @@ export function WorkflowChoiceDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 py-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="h-auto min-w-0 flex-col items-start gap-2 p-4 text-left whitespace-normal"
-            onClick={() => {
-              onSelect("pipeline");
-              onOpenChange(false);
-            }}
-          >
-            <span className="flex items-center gap-2 font-medium">
-              <GitBranch className="h-5 w-5 shrink-0 text-primary" />
-              Pipeline
-            </span>
-            <span className="text-wrap text-sm font-normal text-muted-foreground">
-              Plano → Código → Aplicar no app. Gere e revise plano e diff antes de aplicar.
-            </span>
-          </Button>
+          {showPipelineOption && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-auto min-w-0 flex-col items-start gap-2 p-4 text-left whitespace-normal"
+              onClick={() => {
+                onSelect("pipeline");
+                onOpenChange(false);
+              }}
+            >
+              <span className="flex items-center gap-2 font-medium">
+                <GitBranch className="h-5 w-5 shrink-0 text-primary" />
+                Pipeline
+              </span>
+              <span className="text-wrap text-sm font-normal text-muted-foreground">
+                Plano → Código → Aplicar no app. Gere e revise plano e diff antes de aplicar.
+              </span>
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"

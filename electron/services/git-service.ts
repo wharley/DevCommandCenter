@@ -290,6 +290,23 @@ export class GitService {
   }
 
   /**
+   * Lista branches locais (nomes apenas, sem *).
+   */
+  async getLocalBranches(): Promise<string[]> {
+    try {
+      const { stdout } = await execAsync("git branch --no-color", {
+        cwd: this.projectPath,
+      });
+      return stdout
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^\*?\s*/, "").trim())
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Obtém a URL do remote origin
    */
   async getRemoteUrl(): Promise<string | undefined> {
@@ -532,6 +549,31 @@ export class GitService {
       return stdout;
     } catch {
       return "";
+    }
+  }
+
+  /**
+   * Obtém estatística resumida do diff (arquivos alterados, inserções, remoções).
+   * Roda git diff --shortstat HEAD no worktree.
+   */
+  async getShortStat(): Promise<{ changedFiles: number; insertions: number; deletions: number }> {
+    try {
+      const { stdout } = await execAsync("git diff --shortstat HEAD", {
+        cwd: this.projectPath,
+      });
+      const line = stdout.trim();
+      let changedFiles = 0;
+      let insertions = 0;
+      let deletions = 0;
+      const fileMatch = line.match(/(\d+)\s+files?\s+changed/);
+      if (fileMatch) changedFiles = parseInt(fileMatch[1], 10);
+      const insMatch = line.match(/(\d+)\s+insertions?/);
+      if (insMatch) insertions = parseInt(insMatch[1], 10);
+      const delMatch = line.match(/(\d+)\s+deletions?/);
+      if (delMatch) deletions = parseInt(delMatch[1], 10);
+      return { changedFiles, insertions, deletions };
+    } catch {
+      return { changedFiles: 0, insertions: 0, deletions: 0 };
     }
   }
 

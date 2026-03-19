@@ -11,6 +11,10 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { Project, Provider } from "@/lib/database/types";
 
+/** Quando false, o link Pipeline é escondido da nav (rota continua acessível). Reativar via localStorage "dcc:showPipelineTab" = "true". */
+const getShowPipelineTab = (): boolean =>
+  typeof localStorage !== "undefined" && localStorage.getItem("dcc:showPipelineTab") === "true";
+
 export interface ProjectWorkspaceContextValue {
   projectId: string;
   project: Project;
@@ -28,6 +32,7 @@ export default function ProjectWorkspacePage() {
   const location = useLocation();
   const [showWorkflowChoice, setShowWorkflowChoice] = useState(false);
   const hasUpdatedLastOpenedRef = useRef<string | null>(null);
+  const showPipelineTab = getShowPipelineTab();
 
   const { projects, update, isLoading: projectsLoading } = useProjects();
   const { providers } = useProviders();
@@ -53,7 +58,7 @@ export default function ProjectWorkspacePage() {
   }, [location.pathname]);
 
   const handleContextualCreate = () => {
-    if (activeWorkspace === "agents") {
+    if (activeWorkspace === "agents" || !showPipelineTab) {
       navigate(`/project/${projectId}/agents?new=agents`);
       return;
     }
@@ -112,7 +117,9 @@ export default function ProjectWorkspacePage() {
           </div>
           <Button onClick={handleContextualCreate}>
             <Plus className="mr-2 h-4 w-4" />
-            {activeWorkspace === "agents" ? "Nova tarefa de agente" : "Nova missão pipeline"}
+            {activeWorkspace === "agents" || !showPipelineTab
+              ? "Nova tarefa de agente"
+              : "Nova missão pipeline"}
           </Button>
           <Button variant="outline" onClick={() => setShowWorkflowChoice(true)}>
             Escolher fluxo
@@ -144,9 +151,11 @@ export default function ProjectWorkspacePage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button asChild variant={activeWorkspace === "pipeline" ? "secondary" : "ghost"}>
-            <Link to={`/project/${projectId}/pipeline`}>Pipeline</Link>
-          </Button>
+          {showPipelineTab && (
+            <Button asChild variant={activeWorkspace === "pipeline" ? "secondary" : "ghost"}>
+              <Link to={`/project/${projectId}/pipeline`}>Pipeline</Link>
+            </Button>
+          )}
           <Button asChild variant={activeWorkspace === "agents" ? "secondary" : "ghost"} className="gap-2">
             <Link to={`/project/${projectId}/agents`}>
               <Terminal className="h-4 w-4" />
@@ -170,8 +179,9 @@ export default function ProjectWorkspacePage() {
       <WorkflowChoiceDialog
         open={showWorkflowChoice}
         onOpenChange={setShowWorkflowChoice}
+        showPipelineOption={showPipelineTab}
         onSelect={(choice) => {
-          if (choice === "pipeline") {
+          if (choice === "pipeline" && showPipelineTab) {
             navigate(`/project/${projectId}/pipeline?new=pipeline`);
             return;
           }

@@ -12,6 +12,8 @@ import type {
   CreateMissionDTO,
   UpdateMissionDTO,
   MissionsQueryOptions,
+  WallStatus,
+  LastGitSummary,
 } from '../types';
 
 // ============================================
@@ -39,6 +41,11 @@ interface MissionRow {
   pending_commands: string | null;
   worktree_path?: string | null;
   worktree_branch?: string | null;
+  base_branch?: string | null;
+  target_branch?: string | null;
+  last_output_summary?: string | null;
+  last_git_summary?: string | null;
+  wall_status?: string | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -73,6 +80,13 @@ function rowToMission(row: MissionRow): Mission {
     pendingCommands: row.pending_commands ? JSON.parse(row.pending_commands) : null,
     worktreePath: row.worktree_path ?? null,
     worktreeBranch: row.worktree_branch ?? null,
+    baseBranch: row.base_branch ?? null,
+    targetBranch: row.target_branch ?? null,
+    lastOutputSummary: row.last_output_summary ?? null,
+    lastGitSummary: row.last_git_summary
+      ? (JSON.parse(row.last_git_summary) as LastGitSummary)
+      : null,
+    wallStatus: (row.wall_status as WallStatus | undefined) ?? null,
     startedAt: row.started_at ? new Date(row.started_at) : null,
     completedAt: row.completed_at ? new Date(row.completed_at) : null,
     createdAt: new Date(row.created_at),
@@ -240,13 +254,15 @@ export const MissionsRepository = {
   create(data: CreateMissionDTO): Mission {
     const db = getDatabase();
     const id = generateId();
-    
+
     const missionType = data.missionType ?? 'implementation';
+    const isAgentsCli = missionType === 'agents_cli';
+    const wallStatus = isAgentsCli ? 'running' : null;
     const stmt = db.prepare(`
-      INSERT INTO missions (id, project_id, provider_id, plan_provider_id, code_provider_id, title, description, preserve_instructions, mission_type, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'created')
+      INSERT INTO missions (id, project_id, provider_id, plan_provider_id, code_provider_id, title, description, preserve_instructions, mission_type, status, base_branch, wall_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    
+
     stmt.run(
       id,
       data.projectId,
@@ -256,9 +272,12 @@ export const MissionsRepository = {
       data.title,
       data.description,
       data.preserveInstructions ?? null,
-      missionType
+      missionType,
+      'created',
+      data.baseBranch ?? null,
+      wallStatus
     );
-    
+
     return this.findById(id)!;
   },
 
@@ -356,7 +375,27 @@ export const MissionsRepository = {
       updates.push('worktree_branch = ?');
       values.push(data.worktreeBranch);
     }
-    
+    if (data.baseBranch !== undefined) {
+      updates.push('base_branch = ?');
+      values.push(data.baseBranch);
+    }
+    if (data.targetBranch !== undefined) {
+      updates.push('target_branch = ?');
+      values.push(data.targetBranch);
+    }
+    if (data.lastOutputSummary !== undefined) {
+      updates.push('last_output_summary = ?');
+      values.push(data.lastOutputSummary);
+    }
+    if (data.lastGitSummary !== undefined) {
+      updates.push('last_git_summary = ?');
+      values.push(data.lastGitSummary ? JSON.stringify(data.lastGitSummary) : null);
+    }
+    if (data.wallStatus !== undefined) {
+      updates.push('wall_status = ?');
+      values.push(data.wallStatus);
+    }
+
     if (updates.length === 0) {
       return existing;
     }
@@ -586,7 +625,11 @@ export const MissionsRepository = {
    * Cancela uma missão.
    */
   cancel(id: string): Mission | null {
-    return this.updateStatus(id, 'cancelled');
+    const mission = this.updateStatus(id, 'cancelled');
+    if (mission?.missionType === 'agents_cli') {
+      return this.update(id, { wallStatus: 'canceled' }) ?? mission;
+    }
+    return mission;
   },
 
   /**

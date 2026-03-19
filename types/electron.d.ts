@@ -183,6 +183,29 @@ declare global {
           success: boolean;
           error?: string;
         }>;
+        getDiffs: (missionId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          files: Array<{ path: string; status: string; diff: string }>;
+          summary: {
+            changedFiles: number;
+            insertions: number;
+            deletions: number;
+          } | null;
+        }>;
+        applyMissionPatch: (
+          missionId: string,
+          targetBranch: string,
+          options?: {
+            includeFiles?: string[];
+            commit?: boolean;
+            message?: string;
+          }
+        ) => Promise<{
+          success: boolean;
+          error?: string;
+          applyFailed?: boolean;
+        }>;
       };
 
       window: {
@@ -266,6 +289,7 @@ declare global {
         isRepo: (projectPath: string) => Promise<boolean>;
         getCurrentBranch: (projectPath: string) => Promise<string>;
         getDefaultBranch: (projectPath: string) => Promise<string>;
+        getLocalBranches: (projectPath: string) => Promise<string[]>;
         createBranch: (
           projectPath: string,
           branchName: string,

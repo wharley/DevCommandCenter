@@ -122,6 +122,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     mergeIntoMain: (missionId: string) =>
       invoke("worktree:mergeIntoMain", missionId),
     discard: (missionId: string) => invoke("worktree:discard", missionId),
+    getDiffs: (missionId: string) =>
+      invoke("missions:getDiffs", missionId),
+    applyMissionPatch: (
+      missionId: string,
+      targetBranch: string,
+      options?: { includeFiles?: string[]; commit?: boolean; message?: string },
+    ) =>
+      invoke("worktree:applyMissionPatch", missionId, targetBranch, options),
   },
 
   // Window APIs
@@ -191,6 +199,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       invoke("git:getCurrentBranch", projectPath),
     getDefaultBranch: (projectPath: string) =>
       invoke("git:getDefaultBranch", projectPath),
+    getLocalBranches: (projectPath: string) =>
+      invoke("git:getLocalBranches", projectPath),
     createBranch: (
       projectPath: string,
       branchName: string,

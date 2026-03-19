@@ -39,6 +39,23 @@ export type MissionLogType =
 /** implementation = plano → código → aplicar; analysis = apenas plano; agents_cli = tarefa 1:1 com agente no terminal */
 export type MissionType = "implementation" | "analysis" | "agents_cli";
 
+/** Status simplificado para o Wall (agents_cli). */
+export type WallStatus =
+  | "running"
+  | "ready_for_review"
+  | "applied"
+  | "discarded"
+  | "canceled"
+  | "error"
+  | "apply_failed";
+
+/** Resumo Git para o rodapé do card (agents_cli). */
+export interface LastGitSummary {
+  changedFiles: number;
+  insertions: number;
+  deletions: number;
+}
+
 /**
  * Permission mode for CLI agents (Codex, Claude Code, etc.).
  * - plan: only plan, require approval for edits
@@ -116,6 +133,16 @@ export interface Mission {
   worktreePath?: string | null;
   /** Branch do worktree (ex.: dcc-mission-<id>) */
   worktreeBranch?: string | null;
+  /** Branch de origem ao criar worktree (agents_cli) */
+  baseBranch?: string | null;
+  /** Branch de destino após aplicar patch (agents_cli) */
+  targetBranch?: string | null;
+  /** Resumo da saída do terminal para o card (agents_cli) */
+  lastOutputSummary?: string | null;
+  /** Resumo Git para o rodapé do card (agents_cli) */
+  lastGitSummary?: LastGitSummary | null;
+  /** Status simplificado para o Wall (agents_cli) */
+  wallStatus?: WallStatus | null;
   startedAt?: Date | null;
   completedAt?: Date | null;
   createdAt: Date;
@@ -276,6 +303,8 @@ export interface CreateMissionDTO {
   description: string;
   preserveInstructions?: string;
   missionType?: MissionType;
+  /** Branch de origem para worktree (agents_cli) */
+  baseBranch?: string | null;
 }
 
 export interface UpdateMissionDTO {
@@ -297,6 +326,11 @@ export interface UpdateMissionDTO {
   pendingCommands?: PendingCommand[] | null;
   worktreePath?: string | null;
   worktreeBranch?: string | null;
+  baseBranch?: string | null;
+  targetBranch?: string | null;
+  lastOutputSummary?: string | null;
+  lastGitSummary?: LastGitSummary | null;
+  wallStatus?: WallStatus | null;
   startedAt?: Date | null;
   completedAt?: Date | null;
 }

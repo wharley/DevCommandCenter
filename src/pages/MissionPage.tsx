@@ -399,6 +399,17 @@ export default function MissionPage() {
     };
   }, [project?.path]);
 
+  // agents_cli: preencher cwd do terminal com worktree para reanexar à sessão
+  useEffect(() => {
+    if (
+      mission?.missionType === "agents_cli" &&
+      mission?.worktreePath &&
+      !embeddedTerminalCwd
+    ) {
+      setEmbeddedTerminalCwd(mission.worktreePath);
+    }
+  }, [mission?.missionType, mission?.worktreePath, embeddedTerminalCwd]);
+
   // Status do repositório ao abrir o diálogo de commit
   useEffect(() => {
     if (!commitDialogOpen || !project?.path || !window.electronAPI?.git) {
@@ -1540,10 +1551,23 @@ export default function MissionPage() {
               variant="ghost"
               size="icon"
               className="cursor-pointer"
-              onClick={() => navigate(`/project/${projectId}/pipeline`)}
+              onClick={() => navigate(mission?.missionType === "agents_cli" ? `/project/${projectId}/agents` : `/project/${projectId}/pipeline`)}
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>
+            {mission?.missionType === "agents_cli" && mission?.worktreePath && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                asChild
+              >
+                <Link to={`/project/${projectId}/review?missionId=${missionId}`}>
+                  <GitMerge className="h-4 w-4" />
+                  Revisar patch
+                </Link>
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -1560,7 +1584,7 @@ export default function MissionPage() {
             <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Link
-                to={`/project/${projectId}/pipeline`}
+                to={mission?.missionType === "agents_cli" ? `/project/${projectId}/agents` : `/project/${projectId}/pipeline`}
                 className="hover:text-foreground"
               >
                 {project.name}
@@ -2378,6 +2402,7 @@ export default function MissionPage() {
                     args={embeddedTerminalArgs}
                     onClose={() => setEmbeddedTerminalCwd(null)}
                     title={mission?.title ?? "Missão"}
+                    missionId={mission?.missionType === "agents_cli" ? missionId ?? undefined : undefined}
                   />
                 </div>
               ) : (

@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS missions (
   pending_commands TEXT, -- JSON com comandos pendentes que o usuário precisa executar
   worktree_path TEXT, -- Path do worktree Git da missão (pipeline paralelo)
   worktree_branch TEXT, -- Branch do worktree (ex.: dcc-mission-<id>)
+  base_branch TEXT, -- Branch de origem ao criar worktree (agents_cli)
+  target_branch TEXT, -- Branch de destino após aplicar patch (agents_cli)
+  last_output_summary TEXT, -- Resumo da saída do terminal para o card (agents_cli)
+  last_git_summary TEXT, -- JSON { changedFiles, insertions, deletions } (agents_cli)
+  wall_status TEXT, -- running | ready_for_review | applied | discarded | canceled | error | apply_failed (agents_cli)
   started_at TEXT,
   completed_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),

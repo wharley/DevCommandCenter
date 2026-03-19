@@ -9,6 +9,7 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 const execAsync = promisify(exec);
@@ -59,15 +60,18 @@ function getProjectWorktreeDir(projectPath: string, branch: string): string {
  * Cria um worktree para uma missão a partir do repositório principal.
  * Path: <projectPath>/.dcc/worktrees/<branch> (dentro do projeto, como no dmux)
  * Branch: dcc-mission-<mission-slug>-<missionIdShort>
+ * @param baseBranch - Branch de origem (ref) para criar o worktree. Se não informado, usa HEAD.
  */
 export async function createWorktreeForMission(
   projectPath: string,
   missionId: string,
   missionTitle?: string | null,
+  baseBranch?: string | null,
 ): Promise<{ success: true; data: CreateWorktreeResult } | { success: false; error: string }> {
   const resolvedProject = path.resolve(projectPath);
   const branch = safeBranchName(missionId, missionTitle);
   const worktreeDir = getProjectWorktreeDir(resolvedProject, branch);
+  const fromRef = (baseBranch && baseBranch.trim()) ? baseBranch.trim() : "HEAD";
 
   try {
     const stat = await fs.promises.stat(resolvedProject);
@@ -102,7 +106,7 @@ export async function createWorktreeForMission(
     }
 
     await execAsync(
-      `git worktree add "${worktreeDir}" -b "${branch}"`,
+      `git worktree add "${worktreeDir}" -b "${branch}" "${fromRef}"`,
       { cwd: resolvedProject }
     );
 
@@ -210,4 +214,84 @@ export async function discardWorktree(
     force: true,
     deleteBranch: true,
   });
+}
+
+export interface ApplyMissionPatchOptions {
+  /** Arquivos a incluir no patch (paths relativos ao repo). Se vazio, inclui todos. */
+  includeFiles?: string[];
+  commit?: boolean;
+  message?: string;
+}
+
+/**
+ * Gera patch do worktree (git diff HEAD) e aplica no repo principal na targetBranch.
+ * Opcionalmente faz commit. Retorna apply_failed em error quando git apply falha.
+ */
+export async function applyMissionPatch(
+  projectPath: string,
+  worktreePath: string,
+  targetBranch: string,
+  options: ApplyMissionPatchOptions = {}
+): Promise<WorktreeServiceResult & { applyFailed?: boolean }> {
+  const resolvedProject = path.resolve(projectPath);
+  const resolvedWorktree = path.resolve(worktreePath);
+  const { includeFiles = [], commit = false, message = "Apply mission patch" } = options;
+
+  try {
+    const filesArg =
+      includeFiles.length > 0
+        ? " -- " + includeFiles.map((f) => `"${f.replace(/"/g, '\\"')}"`).join(" ")
+        : "";
+    const { stdout: patchContent } = await execAsync(
+      `git diff HEAD${filesArg}`,
+      { cwd: resolvedWorktree }
+    );
+    if (!patchContent || !patchContent.trim()) {
+      return { success: false, error: "Nenhuma alteração para aplicar." };
+    }
+
+    const tmpFile = path.join(
+      os.tmpdir(),
+      `dcc-apply-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`
+    );
+    await fs.promises.writeFile(tmpFile, patchContent, "utf-8");
+
+    try {
+      await execAsync(`git checkout "${targetBranch}"`, { cwd: resolvedProject });
+      await execAsync(`git apply --check "${tmpFile}"`, { cwd: resolvedProject });
+      await execAsync(`git apply "${tmpFile}"`, { cwd: resolvedProject });
+    } catch (applyErr: unknown) {
+      const errMsg = applyErr instanceof Error ? applyErr.message : String(applyErr);
+      await fs.promises.unlink(tmpFile).catch(() => {});
+      return { success: false, error: errMsg, applyFailed: true };
+    } finally {
+      await fs.promises.unlink(tmpFile).catch(() => {});
+    }
+
+    if (commit) {
+      const { stdout: statusOut } = await execAsync("git status --porcelain", {
+        cwd: resolvedProject,
+      });
+      const files = statusOut
+        .trim()
+        .split(/\n/)
+        .filter(Boolean)
+        .map((line) => line.slice(3).trim());
+      if (files.length > 0) {
+        for (const f of files) {
+          await execAsync(`git add "${f.replace(/"/g, '\\"')}"`, {
+            cwd: resolvedProject,
+          });
+        }
+        const escapedMsg = message.replace(/"/g, '\\"');
+        await execAsync(`git commit -m "${escapedMsg}"`, { cwd: resolvedProject });
+      }
+    }
+
+    return { success: true };
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
+  }
 }

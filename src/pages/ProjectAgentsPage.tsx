@@ -58,6 +58,7 @@ import { EmbeddedTerminal } from "@/components/embedded-terminal";
 import { DiffCodeBlock } from "@/components/diff-code-block";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMissions, useProviders } from "@/hooks/use-data";
 import { useAppStore } from "@/hooks/use-app-store";
 import { useProjectWorkspaceContext } from "@/src/pages/ProjectWorkspacePage";
@@ -82,6 +83,7 @@ const FINAL_STATUSES = ["completed", "failed", "cancelled"] as const;
 type AgentPriority = "high" | "normal" | "low";
 type QueueUrgency = "ok" | "warning" | "critical";
 type AgentsView = "wall" | "queue";
+type WallTab = "live" | "review";
 type AgentLane = "running" | "queued" | "review" | "history";
 const PRIORITY_SCORE: Record<AgentPriority, number> = {
   high: 3,
@@ -117,6 +119,18 @@ function getQueueStatusLabel(
   }
   if (mission.startedAt && !mission.completedAt) return "Em execução";
   return "Nova";
+}
+
+function getWallStatusLabel(mission: Mission): string {
+  const ws = mission.wallStatus;
+  if (ws === "running") return "Rodando";
+  if (ws === "ready_for_review") return "Pronto p/ revisão";
+  if (ws === "applied") return "Aplicado";
+  if (ws === "discarded") return "Descartado";
+  if (ws === "canceled") return "Cancelado";
+  if (ws === "error") return "Erro";
+  if (ws === "apply_failed") return "Falha ao aplicar";
+  return getQueueStatusLabel(mission);
 }
 
 function hasActiveSession(mission: Mission): boolean {
@@ -673,6 +687,7 @@ export default function ProjectAgentsPage() {
   const [quickDescription, setQuickDescription] = useState("");
   const [quickProviderId, setQuickProviderId] = useState("");
   const [agentsView, setAgentsView] = useState<AgentsView>("wall");
+  const [wallTab, setWallTab] = useState<WallTab>("live");
   const [isQuickCreating, setIsQuickCreating] = useState(false);
   const [newTaskDialogOpen, setNewTaskDialogOpen] = useState(false);
   const [newTaskInitial, setNewTaskInitial] =
@@ -724,6 +739,9 @@ export default function ProjectAgentsPage() {
   >({});
   const [projectBranch, setProjectBranch] = useState<string | null>(null);
   const [projectBranchLoading, setProjectBranchLoading] = useState(false);
+  const [localBranches, setLocalBranches] = useState<string[]>([]);
+  const [quickBaseBranch, setQuickBaseBranch] = useState<string>("");
+  const [focusedMissionId, setFocusedMissionId] = useState<string | null>(null);
   const [reviewExpandedByMissionId, setReviewExpandedByMissionId] = useState<
     Record<string, boolean>
   >({});
@@ -811,6 +829,12 @@ export default function ProjectAgentsPage() {
     if (savedView === "wall" || savedView === "queue") {
       setAgentsView(savedView);
     }
+    const savedWallTab = localStorage.getItem(
+      `dcc:project:${projectId}:agents:wallTab`,
+    );
+    if (savedWallTab === "live" || savedWallTab === "review") {
+      setWallTab(savedWallTab);
+    }
   }, [projectId]);
 
   useEffect(() => {
@@ -833,6 +857,11 @@ export default function ProjectAgentsPage() {
     if (!projectId || typeof window === "undefined") return;
     localStorage.setItem(`dcc:project:${projectId}:agents:view`, agentsView);
   }, [agentsView, projectId]);
+
+  useEffect(() => {
+    if (!projectId || typeof window === "undefined") return;
+    localStorage.setItem(`dcc:project:${projectId}:agents:wallTab`, wallTab);
+  }, [wallTab, projectId]);
 
   useEffect(() => {
     if (agentsView === "wall") {
@@ -890,6 +919,25 @@ export default function ProjectAgentsPage() {
       cancelled = true;
     };
   }, [project?.path]);
+
+  useEffect(() => {
+    const path = project?.path;
+    if (!path?.trim() || typeof window === "undefined" || !window.electronAPI?.git?.getLocalBranches) {
+      setLocalBranches([]);
+      return;
+    }
+    let cancelled = false;
+    window.electronAPI.git.getLocalBranches(path.trim()).then((branches) => {
+      if (!cancelled) setLocalBranches(branches ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.path]);
+
+  useEffect(() => {
+    if (projectBranch && !quickBaseBranch) setQuickBaseBranch(projectBranch);
+  }, [projectBranch, quickBaseBranch]);
 
   useEffect(() => {
     if (!projectId || typeof window === "undefined") return;
@@ -1064,7 +1112,32 @@ export default function ProjectAgentsPage() {
     () => queued.slice(0, Math.max(0, 6 - running.length)),
     [queued, running.length],
   );
-  const wallMissions = useMemo(() => running, [running]);
+  const wallMissions = useMemo(() => {
+    const runningIds = new Set(running.map((m) => m.id));
+    const reviewIds = new Set(readyToReview.map((m) => m.id));
+    return [...agentMissions]
+      .sort((a, b) => {
+        const aRunning = runningIds.has(a.id) ? 1 : 0;
+        const bRunning = runningIds.has(b.id) ? 1 : 0;
+        if (aRunning !== bRunning) return bRunning - aRunning;
+        const aReview = reviewIds.has(a.id) ? 1 : 0;
+        const bReview = reviewIds.has(b.id) ? 1 : 0;
+        if (aReview !== bReview) return bReview - aReview;
+        return b.updatedAt.getTime() - a.updatedAt.getTime();
+      })
+      .slice(0, 20);
+  }, [agentMissions, running, readyToReview]);
+
+  useEffect(() => {
+    const firstRunning = running[0] ?? null;
+    if (
+      wallTab === "live" &&
+      firstRunning &&
+      (focusedMissionId == null || !running.some((m) => m.id === focusedMissionId))
+    ) {
+      setFocusedMissionId(firstRunning.id);
+    }
+  }, [wallTab, running, focusedMissionId]);
 
   const handleQuickCreate = async () => {
     if (!quickTitle.trim()) {
@@ -1077,6 +1150,7 @@ export default function ProjectAgentsPage() {
     }
     setIsQuickCreating(true);
     try {
+      const baseBranchToUse = (quickBaseBranch.trim() || projectBranch) ?? undefined;
       const mission = await create({
         projectId,
         providerId: quickProviderId,
@@ -1085,9 +1159,11 @@ export default function ProjectAgentsPage() {
         title: quickTitle.trim(),
         description: quickDescription.trim() || quickTitle.trim(),
         missionType: "agents_cli",
+        baseBranch: baseBranchToUse ?? null,
       });
       await launchMissionSession(mission);
       await refreshMissions();
+      setFocusedMissionId(mission.id);
       toast.success("Agente iniciado no Wall");
       setQuickTitle("");
       setQuickDescription("");
@@ -1364,6 +1440,19 @@ export default function ProjectAgentsPage() {
       toast.error(`Erro: ${e instanceof Error ? e.message : "desconhecido"}`);
     } finally {
       setIsWorktreeActionMissionId(null);
+    }
+  };
+
+  const handleCancelMission = async (mission: Mission) => {
+    try {
+      if (window.electronAPI?.terminal?.killByMissionId) {
+        await window.electronAPI.terminal.killByMissionId(mission.id);
+      }
+      await cancelMission(mission.id);
+      await refreshMissions();
+      toast.success("Execução cancelada");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Não foi possível cancelar");
     }
   };
 
@@ -1688,7 +1777,27 @@ export default function ProjectAgentsPage() {
               value={quickTitle}
               onChange={(e) => setQuickTitle(e.target.value)}
             />
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <div className="min-w-[180px] flex-1">
+                <Select
+                  value={quickBaseBranch || "__current__"}
+                  onValueChange={(v) => setQuickBaseBranch(v === "__current__" ? "" : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Branch base" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__current__">
+                      {projectBranchLoading ? "Carregando…" : projectBranch ? `Atual (${projectBranch})` : "Branch atual"}
+                    </SelectItem>
+                    {localBranches.map((b) => (
+                      <SelectItem key={b} value={b}>
+                        {b}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="min-w-[220px] flex-1">
                 <Select
                   value={quickProviderId}
@@ -1727,105 +1836,87 @@ export default function ProjectAgentsPage() {
           </CardContent>
         </Card>
 
-        {wallMissions.length === 0 ? (
-          <Empty className="mt-8">
-            <Empty.Icon>
-              <Terminal className="h-10 w-10" />
-            </Empty.Icon>
-            <Empty.Title>Sem sessões ativas</Empty.Title>
-            <Empty.Description>
-              Inicie uma tarefa para acompanhar a execução em tempo real.
-            </Empty.Description>
-          </Empty>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {wallMissions.map((mission) => {
-              const gitState = gitStateByMissionId[mission.id] ?? null;
-              const session = mission.context?.agentSession ?? null;
-              const sessionPreview = getSessionPreview(mission);
-              const lastActivityLabel = formatRelativeIso(
-                session?.lastActivityAt,
-              );
+        <Tabs
+          value={wallTab}
+          onValueChange={(v) => setWallTab(v as WallTab)}
+          className="mt-6"
+        >
+          <TabsList className="mb-4 grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="live" className="gap-2">
+              Ao vivo
+              <Badge variant="secondary" className="ml-1">
+                {running.length}
+              </Badge>
+            </TabsTrigger>
+            <TabsTrigger value="review" className="gap-2">
+              Review
+              <Badge variant="outline" className="ml-1">
+                {readyToReview.length + history.length}
+              </Badge>
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="live" className="mt-4 space-y-5">
+            {running.length === 0 ? (
+              <Empty className="mt-8">
+                <Empty.Icon>
+                  <Terminal className="h-10 w-10" />
+                </Empty.Icon>
+                <Empty.Title>Sem sessões ativas</Empty.Title>
+                <Empty.Description>
+                  Inicie uma tarefa para acompanhar a execução em tempo real.
+                </Empty.Description>
+              </Empty>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {running.map((mission) => {
               const isRunningMission = getAgentLane(mission) === "running";
-              const isFinalMission = FINAL_STATUSES.includes(
-                mission.status as (typeof FINAL_STATUSES)[number],
-              );
-              const canFinalizeFromWall = isRunningMission;
-              const canCommitFromWall = Boolean(
-                mission.worktreePath &&
-                isFinalMission &&
-                gitState &&
-                (gitState.isDirty || gitState.changedFiles.length > 0),
-              );
-              const canPushFromWall = Boolean(
-                mission.worktreePath &&
-                isFinalMission &&
-                gitState &&
-                !gitState.isDirty &&
-                (gitState.aheadCount > 0 || !gitState.hasUpstream),
-              );
               const provider = mission.providerId
                 ? (providerById.get(mission.providerId) ?? null)
                 : null;
               const suggestedCommand = buildSuggestedCliCommand(provider);
               const prompt = buildMissionPrompt(mission);
+              const baseBranchLabel = mission.baseBranch ?? mission.worktreeBranch ?? "—";
+              const isFocused = focusedMissionId === mission.id;
+              const summary = mission.lastGitSummary;
+              const hasDiff = summary && summary.changedFiles > 0;
               return (
                 <Card
                   key={mission.id}
-                  className="flex min-h-[360px] flex-col overflow-hidden border-primary/10 text-left shadow-sm"
+                  className="flex min-h-[320px] max-h-[420px] flex-col overflow-hidden border-primary/10 text-left shadow-sm"
                 >
-                  <CardHeader className="min-w-0 pb-2 text-left">
+                  <CardHeader className="shrink-0 pb-2 pt-3 text-left">
                     <div className="flex min-w-0 items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <CardTitle className="line-clamp-2 max-w-full wrap-break-word text-sm">
+                        <CardTitle className="line-clamp-1 max-w-full text-sm" title={mission.title}>
                           {mission.title}
                         </CardTitle>
-                        <CardDescription className="line-clamp-1 wrap-break-word">
-                          {provider ? provider.name : "Sem agente"}
+                        <CardDescription className="line-clamp-1 text-xs">
+                          {provider ? provider.name : "Sem agente"} · {baseBranchLabel}
                         </CardDescription>
                       </div>
-                      <Badge
-                        variant={getStatusVariant(getQueueStatusLabel(mission))}
-                        className="shrink-0"
-                      >
-                        {getQueueStatusLabel(mission)}
-                      </Badge>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {isRunningMission && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-destructive hover:text-destructive"
+                            onClick={() => void handleCancelMission(mission)}
+                          >
+                            Cancelar
+                          </Button>
+                        )}
+                        <Badge
+                          variant={getStatusVariant(getQueueStatusLabel(mission))}
+                          className="shrink-0"
+                        >
+                          {getWallStatusLabel(mission)}
+                        </Badge>
+                      </div>
                     </div>
-                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-                      <span className="rounded-full border bg-muted/20 px-2 py-0.5">
-                        {session?.status === "running"
-                          ? "Sessão ao vivo"
-                          : "Sessão pronta para retomar"}
-                      </span>
-                      {lastActivityLabel && (
-                        <span className="rounded-full border bg-muted/20 px-2 py-0.5">
-                          Última atividade {lastActivityLabel}
-                        </span>
-                      )}
-                      <span className="rounded-full border bg-muted/20 px-2 py-0.5">
-                        Em andamento ha{" "}
-                        {formatWaitLabel(getQueueWaitMs(mission))}
-                      </span>
-                    </div>
-                    <div className="mt-2">
-                      <BranchAccessRow
-                        branch={gitState?.branch ?? mission.worktreeBranch ?? null}
-                        worktreePath={mission.worktreePath ?? null}
-                      />
-                    </div>
-                    <AgentGitFlowStatus mission={mission} gitState={gitState} />
                   </CardHeader>
-                  <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-                    <div className="rounded-lg border bg-muted/10 p-3">
-                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                        Objetivo
-                      </p>
-                      <p className="mt-1 line-clamp-3 text-sm text-foreground/90">
-                        {mission.description}
-                      </p>
-                    </div>
-                    {isRunningMission ? (
-                      <div className="min-h-0 flex-1">
+                  <CardContent className="flex min-h-0 flex-1 flex-col gap-2 pt-0">
+                    {isFocused ? (
+                      <div className="min-h-[200px] flex-1 overflow-hidden rounded-md border">
                         <EmbeddedTerminal
                           cwd={mission.worktreePath ?? project.path}
                           command={suggestedCommand}
@@ -1838,389 +1929,270 @@ export default function ProjectAgentsPage() {
                         />
                       </div>
                     ) : (
-                      <div className="rounded-md border bg-muted/20 p-3 text-left text-sm text-muted-foreground whitespace-pre-wrap wrap-break-word">
-                        Sessão pausada. Reabra a mesma branch para continuar do
-                        ponto em que parou.
-                      </div>
-                    )}
-                    {sessionPreview && (
-                      <div className="rounded-lg border bg-background p-3">
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                            Última saída capturada
-                          </p>
-                          {session?.outputLineCount ? (
-                            <span className="text-[11px] text-muted-foreground">
-                              {session.outputLineCount} linhas
-                            </span>
-                          ) : null}
-                        </div>
-                        <pre className="max-h-28 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
-                          {sessionPreview}
+                      <div
+                        className="flex min-h-[200px] flex-1 flex-col items-center justify-center gap-2 rounded-md border bg-muted/20 p-3"
+                        onClick={() => setFocusedMissionId(mission.id)}
+                      >
+                        <pre className="max-h-32 w-full overflow-auto whitespace-pre-wrap wrap-break-word text-left text-xs text-muted-foreground">
+                          {mission.lastOutputSummary || "Sem saída capturada."}
                         </pre>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-2">
-                      {canFinalizeFromWall && (
                         <Button
+                          type="button"
                           size="sm"
                           variant="secondary"
-                          className="w-full justify-center"
-                          onClick={() => void handleManualFinish(mission)}
-                          disabled={isFinishingMissionId === mission.id}
-                        >
-                          {isFinishingMissionId === mission.id ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : null}
-                          Finalizar
-                        </Button>
-                      )}
-                      {!isRunningMission && (
-                        <Button
-                          size="sm"
-                          className="w-full justify-center"
-                          onClick={async () => {
-                            try {
-                              await launchMissionSession(mission);
-                              await refreshMissions();
-                              toast.success(
-                                `Agente iniciado: ${mission.title}`,
-                              );
-                            } catch (e) {
-                              toast.error(
-                                e instanceof Error
-                                  ? e.message
-                                  : `Falha ao iniciar ${mission.title}`,
-                              );
-                            }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFocusedMissionId(mission.id);
                           }}
                         >
-                          <Play className="mr-2 h-4 w-4" />
-                          Iniciar
+                          <Terminal className="mr-2 h-4 w-4" />
+                          Ver terminal
                         </Button>
-                      )}
-                      {!isFinalMission && canCommitFromWall && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="w-full justify-center"
-                          onClick={() => openCommitDialog(mission)}
-                        >
-                          <GitCommit className="mr-2 h-4 w-4" />
-                          Commitar
-                        </Button>
-                      )}
-                      {!isFinalMission && canPushFromWall && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="w-full justify-center"
-                          onClick={() => void handlePushFromWall(mission)}
-                          disabled={isPushingMissionId === mission.id}
-                        >
-                          {isPushingMissionId === mission.id ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <Upload className="mr-2 h-4 w-4" />
-                          )}
-                          Push
-                        </Button>
-                      )}
-                      {!isFinalMission && mission.worktreePath && isFinalMission && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="w-full justify-center"
-                          onClick={() =>
-                            void handleMergeWorktreeFromWall(mission)
-                          }
-                          disabled={isWorktreeActionMissionId === mission.id}
-                        >
-                          {isWorktreeActionMissionId === mission.id ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <GitMerge className="mr-2 h-4 w-4" />
-                          )}
-                          Incorporar
-                        </Button>
-                      )}
-                      {!isFinalMission && mission.worktreePath && isFinalMission && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="w-full justify-center hover:bg-destructive/10 hover:text-destructive"
-                          onClick={() =>
-                            void handleDiscardWorktreeFromWall(mission)
-                          }
-                          disabled={isWorktreeActionMissionId === mission.id}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Descartar
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="w-full justify-center"
-                        asChild
-                      >
-                        <Link to={`/project/${projectId}/task/${mission.id}`}>
-                          Abrir detalhe
-                        </Link>
-                      </Button>
-                      {!FINAL_STATUSES.includes(
-                        mission.status as (typeof FINAL_STATUSES)[number],
-                      ) && (
+                      </div>
+                    )}
+                    <div className="flex shrink-0 items-center justify-between gap-2 border-t pt-2 text-xs">
+                      <span className="text-muted-foreground">
+                        {summary && hasDiff
+                          ? `${summary.changedFiles} arquivos · +${summary.insertions} / -${summary.deletions}`
+                          : "Nenhuma alteração detectada ainda."}
+                      </span>
+                      <div className="flex gap-1">
+                        {hasDiff && (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            className="h-7 text-xs"
+                            onClick={() => navigate(`/project/${projectId}/review?missionId=${mission.id}`)}
+                          >
+                            Revisar patch
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="w-full justify-center"
-                          onClick={async () => {
-                            try {
-                              await cancelMission(mission.id);
-                              await refreshMissions();
-                              toast.success("Tarefa arquivada");
-                            } catch {
-                              toast.error("Não foi possível arquivar a tarefa");
-                            }
-                          }}
+                          className="h-7 text-xs"
+                          asChild
                         >
-                          Arquivar
+                          <Link to={`/project/${projectId}/mission/${mission.id}`}>
+                            Detalhes
+                          </Link>
                         </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        className="w-full justify-center"
-                        onClick={async () => {
-                          const confirmed = await confirmDialog({
-                            title: "Excluir tarefa de agente?",
-                            description:
-                              `Esta ação removerá a tarefa "${mission.title}" da lista. ` +
-                              "Se houver terminal/worktree ativo, ele também será encerrado e descartado.",
-                            confirmLabel: "Excluir",
-                            cancelLabel: "Cancelar",
-                          });
-                          if (!confirmed) return;
-                          try {
-                            if (window.electronAPI?.terminal?.killByMissionId) {
-                              await window.electronAPI.terminal.killByMissionId(
-                                mission.id,
-                              );
-                            }
-                            if (
-                              mission.worktreePath &&
-                              window.electronAPI?.worktree?.discard
-                            ) {
-                              await window.electronAPI.worktree.discard(
-                                mission.id,
-                              );
-                            }
-                            await removeMission(mission.id);
-                            await refreshMissions();
-                            toast.success("Tarefa excluída");
-                          } catch {
-                            toast.error("Não foi possível excluir a tarefa");
-                          }
-                        }}
-                      >
-                        Excluir
-                      </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
               );
-            })}
-          </div>
-        )}
-        {wallQueuedPreview.length > 0 && (
-          <Card className="mt-6">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Próximas da fila</CardTitle>
-              <CardDescription>
-                Tarefas prontas para iniciar sem misturar com as sessões que já
-                estão em andamento.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                {wallQueuedPreview.map((mission) => (
-                  <div
-                    key={mission.id}
-                    className="rounded-lg border bg-background p-3"
-                  >
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <p className="line-clamp-1 text-sm font-medium">
-                        {mission.title}
-                      </p>
-                      <Badge variant="outline">
-                        {getMissionPriority(mission.id) === "high"
-                          ? "Alta"
-                          : "Fila"}
-                      </Badge>
-                    </div>
-                    <p className="line-clamp-2 text-sm text-muted-foreground">
-                      {mission.description}
-                    </p>
-                    <div className="mt-3 flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        onClick={async () => {
-                          try {
-                            await launchMissionSession(mission);
-                            await refreshMissions();
-                            toast.success(`Agente iniciado: ${mission.title}`);
-                          } catch (e) {
-                            toast.error(
-                              e instanceof Error
-                                ? e.message
-                                : `Falha ao iniciar ${mission.title}`,
-                            );
-                          }
-                        }}
+                })}
+              </div>
+            )}
+            {wallQueuedPreview.length > 0 && (
+              <Card className="mt-6">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Próximas da fila</CardTitle>
+                  <CardDescription>
+                    Tarefas prontas para iniciar sem misturar com as sessões que
+                    já estão em andamento.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    {wallQueuedPreview.map((mission) => (
+                      <div
+                        key={mission.id}
+                        className="rounded-lg border bg-background p-3"
                       >
-                        <Play className="mr-2 h-4 w-4" />
-                        Iniciar
-                      </Button>
-                      <Button asChild size="sm" variant="outline">
-                        <Link to={`/project/${projectId}/task/${mission.id}`}>
-                          Abrir
-                        </Link>
-                      </Button>
-                    </div>
+                        <div className="mb-2 flex items-start justify-between gap-2">
+                          <p className="line-clamp-1 text-sm font-medium">
+                            {mission.title}
+                          </p>
+                          <Badge variant="outline">
+                            {getMissionPriority(mission.id) === "high"
+                              ? "Alta"
+                              : "Fila"}
+                          </Badge>
+                        </div>
+                        <p className="line-clamp-2 text-sm text-muted-foreground">
+                          {mission.description}
+                        </p>
+                        <div className="mt-3 flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                await launchMissionSession(mission);
+                                await refreshMissions();
+                                toast.success(`Agente iniciado: ${mission.title}`);
+                              } catch (e) {
+                                toast.error(
+                                  e instanceof Error
+                                    ? e.message
+                                    : `Falha ao iniciar ${mission.title}`,
+                                );
+                              }
+                            }}
+                          >
+                            <Play className="mr-2 h-4 w-4" />
+                            Iniciar
+                          </Button>
+                          <Button asChild size="sm" variant="outline">
+                            <Link to={`/project/${projectId}/task/${mission.id}`}>
+                              Abrir
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-        {readyToReview.length > 0 && (
-          <Card className="mt-6">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Prontas para revisão</CardTitle>
-              <CardDescription>
-                Quando a execução termina, a branch sai do mural e vem para esta
-                etapa de revisão.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4">
-                {readyToReview.map((mission) => (
-                  <ReviewMissionCard
-                    key={mission.id}
-                    mission={mission}
-                    projectId={projectId}
-                    provider={
-                      mission.providerId
-                        ? (providerById.get(mission.providerId) ?? null)
-                        : null
-                    }
-                    gitState={gitStateByMissionId[mission.id] ?? null}
-                    compareUrl={buildCompareUrl(
-                      project?.gitRemoteUrl ?? null,
-                      gitStateByMissionId[mission.id]?.defaultBranch ?? null,
-                      gitStateByMissionId[mission.id]?.branch ??
-                        mission.worktreeBranch ??
-                        null,
-                    )}
-                    isExpanded={Boolean(reviewExpandedByMissionId[mission.id])}
-                    diffState={reviewDiffsByMissionId[mission.id]}
-                    isWorktreeAction={isWorktreeActionMissionId === mission.id}
-                    onMerge={(targetMission) =>
-                      void handleMergeWorktreeFromWall(targetMission)
-                    }
-                    onDiscard={(targetMission) =>
-                      void handleDiscardWorktreeFromWall(targetMission)
-                    }
-                    onToggleExpanded={(targetMission) => {
-                      setReviewExpandedByMissionId((prev) => {
-                        const nextValue = !prev[targetMission.id];
-                        const next = { ...prev, [targetMission.id]: nextValue };
-                        if (
-                          nextValue &&
-                          !reviewDiffsByMissionId[targetMission.id]
-                        ) {
-                          void loadReviewDiffs(targetMission);
-                        }
-                        return next;
-                      });
-                    }}
-                    onDuplicate={(baseMission) => {
-                      setNewTaskInitial({
-                        title: `${baseMission.title} (cópia)`,
-                        description: baseMission.description,
-                        preserveInstructions:
-                          baseMission.preserveInstructions ?? "",
-                      });
-                      setNewTaskDialogOpen(true);
-                    }}
-                  />
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-        {recentMissions.length > 0 && (
-          <Card className="mt-6">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Histórico</CardTitle>
-              <CardDescription>
-                Tarefas encerradas sem branch operacional pendente de revisão.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                {recentMissions.map((mission) => (
-                  <div
-                    key={mission.id}
-                    className="rounded-lg border bg-background p-3"
-                  >
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <p className="line-clamp-1 text-sm font-medium">
-                        {mission.title}
-                      </p>
-                      <Badge
-                        variant={getStatusVariant(getQueueStatusLabel(mission))}
-                      >
-                        {getQueueStatusLabel(mission)}
-                      </Badge>
-                    </div>
-                    <AgentMissionMeta
-                      mission={mission}
-                      provider={
-                        mission.providerId
-                          ? (providerById.get(mission.providerId) ?? null)
-                          : null
-                      }
-                    />
-                    <div className="mt-3 flex items-center gap-2">
-                      <Button asChild size="sm" variant="outline">
-                        <Link to={`/project/${projectId}/task/${mission.id}`}>
-                          Reabrir
-                        </Link>
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setNewTaskInitial({
-                            title: `${mission.title} (cópia)`,
-                            description: mission.description,
-                            preserveInstructions:
-                              mission.preserveInstructions ?? "",
-                          });
-                          setNewTaskDialogOpen(true);
-                        }}
-                      >
-                        Duplicar
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+          <TabsContent value="review" className="mt-4 space-y-5">
+            {readyToReview.length === 0 && history.length === 0 ? (
+              <Empty className="mt-8">
+                <Empty.Icon>
+                  <GitMerge className="h-10 w-10" />
+                </Empty.Icon>
+                <Empty.Title>Nada para revisar</Empty.Title>
+                <Empty.Description>
+                  Tarefas concluídas e prontas para revisão ou já encerradas
+                  aparecem aqui. Execute uma tarefa e finalize para ver os cards.
+                </Empty.Description>
+              </Empty>
+            ) : (
+              <>
+                {readyToReview.length > 0 && (
+                  <Card className="mt-6">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Prontas para revisão</CardTitle>
+                      <CardDescription>
+                        Quando a execução termina, a branch sai do mural e vem
+                        para esta etapa de revisão.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-4">
+                        {readyToReview.map((mission) => (
+                          <ReviewMissionCard
+                            key={mission.id}
+                            mission={mission}
+                            projectId={projectId}
+                            provider={
+                              mission.providerId
+                                ? (providerById.get(mission.providerId) ?? null)
+                                : null
+                            }
+                            gitState={gitStateByMissionId[mission.id] ?? null}
+                            compareUrl={buildCompareUrl(
+                              project?.gitRemoteUrl ?? null,
+                              gitStateByMissionId[mission.id]?.defaultBranch ?? null,
+                              gitStateByMissionId[mission.id]?.branch ??
+                                mission.worktreeBranch ??
+                                null,
+                            )}
+                            isExpanded={Boolean(reviewExpandedByMissionId[mission.id])}
+                            diffState={reviewDiffsByMissionId[mission.id]}
+                            isWorktreeAction={isWorktreeActionMissionId === mission.id}
+                            onMerge={(targetMission) =>
+                              void handleMergeWorktreeFromWall(targetMission)
+                            }
+                            onDiscard={(targetMission) =>
+                              void handleDiscardWorktreeFromWall(targetMission)
+                            }
+                            onToggleExpanded={(targetMission) => {
+                              setReviewExpandedByMissionId((prev) => {
+                                const nextValue = !prev[targetMission.id];
+                                const next = { ...prev, [targetMission.id]: nextValue };
+                                if (
+                                  nextValue &&
+                                  !reviewDiffsByMissionId[targetMission.id]
+                                ) {
+                                  void loadReviewDiffs(targetMission);
+                                }
+                                return next;
+                              });
+                            }}
+                            onDuplicate={(baseMission) => {
+                              setNewTaskInitial({
+                                title: `${baseMission.title} (cópia)`,
+                                description: baseMission.description,
+                                preserveInstructions:
+                                  baseMission.preserveInstructions ?? "",
+                              });
+                              setNewTaskDialogOpen(true);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+                {history.length > 0 && (
+                  <Card className="mt-6">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Histórico</CardTitle>
+                      <CardDescription>
+                        Tarefas encerradas sem branch operacional pendente de
+                        revisão.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                        {history.slice(0, 24).map((mission) => (
+                          <div
+                            key={mission.id}
+                            className="rounded-lg border bg-background p-3"
+                          >
+                            <div className="mb-2 flex items-start justify-between gap-2">
+                              <p className="line-clamp-1 text-sm font-medium">
+                                {mission.title}
+                              </p>
+                              <Badge
+                                variant={getStatusVariant(getQueueStatusLabel(mission))}
+                              >
+                                {getQueueStatusLabel(mission)}
+                              </Badge>
+                            </div>
+                            <AgentMissionMeta
+                              mission={mission}
+                              provider={
+                                mission.providerId
+                                  ? (providerById.get(mission.providerId) ?? null)
+                                  : null
+                              }
+                            />
+                            <div className="mt-3 flex items-center gap-2">
+                              <Button asChild size="sm" variant="outline">
+                                <Link to={`/project/${projectId}/task/${mission.id}`}>
+                                  Reabrir
+                                </Link>
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setNewTaskInitial({
+                                    title: `${mission.title} (cópia)`,
+                                    description: mission.description,
+                                    preserveInstructions:
+                                      mission.preserveInstructions ?? "",
+                                  });
+                                  setNewTaskDialogOpen(true);
+                                }}
+                              >
+                                Duplicar
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </>
+            )}
+          </TabsContent>
+        </Tabs>
         <NewTaskDialog
           open={newTaskDialogOpen}
           onOpenChange={(open) => {

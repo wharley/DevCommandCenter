@@ -149,6 +149,9 @@ export function initDatabase(): Database.Database {
   // Migração: criar tabela activation se não existir
   migrateActivationTable(db);
 
+  // Migração: colunas do Agents Wall (base_branch, target_branch, last_output_summary, last_git_summary, wall_status)
+  migrateMissionWallColumns(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
 
   return db;
@@ -443,6 +446,29 @@ function migrateMissionWorktree(database: Database.Database): void {
   if (!hasWorktreeBranch) {
     database.exec("ALTER TABLE missions ADD COLUMN worktree_branch TEXT");
     console.log("[Database] Migration: worktree_branch column added to missions.");
+  }
+}
+
+/**
+ * Migração: colunas do Agents Wall (base_branch, target_branch, last_output_summary, last_git_summary, wall_status).
+ */
+function migrateMissionWallColumns(database: Database.Database): void {
+  const rows = database
+    .prepare("PRAGMA table_info(missions)")
+    .all() as Array<{ name: string }>;
+  const names = new Set(rows.map((c) => c.name));
+  const columns = [
+    { name: "base_branch", sql: "ALTER TABLE missions ADD COLUMN base_branch TEXT" },
+    { name: "target_branch", sql: "ALTER TABLE missions ADD COLUMN target_branch TEXT" },
+    { name: "last_output_summary", sql: "ALTER TABLE missions ADD COLUMN last_output_summary TEXT" },
+    { name: "last_git_summary", sql: "ALTER TABLE missions ADD COLUMN last_git_summary TEXT" },
+    { name: "wall_status", sql: "ALTER TABLE missions ADD COLUMN wall_status TEXT" },
+  ];
+  for (const col of columns) {
+    if (!names.has(col.name)) {
+      database.exec(col.sql);
+      console.log(`[Database] Migration: ${col.name} column added to missions.`);
+    }
   }
 }
 

@@ -6,8 +6,10 @@ export default function ProjectWorkspaceIndexRedirect() {
 
   const target = useMemo(() => {
     if (!projectId) return "/";
-    const saved = localStorage.getItem(`dcc:project:${projectId}:workspace`);
-    const workspace = saved === "agents" ? "agents" : "pipeline";
+    const showPipeline = typeof localStorage !== "undefined" && localStorage.getItem("dcc:showPipelineTab") === "true";
+    const saved = typeof localStorage !== "undefined" ? localStorage.getItem(`dcc:project:${projectId}:workspace`) : null;
+    const workspace =
+      saved === "agents" ? "agents" : showPipeline && saved === "pipeline" ? "pipeline" : "agents";
     return `/project/${projectId}/${workspace}`;
   }, [projectId]);
 
