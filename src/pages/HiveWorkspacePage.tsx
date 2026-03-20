@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
+  ChartNoAxesColumn,
   ChevronDown,
   FileCode,
   FolderGit2,
@@ -56,12 +57,22 @@ import { AddProjectDialog } from "@/components/dialogs/add-project-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import {
   useCombs,
+  useMissions,
   usePanes,
   useProjects,
   useProviders,
 } from "@/hooks/use-data";
 import SettingsPage from "@/src/pages/SettingsPage";
+import DashboardPage from "@/src/pages/DashboardPage";
 import type { Comb, Pane, Project, Provider } from "@/lib/database/types";
+import {
+  useDashboardMetrics,
+  type DashboardPeriodDays,
+} from "@/hooks/use-dashboard-metrics";
+import {
+  canAccessDashboard,
+  getDashboardAccessContext,
+} from "@/lib/dashboard/access";
 import type { GitStatus } from "@/types/electron";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -773,6 +784,9 @@ export default function HiveWorkspacePage() {
   const [newAgentOpen, setNewAgentOpen] = useState(false);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
+  const [dashboardPeriodDays, setDashboardPeriodDays] =
+    useState<DashboardPeriodDays>(7);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 
   const sortedProjects = useMemo(
@@ -811,6 +825,18 @@ export default function HiveWorkspacePage() {
     create: createPane,
     remove: removePane,
   } = usePanes(activeCombId ?? undefined);
+  const { missions } = useMissions(selectedProjectId ?? undefined);
+
+  const dashboardAccess = useMemo(() => {
+    const ctx = getDashboardAccessContext();
+    return canAccessDashboard(ctx);
+  }, []);
+
+  const dashboardMetrics = useDashboardMetrics(
+    missions,
+    combs,
+    dashboardPeriodDays,
+  );
 
   const providerById = useMemo(() => {
     const map = new Map<string, Provider>();
@@ -891,11 +917,14 @@ export default function HiveWorkspacePage() {
     setSelectedProjectId(projectId);
     setActiveCombId(null);
     setActiveMainTab("panes");
+    setShowSettings(false);
+    setShowDashboard(false);
   };
 
   const handleCombCreated = (comb: Comb) => {
     setActiveCombId(comb.id);
     setShowSettings(false);
+    setShowDashboard(false);
     refreshCombs();
   };
 
@@ -1075,6 +1104,7 @@ export default function HiveWorkspacePage() {
                     onClick={() => {
                       setActiveCombId(comb.id);
                       setShowSettings(false);
+                      setShowDashboard(false);
                     }}
                     className={`electron-no-drag group flex w-full cursor-pointer gap-1.5 rounded-lg px-3 py-2 text-left transition-colors ${
                       isActive
@@ -1128,7 +1158,23 @@ export default function HiveWorkspacePage() {
             size="sm"
             className="electron-no-drag w-full justify-start gap-3 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
             onClick={() => {
+              if (!dashboardAccess.enabled) return;
+              setShowDashboard(true);
+              setShowSettings(false);
+              setActiveCombId(null);
+            }}
+            disabled={!dashboardAccess.enabled}
+          >
+            <ChartNoAxesColumn className="h-4 w-4" />
+            Dashboard
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="electron-no-drag w-full justify-start gap-3 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            onClick={() => {
               setShowSettings(true);
+              setShowDashboard(false);
               setActiveCombId(null);
             }}
           >
@@ -1140,7 +1186,16 @@ export default function HiveWorkspacePage() {
 
       {/* ====== MAIN CONTENT ====== */}
       <main className="flex min-h-0 flex-1 flex-col">
-        {showSettings ? (
+        {showDashboard ? (
+          <div className="flex-1 overflow-auto mt-8">
+            <DashboardPage
+              selectedProjectName={selectedProject?.name}
+              periodDays={dashboardPeriodDays}
+              onPeriodChange={setDashboardPeriodDays}
+              metrics={dashboardMetrics}
+            />
+          </div>
+        ) : showSettings ? (
           <div className="flex-1 overflow-auto mt-8">
             <SettingsPage />
           </div>
