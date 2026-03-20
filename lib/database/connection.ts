@@ -152,6 +152,9 @@ export function initDatabase(): Database.Database {
   // Migração: colunas do Agents Wall (base_branch, target_branch, last_output_summary, last_git_summary, wall_status)
   migrateMissionWallColumns(db);
 
+  // Migração: criar tabelas combs e panes (Hive/Comb/Pane architecture)
+  migrateCombsPanes(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
 
   return db;
@@ -469,6 +472,75 @@ function migrateMissionWallColumns(database: Database.Database): void {
       database.exec(col.sql);
       console.log(`[Database] Migration: ${col.name} column added to missions.`);
     }
+  }
+}
+
+/**
+ * Migração: cria tabelas combs e panes se não existirem (Hive/Comb/Pane architecture).
+ */
+function migrateCombsPanes(database: Database.Database): void {
+  const combsExists = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'combs'")
+    .get();
+  if (!combsExists) {
+    database.exec(`
+      CREATE TABLE combs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        base_branch TEXT NOT NULL DEFAULT 'main',
+        branch TEXT,
+        worktree_path TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ready_for_review', 'applied', 'discarded', 'archived', 'error')),
+        last_opened_at TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+      CREATE INDEX idx_combs_project ON combs(project_id);
+      CREATE INDEX idx_combs_status ON combs(status);
+      CREATE INDEX idx_combs_last_opened ON combs(last_opened_at DESC);
+      CREATE TRIGGER update_combs_timestamp
+      AFTER UPDATE ON combs
+      BEGIN
+        UPDATE combs SET updated_at = datetime('now') WHERE id = NEW.id;
+      END;
+    `);
+    console.log("[Database] Migration: combs table created.");
+  }
+
+  const panesExists = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'panes'")
+    .get();
+  if (!panesExists) {
+    database.exec(`
+      CREATE TABLE panes (
+        id TEXT PRIMARY KEY,
+        comb_id TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'term' CHECK (type IN ('term', 'agent')),
+        provider_id TEXT,
+        title TEXT,
+        initial_prompt TEXT,
+        cwd TEXT,
+        pty_owner_key TEXT,
+        status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'running', 'exited')),
+        layout_order INTEGER NOT NULL DEFAULT 0,
+        last_activity_at TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (comb_id) REFERENCES combs(id) ON DELETE CASCADE,
+        FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE SET NULL
+      );
+      CREATE INDEX idx_panes_comb ON panes(comb_id);
+      CREATE INDEX idx_panes_layout ON panes(comb_id, layout_order);
+      CREATE TRIGGER update_panes_timestamp
+      AFTER UPDATE ON panes
+      BEGIN
+        UPDATE panes SET updated_at = datetime('now') WHERE id = NEW.id;
+      END;
+    `);
+    console.log("[Database] Migration: panes table created.");
   }
 }
 

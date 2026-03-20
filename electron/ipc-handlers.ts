@@ -12,6 +12,7 @@ import {
   mergeWorktreeIntoMain,
   discardWorktree,
   applyMissionPatch as applyMissionPatchService,
+  createWorktreeForComb,
 } from "./services/worktree-service";
 import { getMachineId } from "./services/machine-id";
 import {
@@ -22,12 +23,15 @@ import { detectCliPath, validateCliPath } from "./services/cli-detection";
 import {
   spawnPty,
   getOrCreatePty,
+  getOrCreatePtyForPane,
   getMissionSession,
+  getPaneSession,
   onTerminalSessionEvent,
   writeToPty,
   resizePty,
   killPty,
   killPtyByMissionId,
+  killPtyByPaneId,
 } from "./services/terminal-pty-service";
 
 const BETA_ACTIVATE_URL = "https://www.devcommandcenter.com/api/beta-activate";
@@ -1257,6 +1261,249 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
       return { ok: killPtyByMissionId(missionId) };
     }
   );
+
+  // ==========================================
+  // Pane-based terminal (Comb/Pane architecture)
+  // ==========================================
+  ipcMain.handle(
+    "terminal:getOrCreateForPane",
+    async (
+      event,
+      paneId: string,
+      options: { cwd: string; command?: string; args?: string[]; cols?: number; rows?: number }
+    ): Promise<{
+      ptyId?: string;
+      error?: string;
+      session?: import("../lib/database/types").PaneSession | null;
+    }> => {
+      const result = getOrCreatePtyForPane(
+        {
+          paneId,
+          cwd: options.cwd,
+          command: options.command,
+          args: options.args ?? [],
+          cols: options.cols ?? 80,
+          rows: options.rows ?? 24,
+        },
+        event.sender
+      );
+      if (result.error) return { error: result.error };
+      return { ptyId: result.ptyId, session: result.session ?? null };
+    }
+  );
+
+  ipcMain.handle(
+    "terminal:getPaneSession",
+    async (
+      _event,
+      paneId: string
+    ): Promise<import("../lib/database/types").PaneSession | null> => {
+      return getPaneSession(paneId);
+    }
+  );
+
+  ipcMain.handle(
+    "terminal:killByPaneId",
+    (_event, paneId: string): { ok: boolean } => {
+      return { ok: killPtyByPaneId(paneId) };
+    }
+  );
+
+  // ==========================================
+  // Combs (Hive/Comb/Pane architecture)
+  // ==========================================
+  ipcMain.handle("db:combs:findByProject", (_event, projectId: string) => {
+    return db.combs.findByProject(projectId);
+  });
+
+  ipcMain.handle("db:combs:findById", (_event, id: string) => {
+    return db.combs.findById(id);
+  });
+
+  ipcMain.handle("db:combs:create", (_event, data: unknown) => {
+    return db.combs.create(data as import("../lib/database/types").CreateCombDTO);
+  });
+
+  ipcMain.handle("db:combs:update", (_event, id: string, data: unknown) => {
+    return db.combs.update(id, data as import("../lib/database/types").UpdateCombDTO);
+  });
+
+  ipcMain.handle("db:combs:delete", (_event, id: string) => {
+    return db.combs.delete(id);
+  });
+
+  ipcMain.handle(
+    "comb:ensureWorktree",
+    async (_event, combId: string) => {
+      const comb = db.combs.findById(combId);
+      if (!comb) return { success: false, error: "Comb not found" };
+      const project = db.projects.findById(comb.projectId);
+      if (!project) return { success: false, error: "Project not found" };
+
+      if (comb.worktreePath && comb.branch) {
+        return {
+          success: true,
+          worktreePath: comb.worktreePath,
+          branch: comb.branch,
+        };
+      }
+
+      const result = await createWorktreeForComb(
+        project.path,
+        combId,
+        comb.name,
+        comb.baseBranch,
+      );
+      if (!result.success) return result;
+      db.combs.update(combId, {
+        worktreePath: result.data!.worktreePath,
+        branch: result.data!.worktreeBranch,
+      });
+      return {
+        success: true,
+        worktreePath: result.data!.worktreePath,
+        branch: result.data!.worktreeBranch,
+      };
+    },
+  );
+
+  ipcMain.handle("comb:discard", async (_event, combId: string) => {
+    const comb = db.combs.findById(combId);
+    if (!comb?.worktreePath || !comb?.branch)
+      return { success: false, error: "Comb has no worktree" };
+    const project = db.projects.findById(comb.projectId);
+    if (!project) return { success: false, error: "Project not found" };
+    const result = await discardWorktree(project.path, comb.worktreePath, comb.branch);
+    if (result.success) {
+      db.combs.update(combId, {
+        worktreePath: null,
+        branch: null,
+        status: "discarded",
+      });
+      const panes = db.panes.findByComb(combId);
+      for (const pane of panes) {
+        killPtyByPaneId(pane.id);
+      }
+    }
+    return result;
+  });
+
+  ipcMain.handle("comb:mergeIntoMain", async (_event, combId: string) => {
+    const comb = db.combs.findById(combId);
+    if (!comb?.worktreePath || !comb?.branch)
+      return { success: false, error: "Comb has no worktree" };
+    const project = db.projects.findById(comb.projectId);
+    if (!project) return { success: false, error: "Project not found" };
+    const gitService = new GitService(project.path);
+    let targetBranch = await gitService.getCurrentBranch();
+    if (!targetBranch || targetBranch === "HEAD" || targetBranch === "unknown") {
+      targetBranch = await gitService.getDefaultBranch().catch(() => "main");
+    }
+    const result = await mergeWorktreeIntoMain(
+      project.path,
+      comb.branch,
+      comb.worktreePath,
+      targetBranch,
+    );
+    if (result.success) {
+      db.combs.update(combId, {
+        worktreePath: null,
+        branch: null,
+        status: "applied",
+      });
+    }
+    return result;
+  });
+
+  ipcMain.handle("comb:getDiffs", async (_event, combId: string) => {
+    const comb = db.combs.findById(combId);
+    if (!comb) return { success: false, error: "Comb not found", files: [], summary: null };
+    if (!comb.worktreePath) {
+      return { success: false, error: "Comb has no worktree", files: [], summary: null };
+    }
+    try {
+      const gitService = new GitService(comb.worktreePath);
+      const branchState = await gitService.getBranchState();
+      const shortStat = await gitService.getShortStat();
+      const changedFiles = branchState.changedFiles ?? [];
+      const files: Array<{ path: string; status: string; diff: string }> = [];
+      for (const filePath of changedFiles) {
+        const diff = await gitService.getFileDiffHead(filePath);
+        const status = branchState.staged?.includes(filePath)
+          ? "staged"
+          : branchState.untracked?.includes(filePath)
+            ? "untracked"
+            : "modified";
+        files.push({ path: filePath, status, diff });
+      }
+      return {
+        success: true,
+        files,
+        summary: {
+          changedFiles: shortStat.changedFiles,
+          insertions: shortStat.insertions,
+          deletions: shortStat.deletions,
+        },
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, error: message, files: [], summary: null };
+    }
+  });
+
+  ipcMain.handle(
+    "comb:applyPatch",
+    async (
+      _event,
+      combId: string,
+      targetBranch: string,
+      options?: { includeFiles?: string[]; commit?: boolean; message?: string },
+    ) => {
+      const comb = db.combs.findById(combId);
+      if (!comb?.worktreePath)
+        return { success: false, error: "Comb has no worktree" };
+      const project = db.projects.findById(comb.projectId);
+      if (!project) return { success: false, error: "Project not found" };
+      const result = await applyMissionPatchService(
+        project.path,
+        comb.worktreePath,
+        targetBranch,
+        {
+          includeFiles: options?.includeFiles ?? [],
+          commit: options?.commit ?? false,
+          message: options?.message ?? "Apply comb patch",
+        },
+      );
+      if (result.success) {
+        db.combs.update(combId, { status: "applied" });
+      }
+      return result;
+    },
+  );
+
+  // ==========================================
+  // Panes (Hive/Comb/Pane architecture)
+  // ==========================================
+  ipcMain.handle("db:panes:findByComb", (_event, combId: string) => {
+    return db.panes.findByComb(combId);
+  });
+
+  ipcMain.handle("db:panes:findById", (_event, id: string) => {
+    return db.panes.findById(id);
+  });
+
+  ipcMain.handle("db:panes:create", (_event, data: unknown) => {
+    return db.panes.create(data as import("../lib/database/types").CreatePaneDTO);
+  });
+
+  ipcMain.handle("db:panes:update", (_event, id: string, data: unknown) => {
+    return db.panes.update(id, data as import("../lib/database/types").UpdatePaneDTO);
+  });
+
+  ipcMain.handle("db:panes:delete", (_event, id: string) => {
+    killPtyByPaneId(id);
+    return db.panes.delete(id);
+  });
 
   console.log("[IPC] All handlers registered");
 }

@@ -19,6 +19,8 @@ export { ProvidersRepository } from "./repositories/providers";
 export { ProjectsRepository } from "./repositories/projects";
 export { MissionsRepository } from "./repositories/missions";
 export { MissionLogsRepository } from "./repositories/mission-logs";
+export { CombsRepository } from "./repositories/combs";
+export { PanesRepository } from "./repositories/panes";
 
 // Tipos
 export type {
@@ -27,6 +29,9 @@ export type {
   MissionStatus,
   MissionType,
   MissionLogType,
+  CombStatus,
+  PaneType,
+  PaneStatus,
 
   // Entidades
   Provider,
@@ -40,6 +45,9 @@ export type {
   MissionContext,
   MissionLog,
   MissionLogMetadata,
+  Comb,
+  Pane,
+  PaneSession,
 
   // DTOs
   CreateProviderDTO,
@@ -49,12 +57,18 @@ export type {
   CreateMissionDTO,
   UpdateMissionDTO,
   CreateMissionLogDTO,
+  CreateCombDTO,
+  UpdateCombDTO,
+  CreatePaneDTO,
+  UpdatePaneDTO,
 
   // Query options
   PaginationOptions,
   ProjectsQueryOptions,
   MissionsQueryOptions,
   MissionLogsQueryOptions,
+  CombsQueryOptions,
+  PanesQueryOptions,
 } from "./types";
 
 // ============================================
@@ -71,6 +85,8 @@ import { ProvidersRepository } from "./repositories/providers";
 import { ProjectsRepository } from "./repositories/projects";
 import { MissionsRepository } from "./repositories/missions";
 import { MissionLogsRepository } from "./repositories/mission-logs";
+import { CombsRepository } from "./repositories/combs";
+import { PanesRepository } from "./repositories/panes";
 
 /**
  * Objeto DB para acesso simplificado aos repositórios.
@@ -81,6 +97,8 @@ export const db = {
   projects: ProjectsRepository,
   missions: MissionsRepository,
   missionLogs: MissionLogsRepository,
+  combs: CombsRepository,
+  panes: PanesRepository,
 
   /**
    * Inicializa o banco de dados.

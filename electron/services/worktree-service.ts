@@ -124,6 +124,70 @@ export async function createWorktreeForMission(
   }
 }
 
+function safeCombBranchName(combId: string, combName?: string | null): string {
+  const slug = slugifyForBranch(combName).slice(0, 36);
+  const shortId =
+    combId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toLowerCase() || "unknown";
+  return `dcc-comb-${slug}-${shortId}`;
+}
+
+/**
+ * Creates a worktree for a Comb.
+ * Path: <projectPath>/.dcc/worktrees/<branch>
+ */
+export async function createWorktreeForComb(
+  projectPath: string,
+  combId: string,
+  combName?: string | null,
+  baseBranch?: string | null,
+): Promise<{ success: true; data: CreateWorktreeResult } | { success: false; error: string }> {
+  const resolvedProject = path.resolve(projectPath);
+  const branch = safeCombBranchName(combId, combName);
+  const worktreeDir = getProjectWorktreeDir(resolvedProject, branch);
+  const fromRef = (baseBranch && baseBranch.trim()) ? baseBranch.trim() : "HEAD";
+
+  try {
+    const stat = await fs.promises.stat(resolvedProject);
+    if (!stat.isDirectory()) {
+      return { success: false, error: "Project path is not a directory" };
+    }
+
+    const gitDir = path.join(resolvedProject, ".git");
+    const gitExists =
+      (await fs.promises.stat(gitDir).then(() => true).catch(() => false)) ||
+      (await fs.promises.stat(gitDir + "/file").then(() => true).catch(() => false));
+    if (!gitExists) {
+      return { success: false, error: "Project is not a Git repository" };
+    }
+
+    await fs.promises.mkdir(path.dirname(worktreeDir), { recursive: true });
+
+    if (fs.existsSync(worktreeDir)) {
+      const exists = await branchExistsInRepo(resolvedProject, branch);
+      if (exists) {
+        return {
+          success: true,
+          data: { worktreePath: worktreeDir, worktreeBranch: branch },
+        };
+      }
+      await fs.promises.rm(worktreeDir, { recursive: true, force: true });
+    }
+
+    await execAsync(
+      `git worktree add "${worktreeDir}" -b "${branch}" "${fromRef}"`,
+      { cwd: resolvedProject }
+    );
+
+    return {
+      success: true,
+      data: { worktreePath: worktreeDir, worktreeBranch: branch },
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
+  }
+}
+
 async function branchExistsInRepo(
   projectPath: string,
   branch: string

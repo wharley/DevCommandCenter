@@ -19,6 +19,13 @@ import type {
   GeneratedCode,
   CodeSuggestion,
   MissionAgentSession,
+  Comb,
+  CombCreate,
+  CombUpdate,
+  Pane,
+  PaneCreate,
+  PaneUpdate,
+  PaneSession,
 } from "@/lib/database/types";
 
 // ============================================
@@ -160,6 +167,18 @@ declare global {
         ) => Promise<{ ok: boolean }>;
         kill: (ptyId: string) => Promise<{ ok: boolean }>;
         killByMissionId: (missionId: string) => Promise<{ ok: boolean }>;
+        getOrCreateForPane: (
+          paneId: string,
+          options: {
+            cwd: string;
+            command?: string;
+            args?: string[];
+            cols?: number;
+            rows?: number;
+          }
+        ) => Promise<{ ptyId?: string; error?: string; session?: PaneSession | null }>;
+        getPaneSession: (paneId: string) => Promise<PaneSession | null>;
+        killByPaneId: (paneId: string) => Promise<{ ok: boolean }>;
         onData: (
           callback: (ptyId: string, data: string) => void
         ) => () => void;
@@ -205,6 +224,45 @@ declare global {
           success: boolean;
           error?: string;
           applyFailed?: boolean;
+        }>;
+      };
+
+      comb: {
+        ensureWorktree: (combId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          worktreePath?: string;
+          branch?: string;
+        }>;
+        discard: (combId: string) => Promise<{
+          success: boolean;
+          error?: string;
+        }>;
+        mergeIntoMain: (combId: string) => Promise<{
+          success: boolean;
+          error?: string;
+        }>;
+        getDiffs: (combId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          files: Array<{ path: string; status: string; diff: string }>;
+          summary: {
+            changedFiles: number;
+            insertions: number;
+            deletions: number;
+          } | null;
+        }>;
+        applyPatch: (
+          combId: string,
+          targetBranch: string,
+          options?: {
+            includeFiles?: string[];
+            commit?: boolean;
+            message?: string;
+          }
+        ) => Promise<{
+          success: boolean;
+          error?: string;
         }>;
       };
 
@@ -437,6 +495,22 @@ declare global {
           missionId: string
         ) => Promise<{ totalTokens: number; totalDurationMs: number }>;
         getLatest: (missionId: string, count?: number) => Promise<MissionLog[]>;
+      };
+
+      combs: {
+        findByProject: (projectId: string) => Promise<Comb[]>;
+        findById: (id: string) => Promise<Comb | undefined>;
+        create: (data: CombCreate) => Promise<Comb>;
+        update: (id: string, data: CombUpdate) => Promise<Comb | undefined>;
+        delete: (id: string) => Promise<boolean>;
+      };
+
+      panes: {
+        findByComb: (combId: string) => Promise<Pane[]>;
+        findById: (id: string) => Promise<Pane | undefined>;
+        create: (data: PaneCreate) => Promise<Pane>;
+        update: (id: string, data: PaneUpdate) => Promise<Pane | undefined>;
+        delete: (id: string) => Promise<boolean>;
       };
 
       utils: {

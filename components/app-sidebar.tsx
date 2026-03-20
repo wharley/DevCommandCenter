@@ -19,7 +19,8 @@ import { useProjects, useMissions } from "@/hooks/use-data";
 import { useAppStore } from "@/hooks/use-app-store";
 
 const navItems = [
-  { href: "/", label: "Projetos", icon: FolderGit2 },
+  { href: "/", label: "Hive", icon: Terminal },
+  { href: "/projects", label: "Projetos", icon: FolderGit2 },
   { href: "/settings", label: "Configurações", icon: Settings },
 ];
 

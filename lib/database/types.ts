@@ -225,6 +225,66 @@ export interface MissionGitSnapshot {
     | "not_applicable";
 }
 
+// ============================================
+// Comb & Pane (Hive/Comb/Pane architecture)
+// ============================================
+
+export type CombStatus =
+  | "active"
+  | "ready_for_review"
+  | "applied"
+  | "discarded"
+  | "archived"
+  | "error";
+
+export type PaneType = "term" | "agent";
+
+export type PaneStatus = "idle" | "running" | "exited";
+
+export interface Comb {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string | null;
+  baseBranch: string;
+  branch?: string | null;
+  worktreePath?: string | null;
+  status: CombStatus;
+  lastOpenedAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Pane {
+  id: string;
+  combId: string;
+  type: PaneType;
+  providerId?: string | null;
+  title?: string | null;
+  initialPrompt?: string | null;
+  cwd?: string | null;
+  ptyOwnerKey?: string | null;
+  status: PaneStatus;
+  layoutOrder: number;
+  lastActivityAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PaneSession {
+  ptyId?: string | null;
+  cwd?: string;
+  command?: string | null;
+  args?: string[];
+  status?: "idle" | "running" | "exited";
+  startedAt?: string;
+  lastActivityAt?: string;
+  exitedAt?: string | null;
+  lastExitCode?: number | null;
+  outputPreview?: string;
+  outputLineCount?: number;
+}
+
 /** Comando pendente detectado que o usuário precisa executar manualmente */
 export interface PendingCommand {
   id: string;
@@ -335,6 +395,42 @@ export interface UpdateMissionDTO {
   completedAt?: Date | null;
 }
 
+export interface CreateCombDTO {
+  projectId: string;
+  name: string;
+  description?: string;
+  baseBranch: string;
+}
+
+export interface UpdateCombDTO {
+  name?: string;
+  description?: string | null;
+  branch?: string | null;
+  worktreePath?: string | null;
+  status?: CombStatus;
+  lastOpenedAt?: Date;
+}
+
+export interface CreatePaneDTO {
+  combId: string;
+  type: PaneType;
+  providerId?: string;
+  title?: string;
+  initialPrompt?: string;
+  layoutOrder?: number;
+}
+
+export interface UpdatePaneDTO {
+  title?: string | null;
+  initialPrompt?: string | null;
+  providerId?: string | null;
+  cwd?: string | null;
+  ptyOwnerKey?: string | null;
+  status?: PaneStatus;
+  layoutOrder?: number;
+  lastActivityAt?: Date;
+}
+
 export interface CreateMissionLogDTO {
   missionId: string;
   type: MissionLogType;
@@ -368,6 +464,20 @@ export interface MissionLogsQueryOptions extends PaginationOptions {
   type?: MissionLogType | MissionLogType[];
 }
 
+export interface CombsQueryOptions extends PaginationOptions {
+  projectId?: string;
+  status?: CombStatus | CombStatus[];
+  orderBy?: "name" | "status" | "createdAt" | "updatedAt" | "lastOpenedAt";
+  orderDirection?: "asc" | "desc";
+}
+
+export interface PanesQueryOptions extends PaginationOptions {
+  combId?: string;
+  type?: PaneType;
+  orderBy?: "layoutOrder" | "createdAt" | "lastActivityAt";
+  orderDirection?: "asc" | "desc";
+}
+
 // ============================================
 // Aliases para compatibilidade (electron.d.ts, etc.)
 // ============================================
@@ -379,6 +489,10 @@ export type ProviderUpdate = UpdateProviderDTO;
 export type MissionCreate = CreateMissionDTO;
 export type MissionUpdate = UpdateMissionDTO;
 export type MissionLogCreate = CreateMissionLogDTO;
+export type CombCreate = CreateCombDTO;
+export type CombUpdate = UpdateCombDTO;
+export type PaneCreate = CreatePaneDTO;
+export type PaneUpdate = UpdatePaneDTO;
 
 /** Stats for a project (mission counts). */
 export interface ProjectStats {

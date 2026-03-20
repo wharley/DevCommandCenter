@@ -90,6 +90,41 @@ CREATE TABLE IF NOT EXISTS activation (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Tabela de Combs (workspaces isolados por worktree dentro de um projeto)
+CREATE TABLE IF NOT EXISTS combs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  base_branch TEXT NOT NULL DEFAULT 'main',
+  branch TEXT,
+  worktree_path TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ready_for_review', 'applied', 'discarded', 'archived', 'error')),
+  last_opened_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+-- Tabela de Panes (terminais e agents dentro de um Comb)
+CREATE TABLE IF NOT EXISTS panes (
+  id TEXT PRIMARY KEY,
+  comb_id TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'term' CHECK (type IN ('term', 'agent')),
+  provider_id TEXT,
+  title TEXT,
+  initial_prompt TEXT,
+  cwd TEXT,
+  pty_owner_key TEXT,
+  status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'running', 'exited')),
+  layout_order INTEGER NOT NULL DEFAULT 0,
+  last_activity_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (comb_id) REFERENCES combs(id) ON DELETE CASCADE,
+  FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE SET NULL
+);
+
 -- Índices para performance
 CREATE INDEX IF NOT EXISTS idx_projects_last_opened ON projects(last_opened_at DESC);
 CREATE INDEX IF NOT EXISTS idx_missions_project ON missions(project_id);
@@ -97,6 +132,12 @@ CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status);
 CREATE INDEX IF NOT EXISTS idx_missions_created ON missions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mission_logs_mission ON mission_logs(mission_id);
 CREATE INDEX IF NOT EXISTS idx_mission_logs_created ON mission_logs(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_combs_project ON combs(project_id);
+CREATE INDEX IF NOT EXISTS idx_combs_status ON combs(status);
+CREATE INDEX IF NOT EXISTS idx_combs_last_opened ON combs(last_opened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_panes_comb ON panes(comb_id);
+CREATE INDEX IF NOT EXISTS idx_panes_layout ON panes(comb_id, layout_order);
 
 -- Trigger para atualizar updated_at automaticamente
 CREATE TRIGGER IF NOT EXISTS update_providers_timestamp
@@ -115,4 +156,16 @@ CREATE TRIGGER IF NOT EXISTS update_missions_timestamp
 AFTER UPDATE ON missions
 BEGIN
   UPDATE missions SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS update_combs_timestamp
+AFTER UPDATE ON combs
+BEGIN
+  UPDATE combs SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS update_panes_timestamp
+AFTER UPDATE ON panes
+BEGIN
+  UPDATE panes SET updated_at = datetime('now') WHERE id = NEW.id;
 END;

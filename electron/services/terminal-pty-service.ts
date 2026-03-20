@@ -5,7 +5,7 @@
 
 import { platform } from "node:os";
 import type { WebContents } from "electron";
-import type { MissionAgentSession } from "../../lib/database/types";
+import type { MissionAgentSession, PaneSession } from "../../lib/database/types";
 
 /** Minimal type for node-pty spawn return (avoids importing node-pty types at compile time) */
 interface PtyInstance {
@@ -47,6 +47,10 @@ const ptys = new Map<string, PtyInstance>();
 const missionIdToPtyId = new Map<string, string>();
 /** ptyId → missionId for cleanup on exit */
 const ptyIdToMissionId = new Map<string, string>();
+/** paneId → ptyId for reattach (Comb/Pane architecture) */
+const paneIdToPtyId = new Map<string, string>();
+/** ptyId → paneId for cleanup on exit */
+const ptyIdToPaneId = new Map<string, string>();
 const MAX_OUTPUT_PREVIEW_CHARS = 100_000;
 
 interface TerminalSessionState extends MissionAgentSession {
@@ -342,6 +346,143 @@ export function killPty(ptyId: string): boolean {
  */
 export function killPtyByMissionId(missionId: string): boolean {
   const ptyId = missionIdToPtyId.get(missionId);
+  if (!ptyId) return false;
+  return killPty(ptyId);
+}
+
+// ==========================================
+// Pane-based PTY management (Comb/Pane arch)
+// ==========================================
+
+interface PaneSessionState extends PaneSession {
+  ptyId: string;
+  outputPreview: string;
+}
+
+const paneSessions = new Map<string, PaneSessionState>();
+
+function snapshotPaneSession(
+  session: PaneSessionState | undefined | null,
+): PaneSession | null {
+  if (!session) return null;
+  return {
+    ptyId: session.ptyId,
+    cwd: session.cwd,
+    command: session.command ?? null,
+    args: [...(session.args ?? [])],
+    status: session.status ?? "idle",
+    startedAt: session.startedAt,
+    lastActivityAt: session.lastActivityAt,
+    exitedAt: session.exitedAt ?? null,
+    lastExitCode: session.lastExitCode ?? null,
+    outputPreview: session.outputPreview ?? "",
+    outputLineCount: session.outputLineCount ?? countLines(session.outputPreview ?? ""),
+  };
+}
+
+export function getPaneSession(paneId: string): PaneSession | null {
+  return snapshotPaneSession(paneSessions.get(paneId));
+}
+
+export interface GetOrCreatePaneOptions extends SpawnOptions {
+  paneId: string;
+}
+
+export interface PaneSpawnResult {
+  ptyId: string;
+  error?: string;
+  session?: PaneSession | null;
+}
+
+export function getOrCreatePtyForPane(
+  options: GetOrCreatePaneOptions,
+  sender: WebContents,
+): PaneSpawnResult {
+  const { paneId, cwd, command, args, cols, rows } = options;
+  const existingPtyId = paneIdToPtyId.get(paneId);
+  if (existingPtyId && ptys.has(existingPtyId)) {
+    return { ptyId: existingPtyId, session: getPaneSession(paneId) };
+  }
+  if (existingPtyId) {
+    paneIdToPtyId.delete(paneId);
+    ptyIdToPaneId.delete(existingPtyId);
+  }
+
+  const pty = getPty();
+  try {
+    const file = command ?? defaultShell();
+    const argv = command ? (args ?? []) : [];
+    const ptyProcess = pty.spawn(file, argv, {
+      cwd,
+      cols: cols ?? 80,
+      rows: rows ?? 24,
+      env: process.env as Record<string, string>,
+      name: "xterm-256color",
+    });
+
+    const ptyId = `pty-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    ptys.set(ptyId, ptyProcess);
+    paneIdToPtyId.set(paneId, ptyId);
+    ptyIdToPaneId.set(ptyId, paneId);
+
+    const startedAt = new Date().toISOString();
+    paneSessions.set(paneId, {
+      ptyId,
+      cwd,
+      command: command ?? null,
+      args: args ?? [],
+      status: "running",
+      startedAt,
+      lastActivityAt: startedAt,
+      exitedAt: null,
+      lastExitCode: null,
+      outputPreview: "",
+      outputLineCount: 0,
+    });
+
+    ptyProcess.onData((data: string) => {
+      const pid = ptyIdToPaneId.get(ptyId);
+      if (pid) {
+        const session = paneSessions.get(pid);
+        if (session) {
+          session.outputPreview = trimOutputPreview(`${session.outputPreview ?? ""}${data}`);
+          session.outputLineCount = countLines(session.outputPreview);
+          session.lastActivityAt = new Date().toISOString();
+        }
+      }
+      if (!sender.isDestroyed()) {
+        sender.send("terminal:data", ptyId, data);
+      }
+    });
+
+    ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+      ptys.delete(ptyId);
+      const pid = ptyIdToPaneId.get(ptyId);
+      if (pid) {
+        const session = paneSessions.get(pid);
+        if (session) {
+          session.status = "exited";
+          session.lastExitCode = exitCode;
+          session.exitedAt = new Date().toISOString();
+          session.lastActivityAt = session.exitedAt;
+        }
+        ptyIdToPaneId.delete(ptyId);
+        paneIdToPtyId.delete(pid);
+      }
+      if (!sender.isDestroyed()) {
+        sender.send("terminal:exit", ptyId, exitCode);
+      }
+    });
+
+    return { ptyId, session: getPaneSession(paneId) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ptyId: "", error: message };
+  }
+}
+
+export function killPtyByPaneId(paneId: string): boolean {
+  const ptyId = paneIdToPtyId.get(paneId);
   if (!ptyId) return false;
   return killPty(ptyId);
 }

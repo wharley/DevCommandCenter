@@ -18,6 +18,10 @@ import {
   normalizeMissions,
   normalizeMissionLog,
   normalizeMissionLogs,
+  normalizeComb,
+  normalizeCombs,
+  normalizePane,
+  normalizePanes,
 } from "@/lib/database/normalize";
 import type {
   Project,
@@ -33,6 +37,12 @@ import type {
   MissionStatus,
   MissionPlan,
   GeneratedCode,
+  Comb,
+  CreateCombDTO,
+  UpdateCombDTO,
+  Pane,
+  CreatePaneDTO,
+  UpdatePaneDTO,
 } from "@/lib/database/types";
 
 // Detecta ambiente Electron
@@ -41,7 +51,7 @@ const isElectron = () => typeof window !== "undefined" && !!window.db;
 // ============================================
 // Event Emitter para sincronização entre hooks
 // ============================================
-type DataEventType = "projects" | "providers" | "missions" | "missionLogs";
+type DataEventType = "projects" | "providers" | "missions" | "missionLogs" | "combs" | "panes";
 type DataEventListener = () => void;
 
 const dataEventListeners: Record<DataEventType, Set<DataEventListener>> = {
@@ -49,6 +59,8 @@ const dataEventListeners: Record<DataEventType, Set<DataEventListener>> = {
   providers: new Set(),
   missions: new Set(),
   missionLogs: new Set(),
+  combs: new Set(),
+  panes: new Set(),
 };
 
 function emitDataChange(type: DataEventType) {
@@ -672,6 +684,139 @@ export function useMissionLogs(missionId: string) {
     addLog,
     logAgentAction,
     logUserInput,
+  };
+}
+
+// ============================================
+// Hook para Combs
+// ============================================
+
+export function useCombs(projectId?: string) {
+  const [combs, setCombs] = useState<Comb[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      if (isElectron() && window.db?.combs && projectId) {
+        const data = await window.db.combs.findByProject(projectId);
+        setCombs(normalizeCombs(data) as Comb[]);
+      } else {
+        setCombs([]);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    refresh();
+    const unsubscribe = subscribeToDataChange("combs", refresh);
+    return unsubscribe;
+  }, [refresh]);
+
+  const create = useCallback(
+    async (data: CreateCombDTO) => {
+      if (!isElectron() || !window.db?.combs) throw new Error("Combs not available");
+      const comb = await window.db.combs.create(data);
+      emitDataChange("combs");
+      return normalizeComb(comb as unknown as Record<string, unknown>) as unknown as Comb;
+    },
+    [],
+  );
+
+  const update = useCallback(
+    async (id: string, data: UpdateCombDTO) => {
+      if (!isElectron() || !window.db?.combs) return;
+      await window.db.combs.update(id, data);
+      emitDataChange("combs");
+    },
+    [],
+  );
+
+  const remove = useCallback(
+    async (id: string) => {
+      if (!isElectron() || !window.db?.combs) return;
+      await window.db.combs.delete(id);
+      emitDataChange("combs");
+      emitDataChange("panes");
+    },
+    [],
+  );
+
+  return {
+    combs,
+    isLoading,
+    refresh,
+    create,
+    update,
+    remove,
+  };
+}
+
+// ============================================
+// Hook para Panes
+// ============================================
+
+export function usePanes(combId?: string) {
+  const [panes, setPanes] = useState<Pane[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      if (isElectron() && window.db?.panes && combId) {
+        const data = await window.db.panes.findByComb(combId);
+        setPanes(normalizePanes(data) as Pane[]);
+      } else {
+        setPanes([]);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [combId]);
+
+  useEffect(() => {
+    refresh();
+    const unsubscribe = subscribeToDataChange("panes", refresh);
+    return unsubscribe;
+  }, [refresh]);
+
+  const create = useCallback(
+    async (data: CreatePaneDTO) => {
+      if (!isElectron() || !window.db?.panes) throw new Error("Panes not available");
+      const pane = await window.db.panes.create(data);
+      emitDataChange("panes");
+      return normalizePane(pane as unknown as Record<string, unknown>) as unknown as Pane;
+    },
+    [],
+  );
+
+  const update = useCallback(
+    async (id: string, data: UpdatePaneDTO) => {
+      if (!isElectron() || !window.db?.panes) return;
+      await window.db.panes.update(id, data);
+      emitDataChange("panes");
+    },
+    [],
+  );
+
+  const remove = useCallback(
+    async (id: string) => {
+      if (!isElectron() || !window.db?.panes) return;
+      await window.db.panes.delete(id);
+      emitDataChange("panes");
+    },
+    [],
+  );
+
+  return {
+    panes,
+    isLoading,
+    refresh,
+    create,
+    update,
+    remove,
   };
 }
 

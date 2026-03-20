@@ -6,6 +6,8 @@ const DATE_KEYS: Record<string, string[]> = {
   provider: ['createdAt', 'updatedAt'],
   mission: ['startedAt', 'completedAt', 'createdAt', 'updatedAt'],
   missionLog: ['createdAt'],
+  comb: ['lastOpenedAt', 'createdAt', 'updatedAt'],
+  pane: ['lastActivityAt', 'createdAt', 'updatedAt'],
 };
 
 function parseDate(value: unknown): Date | null {
@@ -87,6 +89,30 @@ export function normalizeMissionLogs(raw: unknown[]): unknown[] {
   return raw.map((item) =>
     typeof item === 'object' && item !== null
       ? normalizeMissionLog(item as Record<string, unknown>)
+      : item,
+  );
+}
+
+export function normalizeComb(raw: Record<string, unknown>): Record<string, unknown> {
+  return normalizeDates(raw, DATE_KEYS.comb);
+}
+
+export function normalizePane(raw: Record<string, unknown>): Record<string, unknown> {
+  return normalizeDates(raw, DATE_KEYS.pane);
+}
+
+export function normalizeCombs(raw: unknown[]): unknown[] {
+  return raw.map((item) =>
+    typeof item === 'object' && item !== null
+      ? normalizeComb(item as Record<string, unknown>)
+      : item,
+  );
+}
+
+export function normalizePanes(raw: unknown[]): unknown[] {
+  return raw.map((item) =>
+    typeof item === 'object' && item !== null
+      ? normalizePane(item as Record<string, unknown>)
       : item,
   );
 }

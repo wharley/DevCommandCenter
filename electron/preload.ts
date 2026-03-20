@@ -102,6 +102,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
       invoke("terminal:kill", ptyId) as Promise<{ ok: boolean }>,
     killByMissionId: (missionId: string) =>
       invoke("terminal:killByMissionId", missionId) as Promise<{ ok: boolean }>,
+    getOrCreateForPane: (paneId: string, options: {
+      cwd: string;
+      command?: string;
+      args?: string[];
+      cols?: number;
+      rows?: number;
+    }) =>
+      invoke("terminal:getOrCreateForPane", paneId, options) as Promise<{
+        ptyId?: string;
+        error?: string;
+        session?: import("../lib/database/types").PaneSession | null;
+      }>,
+    getPaneSession: (paneId: string) =>
+      invoke("terminal:getPaneSession", paneId) as Promise<
+        import("../lib/database/types").PaneSession | null
+      >,
+    killByPaneId: (paneId: string) =>
+      invoke("terminal:killByPaneId", paneId) as Promise<{ ok: boolean }>,
     onData: (callback: (ptyId: string, data: string) => void) => {
       const fn = (_: unknown, ptyId: string, data: string) =>
         callback(ptyId, data);
@@ -130,6 +148,36 @@ contextBridge.exposeInMainWorld("electronAPI", {
       options?: { includeFiles?: string[]; commit?: boolean; message?: string },
     ) =>
       invoke("worktree:applyMissionPatch", missionId, targetBranch, options),
+  },
+
+  comb: {
+    ensureWorktree: (combId: string) =>
+      invoke("comb:ensureWorktree", combId) as Promise<{
+        success: boolean;
+        error?: string;
+        worktreePath?: string;
+        branch?: string;
+      }>,
+    discard: (combId: string) =>
+      invoke("comb:discard", combId) as Promise<{ success: boolean; error?: string }>,
+    mergeIntoMain: (combId: string) =>
+      invoke("comb:mergeIntoMain", combId) as Promise<{ success: boolean; error?: string }>,
+    getDiffs: (combId: string) =>
+      invoke("comb:getDiffs", combId) as Promise<{
+        success: boolean;
+        error?: string;
+        files: Array<{ path: string; status: string; diff: string }>;
+        summary: { changedFiles: number; insertions: number; deletions: number } | null;
+      }>,
+    applyPatch: (
+      combId: string,
+      targetBranch: string,
+      options?: { includeFiles?: string[]; commit?: boolean; message?: string },
+    ) =>
+      invoke("comb:applyPatch", combId, targetBranch, options) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
   },
 
   // Window APIs
@@ -317,6 +365,27 @@ contextBridge.exposeInMainWorld("db", {
       invoke("db:missionLogs:getUsageStats", missionId),
     getLatest: (missionId: string, count?: number) =>
       invoke("db:missionLogs:getLatest", missionId, count),
+  },
+
+  // Combs
+  combs: {
+    findByProject: (projectId: string) =>
+      invoke("db:combs:findByProject", projectId),
+    findById: (id: string) => invoke("db:combs:findById", id),
+    create: (data: unknown) => invoke("db:combs:create", data),
+    update: (id: string, data: unknown) =>
+      invoke("db:combs:update", id, data),
+    delete: (id: string) => invoke("db:combs:delete", id),
+  },
+
+  // Panes
+  panes: {
+    findByComb: (combId: string) => invoke("db:panes:findByComb", combId),
+    findById: (id: string) => invoke("db:panes:findById", id),
+    create: (data: unknown) => invoke("db:panes:create", data),
+    update: (id: string, data: unknown) =>
+      invoke("db:panes:update", id, data),
+    delete: (id: string) => invoke("db:panes:delete", id),
   },
 
   // Database utilities

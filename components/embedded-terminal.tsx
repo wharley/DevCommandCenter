@@ -20,6 +20,11 @@ export interface EmbeddedTerminalProps {
    * so the user can navigate away and reattach to the same session later.
    */
   missionId?: string;
+  /**
+   * When set, PTY is keyed by paneId (Comb/Pane architecture): getOrCreateForPane is used
+   * and the PTY is NOT killed on unmount for reattach.
+   */
+  paneId?: string;
 }
 
 export function EmbeddedTerminal({
@@ -30,6 +35,7 @@ export function EmbeddedTerminal({
   onExit,
   title,
   missionId,
+  paneId,
 }: EmbeddedTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
@@ -113,7 +119,21 @@ export function EmbeddedTerminal({
       rows: term.rows,
     };
 
-    if (missionId && api.getOrCreate) {
+    if (paneId && api.getOrCreateForPane) {
+      api.getOrCreateForPane(paneId, spawnOptions).then((result) => {
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        if (result.ptyId) ptyIdRef.current = result.ptyId;
+        if (result.session?.outputPreview) {
+          term.write(result.session.outputPreview);
+        }
+        if (typeof result.session?.lastExitCode === "number") {
+          setExited(result.session.lastExitCode);
+        }
+      });
+    } else if (missionId && api.getOrCreate) {
       api.getOrCreate(missionId, spawnOptions).then((result) => {
         if (result.error) {
           setError(result.error);
@@ -151,8 +171,8 @@ export function EmbeddedTerminal({
       unsubData();
       unsubExit();
       const id = ptyIdRef.current;
-      // When missionId is set, do NOT kill on unmount so the user can reattach when navigating back
-      if (id && api.kill && !missionId) {
+      // When missionId or paneId is set, do NOT kill on unmount so the user can reattach
+      if (id && api.kill && !missionId && !paneId) {
         api.kill(id);
       }
       ptyIdRef.current = null;
@@ -160,7 +180,7 @@ export function EmbeddedTerminal({
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [command, cwd, missionId, stableArgs]);
+  }, [command, cwd, missionId, paneId, stableArgs]);
 
   return (
     <div className="flex h-full flex-col rounded-lg border border-border bg-background">
