@@ -1,0 +1,57 @@
+# Gera o pacote .deb (Electron) no GitHub Actions (Linux).
+# Repo privado: minutos contam; por isso o padrão é rodar só em push na main
+# (após merge de PR) ou manualmente — não em todo push de feature branch.
+name: Build Linux (.deb)
+
+on:
+  # Merge na main / commits diretos na main
+  push:
+    branches:
+      - main
+  # Quando quiser gerar sem commit (ex.: testar build da main atual)
+  workflow_dispatch:
+
+concurrency:
+  group: build-linux-deb-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: yarn
+
+      - name: Enable Corepack (Yarn)
+        run: corepack enable
+
+      - name: Install system deps (native modules / packaging)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            python3
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build .deb
+        env:
+          # Evita prompts interativos no electron-builder
+          CI: true
+        run: yarn electron:build -- --linux deb
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-command-center-linux-deb
+          path: release/*.deb
+          if-no-files-found: error
