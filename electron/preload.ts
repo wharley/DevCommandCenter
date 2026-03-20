@@ -160,8 +160,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
       }>,
     discard: (combId: string) =>
       invoke("comb:discard", combId) as Promise<{ success: boolean; error?: string }>,
-    mergeIntoMain: (combId: string) =>
-      invoke("comb:mergeIntoMain", combId) as Promise<{ success: boolean; error?: string }>,
+    mergeIntoMain: (combId: string, targetBranch?: string) =>
+      invoke("comb:mergeIntoMain", combId, targetBranch) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
     getDiffs: (combId: string) =>
       invoke("comb:getDiffs", combId) as Promise<{
         success: boolean;

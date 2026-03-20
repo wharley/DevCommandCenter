@@ -1,12 +1,6 @@
 "use client";
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   ChevronDown,
@@ -32,12 +26,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -53,7 +54,12 @@ import { DiffCodeBlock } from "@/components/diff-code-block";
 import { CommitDialog } from "@/components/dialogs/commit-dialog";
 import { AddProjectDialog } from "@/components/dialogs/add-project-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
-import { useCombs, usePanes, useProjects, useProviders } from "@/hooks/use-data";
+import {
+  useCombs,
+  usePanes,
+  useProjects,
+  useProviders,
+} from "@/hooks/use-data";
 import SettingsPage from "@/src/pages/SettingsPage";
 import type { Comb, Pane, Project, Provider } from "@/lib/database/types";
 import type { GitStatus } from "@/types/electron";
@@ -61,12 +67,19 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 
-const CLI_PROVIDER_TYPES = ["codex", "claude-code", "gemini", "cursor"] as const;
+const CLI_PROVIDER_TYPES = [
+  "codex",
+  "claude-code",
+  "gemini",
+  "cursor",
+] as const;
 
 function isCliProviderType(
   type: string,
 ): type is (typeof CLI_PROVIDER_TYPES)[number] {
-  return CLI_PROVIDER_TYPES.includes(type as (typeof CLI_PROVIDER_TYPES)[number]);
+  return CLI_PROVIDER_TYPES.includes(
+    type as (typeof CLI_PROVIDER_TYPES)[number],
+  );
 }
 
 function buildCliCommand(provider: Provider | null): string | undefined {
@@ -84,25 +97,45 @@ function buildCliCommand(provider: Provider | null): string | undefined {
 
 function getCombStatusLabel(comb: Comb): string {
   switch (comb.status) {
-    case "active": return "Ativo";
-    case "ready_for_review": return "Revisão";
-    case "applied": return "Aplicado";
-    case "discarded": return "Descartado";
-    case "archived": return "Arquivado";
-    case "error": return "Erro";
-    default: return comb.status;
+    case "active":
+      return "Ativo";
+    case "ready_for_review":
+      return "Revisão";
+    case "applied":
+      return "Aplicado";
+    case "discarded":
+      return "Descartado";
+    case "archived":
+      return "Arquivado";
+    case "error":
+      return "Erro";
+    default:
+      return comb.status;
   }
 }
 
 function getCombStatusVariant(status: Comb["status"]) {
   switch (status) {
-    case "active": return "default" as const;
-    case "ready_for_review": return "secondary" as const;
-    case "applied": return "outline" as const;
-    case "discarded": return "outline" as const;
-    case "error": return "destructive" as const;
-    default: return "outline" as const;
+    case "active":
+      return "default" as const;
+    case "ready_for_review":
+      return "secondary" as const;
+    case "applied":
+      return "outline" as const;
+    case "discarded":
+      return "outline" as const;
+    case "error":
+      return "destructive" as const;
+    default:
+      return "outline" as const;
   }
+}
+
+/** 1 col, 2–4 panes → 2 cols, 5+ → 3 cols (grid auto-wraps rows). */
+function getPaneGridColumnCount(paneCount: number): number {
+  if (paneCount <= 1) return 1;
+  if (paneCount <= 4) return 2;
+  return 3;
 }
 
 // ==========================================
@@ -141,7 +174,9 @@ function NewCombDialog({
       setLocalBranches(branches ?? []);
       if (!baseBranch && current) setBaseBranch(current.trim());
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [open, projectPath]);
 
   const handleCreate = async () => {
@@ -194,6 +229,7 @@ function NewCombDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
+              className="field-sizing-fixed max-h-40 overflow-y-auto"
             />
           </div>
           <div className="space-y-2">
@@ -205,7 +241,9 @@ function NewCombDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {localBranches.map((b) => (
-                    <SelectItem key={b} value={b}>{b}</SelectItem>
+                    <SelectItem key={b} value={b}>
+                      {b}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -300,7 +338,9 @@ function NewAgentPaneDialog({
               </SelectTrigger>
               <SelectContent>
                 {cliProviders.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -314,12 +354,15 @@ function NewAgentPaneDialog({
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Prompt inicial (opcional)</label>
+            <label className="text-sm font-medium">
+              Prompt inicial (opcional)
+            </label>
             <Textarea
               placeholder="Instrução para o agente..."
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={3}
+              className="field-sizing-fixed max-h-48 overflow-y-auto"
             />
           </div>
         </div>
@@ -353,25 +396,27 @@ function PaneGridItem({
 }) {
   const cwd = comb.worktreePath ?? "";
   const command = pane.type === "agent" ? buildCliCommand(provider) : undefined;
-  const args = pane.type === "agent" && pane.initialPrompt
-    ? [pane.initialPrompt]
-    : [];
+  const args =
+    pane.type === "agent" && pane.initialPrompt ? [pane.initialPrompt] : [];
 
-  const label = pane.type === "agent"
-    ? (pane.title ?? provider?.name ?? "Agent")
-    : (pane.title ?? "Terminal");
+  const label =
+    pane.type === "agent"
+      ? (pane.title ?? provider?.name ?? "Agent")
+      : (pane.title ?? "Terminal");
 
   if (!cwd) {
     return (
-      <div className="flex h-full flex-col items-center justify-center rounded-lg border border-border bg-card p-4">
+      <div className="flex h-full min-h-0 min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg border border-border bg-card p-4">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        <p className="mt-2 text-sm text-muted-foreground">Preparando worktree...</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Preparando worktree...
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border bg-card px-3 py-1.5">
         <div className="flex items-center gap-2">
           {pane.type === "agent" ? (
@@ -395,7 +440,7 @@ function PaneGridItem({
           <Trash2 className="h-3 w-3" />
         </Button>
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <EmbeddedTerminal
           cwd={cwd}
           command={command}
@@ -413,48 +458,94 @@ function PaneGridItem({
 // ==========================================
 function CombReviewPanel({
   comb,
+  mainProjectPath,
   onAction,
 }: {
   comb: Comb;
+  /** Repositório principal (checkout), não o worktree — usado para listar branches de destino do merge. */
+  mainProjectPath?: string;
   onAction: () => void;
 }) {
   const [diffs, setDiffs] = useState<{
     loading: boolean;
     error?: string;
     files: Array<{ path: string; status: string; diff: string }>;
-    summary: { changedFiles: number; insertions: number; deletions: number } | null;
+    summary: {
+      changedFiles: number;
+      insertions: number;
+      deletions: number;
+    } | null;
   }>({ loading: false, files: [], summary: null });
   const [isApplying, setIsApplying] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
-  const [commitDialogStatus, setCommitDialogStatus] = useState<GitStatus | null>(null);
-  const { confirmDialog } = useConfirmDialog();
+  const [commitDialogStatus, setCommitDialogStatus] =
+    useState<GitStatus | null>(null);
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [mergeTargetBranch, setMergeTargetBranch] = useState("");
+  const [mergeBranches, setMergeBranches] = useState<string[]>([]);
 
   useEffect(() => {
     if (!comb.worktreePath || !window.electronAPI?.comb?.getDiffs) return;
     setDiffs((prev) => ({ ...prev, loading: true, error: undefined }));
     window.electronAPI.comb.getDiffs(comb.id).then((result) => {
       if (result.success) {
-        setDiffs({ loading: false, files: result.files, summary: result.summary });
+        setDiffs({
+          loading: false,
+          files: result.files,
+          summary: result.summary,
+        });
       } else {
-        setDiffs({ loading: false, error: result.error, files: [], summary: null });
+        setDiffs({
+          loading: false,
+          error: result.error,
+          files: [],
+          summary: null,
+        });
       }
     });
   }, [comb.id, comb.worktreePath]);
 
-  const handleMerge = async () => {
-    const confirmed = await confirmDialog({
-      title: "Merge Missão na branch principal?",
-      description: "As alterações do worktree serão integradas na branch ativa do projeto.",
-      confirmLabel: "Merge",
-      cancelLabel: "Cancelar",
+  useEffect(() => {
+    if (!mergeDialogOpen || !mainProjectPath?.trim()) return;
+    const git = window.electronAPI?.git;
+    if (!git?.getLocalBranches || !git?.getCurrentBranch) return;
+    let cancelled = false;
+    Promise.all([
+      git.getLocalBranches(mainProjectPath),
+      git.getCurrentBranch(mainProjectPath),
+    ]).then(([branches, current]) => {
+      if (cancelled) return;
+      const list = branches ?? [];
+      setMergeBranches(list);
+      const c = (current ?? "").trim();
+      setMergeTargetBranch(c || list[0] || "main");
     });
-    if (!confirmed) return;
+    return () => {
+      cancelled = true;
+    };
+  }, [mergeDialogOpen, mainProjectPath]);
+
+  const handleMergeClick = () => {
+    if (!mainProjectPath?.trim()) {
+      toast.error("Caminho do repositório principal indisponível.");
+      return;
+    }
+    setMergeDialogOpen(true);
+  };
+
+  const handleConfirmMerge = async () => {
+    const b = mergeTargetBranch.trim();
+    if (!b) {
+      toast.error("Selecione a branch de destino.");
+      return;
+    }
     setIsMerging(true);
     try {
-      const result = await window.electronAPI?.comb?.mergeIntoMain(comb.id);
+      const result = await window.electronAPI?.comb?.mergeIntoMain(comb.id, b);
       if (result?.success) {
         toast.success("Missão mergeada com sucesso");
+        setMergeDialogOpen(false);
         onAction();
       } else {
         toast.error(result?.error ?? "Erro ao fazer merge");
@@ -467,12 +558,19 @@ function CombReviewPanel({
   const handleCommit = async (message: string) => {
     if (!comb.worktreePath || !window.electronAPI?.git) return;
     try {
-      const ok = await window.electronAPI.git.commit(comb.worktreePath, message);
+      const ok = await window.electronAPI.git.commit(
+        comb.worktreePath,
+        message,
+      );
       if (ok) {
         toast.success("Commit realizado");
         const result = await window.electronAPI?.comb?.getDiffs(comb.id);
         if (result?.success) {
-          setDiffs({ loading: false, files: result.files, summary: result.summary });
+          setDiffs({
+            loading: false,
+            files: result.files,
+            summary: result.summary,
+          });
         }
       } else {
         toast.error("Falha ao commitar");
@@ -514,7 +612,9 @@ function CombReviewPanel({
   if (!comb.worktreePath) {
     return (
       <div className="flex h-full items-center justify-center p-8">
-        <p className="text-sm text-muted-foreground">Worktree ainda não criada.</p>
+        <p className="text-sm text-muted-foreground">
+          Worktree ainda não criada.
+        </p>
       </div>
     );
   }
@@ -526,7 +626,8 @@ function CombReviewPanel({
           <h4 className="text-sm font-semibold">Review</h4>
           {diffs.summary && (
             <span className="text-xs text-muted-foreground">
-              {diffs.summary.changedFiles} arquivo(s), +{diffs.summary.insertions} -{diffs.summary.deletions}
+              {diffs.summary.changedFiles} arquivo(s), +
+              {diffs.summary.insertions} -{diffs.summary.deletions}
             </span>
           )}
         </div>
@@ -552,7 +653,7 @@ function CombReviewPanel({
           <Button
             variant="default"
             size="sm"
-            onClick={handleMerge}
+            onClick={handleMergeClick}
             disabled={isMerging}
           >
             {isMerging ? (
@@ -564,6 +665,53 @@ function CombReviewPanel({
           </Button>
         </div>
       </div>
+
+      <Dialog open={mergeDialogOpen} onOpenChange={setMergeDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Merge na branch de destino</DialogTitle>
+            <DialogDescription>
+              O branch do worktree desta Missão será integrado na branch
+              escolhida do repositório principal (não no worktree).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <label className="text-sm font-medium">Branch de destino</label>
+            {mergeBranches.length > 0 ? (
+              <Select
+                value={mergeTargetBranch}
+                onValueChange={setMergeTargetBranch}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {mergeBranches.map((br) => (
+                    <SelectItem key={br} value={br}>
+                      {br}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                placeholder="main"
+                value={mergeTargetBranch}
+                onChange={(e) => setMergeTargetBranch(e.target.value)}
+              />
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMergeDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleConfirmMerge} disabled={isMerging}>
+              {isMerging && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Merge
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ScrollArea className="flex-1">
         {diffs.loading ? (
@@ -614,29 +762,55 @@ export default function HiveWorkspacePage() {
   const { providers } = useProviders();
   const { confirmDialog } = useConfirmDialog();
 
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    null,
+  );
   const [activeCombId, setActiveCombId] = useState<string | null>(null);
-  const [activeMainTab, setActiveMainTab] = useState<"panes" | "review">("panes");
+  const [activeMainTab, setActiveMainTab] = useState<"panes" | "review">(
+    "panes",
+  );
   const [newCombOpen, setNewCombOpen] = useState(false);
   const [newAgentOpen, setNewAgentOpen] = useState(false);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+
+  const sortedProjects = useMemo(
+    () =>
+      [...projects].sort((a, b) => {
+        const da = a.lastOpenedAt?.getTime() ?? a.createdAt.getTime();
+        const db = b.lastOpenedAt?.getTime() ?? b.createdAt.getTime();
+        return db - da;
+      }),
+    [projects],
+  );
 
   const selectedProject = useMemo(
-    () => (selectedProjectId ? projects.find((p) => p.id === selectedProjectId) ?? null : null),
+    () =>
+      selectedProjectId
+        ? (projects.find((p) => p.id === selectedProjectId) ?? null)
+        : null,
     [selectedProjectId, projects],
   );
 
-  const { combs, isLoading: combsLoading, refresh: refreshCombs } =
-    useCombs(selectedProjectId ?? undefined);
+  const {
+    combs,
+    isLoading: combsLoading,
+    refresh: refreshCombs,
+  } = useCombs(selectedProjectId ?? undefined);
 
   const activeComb = useMemo(
-    () => (activeCombId ? combs.find((c) => c.id === activeCombId) ?? null : null),
+    () =>
+      activeCombId ? (combs.find((c) => c.id === activeCombId) ?? null) : null,
     [activeCombId, combs],
   );
 
-  const { panes, refresh: refreshPanes, create: createPane, remove: removePane } =
-    usePanes(activeCombId ?? undefined);
+  const {
+    panes,
+    refresh: refreshPanes,
+    create: createPane,
+    remove: removePane,
+  } = usePanes(activeCombId ?? undefined);
 
   const providerById = useMemo(() => {
     const map = new Map<string, Provider>();
@@ -651,7 +825,8 @@ export default function HiveWorkspacePage() {
 
   // Restore selected project from localStorage
   useEffect(() => {
-    if (selectedProjectId && projects.some((p) => p.id === selectedProjectId)) return;
+    if (selectedProjectId && projects.some((p) => p.id === selectedProjectId))
+      return;
     const stored = localStorage.getItem("dcc:hive:selectedProject");
     if (stored && projects.some((p) => p.id === stored)) {
       setSelectedProjectId(stored);
@@ -675,9 +850,14 @@ export default function HiveWorkspacePage() {
 
   // Auto-select comb or restore from localStorage
   useEffect(() => {
-    if (!selectedProjectId) { setActiveCombId(null); return; }
+    if (!selectedProjectId) {
+      setActiveCombId(null);
+      return;
+    }
     if (activeCombId && combs.some((c) => c.id === activeCombId)) return;
-    const stored = localStorage.getItem(`dcc:hive:${selectedProjectId}:activeComb`);
+    const stored = localStorage.getItem(
+      `dcc:hive:${selectedProjectId}:activeComb`,
+    );
     if (stored && combs.some((c) => c.id === stored)) {
       setActiveCombId(stored);
       return;
@@ -687,7 +867,10 @@ export default function HiveWorkspacePage() {
 
   useEffect(() => {
     if (activeCombId && selectedProjectId) {
-      localStorage.setItem(`dcc:hive:${selectedProjectId}:activeComb`, activeCombId);
+      localStorage.setItem(
+        `dcc:hive:${selectedProjectId}:activeComb`,
+        activeCombId,
+      );
     }
   }, [activeCombId, selectedProjectId]);
 
@@ -777,13 +960,18 @@ export default function HiveWorkspacePage() {
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sidebar-primary">
               <Terminal className="h-4 w-4 text-sidebar-primary-foreground" />
             </div>
-            <span className="text-sm font-semibold tracking-tight">Dev Command</span>
+            <span className="text-sm font-semibold tracking-tight">
+              Dev Command
+            </span>
           </div>
 
-          {/* Hive (Project) Selector */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="electron-no-drag flex w-full items-center justify-between rounded-md border border-sidebar-border bg-sidebar-accent/30 px-3 py-2 text-sm transition-colors hover:bg-sidebar-accent/50">
+          {/* Hive (Project) Selector — searchable */}
+          <Popover open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="electron-no-drag flex w-full items-center justify-between rounded-md border border-sidebar-border bg-sidebar-accent/30 px-3 py-2 text-sm transition-colors hover:bg-sidebar-accent/50"
+              >
                 <div className="flex items-center gap-2 min-w-0">
                   <FolderGit2 className="h-4 w-4 shrink-0 text-sidebar-foreground/70" />
                   <span className="truncate font-medium">
@@ -792,38 +980,47 @@ export default function HiveWorkspacePage() {
                 </div>
                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-sidebar-foreground/50" />
               </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
-              {projects.length === 0 ? (
-                <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-                  Nenhum projeto ainda
-                </div>
-              ) : (
-                projects
-                  .slice()
-                  .sort((a, b) => {
-                    const da = a.lastOpenedAt?.getTime() ?? a.createdAt.getTime();
-                    const db = b.lastOpenedAt?.getTime() ?? b.createdAt.getTime();
-                    return db - da;
-                  })
-                  .map((p) => (
-                    <DropdownMenuItem
-                      key={p.id}
-                      onClick={() => handleProjectChange(p.id)}
-                      className={p.id === selectedProjectId ? "bg-accent" : ""}
+            </PopoverTrigger>
+            <PopoverContent className="w-56 p-0" align="start">
+              <Command className="rounded-lg border-0 bg-popover">
+                <CommandInput placeholder="Buscar projeto…" className="h-9" />
+                <CommandList>
+                  <CommandEmpty>Nenhum projeto encontrado.</CommandEmpty>
+                  <CommandGroup heading="Projetos">
+                    {sortedProjects.map((p) => (
+                      <CommandItem
+                        key={p.id}
+                        value={`${p.name} ${p.path}`}
+                        onSelect={() => {
+                          handleProjectChange(p.id);
+                          setProjectPickerOpen(false);
+                        }}
+                        className={
+                          p.id === selectedProjectId ? "bg-accent" : ""
+                        }
+                      >
+                        <FolderGit2 className="mr-2 h-4 w-4" />
+                        <span className="truncate">{p.name}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                  <CommandSeparator />
+                  <CommandGroup>
+                    <CommandItem
+                      value="adicionar-projeto"
+                      onSelect={() => {
+                        setAddProjectOpen(true);
+                        setProjectPickerOpen(false);
+                      }}
                     >
-                      <FolderGit2 className="mr-2 h-4 w-4" />
-                      <span className="truncate">{p.name}</span>
-                    </DropdownMenuItem>
-                  ))
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setAddProjectOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Adicionar projeto
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Adicionar projeto
+                    </CommandItem>
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
 
         {/* Missões section header */}
@@ -854,7 +1051,9 @@ export default function HiveWorkspacePage() {
             </div>
           ) : combs.length === 0 ? (
             <div className="px-3 py-4 text-center">
-              <p className="text-xs text-sidebar-foreground/40">Nenhuma Missão ainda</p>
+              <p className="text-xs text-sidebar-foreground/40">
+                Nenhuma Missão ainda
+              </p>
               <Button
                 variant="ghost"
                 size="sm"
@@ -872,19 +1071,41 @@ export default function HiveWorkspacePage() {
                 return (
                   <button
                     key={comb.id}
-                    onClick={() => { setActiveCombId(comb.id); setShowSettings(false); }}
-                    className={`electron-no-drag group flex w-full flex-col rounded-lg px-3 py-2 text-left transition-colors ${
+                    type="button"
+                    onClick={() => {
+                      setActiveCombId(comb.id);
+                      setShowSettings(false);
+                    }}
+                    className={`electron-no-drag group flex w-full cursor-pointer gap-1.5 rounded-lg px-3 py-2 text-left transition-colors ${
                       isActive
                         ? "bg-sidebar-accent text-sidebar-accent-foreground"
                         : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="truncate text-sm font-medium">{comb.name}</span>
+                    <div className="min-w-0 flex-1 flex flex-col">
+                      <span className="truncate text-sm font-medium">
+                        {comb.name}
+                      </span>
+                      <div className="mt-0.5 flex items-center gap-1.5">
+                        <GitBranch className="h-3 w-3 shrink-0 text-sidebar-foreground/40" />
+                        <span className="truncate text-[11px] text-sidebar-foreground/50">
+                          {comb.branch ?? comb.baseBranch}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center gap-2">
+                        <Badge
+                          variant={getCombStatusVariant(comb.status)}
+                          className="text-[10px] px-1.5 py-0"
+                        >
+                          {getCombStatusLabel(comb)}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="shrink-0 self-start pt-0.5">
                       <Button
                         variant="ghost"
-                        size="icon"
-                        className="h-5 w-5 opacity-0 group-hover:opacity-100 text-sidebar-foreground/50 hover:text-destructive"
+                        size="icon-sm"
+                        className="h-5 w-5 min-h-5 min-w-5 p-0 opacity-0 group-hover:opacity-100 text-sidebar-foreground/50 hover:text-destructive"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleRemoveComb(comb.id);
@@ -892,20 +1113,6 @@ export default function HiveWorkspacePage() {
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-1.5">
-                      <GitBranch className="h-3 w-3 shrink-0 text-sidebar-foreground/40" />
-                      <span className="truncate text-[11px] text-sidebar-foreground/50">
-                        {comb.branch ?? comb.baseBranch}
-                      </span>
-                    </div>
-                    <div className="mt-1 flex items-center gap-2">
-                      <Badge
-                        variant={getCombStatusVariant(comb.status)}
-                        className="text-[10px] px-1.5 py-0"
-                      >
-                        {getCombStatusLabel(comb)}
-                      </Badge>
                     </div>
                   </button>
                 );
@@ -978,7 +1185,11 @@ export default function HiveWorkspacePage() {
                 </div>
                 {activeMainTab === "panes" && (
                   <>
-                    <Button variant="outline" size="sm" onClick={handleAddTerminal}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAddTerminal}
+                    >
                       <Terminal className="mr-1 h-3 w-3" />
                       Terminal
                     </Button>
@@ -1006,7 +1217,11 @@ export default function HiveWorkspacePage() {
                       Nenhum pane aberto nesta Missão
                     </p>
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={handleAddTerminal}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAddTerminal}
+                      >
                         <Terminal className="mr-1 h-3 w-3" />
                         Abrir Terminal
                       </Button>
@@ -1024,9 +1239,9 @@ export default function HiveWorkspacePage() {
                   </div>
                 ) : (
                   <div
-                    className="grid h-full gap-1 p-1"
+                    className="grid h-full min-h-0 min-w-0 gap-1 overflow-hidden p-1 [grid-auto-rows:minmax(0,1fr)]"
                     style={{
-                      gridTemplateColumns: `repeat(${Math.min(panes.length, 3)}, 1fr)`,
+                      gridTemplateColumns: `repeat(${getPaneGridColumnCount(panes.length)}, minmax(0, 1fr))`,
                     }}
                   >
                     {panes.map((pane) => (
@@ -1036,7 +1251,7 @@ export default function HiveWorkspacePage() {
                         comb={activeComb}
                         provider={
                           pane.providerId
-                            ? providerById.get(pane.providerId) ?? null
+                            ? (providerById.get(pane.providerId) ?? null)
                             : null
                         }
                         onRemove={() => handleRemovePane(pane.id)}
@@ -1045,7 +1260,11 @@ export default function HiveWorkspacePage() {
                   </div>
                 )
               ) : (
-                <CombReviewPanel comb={activeComb} onAction={() => refreshCombs()} />
+                <CombReviewPanel
+                  comb={activeComb}
+                  mainProjectPath={selectedProject?.path}
+                  onAction={() => refreshCombs()}
+                />
               )}
             </div>
           </>
@@ -1055,8 +1274,8 @@ export default function HiveWorkspacePage() {
             <div className="text-center">
               <h3 className="text-lg font-medium">Comece criando uma Missão</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Cada Missão cria uma worktree isolada onde seus agents e terminais
-                compartilham o mesmo espaço.
+                Cada Missão cria uma worktree isolada onde seus agents e
+                terminais compartilham o mesmo espaço.
               </p>
             </div>
             <Button onClick={() => setNewCombOpen(true)}>
@@ -1068,7 +1287,9 @@ export default function HiveWorkspacePage() {
           <div className="flex h-full flex-col items-center justify-center gap-4 p-8 mt-8">
             <FolderGit2 className="h-16 w-16 text-muted-foreground/20" />
             <div className="text-center">
-              <h3 className="text-lg font-medium">Selecione ou adicione um Hive</h3>
+              <h3 className="text-lg font-medium">
+                Selecione ou adicione um Hive
+              </h3>
               <p className="mt-1 text-sm text-muted-foreground">
                 Use o seletor no topo da sidebar para escolher um projeto.
               </p>
@@ -1102,7 +1323,10 @@ export default function HiveWorkspacePage() {
         />
       )}
 
-      <AddProjectDialog open={addProjectOpen} onOpenChange={setAddProjectOpen} />
+      <AddProjectDialog
+        open={addProjectOpen}
+        onOpenChange={setAddProjectOpen}
+      />
     </div>
   );
 }

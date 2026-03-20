@@ -183,7 +183,7 @@ export function EmbeddedTerminal({
   }, [command, cwd, missionId, paneId, stableArgs]);
 
   return (
-    <div className="flex h-full flex-col rounded-lg border border-border bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-background">
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
         <span className="truncate text-xs text-muted-foreground">
           {title ?? "Terminal"} — {cwd}

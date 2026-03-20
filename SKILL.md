@@ -129,22 +129,17 @@ DevCommandCenter/
 │   ├── main.tsx                  # Entry point
 │   ├── globals.css               # Estilos globais
 │   └── pages/                    # Páginas (React Router)
-│       ├── HomePage.tsx          # Página inicial (lista projetos)
-│       ├── ProjectPage.tsx       # Detalhe do projeto
-│       ├── MissionPage.tsx       # Detalhe da missão
-│       └── SettingsPage.tsx      # Configurações/Providers
+│       ├── HiveWorkspacePage.tsx # Único shell do produto (rota /)
+│       ├── SettingsPage.tsx      # Preferências (embutido no Hive)
+│       └── ActivationPage.tsx    # Licença (Electron)
 │
 ├── components/
-│   ├── app-sidebar.tsx           # Sidebar principal
 │   ├── theme-provider.tsx        # Provider de tema
 │   ├── dialogs/
 │   │   ├── add-project-dialog.tsx
 │   │   ├── add-provider-dialog.tsx
 │   │   ├── commit-dialog.tsx
-│   │   ├── edit-provider-dialog.tsx
-│   │   └── new-mission-dialog.tsx
-│   ├── layouts/
-│   │   └── main-layout.tsx       # Layout com sidebar
+│   │   └── edit-provider-dialog.tsx
 │   └── ui/                       # Componentes Radix/shadcn
 │       ├── button.tsx
 │       ├── card.tsx
@@ -637,78 +632,19 @@ providerRegistry.set("openai", new OpenAIAdapter());
 
 ---
 
-## Telas do MVP
+## Telas do produto (Hive)
 
-### 1. Tela Inicial (Projects)
+**Rota única:** `/` (outros paths redirecionam para `/`). **Electron:** `ActivationPage` até licença válida.
 
-**Rota:** `/`
+### Hive workspace (`HiveWorkspacePage`)
 
-**Funcionalidades:**
+- **Seletor de projeto (Hive)** com busca; **Adicionar projeto** (dialog + `AddProjectDialog`).
+- **Missões (Combs):** lista por projeto, worktree Git por missão; criar/remover missão.
+- **Panes:** terminais e agentes CLI no mesmo `cwd` (worktree da missão). Grid até 3 colunas.
+- **Review:** diffs, commit, push, merge na branch de destino (escolhida no dialog).
+- **Configurações:** `SettingsPage` embutido no painel principal (providers, preferências).
 
-- Lista de projetos recentes ordenados por `lastOpenedAt`
-- Busca por nome/descrição
-- Badge com contagem de missões ativas
-- Botão "Add Project" → Dialog para selecionar pasta
-- Cards com: nome, descrição, branch, última abertura
-- Dropdown menu: Open, Delete
-
-**Componentes:**
-
-- `AddProjectDialog` - seleção de pasta via `dialog:selectDirectory`
-
-### 2. Tela do Projeto
-
-**Rota:** `/project/[id]`
-
-**Funcionalidades:**
-
-- Header com nome, path, branch, provider padrão
-- Cards de estatísticas: Total, Ativas, Concluídas
-- Lista de missões ordenadas (ativas primeiro)
-- Status badges com ícones animados
-- Botão "Nova Missão" → Dialog
-
-**Componentes:**
-
-- `NewMissionDialog` - título, descrição, seleção de provider
-
-### 3. Tela da Missão
-
-**Rota:** `/project/[id]/mission/[missionId]`
-
-**Funcionalidades:**
-
-- Header com título, status badge, descrição
-- Barra de progresso (steps completados)
-- Tabs: Plan | Code | Logs
-- Botões contextuais:
-  - `created` → "Generate Plan"
-  - `plan_generated` → "Generate Code"
-  - `code_ready` → "Apply Changes"
-
-**Sub-views:**
-
-- **PlanView**: Summary + lista de steps com status
-- **CodeView**: Lista de arquivos + diffs em code blocks
-- **LogsView**: Timeline de logs com ícones por tipo
-
-### 4. Tela de Settings
-
-**Rota:** `/settings`
-
-**Funcionalidades:**
-
-- Lista de providers configurados
-- Toggle de ativo/inativo
-- Indicadores: API Key, CLI Path, Model
-- Dropdown menu: Edit, Delete
-- Botão "Add Provider" → Dialog
-- Seção "About" com versão
-
-**Componentes:**
-
-- `AddProviderDialog` - tipo, nome, API key, CLI path, config
-- `EditProviderDialog` - edição de provider existente
+**Componentes:** `AddProjectDialog`, `CommitDialog`, `EmbeddedTerminal`, `DiffCodeBlock`, etc.
 
 ---
 

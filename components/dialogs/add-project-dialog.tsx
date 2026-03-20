@@ -73,7 +73,8 @@ export function AddProjectDialog({
 
       toast.success("Projeto adicionado com sucesso");
       onOpenChange(false);
-      navigate(`/project/${project.id}`);
+      localStorage.setItem("dcc:hive:selectedProject", project.id);
+      navigate("/", { replace: true });
 
       // Reset form
       setFormData({

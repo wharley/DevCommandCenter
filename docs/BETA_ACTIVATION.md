@@ -6,12 +6,12 @@ Este documento descreve o que foi implementado na **camada de ativação beta**:
 
 ## O que foi implementado
 
-- **Gate no app:** ao abrir o Electron, se não houver ativação salva localmente, o usuário vê apenas a tela de ativação (e-mail). Após ativar (ou pular em dev), o app segue normal (Home, Projetos, Missões, Configurações).
+- **Gate no app:** ao abrir o Electron, se não houver ativação salva localmente, o usuário vê apenas a tela de ativação (e-mail). Após ativar (ou pular em dev), o app segue no **Hive** (`/`).
 - **Persistência local:** e-mail e estado de ativação ficam no SQLite (tabela `activation`), junto com o restante dos dados do app.
 - **Backend remoto:** o app chama o site (https://www.devcommandcenter.com) para registrar a ativação. O site deve expor a API descrita mais abaixo.
 - **Modo desenvolvimento:** link “Pular ativação (só desenvolvimento)” só em dev; em build de produção esse link não aparece.
 
-Nenhuma rota, layout ou fluxo existente (projetos, missões, providers) foi alterado; a ativação é uma camada **antes** do app principal.
+A ativação é uma camada **antes** do shell principal (Hive).
 
 ---
 
@@ -23,7 +23,7 @@ Nenhuma rota, layout ou fluxo existente (projetos, missões, providers) foi alte
 4. Usuário informa e-mail e clica em Ativar.
 5. O app obtém `machineId` (identificador estável da máquina), faz **POST** para `https://www.devcommandcenter.com/api/beta-activate` com `{ email, machineId }`.
 6. Se o servidor responder sucesso (`ok: true`), o app grava no SQLite (e-mail, `machineId`, ativado) e chama `onActivated()` → entra no app.
-7. Nas próximas aberturas, `getStatus()` retorna ativado e o app abre direto no fluxo normal (MainLayout + rotas).
+7. Nas próximas aberturas, `getStatus()` retorna ativado e o app abre direto no **Hive** (`/`).
 
 ---
 

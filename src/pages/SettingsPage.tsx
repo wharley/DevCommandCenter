@@ -17,13 +17,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -33,7 +26,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty } from "@/components/ui/empty";
-import { Separator } from "@/components/ui/separator";
 import { AddProviderDialog } from "@/components/dialogs/add-provider-dialog";
 import { EditProviderDialog } from "@/components/dialogs/edit-provider-dialog";
 import { useProviders } from "@/hooks/use-data";
@@ -177,273 +169,269 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col bg-background">
       {/* Header */}
-      <header className="border-b border-border bg-card px-6 py-4">
-        <div className="flex items-center justify-between">
+      <header className="shrink-0 border-b border-border bg-card/80 px-6 py-3 backdrop-blur supports-backdrop-filter:bg-card/60">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-semibold text-card-foreground">
+            <h1 className="text-lg font-semibold tracking-tight text-foreground">
               Configurações
             </h1>
-            <p className="text-sm text-muted-foreground">
-              Configure seus provedores de IA e preferências do app
+            <p className="text-xs text-muted-foreground">
+              Provedores de IA e preferências do app
             </p>
           </div>
         </div>
       </header>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-6">
-        <div className="w-full">
+      <div className="flex-1 overflow-auto px-6 py-5">
+        <div className="mx-auto max-w-3xl space-y-6">
           {/* Providers Section */}
           <section>
             {encryptionAvailable === false && (
-              <Alert variant="destructive" className="mb-4">
+              <Alert variant="destructive" className="mb-4 py-3">
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>Criptografia indisponível</AlertTitle>
-                <AlertDescription>
+                <AlertDescription className="text-xs">
                   Neste ambiente, as chaves de API serão armazenadas em texto plano.
                   Recomenda-se não usar em máquinas compartilhadas.
                 </AlertDescription>
               </Alert>
             )}
 
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold">Provedores de IA</h2>
-                <p className="text-sm text-muted-foreground">
-                  Gerencie seus agentes de código e chaves de API
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  Provedores de IA
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Agentes de código e chaves de API
                 </p>
               </div>
               <Button
+                size="sm"
                 onClick={() => setAddDialogOpen(true)}
                 className="shrink-0"
               >
-                <Plus className="mr-2 h-4 w-4" />
-                Adicionar provedor
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                Adicionar
               </Button>
             </div>
 
             {providers.length === 0 ? (
-              <Empty>
-                <Empty.Icon>
-                  <Bot className="h-10 w-10" />
-                </Empty.Icon>
-                <Empty.Title>Nenhum provedor configurado</Empty.Title>
-                <Empty.Description>
-                  Adicione seu primeiro provedor de IA para criar missões de
-                  código.
-                </Empty.Description>
-                <Empty.Actions>
-                  <Button onClick={() => setAddDialogOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Adicionar provedor
-                  </Button>
-                </Empty.Actions>
-              </Empty>
+              <div className="overflow-hidden rounded-xl border border-dashed border-border bg-muted/20 px-6 py-10">
+                <Empty>
+                  <Empty.Icon>
+                    <Bot className="h-8 w-8 opacity-80" />
+                  </Empty.Icon>
+                  <Empty.Title className="text-base">
+                    Nenhum provedor configurado
+                  </Empty.Title>
+                  <Empty.Description className="text-sm">
+                    Adicione seu primeiro provedor de IA para criar missões de
+                    código.
+                  </Empty.Description>
+                  <Empty.Actions>
+                    <Button size="sm" onClick={() => setAddDialogOpen(true)}>
+                      <Plus className="mr-1.5 h-3.5 w-3.5" />
+                      Adicionar provedor
+                    </Button>
+                  </Empty.Actions>
+                </Empty>
+              </div>
             ) : (
-              <div className="space-y-4">
-                {providers.map((provider) => {
+              <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                {providers.map((provider, index) => {
                   const config =
                     providerTypeConfig[provider.type] ??
                     providerTypeConfig.custom;
                   const Icon = config.icon;
 
                   return (
-                    <Card key={provider.id}>
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-start gap-4">
-                            <div
-                              className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                                provider.isActive ? "bg-primary/10" : "bg-muted"
-                              }`}
-                            >
-                              <Icon
-                                className={`h-5 w-5 ${
-                                  provider.isActive
-                                    ? "text-primary"
-                                    : "text-muted-foreground"
-                                }`}
-                              />
-                            </div>
-                            <div>
-                              <CardTitle className="text-base flex items-center gap-2">
-                                {provider.name}
-                                {!provider.isActive && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-muted-foreground"
-                                  >
-                                    Desativado
-                                  </Badge>
-                                )}
-                              </CardTitle>
-                              <CardDescription>
-                                {config.label} - {config.description}
-                              </CardDescription>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <Switch
-                              checked={provider.isActive}
-                              onCheckedChange={() =>
-                                handleToggleActive(provider)
-                              }
-                            />
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                >
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  onClick={() => setEditingProvider(provider)}
-                                >
-                                  <Edit className="mr-2 h-4 w-4" />
-                                  Editar
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  className="text-destructive focus:text-destructive"
-                                  onClick={() => remove(provider.id)}
-                                >
-                                  <Trash2 className="mr-2 h-4 w-4" />
-                                  Excluir
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
+                    <div
+                      key={provider.id}
+                      className={`border-border px-3 py-2.5 transition-colors hover:bg-muted/40 sm:px-4 ${
+                        index > 0 ? "border-t" : ""
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div
+                          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
+                            provider.isActive ? "bg-primary/10" : "bg-muted"
+                          }`}
+                        >
+                          <Icon
+                            className={`h-4 w-4 ${
+                              provider.isActive
+                                ? "text-primary"
+                                : "text-muted-foreground"
+                            }`}
+                          />
                         </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="flex flex-wrap gap-4 text-sm">
-                          {(provider.hasApiKey ?? provider.apiKey) && (
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <Key className="h-4 w-4" />
-                              <span>Chave de API configurada</span>
-                              <Check className="h-4 w-4 text-green-500" />
-                            </div>
-                          )}
-                          {provider.cliPath && (
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <Terminal className="h-4 w-4" />
-                              <code className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                                {provider.cliPath}
-                              </code>
-                            </div>
-                          )}
-                          {(provider.config?.model ||
-                            defaultModelLabelByType[provider.type]) && (
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <Bot className="h-4 w-4" />
-                              <span>
-                                Modelo:{" "}
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-medium leading-none">
+                              {provider.name}
+                            </span>
+                            {!provider.isActive && (
+                              <Badge
+                                variant="outline"
+                                className="h-5 px-1.5 text-[10px] text-muted-foreground"
+                              >
+                                Desativado
+                              </Badge>
+                            )}
+                            <span className="text-[11px] text-muted-foreground">
+                              {config.label}
+                            </span>
+                          </div>
+                          <p className="line-clamp-1 text-[11px] text-muted-foreground/90">
+                            {config.description}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                            {(provider.hasApiKey ?? provider.apiKey) && (
+                              <span className="inline-flex items-center gap-1">
+                                <Key className="h-3 w-3" />
+                                API ok
+                                <Check className="h-3 w-3 text-green-600 dark:text-green-500" />
+                              </span>
+                            )}
+                            {provider.cliPath && (
+                              <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+                                <Terminal className="h-3 w-3 shrink-0" />
+                                <code className="truncate rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
+                                  {provider.cliPath}
+                                </code>
+                              </span>
+                            )}
+                            {(provider.config?.model ||
+                              defaultModelLabelByType[provider.type]) && (
+                              <span className="inline-flex items-center gap-1">
+                                <Bot className="h-3 w-3" />
                                 {provider.config?.model ||
                                   defaultModelLabelByType[provider.type]}
                               </span>
-                            </div>
-                          )}
-                          {!provider.hasApiKey && !provider.apiKey && !provider.cliPath && (
-                            <div className="flex items-center gap-2 text-amber-500">
-                              <AlertCircle className="h-4 w-4" />
-                              <span>Não totalmente configurado</span>
-                            </div>
-                          )}
+                            )}
+                            {!provider.hasApiKey &&
+                              !provider.apiKey &&
+                              !provider.cliPath && (
+                                <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-500">
+                                  <AlertCircle className="h-3 w-3" />
+                                  Incompleto
+                                </span>
+                              )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground/70">
+                            Adicionado{" "}
+                            {formatDistanceToNow(provider.createdAt, {
+                              addSuffix: true,
+                              locale: ptBR,
+                            })}
+                          </p>
                         </div>
-                        <Separator className="my-3" />
-                        <p className="text-xs text-muted-foreground">
-                          Adicionado{" "}
-                          {formatDistanceToNow(provider.createdAt, {
-                            addSuffix: true,
-                            locale: ptBR,
-                          })}
-                        </p>
-                      </CardContent>
-                    </Card>
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          <Switch
+                            checked={provider.isActive}
+                            onCheckedChange={() =>
+                              handleToggleActive(provider)
+                            }
+                          />
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() => setEditingProvider(provider)}
+                              >
+                                <Edit className="mr-2 h-4 w-4" />
+                                Editar
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => remove(provider.id)}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Excluir
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
             )}
           </section>
 
-          {/* Notificações nativas */}
-          <section className="mt-8">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">
-                  Notificações nativas
-                </CardTitle>
-                <CardDescription>
-                  Exibir notificações do sistema quando uma missão terminar uma
-                  etapa (plano pronto, código pronto, aplicado ou falha).
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Ativar notificações</span>
-                  <Switch
-                    checked={notificationsEnabled}
-                    onCheckedChange={(checked) => {
-                      setNotificationsEnabled(checked);
-                      setNotificationsEnabledState(checked);
-                    }}
-                  />
+          {/* Notificações + Atualizações — painel único estilo lista */}
+          <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            <div
+              className={`flex items-center justify-between gap-4 px-4 py-3 ${
+                hasAppUpdateAPI ? "border-b border-border" : ""
+              }`}
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Notificações nativas</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Avisos do sistema ao concluir etapas da missão
+                </p>
+              </div>
+              <Switch
+                checked={notificationsEnabled}
+                onCheckedChange={(checked) => {
+                  setNotificationsEnabled(checked);
+                  setNotificationsEnabledState(checked);
+                }}
+              />
+            </div>
+            {hasAppUpdateAPI && (
+              <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">Atualizações</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Versão {appVersion}
+                  </p>
                 </div>
-              </CardContent>
-            </Card>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={handleCheckForUpdates}
+                  disabled={checkingUpdate}
+                >
+                  {checkingUpdate ? (
+                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                  )}
+                  Verificar
+                </Button>
+              </div>
+            )}
           </section>
-
-          {/* Atualizações */}
-          {hasAppUpdateAPI && (
-            <section className="mt-8">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Atualizações</CardTitle>
-                  <CardDescription>
-                    Versão instalada: {appVersion}. Verifique se há uma nova
-                    versão disponível.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCheckForUpdates}
-                    disabled={checkingUpdate}
-                  >
-                    {checkingUpdate ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
-                    Verificar atualizações
-                  </Button>
-                </CardContent>
-              </Card>
-            </section>
-          )}
         </div>
       </div>
 
       {/* Footer - Sobre */}
-      <footer className="border-t border-border bg-card px-6 py-4 mt-auto">
-        <div className="max-w-3xl flex items-center gap-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary">
-            <Terminal className="h-5 w-5 text-primary-foreground" />
+      <footer className="mt-auto shrink-0 border-t border-border bg-card/50 px-6 py-3">
+        <div className="mx-auto flex max-w-3xl items-center gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
+            <Terminal className="h-4 w-4 text-primary-foreground" />
           </div>
           <div className="min-w-0">
-            <h3 className="font-semibold text-sm">Dev Command Center</h3>
-            <p className="text-xs text-muted-foreground truncate">
-              Versão {appVersion} — Seu hub para agentes de código com IA.
-              Conecte vários provedores como Claude Code e OpenAI para criar e
-              gerenciar missões de código com facilidade.
+            <h3 className="text-xs font-semibold">Dev Command Center</h3>
+            <p className="line-clamp-2 text-[11px] text-muted-foreground">
+              Versão {appVersion} — Hub para agentes de código com IA e missões.
             </p>
           </div>
         </div>

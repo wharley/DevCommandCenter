@@ -238,7 +238,10 @@ declare global {
           success: boolean;
           error?: string;
         }>;
-        mergeIntoMain: (combId: string) => Promise<{
+        mergeIntoMain: (
+          combId: string,
+          targetBranch?: string
+        ) => Promise<{
           success: boolean;
           error?: string;
         }>;

@@ -1388,16 +1388,27 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     return result;
   });
 
-  ipcMain.handle("comb:mergeIntoMain", async (_event, combId: string) => {
+  ipcMain.handle(
+    "comb:mergeIntoMain",
+    async (_event, combId: string, targetBranchParam?: string) => {
     const comb = db.combs.findById(combId);
     if (!comb?.worktreePath || !comb?.branch)
       return { success: false, error: "Comb has no worktree" };
     const project = db.projects.findById(comb.projectId);
     if (!project) return { success: false, error: "Project not found" };
     const gitService = new GitService(project.path);
-    let targetBranch = await gitService.getCurrentBranch();
-    if (!targetBranch || targetBranch === "HEAD" || targetBranch === "unknown") {
-      targetBranch = await gitService.getDefaultBranch().catch(() => "main");
+    const explicit =
+      typeof targetBranchParam === "string" && targetBranchParam.trim().length > 0
+        ? targetBranchParam.trim()
+        : "";
+    let targetBranch: string;
+    if (explicit) {
+      targetBranch = explicit;
+    } else {
+      targetBranch = await gitService.getCurrentBranch();
+      if (!targetBranch || targetBranch === "HEAD" || targetBranch === "unknown") {
+        targetBranch = await gitService.getDefaultBranch().catch(() => "main");
+      }
     }
     const result = await mergeWorktreeIntoMain(
       project.path,
