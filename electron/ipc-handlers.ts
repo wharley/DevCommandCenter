@@ -932,6 +932,73 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     },
   );
 
+  /** Diffs da aba Review para qualquer raiz Git (worktree ou checkout principal). */
+  ipcMain.handle("git:getReviewDiffs", async (_event, worktreePath: string) => {
+    try {
+      const git = new GitService(worktreePath);
+      const { files, summary } = await git.getReviewPanelDiffs();
+      return { success: true, files, summary };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        error: message,
+        files: [] as Array<{ path: string; status: string; diff: string }>,
+        summary: null as {
+          changedFiles: number;
+          insertions: number;
+          deletions: number;
+        } | null,
+      };
+    }
+  });
+
+  /** Aplica patch do worktree no repositório principal (mesmo que `comb:applyPatch`, paths explícitos). */
+  ipcMain.handle(
+    "git:applyWorktreePatch",
+    async (
+      _event,
+      mainProjectPath: string,
+      worktreePath: string,
+      targetBranch: string,
+      options?: { includeFiles?: string[]; commit?: boolean; message?: string },
+    ) => {
+      return applyMissionPatchService(mainProjectPath, worktreePath, targetBranch, {
+        includeFiles: options?.includeFiles ?? [],
+        commit: options?.commit ?? false,
+        message: options?.message ?? "Apply worktree patch",
+      });
+    },
+  );
+
+  /** Uma ida ao main: diffs para várias raízes Git (multi-target Review). */
+  ipcMain.handle("review:getDiffsBundle", async (_event, worktreePaths: string[]) => {
+    const paths = Array.isArray(worktreePaths) ? worktreePaths : [];
+    const results = await Promise.all(
+      paths.map(async (worktreePath) => {
+        try {
+          const git = new GitService(worktreePath);
+          const { files, summary } = await git.getReviewPanelDiffs();
+          return { worktreePath, success: true as const, files, summary };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return {
+            worktreePath,
+            success: false as const,
+            error: message,
+            files: [] as Array<{ path: string; status: string; diff: string }>,
+            summary: null as {
+              changedFiles: number;
+              insertions: number;
+              deletions: number;
+            } | null,
+          };
+        }
+      }),
+    );
+    return results;
+  });
+
   // ==========================================
   // Worktree (por missão, pipeline paralelo)
   // ==========================================
@@ -1270,7 +1337,14 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     async (
       event,
       paneId: string,
-      options: { cwd: string; command?: string; args?: string[]; cols?: number; rows?: number }
+      options: {
+        cwd: string;
+        command?: string;
+        args?: string[];
+        cols?: number;
+        rows?: number;
+        restart?: boolean;
+      }
     ): Promise<{
       ptyId?: string;
       error?: string;
@@ -1284,6 +1358,7 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
           args: options.args ?? [],
           cols: options.cols ?? 80,
           rows: options.rows ?? 24,
+          restart: options.restart,
         },
         event.sender
       );
@@ -1306,6 +1381,33 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     "terminal:killByPaneId",
     (_event, paneId: string): { ok: boolean } => {
       return { ok: killPtyByPaneId(paneId) };
+    }
+  );
+
+  /** Panes com PTY em execução (status running) por projeto, para indicadores na sidebar. */
+  ipcMain.handle(
+    "terminal:getProjectActivity",
+    (
+      _event,
+      projectId: string
+    ): {
+      totalRunningPanes: number;
+      runningPanesByCombId: Record<string, number>;
+    } => {
+      const runningPanesByCombId: Record<string, number> = {};
+      let totalRunningPanes = 0;
+      const combs = db.combs.findByProject(projectId);
+      for (const comb of combs) {
+        const panes = db.panes.findByComb(comb.id);
+        let n = 0;
+        for (const pane of panes) {
+          const session = getPaneSession(pane.id);
+          if (session?.status === "running") n++;
+        }
+        if (n > 0) runningPanesByCombId[comb.id] = n;
+        totalRunningPanes += n;
+      }
+      return { totalRunningPanes, runningPanesByCombId };
     }
   );
 

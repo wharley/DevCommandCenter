@@ -6,15 +6,91 @@
  * Ver: docs/WORKTREE_POLICY.md e docs/PLAN_REMAINING_IMPLEMENTATION.md
  */
 
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
 import { GitService } from "./git-service";
+import type { GitStatus } from "./types";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+
+/** Mensagem quando o repositório principal tem alterações locais (merge/checkout/apply). */
+function formatMainRepoDirtyError(status: GitStatus): string {
+  const all = [
+    ...new Set([
+      ...status.staged,
+      ...status.unstaged,
+      ...status.untracked,
+    ]),
+  ];
+  const preview = all.slice(0, 12);
+  const list =
+    preview.length > 0
+      ? ` Ex.: ${preview.join(", ")}${all.length > 12 ? "…" : "."}`
+      : "";
+  return (
+    "O repositório principal tem alterações não guardadas (commit, stash ou descarte antes de continuar)." +
+    list
+  );
+}
+
+function looksLikeDirtyTreeGitError(message: string): boolean {
+  return (
+    /local changes would be overwritten/i.test(message) ||
+    /Please commit your changes or stash/i.test(message) ||
+    /Your local changes to the following files would be overwritten/i.test(
+      message,
+    )
+  );
+}
+
+function translateMainRepoGitError(raw: string): string {
+  const t = raw.trim();
+  if (looksLikeDirtyTreeGitError(t)) {
+    return (
+      "O repositório principal tem alterações que impedem mudar de branch ou aplicar o patch. " +
+      "Faça commit, stash ou descarte no repositório principal e tente de novo."
+    );
+  }
+  return raw;
+}
+
+/**
+ * Aplica alterações copiando paths do worktree para o repo principal (fallback quando `git apply` falha).
+ * Remoções: se o ficheiro não existe no worktree, remove no destino se existir.
+ */
+async function copyWorktreePathsToProject(
+  worktreeRoot: string,
+  projectRoot: string,
+  relativePaths: string[],
+): Promise<{ success: boolean; error?: string }> {
+  for (const rel of relativePaths) {
+    const src = path.join(worktreeRoot, rel);
+    const dst = path.join(projectRoot, rel);
+    try {
+      if (fs.existsSync(src)) {
+        const stat = await fs.promises.stat(src);
+        if (stat.isDirectory()) {
+          continue;
+        }
+        await fs.promises.mkdir(path.dirname(dst), { recursive: true });
+        await fs.promises.copyFile(src, dst);
+      } else if (fs.existsSync(dst)) {
+        await fs.promises.unlink(dst);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, error: msg };
+    }
+  }
+  return { success: true };
+}
 
 /** Diretório relativo ao projeto onde as worktrees são criadas (estilo dmux) */
 export const WORKTREE_RELATIVE_DIR = ".dcc/worktrees";
@@ -252,6 +328,12 @@ export async function mergeWorktreeIntoMain(
   const resolvedProject = path.resolve(projectPath);
 
   try {
+    const mainGit = new GitService(resolvedProject);
+    const mainStatus = await mainGit.getStatus();
+    if (mainStatus.isDirty) {
+      return { success: false, error: formatMainRepoDirtyError(mainStatus) };
+    }
+
     await execAsync(`git checkout "${mainBranch}"`, { cwd: resolvedProject });
     await execAsync(`git merge "${worktreeBranch}" --no-edit`, {
       cwd: resolvedProject,
@@ -264,7 +346,7 @@ export async function mergeWorktreeIntoMain(
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : String(err);
-    return { success: false, error: message };
+    return { success: false, error: translateMainRepoGitError(message) };
   }
 }
 
@@ -291,7 +373,8 @@ export interface ApplyMissionPatchOptions {
 
 /**
  * Gera patch do worktree (git diff HEAD) e aplica no repo principal na targetBranch.
- * Opcionalmente faz commit. Retorna apply_failed em error quando git apply falha.
+ * Opcionalmente faz commit. Usa diff único --binary para tracked + untracked; se `git apply`
+ * falhar, copia ficheiros do worktree para o projeto principal.
  */
 export async function applyMissionPatch(
   projectPath: string,
@@ -311,18 +394,26 @@ export async function applyMissionPatch(
     const pathsToInclude =
       includeFiles.length > 0 ? includeFiles : allChanged;
 
+    const trackedPaths = pathsToInclude.filter((p) => !untrackedSet.has(p));
+    const untrackedPaths = pathsToInclude.filter((p) => untrackedSet.has(p));
+
     const parts: string[] = [];
-    for (const filePath of pathsToInclude) {
-      const isUntracked = untrackedSet.has(filePath);
-      const chunk = isUntracked
-        ? await git.getFileDiffUntracked(filePath)
-        : await git.getFileDiffHead(filePath);
+    const trackedChunk = await git.getTrackedDiffBinaryVsHead(trackedPaths);
+    if (trackedChunk.trim()) {
+      parts.push(trackedChunk.trimEnd());
+    }
+    for (const filePath of untrackedPaths) {
+      const chunk = await git.getFileDiffUntracked(filePath);
       if (chunk.trim()) {
         parts.push(chunk.trimEnd());
       }
     }
-    const patchContent = parts.join("\n");
-    if (!patchContent || !patchContent.trim()) {
+
+    let patchContent = parts.join("\n");
+    if (patchContent.length > 0 && !patchContent.endsWith("\n")) {
+      patchContent += "\n";
+    }
+    if (!patchContent.trim()) {
       return { success: false, error: "Nenhuma alteração para aplicar." };
     }
 
@@ -332,14 +423,60 @@ export async function applyMissionPatch(
     );
     await fs.promises.writeFile(tmpFile, patchContent, "utf-8");
 
+    const mainRepoGit = new GitService(resolvedProject);
+    const mainStatus = await mainRepoGit.getStatus();
+    if (mainStatus.isDirty) {
+      await fs.promises.unlink(tmpFile).catch(() => {});
+      return { success: false, error: formatMainRepoDirtyError(mainStatus) };
+    }
+
     try {
-      await execAsync(`git checkout "${targetBranch}"`, { cwd: resolvedProject });
-      await execAsync(`git apply --check "${tmpFile}"`, { cwd: resolvedProject });
-      await execAsync(`git apply "${tmpFile}"`, { cwd: resolvedProject });
+      await execFileAsync("git", ["checkout", targetBranch], {
+        cwd: resolvedProject,
+        env: gitEnv,
+      });
+    } catch (checkoutErr: unknown) {
+      await fs.promises.unlink(tmpFile).catch(() => {});
+      const raw =
+        checkoutErr instanceof Error ? checkoutErr.message : String(checkoutErr);
+      return { success: false, error: translateMainRepoGitError(raw) };
+    }
+
+    try {
+      await execFileAsync("git", ["apply", "--check", tmpFile], {
+        cwd: resolvedProject,
+        env: gitEnv,
+      });
+      await execFileAsync("git", ["apply", tmpFile], {
+        cwd: resolvedProject,
+        env: gitEnv,
+      });
     } catch (applyErr: unknown) {
       const errMsg = applyErr instanceof Error ? applyErr.message : String(applyErr);
-      await fs.promises.unlink(tmpFile).catch(() => {});
-      return { success: false, error: errMsg, applyFailed: true };
+      const stderr =
+        applyErr &&
+        typeof applyErr === "object" &&
+        "stderr" in applyErr
+          ? String((applyErr as { stderr?: string }).stderr ?? "")
+          : "";
+      const combinedErr = (stderr.trim() || errMsg).trim();
+
+      const copyResult = await copyWorktreePathsToProject(
+        resolvedWorktree,
+        resolvedProject,
+        pathsToInclude,
+      );
+      if (!copyResult.success) {
+        return {
+          success: false,
+          error: `${combinedErr} (fallback cópia: ${copyResult.error})`,
+          applyFailed: true,
+        };
+      }
+      console.log(
+        "[applyMissionPatch] git apply failed; applied changes via file copy fallback",
+        combinedErr.slice(0, 200),
+      );
     } finally {
       await fs.promises.unlink(tmpFile).catch(() => {});
     }
@@ -368,6 +505,6 @@ export async function applyMissionPatch(
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : String(err);
-    return { success: false, error: message };
+    return { success: false, error: translateMainRepoGitError(message) };
   }
 }

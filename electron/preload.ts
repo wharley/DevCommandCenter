@@ -108,6 +108,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       args?: string[];
       cols?: number;
       rows?: number;
+      restart?: boolean;
     }) =>
       invoke("terminal:getOrCreateForPane", paneId, options) as Promise<{
         ptyId?: string;
@@ -120,6 +121,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
       >,
     killByPaneId: (paneId: string) =>
       invoke("terminal:killByPaneId", paneId) as Promise<{ ok: boolean }>,
+    getProjectActivity: (projectId: string) =>
+      invoke("terminal:getProjectActivity", projectId) as Promise<{
+        totalRunningPanes: number;
+        runningPanesByCombId: Record<string, number>;
+      }>,
     onData: (callback: (ptyId: string, data: string) => void) => {
       const fn = (_: unknown, ptyId: string, data: string) =>
         callback(ptyId, data);
@@ -131,6 +137,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
         callback(ptyId, code);
       ipcRenderer.on("terminal:exit", fn);
       return () => ipcRenderer.removeListener("terminal:exit", fn);
+    },
+    onAttention: (
+      callback: (payload: import("../lib/terminal/attention-types").TerminalAttentionPayload) => void,
+    ) => {
+      const fn = (
+        _: unknown,
+        payload: import("../lib/terminal/attention-types").TerminalAttentionPayload,
+      ) => callback(payload);
+      ipcRenderer.on("terminal:attention", fn);
+      return () => ipcRenderer.removeListener("terminal:attention", fn);
     },
   },
 
@@ -270,6 +286,51 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ) => invoke("git:reset", projectPath, ref ?? "HEAD"),
     getWorktreeInfo: (projectPath: string) =>
       invoke("git:getWorktreeInfo", projectPath),
+    getReviewDiffs: (worktreePath: string) =>
+      invoke("git:getReviewDiffs", worktreePath) as Promise<{
+        success: boolean;
+        error?: string;
+        files: Array<{ path: string; status: string; diff: string }>;
+        summary: {
+          changedFiles: number;
+          insertions: number;
+          deletions: number;
+        } | null;
+      }>,
+    applyWorktreePatch: (
+      mainProjectPath: string,
+      worktreePath: string,
+      targetBranch: string,
+      options?: {
+        includeFiles?: string[];
+        commit?: boolean;
+        message?: string;
+      },
+    ) =>
+      invoke(
+        "git:applyWorktreePatch",
+        mainProjectPath,
+        worktreePath,
+        targetBranch,
+        options,
+      ) as Promise<{ success: boolean; error?: string; applyFailed?: boolean }>,
+  },
+
+  review: {
+    getDiffsBundle: (worktreePaths: string[]) =>
+      invoke("review:getDiffsBundle", worktreePaths) as Promise<
+        Array<{
+          worktreePath: string;
+          success: boolean;
+          error?: string;
+          files: Array<{ path: string; status: string; diff: string }>;
+          summary: {
+            changedFiles: number;
+            insertions: number;
+            deletions: number;
+          } | null;
+        }>
+      >,
   },
 });
 

@@ -10,6 +10,11 @@
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["./**/*.ts", "./services/**/*.ts", "../lib/database/**/*.ts"],
+  "include": [
+    "./**/*.ts",
+    "./services/**/*.ts",
+    "../lib/database/**/*.ts",
+    "../lib/terminal/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }

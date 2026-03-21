@@ -3,6 +3,7 @@ import type {
   Comb,
   CombStatus,
   CreateCombDTO,
+  ReviewTarget,
   UpdateCombDTO,
   CombsQueryOptions,
 } from '../types';
@@ -15,10 +16,22 @@ interface CombRow {
   base_branch: string;
   branch: string | null;
   worktree_path: string | null;
+  review_targets: string | null;
   status: string;
   last_opened_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+function parseReviewTargetsJson(raw: string | null | undefined): ReviewTarget[] | null {
+  if (!raw?.trim()) return null;
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (Array.isArray(v)) return v as ReviewTarget[];
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 function rowToComb(row: CombRow): Comb {
@@ -30,6 +43,7 @@ function rowToComb(row: CombRow): Comb {
     baseBranch: row.base_branch,
     branch: row.branch ?? null,
     worktreePath: row.worktree_path ?? null,
+    reviewTargets: parseReviewTargetsJson(row.review_targets),
     status: row.status as CombStatus,
     lastOpenedAt: row.last_opened_at ? new Date(row.last_opened_at) : null,
     createdAt: new Date(row.created_at),
@@ -111,8 +125,8 @@ export const CombsRepository = {
     const now = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO combs (id, project_id, name, description, base_branch, status, last_opened_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
+      INSERT INTO combs (id, project_id, name, description, base_branch, review_targets, status, last_opened_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, NULL, 'active', ?, ?, ?)
     `).run(
       id,
       data.projectId,
@@ -147,6 +161,14 @@ export const CombsRepository = {
     if (data.worktreePath !== undefined) {
       updates.push('worktree_path = ?');
       values.push(data.worktreePath);
+    }
+    if (data.reviewTargets !== undefined) {
+      updates.push('review_targets = ?');
+      values.push(
+        data.reviewTargets == null || data.reviewTargets.length === 0
+          ? null
+          : JSON.stringify(data.reviewTargets),
+      );
     }
     if (data.status !== undefined) {
       updates.push('status = ?');

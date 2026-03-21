@@ -6,6 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "xterm/css/xterm.css";
 import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
+import type { PaneSession } from "@/lib/database/types";
 
 export interface EmbeddedTerminalProps {
   cwd: string;
@@ -27,6 +28,12 @@ export interface EmbeddedTerminalProps {
   paneId?: string;
 }
 
+type PaneAttachResult = {
+  ptyId?: string;
+  error?: string;
+  session?: PaneSession | null;
+};
+
 export function EmbeddedTerminal({
   cwd,
   command,
@@ -44,12 +51,58 @@ export function EmbeddedTerminal({
   const onExitRef = useRef<typeof onExit>(onExit);
   const [error, setError] = useState<string | null>(null);
   const [exited, setExited] = useState<number | null>(null);
+  /** Pane agent: mostrar reinício quando o processo terminou ou só há sessão encerrada no main. */
+  const [agentCanRestart, setAgentCanRestart] = useState(false);
   const argsKey = useMemo(() => JSON.stringify(args), [args]);
   const stableArgs = useMemo(() => args, [argsKey]);
 
   useEffect(() => {
     onExitRef.current = onExit;
   }, [onExit]);
+
+  const applyPaneAttachResult = useCallback(
+    (result: PaneAttachResult, term: XTerm) => {
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      setError(null);
+      if (result.ptyId) {
+        ptyIdRef.current = result.ptyId;
+        setAgentCanRestart(false);
+        setExited(null);
+      } else if (result.session?.status === "exited" && command) {
+        setAgentCanRestart(true);
+      }
+      if (result.session?.outputPreview) {
+        term.write(result.session.outputPreview);
+      }
+      if (
+        !result.ptyId &&
+        typeof result.session?.lastExitCode === "number"
+      ) {
+        setExited(result.session.lastExitCode);
+      }
+    },
+    [command],
+  );
+
+  const handleRestartAgent = useCallback(() => {
+    const api = window.electronAPI?.terminal;
+    const term = xtermRef.current;
+    if (!api?.getOrCreateForPane || !paneId || !term) return;
+    term.reset();
+    void api
+      .getOrCreateForPane(paneId, {
+        cwd,
+        command,
+        args: stableArgs,
+        cols: term.cols,
+        rows: term.rows,
+        restart: true,
+      })
+      .then((result) => applyPaneAttachResult(result, term));
+  }, [applyPaneAttachResult, paneId, cwd, command, stableArgs]);
 
   const killPty = useCallback(() => {
     const id = ptyIdRef.current;
@@ -102,6 +155,7 @@ export function EmbeddedTerminal({
       if (id === ptyIdRef.current) {
         ptyIdRef.current = null;
         setExited(code);
+        if (paneId && command) setAgentCanRestart(true);
         onExitRef.current?.(code);
       }
     });
@@ -120,19 +174,9 @@ export function EmbeddedTerminal({
     };
 
     if (paneId && api.getOrCreateForPane) {
-      api.getOrCreateForPane(paneId, spawnOptions).then((result) => {
-        if (result.error) {
-          setError(result.error);
-          return;
-        }
-        if (result.ptyId) ptyIdRef.current = result.ptyId;
-        if (result.session?.outputPreview) {
-          term.write(result.session.outputPreview);
-        }
-        if (typeof result.session?.lastExitCode === "number") {
-          setExited(result.session.lastExitCode);
-        }
-      });
+      void api
+        .getOrCreateForPane(paneId, spawnOptions)
+        .then((result) => applyPaneAttachResult(result, term));
     } else if (missionId && api.getOrCreate) {
       api.getOrCreate(missionId, spawnOptions).then((result) => {
         if (result.error) {
@@ -180,7 +224,14 @@ export function EmbeddedTerminal({
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [command, cwd, missionId, paneId, stableArgs]);
+  }, [
+    applyPaneAttachResult,
+    command,
+    cwd,
+    missionId,
+    paneId,
+    stableArgs,
+  ]);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-background">
@@ -189,6 +240,17 @@ export function EmbeddedTerminal({
           {title ?? "Terminal"} — {cwd}
         </span>
         <div className="flex items-center gap-1">
+          {paneId && command && agentCanRestart && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleRestartAgent}
+            >
+              Reiniciar agente
+            </Button>
+          )}
           {exited !== null && (
             <span className="text-xs text-muted-foreground">
               (saiu com código {exited})

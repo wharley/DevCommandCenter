@@ -241,6 +241,19 @@ export type PaneType = "term" | "agent";
 
 export type PaneStatus = "idle" | "running" | "exited";
 
+/**
+ * Target genérico de revisão multi-repo na mesma Missão (Comb).
+ * O target primário usa a worktree da Missão (`sourceCombId` = id do comb).
+ * Targets extras referenciam outros projetos (checkout local em `project.path`).
+ */
+export interface ReviewTarget {
+  id: string;
+  label: string;
+  projectId: string;
+  /** Quando igual ao id do comb atual, diffs/patch usam a worktree da Missão. */
+  sourceCombId?: string | null;
+}
+
 export interface Comb {
   id: string;
   projectId: string;
@@ -249,6 +262,8 @@ export interface Comb {
   baseBranch: string;
   branch?: string | null;
   worktreePath?: string | null;
+  /** JSON: repos adicionais para revisão na mesma aba (além do projeto primário). */
+  reviewTargets?: ReviewTarget[] | null;
   status: CombStatus;
   lastOpenedAt?: Date | null;
   createdAt: Date;
@@ -407,6 +422,7 @@ export interface UpdateCombDTO {
   description?: string | null;
   branch?: string | null;
   worktreePath?: string | null;
+  reviewTargets?: ReviewTarget[] | null;
   status?: CombStatus;
   lastOpenedAt?: Date;
 }

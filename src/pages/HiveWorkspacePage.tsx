@@ -2,9 +2,11 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Activity,
   Bot,
   ChartNoAxesColumn,
   ChevronDown,
+  CopyPlus,
   FolderGit2,
   GitBranch,
   Loader2,
@@ -68,8 +70,16 @@ import {
   canAccessDashboard,
   getDashboardAccessContext,
 } from "@/lib/dashboard/access";
+import { useTerminalProjectActivity } from "@/hooks/use-terminal-project-activity";
+import { useTerminalAttentionToasts } from "@/hooks/use-terminal-attention-toasts";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { shouldSuggestStoryRef, recordProductSignal } from "@/lib/product/signals";
 import { toast } from "sonner";
 
 const CLI_PROVIDER_TYPES = [
@@ -164,7 +174,13 @@ function NewCombDialog({
   const [baseBranch, setBaseBranch] = useState("");
   const [localBranches, setLocalBranches] = useState<string[]>([]);
   const [isCreating, setIsCreating] = useState(false);
+  const [suggestStoryRef, setSuggestStoryRef] = useState(false);
   const { create } = useCombs(projectId);
+
+  useEffect(() => {
+    if (!open) return;
+    setSuggestStoryRef(shouldSuggestStoryRef());
+  }, [open]);
 
   useEffect(() => {
     if (!open || !projectPath) return;
@@ -215,10 +231,18 @@ function NewCombDialog({
         <DialogHeader>
           <DialogTitle>Nova Missão</DialogTitle>
           <DialogDescription>
-            Cria um workspace isolado (worktree) para uma feature ou tarefa.
+            Cria um workspace isolado (worktree) para uma história de negócio.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
+          <div className="rounded-md border border-border bg-muted/30 p-2">
+            <p className="text-xs text-muted-foreground">
+              Padrão recomendado:{" "}
+              <span className="font-medium">1 Missão por história</span>. Se
+              precisar mexer em mais de um repo, adicione repositórios extras
+              na aba Review.
+            </p>
+          </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Nome</label>
             <Input
@@ -260,6 +284,14 @@ function NewCombDialog({
               />
             )}
           </div>
+          {suggestStoryRef ? (
+            <p className="text-xs text-muted-foreground">
+              Você está em fluxo cross-repo recorrente. Enquanto não existe
+              campo dedicado de história compartilhada, use um prefixo no nome
+              da Missão (ex.:{" "}
+              <span className="font-mono">US-1234 - Campo X</span>).
+            </p>
+          ) : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -268,6 +300,190 @@ function NewCombDialog({
           <Button onClick={handleCreate} disabled={isCreating}>
             {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Criar Missão
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MirrorMissionDialog({
+  open,
+  onOpenChange,
+  sourceComb,
+  sourceProjectId,
+  projects,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  sourceComb: Comb;
+  sourceProjectId: string;
+  projects: Project[];
+  onCreated: (targetProjectId: string, combId: string) => void;
+}) {
+  const [targetProjectId, setTargetProjectId] = useState("");
+  const [mirrorName, setMirrorName] = useState("");
+  const [mirrorDescription, setMirrorDescription] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
+  const [localBranches, setLocalBranches] = useState<string[]>([]);
+  const [isCreating, setIsCreating] = useState(false);
+
+  const targetProjectOptions = useMemo(
+    () => projects.filter((p) => p.id !== sourceProjectId),
+    [projects, sourceProjectId],
+  );
+
+  const targetProject = useMemo(
+    () => projects.find((p) => p.id === targetProjectId) ?? null,
+    [projects, targetProjectId],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    setMirrorName(sourceComb.name);
+    setMirrorDescription(sourceComb.description ?? "");
+    setBaseBranch("");
+    const firstTarget = targetProjectOptions[0];
+    setTargetProjectId(firstTarget?.id ?? "");
+  }, [open, sourceComb, targetProjectOptions]);
+
+  useEffect(() => {
+    if (!open || !targetProject?.path) {
+      setLocalBranches([]);
+      return;
+    }
+    const git = window.electronAPI?.git;
+    if (!git?.getLocalBranches || !git?.getCurrentBranch) return;
+    let cancelled = false;
+    Promise.all([
+      git.getLocalBranches(targetProject.path),
+      git.getCurrentBranch(targetProject.path),
+    ]).then(([branches, current]) => {
+      if (cancelled) return;
+      const list = branches ?? [];
+      setLocalBranches(list);
+      setBaseBranch(current?.trim() || list[0] || "main");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, targetProject?.path]);
+
+  const handleCreate = async () => {
+    if (!targetProjectId || !mirrorName.trim()) {
+      toast.error("Preencha projeto e nome da Missão espelho.");
+      return;
+    }
+    if (!window.db?.combs?.create) {
+      toast.error("Criação de Missão indisponível.");
+      return;
+    }
+    setIsCreating(true);
+    try {
+      const created = (await window.db.combs.create({
+        projectId: targetProjectId,
+        name: mirrorName.trim(),
+        description: mirrorDescription.trim() || undefined,
+        baseBranch: baseBranch.trim() || "main",
+      })) as { id?: string };
+      if (!created?.id) throw new Error("missing comb id");
+      recordProductSignal("mirror_mission_created");
+      toast.success("Missão espelho criada");
+      onCreated(targetProjectId, created.id);
+      onOpenChange(false);
+    } catch {
+      toast.error("Falha ao criar Missão espelho");
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Criar Missão espelho</DialogTitle>
+          <DialogDescription>
+            Copia nome e descrição da Missão atual para outro projeto, sem
+            reescrever o contexto da história.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Projeto de destino</label>
+            {targetProjectOptions.length > 0 ? (
+              <Select value={targetProjectId} onValueChange={setTargetProjectId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o projeto" />
+                </SelectTrigger>
+                <SelectContent>
+                  {targetProjectOptions.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Não há outro projeto disponível para espelhar.
+              </p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Nome</label>
+            <Input
+              value={mirrorName}
+              onChange={(e) => setMirrorName(e.target.value)}
+              placeholder="ex.: US-1234 - Campo X"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Descrição</label>
+            <Textarea
+              value={mirrorDescription}
+              onChange={(e) => setMirrorDescription(e.target.value)}
+              rows={3}
+              className="field-sizing-fixed max-h-40 overflow-y-auto"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Branch base</label>
+            {localBranches.length > 0 ? (
+              <Select value={baseBranch} onValueChange={setBaseBranch}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {localBranches.map((b) => (
+                    <SelectItem key={b} value={b}>
+                      {b}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                value={baseBranch}
+                onChange={(e) => setBaseBranch(e.target.value)}
+                placeholder="main"
+              />
+            )}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleCreate}
+            disabled={
+              isCreating || !targetProjectId || targetProjectOptions.length === 0
+            }
+          >
+            {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Criar espelho
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -421,7 +637,10 @@ function PaneGridItem({
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+    <div
+      data-pane-id={pane.id}
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+    >
       <div className="flex items-center justify-between border-b border-border bg-card px-3 py-1.5">
         <div className="flex items-center gap-2">
           {pane.type === "agent" ? (
@@ -478,6 +697,7 @@ export default function HiveWorkspacePage() {
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
+  const [mirrorMissionOpen, setMirrorMissionOpen] = useState(false);
   const [dashboardPeriodDays, setDashboardPeriodDays] =
     useState<DashboardPeriodDays>(7);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
@@ -519,6 +739,21 @@ export default function HiveWorkspacePage() {
     remove: removePane,
   } = usePanes(activeCombId ?? undefined);
   const { missions } = useMissions(selectedProjectId ?? undefined);
+  const { activity: terminalActivity, refresh: refreshTerminalActivity } =
+    useTerminalProjectActivity(selectedProjectId);
+
+  useTerminalAttentionToasts({
+    onNavigateToPane: ({ projectId, combId, paneId }) => {
+      setSelectedProjectId(projectId);
+      setActiveCombId(combId);
+      setActiveMainTab("panes");
+      requestAnimationFrame(() => {
+        document
+          .querySelector(`[data-pane-id="${paneId}"]`)
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    },
+  });
 
   const dashboardAccess = useMemo(() => {
     const ctx = getDashboardAccessContext();
@@ -593,6 +828,12 @@ export default function HiveWorkspacePage() {
     }
   }, [activeCombId, selectedProjectId]);
 
+  useEffect(() => {
+    const goPanes = () => setActiveMainTab("panes");
+    window.addEventListener("dcc:hive:goto-panes", goPanes);
+    return () => window.removeEventListener("dcc:hive:goto-panes", goPanes);
+  }, []);
+
   // Ensure worktree when comb becomes active
   useEffect(() => {
     if (!activeComb || activeComb.worktreePath) return;
@@ -621,11 +862,21 @@ export default function HiveWorkspacePage() {
     refreshCombs();
   };
 
+  const handleMirrorMissionCreated = (targetProjectId: string, combId: string) => {
+    localStorage.setItem(`dcc:hive:${targetProjectId}:activeComb`, combId);
+    setSelectedProjectId(targetProjectId);
+    setActiveCombId(combId);
+    setActiveMainTab("panes");
+    setShowSettings(false);
+    setShowDashboard(false);
+  };
+
   const handleAddTerminal = async () => {
     if (!activeCombId) return;
     try {
       await createPane({ combId: activeCombId, type: "term" });
       refreshPanes();
+      void refreshTerminalActivity();
     } catch {
       toast.error("Falha ao criar terminal");
     }
@@ -641,6 +892,7 @@ export default function HiveWorkspacePage() {
     if (!confirmed) return;
     await removePane(paneId);
     refreshPanes();
+    void refreshTerminalActivity();
   };
 
   const handleRemoveComb = async (combId: string) => {
@@ -746,10 +998,21 @@ export default function HiveWorkspacePage() {
         </div>
 
         {/* Missões section header */}
-        <div className="flex items-center justify-between px-4 py-2">
-          <span className="text-xs font-medium uppercase tracking-wider text-sidebar-foreground/50">
-            Missões
-          </span>
+        <div className="flex items-center justify-between px-4 py-2 gap-2">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="text-xs font-medium uppercase tracking-wider text-sidebar-foreground/50">
+              Missões
+            </span>
+            {terminalActivity.totalRunningPanes > 0 && (
+              <span className="text-[10px] leading-tight text-emerald-600/90 dark:text-emerald-400/90">
+                {terminalActivity.totalRunningPanes}{" "}
+                {terminalActivity.totalRunningPanes === 1
+                  ? "sessão ativa"
+                  : "sessões ativas"}{" "}
+                neste projeto
+              </span>
+            )}
+          </div>
           <Button
             variant="ghost"
             size="icon"
@@ -790,6 +1053,8 @@ export default function HiveWorkspacePage() {
             <div className="flex flex-col gap-1 py-1">
               {combs.map((comb) => {
                 const isActive = comb.id === activeCombId;
+                const runningPanes =
+                  terminalActivity.runningPanesByCombId[comb.id] ?? 0;
                 return (
                   <button
                     key={comb.id}
@@ -806,8 +1071,25 @@ export default function HiveWorkspacePage() {
                     }`}
                   >
                     <div className="min-w-0 flex-1 flex flex-col">
-                      <span className="truncate text-sm font-medium">
+                      <span className="flex items-center gap-1.5 truncate text-sm font-medium">
                         {comb.name}
+                        {runningPanes > 0 && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex shrink-0">
+                                <Activity
+                                  className="h-3.5 w-3.5 text-emerald-500"
+                                  aria-hidden
+                                />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="right">
+                              {runningPanes === 1
+                                ? "1 pane com sessão ativa (terminal ou agent)"
+                                : `${runningPanes} panes com sessão ativa (terminais ou agents)`}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
                       </span>
                       <div className="mt-0.5 flex items-center gap-1.5">
                         <GitBranch className="h-3 w-3 shrink-0 text-sidebar-foreground/40" />
@@ -936,6 +1218,15 @@ export default function HiveWorkspacePage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      onClick={() => setMirrorMissionOpen(true)}
+                      disabled={sortedProjects.length < 2}
+                    >
+                      <CopyPlus className="mr-1 h-3 w-3" />
+                      Espelhar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={handleAddTerminal}
                     >
                       <Terminal className="mr-1 h-3 w-3" />
@@ -955,10 +1246,17 @@ export default function HiveWorkspacePage() {
               </div>
             </div>
 
-            {/* Panes or Review */}
+            {/* Panes + Review: ambos montados para não desmontar EmbeddedTerminal ao trocar aba */}
             <div className="min-h-0 flex-1 overflow-hidden">
-              {activeMainTab === "panes" ? (
-                panes.length === 0 ? (
+              <div
+                className={
+                  activeMainTab === "panes"
+                    ? "flex h-full min-h-0 flex-col overflow-hidden"
+                    : "hidden"
+                }
+                aria-hidden={activeMainTab !== "panes"}
+              >
+                {panes.length === 0 ? (
                   <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
                     <Terminal className="h-12 w-12 text-muted-foreground/30" />
                     <p className="text-sm text-muted-foreground">
@@ -987,7 +1285,7 @@ export default function HiveWorkspacePage() {
                   </div>
                 ) : (
                   <div
-                    className="grid h-full min-h-0 min-w-0 gap-1 overflow-hidden p-1 [grid-auto-rows:minmax(0,1fr)]"
+                    className="grid h-full min-h-0 min-w-0 auto-rows-fr gap-1 overflow-hidden p-1"
                     style={{
                       gridTemplateColumns: `repeat(${getPaneGridColumnCount(panes.length)}, minmax(0, 1fr))`,
                     }}
@@ -1006,14 +1304,23 @@ export default function HiveWorkspacePage() {
                       />
                     ))}
                   </div>
-                )
-              ) : (
+                )}
+              </div>
+              <div
+                className={
+                  activeMainTab === "review"
+                    ? "flex h-full min-h-0 flex-col overflow-hidden"
+                    : "hidden"
+                }
+                aria-hidden={activeMainTab !== "review"}
+              >
                 <CombReviewPanel
                   comb={activeComb}
                   mainProjectPath={selectedProject?.path}
+                  projects={sortedProjects}
                   onAction={() => refreshCombs()}
                 />
-              )}
+              </div>
             </div>
           </>
         ) : selectedProjectId ? (
@@ -1067,7 +1374,21 @@ export default function HiveWorkspacePage() {
           onOpenChange={setNewAgentOpen}
           combId={activeCombId}
           providers={providers}
-          onCreate={() => refreshPanes()}
+          onCreate={() => {
+            refreshPanes();
+            void refreshTerminalActivity();
+          }}
+        />
+      )}
+
+      {activeComb && selectedProjectId && (
+        <MirrorMissionDialog
+          open={mirrorMissionOpen}
+          onOpenChange={setMirrorMissionOpen}
+          sourceComb={activeComb}
+          sourceProjectId={selectedProjectId}
+          projects={sortedProjects}
+          onCreated={handleMirrorMissionCreated}
         />
       )}
 

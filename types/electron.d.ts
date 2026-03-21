@@ -27,6 +27,7 @@ import type {
   PaneUpdate,
   PaneSession,
 } from "@/lib/database/types";
+import type { TerminalAttentionPayload } from "@/lib/terminal/attention-types";
 
 // ============================================
 // AI Service Types
@@ -175,15 +176,23 @@ declare global {
             args?: string[];
             cols?: number;
             rows?: number;
+            restart?: boolean;
           }
         ) => Promise<{ ptyId?: string; error?: string; session?: PaneSession | null }>;
         getPaneSession: (paneId: string) => Promise<PaneSession | null>;
         killByPaneId: (paneId: string) => Promise<{ ok: boolean }>;
+        getProjectActivity: (projectId: string) => Promise<{
+          totalRunningPanes: number;
+          runningPanesByCombId: Record<string, number>;
+        }>;
         onData: (
           callback: (ptyId: string, data: string) => void
         ) => () => void;
         onExit: (
           callback: (ptyId: string, code: number) => void
+        ) => () => void;
+        onAttention: (
+          callback: (payload: TerminalAttentionPayload) => void
         ) => () => void;
       };
 
@@ -379,6 +388,46 @@ declare global {
         getWorktreeInfo: (
           projectPath: string
         ) => Promise<{ isWorktree: boolean; worktreeRoot?: string }>;
+        getReviewDiffs: (worktreePath: string) => Promise<{
+          success: boolean;
+          error?: string;
+          files: Array<{ path: string; status: string; diff: string }>;
+          summary: {
+            changedFiles: number;
+            insertions: number;
+            deletions: number;
+          } | null;
+        }>;
+        applyWorktreePatch: (
+          mainProjectPath: string,
+          worktreePath: string,
+          targetBranch: string,
+          options?: {
+            includeFiles?: string[];
+            commit?: boolean;
+            message?: string;
+          }
+        ) => Promise<{
+          success: boolean;
+          error?: string;
+          applyFailed?: boolean;
+        }>;
+      };
+
+      review: {
+        getDiffsBundle: (worktreePaths: string[]) => Promise<
+          Array<{
+            worktreePath: string;
+            success: boolean;
+            error?: string;
+            files: Array<{ path: string; status: string; diff: string }>;
+            summary: {
+              changedFiles: number;
+              insertions: number;
+              deletions: number;
+            } | null;
+          }>
+        >;
       };
     };
 

@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS combs (
   base_branch TEXT NOT NULL DEFAULT 'main',
   branch TEXT,
   worktree_path TEXT,
+  review_targets TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ready_for_review', 'applied', 'discarded', 'archived', 'error')),
   last_opened_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),

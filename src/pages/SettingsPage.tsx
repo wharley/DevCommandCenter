@@ -99,6 +99,8 @@ export default function SettingsPage() {
   const gotUpdateEventRef = useRef(false);
   const hasAppUpdateAPI =
     typeof window !== "undefined" && !!window.electronAPI?.app;
+  const isElectronApp =
+    typeof window !== "undefined" && !!window.electronAPI;
 
   React.useEffect(() => {
     window.db?.providers?.isEncryptionAvailable?.().then(setEncryptionAvailable);
@@ -372,6 +374,28 @@ export default function SettingsPage() {
               </div>
             )}
           </section>
+
+          {isElectronApp && (
+            <section>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                Workspace Hive
+              </h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Projetos, Missões e sessões de terminal no app desktop
+              </p>
+              <Alert className="mt-3 border-muted bg-muted/30 py-3">
+                <Terminal className="h-4 w-4" />
+                <AlertTitle className="text-sm">Sessões de terminal e agentes</AlertTitle>
+                <AlertDescription className="text-xs text-muted-foreground">
+                  Você pode trocar de projeto no seletor: um projeto fica em foco na
+                  tela por vez. As sessões (terminais e agents CLI) continuam no
+                  processo do app; ao voltar para a Missão, o pane reconecta à
+                  mesma sessão. Ao fechar o aplicativo, essas sessões são
+                  encerradas.
+                </AlertDescription>
+              </Alert>
+            </section>
+          )}
 
           {/* Notificações + Atualizações — painel único estilo lista */}
           <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">

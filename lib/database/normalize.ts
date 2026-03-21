@@ -94,7 +94,16 @@ export function normalizeMissionLogs(raw: unknown[]): unknown[] {
 }
 
 export function normalizeComb(raw: Record<string, unknown>): Record<string, unknown> {
-  return normalizeDates(raw, DATE_KEYS.comb);
+  const normalized = normalizeDates(raw, DATE_KEYS.comb);
+  const rt = normalized.review_targets ?? normalized.reviewTargets;
+  if (typeof rt === "string" && rt.trim()) {
+    try {
+      normalized.reviewTargets = JSON.parse(rt) as unknown;
+    } catch {
+      /* ignore */
+    }
+  }
+  return normalized;
 }
 
 export function normalizePane(raw: Record<string, unknown>): Record<string, unknown> {

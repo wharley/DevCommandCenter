@@ -155,6 +155,9 @@ export function initDatabase(): Database.Database {
   // Migração: criar tabelas combs e panes (Hive/Comb/Pane architecture)
   migrateCombsPanes(db);
 
+  // Migração: review_targets (JSON) em combs para multi-repo na mesma Review
+  migrateCombsReviewTargets(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
 
   return db;
@@ -541,6 +544,23 @@ function migrateCombsPanes(database: Database.Database): void {
       END;
     `);
     console.log("[Database] Migration: panes table created.");
+  }
+}
+
+/**
+ * Adiciona coluna review_targets (JSON) em combs para targets genéricos de revisão.
+ */
+function migrateCombsReviewTargets(database: Database.Database): void {
+  const combsExists = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'combs'")
+    .get();
+  if (!combsExists) return;
+
+  const columns = database.prepare("PRAGMA table_info(combs)").all() as { name: string }[];
+  const names = new Set(columns.map((c) => c.name));
+  if (!names.has("review_targets")) {
+    database.exec(`ALTER TABLE combs ADD COLUMN review_targets TEXT`);
+    console.log("[Database] Migration: review_targets column added to combs.");
   }
 }
 

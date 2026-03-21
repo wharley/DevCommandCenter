@@ -6,6 +6,79 @@
 import { platform } from "node:os";
 import type { WebContents } from "electron";
 import type { MissionAgentSession, PaneSession } from "../../lib/database/types";
+import {
+  excerptFromPlainTail,
+  stripAnsiForAttention,
+  tailLooksLikeWaitingForUser,
+} from "../../lib/terminal/attention-heuristic";
+import type { TerminalAttentionPayload } from "../../lib/terminal/attention-types";
+
+export type { TerminalAttentionPayload } from "../../lib/terminal/attention-types";
+
+const PANE_ATTENTION_THROTTLE_MS = 90_000;
+const PANE_IDLE_SILENCE_MS = 50_000;
+
+const paneAttentionLastEmit = new Map<string, number>();
+const paneIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearPaneIdleAttentionTimer(paneId: string): void {
+  const t = paneIdleTimers.get(paneId);
+  if (t) clearTimeout(t);
+  paneIdleTimers.delete(paneId);
+}
+
+function schedulePaneIdleAttention(paneId: string, sender: WebContents): void {
+  clearPaneIdleAttentionTimer(paneId);
+  const t = setTimeout(() => {
+    paneIdleTimers.delete(paneId);
+    const session = paneSessions.get(paneId);
+    if (!session || session.status !== "running") return;
+    if (sender.isDestroyed()) return;
+    maybeEmitPaneAttention(
+      paneId,
+      sender,
+      "idle",
+      undefined,
+    );
+  }, PANE_IDLE_SILENCE_MS);
+  paneIdleTimers.set(paneId, t);
+}
+
+function maybeEmitPaneAttention(
+  paneId: string,
+  sender: WebContents,
+  reason: "keyword" | "idle",
+  excerpt: string | undefined,
+): void {
+  const now = Date.now();
+  const last = paneAttentionLastEmit.get(paneId) ?? 0;
+  if (now - last < PANE_ATTENTION_THROTTLE_MS) return;
+  paneAttentionLastEmit.set(paneId, now);
+  if (!sender.isDestroyed()) {
+    const payload: TerminalAttentionPayload = {
+      paneId,
+      reason,
+      ...(excerpt && excerpt.length > 0 ? { excerpt } : {}),
+    };
+    sender.send("terminal:attention", payload);
+  }
+}
+
+function evaluatePaneOutputForAttention(
+  paneId: string,
+  plainPreview: string,
+  sender: WebContents,
+): void {
+  if (tailLooksLikeWaitingForUser(plainPreview)) {
+    const excerpt = excerptFromPlainTail(plainPreview);
+    maybeEmitPaneAttention(paneId, sender, "keyword", excerpt);
+  }
+}
+
+function teardownPaneAttention(paneId: string): void {
+  clearPaneIdleAttentionTimer(paneId);
+  paneAttentionLastEmit.delete(paneId);
+}
 
 /** Minimal type for node-pty spawn return (avoids importing node-pty types at compile time) */
 interface PtyInstance {
@@ -386,10 +459,12 @@ export function getPaneSession(paneId: string): PaneSession | null {
 
 export interface GetOrCreatePaneOptions extends SpawnOptions {
   paneId: string;
+  /** When true, spawn a new process even if the last pane session exited (clears exited snapshot). */
+  restart?: boolean;
 }
 
 export interface PaneSpawnResult {
-  ptyId: string;
+  ptyId?: string;
   error?: string;
   session?: PaneSession | null;
 }
@@ -398,7 +473,7 @@ export function getOrCreatePtyForPane(
   options: GetOrCreatePaneOptions,
   sender: WebContents,
 ): PaneSpawnResult {
-  const { paneId, cwd, command, args, cols, rows } = options;
+  const { paneId, cwd, command, args, cols, rows, restart } = options;
   const existingPtyId = paneIdToPtyId.get(paneId);
   if (existingPtyId && ptys.has(existingPtyId)) {
     return { ptyId: existingPtyId, session: getPaneSession(paneId) };
@@ -406,6 +481,15 @@ export function getOrCreatePtyForPane(
   if (existingPtyId) {
     paneIdToPtyId.delete(paneId);
     ptyIdToPaneId.delete(existingPtyId);
+  }
+
+  if (restart) {
+    paneSessions.delete(paneId);
+  } else {
+    const sess = paneSessions.get(paneId);
+    if (sess?.status === "exited") {
+      return { session: getPaneSession(paneId) };
+    }
   }
 
   const pty = getPty();
@@ -448,6 +532,9 @@ export function getOrCreatePtyForPane(
           session.outputPreview = trimOutputPreview(`${session.outputPreview ?? ""}${data}`);
           session.outputLineCount = countLines(session.outputPreview);
           session.lastActivityAt = new Date().toISOString();
+          const plain = stripAnsiForAttention(session.outputPreview);
+          evaluatePaneOutputForAttention(pid, plain, sender);
+          schedulePaneIdleAttention(pid, sender);
         }
       }
       if (!sender.isDestroyed()) {
@@ -459,6 +546,7 @@ export function getOrCreatePtyForPane(
       ptys.delete(ptyId);
       const pid = ptyIdToPaneId.get(ptyId);
       if (pid) {
+        teardownPaneAttention(pid);
         const session = paneSessions.get(pid);
         if (session) {
           session.status = "exited";
@@ -477,7 +565,7 @@ export function getOrCreatePtyForPane(
     return { ptyId, session: getPaneSession(paneId) };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { ptyId: "", error: message };
+    return { error: message };
   }
 }
 

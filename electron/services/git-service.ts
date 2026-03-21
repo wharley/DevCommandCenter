@@ -552,6 +552,25 @@ export class GitService {
     }
   }
 
+  /**
+   * Um único diff vs HEAD para vários paths rastreados (inclui binários via --binary).
+   * Evita concatenar diffs por ficheiro e falhas de `git apply` com "Binary files differ".
+   */
+  async getTrackedDiffBinaryVsHead(paths: string[]): Promise<string> {
+    if (paths.length === 0) return "";
+    const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+    try {
+      const { stdout } = await execFileAsync(
+        "git",
+        ["diff", "--binary", "HEAD", "--", ...paths],
+        { cwd: this.projectPath, env },
+      );
+      return stdout;
+    } catch {
+      return "";
+    }
+  }
+
   /** Dispositivo nulo para `git diff --no-index` (paths untracked). */
   private static nullDevice(): string {
     return process.platform === "win32" ? "NUL" : "/dev/null";
@@ -560,14 +579,16 @@ export class GitService {
   /**
    * Diff de arquivo ainda não rastreado (untracked): compara /dev/null ao working tree.
    * `git diff HEAD` não inclui estes ficheiros.
+   * Usa --binary para patches aplicáveis com `git apply` em ficheiros binários.
    */
   async getFileDiffUntracked(filePath: string): Promise<string> {
-    const escaped = filePath.replace(/"/g, '\\"');
     const nullDev = GitService.nullDevice();
+    const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
     try {
-      const { stdout } = await execAsync(
-        `git diff --no-index -- "${nullDev}" "${escaped}"`,
-        { cwd: this.projectPath },
+      const { stdout } = await execFileAsync(
+        "git",
+        ["diff", "--binary", "--no-index", "--", nullDev, filePath],
+        { cwd: this.projectPath, env },
       );
       return stdout;
     } catch {
@@ -627,6 +648,38 @@ export class GitService {
       changedFiles: changed.length,
       insertions,
       deletions,
+    };
+  }
+
+  /**
+   * Painel de Review: lista de arquivos + diffs (HEAD + untracked) e resumo.
+   * Mesma lógica que `comb:getDiffs` / IPC `git:getReviewDiffs`.
+   */
+  async getReviewPanelDiffs(): Promise<{
+    files: Array<{ path: string; status: string; diff: string }>;
+    summary: { changedFiles: number; insertions: number; deletions: number };
+  }> {
+    const branchState = await this.getBranchState();
+    const summaryStats = await this.getReviewSummaryStats();
+    const changedFiles = branchState.changedFiles ?? [];
+    const files: Array<{ path: string; status: string; diff: string }> = [];
+    for (const filePath of changedFiles) {
+      const isUntracked = branchState.untracked?.includes(filePath) ?? false;
+      const diff = await this.getFileDiffForReview(filePath, isUntracked);
+      const status = branchState.staged?.includes(filePath)
+        ? "staged"
+        : isUntracked
+          ? "untracked"
+          : "modified";
+      files.push({ path: filePath, status, diff });
+    }
+    return {
+      files,
+      summary: {
+        changedFiles: summaryStats.changedFiles,
+        insertions: summaryStats.insertions,
+        deletions: summaryStats.deletions,
+      },
     };
   }
 
