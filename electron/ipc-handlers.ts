@@ -1435,14 +1435,15 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     try {
       const gitService = new GitService(comb.worktreePath);
       const branchState = await gitService.getBranchState();
-      const shortStat = await gitService.getShortStat();
+      const summaryStats = await gitService.getReviewSummaryStats();
       const changedFiles = branchState.changedFiles ?? [];
       const files: Array<{ path: string; status: string; diff: string }> = [];
       for (const filePath of changedFiles) {
-        const diff = await gitService.getFileDiffHead(filePath);
+        const isUntracked = branchState.untracked?.includes(filePath) ?? false;
+        const diff = await gitService.getFileDiffForReview(filePath, isUntracked);
         const status = branchState.staged?.includes(filePath)
           ? "staged"
-          : branchState.untracked?.includes(filePath)
+          : isUntracked
             ? "untracked"
             : "modified";
         files.push({ path: filePath, status, diff });
@@ -1451,9 +1452,9 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
         success: true,
         files,
         summary: {
-          changedFiles: shortStat.changedFiles,
-          insertions: shortStat.insertions,
-          deletions: shortStat.deletions,
+          changedFiles: summaryStats.changedFiles,
+          insertions: summaryStats.insertions,
+          deletions: summaryStats.deletions,
         },
       };
     } catch (err) {

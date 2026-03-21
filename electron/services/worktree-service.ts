@@ -12,6 +12,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { GitService } from "./git-service";
+
 const execAsync = promisify(exec);
 
 /** Diretório relativo ao projeto onde as worktrees são criadas (estilo dmux) */
@@ -302,14 +304,24 @@ export async function applyMissionPatch(
   const { includeFiles = [], commit = false, message = "Apply mission patch" } = options;
 
   try {
-    const filesArg =
-      includeFiles.length > 0
-        ? " -- " + includeFiles.map((f) => `"${f.replace(/"/g, '\\"')}"`).join(" ")
-        : "";
-    const { stdout: patchContent } = await execAsync(
-      `git diff HEAD${filesArg}`,
-      { cwd: resolvedWorktree }
-    );
+    const git = new GitService(resolvedWorktree);
+    const branchState = await git.getBranchState();
+    const untrackedSet = new Set(branchState.untracked ?? []);
+    const allChanged = branchState.changedFiles ?? [];
+    const pathsToInclude =
+      includeFiles.length > 0 ? includeFiles : allChanged;
+
+    const parts: string[] = [];
+    for (const filePath of pathsToInclude) {
+      const isUntracked = untrackedSet.has(filePath);
+      const chunk = isUntracked
+        ? await git.getFileDiffUntracked(filePath)
+        : await git.getFileDiffHead(filePath);
+      if (chunk.trim()) {
+        parts.push(chunk.trimEnd());
+      }
+    }
+    const patchContent = parts.join("\n");
     if (!patchContent || !patchContent.trim()) {
       return { success: false, error: "Nenhuma alteração para aplicar." };
     }

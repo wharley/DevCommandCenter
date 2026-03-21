@@ -552,6 +552,84 @@ export class GitService {
     }
   }
 
+  /** Dispositivo nulo para `git diff --no-index` (paths untracked). */
+  private static nullDevice(): string {
+    return process.platform === "win32" ? "NUL" : "/dev/null";
+  }
+
+  /**
+   * Diff de arquivo ainda não rastreado (untracked): compara /dev/null ao working tree.
+   * `git diff HEAD` não inclui estes ficheiros.
+   */
+  async getFileDiffUntracked(filePath: string): Promise<string> {
+    const escaped = filePath.replace(/"/g, '\\"');
+    const nullDev = GitService.nullDevice();
+    try {
+      const { stdout } = await execAsync(
+        `git diff --no-index -- "${nullDev}" "${escaped}"`,
+        { cwd: this.projectPath },
+      );
+      return stdout;
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Diff para revisão: tracked/modified usa HEAD; untracked usa --no-index.
+   */
+  async getFileDiffForReview(
+    filePath: string,
+    isUntracked: boolean,
+  ): Promise<string> {
+    if (isUntracked) {
+      return this.getFileDiffUntracked(filePath);
+    }
+    return this.getFileDiffHead(filePath);
+  }
+
+  /**
+   * Conta linhas + / - num diff unificado (exclui cabeçalhos +++ / ---).
+   */
+  countUnifiedDiffLineStats(diff: string): { insertions: number; deletions: number } {
+    let insertions = 0;
+    let deletions = 0;
+    for (const line of diff.split(/\r?\n/)) {
+      if (line.startsWith("+") && !line.startsWith("+++")) insertions++;
+      else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
+    }
+    return { insertions, deletions };
+  }
+
+  /**
+   * Resumo para a aba Review: inclui alterações vs HEAD e ficheiros untracked.
+   */
+  async getReviewSummaryStats(): Promise<{
+    changedFiles: number;
+    insertions: number;
+    deletions: number;
+  }> {
+    const branchState = await this.getBranchState();
+    const changed = branchState.changedFiles ?? [];
+    const untrackedSet = new Set(branchState.untracked ?? []);
+    const short = await this.getShortStat();
+    let insertions = short.insertions;
+    let deletions = short.deletions;
+    for (const p of changed) {
+      if (untrackedSet.has(p)) {
+        const d = await this.getFileDiffUntracked(p);
+        const extra = this.countUnifiedDiffLineStats(d);
+        insertions += extra.insertions;
+        deletions += extra.deletions;
+      }
+    }
+    return {
+      changedFiles: changed.length,
+      insertions,
+      deletions,
+    };
+  }
+
   /**
    * Obtém estatística resumida do diff (arquivos alterados, inserções, remoções).
    * Roda git diff --shortstat HEAD no worktree.

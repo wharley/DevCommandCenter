@@ -5,16 +5,13 @@ import {
   Bot,
   ChartNoAxesColumn,
   ChevronDown,
-  FileCode,
   FolderGit2,
   GitBranch,
-  GitMerge,
   Loader2,
   Plus,
   Settings,
   Terminal,
   Trash2,
-  Upload,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,11 +45,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { EmbeddedTerminal } from "@/components/embedded-terminal";
-import { DiffCodeBlock } from "@/components/diff-code-block";
-import { CommitDialog } from "@/components/dialogs/commit-dialog";
+import { CombReviewPanel } from "@/components/review/comb-review-panel";
 import { AddProjectDialog } from "@/components/dialogs/add-project-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import {
@@ -73,7 +68,6 @@ import {
   canAccessDashboard,
   getDashboardAccessContext,
 } from "@/lib/dashboard/access";
-import type { GitStatus } from "@/types/electron";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -460,307 +454,6 @@ function PaneGridItem({
           title={label}
         />
       </div>
-    </div>
-  );
-}
-
-// ==========================================
-// Comb Review Panel
-// ==========================================
-function CombReviewPanel({
-  comb,
-  mainProjectPath,
-  onAction,
-}: {
-  comb: Comb;
-  /** Repositório principal (checkout), não o worktree — usado para listar branches de destino do merge. */
-  mainProjectPath?: string;
-  onAction: () => void;
-}) {
-  const [diffs, setDiffs] = useState<{
-    loading: boolean;
-    error?: string;
-    files: Array<{ path: string; status: string; diff: string }>;
-    summary: {
-      changedFiles: number;
-      insertions: number;
-      deletions: number;
-    } | null;
-  }>({ loading: false, files: [], summary: null });
-  const [isApplying, setIsApplying] = useState(false);
-  const [isMerging, setIsMerging] = useState(false);
-  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
-  const [commitDialogStatus, setCommitDialogStatus] =
-    useState<GitStatus | null>(null);
-  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
-  const [mergeTargetBranch, setMergeTargetBranch] = useState("");
-  const [mergeBranches, setMergeBranches] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (!comb.worktreePath || !window.electronAPI?.comb?.getDiffs) return;
-    setDiffs((prev) => ({ ...prev, loading: true, error: undefined }));
-    window.electronAPI.comb.getDiffs(comb.id).then((result) => {
-      if (result.success) {
-        setDiffs({
-          loading: false,
-          files: result.files,
-          summary: result.summary,
-        });
-      } else {
-        setDiffs({
-          loading: false,
-          error: result.error,
-          files: [],
-          summary: null,
-        });
-      }
-    });
-  }, [comb.id, comb.worktreePath]);
-
-  useEffect(() => {
-    if (!mergeDialogOpen || !mainProjectPath?.trim()) return;
-    const git = window.electronAPI?.git;
-    if (!git?.getLocalBranches || !git?.getCurrentBranch) return;
-    let cancelled = false;
-    Promise.all([
-      git.getLocalBranches(mainProjectPath),
-      git.getCurrentBranch(mainProjectPath),
-    ]).then(([branches, current]) => {
-      if (cancelled) return;
-      const list = branches ?? [];
-      setMergeBranches(list);
-      const c = (current ?? "").trim();
-      setMergeTargetBranch(c || list[0] || "main");
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [mergeDialogOpen, mainProjectPath]);
-
-  const handleMergeClick = () => {
-    if (!mainProjectPath?.trim()) {
-      toast.error("Caminho do repositório principal indisponível.");
-      return;
-    }
-    setMergeDialogOpen(true);
-  };
-
-  const handleConfirmMerge = async () => {
-    const b = mergeTargetBranch.trim();
-    if (!b) {
-      toast.error("Selecione a branch de destino.");
-      return;
-    }
-    setIsMerging(true);
-    try {
-      const result = await window.electronAPI?.comb?.mergeIntoMain(comb.id, b);
-      if (result?.success) {
-        toast.success("Missão mergeada com sucesso");
-        setMergeDialogOpen(false);
-        onAction();
-      } else {
-        toast.error(result?.error ?? "Erro ao fazer merge");
-      }
-    } finally {
-      setIsMerging(false);
-    }
-  };
-
-  const handleCommit = async (message: string) => {
-    if (!comb.worktreePath || !window.electronAPI?.git) return;
-    try {
-      const ok = await window.electronAPI.git.commit(
-        comb.worktreePath,
-        message,
-      );
-      if (ok) {
-        toast.success("Commit realizado");
-        const result = await window.electronAPI?.comb?.getDiffs(comb.id);
-        if (result?.success) {
-          setDiffs({
-            loading: false,
-            files: result.files,
-            summary: result.summary,
-          });
-        }
-      } else {
-        toast.error("Falha ao commitar");
-        throw new Error("Falha ao commitar");
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Erro desconhecido";
-      toast.error(msg);
-      throw e;
-    }
-  };
-
-  const handlePush = async () => {
-    if (!comb.worktreePath || !window.electronAPI?.git?.push) return;
-    setIsApplying(true);
-    try {
-      const result = await window.electronAPI.git.push(comb.worktreePath);
-      if (result?.success) {
-        toast.success("Push enviado");
-      } else {
-        toast.error(result?.error ?? "Falha ao enviar push");
-      }
-    } finally {
-      setIsApplying(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!commitDialogOpen || !comb.worktreePath || !window.electronAPI?.git) {
-      if (!commitDialogOpen) setCommitDialogStatus(null);
-      return;
-    }
-    window.electronAPI.git
-      .getStatus(comb.worktreePath)
-      .then((s) => setCommitDialogStatus(s))
-      .catch(() => setCommitDialogStatus(null));
-  }, [commitDialogOpen, comb.worktreePath]);
-
-  if (!comb.worktreePath) {
-    return (
-      <div className="flex h-full items-center justify-center p-8">
-        <p className="text-sm text-muted-foreground">
-          Worktree ainda não criada.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border px-4 py-2">
-        <div className="flex items-center gap-3">
-          <h4 className="text-sm font-semibold">Review</h4>
-          {diffs.summary && (
-            <span className="text-xs text-muted-foreground">
-              {diffs.summary.changedFiles} arquivo(s), +
-              {diffs.summary.insertions} -{diffs.summary.deletions}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCommitDialogOpen(true)}
-            disabled={diffs.files.length === 0}
-          >
-            <FileCode className="mr-1 h-3 w-3" />
-            Commit
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handlePush}
-            disabled={isApplying}
-          >
-            <Upload className="mr-1 h-3 w-3" />
-            Push
-          </Button>
-          <Button
-            variant="default"
-            size="sm"
-            onClick={handleMergeClick}
-            disabled={isMerging}
-          >
-            {isMerging ? (
-              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-            ) : (
-              <GitMerge className="mr-1 h-3 w-3" />
-            )}
-            Merge
-          </Button>
-        </div>
-      </div>
-
-      <Dialog open={mergeDialogOpen} onOpenChange={setMergeDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Merge na branch de destino</DialogTitle>
-            <DialogDescription>
-              O branch do worktree desta Missão será integrado na branch
-              escolhida do repositório principal (não no worktree).
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 py-2">
-            <label className="text-sm font-medium">Branch de destino</label>
-            {mergeBranches.length > 0 ? (
-              <Select
-                value={mergeTargetBranch}
-                onValueChange={setMergeTargetBranch}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione a branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {mergeBranches.map((br) => (
-                    <SelectItem key={br} value={br}>
-                      {br}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                placeholder="main"
-                value={mergeTargetBranch}
-                onChange={(e) => setMergeTargetBranch(e.target.value)}
-              />
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setMergeDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleConfirmMerge} disabled={isMerging}>
-              {isMerging && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Merge
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <ScrollArea className="flex-1">
-        {diffs.loading ? (
-          <div className="flex items-center justify-center p-8">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : diffs.error ? (
-          <div className="p-4 text-sm text-destructive">{diffs.error}</div>
-        ) : diffs.files.length === 0 ? (
-          <div className="p-8 text-center text-sm text-muted-foreground">
-            Nenhuma alteração detectada neste worktree.
-          </div>
-        ) : (
-          <div className="space-y-4 p-4">
-            {diffs.files.map((file) => (
-              <div key={file.path} className="rounded-lg border border-border">
-                <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-                  <FileCode className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-sm font-mono">{file.path}</span>
-                  <Badge variant="outline" className="text-[10px]">
-                    {file.status}
-                  </Badge>
-                </div>
-                <DiffCodeBlock content={file.diff} />
-              </div>
-            ))}
-          </div>
-        )}
-      </ScrollArea>
-
-      <CommitDialog
-        open={commitDialogOpen}
-        onOpenChange={setCommitDialogOpen}
-        onCommit={handleCommit}
-        defaultMessage={`Changes from mission: ${comb.name}`}
-        projectPath={comb.worktreePath ?? ""}
-        status={commitDialogStatus}
-      />
     </div>
   );
 }
