@@ -923,6 +923,11 @@ export function registerIpcHandlers(ipcMain: IpcMain) {
     return gitService.push();
   });
 
+  ipcMain.handle("git:pull", async (_event, projectPath: string) => {
+    const gitService = new GitService(projectPath);
+    return gitService.pull();
+  });
+
   // Reset (discard changes or undo last commit)
   ipcMain.handle(
     "git:reset",

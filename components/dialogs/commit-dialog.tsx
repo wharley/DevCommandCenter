@@ -77,6 +77,7 @@ export function CommitDialog({
 
   const filesToCommit =
     status && status.isDirty ? getFilesToCommit(status) : [];
+
   const selectedUntracked =
     selectedPath &&
     filesToCommit.some((f) => f.path === selectedPath && f.untracked);
@@ -128,10 +129,13 @@ export function CommitDialog({
     loadDiff(path);
   };
 
+  const canCommit =
+    status !== null && filesToCommit.length > 0 && message.trim().length > 0;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = message.trim();
-    if (!trimmed) return;
+    if (!trimmed || filesToCommit.length === 0) return;
     setIsSubmitting(true);
     try {
       await onCommit(trimmed);
@@ -309,8 +313,10 @@ export function CommitDialog({
                 </p>
               )}
               {filesToCommit.length === 0 && status !== null && (
-                <p className="text-sm text-muted-foreground py-2">
-                  Nenhuma alteração para commitar.
+                <p className="text-sm text-amber-600/90 dark:text-amber-400/90 py-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3">
+                  Nenhuma alteração para commitar neste repositório. O botão
+                  Commitar fica desativado até existirem alterações locais
+                  (modificados ou novos ficheiros).
                 </p>
               )}
 
@@ -337,7 +343,15 @@ export function CommitDialog({
               >
                 Cancelar
               </Button>
-              <Button type="submit" disabled={isSubmitting || !message.trim()}>
+              <Button
+                type="submit"
+                disabled={isSubmitting || !canCommit}
+                title={
+                  filesToCommit.length === 0 && status !== null
+                    ? "Sem ficheiros em alteração para incluir no commit."
+                    : undefined
+                }
+              >
                 {isSubmitting ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : null}

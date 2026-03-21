@@ -1,9 +1,14 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Layers, Link2, Loader2, PanelLeft, Plus } from "lucide-react";
+import { ChevronDown, Layers, Link2, PanelLeft, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -189,85 +194,97 @@ export function CombReviewPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 space-y-3 border-b border-border px-4 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-base font-semibold leading-tight truncate">
-                {comb.name}
-              </h3>
-              <Badge variant="outline" className="shrink-0 text-[10px]">
-                {getCombStatusLabel(comb.status)}
-              </Badge>
-              {multi ? (
-                <Badge variant="secondary" className="gap-1 text-[10px]">
-                  <Layers className="h-3 w-3" />
-                  {resolved.length} targets
+      <div className="shrink-0 space-y-2 border-b border-border px-4 py-2.5">
+        <div className="space-y-1.5">
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-semibold leading-tight truncate">
+                  {comb.name}
+                </h3>
+                <Badge variant="outline" className="shrink-0 text-[10px]">
+                  {getCombStatusLabel(comb.status)}
                 </Badge>
-              ) : null}
+                {multi ? (
+                  <Badge variant="secondary" className="gap-1 text-[10px]">
+                    <Layers className="h-3 w-3" />
+                    {resolved.length} targets
+                  </Badge>
+                ) : null}
+              </div>
             </div>
-            {comb.description ? (
-              <p className="text-xs text-muted-foreground line-clamp-2">
-                {comb.description}
-              </p>
-            ) : null}
-            <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-              {resolved.map((r) => (
-                <span key={r.id} className="font-mono truncate max-w-[240px]">
-                  {r.label}: {r.isPrimaryCombWorktree ? (comb.branch ?? comb.baseBranch) : "checkout local"}
-                </span>
-              ))}
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1 whitespace-nowrap"
+                onClick={() => {
+                  /* Volta para panes: pai controla aba; apenas sinaliza foco */
+                  window.dispatchEvent(new CustomEvent("dcc:hive:goto-panes"));
+                }}
+              >
+                <PanelLeft className="h-3.5 w-3.5" />
+                Abrir Panes
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="gap-1 whitespace-nowrap"
+                disabled={addTargetProjectOptions.length === 0}
+                onClick={() => setAddTargetOpen(true)}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Adicionar repo à revisão
+              </Button>
             </div>
           </div>
-          <div className="flex flex-col gap-2 items-end">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1"
-              onClick={() => {
-                /* Volta para panes: pai controla aba; apenas sinaliza foco */
-                window.dispatchEvent(new CustomEvent("dcc:hive:goto-panes"));
-              }}
-            >
-              <PanelLeft className="h-3.5 w-3.5" />
-              Abrir Panes
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="gap-1"
-              disabled={addTargetProjectOptions.length === 0}
-              onClick={() => setAddTargetOpen(true)}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Adicionar repo à revisão
-            </Button>
+          {comb.description ? (
+            <p className="text-xs leading-snug text-muted-foreground line-clamp-2">
+              {comb.description}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            {resolved.map((r) => (
+              <span key={r.id} className="font-mono truncate max-w-[min(100%,240px)]">
+                {r.label}: {r.isPrimaryCombWorktree ? (comb.branch ?? comb.baseBranch) : "checkout local"}
+              </span>
+            ))}
           </div>
         </div>
 
         {multi ? (
-          <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
-              Mapa da revisão
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {miniMap.files} arquivo(s) total · {miniMap.ok} OK ·{" "}
-              {miniMap.later} rever depois · {miniMap.suspicious} suspeito(s)
-            </p>
-          </div>
+          <Collapsible defaultOpen={false} className="rounded-md border border-border bg-muted/30">
+            <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/40">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Mapa da revisão
+              </span>
+              <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="border-t border-border/60 px-3 pb-3 pt-0">
+              <p className="mt-2 text-xs text-muted-foreground">
+                {miniMap.files} arquivo(s) total · {miniMap.ok} OK ·{" "}
+                {miniMap.later} rever depois · {miniMap.suspicious} suspeito(s)
+              </p>
+            </CollapsibleContent>
+          </Collapsible>
         ) : null}
 
-        <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Padrão recomendado
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Use <span className="font-medium">1 Missão por história</span> e
-            adicione os outros repositórios com o botão{" "}
-            <span className="font-medium">Adicionar repo à revisão</span> acima
-            para evitar duplicação de contexto.
-          </p>
-        </div>
+        <Collapsible defaultOpen={false} className="rounded-md border border-border bg-muted/20">
+          <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/30">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Padrão recomendado
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="border-t border-border/60 px-3 pb-3 pt-0 text-xs text-muted-foreground">
+            <p className="mt-2 leading-relaxed">
+              Use <span className="font-medium">1 Missão por história</span> e
+              adicione os outros repositórios com o botão{" "}
+              <span className="font-medium">Adicionar repo à revisão</span> acima
+              para evitar duplicação de contexto.
+            </p>
+          </CollapsibleContent>
+        </Collapsible>
 
         {multi &&
         Object.entries(tokenCatalog).some(([_, hits]) => {

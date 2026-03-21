@@ -9,6 +9,7 @@ import React, {
 } from "react";
 import {
   AlertTriangle,
+  ArrowDownToLine,
   Check,
   ChevronDown,
   Clock,
@@ -151,6 +152,7 @@ export function RepoReviewSection({
   const [isApplyingPatch, setIsApplyingPatch] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
+  const [isPulling, setIsPulling] = useState(false);
 
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [commitDialogStatus, setCommitDialogStatus] =
@@ -162,6 +164,10 @@ export function RepoReviewSection({
 
   const [mainRepoStatus, setMainRepoStatus] = useState<GitStatus | null>(null);
   const [mainRepoStatusLoading, setMainRepoStatusLoading] = useState(false);
+
+  /** Estado do Git na worktree (commit/merge só fazem sentido com cópia limpa antes do merge). */
+  const [worktreeRepoStatus, setWorktreeRepoStatus] =
+    useState<GitStatus | null>(null);
 
   const filePathsKey = useMemo(
     () => diffs.files.map((f) => f.path).sort().join("\0"),
@@ -184,6 +190,19 @@ export function RepoReviewSection({
     [storageKey],
   );
 
+  const refreshWorktreeRepoStatus = useCallback(async () => {
+    if (!worktreePath?.trim() || !window.electronAPI?.git?.getStatus) {
+      setWorktreeRepoStatus(null);
+      return;
+    }
+    try {
+      const s = await window.electronAPI.git.getStatus(worktreePath);
+      setWorktreeRepoStatus(s);
+    } catch {
+      setWorktreeRepoStatus(null);
+    }
+  }, [worktreePath]);
+
   const loadDiffs = useCallback(async () => {
     if (!worktreePath?.trim() || !window.electronAPI?.git?.getReviewDiffs) return;
     setDiffs((prev) => ({ ...prev, loading: true, error: undefined }));
@@ -197,6 +216,7 @@ export function RepoReviewSection({
       addTrail(
         `Alterações carregadas — ${title}: ${result.files.length} arquivo(s)`,
       );
+      void refreshWorktreeRepoStatus();
     } else {
       setDiffs({
         loading: false,
@@ -205,11 +225,15 @@ export function RepoReviewSection({
         summary: null,
       });
     }
-  }, [worktreePath, title, addTrail]);
+  }, [worktreePath, title, addTrail, refreshWorktreeRepoStatus]);
 
   useEffect(() => {
     void loadDiffs();
   }, [loadDiffs]);
+
+  useEffect(() => {
+    void refreshWorktreeRepoStatus();
+  }, [refreshWorktreeRepoStatus]);
 
   useEffect(() => {
     const t = loadReviewJson<TrailEntry[]>(reviewTrailKey(storageKey));
@@ -357,15 +381,29 @@ export function RepoReviewSection({
   }, [refreshMainRepoStatus, targetBranch]);
 
   useEffect(() => {
-    if (mergeDialogOpen) void refreshMainRepoStatus();
-  }, [mergeDialogOpen, refreshMainRepoStatus]);
+    if (mergeDialogOpen) {
+      void refreshMainRepoStatus();
+      void refreshWorktreeRepoStatus();
+    }
+  }, [mergeDialogOpen, refreshMainRepoStatus, refreshWorktreeRepoStatus]);
 
   const mainRepoDirty = mainRepoStatus?.isDirty === true;
+  const worktreeDirty = worktreeRepoStatus?.isDirty === true;
   const patchActionsBlocked = mainRepoDirty;
+  /** Merge revalida a worktree em `handleConfirmMerge`; não bloquear por loading do primeiro getStatus. */
   const mergeUiBlocked =
     !canMergeComb ||
     mainRepoDirty ||
-    mainRepoStatusLoading;
+    worktreeDirty;
+
+  const mainDirtyFilePreview = useMemo(() => {
+    if (!mainRepoStatus?.isDirty) return [];
+    const u = new Set<string>();
+    for (const p of mainRepoStatus.staged ?? []) u.add(p);
+    for (const p of mainRepoStatus.unstaged ?? []) u.add(p);
+    for (const p of mainRepoStatus.untracked ?? []) u.add(p);
+    return Array.from(u);
+  }, [mainRepoStatus]);
 
   const handleMergeClick = () => {
     if (!mainProjectPath?.trim()) {
@@ -376,7 +414,10 @@ export function RepoReviewSection({
       toast.error("Merge do branch só está disponível no target principal da Missão.");
       return;
     }
-    void refreshMainRepoStatus().then(() => setMergeDialogOpen(true));
+    void Promise.all([
+      refreshMainRepoStatus(),
+      refreshWorktreeRepoStatus(),
+    ]).then(() => setMergeDialogOpen(true));
   };
 
   const handleConfirmMerge = async () => {
@@ -386,6 +427,20 @@ export function RepoReviewSection({
       return;
     }
     if (!combId) return;
+    if (worktreePath && window.electronAPI?.git?.getStatus) {
+      try {
+        const wt = await window.electronAPI.git.getStatus(worktreePath);
+        if (wt.isDirty) {
+          toast.error(
+            "A worktree ainda tem alterações por commitar. Faça commit ou descarte antes do merge.",
+          );
+          return;
+        }
+      } catch {
+        toast.error("Não foi possível verificar o estado da worktree.");
+        return;
+      }
+    }
     setIsMerging(true);
     try {
       const result = await window.electronAPI?.comb?.mergeIntoMain(combId, b);
@@ -395,6 +450,7 @@ export function RepoReviewSection({
         addTrail(`Merge na branch ${b} concluído`);
         onAction();
         await refreshMainRepoStatus();
+        await refreshWorktreeRepoStatus();
       } else {
         toast.error(result?.error ?? "Erro ao fazer merge");
       }
@@ -405,22 +461,25 @@ export function RepoReviewSection({
 
   const handleCommitWorktree = async (message: string) => {
     if (!worktreePath || !window.electronAPI?.git) return;
-    const paths = includedPaths.length > 0 ? includedPaths : undefined;
     try {
-      const ok = await window.electronAPI.git.commit(
+      const result = await window.electronAPI.git.commit(
         worktreePath,
         message,
-        paths,
       );
-      if (ok) {
+      if (result.success) {
         toast.success("Commit realizado no repositório");
         addTrail(
           `Commit: ${message.slice(0, 60)}${message.length > 60 ? "…" : ""}`,
         );
         await loadDiffs();
+        await refreshWorktreeRepoStatus();
+        await refreshMainRepoStatus();
       } else {
-        toast.error("Falha ao commitar");
-        throw new Error("Falha ao commitar");
+        toast.error(
+          result.error ??
+            "Commit não realizado — costuma acontecer quando não há alterações para incluir ou o Git recusou o commit.",
+        );
+        throw new Error(result.error ?? "Commit não realizado");
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erro desconhecido";
@@ -437,11 +496,31 @@ export function RepoReviewSection({
       if (result?.success) {
         toast.success("Push enviado");
         addTrail("Push do branch enviado");
+        await loadDiffs();
+        await refreshWorktreeRepoStatus();
       } else {
         toast.error(result?.error ?? "Falha ao enviar push");
       }
     } finally {
       setIsPushing(false);
+    }
+  };
+
+  const handlePull = async () => {
+    if (!worktreePath || !window.electronAPI?.git?.pull) return;
+    setIsPulling(true);
+    try {
+      const result = await window.electronAPI.git.pull(worktreePath);
+      if (result?.success) {
+        toast.success("Pull concluído na worktree");
+        addTrail("Pull na worktree");
+        await loadDiffs();
+        await refreshWorktreeRepoStatus();
+      } else {
+        toast.error(result?.error ?? "Falha ao fazer pull");
+      }
+    } finally {
+      setIsPulling(false);
     }
   };
 
@@ -549,8 +628,29 @@ export function RepoReviewSection({
       toast.success("Alterações locais descartadas");
       addTrail("Alterações locais descartadas (reset --hard)");
       await loadDiffs();
+      await refreshWorktreeRepoStatus();
     } else {
       toast.error(result.error ?? "Falha ao descartar");
+    }
+  };
+
+  const handleDiscardMainRepo = async () => {
+    if (!mainProjectPath?.trim() || !window.electronAPI?.git?.reset) return;
+    const ok = await confirmDialog({
+      title: "Descartar alterações no repositório principal?",
+      description:
+        "Será executado git reset --hard HEAD no checkout principal (não na worktree da Missão). Perdes alterações locais não commitadas nesse repositório.",
+      confirmLabel: "Descartar no principal",
+      cancelLabel: "Cancelar",
+    });
+    if (!ok) return;
+    const result = await window.electronAPI.git.reset(mainProjectPath, "HEAD");
+    if (result.success) {
+      toast.success("Alterações locais descartadas no repositório principal");
+      addTrail("Principal: reset --hard (working tree limpo)");
+      await refreshMainRepoStatus();
+    } else {
+      toast.error(result.error ?? "Falha ao descartar no principal");
     }
   };
 
@@ -636,38 +736,50 @@ export function RepoReviewSection({
           </div>
         </div>
 
+        <Alert className="border-primary/25 bg-primary/5 py-2">
+          <Check className="h-4 w-4 text-primary" />
+          <AlertTitle className="text-xs">Fluxo recomendado (sem terminal)</AlertTitle>
+          <AlertDescription className="text-xs leading-relaxed text-muted-foreground">
+            <ol className="mt-1 list-decimal space-y-1 pl-4">
+              <li>
+                <strong className="text-foreground">Worktree</strong> — Commit e depois
+                Push no branch da Missão (abaixo). Usa Pull se precisares de alinhar com
+                o remoto antes.
+              </li>
+              <li>
+                <strong className="text-foreground">Principal limpo</strong> — O
+                checkout na raiz do projeto (ex. <code className="text-[10px]">main</code>)
+                não pode ter alterações por commitar. Se editaste ficheiros aí ou usaste
+                &quot;Aplicar&quot; antes, resolve ou usa &quot;Descartar no
+                principal&quot; no alerta vermelho.
+              </li>
+              <li>
+                <strong className="text-foreground">Merge</strong> — Integra o branch
+                da Missão na branch de destino escolhida em cima.
+              </li>
+            </ol>
+            <p className="mt-2 font-mono text-[10px] break-all opacity-90">
+              Pasta da Missão (agentes): {worktreePath}
+            </p>
+          </AlertDescription>
+        </Alert>
+
         <Collapsible className="rounded-md border border-border/80 bg-muted/15">
           <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/30">
-            <span>Ordem e estratégias de integração</span>
+            <span>Detalhes: merge vs patch</span>
             <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-2 border-t border-border/60 px-3 pb-3 pt-0 text-xs text-muted-foreground">
-            <ol className="mt-2 list-decimal space-y-1 pl-4 leading-relaxed">
-              <li>Rever diffs e marcar ficheiros (para patch).</li>
-              <li>Escolher a branch de destino no repositório principal.</li>
-              <li>
-                Opcional no branch da Missão: Commit local → Push (backup/remoto).
-              </li>
-              <li>
-                No principal, escolher <strong className="text-foreground">uma</strong>{" "}
-                estratégia:
-              </li>
-            </ol>
-            <ul className="space-y-1.5 border-l-2 border-border pl-3">
-              <li>
-                <strong className="text-foreground">Merge</strong> — integra o branch
-                inteiro (histórico). Exige o repositório principal{" "}
-                <strong className="text-foreground">limpo</strong>.
-              </li>
-              <li>
-                <strong className="text-foreground">Patch</strong> — copia alterações
-                para a branch; &quot;Aplicar&quot; sem commit deixa o principal sujo até
-                commitares ou descartares.
-              </li>
-            </ul>
-            <p className="text-[11px] italic text-amber-600/90 dark:text-amber-400/90">
-              Merge não é o passo natural depois de &quot;Aplicar&quot; sem commit —
-              primeiro resolve o estado do repositório principal.
+            <p className="mt-2 leading-relaxed">
+              <strong className="text-foreground">Merge</strong> é o caminho normal:
+              traz o branch inteiro da worktree para a branch de destino no repositório
+              principal (histórico preservado).
+            </p>
+            <p className="leading-relaxed">
+              <strong className="text-foreground">Patch</strong> (&quot;Aplicar&quot;)
+              copia diffs para o checkout principal — útil em casos raros; sem commit
+              deixa o principal com ficheiros modificados (como{" "}
+              <code className="text-[10px]">git apply</code> manual).
             </p>
           </CollapsibleContent>
         </Collapsible>
@@ -683,17 +795,47 @@ export function RepoReviewSection({
           <Alert variant="destructive" className="py-2">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle className="text-xs">Repositório principal com alterações pendentes</AlertTitle>
+            <AlertDescription className="space-y-2 text-xs leading-snug">
+              <p>
+                Patch e merge no principal estão bloqueados até commitares, stash ou
+                descartares nesse repositório (não na worktree). Isto evita o erro de
+                merge por ficheiros locais.
+              </p>
+              {mainDirtyFilePreview.length > 0 ? (
+                <span className="block font-mono text-[10px] text-destructive/95">
+                  {mainDirtyFilePreview.slice(0, 8).join(" · ")}
+                  {mainDirtyFilePreview.length > 8
+                    ? ` · +${mainDirtyFilePreview.length - 8} mais`
+                    : ""}
+                </span>
+              ) : null}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 border-destructive/40 text-xs"
+                onClick={() => void handleDiscardMainRepo()}
+              >
+                Descartar alterações locais no principal…
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {canMergeComb && worktreeDirty ? (
+          <Alert variant="destructive" className="py-2">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle className="text-xs">Worktree com alterações por commitar</AlertTitle>
             <AlertDescription className="text-xs leading-snug">
-              Patch e merge no principal estão bloqueados até commitares, stash ou
-              descartares nesse repositório (não na worktree). Isto evita o erro de
-              merge por ficheiros locais.
+              O merge integra o branch já commitado, não o working tree. Faz commit ou
+              descarta na worktree antes de integrar no repositório principal.
             </AlertDescription>
           </Alert>
         ) : null}
 
         <div className="space-y-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            No branch da Missão (worktree)
+            Passo 1 — Branch da Missão (worktree)
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -716,6 +858,20 @@ export function RepoReviewSection({
             <Button
               variant="outline"
               size="sm"
+              disabled={isPulling || !worktreePath}
+              onClick={() => void handlePull()}
+              title="Atualizar branch da Missão a partir do remoto (git pull)"
+            >
+              {isPulling ? (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              ) : (
+                <ArrowDownToLine className="mr-1 h-3 w-3" />
+              )}
+              Pull
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               disabled={isPushing || !worktreePath}
               onClick={() => void handlePush()}
             >
@@ -731,48 +887,24 @@ export function RepoReviewSection({
 
         <div className="space-y-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            No repositório principal
+            Passo 2 — Integrar no repositório principal
+          </p>
+          <p className="text-[11px] text-muted-foreground leading-snug">
+            Usa o merge para trazer o branch da Missão para{" "}
+            <span className="font-mono">{targetBranch || "…"}</span>. O principal tem
+            de estar limpo (sem alterações locais na raiz do projeto).
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              size="sm"
-              disabled={
-                isApplyingPatch ||
-                !hasIncludedFiles ||
-                diffs.files.length === 0 ||
-                patchActionsBlocked
-              }
-              onClick={() => void runApplyPatch({ commit: false })}
-            >
-              {isApplyingPatch ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              ) : null}
-              Aplicar
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={
-                isApplyingPatch ||
-                !hasIncludedFiles ||
-                diffs.files.length === 0 ||
-                patchActionsBlocked
-              }
-              onClick={() => setApplyCommitDialogOpen(true)}
-            >
-              Aplicar + Commit
-            </Button>
-            <Button
-              variant="outline"
               size="sm"
               disabled={isMerging || mergeUiBlocked}
               title={
                 !canMergeComb
                   ? "Disponível só no target principal da Missão."
-                  : mainRepoStatusLoading
-                    ? "A atualizar estado do repositório…"
-                    : mainRepoDirty
-                      ? "Limpe alterações no repositório principal antes do merge."
+                  : mainRepoDirty
+                    ? "Limpe alterações no repositório principal antes do merge (ou use Descartar no alerta acima)."
+                    : worktreeDirty
+                      ? "Faça commit ou descarte na worktree antes do merge."
                       : undefined
               }
               onClick={handleMergeClick}
@@ -785,6 +917,52 @@ export function RepoReviewSection({
               Integrar branch (merge)…
             </Button>
           </div>
+
+          <Collapsible className="rounded-md border border-amber-500/25 bg-amber-500/5">
+            <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-amber-500/10">
+              <span>Alternativa avançada: patch no principal (não é merge)</span>
+              <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-2 border-t border-amber-500/20 px-3 pb-3 pt-1 text-xs text-muted-foreground">
+              <p className="leading-snug">
+                Isto aplica alterações diretamente no checkout do repositório principal
+                (pasta do Hive), não só na worktree. Só usa se souberes o que estás a
+                fazer; &quot;Aplicar&quot; sem commit deixa o principal com ficheiros
+                modificados.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={
+                    isApplyingPatch ||
+                    !hasIncludedFiles ||
+                    diffs.files.length === 0 ||
+                    patchActionsBlocked
+                  }
+                  onClick={() => void runApplyPatch({ commit: false })}
+                >
+                  {isApplyingPatch ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : null}
+                  Aplicar
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={
+                    isApplyingPatch ||
+                    !hasIncludedFiles ||
+                    diffs.files.length === 0 ||
+                    patchActionsBlocked
+                  }
+                  onClick={() => setApplyCommitDialogOpen(true)}
+                >
+                  Aplicar + Commit
+                </Button>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
       </div>
 
@@ -827,6 +1005,16 @@ export function RepoReviewSection({
               <AlertDescription className="text-xs">
                 Não é possível fazer merge enquanto o repositório principal tiver
                 alterações locais. Commit, stash ou descarte primeiro.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {worktreeDirty ? (
+            <Alert variant="destructive" className="py-2">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle className="text-xs">Worktree suja</AlertTitle>
+              <AlertDescription className="text-xs">
+                Faça commit ou descarte na worktree antes do merge — só entram no merge
+                os commits já gravados no branch.
               </AlertDescription>
             </Alert>
           ) : null}
@@ -1018,7 +1206,11 @@ export function RepoReviewSection({
         onCommit={handleCommitWorktree}
         defaultMessage={`Changes from mission: ${missionName}`}
         projectPath={worktreePath}
-        status={commitDialogStatus}
+        status={
+          commitDialogOpen
+            ? (commitDialogStatus ?? worktreeRepoStatus)
+            : null
+        }
       />
     </div>
   );

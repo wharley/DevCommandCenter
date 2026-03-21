@@ -280,6 +280,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     commit: (projectPath: string, message: string, files?: string[]) =>
       invoke("git:commit", projectPath, message, files),
     push: (projectPath: string) => invoke("git:push", projectPath),
+    pull: (projectPath: string) => invoke("git:pull", projectPath),
     reset: (
       projectPath: string,
       ref?: "HEAD" | "HEAD~1",

@@ -1305,20 +1305,42 @@ export class GitService {
   }
 
   /**
-   * Faz commit das mudanças
+   * Faz commit das mudanças (mensagem via ficheiro temporário para evitar falhas com aspas).
    */
-  async commit(message: string, files?: string[]): Promise<boolean> {
+  async commit(
+    message: string,
+    files?: string[],
+  ): Promise<{ success: boolean; error?: string }> {
+    const msgPath = path.join(
+      os.tmpdir(),
+      `dcc-git-commit-${crypto.randomBytes(8).toString("hex")}.txt`,
+    );
     try {
       if (files && files.length > 0) {
-        const fileList = files.map((f) => `"${f}"`).join(" ");
-        await execAsync(`git add ${fileList}`, { cwd: this.projectPath });
+        await execFileAsync("git", ["add", ...files], {
+          cwd: this.projectPath,
+        });
       } else {
-        await execAsync("git add -A", { cwd: this.projectPath });
+        await execFileAsync("git", ["add", "-A"], { cwd: this.projectPath });
       }
-      await execAsync(`git commit -m "${message}"`, { cwd: this.projectPath });
-      return true;
-    } catch {
-      return false;
+      await fs.promises.writeFile(msgPath, message, "utf8");
+      await execFileAsync("git", ["commit", "-F", msgPath], {
+        cwd: this.projectPath,
+      });
+      return { success: true };
+    } catch (err: unknown) {
+      let errMsg = "Erro ao fazer commit.";
+      if (err instanceof Error) {
+        errMsg = err.message;
+      } else if (err && typeof err === "object" && "stderr" in err) {
+        errMsg = String((err as { stderr?: string }).stderr ?? "").trim() || errMsg;
+      }
+      return {
+        success: false,
+        error: errMsg || "Erro ao fazer commit.",
+      };
+    } finally {
+      await fs.promises.unlink(msgPath).catch(() => {});
     }
   }
 
@@ -1350,17 +1372,64 @@ export class GitService {
    * Envia commits do branch atual para o remoto (origin)
    */
   async push(): Promise<{ success: boolean; error?: string }> {
-    try {
-      const branch = await this.getCurrentBranch();
-      if (!branch || branch === "unknown" || branch === "HEAD") {
-        return { success: false, error: "Branch atual não identificado." };
+    const branch = await this.getCurrentBranch();
+    if (!branch || branch === "unknown" || branch === "HEAD") {
+      return { success: false, error: "Branch atual não identificado." };
+    }
+
+    const runPush = async (args: string[]) => {
+      await execFileAsync("git", args, { cwd: this.projectPath });
+    };
+
+    const extractErr = (err: unknown): string => {
+      let message = "Erro ao fazer push.";
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (err && typeof err === "object" && "stderr" in err) {
+        message = String((err as { stderr?: string }).stderr ?? "").trim();
       }
-      await execAsync(`git push origin ${branch}`, {
+      return message || "Erro ao fazer push.";
+    };
+
+    const looksLikeUpstreamMissing = (text: string) =>
+      /no upstream branch|set-upstream|set the upstream|has no upstream/i.test(
+        text,
+      );
+
+    try {
+      await runPush(["push", "origin", branch]);
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = extractErr(err);
+      if (looksLikeUpstreamMissing(msg)) {
+        try {
+          await runPush(["push", "-u", "origin", branch]);
+          return { success: true };
+        } catch (err2: unknown) {
+          return {
+            success: false,
+            error: extractErr(err2),
+          };
+        }
+      }
+      return {
+        success: false,
+        error: msg,
+      };
+    }
+  }
+
+  /**
+   * Atualiza o branch atual a partir do remoto (origin), p.ex. antes do push.
+   */
+  async pull(): Promise<{ success: boolean; error?: string }> {
+    try {
+      await execFileAsync("git", ["pull", "--no-edit"], {
         cwd: this.projectPath,
       });
       return { success: true };
     } catch (err: unknown) {
-      let message = "Erro ao fazer push.";
+      let message = "Erro ao fazer pull.";
       if (err instanceof Error) {
         message = err.message;
       } else if (err && typeof err === "object" && "stderr" in err) {
@@ -1368,7 +1437,7 @@ export class GitService {
       }
       return {
         success: false,
-        error: message || "Erro ao fazer push.",
+        error: message || "Erro ao fazer pull.",
       };
     }
   }

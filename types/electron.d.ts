@@ -377,8 +377,11 @@ declare global {
           projectPath: string,
           message: string,
           files?: string[]
-        ) => Promise<boolean>;
+        ) => Promise<{ success: boolean; error?: string }>;
         push: (
+          projectPath: string
+        ) => Promise<{ success: boolean; error?: string }>;
+        pull: (
           projectPath: string
         ) => Promise<{ success: boolean; error?: string }>;
         reset: (
