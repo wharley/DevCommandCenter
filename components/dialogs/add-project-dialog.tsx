@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useElectron } from "@/hooks/use-electron";
+import { useDesktopShell } from "@/hooks/use-desktop-shell";
 import { useProjects, useProviders } from "@/hooks/use-data";
 import { toast } from "sonner";
 
@@ -36,7 +36,7 @@ export function AddProjectDialog({
   onOpenChange,
 }: AddProjectDialogProps) {
   const navigate = useNavigate();
-  const { selectDirectory } = useElectron();
+  const { selectDirectory, isDesktop } = useDesktopShell();
   const { create } = useProjects();
   const { providers } = useProviders();
   const activeProviders = providers.filter((p) => p.isActive);
@@ -96,9 +96,9 @@ export function AddProjectDialog({
       const path = await selectDirectory();
       if (path) {
         setFormData((prev) => ({ ...prev, path }));
-      } else {
+      } else if (!isDesktop) {
         toast.info(
-          "Seletor de pasta estará disponível na versão Electron. Digite o caminho manualmente.",
+          "Seletor de pasta estará disponível no app desktop. Digite o caminho manualmente.",
         );
       }
     } finally {

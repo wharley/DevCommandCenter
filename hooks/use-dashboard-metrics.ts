@@ -45,6 +45,15 @@ function getPeriodStart(days: DashboardPeriodDays): Date {
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 }
 
+function asDate(value: unknown): Date | null {
+  if (value instanceof Date) return value;
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
 function countMissionStatus(missions: Mission[]) {
   const counts = new Map<MissionStatus, number>();
   for (const mission of missions) {
@@ -79,13 +88,18 @@ export function useDashboardMetrics(
   return useMemo(() => {
     const periodStart = getPeriodStart(periodDays);
 
-    const missionsInPeriod = missions.filter((m) => m.createdAt >= periodStart);
+    const missionsInPeriod = missions.filter((m) => {
+      const createdAt = asDate(m.createdAt);
+      return !!createdAt && createdAt >= periodStart;
+    });
     const completedInPeriod = missionsInPeriod.filter((m) => m.status === "completed");
 
     const leadTimes = completedInPeriod
       .map((mission) => {
-        if (!mission.completedAt) return null;
-        const diffMs = mission.completedAt.getTime() - mission.createdAt.getTime();
+        const completedAt = asDate(mission.completedAt);
+        const createdAt = asDate(mission.createdAt);
+        if (!completedAt || !createdAt) return null;
+        const diffMs = completedAt.getTime() - createdAt.getTime();
         return diffMs > 0 ? diffMs / (1000 * 60) : null;
       })
       .filter((value): value is number => value !== null);

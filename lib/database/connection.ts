@@ -8,11 +8,11 @@ import fs from 'fs';
 // Singleton para a conexão do banco
 let db: Database.Database | null = null;
 
-// Cache do userData path (definido pelo Electron main process)
+// Cache do userData path (definido pelo host em integrações legadas)
 let userDataPath: string | null = null;
 
 /**
- * Define o caminho do userData (chamado pelo main process do Electron).
+ * Define o caminho do userData (ex.: host Node / scripts).
  */
 export function setUserDataPath(appPath: string): void {
   userDataPath = appPath;
@@ -28,25 +28,12 @@ export function setUserDataPath(appPath: string): void {
 export function getAppDataPath(): string {
   const appName = 'dev-command-center';
   
-  // Se o Electron definiu o path, usar ele
+  // Se o host definiu o path, usar ele
   if (userDataPath) {
     return userDataPath;
   }
   
-  // Tentar usar app.getPath do Electron diretamente (main process)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { app } = require('electron');
-    if (app && typeof app.getPath === 'function') {
-      const electronPath = app.getPath('userData');
-      userDataPath = electronPath;
-      return electronPath;
-    }
-  } catch {
-    // Electron não disponível, usar fallback
-  }
-  
-  // Fallback para Node.js puro (desenvolvimento/testes)
+  // Fallback para Node.js (scripts / testes; o app Tauri usa Rust + window.db)
   const platform = process.platform;
   const homeDir = process.env.HOME || process.env.USERPROFILE || '';
   

@@ -19,10 +19,10 @@ const isDev =
   (import.meta.env?.DEV ?? process.env.NODE_ENV === "development");
 
 function hasLicenseAPI(): boolean {
-  return typeof window !== "undefined" && !!window.electronAPI?.license;
+  return typeof window !== "undefined" && !!window.desktopAPI?.license;
 }
 function hasSkipActivation(): boolean {
-  return typeof window.electronAPI?.license?.skipActivation === "function";
+  return typeof window.desktopAPI?.license?.skipActivation === "function";
 }
 
 interface ActivationPageProps {
@@ -44,7 +44,7 @@ export default function ActivationPage({ onActivated }: ActivationPageProps) {
     }
     setLoading(true);
     try {
-      const result = await window.electronAPI!.license.activate(email);
+      const result = await window.desktopAPI!.license.activate(email);
       if (result.success) {
         setSuccess(true);
         setTimeout(() => onActivated(), 1200);
@@ -63,7 +63,7 @@ export default function ActivationPage({ onActivated }: ActivationPageProps) {
     setLoading(true);
     setError(null);
     try {
-      const result = await window.electronAPI!.license.skipActivation();
+      const result = await window.desktopAPI!.license.skipActivation();
       if (result.success) {
         onActivated();
       } else {

@@ -1,6 +1,6 @@
 // Dev Command Center - Application State Store
 // Estado de UI (projeto/missão atuais) e cache em memória para uso no browser.
-// No Electron, dados reais vêm do SQLite via use-data (window.db).
+// No app desktop (Tauri), dados reais vêm do SQLite via use-data (window.db).
 
 import { create } from "zustand";
 import type {
@@ -80,7 +80,7 @@ const generateId = () =>
 // ============================================
 
 export const useAppStore = create<AppState>((set, get) => ({
-  // Estado inicial vazio; no Electron os dados vêm do SQLite via use-data
+  // Estado inicial vazio; no desktop os dados vêm do SQLite via use-data
   projects: [],
   providers: [],
   missions: [],

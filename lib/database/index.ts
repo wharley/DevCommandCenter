@@ -72,7 +72,7 @@ export type {
 } from "./types";
 
 // ============================================
-// Funções de conveniência para uso no Electron
+// Funções de conveniência para uso no host Node (legado / tooling)
 // ============================================
 
 import {
@@ -102,13 +102,13 @@ export const db = {
 
   /**
    * Inicializa o banco de dados.
-   * Deve ser chamado uma vez na inicialização do app Electron.
+   * Deve ser chamado uma vez na inicialização do host Node (tooling legado).
    */
   init: initDatabase,
 
   /**
    * Fecha a conexão com o banco.
-   * Deve ser chamado ao fechar o app Electron.
+   * Deve ser chamado ao fechar o host Node (tooling legado).
    */
   close: closeDatabase,
 

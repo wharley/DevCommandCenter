@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Dev Command Center",
+  "version": "0.1.0",
+  "identifier": "com.devcommandcenter.app",
+  "build": {
+    "beforeDevCommand": "node scripts/ensure-node.mjs && yarn vite",
+    "beforeBuildCommand": "yarn vite:build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "title": "Dev Command Center",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 700
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  }
+}

@@ -22,7 +22,7 @@ export function useTerminalAttentionToasts(options?: {
   const lastRendererEmit = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
-    const subscribe = window.electronAPI?.terminal?.onAttention;
+    const subscribe = window.desktopAPI?.terminal?.onAttention;
     if (!subscribe) return;
 
     return subscribe(async (payload: TerminalAttentionPayload) => {

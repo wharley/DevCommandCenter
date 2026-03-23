@@ -2,9 +2,11 @@
 
 > **Patch & Git Execution UI**: missão → plano → diffs → apply → commit, com vários providers (BYOK). Não é plataforma genérica de agentes.
 
+> **Runtime desktop:** o projeto migrou de **Electron** para **Tauri 2** (Rust + WebView). Motivos, pré-requisitos de instalação (Node, Rust, deps por SO) e comandos: **[docs/MIGRACAO_TAURI.md](docs/MIGRACAO_TAURI.md)**.
+
 ## Visão Geral
 
-O Dev Command Center é um aplicativo desktop cross-platform (macOS, Windows, Linux) desenvolvido em **Electron + Vite + React + TypeScript**. O produto é um **fluxo de execução de patches e Git**: o usuário descreve uma missão em linguagem natural, revisa plano e diffs gerados por IA e aplica as mudanças no repositório com controle (dry-run, backup, commit). O app não hospeda modelo próprio; suporta vários provedores (Claude Code, Codex, OpenAI, Anthropic, Cursor Agent CLI, etc.) via CLIs/APIs, todos entrando no mesmo funil **Plan + Unified Diff + Apply + Git**.
+O Dev Command Center é um aplicativo desktop cross-platform (macOS, Windows, Linux) desenvolvido em **Tauri 2 + Vite + React + TypeScript**. O produto é um **fluxo de execução de patches e Git**: o usuário descreve uma missão em linguagem natural, revisa plano e diffs gerados por IA e aplica as mudanças no repositório com controle (dry-run, backup, commit). O app não hospeda modelo próprio; suporta vários provedores (Claude Code, Codex, OpenAI, Anthropic, Cursor Agent CLI, etc.) via CLIs/APIs, todos entrando no mesmo funil **Plan + Unified Diff + Apply + Git**.
 
 ### Proposta de Valor
 
@@ -56,7 +58,7 @@ Para o porquê de cada etapa, custo/tokens e boas práticas de uso (missões peq
 Antes de implementar criação de worktrees, as regras de governança estão definidas em:
 
 - **Documento**: [docs/WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md)
-- **Constantes**: [electron/services/worktree-policy.ts](electron/services/worktree-policy.ts)
+- **Constantes / implementação**: política em Rust sob `src-tauri` (ver também regras em [WORKTREE_POLICY.md](docs/WORKTREE_POLICY.md))
 
 Resumo: nome padrão `dcc-{id}-{timestamp}`, limpeza de worktrees antigos (>7 dias), listagem/reaproveitamento, lock durante missão em execução.
 
@@ -91,13 +93,13 @@ Esta seção é **apenas uma hipótese** para validar depois do MVP. A ideia é 
 
 | Camada             | Tecnologia           | Versão                    |
 | ------------------ | -------------------- | ------------------------- |
-| Desktop Runtime    | Electron             | ^33.0.0                   |
+| Desktop shell      | Tauri                | 2.x (`src-tauri`)         |
 | Build Tool         | Vite                 | ^6.0.0                    |
 | Frontend Framework | React + React Router | React 19.2.0 / Router 7.x |
 | Linguagem          | TypeScript           | ^5                        |
-| Database           | better-sqlite3       | ^11.8.0                   |
+| Database (app)     | SQLite via Rust      | rusqlite no `src-tauri`   |
 | State Management   | Zustand              | 5.0.10                    |
-| Node.js (runtime)  | Node.js              | >=22.0.0                  |
+| Node.js            | Node.js              | >=22.0.0 (tooling / Vite) |
 
 ### UI/UX
 
@@ -112,11 +114,11 @@ Esta seção é **apenas uma hipótese** para validar depois do MVP. A ideia é 
 
 ### Build & Dev
 
-| Ferramenta       | Uso                           |
-| ---------------- | ----------------------------- |
-| electron-builder | Empacotamento multiplataforma |
-| concurrently     | Dev server paralelo           |
-| wait-on          | Sincronização de startup      |
+| Ferramenta        | Uso                                      |
+| ----------------- | ---------------------------------------- |
+| `@tauri-apps/cli` | `tauri dev` / `tauri build` (via `yarn`) |
+| Cargo / Rust      | Compilação de `src-tauri`                |
+| Vite              | Bundler do frontend (`dist/`)            |
 
 ---
 
@@ -126,12 +128,14 @@ Esta seção é **apenas uma hipótese** para validar depois do MVP. A ideia é 
 DevCommandCenter/
 ├── src/                          # Código fonte React (Vite)
 │   ├── App.tsx                   # Componente raiz com rotas
-│   ├── main.tsx                  # Entry point
+│   ├── main.tsx                  # Entry point (+ installDesktopBridge)
+│   ├── lib/
+│   │   └── desktop-bridge.ts     # Ponte Tauri → window.desktopAPI / window.db
 │   ├── globals.css               # Estilos globais
 │   └── pages/                    # Páginas (React Router)
 │       ├── HiveWorkspacePage.tsx # Único shell do produto (rota /)
 │       ├── SettingsPage.tsx      # Preferências (embutido no Hive)
-│       └── ActivationPage.tsx    # Licença (Electron)
+│       └── ActivationPage.tsx    # Licença (shell desktop)
 │
 ├── components/
 │   ├── theme-provider.tsx        # Provider de tema
@@ -147,30 +151,15 @@ DevCommandCenter/
 │       ├── empty.tsx             # Estado vazio
 │       └── ... (50+ componentes)
 │
-├── electron/
-│   ├── main.ts                   # Processo principal Electron
-│   ├── preload.ts                # Bridge IPC seguro
-│   ├── ipc-handlers.ts           # Handlers IPC (DB + AI + Git)
-│   ├── tsconfig.json             # Config TS do Electron
-│   └── services/                 # Serviços do backend
-│       ├── types.ts              # Tipos compartilhados
-│       ├── schemas/              # Schemas Zod (MissionPlan, GeneratedCode)
-│       ├── git-service.ts        # Operações Git
-│       ├── worktree-policy.ts    # Constantes Worktree Policy
-│       ├── ai-orchestrator.ts    # Orquestrador de IA
-│       └── adapters/             # Adapters de providers
-│           ├── base.ts           # Classe base abstrata
-│           ├── claude-code.ts    # Claude Code CLI
-│           ├── codex.ts          # OpenAI Codex CLI
-│           ├── openai.ts         # OpenAI API direta
-│           ├── anthropic.ts      # Anthropic API direta
-│           ├── cursor.ts         # Cursor Agent CLI
-│           └── index.ts          # Factory e registry
+├── src-tauri/                    # Backend Tauri (Rust)
+│   ├── src/main.rs               # Comandos, DB, Git, terminal, etc.
+│   ├── Cargo.toml
+│   └── tauri.conf.json
 │
 ├── hooks/
 │   ├── use-app-store.ts          # Estado global Zustand
 │   ├── use-data.ts               # Hook de dados
-│   ├── use-electron.ts           # Hook para APIs Electron
+│   ├── use-desktop-shell.ts      # Hook para APIs do shell (desktopAPI)
 │   └── use-toast.ts              # Hook de notificações
 │
 ├── lib/
@@ -190,16 +179,16 @@ DevCommandCenter/
 │   └── utils.ts                  # Utilitários gerais
 │
 ├── types/
-│   └── electron.d.ts             # Tipos globais Electron
+│   └── app.d.ts                  # Tipos globais (window.desktopAPI, window.db)
 │
 ├── docs/                         # Documentação
+│   ├── MIGRACAO_TAURI.md         # Migração Electron→Tauri, pré-requisitos, comandos
 │   └── WORKTREE_POLICY.md        # Política de worktrees
 │
 ├── public/                       # Assets estáticos
 ├── styles/
 │   └── globals.css               # CSS adicional
 │
-├── electron-builder.yml          # Config de build
 ├── vite.config.ts                # Config Vite
 ├── package.json
 ├── tsconfig.json
@@ -227,14 +216,13 @@ DevCommandCenter/
 ├─────────────────────────────────────────────────────────────┤
 │                    Service Layer                             │
 │  ┌─────────────────┐  ┌─────────────────────────────────┐   │
-│  │   AI Service    │  │     IPC Bridge (preload.ts)     │   │
+│  │   AI Service    │  │  desktop-bridge (invoke/listen) │   │
 │  │  (mock/real)    │  │                                  │   │
 │  └─────────────────┘  └─────────────────────────────────┘   │
 ├─────────────────────────────────────────────────────────────┤
-│                    Electron Main Process                     │
+│                    Tauri (Rust) — src-tauri                  │
 │  ┌─────────────────┐  ┌─────────────────────────────────┐   │
-│  │  IPC Handlers   │  │     Database (SQLite)            │   │
-│  │                 │  │     - Repositories               │   │
+│  │  #[tauri::command] │  SQLite / Git / terminal / …   │   │
 │  └─────────────────┘  └─────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -244,13 +232,9 @@ DevCommandCenter/
 ```
 User Action → React Component → useAppStore (Zustand)
                                       ↓
-                              IPC via preload.ts
+                    invoke / events (desktop-bridge) → Tauri
                                       ↓
-                         Electron Main Process
-                                      ↓
-                         ipc-handlers.ts → Database
-                                      ↓
-                              Repository (SQLite)
+                         src-tauri (Rust) → SQLite
 ```
 
 ---
@@ -462,75 +446,14 @@ interface CodeSuggestion {
 
 ---
 
-## API de Comunicação IPC
+## API de comunicação (UI ↔ Rust)
 
-### Canais Disponíveis
+No **Tauri**, não há `preload` nem `contextBridge`: o frontend chama **`@tauri-apps/api`** (`invoke`, `listen`) e o módulo **`src/lib/desktop-bridge.ts`** instala na primeira carga:
 
-O `preload.ts` expõe APIs seguras via `contextBridge`:
+- **`window.desktopAPI`** — diálogo, shell, janela, licença, `ai`, `git`, `terminal`, `worktree`, `comb`, `review`, etc.
+- **`window.db`** — mesma superfície de repositórios (providers, projects, missions, missionLogs, combs, panes, utils) via comandos Rust.
 
-```typescript
-// window.electronAPI
-electronAPI: {
-  platform: 'darwin' | 'win32' | 'linux',
-  dialog: {
-    selectDirectory(): Promise<string | null>,
-    showMessage(options): Promise<number>,
-    confirm(message: string): Promise<boolean>,
-  },
-  shell: {
-    openExternal(url: string): Promise<void>,
-    openPath(path: string): Promise<void>,
-    showItemInFolder(path: string): void,
-  },
-  window: {
-    minimize(): Promise<void>,
-    maximize(): Promise<void>,
-    close(): Promise<void>,
-    isMaximized(): Promise<boolean>,
-  },
-}
-
-// window.db
-db: {
-  providers: {
-    findAll(): Promise<Provider[]>,
-    findById(id: string): Promise<Provider | null>,
-    findActive(): Promise<Provider[]>,
-    create(data: CreateProviderDTO): Promise<Provider>,
-    update(id: string, data: UpdateProviderDTO): Promise<Provider>,
-    delete(id: string): Promise<boolean>,
-    setActive(id: string, isActive: boolean): Promise<Provider>,
-    testConnection(id: string): Promise<boolean>,
-  },
-  projects: { /* similar CRUD */ },
-  missions: {
-    /* CRUD + */
-    updateStatus(id, status): Promise<Mission>,
-    updatePlan(id, plan): Promise<Mission>,
-    updateGeneratedCode(id, code): Promise<Mission>,
-    start(id): Promise<Mission>,
-    complete(id, summary?): Promise<Mission>,
-    fail(id, error): Promise<Mission>,
-    cancel(id): Promise<Mission>,
-    getFullMission(id): Promise<Mission & { logs: MissionLog[] }>,
-  },
-  missionLogs: {
-    /* CRUD + */
-    logInfo(missionId, message, metadata?): Promise<MissionLog>,
-    logError(missionId, message, metadata?): Promise<MissionLog>,
-    logAgentAction(missionId, action, details?): Promise<MissionLog>,
-    getStats(missionId): Promise<LogStats>,
-    getLatest(missionId, count?): Promise<MissionLog[]>,
-  },
-  utils: {
-    backup(destPath: string): Promise<boolean>,
-    getPath(): Promise<string>,
-    getSize(): Promise<number>,
-  },
-}
-```
-
-A API completa (incluindo `electronAPI.ai` — generatePlan, generateCode, applyChanges, testConnection, validateProvider — e `electronAPI.git` — getInfo, getStatus, getCurrentBranch, listFiles, commit, push, etc. — além de métodos extras de `db` como findByType, findByPath, search, getStats, logWarning, logDebug) está definida em [electron/preload.ts](electron/preload.ts).
+A **assinatura TypeScript** completa está em **[types/app.d.ts](types/app.d.ts)**. O bridge replica a API que antes existia no preload Electron, para mudança mínima no React.
 
 ---
 
@@ -668,28 +591,28 @@ Para **Cursor CLI**, **Claude Code CLI** e **Codex CLI**, o login é feito **no 
 
 ### Scripts NPM
 
+Pré-requisitos: **Node 22+**, **Yarn**, **Rust (stable)** e dependências de sistema para Tauri — ver **[docs/MIGRACAO_TAURI.md](docs/MIGRACAO_TAURI.md)**.
+
 ```bash
-# Desenvolvimento
-yarn dev                # Vite dev server (http://localhost:5173)
-yarn electron:dev       # Electron + Vite em paralelo (wait-on porta 5173)
+# Desenvolvimento — app desktop (Tauri + Vite; beforeDevCommand em tauri.conf.json)
+yarn dev
 
-# Build
-yarn build              # Vite build (saída em dist/)
-yarn electron:compile   # Compila electron/*.ts para .electron/ e copia schema.sql
-yarn electron:build     # electron:compile + vite build + electron-builder
-yarn electron:rebuild   # Recompila módulos nativos (better-sqlite3)
+# Só frontend no browser (sem APIs nativas / sem DB real via invoke)
+yarn vite
 
-# Produção
-yarn electron:start     # Roda app compilado localmente
+# Build — frontend (vite:build) + binário Tauri
+yarn build
+
+# Lint
+yarn lint
 ```
 
 ### Processo de Build
 
-1. `yarn electron:compile` → Compila `electron/*.ts` para `.electron/` e copia `lib/database/schema.sql` para `.electron/lib/database/`
-2. `yarn build` (Vite) → Gera saída em `dist/`
-3. `electron-builder` → Empacota para cada plataforma usando `dist/` e main em `.electron/electron/main.js`
+1. `yarn vite:build` (via `beforeBuildCommand` no Tauri) → saída em `dist/`
+2. Cargo compila `src-tauri` e empacota WebView + assets → artefatos em `src-tauri/target/release/bundle/`
 
-**Nota:** Electron 33 usa Node.js 22+. Certifique-se de usar Node.js >=22 no desenvolvimento.
+**Nota:** usar Node.js >=22 como no `package.json`.
 
 ---
 

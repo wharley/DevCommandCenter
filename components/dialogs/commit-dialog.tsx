@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { GitStatus } from "@/types/electron";
+import type { GitStatus } from "@/types/app";
 
 interface CommitDialogProps {
   open: boolean;
@@ -85,7 +85,7 @@ export function CommitDialog({
   const loadDiff = useCallback(
     async (path: string) => {
       if (
-        !window.electronAPI?.git?.getFileDiffHead ||
+        !window.desktopAPI?.git?.getFileDiffHead ||
         filesToCommit.some((f) => f.path === path && f.untracked)
       ) {
         setDiffContent(null);
@@ -94,7 +94,7 @@ export function CommitDialog({
       setDiffLoading(true);
       setDiffContent(null);
       try {
-        const diff = await window.electronAPI.git.getFileDiffHead(
+        const diff = await window.desktopAPI.git.getFileDiffHead(
           projectPath,
           path,
         );
@@ -147,13 +147,13 @@ export function CommitDialog({
   };
 
   const handlePushInDialog = async () => {
-    if (!projectPath || !window.electronAPI?.git?.push) {
+    if (!projectPath || !window.desktopAPI?.git?.push) {
       toast.error("Push indisponível");
       return;
     }
     setIsPushingInDialog(true);
     try {
-      const result = await window.electronAPI.git.push(projectPath);
+      const result = await window.desktopAPI.git.push(projectPath);
       if (result.success) {
         toast.success("Push realizado");
         // Callback para atualizar missão
