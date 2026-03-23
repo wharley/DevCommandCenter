@@ -1,0 +1,10 @@
+/Users/wharleyornelasdarocha/projetos/DevCommandCenter/src-tauri/target/debug/deps/walkdir-cf88fd42b61bcc48.d: /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/lib.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/dent.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/error.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/util.rs
+
+/Users/wharleyornelasdarocha/projetos/DevCommandCenter/src-tauri/target/debug/deps/libwalkdir-cf88fd42b61bcc48.rlib: /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/lib.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/dent.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/error.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/util.rs
+
+/Users/wharleyornelasdarocha/projetos/DevCommandCenter/src-tauri/target/debug/deps/libwalkdir-cf88fd42b61bcc48.rmeta: /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/lib.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/dent.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/error.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/util.rs
+
+/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/lib.rs:
+/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/dent.rs:
+/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/error.rs:
+/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/src/util.rs:

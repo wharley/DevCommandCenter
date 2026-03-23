@@ -51,7 +51,7 @@ import { DiffCodeBlock } from "@/components/diff-code-block";
 import { CommitDialog } from "@/components/dialogs/commit-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { extractContextTokens } from "@/lib/review/extract-context-tokens";
-import type { GitStatus } from "@/types/electron";
+import type { GitStatus } from "@/types/app";
 import { toast } from "sonner";
 
 export type ReviewFlag = "ok" | "later" | "suspicious";
@@ -191,12 +191,12 @@ export function RepoReviewSection({
   );
 
   const refreshWorktreeRepoStatus = useCallback(async () => {
-    if (!worktreePath?.trim() || !window.electronAPI?.git?.getStatus) {
+    if (!worktreePath?.trim() || !window.desktopAPI?.git?.getStatus) {
       setWorktreeRepoStatus(null);
       return;
     }
     try {
-      const s = await window.electronAPI.git.getStatus(worktreePath);
+      const s = await window.desktopAPI.git.getStatus(worktreePath);
       setWorktreeRepoStatus(s);
     } catch {
       setWorktreeRepoStatus(null);
@@ -204,9 +204,9 @@ export function RepoReviewSection({
   }, [worktreePath]);
 
   const loadDiffs = useCallback(async () => {
-    if (!worktreePath?.trim() || !window.electronAPI?.git?.getReviewDiffs) return;
+    if (!worktreePath?.trim() || !window.desktopAPI?.git?.getReviewDiffs) return;
     setDiffs((prev) => ({ ...prev, loading: true, error: undefined }));
-    const result = await window.electronAPI.git.getReviewDiffs(worktreePath);
+    const result = await window.desktopAPI.git.getReviewDiffs(worktreePath);
     if (result.success) {
       setDiffs({
         loading: false,
@@ -242,7 +242,7 @@ export function RepoReviewSection({
 
   useEffect(() => {
     if (!mainProjectPath?.trim()) return;
-    const git = window.electronAPI?.git;
+    const git = window.desktopAPI?.git;
     if (!git?.getLocalBranches || !git?.getCurrentBranch) return;
     let cancelled = false;
     Promise.all([
@@ -357,17 +357,17 @@ export function RepoReviewSection({
   const hasIncludedFiles = includedPaths.length > 0;
 
   const canMergeComb = Boolean(
-    useCombWorktreeApis && combId && window.electronAPI?.comb?.mergeIntoMain,
+    useCombWorktreeApis && combId && window.desktopAPI?.comb?.mergeIntoMain,
   );
 
   const refreshMainRepoStatus = useCallback(async () => {
-    if (!mainProjectPath?.trim() || !window.electronAPI?.git?.getStatus) {
+    if (!mainProjectPath?.trim() || !window.desktopAPI?.git?.getStatus) {
       setMainRepoStatus(null);
       return;
     }
     setMainRepoStatusLoading(true);
     try {
-      const s = await window.electronAPI.git.getStatus(mainProjectPath);
+      const s = await window.desktopAPI.git.getStatus(mainProjectPath);
       setMainRepoStatus(s);
     } catch {
       setMainRepoStatus(null);
@@ -427,9 +427,9 @@ export function RepoReviewSection({
       return;
     }
     if (!combId) return;
-    if (worktreePath && window.electronAPI?.git?.getStatus) {
+    if (worktreePath && window.desktopAPI?.git?.getStatus) {
       try {
-        const wt = await window.electronAPI.git.getStatus(worktreePath);
+        const wt = await window.desktopAPI.git.getStatus(worktreePath);
         if (wt.isDirty) {
           toast.error(
             "A worktree ainda tem alterações por commitar. Faça commit ou descarte antes do merge.",
@@ -443,7 +443,7 @@ export function RepoReviewSection({
     }
     setIsMerging(true);
     try {
-      const result = await window.electronAPI?.comb?.mergeIntoMain(combId, b);
+      const result = await window.desktopAPI?.comb?.mergeIntoMain(combId, b);
       if (result?.success) {
         toast.success("Missão mergeada com sucesso");
         setMergeDialogOpen(false);
@@ -460,9 +460,9 @@ export function RepoReviewSection({
   };
 
   const handleCommitWorktree = async (message: string) => {
-    if (!worktreePath || !window.electronAPI?.git) return;
+    if (!worktreePath || !window.desktopAPI?.git) return;
     try {
-      const result = await window.electronAPI.git.commit(
+      const result = await window.desktopAPI.git.commit(
         worktreePath,
         message,
       );
@@ -489,10 +489,10 @@ export function RepoReviewSection({
   };
 
   const handlePush = async () => {
-    if (!worktreePath || !window.electronAPI?.git?.push) return;
+    if (!worktreePath || !window.desktopAPI?.git?.push) return;
     setIsPushing(true);
     try {
-      const result = await window.electronAPI.git.push(worktreePath);
+      const result = await window.desktopAPI.git.push(worktreePath);
       if (result?.success) {
         toast.success("Push enviado");
         addTrail("Push do branch enviado");
@@ -507,10 +507,10 @@ export function RepoReviewSection({
   };
 
   const handlePull = async () => {
-    if (!worktreePath || !window.electronAPI?.git?.pull) return;
+    if (!worktreePath || !window.desktopAPI?.git?.pull) return;
     setIsPulling(true);
     try {
-      const result = await window.electronAPI.git.pull(worktreePath);
+      const result = await window.desktopAPI.git.pull(worktreePath);
       if (result?.success) {
         toast.success("Pull concluído na worktree");
         addTrail("Pull na worktree");
@@ -543,8 +543,8 @@ export function RepoReviewSection({
     }
     setIsApplyingPatch(true);
     try {
-      if (useCombWorktreeApis && combId && window.electronAPI?.comb?.applyPatch) {
-        const result = await window.electronAPI.comb.applyPatch(combId, b, {
+      if (useCombWorktreeApis && combId && window.desktopAPI?.comb?.applyPatch) {
+        const result = await window.desktopAPI.comb.applyPatch(combId, b, {
           includeFiles: includedPaths,
           commit: opts.commit,
           message:
@@ -570,7 +570,7 @@ export function RepoReviewSection({
         return false;
       }
 
-      const applyApi = window.electronAPI?.git?.applyWorktreePatch;
+      const applyApi = window.desktopAPI?.git?.applyWorktreePatch;
       if (!applyApi) {
         toast.error("Aplicar patch indisponível.");
         return false;
@@ -614,7 +614,7 @@ export function RepoReviewSection({
   };
 
   const handleDiscardWorktree = async () => {
-    if (!worktreePath || !window.electronAPI?.git?.reset) return;
+    if (!worktreePath || !window.desktopAPI?.git?.reset) return;
     const ok = await confirmDialog({
       title: "Descartar alterações locais?",
       description:
@@ -623,7 +623,7 @@ export function RepoReviewSection({
       cancelLabel: "Cancelar",
     });
     if (!ok) return;
-    const result = await window.electronAPI.git.reset(worktreePath, "HEAD");
+    const result = await window.desktopAPI.git.reset(worktreePath, "HEAD");
     if (result.success) {
       toast.success("Alterações locais descartadas");
       addTrail("Alterações locais descartadas (reset --hard)");
@@ -635,7 +635,7 @@ export function RepoReviewSection({
   };
 
   const handleDiscardMainRepo = async () => {
-    if (!mainProjectPath?.trim() || !window.electronAPI?.git?.reset) return;
+    if (!mainProjectPath?.trim() || !window.desktopAPI?.git?.reset) return;
     const ok = await confirmDialog({
       title: "Descartar alterações no repositório principal?",
       description:
@@ -644,7 +644,7 @@ export function RepoReviewSection({
       cancelLabel: "Cancelar",
     });
     if (!ok) return;
-    const result = await window.electronAPI.git.reset(mainProjectPath, "HEAD");
+    const result = await window.desktopAPI.git.reset(mainProjectPath, "HEAD");
     if (result.success) {
       toast.success("Alterações locais descartadas no repositório principal");
       addTrail("Principal: reset --hard (working tree limpo)");
@@ -655,11 +655,11 @@ export function RepoReviewSection({
   };
 
   useEffect(() => {
-    if (!commitDialogOpen || !worktreePath || !window.electronAPI?.git) {
+    if (!commitDialogOpen || !worktreePath || !window.desktopAPI?.git) {
       if (!commitDialogOpen) setCommitDialogStatus(null);
       return;
     }
-    window.electronAPI.git
+    window.desktopAPI.git
       .getStatus(worktreePath)
       .then((s) => setCommitDialogStatus(s))
       .catch(() => setCommitDialogStatus(null));

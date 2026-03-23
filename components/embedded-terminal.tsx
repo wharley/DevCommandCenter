@@ -60,6 +60,19 @@ export function EmbeddedTerminal({
     onExitRef.current = onExit;
   }, [onExit]);
 
+  /** Reidrata buffer de sessão (Tauri) antes de assinar onData, evitando duplicar linhas. */
+  const hydrateTerminalBacklog = useCallback(async (term: XTerm, ptyId: string | undefined) => {
+    const tapi = window.desktopAPI?.terminal;
+    if (!ptyId || !tapi?.getBacklog) return;
+    try {
+      const r = await tapi.getBacklog(ptyId);
+      const lines = r?.lines;
+      if (lines?.length) term.write(lines.join(""));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const applyPaneAttachResult = useCallback(
     (result: PaneAttachResult, term: XTerm) => {
       if (result.error) {
@@ -88,7 +101,7 @@ export function EmbeddedTerminal({
   );
 
   const handleRestartAgent = useCallback(() => {
-    const api = window.electronAPI?.terminal;
+    const api = window.desktopAPI?.terminal;
     const term = xtermRef.current;
     if (!api?.getOrCreateForPane || !paneId || !term) return;
     term.reset();
@@ -101,13 +114,16 @@ export function EmbeddedTerminal({
         rows: term.rows,
         restart: true,
       })
-      .then((result) => applyPaneAttachResult(result, term));
-  }, [applyPaneAttachResult, paneId, cwd, command, stableArgs]);
+      .then(async (result) => {
+        applyPaneAttachResult(result, term);
+        await hydrateTerminalBacklog(term, result.ptyId);
+      });
+  }, [applyPaneAttachResult, hydrateTerminalBacklog, paneId, cwd, command, stableArgs]);
 
   const killPty = useCallback(() => {
     const id = ptyIdRef.current;
-    if (id && window.electronAPI?.terminal?.kill) {
-      window.electronAPI.terminal.kill(id);
+    if (id && window.desktopAPI?.terminal?.kill) {
+      window.desktopAPI.terminal.kill(id);
       ptyIdRef.current = null;
     }
   }, []);
@@ -118,7 +134,7 @@ export function EmbeddedTerminal({
   }, [killPty, onClose]);
 
   useEffect(() => {
-    const api = window.electronAPI?.terminal;
+    const api = window.desktopAPI?.terminal;
     if (!api || !containerRef.current) return;
 
     const term = new XTerm({
@@ -148,9 +164,8 @@ export function EmbeddedTerminal({
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    const unsubData = api.onData((id: string, data: string) => {
-      if (id === ptyIdRef.current) term.write(data);
-    });
+    let unsubData: (() => void) | null = null;
+
     const unsubExit = api.onExit((id: string, code: number) => {
       if (id === ptyIdRef.current) {
         ptyIdRef.current = null;
@@ -173,33 +188,44 @@ export function EmbeddedTerminal({
       rows: term.rows,
     };
 
-    if (paneId && api.getOrCreateForPane) {
-      void api
-        .getOrCreateForPane(paneId, spawnOptions)
-        .then((result) => applyPaneAttachResult(result, term));
-    } else if (missionId && api.getOrCreate) {
-      api.getOrCreate(missionId, spawnOptions).then((result) => {
-        if (result.error) {
-          setError(result.error);
-          return;
+    const mountSession = async () => {
+      try {
+        if (paneId && api.getOrCreateForPane) {
+          const result = await api.getOrCreateForPane(paneId, spawnOptions);
+          applyPaneAttachResult(result, term);
+          await hydrateTerminalBacklog(term, result.ptyId);
+        } else if (missionId && api.getOrCreate) {
+          const result = await api.getOrCreate(missionId, spawnOptions);
+          if (result.error) {
+            setError(result.error);
+            return;
+          }
+          if (result.ptyId) ptyIdRef.current = result.ptyId;
+          if (result.session?.outputPreview) {
+            term.write(result.session.outputPreview);
+          }
+          if (typeof result.session?.lastExitCode === "number") {
+            setExited(result.session.lastExitCode);
+          }
+          await hydrateTerminalBacklog(term, result.ptyId);
+        } else {
+          const result = await api.spawn(spawnOptions);
+          if (result.error) {
+            setError(result.error);
+            return;
+          }
+          if (result.ptyId) ptyIdRef.current = result.ptyId;
+          await hydrateTerminalBacklog(term, result.ptyId);
         }
-        if (result.ptyId) ptyIdRef.current = result.ptyId;
-        if (result.session?.outputPreview) {
-          term.write(result.session.outputPreview);
-        }
-        if (typeof result.session?.lastExitCode === "number") {
-          setExited(result.session.lastExitCode);
-        }
-      });
-    } else {
-      api.spawn(spawnOptions).then((result) => {
-        if (result.error) {
-          setError(result.error);
-          return;
-        }
-        if (result.ptyId) ptyIdRef.current = result.ptyId;
-      });
-    }
+        unsubData = api.onData((id: string, data: string) => {
+          if (id === ptyIdRef.current) term.write(data);
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    };
+
+    void mountSession();
 
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
@@ -212,7 +238,7 @@ export function EmbeddedTerminal({
 
     return () => {
       resizeObserver.disconnect();
-      unsubData();
+      unsubData?.();
       unsubExit();
       const id = ptyIdRef.current;
       // When missionId or paneId is set, do NOT kill on unmount so the user can reattach
@@ -228,6 +254,7 @@ export function EmbeddedTerminal({
     applyPaneAttachResult,
     command,
     cwd,
+    hydrateTerminalBacklog,
     missionId,
     paneId,
     stableArgs,

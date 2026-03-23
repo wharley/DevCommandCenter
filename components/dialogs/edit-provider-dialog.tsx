@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useProviders } from "@/hooks/use-data";
-import { useElectron } from "@/hooks/use-electron";
+import { useDesktopShell } from "@/hooks/use-desktop-shell";
 import { toast } from "sonner";
 import type {
   Provider,
@@ -127,7 +127,7 @@ export function EditProviderDialog({
   provider,
 }: EditProviderDialogProps) {
   const { update } = useProviders();
-  const { validateCliPath, detectCliForProvider } = useElectron();
+  const { validateCliPath, detectCliForProvider } = useDesktopShell();
   const [cliStatus, setCliStatus] = useState<{
     valid: boolean;
     message?: string;
@@ -281,7 +281,10 @@ export function EditProviderDialog({
                               ...prev,
                               cliPath: path,
                             }));
-                          else toast.error("CLI não encontrado no PATH");
+                          else
+                            toast.error(
+                              "CLI não encontrado. Digite o caminho completo (ex.: /opt/homebrew/bin/claude) ou o nome do comando se estiver no PATH.",
+                            );
                         });
                       }}
                     >

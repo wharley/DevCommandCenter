@@ -31,7 +31,7 @@ export function showNativeNotification(
 ): void {
   if (!areNotificationsEnabled()) return;
   try {
-    window.electronAPI?.app?.showNotification?.({ title, body });
+    window.desktopAPI?.app?.showNotification?.({ title, body });
   } catch {
     // ignore
   }

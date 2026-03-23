@@ -19,12 +19,12 @@ export function useTerminalProjectActivity(projectId: string | null) {
     useState<TerminalProjectActivity>(emptyActivity);
 
   const refresh = useCallback(async () => {
-    if (!projectId || !window.electronAPI?.terminal?.getProjectActivity) {
+    if (!projectId || !window.desktopAPI?.terminal?.getProjectActivity) {
       setActivity(emptyActivity);
       return;
     }
     try {
-      const next = await window.electronAPI.terminal.getProjectActivity(
+      const next = await window.desktopAPI.terminal.getProjectActivity(
         projectId,
       );
       setActivity(next);
@@ -38,8 +38,8 @@ export function useTerminalProjectActivity(projectId: string | null) {
   }, [refresh]);
 
   useEffect(() => {
-    if (!projectId || !window.electronAPI?.terminal?.onExit) return;
-    const off = window.electronAPI.terminal.onExit(() => {
+    if (!projectId || !window.desktopAPI?.terminal?.onExit) return;
+    const off = window.desktopAPI.terminal.onExit(() => {
       void refresh();
     });
     return off;

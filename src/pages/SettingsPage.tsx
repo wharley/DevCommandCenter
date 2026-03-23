@@ -98,9 +98,9 @@ export default function SettingsPage() {
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const gotUpdateEventRef = useRef(false);
   const hasAppUpdateAPI =
-    typeof window !== "undefined" && !!window.electronAPI?.app;
-  const isElectronApp =
-    typeof window !== "undefined" && !!window.electronAPI;
+    typeof window !== "undefined" && !!window.desktopAPI?.app;
+  const isDesktopApp =
+    typeof window !== "undefined" && !!window.desktopAPI;
 
   React.useEffect(() => {
     window.db?.providers?.isEncryptionAvailable?.().then(setEncryptionAvailable);
@@ -108,12 +108,12 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!hasAppUpdateAPI) return;
-    window.electronAPI!.app.getVersion().then(setAppVersion);
+    window.desktopAPI!.app.getVersion().then(setAppVersion);
   }, [hasAppUpdateAPI]);
 
   useEffect(() => {
-    if (!hasAppUpdateAPI || !window.electronAPI?.app?.onUpdateStatus) return;
-    const unsubscribe = window.electronAPI.app.onUpdateStatus((payload) => {
+    if (!hasAppUpdateAPI || !window.desktopAPI?.app?.onUpdateStatus) return;
+    const unsubscribe = window.desktopAPI.app.onUpdateStatus((payload) => {
       gotUpdateEventRef.current = true;
       setCheckingUpdate(false);
       switch (payload.type) {
@@ -131,7 +131,7 @@ export default function SettingsPage() {
             duration: 10000,
             action: {
               label: "Reiniciar agora",
-              onClick: () => window.electronAPI?.app?.quitAndInstall(),
+              onClick: () => window.desktopAPI?.app?.quitAndInstall(),
             },
           });
           break;
@@ -146,11 +146,11 @@ export default function SettingsPage() {
   }, [hasAppUpdateAPI]);
 
   const handleCheckForUpdates = async () => {
-    if (!hasAppUpdateAPI || !window.electronAPI?.app) return;
+    if (!hasAppUpdateAPI || !window.desktopAPI?.app) return;
     gotUpdateEventRef.current = false;
     setCheckingUpdate(true);
     try {
-      await window.electronAPI.app.checkForUpdates();
+      await window.desktopAPI.app.checkForUpdates();
       setTimeout(() => {
         setCheckingUpdate((prev) => {
           if (!prev) return prev;
@@ -375,7 +375,7 @@ export default function SettingsPage() {
             )}
           </section>
 
-          {isElectronApp && (
+          {isDesktopApp && (
             <section>
               <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                 Workspace Hive

@@ -1,0 +1,10 @@
+/Users/wharleyornelasdarocha/projetos/DevCommandCenter/src-tauri/target/debug/deps/lock_api-f0bdfa70c8f11bc3.d: /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/lib.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/mutex.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/remutex.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/rwlock.rs
+
+/Users/wharleyornelasdarocha/projetos/DevCommandCenter/src-tauri/target/debug/deps/liblock_api-f0bdfa70c8f11bc3.rlib: /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/lib.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/mutex.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/remutex.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/rwlock.rs
+
+/Users/wharleyornelasdarocha/projetos/DevCommandCenter/src-tauri/target/debug/deps/liblock_api-f0bdfa70c8f11bc3.rmeta: /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/lib.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/mutex.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/remutex.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/rwlock.rs
+
+/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/lib.rs:
+/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/mutex.rs:
+/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/remutex.rs:
+/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/src/rwlock.rs:

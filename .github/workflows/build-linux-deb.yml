@@ -1,14 +1,12 @@
-# Gera o pacote .deb (Electron) no GitHub Actions (Linux).
+# Gera o pacote .deb (Tauri) no GitHub Actions (Linux).
 # Repo privado: minutos contam; por isso o padrão é rodar só em push na main
 # (após merge de PR) ou manualmente — não em todo push de feature branch.
 name: Build Linux (.deb)
 
 on:
-  # Merge na main / commits diretos na main
   push:
     branches:
       - main
-  # Quando quiser gerar sem commit (ex.: testar build da main atual)
   workflow_dispatch:
 
 concurrency:
@@ -33,25 +31,35 @@ jobs:
       - name: Enable Corepack (Yarn)
         run: corepack enable
 
-      - name: Install system deps (native modules / packaging)
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system deps (Tauri Linux)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
-            python3
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: yarn install --frozen-lockfile --ignore-engines
 
-      - name: Build .deb
+      - name: Build .deb (Tauri)
         env:
-          # Evita prompts interativos no electron-builder
           CI: true
-        run: yarn electron:build -- --linux deb
+        run: yarn exec tauri build -b deb
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v4
         with:
           name: dev-command-center-linux-deb
-          path: release/*.deb
+          path: src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error

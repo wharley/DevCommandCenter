@@ -1,6 +1,6 @@
 /**
  * Best-effort detection of “agent may be waiting for the user” from PTY text.
- * Used by the main process; keep logic dependency-free for Electron main.
+ * Used by the host nativo; manter a lógica sem dependências pesadas.
  */
 
 /** Strip common ANSI SGR and OSC sequences (enough for CLI TUI output). */

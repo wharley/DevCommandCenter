@@ -1,6 +1,6 @@
 // Dev Command Center - AI Service
 // Serviço para comunicação com providers de IA
-// Usa IPC para comunicar com o backend Electron ou mock para browser
+// Usa IPC para o backend nativo (Tauri) ou mock no browser
 
 import type {
   Provider,
@@ -52,11 +52,11 @@ export interface ValidationResult {
 }
 
 // ============================================
-// Detecta ambiente Electron
+// Shell desktop com bridge de IA
 // ============================================
 
-const isElectron = () =>
-  typeof window !== "undefined" && !!window.electronAPI?.ai;
+const isDesktopAi = () =>
+  typeof window !== "undefined" && !!window.desktopAPI?.ai;
 
 // ============================================
 // Simulação de respostas (para browser/dev)
@@ -200,14 +200,14 @@ export class AIService {
 
   /**
    * Gera um plano de ação para a missão
-   * No Electron, usa IPC para chamar o backend
-   * No browser, usa mock
+   * No app desktop (Tauri), usa IPC para o backend nativo.
+   * No browser, usa mock.
    */
   async generatePlan(planFeedback?: string): Promise<AIResponse<MissionPlan>> {
-    // Se estamos no Electron, usa o backend real
-    if (isElectron() && window.electronAPI?.ai) {
+    // Backend real quando o bridge de IA está disponível
+    if (isDesktopAi() && window.desktopAPI?.ai) {
       try {
-        const result = await window.electronAPI.ai.generatePlan(
+        const result = await window.desktopAPI.ai.generatePlan(
           this.config.mission.id,
           planFeedback ? { planFeedback } : undefined
         );
@@ -223,7 +223,7 @@ export class AIService {
       }
     }
 
-    // Fallback para mock (browser ou dev sem Electron)
+    // Fallback para mock (browser / sem bridge)
     const startTime = Date.now();
 
     try {
@@ -255,14 +255,14 @@ export class AIService {
 
   /**
    * Gera sugestões de código baseadas no plano
-   * No Electron, usa IPC para chamar o backend
-   * No browser, usa mock
+   * No app desktop (Tauri), usa IPC para o backend nativo.
+   * No browser, usa mock.
    */
   async generateCode(): Promise<AIResponse<GeneratedCode>> {
-    // Se estamos no Electron, usa o backend real
-    if (isElectron() && window.electronAPI?.ai) {
+    // Backend real quando o bridge de IA está disponível
+    if (isDesktopAi() && window.desktopAPI?.ai) {
       try {
-        const result = await window.electronAPI.ai.generateCode(
+        const result = await window.desktopAPI.ai.generateCode(
           this.config.mission.id,
           this.config.codeFeedback
             ? { codeFeedback: this.config.codeFeedback }
@@ -280,7 +280,7 @@ export class AIService {
       }
     }
 
-    // Fallback para mock (browser ou dev sem Electron)
+    // Fallback para mock (browser / sem bridge)
     const startTime = Date.now();
 
     try {
@@ -312,7 +312,7 @@ export class AIService {
 
   /**
    * Aplica as mudanças ao projeto
-   * Só funciona no Electron
+   * Requer o app desktop com bridge de IA.
    */
   async applyChanges(options?: {
     createBackup?: boolean;
@@ -320,9 +320,9 @@ export class AIService {
     filePaths?: string[];
     editedContent?: Record<string, string>;
   }): Promise<ApplyChangesResult> {
-    if (isElectron() && window.electronAPI?.ai) {
+    if (isDesktopAi() && window.desktopAPI?.ai) {
       try {
-        return await window.electronAPI.ai.applyChanges(
+        return await window.desktopAPI.ai.applyChanges(
           this.config.mission.id,
           options
         );
@@ -386,9 +386,9 @@ export class AIService {
   static async validateProviderAsync(
     provider: Provider
   ): Promise<ValidationResult> {
-    if (isElectron() && window.electronAPI?.ai) {
+    if (isDesktopAi() && window.desktopAPI?.ai) {
       try {
-        return await window.electronAPI.ai.validateProvider(provider);
+        return await window.desktopAPI.ai.validateProvider(provider);
       } catch (error) {
         return {
           valid: false,
@@ -405,9 +405,9 @@ export class AIService {
   static async testConnection(
     providerId: string
   ): Promise<{ success: boolean; message: string }> {
-    if (isElectron() && window.electronAPI?.ai) {
+    if (isDesktopAi() && window.desktopAPI?.ai) {
       try {
-        return await window.electronAPI.ai.testConnection(providerId);
+        return await window.desktopAPI.ai.testConnection(providerId);
       } catch (error) {
         return {
           success: false,
@@ -428,8 +428,8 @@ export class AIService {
    * Invalida o cache do adapter (chamar após atualizar provider)
    */
   static async invalidateAdapter(providerId: string): Promise<void> {
-    if (isElectron() && window.electronAPI?.ai) {
-      await window.electronAPI.ai.invalidateAdapter(providerId);
+    if (isDesktopAi() && window.desktopAPI?.ai) {
+      await window.desktopAPI.ai.invalidateAdapter(providerId);
     }
   }
 }

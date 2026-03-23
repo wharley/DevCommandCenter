@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Bot,
@@ -153,6 +153,143 @@ function getPaneGridColumnCount(paneCount: number): number {
   return 3;
 }
 
+/** Lista branches locais via `desktopAPI.git` e permite escolher a branch base (com busca). */
+function BranchBasePicker({
+  projectPath,
+  value,
+  onValueChange,
+  dialogOpen,
+}: {
+  projectPath?: string;
+  value: string;
+  onValueChange: (v: string) => void;
+  dialogOpen: boolean;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [manualFallback, setManualFallback] = useState(false);
+
+  const displayBranches = useMemo(() => {
+    const v = value.trim();
+    if (!v) return branches;
+    if (branches.includes(v)) return branches;
+    return [v, ...branches];
+  }, [branches, value]);
+
+  useEffect(() => {
+    if (!dialogOpen) {
+      setManualFallback(false);
+      return;
+    }
+    if (!projectPath?.trim()) {
+      setBranches([]);
+      setManualFallback(true);
+      return;
+    }
+    const git = window.desktopAPI?.git;
+    if (!git?.getLocalBranches || !git?.getCurrentBranch) {
+      setBranches([]);
+      setManualFallback(true);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setManualFallback(false);
+    Promise.all([
+      git.getLocalBranches(projectPath),
+      git.getCurrentBranch(projectPath),
+    ])
+      .then(([list, current]) => {
+        if (cancelled) return;
+        const arr = list ?? [];
+        setBranches(arr);
+        if (arr.length === 0) setManualFallback(true);
+        if (!value.trim() && current?.trim()) {
+          onValueChange(current.trim());
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBranches([]);
+          setManualFallback(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // value/onValueChange omitidos de propósito: só aplicar branch atual ao abrir o diálogo.
+  }, [dialogOpen, projectPath]);
+
+  if (loading) {
+    return (
+      <div className="flex h-10 items-center rounded-md border border-input bg-background px-3 text-sm text-muted-foreground">
+        <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin" />
+        Carregando branches…
+      </div>
+    );
+  }
+
+  if (manualFallback) {
+    return (
+      <Input
+        placeholder="main"
+        value={value}
+        onChange={(e) => onValueChange(e.target.value)}
+      />
+    );
+  }
+
+  return (
+    <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={menuOpen}
+          className="w-full justify-between font-normal"
+        >
+          <span className="truncate">
+            {value.trim() ? (
+              value
+            ) : (
+              <span className="text-muted-foreground">Selecione a branch base</span>
+            )}
+          </span>
+          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Buscar branch…" className="h-9" />
+          <CommandList>
+            <CommandEmpty>Nenhuma branch encontrada.</CommandEmpty>
+            <CommandGroup>
+              {displayBranches.map((b) => (
+                <CommandItem
+                  key={b}
+                  value={b}
+                  onSelect={() => {
+                    onValueChange(b);
+                    setMenuOpen(false);
+                  }}
+                >
+                  <GitBranch className="mr-2 h-4 w-4 shrink-0 opacity-70" />
+                  <span className="truncate">{b}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ==========================================
 // New Comb Dialog
 // ==========================================
@@ -172,7 +309,6 @@ function NewCombDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
-  const [localBranches, setLocalBranches] = useState<string[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [suggestStoryRef, setSuggestStoryRef] = useState(false);
   const { create } = useCombs(projectId);
@@ -180,25 +316,8 @@ function NewCombDialog({
   useEffect(() => {
     if (!open) return;
     setSuggestStoryRef(shouldSuggestStoryRef());
+    setBaseBranch("");
   }, [open]);
-
-  useEffect(() => {
-    if (!open || !projectPath) return;
-    const git = window.electronAPI?.git;
-    if (!git?.getLocalBranches || !git?.getCurrentBranch) return;
-    let cancelled = false;
-    Promise.all([
-      git.getLocalBranches(projectPath),
-      git.getCurrentBranch(projectPath),
-    ]).then(([branches, current]) => {
-      if (cancelled) return;
-      setLocalBranches(branches ?? []);
-      if (!baseBranch && current) setBaseBranch(current.trim());
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, projectPath]);
 
   const handleCreate = async () => {
     if (!name.trim()) {
@@ -263,26 +382,12 @@ function NewCombDialog({
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Branch base</label>
-            {localBranches.length > 0 ? (
-              <Select value={baseBranch} onValueChange={setBaseBranch}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {localBranches.map((b) => (
-                    <SelectItem key={b} value={b}>
-                      {b}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                placeholder="main"
-                value={baseBranch}
-                onChange={(e) => setBaseBranch(e.target.value)}
-              />
-            )}
+            <BranchBasePicker
+              projectPath={projectPath}
+              value={baseBranch}
+              onValueChange={setBaseBranch}
+              dialogOpen={open}
+            />
           </div>
           {suggestStoryRef ? (
             <p className="text-xs text-muted-foreground">
@@ -326,7 +431,6 @@ function MirrorMissionDialog({
   const [mirrorName, setMirrorName] = useState("");
   const [mirrorDescription, setMirrorDescription] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
-  const [localBranches, setLocalBranches] = useState<string[]>([]);
   const [isCreating, setIsCreating] = useState(false);
 
   const targetProjectOptions = useMemo(
@@ -347,28 +451,6 @@ function MirrorMissionDialog({
     const firstTarget = targetProjectOptions[0];
     setTargetProjectId(firstTarget?.id ?? "");
   }, [open, sourceComb, targetProjectOptions]);
-
-  useEffect(() => {
-    if (!open || !targetProject?.path) {
-      setLocalBranches([]);
-      return;
-    }
-    const git = window.electronAPI?.git;
-    if (!git?.getLocalBranches || !git?.getCurrentBranch) return;
-    let cancelled = false;
-    Promise.all([
-      git.getLocalBranches(targetProject.path),
-      git.getCurrentBranch(targetProject.path),
-    ]).then(([branches, current]) => {
-      if (cancelled) return;
-      const list = branches ?? [];
-      setLocalBranches(list);
-      setBaseBranch(current?.trim() || list[0] || "main");
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, targetProject?.path]);
 
   const handleCreate = async () => {
     if (!targetProjectId || !mirrorName.trim()) {
@@ -413,7 +495,13 @@ function MirrorMissionDialog({
           <div className="space-y-2">
             <label className="text-sm font-medium">Projeto de destino</label>
             {targetProjectOptions.length > 0 ? (
-              <Select value={targetProjectId} onValueChange={setTargetProjectId}>
+              <Select
+                value={targetProjectId}
+                onValueChange={(id) => {
+                  setTargetProjectId(id);
+                  setBaseBranch("");
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione o projeto" />
                 </SelectTrigger>
@@ -450,26 +538,13 @@ function MirrorMissionDialog({
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Branch base</label>
-            {localBranches.length > 0 ? (
-              <Select value={baseBranch} onValueChange={setBaseBranch}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {localBranches.map((b) => (
-                    <SelectItem key={b} value={b}>
-                      {b}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                value={baseBranch}
-                onChange={(e) => setBaseBranch(e.target.value)}
-                placeholder="main"
-              />
-            )}
+            <BranchBasePicker
+              key={targetProject?.path ?? targetProjectId}
+              projectPath={targetProject?.path}
+              value={baseBranch}
+              onValueChange={setBaseBranch}
+              dialogOpen={open}
+            />
           </div>
         </div>
         <DialogFooter>
@@ -500,12 +575,14 @@ function NewAgentPaneDialog({
   combId,
   providers,
   onCreate,
+  ensureCombWorktree,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   combId: string;
   providers: Provider[];
   onCreate: (pane: Pane) => void;
+  ensureCombWorktree: () => Promise<boolean>;
 }) {
   const [providerId, setProviderId] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -521,6 +598,8 @@ function NewAgentPaneDialog({
   const handleCreate = async () => {
     setIsCreating(true);
     try {
+      const wtOk = await ensureCombWorktree();
+      if (!wtOk) return;
       const pane = await create({
         combId,
         type: "agent",
@@ -702,11 +781,20 @@ export default function HiveWorkspacePage() {
     useState<DashboardPeriodDays>(7);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 
+  const safeDateMs = (value: unknown): number => {
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === "string") {
+      const ms = Date.parse(value);
+      return Number.isNaN(ms) ? 0 : ms;
+    }
+    return 0;
+  };
+
   const sortedProjects = useMemo(
     () =>
       [...projects].sort((a, b) => {
-        const da = a.lastOpenedAt?.getTime() ?? a.createdAt.getTime();
-        const db = b.lastOpenedAt?.getTime() ?? b.createdAt.getTime();
+        const da = safeDateMs(a.lastOpenedAt) || safeDateMs(a.createdAt);
+        const db = safeDateMs(b.lastOpenedAt) || safeDateMs(b.createdAt);
         return db - da;
       }),
     [projects],
@@ -726,11 +814,45 @@ export default function HiveWorkspacePage() {
     refresh: refreshCombs,
   } = useCombs(selectedProjectId ?? undefined);
 
+  const combsRef = useRef(combs);
+  combsRef.current = combs;
+
   const activeComb = useMemo(
     () =>
       activeCombId ? (combs.find((c) => c.id === activeCombId) ?? null) : null,
     [activeCombId, combs],
   );
+
+  /** Ref evita que `combs` no deps recrie o callback a cada refresh e dispare o efeito de worktree em loop. */
+  const ensureActiveCombWorktree = useCallback(async (): Promise<boolean> => {
+    if (!activeCombId) return false;
+    const comb = combsRef.current.find((c) => c.id === activeCombId);
+    if (!comb) return false;
+    if (comb.worktreePath) return true;
+    const api = window.desktopAPI?.comb?.ensureWorktree;
+    if (!api) {
+      toast.error("Worktree indisponível neste ambiente.");
+      return false;
+    }
+    try {
+      const result = await api(activeCombId);
+      if (result.success) {
+        await refreshCombs();
+        return true;
+      }
+      if (result.error) toast.error(`Worktree: ${result.error}`);
+      return false;
+    } catch (e: unknown) {
+      const msg =
+        e instanceof Error
+          ? e.message
+          : typeof e === "string"
+            ? e
+            : "Falha ao preparar worktree";
+      toast.error(msg);
+      return false;
+    }
+  }, [activeCombId, refreshCombs]);
 
   const {
     panes,
@@ -788,8 +910,8 @@ export default function HiveWorkspacePage() {
     }
     if (projects.length > 0) {
       const sorted = [...projects].sort((a, b) => {
-        const da = a.lastOpenedAt?.getTime() ?? a.createdAt.getTime();
-        const db = b.lastOpenedAt?.getTime() ?? b.createdAt.getTime();
+        const da = safeDateMs(a.lastOpenedAt) || safeDateMs(a.createdAt);
+        const db = safeDateMs(b.lastOpenedAt) || safeDateMs(b.createdAt);
         return db - da;
       });
       setSelectedProjectId(sorted[0].id);
@@ -834,18 +956,36 @@ export default function HiveWorkspacePage() {
     return () => window.removeEventListener("dcc:hive:goto-panes", goPanes);
   }, []);
 
-  // Ensure worktree when comb becomes active
+  // Ensure worktree quando a Missão fica ativa (deps só id/path — evita loop com cada refresh de `combs`)
+  const activeCombIdForWt = activeComb?.id ?? null;
+  const activeCombWtPath = activeComb?.worktreePath ?? null;
   useEffect(() => {
-    if (!activeComb || activeComb.worktreePath) return;
-    if (!window.electronAPI?.comb?.ensureWorktree) return;
-    window.electronAPI.comb.ensureWorktree(activeComb.id).then((result) => {
-      if (result.success) {
-        refreshCombs();
-      } else if (result.error) {
-        toast.error(`Worktree: ${result.error}`);
+    if (!activeCombIdForWt || activeCombWtPath) return;
+    const ensureWorktree = window.desktopAPI?.comb?.ensureWorktree;
+    if (!ensureWorktree) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await ensureWorktree(activeCombIdForWt);
+        if (cancelled) return;
+        if (result.success) await refreshCombs();
+        else if (result.error) toast.error(`Worktree: ${result.error}`);
+      } catch (e: unknown) {
+        if (!cancelled) {
+          const msg =
+            e instanceof Error
+              ? e.message
+              : typeof e === "string"
+                ? e
+                : "Falha ao preparar worktree";
+          toast.error(msg);
+        }
       }
-    });
-  }, [activeComb?.id, activeComb?.worktreePath, refreshCombs]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCombIdForWt, activeCombWtPath, refreshCombs]);
 
   const handleProjectChange = (projectId: string) => {
     setSelectedProjectId(projectId);
@@ -874,6 +1014,8 @@ export default function HiveWorkspacePage() {
   const handleAddTerminal = async () => {
     if (!activeCombId) return;
     try {
+      const ok = await ensureActiveCombWorktree();
+      if (!ok) return;
       await createPane({ combId: activeCombId, type: "term" });
       refreshPanes();
       void refreshTerminalActivity();
@@ -903,8 +1045,8 @@ export default function HiveWorkspacePage() {
       cancelLabel: "Cancelar",
     });
     if (!confirmed) return;
-    if (window.electronAPI?.comb?.discard) {
-      const result = await window.electronAPI.comb.discard(combId);
+    if (window.desktopAPI?.comb?.discard) {
+      const result = await window.desktopAPI.comb.discard(combId);
       if (!result.success && result.error) toast.error(result.error);
     }
     if (window.db?.combs) await window.db.combs.delete(combId);
@@ -924,7 +1066,7 @@ export default function HiveWorkspacePage() {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Titlebar drag area */}
-      <div className="electron-drag fixed top-0 left-0 right-0 h-8 z-50" />
+      <div className="titlebar-drag-region fixed top-0 left-0 right-0 h-8 z-50" />
 
       {/* ====== SIDEBAR ====== */}
       <aside className="flex w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
@@ -944,7 +1086,7 @@ export default function HiveWorkspacePage() {
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className="electron-no-drag flex w-full items-center justify-between rounded-md border border-sidebar-border bg-sidebar-accent/30 px-3 py-2 text-sm transition-colors hover:bg-sidebar-accent/50"
+                className="titlebar-no-drag flex w-full items-center justify-between rounded-md border border-sidebar-border bg-sidebar-accent/30 px-3 py-2 text-sm transition-colors hover:bg-sidebar-accent/50"
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <FolderGit2 className="h-4 w-4 shrink-0 text-sidebar-foreground/70" />
@@ -1016,7 +1158,7 @@ export default function HiveWorkspacePage() {
           <Button
             variant="ghost"
             size="icon"
-            className="electron-no-drag h-6 w-6 text-sidebar-foreground/50 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="titlebar-no-drag h-6 w-6 text-sidebar-foreground/50 hover:bg-sidebar-accent hover:text-sidebar-foreground"
             onClick={() => setNewCombOpen(true)}
             disabled={!selectedProjectId}
           >
@@ -1042,7 +1184,7 @@ export default function HiveWorkspacePage() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="electron-no-drag mt-2 text-xs"
+                className="titlebar-no-drag mt-2 text-xs"
                 onClick={() => setNewCombOpen(true)}
               >
                 <Plus className="mr-1 h-3 w-3" />
@@ -1064,7 +1206,7 @@ export default function HiveWorkspacePage() {
                       setShowSettings(false);
                       setShowDashboard(false);
                     }}
-                    className={`electron-no-drag group flex w-full cursor-pointer gap-1.5 rounded-lg px-3 py-2 text-left transition-colors ${
+                    className={`titlebar-no-drag group flex w-full cursor-pointer gap-1.5 rounded-lg px-3 py-2 text-left transition-colors ${
                       isActive
                         ? "bg-sidebar-accent text-sidebar-accent-foreground"
                         : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
@@ -1131,7 +1273,7 @@ export default function HiveWorkspacePage() {
           <Button
             variant="ghost"
             size="sm"
-            className="electron-no-drag w-full justify-start gap-3 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="titlebar-no-drag w-full justify-start gap-3 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
             onClick={() => {
               if (!dashboardAccess.enabled) return;
               setShowDashboard(true);
@@ -1146,7 +1288,7 @@ export default function HiveWorkspacePage() {
           <Button
             variant="ghost"
             size="sm"
-            className="electron-no-drag w-full justify-start gap-3 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="titlebar-no-drag w-full justify-start gap-3 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
             onClick={() => {
               setShowSettings(true);
               setShowDashboard(false);
@@ -1374,6 +1516,7 @@ export default function HiveWorkspacePage() {
           onOpenChange={setNewAgentOpen}
           combId={activeCombId}
           providers={providers}
+          ensureCombWorktree={ensureActiveCombWorktree}
           onCreate={() => {
             refreshPanes();
             void refreshTerminalActivity();

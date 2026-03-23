@@ -73,7 +73,7 @@ export interface Provider {
   name: string;
   type: ProviderType;
   apiKey?: string | null;
-  /** Interno: blob criptografado (para hydration no Electron) */
+  /** Interno: blob criptografado (para hydration no host) */
   apiKeyEncrypted?: Buffer | null;
   /** Para UI: true quando há key armazenada (sem expor o valor) */
   hasApiKey?: boolean;
@@ -335,7 +335,7 @@ export interface CreateProviderDTO {
   name: string;
   type: ProviderType;
   apiKey?: string;
-  /** Interno: blob criptografado (Electron encripta antes de chamar repo) */
+  /** Interno: blob criptografado (host encripta antes de chamar repo) */
   apiKeyEncrypted?: Buffer;
   cliPath?: string;
   config?: ProviderConfig;
@@ -495,7 +495,7 @@ export interface PanesQueryOptions extends PaginationOptions {
 }
 
 // ============================================
-// Aliases para compatibilidade (electron.d.ts, etc.)
+// Aliases para compatibilidade (types/app.d.ts, etc.)
 // ============================================
 
 export type ProjectCreate = CreateProjectDTO;

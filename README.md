@@ -4,6 +4,8 @@ Multi-engine command center for coding agents. A local-first desktop app that or
 
 For the full product document, see `SKILL.md`. For product positioning and landing-page copy (non-technical), see [docs/POSICIONAMENTO_E_LANDING.md](docs/POSICIONAMENTO_E_LANDING.md).
 
+**Desktop stack:** o app migrou de Electron para **Tauri 2** — motivos, diferenças e **lista de instalação** (Node, Rust, dependências por SO): **[docs/MIGRACAO_TAURI.md](docs/MIGRACAO_TAURI.md)**.
+
 ## Why it exists
 
 Dev Command Center focuses on a clear agent workflow: select a repo, describe a mission, generate a plan, review changes, and apply safely. It aims to stay local-first and provider-agnostic while keeping execution transparent.
@@ -14,50 +16,56 @@ Dev Command Center focuses on a clear agent workflow: select a repo, describe a 
 - Multi-provider adapters (CLI and API) with validation and fallbacks
 - Git context collection (branch, status, recent commits)
 - Local SQLite persistence for projects, providers, missions, combs, and panes
-- Electron IPC bridge with a mock fallback for browser/dev
+- Tauri bridge (`window.desktopAPI` / `window.db`) with mock fallback no browser
 
 ## Tech stack (condensed)
 
-- Electron + Vite + React + TypeScript
-- SQLite (better-sqlite3)
+- Tauri 2 + Vite + React + TypeScript
+- SQLite via Rust (rusqlite no backend)
 - Zustand, Radix UI, Tailwind CSS
 
 ## Architecture at a glance
 
-- UI (React) → Zustand → IPC (preload) → Electron main process
-- Electron main process → services (AI orchestrator, Git service) → SQLite
+- UI (React) → Zustand → Tauri `invoke` / eventos → Rust (`src-tauri`)
+- Processo Rust → SQLite, Git, terminal, serviços de IA
 - Adapters encapsulate provider-specific behavior
 
 ## Getting started
 
-### Prerequisites
+### Prerequisites (resumo)
 
-- Node.js 22+
-- Yarn
-- Git
+| Ferramenta | Notas |
+|------------|--------|
+| **Node.js** | 22+ |
+| **Yarn** | v1 classic (este repo) |
+| **Git** | Para worktrees / fluxo do app |
+| **Rust (stable)** | Obrigatório para `yarn dev` e `yarn build` — compila `src-tauri` |
+| **Deps de sistema** | macOS: Xcode CLT; Linux: WebKit/GTK dev libs; Windows: MSVC + WebView2 — **detalhe completo em [docs/MIGRACAO_TAURI.md](docs/MIGRACAO_TAURI.md)** |
 
 ### Install
 
 ```bash
 yarn install
+# se necessário no teu ambiente:
+# yarn install --ignore-engines
 ```
 
-### Development (Electron)
-
-```bash
-yarn electron:dev
-```
-
-### Development (web mock)
+### Development (app desktop Tauri + Vite)
 
 ```bash
 yarn dev
 ```
 
-### Build
+### Development (só Vite no browser — APIs nativas indisponíveis)
 
 ```bash
-yarn electron:build
+yarn vite
+```
+
+### Build (binários desktop)
+
+```bash
+yarn build
 ```
 
 ### Lint

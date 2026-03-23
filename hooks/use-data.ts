@@ -3,11 +3,11 @@
 /**
  * Hook unificado para acesso a dados
  *
- * - No Electron: usa a API SQLite via IPC (window.db), com datas normalizadas
+ * - No shell desktop (Tauri): usa SQLite via IPC (window.db), com datas normalizadas
  * - No Browser: usa o Zustand store (estado em memória, sem mock)
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "./use-app-store";
 import {
   normalizeProject,
@@ -45,8 +45,23 @@ import type {
   UpdatePaneDTO,
 } from "@/lib/database/types";
 
-// Detecta ambiente Electron
-const isElectron = () => typeof window !== "undefined" && !!window.db;
+// Shell desktop com bridge DB (Tauri)
+const hasDesktopDb = () => typeof window !== "undefined" && !!window.db;
+
+const IPC_TIMEOUT_MS = 10_000;
+
+/** Wraps a Tauri invoke promise with a timeout so the UI never hangs forever. */
+function ipcCall<T>(promise: Promise<T>, label = "ipc"): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`[${label}] IPC timeout after ${IPC_TIMEOUT_MS}ms`)),
+        IPC_TIMEOUT_MS,
+      ),
+    ),
+  ]);
+}
 
 // ============================================
 // Event Emitter para sincronização entre hooks
@@ -91,32 +106,65 @@ export function useProjects() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const isRefreshingRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  const storeProjectsRef = useRef(storeProjects);
+  storeProjectsRef.current = storeProjects;
 
   const refresh = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      if (isElectron() && window.db) {
-        const data = await window.db.projects.findAll();
-        setProjects(normalizeProjects(data) as Project[]);
-      } else {
-        setProjects(storeProjects);
-      }
-    } finally {
-      setIsLoading(false);
+    // Previne múltiplas chamadas simultâneas
+    if (isRefreshingRef.current) {
+      console.log("⏭️ Skipping refresh - already running");
+      return;
     }
-  }, [storeProjects]);
+
+    console.log("🔄 useProjects.refresh() called");
+    isRefreshingRef.current = true;
+    setIsLoading(true);
+
+    try {
+      if (hasDesktopDb() && window.db) {
+        console.log("📦 Using desktop DB (Tauri)");
+        const data = await ipcCall(window.db.projects.findAll(), "projects.findAll");
+        console.log("✅ Got", data.length, "projects from DB");
+        if (mountedRef.current) {
+          setProjects(normalizeProjects(data) as Project[]);
+        }
+      } else {
+        console.log("💾 Using in-memory store");
+        if (mountedRef.current) {
+          setProjects(storeProjectsRef.current);
+        }
+      }
+    } catch (error) {
+      console.error("❌ Error in useProjects.refresh():", error);
+    } finally {
+      console.log("✨ useProjects.refresh() done, setting isLoading=false");
+      isRefreshingRef.current = false;
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
 
   // Carrega dados inicialmente e escuta mudanças de outras instâncias
   useEffect(() => {
+    console.log("⚡ useProjects useEffect triggered");
+    mountedRef.current = true;
     refresh();
     // Subscreve para receber notificações de mudanças de outras instâncias do hook
     const unsubscribe = subscribeToDataChange("projects", refresh);
-    return unsubscribe;
+    return () => {
+      console.log("🧹 useProjects cleanup");
+      mountedRef.current = false;
+      unsubscribe();
+    };
   }, [refresh]);
 
   const create = useCallback(
     async (data: CreateProjectDTO) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         const project = await window.db.projects.create(data);
         // Notifica todas as instâncias do hook para atualizar
         emitDataChange("projects");
@@ -139,7 +187,7 @@ export function useProjects() {
 
   const update = useCallback(
     async (id: string, data: UpdateProjectDTO) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.projects.update(id, data);
         emitDataChange("projects");
       } else {
@@ -152,7 +200,7 @@ export function useProjects() {
 
   const remove = useCallback(
     async (id: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.projects.delete(id);
         emitDataChange("projects");
       } else {
@@ -165,7 +213,7 @@ export function useProjects() {
 
   const getById = useCallback(
     async (id: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         const project = await window.db.projects.findById(id);
         return project
           ? (normalizeProject(
@@ -180,7 +228,7 @@ export function useProjects() {
 
   const search = useCallback(
     async (query: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         const data = await window.db.projects.search(query);
         return normalizeProjects(data) as Project[];
       } else {
@@ -195,7 +243,7 @@ export function useProjects() {
   );
 
   return {
-    projects: isElectron() ? projects : storeProjects,
+    projects: hasDesktopDb() ? projects : storeProjects,
     isLoading,
     refresh,
     create,
@@ -221,19 +269,24 @@ export function useProviders() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  const storeProvidersRef = useRef(storeProviders);
+  storeProvidersRef.current = storeProviders;
+
   const refresh = useCallback(async () => {
     setIsLoading(true);
     try {
-      if (isElectron() && window.db) {
-        const data = await window.db.providers.findAll();
+      if (hasDesktopDb() && window.db) {
+        const data = await ipcCall(window.db.providers.findAll(), "providers.findAll");
         setProviders(normalizeProviders(data) as Provider[]);
       } else {
-        setProviders(storeProviders);
+        setProviders(storeProvidersRef.current);
       }
+    } catch (error) {
+      console.error("[useProviders] refresh failed:", error);
     } finally {
       setIsLoading(false);
     }
-  }, [storeProviders]);
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -243,7 +296,7 @@ export function useProviders() {
 
   const create = useCallback(
     async (data: CreateProviderDTO) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         const provider = await window.db.providers.create(data);
         emitDataChange("providers");
         return normalizeProvider(
@@ -266,7 +319,7 @@ export function useProviders() {
 
   const update = useCallback(
     async (id: string, data: UpdateProviderDTO) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.providers.update(id, data);
         emitDataChange("providers");
       } else {
@@ -279,7 +332,7 @@ export function useProviders() {
 
   const remove = useCallback(
     async (id: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.providers.delete(id);
         emitDataChange("providers");
       } else {
@@ -292,7 +345,7 @@ export function useProviders() {
 
   const getById = useCallback(
     async (id: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         const provider = await window.db.providers.findById(id);
         return provider
           ? (normalizeProvider(
@@ -306,7 +359,7 @@ export function useProviders() {
   );
 
   const getActive = useCallback(async () => {
-    if (isElectron() && window.db) {
+    if (hasDesktopDb() && window.db) {
       const data = await window.db.providers.findActive();
       return normalizeProviders(data) as Provider[];
     }
@@ -314,7 +367,7 @@ export function useProviders() {
   }, [storeProviders]);
 
   const testConnection = useCallback(async (id: string) => {
-    if (isElectron() && window.db) {
+    if (hasDesktopDb() && window.db) {
       return window.db.providers.testConnection(id);
     } else {
       // Mock test
@@ -324,7 +377,7 @@ export function useProviders() {
   }, []);
 
   return {
-    providers: isElectron() ? providers : storeProviders,
+    providers: hasDesktopDb() ? providers : storeProviders,
     isLoading,
     refresh,
     create,
@@ -355,24 +408,39 @@ export function useMissions(projectId?: string) {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  /** Refs: no desktop o SQLite não usa o store; incluir `storeMissions` nos deps recriava `refresh` a cada mudança no Zustand e o useEffect puxava missões em loop. */
+  const getMissionsByProjectRef = useRef(getMissionsByProject);
+  getMissionsByProjectRef.current = getMissionsByProject;
+  const storeMissionsRef = useRef(storeMissions);
+  storeMissionsRef.current = storeMissions;
+
+  const missionsSeqRef = useRef(0);
+  const missionsInFlightRef = useRef(0);
   const refresh = useCallback(async () => {
+    missionsInFlightRef.current += 1;
+    const mySeq = ++missionsSeqRef.current;
     setIsLoading(true);
     try {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         const data = projectId
-          ? await window.db.missions.findByProject(projectId)
-          : await window.db.missions.findAll();
+          ? await ipcCall(window.db.missions.findByProject(projectId), "missions.findByProject")
+          : await ipcCall(window.db.missions.findAll(), "missions.findAll");
+        if (mySeq !== missionsSeqRef.current) return;
         setMissions(normalizeMissions(data) as Mission[]);
       } else {
         const data = projectId
-          ? getMissionsByProject(projectId)
-          : storeMissions;
+          ? getMissionsByProjectRef.current(projectId)
+          : storeMissionsRef.current;
+        if (mySeq !== missionsSeqRef.current) return;
         setMissions(data);
       }
+    } catch (error) {
+      console.error("[useMissions] refresh failed:", error);
     } finally {
-      setIsLoading(false);
+      missionsInFlightRef.current -= 1;
+      if (missionsInFlightRef.current === 0) setIsLoading(false);
     }
-  }, [projectId, getMissionsByProject, storeMissions]);
+  }, [projectId]);
 
   useEffect(() => {
     refresh();
@@ -382,7 +450,7 @@ export function useMissions(projectId?: string) {
 
   const create = useCallback(
     async (data: CreateMissionDTO) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         const mission = await window.db.missions.create(data);
         emitDataChange("missions");
         return normalizeMission(
@@ -410,7 +478,7 @@ export function useMissions(projectId?: string) {
 
   const update = useCallback(
     async (id: string, data: UpdateMissionDTO) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.missions.update(id, data);
         emitDataChange("missions");
       } else {
@@ -423,7 +491,7 @@ export function useMissions(projectId?: string) {
 
   const remove = useCallback(
     async (id: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.missions.delete(id);
         emitDataChange("missions");
       } else {
@@ -436,7 +504,7 @@ export function useMissions(projectId?: string) {
 
   const getById = useCallback(
     async (id: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         const mission = await window.db.missions.findById(id);
         return mission
           ? (normalizeMission(
@@ -451,7 +519,7 @@ export function useMissions(projectId?: string) {
 
   const updateStatusFn = useCallback(
     async (id: string, status: MissionStatus) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.missions.updateStatus(id, status);
         emitDataChange("missions");
       } else {
@@ -464,7 +532,7 @@ export function useMissions(projectId?: string) {
 
   const setPlan = useCallback(
     async (id: string, plan: MissionPlan) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.missions.updatePlan(id, JSON.stringify(plan));
         emitDataChange("missions");
       } else {
@@ -477,7 +545,7 @@ export function useMissions(projectId?: string) {
 
   const setCode = useCallback(
     async (id: string, code: GeneratedCode) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.missions.updateGeneratedCode(id, JSON.stringify(code));
         emitDataChange("missions");
       } else {
@@ -490,7 +558,7 @@ export function useMissions(projectId?: string) {
 
   const start = useCallback(
     async (id: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.missions.start(id);
         emitDataChange("missions");
       } else {
@@ -503,7 +571,7 @@ export function useMissions(projectId?: string) {
 
   const complete = useCallback(
     async (id: string, summary?: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.missions.complete(id, summary);
         emitDataChange("missions");
       } else {
@@ -516,7 +584,7 @@ export function useMissions(projectId?: string) {
 
   const fail = useCallback(
     async (id: string, error: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.missions.fail(id, error);
         emitDataChange("missions");
       } else {
@@ -530,7 +598,7 @@ export function useMissions(projectId?: string) {
 
   const cancel = useCallback(
     async (id: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.missions.cancel(id);
         emitDataChange("missions");
       } else {
@@ -542,7 +610,7 @@ export function useMissions(projectId?: string) {
   );
 
   // Para o modo browser, retorna diretamente do store para ter dados atualizados
-  const finalMissions = isElectron()
+  const finalMissions = hasDesktopDb()
     ? missions
     : projectId
       ? getMissionsByProject(projectId)
@@ -581,12 +649,14 @@ export function useMissionLogs(missionId: string) {
   const refresh = useCallback(async () => {
     setIsLoading(true);
     try {
-      if (isElectron() && window.db) {
-        const data = await window.db.missionLogs.findByMission(missionId);
+      if (hasDesktopDb() && window.db) {
+        const data = await ipcCall(window.db.missionLogs.findByMission(missionId), "missionLogs.findByMission");
         setLogs(normalizeMissionLogs(data) as MissionLog[]);
       } else {
         setLogs(getLogsByMission(missionId));
       }
+    } catch (error) {
+      console.error("[useMissionLogs] refresh failed:", error);
     } finally {
       setIsLoading(false);
     }
@@ -604,7 +674,7 @@ export function useMissionLogs(missionId: string) {
       content: string,
       metadata?: Record<string, unknown>,
     ) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         switch (type) {
           case "info":
             await window.db.missionLogs.logInfo(missionId, content, metadata);
@@ -645,7 +715,7 @@ export function useMissionLogs(missionId: string) {
 
   const logAgentAction = useCallback(
     async (action: string, details?: Record<string, unknown>) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.missionLogs.logAgentAction(missionId, action, details);
         emitDataChange("missionLogs");
       } else {
@@ -662,7 +732,7 @@ export function useMissionLogs(missionId: string) {
 
   const logUserInput = useCallback(
     async (input: string) => {
-      if (isElectron() && window.db) {
+      if (hasDesktopDb() && window.db) {
         await window.db.missionLogs.logUserInput(missionId, input);
         emitDataChange("missionLogs");
       } else {
@@ -678,7 +748,7 @@ export function useMissionLogs(missionId: string) {
   );
 
   return {
-    logs: isElectron() ? logs : getLogsByMission(missionId),
+    logs: hasDesktopDb() ? logs : getLogsByMission(missionId),
     isLoading,
     refresh,
     addLog,
@@ -695,17 +765,26 @@ export function useCombs(projectId?: string) {
   const [combs, setCombs] = useState<Comb[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  const combsSeqRef = useRef(0);
+  const combsInFlightRef = useRef(0);
   const refresh = useCallback(async () => {
+    combsInFlightRef.current += 1;
+    const mySeq = ++combsSeqRef.current;
     setIsLoading(true);
     try {
-      if (isElectron() && window.db?.combs && projectId) {
-        const data = await window.db.combs.findByProject(projectId);
+      if (hasDesktopDb() && window.db?.combs && projectId) {
+        const data = await ipcCall(window.db.combs.findByProject(projectId), "combs.findByProject");
+        if (mySeq !== combsSeqRef.current) return;
         setCombs(normalizeCombs(data) as Comb[]);
       } else {
+        if (mySeq !== combsSeqRef.current) return;
         setCombs([]);
       }
+    } catch (error) {
+      console.error("[useCombs] refresh failed:", error);
     } finally {
-      setIsLoading(false);
+      combsInFlightRef.current -= 1;
+      if (combsInFlightRef.current === 0) setIsLoading(false);
     }
   }, [projectId]);
 
@@ -717,7 +796,7 @@ export function useCombs(projectId?: string) {
 
   const create = useCallback(
     async (data: CreateCombDTO) => {
-      if (!isElectron() || !window.db?.combs) throw new Error("Combs not available");
+      if (!hasDesktopDb() || !window.db?.combs) throw new Error("Combs not available");
       const comb = await window.db.combs.create(data);
       emitDataChange("combs");
       return normalizeComb(comb as unknown as Record<string, unknown>) as unknown as Comb;
@@ -727,7 +806,7 @@ export function useCombs(projectId?: string) {
 
   const update = useCallback(
     async (id: string, data: UpdateCombDTO) => {
-      if (!isElectron() || !window.db?.combs) return;
+      if (!hasDesktopDb() || !window.db?.combs) return;
       await window.db.combs.update(id, data);
       emitDataChange("combs");
     },
@@ -736,7 +815,7 @@ export function useCombs(projectId?: string) {
 
   const remove = useCallback(
     async (id: string) => {
-      if (!isElectron() || !window.db?.combs) return;
+      if (!hasDesktopDb() || !window.db?.combs) return;
       await window.db.combs.delete(id);
       emitDataChange("combs");
       emitDataChange("panes");
@@ -765,12 +844,14 @@ export function usePanes(combId?: string) {
   const refresh = useCallback(async () => {
     setIsLoading(true);
     try {
-      if (isElectron() && window.db?.panes && combId) {
-        const data = await window.db.panes.findByComb(combId);
+      if (hasDesktopDb() && window.db?.panes && combId) {
+        const data = await ipcCall(window.db.panes.findByComb(combId), "panes.findByComb");
         setPanes(normalizePanes(data) as Pane[]);
       } else {
         setPanes([]);
       }
+    } catch (error) {
+      console.error("[usePanes] refresh failed:", error);
     } finally {
       setIsLoading(false);
     }
@@ -784,7 +865,7 @@ export function usePanes(combId?: string) {
 
   const create = useCallback(
     async (data: CreatePaneDTO) => {
-      if (!isElectron() || !window.db?.panes) throw new Error("Panes not available");
+      if (!hasDesktopDb() || !window.db?.panes) throw new Error("Panes not available");
       const pane = await window.db.panes.create(data);
       emitDataChange("panes");
       return normalizePane(pane as unknown as Record<string, unknown>) as unknown as Pane;
@@ -794,7 +875,7 @@ export function usePanes(combId?: string) {
 
   const update = useCallback(
     async (id: string, data: UpdatePaneDTO) => {
-      if (!isElectron() || !window.db?.panes) return;
+      if (!hasDesktopDb() || !window.db?.panes) return;
       await window.db.panes.update(id, data);
       emitDataChange("panes");
     },
@@ -803,7 +884,7 @@ export function usePanes(combId?: string) {
 
   const remove = useCallback(
     async (id: string) => {
-      if (!isElectron() || !window.db?.panes) return;
+      if (!hasDesktopDb() || !window.db?.panes) return;
       await window.db.panes.delete(id);
       emitDataChange("panes");
     },
@@ -824,12 +905,12 @@ export function usePanes(combId?: string) {
 // Hook para verificar ambiente
 // ============================================
 
-export function useIsElectron() {
-  const [isElectronEnv, setIsElectronEnv] = useState(false);
+export function useDesktopDbAvailable() {
+  const [available, setAvailable] = useState(false);
 
   useEffect(() => {
-    setIsElectronEnv(isElectron());
+    setAvailable(hasDesktopDb());
   }, []);
 
-  return isElectronEnv;
+  return available;
 }

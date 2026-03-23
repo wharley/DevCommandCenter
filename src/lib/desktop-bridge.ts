@@ -1,0 +1,279 @@
+// @ts-nocheck
+import type { DesktopPlatform } from "@/types/app";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+
+const isTauriRuntime = () =>
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+const platformFromUA = (): DesktopPlatform => {
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes("mac")) return "darwin";
+  if (ua.includes("win")) return "win32";
+  if (ua.includes("linux")) return "linux";
+  return "linux";
+};
+
+const call = <T>(cmd: string, args?: Record<string, unknown>) =>
+  invoke<T>(cmd, args ?? {});
+
+/** Expõe `window.desktopAPI` e `window.db` via Tauri `invoke` (paridade com o antigo preload). */
+export function installDesktopBridge(): void {
+  if (typeof window === "undefined") return;
+  /** Só pular quando o SQLite já está exposto; `desktopAPI` pode existir sem `db` (stub Tauri) e isso bloqueava o bridge. */
+  if (window.db) return;
+  if (!isTauriRuntime()) return;
+
+  window.desktopAPI = {
+    platform: platformFromUA(),
+    app: {
+      getVersion: () => call<string>("app_get_version"),
+      checkForUpdates: () => call<void>("app_check_for_updates"),
+      quitAndInstall: () => call<void>("app_quit_and_install"),
+      showNotification: (payload) => call<void>("app_show_notification", { payload }),
+      onUpdateStatus: (_callback) => () => {},
+    },
+    dialog: {
+      selectDirectory: () => call<string | null>("dialog_select_directory"),
+      showMessage: (options) => call<number>("dialog_show_message", { options }),
+      confirm: (message) => call<boolean>("dialog_confirm", { message }),
+    },
+    shell: {
+      openExternal: (url) => call<void>("shell_open_external", { url }),
+      openPath: (path) => call<void>("shell_open_path", { path }),
+      showItemInFolder: (path) => call<void>("shell_show_item_in_folder", { path }),
+      resolveCliPath: (command) =>
+        call<{ path: string | null }>("shell_resolve_cli_path", { command }),
+      detectCliForProvider: (providerType) =>
+        call<{ path: string | null }>("shell_detect_cli_for_provider", {
+          providerType,
+        }),
+      validateCliPath: (providerType, cliPath) =>
+        call<{ valid: boolean; message?: string }>("shell_validate_cli_path", {
+          providerType,
+          cliPath,
+        }),
+      openTerminalAtPath: (dirPath, suggestedCommand) =>
+        call<{ success: boolean; error?: string }>("shell_open_terminal_at_path", {
+          dirPath,
+          suggestedCommand,
+        }),
+    },
+    terminal: {
+      spawn: (options) => call("terminal_spawn", { options }),
+      getOrCreate: (missionId, options) =>
+        call("terminal_get_or_create", { missionId, options }),
+      getSession: (missionId) => call("terminal_get_session", { missionId }),
+      write: (ptyId, data) => call("terminal_write", { ptyId, data }),
+      resize: (ptyId, cols, rows) => call("terminal_resize", { ptyId, cols, rows }),
+      kill: (ptyId) => call("terminal_kill", { ptyId }),
+      killByMissionId: (missionId) => call("terminal_kill_by_mission_id", { missionId }),
+      getOrCreateForPane: (paneId, options) =>
+        call("terminal_get_or_create_for_pane", { paneId, options }),
+      getPaneSession: (paneId) => call("terminal_get_pane_session", { paneId }),
+      killByPaneId: (paneId) => call("terminal_kill_by_pane_id", { paneId }),
+      getBacklog: (ptyId) =>
+        call<{ lines: string[] }>("terminal_get_backlog", { ptyId }),
+      getProjectActivity: (projectId) =>
+        call<{
+          totalRunningPanes: number;
+          runningPanesByCombId: Record<string, number>;
+        }>("terminal_get_project_activity", { projectId }),
+      onData: (callback) => {
+        let unlistenFn: (() => void) | null = null;
+        void listen("terminal-output", (event: any) => {
+          const payload = event?.payload ?? {};
+          callback(payload.ptyId, payload.data ?? "");
+        }).then((unlisten) => {
+          unlistenFn = unlisten;
+        });
+        return () => {
+          if (unlistenFn) unlistenFn();
+        };
+      },
+      onExit: (callback) => {
+        let unlistenFn: (() => void) | null = null;
+        void listen("terminal-exit", (event: any) => {
+          const payload = event?.payload ?? {};
+          callback(payload.ptyId, Number(payload.code ?? 0));
+        }).then((unlisten) => {
+          unlistenFn = unlisten;
+        });
+        return () => {
+          if (unlistenFn) unlistenFn();
+        };
+      },
+      onAttention: (_callback) => () => {},
+    },
+    worktree: {
+      ensureForMission: (missionId) =>
+        call("worktree_ensure_for_mission", { missionId }),
+      mergeIntoMain: (missionId) =>
+        call("worktree_merge_into_main", { missionId }),
+      discard: (missionId) => call("worktree_discard", { missionId }),
+      getDiffs: (missionId) => call("missions_get_diffs", { missionId }),
+      applyMissionPatch: (missionId, targetBranch, options) =>
+        call("worktree_apply_mission_patch", { missionId, targetBranch, options }),
+    },
+    comb: {
+      ensureWorktree: (combId) => call("comb_ensure_worktree", { combId }),
+      discard: (combId) => call("comb_discard", { combId }),
+      mergeIntoMain: (combId, targetBranch) =>
+        call("comb_merge_into_main", { combId, targetBranch }),
+      getDiffs: (combId) => call("comb_get_diffs", { combId }),
+      applyPatch: (combId, targetBranch, options) =>
+        call("comb_apply_patch", { combId, targetBranch, options }),
+    },
+    window: {
+      minimize: () => call<void>("window_minimize"),
+      maximize: () => call<void>("window_maximize"),
+      close: () => call<void>("window_close"),
+      isMaximized: () => call<boolean>("window_is_maximized"),
+    },
+    license: {
+      getStatus: () => call("license_get_status"),
+      getMachineId: () => call("license_get_machine_id"),
+      activate: (email) => call("license_activate", { email }),
+      skipActivation: () => call("license_skip_activation"),
+    },
+    ai: {
+      generatePlan: (missionId, options) =>
+        call("ai_generate_plan", { missionId, options }),
+      generateCode: (missionId, options) =>
+        call("ai_generate_code", { missionId, options }),
+      applyChanges: (missionId, options) =>
+        call("ai_apply_changes", { missionId, options }),
+      testConnection: (providerId) => call("ai_test_connection", { providerId }),
+      validateProvider: (provider) => call("ai_validate_provider", { provider }),
+      invalidateAdapter: (providerId) => call("ai_invalidate_adapter", { providerId }),
+    },
+    git: {
+      getInfo: (projectPath) => call("git_get_info", { projectPath }),
+      getStatus: (projectPath) => call("git_get_status", { projectPath }),
+      getBranchState: (projectPath) => call("git_get_branch_state", { projectPath }),
+      getFileDiffHead: (projectPath, filePath) =>
+        call("git_get_file_diff_head", { projectPath, filePath }),
+      getFileDiffAgainstBase: (projectPath, filePath, baseRef) =>
+        call("git_get_file_diff_against_base", { projectPath, filePath, baseRef }),
+      isRepo: (projectPath) => call("git_is_repo", { projectPath }),
+      getCurrentBranch: (projectPath) => call("git_get_current_branch", { projectPath }),
+      getDefaultBranch: (projectPath) => call("git_get_default_branch", { projectPath }),
+      getLocalBranches: (projectPath) => call("git_get_local_branches", { projectPath }),
+      createBranch: (projectPath, branchName, fromBranch) =>
+        call("git_create_branch", { projectPath, branchName, fromBranch }),
+      listFiles: (projectPath, maxFiles) => call("git_list_files", { projectPath, maxFiles }),
+      getRecentCommits: (projectPath, count) =>
+        call("git_get_recent_commits", { projectPath, count }),
+      commit: (projectPath, message, files) =>
+        call("git_commit", { projectPath, message, files }),
+      push: (projectPath) => call("git_push", { projectPath }),
+      pull: (projectPath) => call("git_pull", { projectPath }),
+      reset: (projectPath, ref) =>
+        call("git_reset", { projectPath, gitRef: ref }),
+      getWorktreeInfo: (projectPath) => call("git_get_worktree_info", { projectPath }),
+      getReviewDiffs: (worktreePath) => call("git_get_review_diffs", { worktreePath }),
+      applyWorktreePatch: (mainProjectPath, worktreePath, targetBranch, options) =>
+        call("git_apply_worktree_patch", {
+          mainProjectPath,
+          worktreePath,
+          targetBranch,
+          options,
+        }),
+    },
+    review: {
+      getDiffsBundle: (worktreePaths) => call("review_get_diffs_bundle", { worktreePaths }),
+    },
+  } as any;
+
+  window.db = {
+    providers: {
+      findAll: () => call("db_providers_find_all"),
+      findById: (id) => call("db_providers_find_by_id", { id }),
+      findByType: (type) => call("db_providers_find_by_type", { kind: type }),
+      findActive: () => call("db_providers_find_active"),
+      create: (data) => call("db_providers_create", { data }),
+      update: (id, data) => call("db_providers_update", { id, data }),
+      delete: (id) => call("db_providers_delete", { id }),
+      setActive: (id, isActive) => call("db_providers_set_active", { id, isActive }),
+      testConnection: (id) => call("db_providers_test_connection", { id }),
+      isEncryptionAvailable: () => call("db_providers_is_encryption_available"),
+    },
+    projects: {
+      findAll: () => call("db_projects_find_all"),
+      findById: (id) => call("db_projects_find_by_id", { id }),
+      findByPath: (path) => call("db_projects_find_by_path", { path }),
+      search: (query) => call("db_projects_search", { query }),
+      create: (data) => call("db_projects_create", { data }),
+      update: (id, data) => call("db_projects_update", { id, data }),
+      delete: (id) => call("db_projects_delete", { id }),
+      getStats: (id) => call("db_projects_get_stats", { id }),
+      updateLastOpened: (id) => call("db_projects_update_last_opened", { id }),
+    },
+    missions: {
+      findAll: () => call("db_missions_find_all"),
+      findById: (id) => call("db_missions_find_by_id", { id }),
+      findByProject: (projectId) => call("db_missions_find_by_project", { projectId }),
+      findByStatus: (status) => call("db_missions_find_by_status", { status }),
+      findActive: () => call("db_missions_find_active"),
+      search: (query, projectId) => call("db_missions_search", { query, projectId }),
+      create: (data) => call("db_missions_create", { data }),
+      update: (id, data) => call("db_missions_update", { id, data }),
+      delete: (id) => call("db_missions_delete", { id }),
+      updateStatus: (id, status) => call("db_missions_update_status", { id, status }),
+      updatePlan: (id, plan) => call("db_missions_update_plan", { id, plan }),
+      updateGeneratedCode: (id, code) =>
+        call("db_missions_update_generated_code", { id, code }),
+      start: (id) => call("db_missions_start", { id }),
+      complete: (id, summary) => call("db_missions_complete", { id, summary }),
+      fail: (id, error) => call("db_missions_fail", { id, error }),
+      cancel: (id) => call("db_missions_cancel", { id }),
+      getFullMission: (id) => call("db_missions_get_full_mission", { id }),
+    },
+    missionLogs: {
+      findAll: (options) => call("db_mission_logs_find_all", { options }),
+      findById: (id) => call("db_mission_logs_find_by_id", { id }),
+      findByMission: (missionId, limit, offset) =>
+        call("db_mission_logs_find_by_mission", { missionId, limit, offset }),
+      findByLevel: (level, missionId) =>
+        call("db_mission_logs_find_by_level", { level, missionId }),
+      search: (query, missionId) => call("db_mission_logs_search", { query, missionId }),
+      create: (data) => call("db_mission_logs_create", { data }),
+      delete: (id) => call("db_mission_logs_delete", { id }),
+      deleteByMission: (missionId) => call("db_mission_logs_delete_by_mission", { missionId }),
+      logInfo: (missionId, message, metadata) =>
+        call("db_mission_logs_log_info", { missionId, message, metadata }),
+      logWarning: (missionId, message, metadata) =>
+        call("db_mission_logs_log_warning", { missionId, message, metadata }),
+      logError: (missionId, message, metadata) =>
+        call("db_mission_logs_log_error", { missionId, message, metadata }),
+      logDebug: (missionId, message, metadata) =>
+        call("db_mission_logs_log_debug", { missionId, message, metadata }),
+      logAgentAction: (missionId, action, details) =>
+        call("db_mission_logs_log_agent_action", { missionId, action, details }),
+      logUserInput: (missionId, input) =>
+        call("db_mission_logs_log_user_input", { missionId, input }),
+      getStats: (missionId) => call("db_mission_logs_get_stats", { missionId }),
+      getUsageStats: (missionId) => call("db_mission_logs_get_usage_stats", { missionId }),
+      getLatest: (missionId, count) => call("db_mission_logs_get_latest", { missionId, count }),
+    },
+    combs: {
+      findByProject: (projectId) => call("db_combs_find_by_project", { projectId }),
+      findById: (id) => call("db_combs_find_by_id", { id }),
+      create: (data) => call("db_combs_create", { data }),
+      update: (id, data) => call("db_combs_update", { id, data }),
+      delete: (id) => call("db_combs_delete", { id }),
+    },
+    panes: {
+      findByComb: (combId) => call("db_panes_find_by_comb", { combId }),
+      findById: (id) => call("db_panes_find_by_id", { id }),
+      create: (data) => call("db_panes_create", { data }),
+      update: (id, data) => call("db_panes_update", { id, data }),
+      delete: (id) => call("db_panes_delete", { id }),
+    },
+    utils: {
+      backup: (destPath) => call("db_utils_backup", { destPath }),
+      getPath: () => call("db_utils_get_path"),
+      getSize: () => call("db_utils_get_size"),
+    },
+  } as any;
+}

@@ -141,14 +141,14 @@
   }
 }
 
-/* Electron window drag region */
-.electron-drag {
+/* Região arrastável da janela (WebView / shell nativo) */
+.titlebar-drag-region {
   -webkit-app-region: drag;
   -webkit-user-select: none;
   user-select: none;
 }
 
-.electron-no-drag {
+.titlebar-no-drag {
   -webkit-app-region: no-drag;
 }
 

@@ -13,8 +13,29 @@ const DATE_KEYS: Record<string, string[]> = {
 function parseDate(value: unknown): Date | null {
   if (value instanceof Date) return value;
   if (typeof value === 'string') {
-    const d = new Date(value);
-    return isNaN(d.getTime()) ? null : d;
+    const raw = value.trim();
+    const d = new Date(raw);
+    if (!isNaN(d.getTime())) return d;
+
+    // SQLite/Tauri commonly returns "YYYY-MM-DD HH:mm:ss" (no timezone).
+    // WebKit may treat this as invalid, so parse it manually as local time.
+    const sqliteMatch = raw.match(
+      /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/,
+    );
+    if (sqliteMatch) {
+      const [, y, m, day, hh, mm, ss] = sqliteMatch;
+      const localDate = new Date(
+        Number(y),
+        Number(m) - 1,
+        Number(day),
+        Number(hh),
+        Number(mm),
+        Number(ss),
+      );
+      return isNaN(localDate.getTime()) ? null : localDate;
+    }
+
+    return null;
   }
   return null;
 }
