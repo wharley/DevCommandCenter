@@ -763,9 +763,7 @@ export default function CmuxWorkspacePage() {
         <div className="border-b border-sidebar-border px-3 pt-10 pb-3">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sidebar-primary">
-                <Terminal className="h-4 w-4 text-sidebar-primary-foreground" />
-              </div>
+              <img src="/dcc-mark.svg" alt="DCC" className="h-7 w-7 rounded-lg" />
               <span className="text-sm font-semibold tracking-tight">Dev Command</span>
             </div>
             <Button variant="ghost" size="icon" className="titlebar-no-drag h-7 w-7" onClick={() => setNewCombOpen(true)}>
