@@ -6,7 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "xterm/css/xterm.css";
 import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
-import type { PaneSession } from "@/lib/database/types";
+import type { TerminalAttentionPayload } from "@/lib/terminal/attention-types";
 
 export interface EmbeddedTerminalProps {
   cwd: string;
@@ -14,15 +14,10 @@ export interface EmbeddedTerminalProps {
   args?: string[];
   onClose?: () => void;
   onExit?: (code: number) => void;
-  /** Optional label for the terminal (e.g. mission title) */
+  /** Optional label for the terminal */
   title?: string;
   /**
-   * When set, PTY is keyed by missionId: getOrCreate is used and the PTY is NOT killed on unmount,
-   * so the user can navigate away and reattach to the same session later.
-   */
-  missionId?: string;
-  /**
-   * When set, PTY is keyed by paneId (Comb/Pane architecture): getOrCreateForPane is used
+   * When set, PTY is keyed by paneId (Workspace architecture): getOrCreateForPane is used
    * and the PTY is NOT killed on unmount for reattach.
    */
   paneId?: string;
@@ -31,7 +26,7 @@ export interface EmbeddedTerminalProps {
 type PaneAttachResult = {
   ptyId?: string;
   error?: string;
-  session?: PaneSession | null;
+  session?: any | null;
 };
 
 export function EmbeddedTerminal({
@@ -41,7 +36,6 @@ export function EmbeddedTerminal({
   onClose,
   onExit,
   title,
-  missionId,
   paneId,
 }: EmbeddedTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -51,14 +45,29 @@ export function EmbeddedTerminal({
   const onExitRef = useRef<typeof onExit>(onExit);
   const [error, setError] = useState<string | null>(null);
   const [exited, setExited] = useState<number | null>(null);
+  const [isWaiting, setIsWaiting] = useState(false);
   /** Pane agent: mostrar reinício quando o processo terminou ou só há sessão encerrada no main. */
   const [agentCanRestart, setAgentCanRestart] = useState(false);
   const argsKey = useMemo(() => JSON.stringify(args), [args]);
   const stableArgs = useMemo(() => args, [argsKey]);
+  const shellCommand = useMemo(() => {
+    const fromEnv = (window as unknown as { __DCC_SHELL__?: string }).__DCC_SHELL__;
+    if (fromEnv && fromEnv.trim()) return fromEnv;
+    return window.desktopAPI?.platform === "win32" ? "powershell" : "/bin/zsh";
+  }, []);
 
   useEffect(() => {
     onExitRef.current = onExit;
   }, [onExit]);
+
+  const safeWrite = useCallback((term: XTerm, chunk: string) => {
+    if (!chunk || xtermRef.current !== term) return;
+    try {
+      term.write(chunk);
+    } catch {
+      // xterm may throw in teardown races; ignore stale writes
+    }
+  }, []);
 
   /** Reidrata buffer de sessão (Tauri) antes de assinar onData, evitando duplicar linhas. */
   const hydrateTerminalBacklog = useCallback(async (term: XTerm, ptyId: string | undefined) => {
@@ -67,14 +76,15 @@ export function EmbeddedTerminal({
     try {
       const r = await tapi.getBacklog(ptyId);
       const lines = r?.lines;
-      if (lines?.length) term.write(lines.join(""));
+      if (lines?.length && xtermRef.current === term) safeWrite(term, lines.join(""));
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [safeWrite]);
 
   const applyPaneAttachResult = useCallback(
     (result: PaneAttachResult, term: XTerm) => {
+      if (xtermRef.current !== term) return;
       if (result.error) {
         setError(result.error);
         return;
@@ -88,7 +98,7 @@ export function EmbeddedTerminal({
         setAgentCanRestart(true);
       }
       if (result.session?.outputPreview) {
-        term.write(result.session.outputPreview);
+        safeWrite(term, result.session.outputPreview);
       }
       if (
         !result.ptyId &&
@@ -97,7 +107,7 @@ export function EmbeddedTerminal({
         setExited(result.session.lastExitCode);
       }
     },
-    [command],
+    [command, safeWrite],
   );
 
   const handleRestartAgent = useCallback(() => {
@@ -115,6 +125,7 @@ export function EmbeddedTerminal({
         restart: true,
       })
       .then(async (result) => {
+        if (xtermRef.current !== term) return;
         applyPaneAttachResult(result, term);
         await hydrateTerminalBacklog(term, result.ptyId);
       });
@@ -136,6 +147,8 @@ export function EmbeddedTerminal({
   useEffect(() => {
     const api = window.desktopAPI?.terminal;
     if (!api || !containerRef.current) return;
+    let disposed = false;
+    let resizeRaf: number | null = null;
 
     const term = new XTerm({
       cursorBlink: true,
@@ -159,10 +172,23 @@ export function EmbeddedTerminal({
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(containerRef.current);
-    fitAddon.fit();
-
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
+    const safeFit = () => {
+      if (disposed || xtermRef.current !== term) return;
+      const el = containerRef.current;
+      // fit() before layout (0×0 flex) or with a torn-down renderer can race xterm's Viewport RAF
+      if (!el || el.offsetWidth < 1 || el.offsetHeight < 1) return;
+      try {
+        fitAddon.fit();
+      } catch {
+        // xterm can throw during unmount/rerender races; ignore and wait next resize tick
+      }
+    };
+    // Defer until after flex/min-h-0 layout so FitAddon sees real cell metrics
+    requestAnimationFrame(() => {
+      requestAnimationFrame(safeFit);
+    });
 
     let unsubData: (() => void) | null = null;
 
@@ -170,46 +196,55 @@ export function EmbeddedTerminal({
       if (id === ptyIdRef.current) {
         ptyIdRef.current = null;
         setExited(code);
+        setIsWaiting(false);
         if (paneId && command) setAgentCanRestart(true);
         onExitRef.current?.(code);
       }
     });
 
-    term.onData((data: string) => {
-      const id = ptyIdRef.current;
-      if (id) api.write(id, data);
+    const unsubAttention = api.onAttention?.((payload: TerminalAttentionPayload) => {
+      const id = payload.ptyId ?? payload.paneId;
+      const status = payload.status ?? (payload.reason === "idle" ? "idle" : "waiting");
+      if (id === ptyIdRef.current) {
+        setIsWaiting(status === "waiting");
+      }
     });
 
-    const spawnOptions = {
-      cwd,
-      command,
-      args: stableArgs,
-      cols: term.cols,
-      rows: term.rows,
-    };
+    term.onData((data: string) => {
+      const id = ptyIdRef.current;
+      if (id) {
+        api.write(id, data);
+        setIsWaiting(false); // Reset waiting state on user input
+      }
+    });
+
+    const spawnOptions =
+      command && command.trim().length > 0
+        ? {
+            cwd,
+            command: shellCommand,
+            args: ["-il", "-c", `${command} ${stableArgs.join(" ")}`.trim()],
+            cols: term.cols,
+            rows: term.rows,
+          }
+        : {
+            cwd,
+            command: shellCommand,
+            args: ["-il"],
+            cols: term.cols,
+            rows: term.rows,
+          };
 
     const mountSession = async () => {
       try {
         if (paneId && api.getOrCreateForPane) {
           const result = await api.getOrCreateForPane(paneId, spawnOptions);
+          if (disposed || xtermRef.current !== term) return;
           applyPaneAttachResult(result, term);
-          await hydrateTerminalBacklog(term, result.ptyId);
-        } else if (missionId && api.getOrCreate) {
-          const result = await api.getOrCreate(missionId, spawnOptions);
-          if (result.error) {
-            setError(result.error);
-            return;
-          }
-          if (result.ptyId) ptyIdRef.current = result.ptyId;
-          if (result.session?.outputPreview) {
-            term.write(result.session.outputPreview);
-          }
-          if (typeof result.session?.lastExitCode === "number") {
-            setExited(result.session.lastExitCode);
-          }
           await hydrateTerminalBacklog(term, result.ptyId);
         } else {
           const result = await api.spawn(spawnOptions);
+          if (disposed || xtermRef.current !== term) return;
           if (result.error) {
             setError(result.error);
             return;
@@ -218,7 +253,9 @@ export function EmbeddedTerminal({
           await hydrateTerminalBacklog(term, result.ptyId);
         }
         unsubData = api.onData((id: string, data: string) => {
-          if (id === ptyIdRef.current) term.write(data);
+          if (id === ptyIdRef.current && !disposed && xtermRef.current === term) {
+            safeWrite(term, data);
+          }
         });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -227,42 +264,66 @@ export function EmbeddedTerminal({
 
     void mountSession();
 
-    const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit();
-      const id = ptyIdRef.current;
-      if (id && term.cols && term.rows) {
-        api.resize(id, term.cols, term.rows);
+    const handleResize = () => {
+      if (disposed || xtermRef.current !== term) return;
+      if (fitAddonRef.current && ptyIdRef.current) {
+        safeFit();
+        const { cols, rows } = term;
+        if (cols && rows) {
+          api.resize(ptyIdRef.current, cols, rows);
+        }
       }
+    };
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(handleResize);
     });
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      disposed = true;
+      if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
       resizeObserver.disconnect();
       unsubData?.();
       unsubExit();
+      unsubAttention?.();
       const id = ptyIdRef.current;
-      // When missionId or paneId is set, do NOT kill on unmount so the user can reattach
-      if (id && api.kill && !missionId && !paneId) {
+      // When paneId is set, do NOT kill on unmount so the user can reattach
+      if (id && api.kill && !paneId) {
         api.kill(id);
       }
       ptyIdRef.current = null;
-      term.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
+      // Defer dispose so pending xterm Viewport/Render RAFs finish before the renderer is cleared
+      // (otherwise: TypeError on this._renderer.value.dimensions).
+      const t = term;
+      setTimeout(() => {
+        try {
+          t.dispose();
+        } catch {
+          /* ignore */
+        }
+      }, 0);
     };
   }, [
     applyPaneAttachResult,
     command,
     cwd,
     hydrateTerminalBacklog,
-    missionId,
     paneId,
+    safeWrite,
     stableArgs,
   ]);
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-background">
-      <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
+    <div className={`flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border transition-all duration-300 ${
+      isWaiting ? "border-primary shadow-[0_0_15px_rgba(var(--primary),0.3)] ring-1 ring-primary" : "border-border"
+    } bg-background`}>
+      <div className={`flex items-center justify-between border-b px-2 py-1.5 ${
+        isWaiting ? "border-primary bg-primary/5" : "border-border"
+      }`}>
         <span className="truncate text-xs text-muted-foreground">
           {title ?? "Terminal"} — {cwd}
         </span>

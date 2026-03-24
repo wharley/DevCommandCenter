@@ -14,10 +14,6 @@ import {
   normalizeProjects,
   normalizeProvider,
   normalizeProviders,
-  normalizeMission,
-  normalizeMissions,
-  normalizeMissionLog,
-  normalizeMissionLogs,
   normalizeComb,
   normalizeCombs,
   normalizePane,
@@ -30,13 +26,6 @@ import type {
   Provider,
   CreateProviderDTO,
   UpdateProviderDTO,
-  Mission,
-  CreateMissionDTO,
-  UpdateMissionDTO,
-  MissionLog,
-  MissionStatus,
-  MissionPlan,
-  GeneratedCode,
   Comb,
   CreateCombDTO,
   UpdateCombDTO,
@@ -66,14 +55,12 @@ function ipcCall<T>(promise: Promise<T>, label = "ipc"): Promise<T> {
 // ============================================
 // Event Emitter para sincronização entre hooks
 // ============================================
-type DataEventType = "projects" | "providers" | "missions" | "missionLogs" | "combs" | "panes";
+type DataEventType = "projects" | "providers" | "combs" | "panes";
 type DataEventListener = () => void;
 
 const dataEventListeners: Record<DataEventType, Set<DataEventListener>> = {
   projects: new Set(),
   providers: new Set(),
-  missions: new Set(),
-  missionLogs: new Set(),
   combs: new Set(),
   panes: new Set(),
 };
@@ -97,7 +84,6 @@ function subscribeToDataChange(
 // ============================================
 
 export function useProjects() {
-  // Use seletores específicos para evitar re-renders desnecessários
   const storeProjects = useAppStore((s) => s.projects);
   const addProject = useAppStore((s) => s.addProject);
   const updateProject = useAppStore((s) => s.updateProject);
@@ -113,26 +99,17 @@ export function useProjects() {
   storeProjectsRef.current = storeProjects;
 
   const refresh = useCallback(async () => {
-    // Previne múltiplas chamadas simultâneas
-    if (isRefreshingRef.current) {
-      console.log("⏭️ Skipping refresh - already running");
-      return;
-    }
-
-    console.log("🔄 useProjects.refresh() called");
+    if (isRefreshingRef.current) return;
     isRefreshingRef.current = true;
     setIsLoading(true);
 
     try {
       if (hasDesktopDb() && window.db) {
-        console.log("📦 Using desktop DB (Tauri)");
         const data = await ipcCall(window.db.projects.findAll(), "projects.findAll");
-        console.log("✅ Got", data.length, "projects from DB");
         if (mountedRef.current) {
           setProjects(normalizeProjects(data) as Project[]);
         }
       } else {
-        console.log("💾 Using in-memory store");
         if (mountedRef.current) {
           setProjects(storeProjectsRef.current);
         }
@@ -140,7 +117,6 @@ export function useProjects() {
     } catch (error) {
       console.error("❌ Error in useProjects.refresh():", error);
     } finally {
-      console.log("✨ useProjects.refresh() done, setting isLoading=false");
       isRefreshingRef.current = false;
       if (mountedRef.current) {
         setIsLoading(false);
@@ -148,15 +124,11 @@ export function useProjects() {
     }
   }, []);
 
-  // Carrega dados inicialmente e escuta mudanças de outras instâncias
   useEffect(() => {
-    console.log("⚡ useProjects useEffect triggered");
     mountedRef.current = true;
     refresh();
-    // Subscreve para receber notificações de mudanças de outras instâncias do hook
     const unsubscribe = subscribeToDataChange("projects", refresh);
     return () => {
-      console.log("🧹 useProjects cleanup");
       mountedRef.current = false;
       unsubscribe();
     };
@@ -166,7 +138,6 @@ export function useProjects() {
     async (data: CreateProjectDTO) => {
       if (hasDesktopDb() && window.db) {
         const project = await window.db.projects.create(data);
-        // Notifica todas as instâncias do hook para atualizar
         emitDataChange("projects");
         return normalizeProject(
           project as unknown as Record<string, unknown>,
@@ -259,7 +230,6 @@ export function useProjects() {
 // ============================================
 
 export function useProviders() {
-  // Use seletores específicos para evitar re-renders desnecessários
   const storeProviders = useAppStore((s) => s.providers);
   const addProvider = useAppStore((s) => s.addProvider);
   const updateProvider = useAppStore((s) => s.updateProvider);
@@ -370,7 +340,6 @@ export function useProviders() {
     if (hasDesktopDb() && window.db) {
       return window.db.providers.testConnection(id);
     } else {
-      // Mock test
       await new Promise((r) => setTimeout(r, 1000));
       return { success: true, message: "Connection successful (mock)" };
     }
@@ -390,375 +359,7 @@ export function useProviders() {
 }
 
 // ============================================
-// Hook para Missions
-// ============================================
-
-export function useMissions(projectId?: string) {
-  // Use seletores específicos para evitar re-renders desnecessários
-  const storeMissions = useAppStore((s) => s.missions);
-  const getMissionsByProject = useAppStore((s) => s.getMissionsByProject);
-  const getMissionById = useAppStore((s) => s.getMissionById);
-  const addMission = useAppStore((s) => s.addMission);
-  const updateMission = useAppStore((s) => s.updateMission);
-  const deleteMission = useAppStore((s) => s.deleteMission);
-  const updateMissionStatus = useAppStore((s) => s.updateMissionStatus);
-  const setMissionPlan = useAppStore((s) => s.setMissionPlan);
-  const setMissionCode = useAppStore((s) => s.setMissionCode);
-
-  const [missions, setMissions] = useState<Mission[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  /** Refs: no desktop o SQLite não usa o store; incluir `storeMissions` nos deps recriava `refresh` a cada mudança no Zustand e o useEffect puxava missões em loop. */
-  const getMissionsByProjectRef = useRef(getMissionsByProject);
-  getMissionsByProjectRef.current = getMissionsByProject;
-  const storeMissionsRef = useRef(storeMissions);
-  storeMissionsRef.current = storeMissions;
-
-  const missionsSeqRef = useRef(0);
-  const missionsInFlightRef = useRef(0);
-  const refresh = useCallback(async () => {
-    missionsInFlightRef.current += 1;
-    const mySeq = ++missionsSeqRef.current;
-    setIsLoading(true);
-    try {
-      if (hasDesktopDb() && window.db) {
-        const data = projectId
-          ? await ipcCall(window.db.missions.findByProject(projectId), "missions.findByProject")
-          : await ipcCall(window.db.missions.findAll(), "missions.findAll");
-        if (mySeq !== missionsSeqRef.current) return;
-        setMissions(normalizeMissions(data) as Mission[]);
-      } else {
-        const data = projectId
-          ? getMissionsByProjectRef.current(projectId)
-          : storeMissionsRef.current;
-        if (mySeq !== missionsSeqRef.current) return;
-        setMissions(data);
-      }
-    } catch (error) {
-      console.error("[useMissions] refresh failed:", error);
-    } finally {
-      missionsInFlightRef.current -= 1;
-      if (missionsInFlightRef.current === 0) setIsLoading(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    refresh();
-    const unsubscribe = subscribeToDataChange("missions", refresh);
-    return unsubscribe;
-  }, [refresh]);
-
-  const create = useCallback(
-    async (data: CreateMissionDTO) => {
-      if (hasDesktopDb() && window.db) {
-        const mission = await window.db.missions.create(data);
-        emitDataChange("missions");
-        return normalizeMission(
-          mission as unknown as Record<string, unknown>,
-        ) as unknown as Mission;
-      } else {
-        const newMission = addMission({
-          ...data,
-          providerId: data.providerId ?? null,
-          planProviderId: data.planProviderId ?? null,
-          codeProviderId: data.codeProviderId ?? null,
-          plan: null,
-          generatedCode: null,
-          context: null,
-          errorMessage: null,
-          startedAt: null,
-          completedAt: null,
-        });
-        emitDataChange("missions");
-        return newMission;
-      }
-    },
-    [addMission],
-  );
-
-  const update = useCallback(
-    async (id: string, data: UpdateMissionDTO) => {
-      if (hasDesktopDb() && window.db) {
-        await window.db.missions.update(id, data);
-        emitDataChange("missions");
-      } else {
-        updateMission(id, data);
-        emitDataChange("missions");
-      }
-    },
-    [updateMission],
-  );
-
-  const remove = useCallback(
-    async (id: string) => {
-      if (hasDesktopDb() && window.db) {
-        await window.db.missions.delete(id);
-        emitDataChange("missions");
-      } else {
-        deleteMission(id);
-        emitDataChange("missions");
-      }
-    },
-    [deleteMission],
-  );
-
-  const getById = useCallback(
-    async (id: string) => {
-      if (hasDesktopDb() && window.db) {
-        const mission = await window.db.missions.findById(id);
-        return mission
-          ? (normalizeMission(
-              mission as unknown as Record<string, unknown>,
-            ) as unknown as Mission)
-          : undefined;
-      }
-      return getMissionById(id);
-    },
-    [getMissionById],
-  );
-
-  const updateStatusFn = useCallback(
-    async (id: string, status: MissionStatus) => {
-      if (hasDesktopDb() && window.db) {
-        await window.db.missions.updateStatus(id, status);
-        emitDataChange("missions");
-      } else {
-        updateMissionStatus(id, status);
-        emitDataChange("missions");
-      }
-    },
-    [updateMissionStatus],
-  );
-
-  const setPlan = useCallback(
-    async (id: string, plan: MissionPlan) => {
-      if (hasDesktopDb() && window.db) {
-        await window.db.missions.updatePlan(id, JSON.stringify(plan));
-        emitDataChange("missions");
-      } else {
-        setMissionPlan(id, plan);
-        emitDataChange("missions");
-      }
-    },
-    [setMissionPlan],
-  );
-
-  const setCode = useCallback(
-    async (id: string, code: GeneratedCode) => {
-      if (hasDesktopDb() && window.db) {
-        await window.db.missions.updateGeneratedCode(id, JSON.stringify(code));
-        emitDataChange("missions");
-      } else {
-        setMissionCode(id, code);
-        emitDataChange("missions");
-      }
-    },
-    [setMissionCode],
-  );
-
-  const start = useCallback(
-    async (id: string) => {
-      if (hasDesktopDb() && window.db) {
-        await window.db.missions.start(id);
-        emitDataChange("missions");
-      } else {
-        updateMissionStatus(id, "planning");
-        emitDataChange("missions");
-      }
-    },
-    [updateMissionStatus],
-  );
-
-  const complete = useCallback(
-    async (id: string, summary?: string) => {
-      if (hasDesktopDb() && window.db) {
-        await window.db.missions.complete(id, summary);
-        emitDataChange("missions");
-      } else {
-        updateMissionStatus(id, "completed");
-        emitDataChange("missions");
-      }
-    },
-    [updateMissionStatus],
-  );
-
-  const fail = useCallback(
-    async (id: string, error: string) => {
-      if (hasDesktopDb() && window.db) {
-        await window.db.missions.fail(id, error);
-        emitDataChange("missions");
-      } else {
-        updateMission(id, { errorMessage: error });
-        updateMissionStatus(id, "failed");
-        emitDataChange("missions");
-      }
-    },
-    [updateMission, updateMissionStatus],
-  );
-
-  const cancel = useCallback(
-    async (id: string) => {
-      if (hasDesktopDb() && window.db) {
-        await window.db.missions.cancel(id);
-        emitDataChange("missions");
-      } else {
-        updateMissionStatus(id, "cancelled");
-        emitDataChange("missions");
-      }
-    },
-    [updateMissionStatus],
-  );
-
-  // Para o modo browser, retorna diretamente do store para ter dados atualizados
-  const finalMissions = hasDesktopDb()
-    ? missions
-    : projectId
-      ? getMissionsByProject(projectId)
-      : storeMissions;
-
-  return {
-    missions: finalMissions,
-    isLoading,
-    refresh,
-    create,
-    update,
-    remove,
-    getById,
-    updateStatus: updateStatusFn,
-    setPlan,
-    setCode,
-    start,
-    complete,
-    fail,
-    cancel,
-  };
-}
-
-// ============================================
-// Hook para Mission Logs
-// ============================================
-
-export function useMissionLogs(missionId: string) {
-  // Use seletores específicos para evitar re-renders desnecessários
-  const getLogsByMission = useAppStore((s) => s.getLogsByMission);
-  const addMissionLog = useAppStore((s) => s.addMissionLog);
-
-  const [logs, setLogs] = useState<MissionLog[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  const refresh = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      if (hasDesktopDb() && window.db) {
-        const data = await ipcCall(window.db.missionLogs.findByMission(missionId), "missionLogs.findByMission");
-        setLogs(normalizeMissionLogs(data) as MissionLog[]);
-      } else {
-        setLogs(getLogsByMission(missionId));
-      }
-    } catch (error) {
-      console.error("[useMissionLogs] refresh failed:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [missionId, getLogsByMission]);
-
-  useEffect(() => {
-    refresh();
-    const unsubscribe = subscribeToDataChange("missionLogs", refresh);
-    return unsubscribe;
-  }, [refresh]);
-
-  const addLog = useCallback(
-    async (
-      type: MissionLog["type"],
-      content: string,
-      metadata?: Record<string, unknown>,
-    ) => {
-      if (hasDesktopDb() && window.db) {
-        switch (type) {
-          case "info":
-            await window.db.missionLogs.logInfo(missionId, content, metadata);
-            break;
-          case "error":
-            await window.db.missionLogs.logError(missionId, content, metadata);
-            break;
-          case "warning":
-            await window.db.missionLogs.logWarning(
-              missionId,
-              content,
-              metadata,
-            );
-            break;
-          case "debug":
-            await window.db.missionLogs.logDebug(missionId, content, metadata);
-            break;
-          default:
-            await window.db.missionLogs.create({
-              missionId,
-              type,
-              content,
-              metadata: metadata ?? undefined,
-            });
-        }
-        emitDataChange("missionLogs");
-      } else {
-        addMissionLog(missionId, {
-          type,
-          content,
-          metadata: metadata ?? null,
-        });
-        emitDataChange("missionLogs");
-      }
-    },
-    [missionId, addMissionLog],
-  );
-
-  const logAgentAction = useCallback(
-    async (action: string, details?: Record<string, unknown>) => {
-      if (hasDesktopDb() && window.db) {
-        await window.db.missionLogs.logAgentAction(missionId, action, details);
-        emitDataChange("missionLogs");
-      } else {
-        addMissionLog(missionId, {
-          type: "action",
-          content: action,
-          metadata: details ?? null,
-        });
-        emitDataChange("missionLogs");
-      }
-    },
-    [missionId, addMissionLog],
-  );
-
-  const logUserInput = useCallback(
-    async (input: string) => {
-      if (hasDesktopDb() && window.db) {
-        await window.db.missionLogs.logUserInput(missionId, input);
-        emitDataChange("missionLogs");
-      } else {
-        addMissionLog(missionId, {
-          type: "prompt",
-          content: input,
-          metadata: null,
-        });
-        emitDataChange("missionLogs");
-      }
-    },
-    [missionId, addMissionLog],
-  );
-
-  return {
-    logs: hasDesktopDb() ? logs : getLogsByMission(missionId),
-    isLoading,
-    refresh,
-    addLog,
-    logAgentAction,
-    logUserInput,
-  };
-}
-
-// ============================================
-// Hook para Combs
+// Hook para Combs (Workspaces)
 // ============================================
 
 export function useCombs(projectId?: string) {
@@ -767,10 +368,13 @@ export function useCombs(projectId?: string) {
 
   const combsSeqRef = useRef(0);
   const combsInFlightRef = useRef(0);
-  const refresh = useCallback(async () => {
-    combsInFlightRef.current += 1;
+  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) {
+      combsInFlightRef.current += 1;
+      setIsLoading(true);
+    }
     const mySeq = ++combsSeqRef.current;
-    setIsLoading(true);
     try {
       if (hasDesktopDb() && window.db?.combs && projectId) {
         const data = await ipcCall(window.db.combs.findByProject(projectId), "combs.findByProject");
@@ -783,15 +387,23 @@ export function useCombs(projectId?: string) {
     } catch (error) {
       console.error("[useCombs] refresh failed:", error);
     } finally {
-      combsInFlightRef.current -= 1;
-      if (combsInFlightRef.current === 0) setIsLoading(false);
+      if (!silent) {
+        combsInFlightRef.current -= 1;
+        if (combsInFlightRef.current === 0) setIsLoading(false);
+      }
     }
   }, [projectId]);
 
   useEffect(() => {
-    refresh();
-    const unsubscribe = subscribeToDataChange("combs", refresh);
+    void refresh({ silent: false });
+    const unsubscribe = subscribeToDataChange("combs", () => {
+      void refresh({ silent: true });
+    });
     return unsubscribe;
+  }, [refresh]);
+
+  const refreshSilent = useCallback(async () => {
+    await refresh({ silent: true });
   }, [refresh]);
 
   const create = useCallback(
@@ -826,7 +438,7 @@ export function useCombs(projectId?: string) {
   return {
     combs,
     isLoading,
-    refresh,
+    refresh: refreshSilent,
     create,
     update,
     remove,
@@ -900,10 +512,6 @@ export function usePanes(combId?: string) {
     remove,
   };
 }
-
-// ============================================
-// Hook para verificar ambiente
-// ============================================
 
 export function useDesktopDbAvailable() {
   const [available, setAvailable] = useState(false);

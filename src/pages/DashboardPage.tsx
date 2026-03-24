@@ -8,24 +8,12 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import type { CombStatus, MissionStatus } from "@/lib/database/types";
+import type { CombStatus } from "@/lib/database/types";
 import type {
   DashboardMetrics,
   DashboardPeriodDays,
 } from "@/hooks/use-dashboard-metrics";
 import { Button } from "@/components/ui/button";
-
-const missionColorByStatus: Record<MissionStatus, string> = {
-  created: "var(--chart-1)",
-  planning: "var(--chart-2)",
-  plan_generated: "var(--chart-3)",
-  generating_code: "var(--chart-4)",
-  code_ready: "var(--chart-5)",
-  applying: "var(--chart-1)",
-  completed: "var(--chart-2)",
-  failed: "var(--chart-5)",
-  cancelled: "var(--chart-4)",
-};
 
 const combColorByStatus: Record<CombStatus, string> = {
   active: "var(--chart-1)",
@@ -43,14 +31,6 @@ interface DashboardPageProps {
   metrics: DashboardMetrics;
 }
 
-function formatLeadTime(minutes: number | null) {
-  if (minutes === null) return "Sem dados";
-  if (minutes >= 60) {
-    return `${(minutes / 60).toFixed(1)}h`;
-  }
-  return `${minutes.toFixed(0)}m`;
-}
-
 export default function DashboardPage({
   selectedProjectName,
   periodDays,
@@ -58,8 +38,8 @@ export default function DashboardPage({
   metrics,
 }: DashboardPageProps) {
   const throughputData = [
-    { key: "created", label: "Criadas", value: metrics.missionsCreated },
-    { key: "completed", label: "Concluídas", value: metrics.missionsCompleted },
+    { key: "created", label: "Criados", value: metrics.workspacesCreated },
+    { key: "applied", label: "Aplicados", value: metrics.workspacesApplied },
   ];
 
   const throughputConfig: ChartConfig = {
@@ -67,25 +47,6 @@ export default function DashboardPage({
       label: "Quantidade",
       color: "var(--chart-1)",
     },
-  };
-
-  const missionFunnelData = metrics.missionStatusCounts
-    .filter((item) => item.count > 0)
-    .map((item) => ({
-      status: item.status,
-      label: item.label,
-      value: item.count,
-      fill: missionColorByStatus[item.status],
-    }));
-
-  const missionFunnelConfig: ChartConfig = {
-    value: { label: "Missões" },
-    ...Object.fromEntries(
-      metrics.missionStatusCounts.map((item) => [
-        item.status,
-        { label: item.label, color: missionColorByStatus[item.status] },
-      ]),
-    ),
   };
 
   const combFunnelData = metrics.combStatusCounts
@@ -98,7 +59,7 @@ export default function DashboardPage({
     }));
 
   const combFunnelConfig: ChartConfig = {
-    value: { label: "Combs" },
+    value: { label: "Workspaces" },
     ...Object.fromEntries(
       metrics.combStatusCounts.map((item) => [
         item.status,
@@ -141,39 +102,26 @@ export default function DashboardPage({
       </header>
 
       <div className="flex-1 overflow-auto px-6 py-5">
-        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 md:grid-cols-2">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Missões criadas
+                Workspaces criados
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-semibold">{metrics.missionsCreated}</div>
+              <div className="text-2xl font-semibold">{metrics.workspacesCreated}</div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Missões concluídas
+                Workspaces aplicados
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-semibold">{metrics.missionsCompleted}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Lead time médio
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold">
-                {formatLeadTime(metrics.avgLeadTimeMinutes)}
-              </div>
+              <div className="text-2xl font-semibold">{metrics.workspacesApplied}</div>
             </CardContent>
           </Card>
         </div>
@@ -181,7 +129,7 @@ export default function DashboardPage({
         <div className="mx-auto mt-4 grid max-w-6xl grid-cols-1 gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">Throughput do período</CardTitle>
+              <CardTitle className="text-sm">Fluxo de Trabalho</CardTitle>
             </CardHeader>
             <CardContent>
               <ChartContainer config={throughputConfig} className="h-[220px] w-full">
@@ -197,50 +145,29 @@ export default function DashboardPage({
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">Funil de status (missões)</CardTitle>
+              <CardTitle className="text-sm">Distribuição de Status</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {missionFunnelData.length === 0 ? (
+              {combFunnelData.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Sem missões no período selecionado.
+                  Sem workspaces no projeto selecionado.
                 </p>
               ) : (
                 <>
-                  <ChartContainer config={missionFunnelConfig} className="h-[220px] w-full">
+                  <ChartContainer config={combFunnelConfig} className="h-[220px] w-full">
                     <PieChart>
-                      <Pie data={missionFunnelData} dataKey="value" nameKey="label" />
+                      <Pie data={combFunnelData} dataKey="value" nameKey="label" />
                       <ChartTooltip content={<ChartTooltipContent />} />
                     </PieChart>
                   </ChartContainer>
                   <div className="flex flex-wrap gap-2">
-                    {missionFunnelData.map((item) => (
+                    {combFunnelData.map((item) => (
                       <Badge key={item.status} variant="outline">
                         {item.label}: {item.value}
                       </Badge>
                     ))}
                   </div>
                 </>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="text-sm">Distribuição de combs (status)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {combFunnelData.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Sem combs para o projeto selecionado.
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {combFunnelData.map((item) => (
-                    <Badge key={item.status} variant="outline">
-                      {item.label}: {item.value}
-                    </Badge>
-                  ))}
-                </div>
               )}
             </CardContent>
           </Card>

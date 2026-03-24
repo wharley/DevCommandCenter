@@ -84,9 +84,13 @@ export function installDesktopBridge(): void {
         void listen("terminal-output", (event: any) => {
           const payload = event?.payload ?? {};
           callback(payload.ptyId, payload.data ?? "");
-        }).then((unlisten) => {
-          unlistenFn = unlisten;
-        });
+        })
+          .then((unlisten) => {
+            unlistenFn = unlisten;
+          })
+          .catch((err) => {
+            console.warn("[desktop-bridge] terminal onData listen failed:", err);
+          });
         return () => {
           if (unlistenFn) unlistenFn();
         };
@@ -96,14 +100,33 @@ export function installDesktopBridge(): void {
         void listen("terminal-exit", (event: any) => {
           const payload = event?.payload ?? {};
           callback(payload.ptyId, Number(payload.code ?? 0));
-        }).then((unlisten) => {
-          unlistenFn = unlisten;
-        });
+        })
+          .then((unlisten) => {
+            unlistenFn = unlisten;
+          })
+          .catch((err) => {
+            console.warn("[desktop-bridge] terminal onExit listen failed:", err);
+          });
         return () => {
           if (unlistenFn) unlistenFn();
         };
       },
-      onAttention: (_callback) => () => {},
+      onAttention: (callback) => {
+        let unlistenFn: (() => void) | null = null;
+        void listen("terminal-attention", (event: any) => {
+          const payload = event?.payload ?? {};
+          callback(payload);
+        })
+          .then((unlisten) => {
+            unlistenFn = unlisten;
+          })
+          .catch((err) => {
+            console.warn("[desktop-bridge] terminal onAttention listen failed:", err);
+          });
+        return () => {
+          if (unlistenFn) unlistenFn();
+        };
+      },
     },
     worktree: {
       ensureForMission: (missionId) =>
@@ -208,53 +231,6 @@ export function installDesktopBridge(): void {
       delete: (id) => call("db_projects_delete", { id }),
       getStats: (id) => call("db_projects_get_stats", { id }),
       updateLastOpened: (id) => call("db_projects_update_last_opened", { id }),
-    },
-    missions: {
-      findAll: () => call("db_missions_find_all"),
-      findById: (id) => call("db_missions_find_by_id", { id }),
-      findByProject: (projectId) => call("db_missions_find_by_project", { projectId }),
-      findByStatus: (status) => call("db_missions_find_by_status", { status }),
-      findActive: () => call("db_missions_find_active"),
-      search: (query, projectId) => call("db_missions_search", { query, projectId }),
-      create: (data) => call("db_missions_create", { data }),
-      update: (id, data) => call("db_missions_update", { id, data }),
-      delete: (id) => call("db_missions_delete", { id }),
-      updateStatus: (id, status) => call("db_missions_update_status", { id, status }),
-      updatePlan: (id, plan) => call("db_missions_update_plan", { id, plan }),
-      updateGeneratedCode: (id, code) =>
-        call("db_missions_update_generated_code", { id, code }),
-      start: (id) => call("db_missions_start", { id }),
-      complete: (id, summary) => call("db_missions_complete", { id, summary }),
-      fail: (id, error) => call("db_missions_fail", { id, error }),
-      cancel: (id) => call("db_missions_cancel", { id }),
-      getFullMission: (id) => call("db_missions_get_full_mission", { id }),
-    },
-    missionLogs: {
-      findAll: (options) => call("db_mission_logs_find_all", { options }),
-      findById: (id) => call("db_mission_logs_find_by_id", { id }),
-      findByMission: (missionId, limit, offset) =>
-        call("db_mission_logs_find_by_mission", { missionId, limit, offset }),
-      findByLevel: (level, missionId) =>
-        call("db_mission_logs_find_by_level", { level, missionId }),
-      search: (query, missionId) => call("db_mission_logs_search", { query, missionId }),
-      create: (data) => call("db_mission_logs_create", { data }),
-      delete: (id) => call("db_mission_logs_delete", { id }),
-      deleteByMission: (missionId) => call("db_mission_logs_delete_by_mission", { missionId }),
-      logInfo: (missionId, message, metadata) =>
-        call("db_mission_logs_log_info", { missionId, message, metadata }),
-      logWarning: (missionId, message, metadata) =>
-        call("db_mission_logs_log_warning", { missionId, message, metadata }),
-      logError: (missionId, message, metadata) =>
-        call("db_mission_logs_log_error", { missionId, message, metadata }),
-      logDebug: (missionId, message, metadata) =>
-        call("db_mission_logs_log_debug", { missionId, message, metadata }),
-      logAgentAction: (missionId, action, details) =>
-        call("db_mission_logs_log_agent_action", { missionId, action, details }),
-      logUserInput: (missionId, input) =>
-        call("db_mission_logs_log_user_input", { missionId, input }),
-      getStats: (missionId) => call("db_mission_logs_get_stats", { missionId }),
-      getUsageStats: (missionId) => call("db_mission_logs_get_usage_stats", { missionId }),
-      getLatest: (missionId, count) => call("db_mission_logs_get_latest", { missionId, count }),
     },
     combs: {
       findByProject: (projectId) => call("db_combs_find_by_project", { projectId }),

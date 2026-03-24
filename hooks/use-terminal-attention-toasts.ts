@@ -8,6 +8,19 @@ export interface NavigateToPaneDetail {
   paneId: string;
 }
 
+export interface TerminalAttentionRecord {
+  id: string;
+  paneId: string;
+  combId: string;
+  projectId: string;
+  projectName: string;
+  workspaceName: string;
+  reason: string;
+  excerpt: string | null;
+  createdAt: number;
+  read: boolean;
+}
+
 const RENDERER_DEDUPE_MS = 95_000;
 
 /**
@@ -16,9 +29,12 @@ const RENDERER_DEDUPE_MS = 95_000;
  */
 export function useTerminalAttentionToasts(options?: {
   onNavigateToPane?: (detail: NavigateToPaneDetail) => void;
+  onAttentionRecord?: (record: TerminalAttentionRecord) => void;
 }) {
   const navigateRef = useRef(options?.onNavigateToPane);
   navigateRef.current = options?.onNavigateToPane;
+  const recordRef = useRef(options?.onAttentionRecord);
+  recordRef.current = options?.onAttentionRecord;
   const lastRendererEmit = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
@@ -26,7 +42,9 @@ export function useTerminalAttentionToasts(options?: {
     if (!subscribe) return;
 
     return subscribe(async (payload: TerminalAttentionPayload) => {
-      const dedupeKey = `${payload.paneId}:${payload.reason}:${payload.excerpt?.slice(0, 64) ?? ""}`;
+      const attentionId = payload.paneId ?? payload.ptyId ?? "unknown";
+      const reason = payload.reason ?? payload.status ?? "waiting";
+      const dedupeKey = `${attentionId}:${reason}:${payload.excerpt?.slice(0, 64) ?? ""}`;
       const now = Date.now();
       const prev = lastRendererEmit.current.get(dedupeKey) ?? 0;
       if (now - prev < RENDERER_DEDUPE_MS) return;
@@ -38,6 +56,7 @@ export function useTerminalAttentionToasts(options?: {
       }
 
       if (!window.db?.panes?.findById) return;
+      if (!payload.paneId) return;
       const pane = await window.db.panes.findById(payload.paneId);
       if (!pane) return;
       const comb = window.db.combs?.findById
@@ -75,6 +94,24 @@ export function useTerminalAttentionToasts(options?: {
               paneId: pane.id,
             }
           : null;
+      const record: TerminalAttentionRecord | null =
+        nav && payload.paneId
+          ? {
+              id: `${payload.paneId}:${now}`,
+              paneId: payload.paneId,
+              combId: pane.combId,
+              projectId: comb.projectId,
+              projectName,
+              workspaceName: missionName,
+              reason: typeof reason === "string" ? reason : "waiting",
+              excerpt,
+              createdAt: now,
+              read: false,
+            }
+          : null;
+      if (record) {
+        recordRef.current?.(record);
+      }
 
       toast.info(title, {
         description,

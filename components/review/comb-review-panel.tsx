@@ -28,8 +28,7 @@ import {
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RepoReviewSection } from "@/components/review/repo-review-section";
-import { useCombs } from "@/hooks/use-data";
-import type { Comb, Project, ReviewTarget } from "@/lib/database/types";
+import type { Comb, Project, ReviewTarget, UpdateCombDTO } from "@/lib/database/types";
 import { recordProductSignal } from "@/lib/product/signals";
 import { resolveReviewTargets } from "@/lib/review/resolve-review-targets";
 import { toast } from "sonner";
@@ -67,15 +66,16 @@ export function CombReviewPanel({
   comb,
   mainProjectPath: _mainProjectPath,
   projects,
+  updateComb,
   onAction,
 }: {
   comb: Comb;
   /** Mantido para compatibilidade com a página; paths vêm de `projects`. */
   mainProjectPath?: string;
   projects: Project[];
+  updateComb: (id: string, data: UpdateCombDTO) => Promise<void>;
   onAction: () => void;
 }) {
-  const { update: updateComb } = useCombs(comb.projectId);
   const [statsByTarget, setStatsByTarget] = useState<
     Record<string, TargetStats>
   >({});

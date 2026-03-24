@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { Comb, CombStatus, Mission, MissionStatus } from "@/lib/database/types";
+import type { Comb, CombStatus } from "@/lib/database/types";
 
 export type DashboardPeriodDays = 7 | 30;
 
@@ -12,31 +12,18 @@ type StatusCount<T extends string> = {
 };
 
 export interface DashboardMetrics {
-  missionsCreated: number;
-  missionsCompleted: number;
+  workspacesCreated: number;
+  workspacesApplied: number;
   avgLeadTimeMinutes: number | null;
-  missionStatusCounts: Array<StatusCount<MissionStatus>>;
   combStatusCounts: Array<StatusCount<CombStatus>>;
 }
 
-const missionStatusLabel: Record<MissionStatus, string> = {
-  created: "Criada",
-  planning: "Planejamento",
-  plan_generated: "Plano pronto",
-  generating_code: "Gerando código",
-  code_ready: "Código pronto",
-  applying: "Aplicando",
-  completed: "Concluída",
-  failed: "Falhou",
-  cancelled: "Cancelada",
-};
-
 const combStatusLabel: Record<CombStatus, string> = {
-  active: "Ativa",
-  ready_for_review: "Revisão",
-  applied: "Aplicada",
-  discarded: "Descartada",
-  archived: "Arquivada",
+  active: "Ativo",
+  ready_for_review: "Em Revisão",
+  applied: "Aplicado",
+  discarded: "Descartado",
+  archived: "Arquivado",
   error: "Erro",
 };
 
@@ -54,19 +41,6 @@ function asDate(value: unknown): Date | null {
   return null;
 }
 
-function countMissionStatus(missions: Mission[]) {
-  const counts = new Map<MissionStatus, number>();
-  for (const mission of missions) {
-    counts.set(mission.status, (counts.get(mission.status) ?? 0) + 1);
-  }
-
-  return (Object.keys(missionStatusLabel) as MissionStatus[]).map((status) => ({
-    status,
-    label: missionStatusLabel[status],
-    count: counts.get(status) ?? 0,
-  }));
-}
-
 function countCombStatus(combs: Comb[]) {
   const counts = new Map<CombStatus, number>();
   for (const comb of combs) {
@@ -81,42 +55,23 @@ function countCombStatus(combs: Comb[]) {
 }
 
 export function useDashboardMetrics(
-  missions: Mission[],
   combs: Comb[],
   periodDays: DashboardPeriodDays,
 ): DashboardMetrics {
   return useMemo(() => {
     const periodStart = getPeriodStart(periodDays);
 
-    const missionsInPeriod = missions.filter((m) => {
-      const createdAt = asDate(m.createdAt);
+    const combsInPeriod = combs.filter((c) => {
+      const createdAt = asDate(c.createdAt);
       return !!createdAt && createdAt >= periodStart;
     });
-    const completedInPeriod = missionsInPeriod.filter((m) => m.status === "completed");
-
-    const leadTimes = completedInPeriod
-      .map((mission) => {
-        const completedAt = asDate(mission.completedAt);
-        const createdAt = asDate(mission.createdAt);
-        if (!completedAt || !createdAt) return null;
-        const diffMs = completedAt.getTime() - createdAt.getTime();
-        return diffMs > 0 ? diffMs / (1000 * 60) : null;
-      })
-      .filter((value): value is number => value !== null);
-
-    const avgLeadTimeMinutes =
-      leadTimes.length > 0
-        ? Math.round(
-            (leadTimes.reduce((sum, value) => sum + value, 0) / leadTimes.length) * 100,
-          ) / 100
-        : null;
+    const appliedInPeriod = combsInPeriod.filter((c) => c.status === "applied");
 
     return {
-      missionsCreated: missionsInPeriod.length,
-      missionsCompleted: completedInPeriod.length,
-      avgLeadTimeMinutes,
-      missionStatusCounts: countMissionStatus(missionsInPeriod),
+      workspacesCreated: combsInPeriod.length,
+      workspacesApplied: appliedInPeriod.length,
+      avgLeadTimeMinutes: null,
       combStatusCounts: countCombStatus(combs),
     };
-  }, [missions, combs, periodDays]);
+  }, [combs, periodDays]);
 }

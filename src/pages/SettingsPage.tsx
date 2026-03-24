@@ -99,8 +99,6 @@ export default function SettingsPage() {
   const gotUpdateEventRef = useRef(false);
   const hasAppUpdateAPI =
     typeof window !== "undefined" && !!window.desktopAPI?.app;
-  const isDesktopApp =
-    typeof window !== "undefined" && !!window.desktopAPI;
 
   React.useEffect(() => {
     window.db?.providers?.isEncryptionAvailable?.().then(setEncryptionAvailable);
@@ -176,11 +174,9 @@ export default function SettingsPage() {
       <header className="shrink-0 border-b border-border bg-card/80 px-6 py-3 backdrop-blur supports-backdrop-filter:bg-card/60">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4">
           <div>
-            <h1 className="text-lg font-semibold tracking-tight text-foreground">
-              Configurações
-            </h1>
+            <h1 className="text-lg font-semibold tracking-tight text-foreground">Providers</h1>
             <p className="text-xs text-muted-foreground">
-              Provedores de IA e preferências do app
+              Configuracao dos agentes e notificacoes essenciais
             </p>
           </div>
         </div>
@@ -375,28 +371,6 @@ export default function SettingsPage() {
             )}
           </section>
 
-          {isDesktopApp && (
-            <section>
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                Workspace Hive
-              </h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Projetos, Missões e sessões de terminal no app desktop
-              </p>
-              <Alert className="mt-3 border-muted bg-muted/30 py-3">
-                <Terminal className="h-4 w-4" />
-                <AlertTitle className="text-sm">Sessões de terminal e agentes</AlertTitle>
-                <AlertDescription className="text-xs text-muted-foreground">
-                  Você pode trocar de projeto no seletor: um projeto fica em foco na
-                  tela por vez. As sessões (terminais e agents CLI) continuam no
-                  processo do app; ao voltar para a Missão, o pane reconecta à
-                  mesma sessão. Ao fechar o aplicativo, essas sessões são
-                  encerradas.
-                </AlertDescription>
-              </Alert>
-            </section>
-          )}
-
           {/* Notificações + Atualizações — painel único estilo lista */}
           <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
             <div
@@ -455,7 +429,7 @@ export default function SettingsPage() {
           <div className="min-w-0">
             <h3 className="text-xs font-semibold">Dev Command Center</h3>
             <p className="line-clamp-2 text-[11px] text-muted-foreground">
-              Versão {appVersion} — Hub para agentes de código com IA e missões.
+              Versao {appVersion} - Hub para agentes de codigo e terminal.
             </p>
           </div>
         </div>

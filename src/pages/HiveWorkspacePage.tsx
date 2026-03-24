@@ -54,14 +54,14 @@ import { AddProjectDialog } from "@/components/dialogs/add-project-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import {
   useCombs,
-  useMissions,
   usePanes,
   useProjects,
   useProviders,
 } from "@/hooks/use-data";
 import SettingsPage from "@/src/pages/SettingsPage";
 import DashboardPage from "@/src/pages/DashboardPage";
-import type { Comb, Pane, Project, Provider } from "@/lib/database/types";
+import type { Comb, CreateCombDTO, Pane, Project, Provider } from "@/lib/database/types";
+
 import {
   useDashboardMetrics,
   type DashboardPeriodDays,
@@ -299,19 +299,20 @@ function NewCombDialog({
   projectId,
   projectPath,
   onCreate,
+  createComb,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   projectId: string;
   projectPath?: string;
   onCreate: (comb: Comb) => void;
+  createComb: (data: CreateCombDTO) => Promise<Comb>;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [suggestStoryRef, setSuggestStoryRef] = useState(false);
-  const { create } = useCombs(projectId);
 
   useEffect(() => {
     if (!open) return;
@@ -321,24 +322,24 @@ function NewCombDialog({
 
   const handleCreate = async () => {
     if (!name.trim()) {
-      toast.error("Nome da Missão é obrigatório");
+      toast.error("Nome do Workspace é obrigatório");
       return;
     }
     setIsCreating(true);
     try {
-      const comb = await create({
+      const comb = await createComb({
         projectId,
         name: name.trim(),
         description: description.trim() || undefined,
         baseBranch: baseBranch.trim() || "main",
       });
-      toast.success("Missão criada");
+      toast.success("Workspace criado");
       onCreate(comb);
       onOpenChange(false);
       setName("");
       setDescription("");
     } catch {
-      toast.error("Falha ao criar Missão");
+      toast.error("Falha ao criar Workspace");
     } finally {
       setIsCreating(false);
     }
@@ -348,16 +349,16 @@ function NewCombDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Nova Missão</DialogTitle>
+          <DialogTitle>Novo Workspace</DialogTitle>
           <DialogDescription>
-            Cria um workspace isolado (worktree) para uma história de negócio.
+            Cria um ambiente isolado (worktree) para uma história de negócio.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="rounded-md border border-border bg-muted/30 p-2">
             <p className="text-xs text-muted-foreground">
               Padrão recomendado:{" "}
-              <span className="font-medium">1 Missão por história</span>. Se
+              <span className="font-medium">1 Workspace por história</span>. Se
               precisar mexer em mais de um repo, adicione repositórios extras
               na aba Review.
             </p>
@@ -373,7 +374,7 @@ function NewCombDialog({
           <div className="space-y-2">
             <label className="text-sm font-medium">Descrição (opcional)</label>
             <Textarea
-              placeholder="O que esta Missão faz..."
+              placeholder="O que este Workspace faz..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
@@ -393,7 +394,7 @@ function NewCombDialog({
             <p className="text-xs text-muted-foreground">
               Você está em fluxo cross-repo recorrente. Enquanto não existe
               campo dedicado de história compartilhada, use um prefixo no nome
-              da Missão (ex.:{" "}
+              do Workspace (ex.:{" "}
               <span className="font-mono">US-1234 - Campo X</span>).
             </p>
           ) : null}
@@ -404,7 +405,7 @@ function NewCombDialog({
           </Button>
           <Button onClick={handleCreate} disabled={isCreating}>
             {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Criar Missão
+            Criar Workspace
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -454,11 +455,11 @@ function MirrorMissionDialog({
 
   const handleCreate = async () => {
     if (!targetProjectId || !mirrorName.trim()) {
-      toast.error("Preencha projeto e nome da Missão espelho.");
+      toast.error("Preencha projeto e nome do Workspace espelho.");
       return;
     }
     if (!window.db?.combs?.create) {
-      toast.error("Criação de Missão indisponível.");
+      toast.error("Criação de Workspace indisponível.");
       return;
     }
     setIsCreating(true);
@@ -471,11 +472,11 @@ function MirrorMissionDialog({
       })) as { id?: string };
       if (!created?.id) throw new Error("missing comb id");
       recordProductSignal("mirror_mission_created");
-      toast.success("Missão espelho criada");
+      toast.success("Workspace espelho criado");
       onCreated(targetProjectId, created.id);
       onOpenChange(false);
     } catch {
-      toast.error("Falha ao criar Missão espelho");
+      toast.error("Falha ao criar Workspace espelho");
     } finally {
       setIsCreating(false);
     }
@@ -485,9 +486,9 @@ function MirrorMissionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Criar Missão espelho</DialogTitle>
+          <DialogTitle>Criar Workspace espelho</DialogTitle>
           <DialogDescription>
-            Copia nome e descrição da Missão atual para outro projeto, sem
+            Copia nome e descrição do Workspace atual para outro projeto, sem
             reescrever o contexto da história.
           </DialogDescription>
         </DialogHeader>
@@ -626,7 +627,7 @@ function NewAgentPaneDialog({
         <DialogHeader>
           <DialogTitle>Novo Agent Pane</DialogTitle>
           <DialogDescription>
-            Abre um agente CLI nesta Missão.
+            Abre um agente CLI neste Workspace.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -812,6 +813,8 @@ export default function HiveWorkspacePage() {
     combs,
     isLoading: combsLoading,
     refresh: refreshCombs,
+    create: createComb,
+    update: updateComb,
   } = useCombs(selectedProjectId ?? undefined);
 
   const combsRef = useRef(combs);
@@ -860,7 +863,6 @@ export default function HiveWorkspacePage() {
     create: createPane,
     remove: removePane,
   } = usePanes(activeCombId ?? undefined);
-  const { missions } = useMissions(selectedProjectId ?? undefined);
   const { activity: terminalActivity, refresh: refreshTerminalActivity } =
     useTerminalProjectActivity(selectedProjectId);
 
@@ -883,7 +885,6 @@ export default function HiveWorkspacePage() {
   }, []);
 
   const dashboardMetrics = useDashboardMetrics(
-    missions,
     combs,
     dashboardPeriodDays,
   );
@@ -1037,22 +1038,22 @@ export default function HiveWorkspacePage() {
     void refreshTerminalActivity();
   };
 
-  const handleRemoveComb = async (combId: string) => {
+  const handleRemoveComb = async (comb_id: string) => {
     const confirmed = await confirmDialog({
-      title: "Remover Missão?",
+      title: "Remover Workspace?",
       description: "O worktree e todos os panes serão removidos.",
       confirmLabel: "Remover",
       cancelLabel: "Cancelar",
     });
     if (!confirmed) return;
     if (window.desktopAPI?.comb?.discard) {
-      const result = await window.desktopAPI.comb.discard(combId);
+      const result = await window.desktopAPI.comb.discard(comb_id);
       if (!result.success && result.error) toast.error(result.error);
     }
-    if (window.db?.combs) await window.db.combs.delete(combId);
-    if (activeCombId === combId) setActiveCombId(null);
+    if (window.db?.combs) await window.db.combs.delete(comb_id);
+    if (activeCombId === comb_id) setActiveCombId(null);
     refreshCombs();
-    toast.success("Missão removida");
+    toast.success("Workspace removido");
   };
 
   if (projectsLoading) {
@@ -1143,7 +1144,7 @@ export default function HiveWorkspacePage() {
         <div className="flex items-center justify-between px-4 py-2 gap-2">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="text-xs font-medium uppercase tracking-wider text-sidebar-foreground/50">
-              Missões
+              Workspaces
             </span>
             {terminalActivity.totalRunningPanes > 0 && (
               <span className="text-[10px] leading-tight text-emerald-600/90 dark:text-emerald-400/90">
@@ -1179,7 +1180,7 @@ export default function HiveWorkspacePage() {
           ) : combs.length === 0 ? (
             <div className="px-3 py-4 text-center">
               <p className="text-xs text-sidebar-foreground/40">
-                Nenhuma Missão ainda
+                Nenhum Workspace ainda
               </p>
               <Button
                 variant="ghost"
@@ -1188,7 +1189,7 @@ export default function HiveWorkspacePage() {
                 onClick={() => setNewCombOpen(true)}
               >
                 <Plus className="mr-1 h-3 w-3" />
-                Criar primeira Missão
+                Criar primeiro Workspace
               </Button>
             </div>
           ) : (
@@ -1198,13 +1199,22 @@ export default function HiveWorkspacePage() {
                 const runningPanes =
                   terminalActivity.runningPanesByCombId[comb.id] ?? 0;
                 return (
-                  <button
+                  <div
                     key={comb.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => {
                       setActiveCombId(comb.id);
                       setShowSettings(false);
                       setShowDashboard(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setActiveCombId(comb.id);
+                        setShowSettings(false);
+                        setShowDashboard(false);
+                      }
                     }}
                     className={`titlebar-no-drag group flex w-full cursor-pointer gap-1.5 rounded-lg px-3 py-2 text-left transition-colors ${
                       isActive
@@ -1261,7 +1271,7 @@ export default function HiveWorkspacePage() {
                         <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -1402,7 +1412,7 @@ export default function HiveWorkspacePage() {
                   <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
                     <Terminal className="h-12 w-12 text-muted-foreground/30" />
                     <p className="text-sm text-muted-foreground">
-                      Nenhum pane aberto nesta Missão
+                      Nenhum pane aberto neste Workspace
                     </p>
                     <div className="flex gap-2">
                       <Button
@@ -1460,6 +1470,7 @@ export default function HiveWorkspacePage() {
                   comb={activeComb}
                   mainProjectPath={selectedProject?.path}
                   projects={sortedProjects}
+                  updateComb={updateComb}
                   onAction={() => refreshCombs()}
                 />
               </div>
@@ -1469,15 +1480,15 @@ export default function HiveWorkspacePage() {
           <div className="flex h-full flex-col items-center justify-center gap-4 p-8 mt-8">
             <FolderGit2 className="h-16 w-16 text-muted-foreground/20" />
             <div className="text-center">
-              <h3 className="text-lg font-medium">Comece criando uma Missão</h3>
+              <h3 className="text-lg font-medium">Comece criando um Workspace</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Cada Missão cria uma worktree isolada onde seus agents e
+                Cada Workspace cria uma worktree isolada onde seus agents e
                 terminais compartilham o mesmo espaço.
               </p>
             </div>
             <Button onClick={() => setNewCombOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
-              Nova Missão
+              Novo Workspace
             </Button>
           </div>
         ) : (
@@ -1507,6 +1518,7 @@ export default function HiveWorkspacePage() {
           projectId={selectedProjectId}
           projectPath={selectedProject?.path}
           onCreate={handleCombCreated}
+          createComb={createComb}
         />
       )}
 
