@@ -1,9 +1,0 @@
-/Users/wharleyornelasdarocha/projetos/DevCommandCenter/src-tauri/target/debug/deps/phf-be6f07df3877db3d.d: /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/lib.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/map.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/ordered_map.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/ordered_set.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/set.rs
-
-/Users/wharleyornelasdarocha/projetos/DevCommandCenter/src-tauri/target/debug/deps/libphf-be6f07df3877db3d.rmeta: /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/lib.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/map.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/ordered_map.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/ordered_set.rs /Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/set.rs
-
-/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/lib.rs:
-/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/map.rs:
-/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/ordered_map.rs:
-/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/ordered_set.rs:
-/Users/wharleyornelasdarocha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.11.3/src/set.rs:
