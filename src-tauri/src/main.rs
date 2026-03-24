@@ -1914,6 +1914,12 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
     let mut cmd = CommandBuilder::new(command);
     cmd.args(&args);
     cmd.cwd(cwd);
+    // Alinha o PTY com o que o xterm.js emula; sem TERM adequado, `clear` e escapes podem falhar
+    // quando o app é lançado pela GUI (env mínima).
+    #[cfg(unix)]
+    {
+        cmd.env("TERM", "xterm-256color");
+    }
 
     let child = pty_pair
         .slave

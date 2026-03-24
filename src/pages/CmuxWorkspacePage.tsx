@@ -46,6 +46,8 @@ import {
 
 const CLI_PROVIDER_TYPES = ["codex", "claude-code", "gemini", "cursor"] as const;
 
+const activePaneStorageKey = (combId: string) => `dcc:workspace:${combId}:activePane`;
+
 function isCliProviderType(type: string): type is (typeof CLI_PROVIDER_TYPES)[number] {
   return CLI_PROVIDER_TYPES.includes(type as (typeof CLI_PROVIDER_TYPES)[number]);
 }
@@ -60,6 +62,38 @@ function buildCliCommand(provider: Provider | null): string | undefined {
   if (t === "gemini") return usePath ? cliPath : "gemini";
   if (t === "cursor") return usePath ? cliPath : "cursor-agent";
   return undefined;
+}
+
+/** Rótulo curto para badge: qual CLI/agent está ligado a este pane. */
+function cliAgentKindLabel(provider: Provider | null): string {
+  const t = provider?.type;
+  if (t === "codex") return "Codex";
+  if (t === "claude-code") return "Claude";
+  if (t === "gemini") return "Gemini";
+  if (t === "cursor") return "Cursor";
+  return "Agent";
+}
+
+function AgentKindBadge({
+  provider,
+  compact,
+  className,
+}: {
+  provider: Provider | null;
+  compact?: boolean;
+  className?: string;
+}) {
+  const label = cliAgentKindLabel(provider);
+  const tip = provider?.name?.trim() ? provider.name : label;
+  return (
+    <Badge
+      variant="secondary"
+      title={tip}
+      className={`shrink-0 font-normal ${compact ? "h-5 px-1.5 py-0 text-[10px] leading-none" : "text-xs"} ${className ?? ""}`}
+    >
+      {label}
+    </Badge>
+  );
 }
 
 function NewWorkspaceDialog({
@@ -343,9 +377,12 @@ const PaneCard = React.memo(function PaneCard({
 
   return (
     <div data-pane-id={pane.id} className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="mb-1 flex items-center justify-between rounded border border-border px-2 py-1">
-        <span className="truncate text-xs">{label}</span>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleRemove}>
+      <div className="mb-1 flex items-center justify-between gap-2 rounded border border-border px-2 py-1">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {pane.type === "agent" ? <AgentKindBadge provider={provider} /> : null}
+          <span className="truncate text-xs">{label}</span>
+        </div>
+        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={handleRemove}>
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -572,14 +609,27 @@ export default function CmuxWorkspacePage() {
     [activePaneId, visiblePanes],
   );
   useEffect(() => {
+    if (!activeCombId) return;
+    if (!activePaneId || !visiblePanes.some((p) => p.id === activePaneId)) return;
+    localStorage.setItem(activePaneStorageKey(activeCombId), activePaneId);
+  }, [activeCombId, activePaneId, visiblePanes]);
+
+  useEffect(() => {
     if (visiblePanes.length === 0) {
       if (activePaneId !== null) setActivePaneId(null);
       return;
     }
-    if (!activePaneId || !visiblePanes.some((pane) => pane.id === activePaneId)) {
-      setActivePaneId(visiblePanes[0].id);
+    if (activePaneId && visiblePanes.some((pane) => pane.id === activePaneId)) return;
+    const stored =
+      activeCombId && typeof window !== "undefined"
+        ? localStorage.getItem(activePaneStorageKey(activeCombId))
+        : null;
+    if (stored && visiblePanes.some((pane) => pane.id === stored)) {
+      setActivePaneId(stored);
+      return;
     }
-  }, [visiblePanes, activePaneId]);
+    setActivePaneId(visiblePanes[0].id);
+  }, [visiblePanes, activePaneId, activeCombId]);
 
   const markPaneAttentionAsRead = useCallback((paneId: string) => {
     setAttentionRecords((prev) => {
@@ -644,6 +694,7 @@ export default function CmuxWorkspacePage() {
   const handleSelectWorkspace = useCallback((comb: Comb) => {
     setSelectedProjectId(comb.projectId);
     setActiveCombId(comb.id);
+    setShowProviders(false);
   }, []);
 
   const handleAddTerminal = async () => {
@@ -652,7 +703,7 @@ export default function CmuxWorkspacePage() {
       const ok = await ensureActiveCombWorktree();
       if (!ok) return;
       const pane = await createPane({ combId: activeCombId, type: "term" });
-      refreshPanes();
+      await refreshPanes();
       setActivePaneId(pane.id);
     } catch {
       toast.error("Falha ao abrir terminal");
@@ -736,6 +787,11 @@ export default function CmuxWorkspacePage() {
       if (!result.success && result.error) toast.error(result.error);
     }
     if (window.db?.combs) await window.db.combs.delete(combId);
+    try {
+      localStorage.removeItem(activePaneStorageKey(combId));
+    } catch {
+      /* ignore */
+    }
     if (activeCombId === combId) setActiveCombId(null);
     refreshCombs();
     setAttentionRecords((prev) => prev.filter((item) => item.combId !== combId));
@@ -899,7 +955,8 @@ export default function CmuxWorkspacePage() {
                           }`}
                         >
                           {pane.type === "agent" ? <Bot className="h-3.5 w-3.5 shrink-0" /> : <Terminal className="h-3.5 w-3.5 shrink-0" />}
-                          <span className="truncate text-xs">{label}</span>
+                          {pane.type === "agent" ? <AgentKindBadge provider={provider} compact /> : null}
+                          <span className="min-w-0 flex-1 truncate text-xs">{label}</span>
                           {hasUnreadAttention ? <span className="h-2 w-2 shrink-0 rounded-full bg-sky-400" /> : null}
                           <Button
                             variant="ghost"
@@ -966,6 +1023,8 @@ export default function CmuxWorkspacePage() {
                   onClick={() => {
                     setSelectedProjectId(item.projectId);
                     setActiveCombId(item.combId);
+                    setActivePaneId(item.paneId);
+                    setShowProviders(false);
                     setAttentionRecords((prev) => prev.map((r) => (r.id === item.id ? { ...r, read: true } : r)));
                     setAttentionOpen(false);
                   }}
@@ -1003,6 +1062,7 @@ export default function CmuxWorkspacePage() {
         onCreate={(comb) => {
           setSelectedProjectId(comb.projectId);
           setActiveCombId(comb.id);
+          setShowProviders(false);
           refreshCombs();
         }}
         createComb={createComb}
@@ -1015,8 +1075,8 @@ export default function CmuxWorkspacePage() {
           combId={activeCombId}
           providers={providers}
           ensureCombWorktree={ensureActiveCombWorktree}
-          onCreate={(pane) => {
-            refreshPanes();
+          onCreate={async (pane) => {
+            await refreshPanes();
             setActivePaneId(pane.id);
           }}
         />
