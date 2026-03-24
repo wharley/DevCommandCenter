@@ -7,17 +7,22 @@ Política de governança para worktrees Git criados pelo Dev Command Center. Def
 Worktrees criados pelo DCC devem seguir o padrão:
 
 ```
-dcc-{identificador}-{timestamp}
+dcc-comb-{slug}-{id8}
 ```
 
-- **identificador**: `{missionId}` ou `{branch}-{shortHash}` (ex: `main-a1b2c3d`, `feature-xyz`)
-- **timestamp**: `YYYYMMDD-HHmmss` (ex: `20250130-143022`)
+- **slug**: nome normalizado do comb (somente caracteres seguros para branch)
+- **id8**: 8 chars hex do sufixo do ID interno do comb
 
 Exemplos:
-- `dcc-mission-abc123-20250130-143022`
-- `dcc-main-a1b2c3d-20250130-143022`
+- `dcc-comb-refactor-auth-18f6a2bc`
+- `dcc-comb-hotfix-shell-7ad03f91`
 
-Objetivo: evitar colisões e permitir identificação rápida da origem.
+Objetivo: evitar colisões, manter legibilidade e não expor detalhes de runtime no nome do worktree.
+
+### Compatibilidade legada
+
+- Registros antigos com ID no formato `tauri-*` continuam válidos.
+- Ao gerar branch/worktree para itens legados, o app usa apenas o sufixo técnico do ID (sem propagar `tauri` no nome final).
 
 ## 2. Limpeza automática
 
