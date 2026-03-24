@@ -124,11 +124,24 @@ jobs:
             exit 1
           fi
 
-          APP_NAME="$(basename "${APP_PATH}" .app)"
-          EXECUTABLE="${APP_PATH}/Contents/MacOS/${APP_NAME}"
+          PLIST_PATH="${APP_PATH}/Contents/Info.plist"
+          if [[ ! -f "${PLIST_PATH}" ]]; then
+            echo "Missing Info.plist inside bundle: ${PLIST_PATH}"
+            exit 1
+          fi
+
+          EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${PLIST_PATH}" 2>/dev/null || true)"
+          if [[ -z "${EXECUTABLE_NAME}" ]]; then
+            echo "Could not read CFBundleExecutable from ${PLIST_PATH}"
+            exit 1
+          fi
+
+          EXECUTABLE="${APP_PATH}/Contents/MacOS/${EXECUTABLE_NAME}"
 
           if [[ ! -f "${EXECUTABLE}" ]]; then
             echo "Missing executable inside bundle: ${EXECUTABLE}"
+            echo "Existing files in Contents/MacOS:"
+            ls -la "${APP_PATH}/Contents/MacOS" || true
             exit 1
           fi
 
