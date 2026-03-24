@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Janela principal: APIs core (incl. event.listen), diálogos e comandos da app.","local":true,"windows":["*"],"permissions":["core:default","dialog:default"]}}
+{"default":{"identifier":"default","description":"Janela principal: APIs core (incl. event.listen), diálogos e comandos da app.","local":true,"windows":["*"],"permissions":["core:default","core:app:allow-set-app-theme","dialog:default"]}}

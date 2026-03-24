@@ -1,5 +1,6 @@
 import * as React from "react";
 import { createContext, useContext, useEffect, useState } from "react";
+import { setTheme as setNativeAppTheme } from "@tauri-apps/api/app";
 
 type Theme = "dark" | "light" | "system";
 
@@ -103,6 +104,16 @@ export function ThemeProvider({
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, [theme, attribute, enableSystem]);
+
+  // macOS/Windows: alinhar a barra de título nativa ao tema do app (em dev costuma coincidir; no .app empacotado pode divergir).
+  useEffect(() => {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+    if (enableSystem && theme === "system") {
+      void setNativeAppTheme(null);
+    } else {
+      void setNativeAppTheme(resolvedTheme);
+    }
+  }, [theme, resolvedTheme, enableSystem]);
 
   const setTheme = (newTheme: Theme) => {
     localStorage.setItem(storageKey, newTheme);
