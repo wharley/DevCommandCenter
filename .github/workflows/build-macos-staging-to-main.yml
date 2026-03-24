@@ -1,0 +1,154 @@
+name: Build macOS (staging -> main)
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: build-macos-staging-to-main-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS desktop validation
+    if: github.event.pull_request.head.ref == 'staging'
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: yarn
+
+      - name: Enable Corepack (Yarn)
+        run: corepack enable
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend/backend dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Import Apple certificate into temporary keychain
+        if: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CERT_PATH="$RUNNER_TEMP/build_certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build Tauri for macOS
+        env:
+          CI: true
+          # If your repo has Apple signing secrets configured, Tauri uses them automatically.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: yarn exec tauri build -b app,dmg
+
+      - name: Validate bundle paths, executable bits and package artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_PATH="$(ls -1d src-tauri/target/release/bundle/macos/*.app | head -n 1)"
+          DMG_PATH="$(ls -1 src-tauri/target/release/bundle/dmg/*.dmg | head -n 1)"
+
+          if [[ ! -d "${APP_PATH}" ]]; then
+            echo "Missing .app bundle at expected macOS path."
+            exit 1
+          fi
+
+          if [[ ! -f "${DMG_PATH}" ]]; then
+            echo "Missing .dmg package at expected macOS path."
+            exit 1
+          fi
+
+          APP_NAME="$(basename "${APP_PATH}" .app)"
+          EXECUTABLE="${APP_PATH}/Contents/MacOS/${APP_NAME}"
+
+          if [[ ! -f "${EXECUTABLE}" ]]; then
+            echo "Missing executable inside bundle: ${EXECUTABLE}"
+            exit 1
+          fi
+
+          if [[ ! -x "${EXECUTABLE}" ]]; then
+            echo "Executable is not marked as executable: ${EXECUTABLE}"
+            exit 1
+          fi
+
+          echo "Bundle and path checks passed."
+          echo "App bundle: ${APP_PATH}"
+          echo "DMG package: ${DMG_PATH}"
+
+      - name: Validate macOS signature and notarization readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_PATH="$(ls -1d src-tauri/target/release/bundle/macos/*.app | head -n 1)"
+          DMG_PATH="$(ls -1 src-tauri/target/release/bundle/dmg/*.dmg | head -n 1)"
+
+          echo "Checking code signature metadata..."
+          if codesign -dv --verbose=4 "${APP_PATH}" 2>&1 | tee /tmp/codesign-info.txt; then
+            echo "codesign metadata available."
+          else
+            echo "codesign metadata not available (likely unsigned build)."
+          fi
+
+          if grep -q "Authority=" /tmp/codesign-info.txt; then
+            echo "Signed app detected."
+          else
+            echo "Unsigned app detected. Configure Apple signing secrets for release-grade artifacts."
+          fi
+
+          echo "Assessing Gatekeeper policy (informational)..."
+          if spctl -a -vv "${APP_PATH}" 2>&1 | tee /tmp/spctl-app.txt; then
+            echo "Gatekeeper accepted app."
+          else
+            echo "Gatekeeper did not accept app (expected for unsigned or not notarized artifacts)."
+          fi
+
+          if spctl -a -vv -t open "${DMG_PATH}" 2>&1 | tee /tmp/spctl-dmg.txt; then
+            echo "Gatekeeper accepted dmg."
+          else
+            echo "Gatekeeper did not accept dmg (expected for unsigned or not notarized artifacts)."
+          fi
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-command-center-macos-bundles
+          path: |
+            src-tauri/target/release/bundle/macos/*.app
+            src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
