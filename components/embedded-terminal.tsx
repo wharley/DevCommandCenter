@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Terminal as XTerm } from "xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "xterm/css/xterm.css";
@@ -42,6 +43,8 @@ export function EmbeddedTerminal({
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
+  /** Evita duplicar output e perder chunks: só aceita stream ao vivo depois do backlog (ver race terminal-output vs listen). */
+  const allowLiveOutputRef = useRef(false);
   const onExitRef = useRef<typeof onExit>(onExit);
   const [error, setError] = useState<string | null>(null);
   const [exited, setExited] = useState<number | null>(null);
@@ -114,6 +117,7 @@ export function EmbeddedTerminal({
     const api = window.desktopAPI?.terminal;
     const term = xtermRef.current;
     if (!api?.getOrCreateForPane || !paneId || !term) return;
+    allowLiveOutputRef.current = false;
     term.reset();
     void api
       .getOrCreateForPane(paneId, {
@@ -128,6 +132,9 @@ export function EmbeddedTerminal({
         if (xtermRef.current !== term) return;
         applyPaneAttachResult(result, term);
         await hydrateTerminalBacklog(term, result.ptyId);
+        if (ptyIdRef.current) {
+          allowLiveOutputRef.current = true;
+        }
       });
   }, [applyPaneAttachResult, hydrateTerminalBacklog, paneId, cwd, command, stableArgs]);
 
@@ -152,6 +159,8 @@ export function EmbeddedTerminal({
 
     const term = new XTerm({
       cursorBlink: true,
+      /** Evita puxar o viewport para o fim a cada tecla quando há scrollback (friccao; default true). */
+      scrollOnUserInput: false,
       fontSize: 13,
       fontFamily: "var(--font-geist-mono, 'Menlo', monospace)",
       theme: {
@@ -190,7 +199,7 @@ export function EmbeddedTerminal({
       requestAnimationFrame(safeFit);
     });
 
-    let unsubData: (() => void) | null = null;
+    let unlistenOutput: UnlistenFn | null = null;
 
     const unsubExit = api.onExit((id: string, code: number) => {
       if (id === ptyIdRef.current) {
@@ -237,6 +246,16 @@ export function EmbeddedTerminal({
 
     const mountSession = async () => {
       try {
+        allowLiveOutputRef.current = false;
+        unlistenOutput = await listen("terminal-output", (event: { payload?: Record<string, unknown> }) => {
+          if (disposed || xtermRef.current !== term) return;
+          const payload = event?.payload ?? {};
+          const id = typeof payload.ptyId === "string" ? payload.ptyId : "";
+          const data = typeof payload.data === "string" ? payload.data : "";
+          if (!allowLiveOutputRef.current || id !== ptyIdRef.current) return;
+          safeWrite(term, data);
+        });
+
         if (paneId && api.getOrCreateForPane) {
           const result = await api.getOrCreateForPane(paneId, spawnOptions);
           if (disposed || xtermRef.current !== term) return;
@@ -252,11 +271,9 @@ export function EmbeddedTerminal({
           if (result.ptyId) ptyIdRef.current = result.ptyId;
           await hydrateTerminalBacklog(term, result.ptyId);
         }
-        unsubData = api.onData((id: string, data: string) => {
-          if (id === ptyIdRef.current && !disposed && xtermRef.current === term) {
-            safeWrite(term, data);
-          }
-        });
+        if (ptyIdRef.current) {
+          allowLiveOutputRef.current = true;
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -275,7 +292,17 @@ export function EmbeddedTerminal({
       }
     };
 
-    const resizeObserver = new ResizeObserver(() => {
+    let lastObservedW = 0;
+    let lastObservedH = 0;
+    const resizeObserver = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (cr) {
+        const w = Math.round(cr.width);
+        const h = Math.round(cr.height);
+        if (w === lastObservedW && h === lastObservedH) return;
+        lastObservedW = w;
+        lastObservedH = h;
+      }
       if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
       resizeRaf = requestAnimationFrame(handleResize);
     });
@@ -285,7 +312,8 @@ export function EmbeddedTerminal({
       disposed = true;
       if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
       resizeObserver.disconnect();
-      unsubData?.();
+      allowLiveOutputRef.current = false;
+      void unlistenOutput?.();
       unsubExit();
       unsubAttention?.();
       const id = ptyIdRef.current;
@@ -318,7 +346,7 @@ export function EmbeddedTerminal({
   ]);
 
   return (
-    <div className={`flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border transition-all duration-300 ${
+    <div className={`flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border transition-[border-color,box-shadow] duration-200 ${
       isWaiting ? "border-primary shadow-[0_0_15px_rgba(var(--primary),0.3)] ring-1 ring-primary" : "border-border"
     } bg-background`}>
       <div className={`flex items-center justify-between border-b px-2 py-1.5 ${
@@ -364,7 +392,7 @@ export function EmbeddedTerminal({
       )}
       <div
         ref={containerRef}
-        className="min-h-0 flex-1 overflow-hidden p-1"
+        className="min-h-0 flex-1 overflow-hidden bg-[#1a1a1a] p-1"
         style={{ height: "100%" }}
       />
     </div>

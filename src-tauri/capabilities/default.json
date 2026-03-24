@@ -3,5 +3,9 @@
   "identifier": "default",
   "description": "Janela principal: APIs core (incl. event.listen), diálogos e comandos da app.",
   "windows": ["*"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": [
+    "core:default",
+    "core:app:allow-set-app-theme",
+    "dialog:default"
+  ]
 }
