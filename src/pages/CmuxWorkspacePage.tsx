@@ -342,14 +342,16 @@ const PaneCard = React.memo(function PaneCard({
   const handleRemove = useCallback(() => onRemovePane(pane.id), [onRemovePane, pane.id]);
 
   return (
-    <div data-pane-id={pane.id} className="min-h-0 overflow-hidden">
+    <div data-pane-id={pane.id} className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="mb-1 flex items-center justify-between rounded border border-border px-2 py-1">
         <span className="truncate text-xs">{label}</span>
         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleRemove}>
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <EmbeddedTerminal cwd={worktreePath} command={command} args={args} paneId={pane.id} title={label} />
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <EmbeddedTerminal cwd={worktreePath} command={command} args={args} paneId={pane.id} title={label} />
+      </div>
     </div>
   );
 });
