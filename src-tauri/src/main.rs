@@ -148,7 +148,7 @@ fn next_id() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    format!("tauri-{now:x}")
+    format!("dcc-{now:x}")
 }
 
 fn value_ref_to_json(value: ValueRef<'_>) -> Value {
@@ -409,13 +409,19 @@ fn safe_branch_name(prefix: &str, raw_id: &str, raw_title: &str) -> String {
         .trim_matches('-')
         .to_string();
     let slug = if title.is_empty() { "item".to_string() } else { title };
-    let id_short = raw_id
+    let id_suffix_source = raw_id.rsplit_once('-').map(|(_, tail)| tail).unwrap_or(raw_id);
+    let id_short = id_suffix_source
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
+        .filter(|c| c.is_ascii_hexdigit())
         .take(8)
         .collect::<String>()
         .to_lowercase();
-    format!("{prefix}-{slug}-{id_short}")
+    let suffix = if id_short.is_empty() {
+        "item".to_string()
+    } else {
+        id_short
+    };
+    format!("{prefix}-{slug}-{suffix}")
 }
 
 fn iso_now() -> String {
