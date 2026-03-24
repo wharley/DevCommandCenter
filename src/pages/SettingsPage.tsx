@@ -423,9 +423,7 @@ export default function SettingsPage() {
       {/* Footer - Sobre */}
       <footer className="mt-auto shrink-0 border-t border-border bg-card/50 px-6 py-3">
         <div className="mx-auto flex max-w-3xl items-center gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
-            <Terminal className="h-4 w-4 text-primary-foreground" />
-          </div>
+          <img src="/dcc-mark.svg" alt="DCC" className="h-8 w-8 shrink-0 rounded-lg" />
           <div className="min-w-0">
             <h3 className="text-xs font-semibold">Dev Command Center</h3>
             <p className="line-clamp-2 text-[11px] text-muted-foreground">
