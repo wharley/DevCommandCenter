@@ -40,8 +40,39 @@ jobs:
       - name: Install frontend/backend dependencies
         run: yarn install --frozen-lockfile --ignore-engines
 
+      - name: Validate required Apple signing secrets
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          missing=0
+
+          for var in \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_SIGNING_IDENTITY \
+            APPLE_TEAM_ID \
+            APPLE_ID \
+            APPLE_PASSWORD; do
+            if [[ -z "${!var}" ]]; then
+              echo "Missing required secret: ${var}"
+              missing=1
+            fi
+          done
+
+          if [[ "${missing}" -ne 0 ]]; then
+            echo "Required Apple signing/notarization secrets are missing."
+            exit 1
+          fi
+
       - name: Import Apple certificate into temporary keychain
-        if: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -93,11 +124,24 @@ jobs:
             exit 1
           fi
 
-          APP_NAME="$(basename "${APP_PATH}" .app)"
-          EXECUTABLE="${APP_PATH}/Contents/MacOS/${APP_NAME}"
+          PLIST_PATH="${APP_PATH}/Contents/Info.plist"
+          if [[ ! -f "${PLIST_PATH}" ]]; then
+            echo "Missing Info.plist inside bundle: ${PLIST_PATH}"
+            exit 1
+          fi
+
+          EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${PLIST_PATH}" 2>/dev/null || true)"
+          if [[ -z "${EXECUTABLE_NAME}" ]]; then
+            echo "Could not read CFBundleExecutable from ${PLIST_PATH}"
+            exit 1
+          fi
+
+          EXECUTABLE="${APP_PATH}/Contents/MacOS/${EXECUTABLE_NAME}"
 
           if [[ ! -f "${EXECUTABLE}" ]]; then
             echo "Missing executable inside bundle: ${EXECUTABLE}"
+            echo "Existing files in Contents/MacOS:"
+            ls -la "${APP_PATH}/Contents/MacOS" || true
             exit 1
           fi
 
