@@ -12,7 +12,7 @@ Dev Command Center focuses on a clear agent workflow: select a repo, describe a 
 
 ## Features (developer-focused)
 
-- **Hive workspace (single app shell):** project picker, missions as Git worktrees, multiple terminal/agent panes per mission, mission-level review
+- **Workspace shell (single app shell):** project picker, missions as Git worktrees, multiple terminal/agent panes per mission, mission-level review
 - Multi-provider adapters (CLI and API) with validation and fallbacks
 - Git context collection (branch, status, recent commits)
 - Local SQLite persistence for projects, providers, missions, combs, and panes
@@ -90,7 +90,7 @@ The app route is **`/`** only (unknown paths redirect to the main workspace shel
 
 ## Roadmap (proposal)
 
-- Hive workspace polish (onboarding, empty states)
+- Workspace shell polish (onboarding, empty states)
 - Advanced diff review UX (selective apply, per-file previews)
 - Automation presets (apply + tests + commit with confirmation)
 - Provider profiles per project and mission templates

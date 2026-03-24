@@ -10,12 +10,12 @@ Este documento descreve o que foi implementado na **camada de ativação beta**:
 
 ## O que foi implementado
 
-- **Gate no app:** ao abrir o **app desktop (Tauri)**, se não houver ativação salva localmente, o usuário vê apenas a tela de ativação (e-mail). Após ativar (ou pular em dev), o app segue no **Hive** (`/`).
+- **Gate no app (histórico):** o fluxo de ativação beta foi implementado como uma camada anterior ao workspace principal. No layout atual, a tela dedicada de ativação não faz mais parte da UI ativa.
 - **Persistência local:** e-mail e estado de ativação ficam no **SQLite** (tabela `activation`), no mesmo banco que o restante dos dados do app — acesso via **comandos Rust** (`window.db`) / implementação em `src-tauri`.
 - **Backend remoto:** o app chama o site (https://www.devcommandcenter.com) para registrar a ativação. O site deve expor a API descrita mais abaixo.
-- **Modo desenvolvimento:** link “Pular ativação (só desenvolvimento)” só em dev; em build de produção esse link não aparece.
+- **Modo desenvolvimento (histórico):** o fluxo antigo previa “Pular ativação (só desenvolvimento)” apenas em dev.
 
-A ativação é uma camada **antes** do shell principal (Hive).
+A ativação foi desenhada como camada **antes** do shell principal.
 
 ---
 
@@ -23,11 +23,11 @@ A ativação é uma camada **antes** do shell principal (Hive).
 
 1. Usuário abre o app desktop.
 2. O app chama `license.getStatus()` (via `invoke` → Rust / SQLite).
-3. Se **não ativado:** mostra a tela “Ative o Dev Command Center” (e-mail + botão Ativar).
+3. Se **não ativado:** o fluxo antigo mostrava a tela “Ative o Dev Command Center” (e-mail + botão Ativar).
 4. Usuário informa e-mail e clica em Ativar.
 5. O app obtém `machineId` (identificador estável da máquina), faz **POST** para `https://www.devcommandcenter.com/api/beta-activate` com `{ email, machineId }`.
 6. Se o servidor responder sucesso (`ok: true`), o app grava no SQLite (e-mail, `machineId`, ativado) e chama `onActivated()` → entra no app.
-7. Nas próximas aberturas, `getStatus()` retorna ativado e o app abre direto no **Hive** (`/`).
+7. Nas próximas aberturas, `getStatus()` retorna ativado e o app abre direto no workspace principal (`/`).
 
 ---
 
@@ -41,8 +41,8 @@ A ativação é uma camada **antes** do shell principal (Hive).
 | **Comandos nativos (backend)** | [`src-tauri/src/main.rs`](../src-tauri/src/main.rs) — `license_get_status`, `license_get_machine_id`, `license_activate`, `license_skip_activation` (`#[tauri::command]`, registados no `invoke_handler`). |
 | **Ponte com a UI** | [`src/lib/desktop-bridge.ts`](../src/lib/desktop-bridge.ts) — expõe `window.desktopAPI.license.*` → `invoke("license_*", …)`. |
 | **Tipos globais** | [`types/app.d.ts`](../types/app.d.ts) — `desktopAPI.license` |
-| **Gate e loading** | [`src/App.tsx`](../src/App.tsx) — verificação de ativação no mount, loading ou tela de ativação |
-| **Tela de ativação** | [`src/pages/ActivationPage.tsx`](../src/pages/ActivationPage.tsx) — formulário, estados, link “Pular ativação” em dev (`window.desktopAPI?.license`) |
+| **Gate e loading (histórico)** | [`src/App.tsx`](../src/App.tsx) — originalmente usado para checagem de ativação no mount e bloqueio de entrada |
+| **Tela de ativação (removida)** | a tela dedicada de ativação (`src/pages/ActivationPage.tsx`) foi removida no layout atual |
 
 ---
 
@@ -85,7 +85,7 @@ Sugestão de implementação no site: validar e-mail (e opcionalmente `machineId
 
 ## Desenvolvimento vs produção
 
-- **Tela “Pular ativação (só desenvolvimento)”:** visível quando `import.meta.env.DEV` (Vite) em [`ActivationPage.tsx`](../src/pages/ActivationPage.tsx). Em build de produção o link não é exibido.
+- **Tela “Pular ativação (só desenvolvimento)” (histórico):** no fluxo antigo era exibida apenas em `import.meta.env.DEV` (Vite).
 - **Handler `license_skip_activation`:** no Rust, só deve permitir gravação local “fake” em **modo desenvolvimento**; em release empacotado deve retornar erro ou não alterar estado.
 - **Ativação real:** em qualquer ambiente, “Ativar e entrar” chama o site. Se a rota `/api/beta-activate` ainda não existir, o usuário verá erro de rede/4xx até o backend estar no ar.
 
@@ -94,6 +94,6 @@ Sugestão de implementação no site: validar e-mail (e opcionalmente `machineId
 ## Resumo
 
 - Ativação beta = gate antes do app + tela de e-mail + POST para o site + persistência no SQLite.
-- **Tauri:** `main.rs` → comandos `license_*`; **frontend:** `desktop-bridge.ts` + `ActivationPage.tsx` + `App.tsx`.
+- **Tauri:** `main.rs` → comandos `license_*`; **frontend:** `desktop-bridge.ts` + `App.tsx` (layout atual sem `ActivationPage.tsx`).
 - Tudo que já existia (projetos, missões, providers, Git, IA) permanece igual; só se interpõe a checagem de ativação na abertura.
 - Documentação da migração e instalação: [MIGRACAO_TAURI.md](./MIGRACAO_TAURI.md). Para conceitos de uso do produto, ver [CONCEITOS_E_USO.md](./CONCEITOS_E_USO.md) e demais docs em `docs/`.
