@@ -12,7 +12,8 @@
     "vite:build": "node scripts/ensure-node.mjs && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "audit:tauri-stubs": "node scripts/audit-tauri-stubs.mjs"
+    "audit:tauri-stubs": "node scripts/audit-tauri-stubs.mjs",
+    "postinstall": "node scripts/patch-xterm-viewport.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",

@@ -34,7 +34,7 @@ yarn-error.log*
 next-env.d.ts
 
 # Rust / Tauri (Cargo build output)
-src-tauri/target/
+src-tauri/target
 
 # macOS
 .DS_Store

@@ -1,8 +1,8 @@
 # Dev Command Center
 
-Multi-engine command center for coding agents. A local-first desktop app that orchestrates multiple providers (CLI and API) with BYOK, structured missions, and diff-driven reviews.
+Multi-engine command center for coding agents. A local-first desktop app that orchestrates multiple providers (CLI and API) with BYOK, workspace-first sessions, and terminal-native flow.
 
-For the full product document, see `SKILL.md`. For product positioning and landing-page copy (non-technical), see [docs/POSICIONAMENTO_E_LANDING.md](docs/POSICIONAMENTO_E_LANDING.md).
+For product and architecture notes, see the `docs/` folder. For positioning and landing-page copy (non-technical), see [docs/POSICIONAMENTO_E_LANDING.md](docs/POSICIONAMENTO_E_LANDING.md).
 
 **Desktop stack:** o app migrou de Electron para **Tauri 2** — motivos, diferenças e **lista de instalação** (Node, Rust, dependências por SO): **[docs/MIGRACAO_TAURI.md](docs/MIGRACAO_TAURI.md)**.
 
@@ -74,19 +74,19 @@ yarn build
 yarn lint
 ```
 
-## Primary user flow (Hive workspace)
+## Primary user flow (workspace-first)
 
-The app opens on `/` into the **Hive workspace**: sidebar for the active repository and **missions** (each mission is one Git **worktree** / feature branch), and a main area for terminals, agents, and review.
+The app opens on `/` into the main workspace shell: sidebar for **workspaces** and a main area for terminal/agent panes.
 
-1. **Select a project (Hive)** — Use the project selector at the top of the sidebar; **Add project** registers a local repo path.
-2. **Create or select a mission** — Missions list the worktrees for that repo. **+** creates a new mission (name, optional description, base branch). Only one mission is **active** in the UI at a time.
-3. **Work in Panes** — On the **Panes** tab, add **Terminal** and **Agent** panes. Every pane uses the **same working directory**: the active mission’s worktree. Multiple CLI agents and shells per mission are supported.
-4. **Review** — On the **Review** tab, inspect diffs and run Git actions (commit, push, merge, etc.) at the **mission / worktree** level—not tied to a single pane session.
-5. **Settings** — **Settings** in the sidebar opens provider and app preferences **in the main panel** (same full-screen workspace), without leaving this layout.
+1. **Add project** — Register at least one local repository path. This is required because workspaces attach to a project/repo context.
+2. **Create or select a workspace** — A workspace maps to a dedicated worktree/branch context.
+3. **Work in panes** — Add **Terminal** and **Agent** panes. Panes share the active workspace directory.
+4. **Watch notifications** — Attention events show toast + sidebar indicators and can be opened in the notifications panel.
+5. **Manage providers** — Configure CLI/API providers in the Providers screen, then use them when opening new agent panes.
 
-**In one sentence:** Pick a repo → open a mission (worktree) → run as many terminals/agents as you need in that folder → integrate changes from **Review**.
+**In one sentence:** Add a repo → open a workspace → run terminals and agents in that directory → react to attention notifications quickly.
 
-The app route is **`/`** only (unknown paths redirect to Hive). Older per-project and mission-detail UIs were removed; historical **mission** rows may still exist in the local DB from past versions but are not exposed in the UI.
+The app route is **`/`** only (unknown paths redirect to the main workspace shell). Older mission/review/dashboard flows are no longer part of the primary UI.
 
 ## Roadmap (proposal)
 
@@ -97,7 +97,7 @@ The app route is **`/`** only (unknown paths redirect to Hive). Older per-projec
 
 ## Contributing
 
-Issues and PRs are welcome. Please keep changes focused and aligned with `SKILL.md`.
+Issues and PRs are welcome. Please keep changes focused and aligned with the project direction documented in `docs/`.
 
 ## License
 

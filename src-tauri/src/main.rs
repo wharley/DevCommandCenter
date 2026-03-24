@@ -7,9 +7,9 @@ use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
 use std::collections::{HashMap, VecDeque};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -17,6 +17,7 @@ use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
+use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
 
 /// Schema SQLite compartilhado com `lib/database/schema.sql` (CREATE IF NOT EXISTS).
 const APP_SCHEMA_SQL: &str = include_str!("../../lib/database/schema.sql");
@@ -32,7 +33,9 @@ struct AppState {
 const TERMINAL_OUTPUT_MAX_LINES: usize = 1000;
 
 struct ManagedTerminal {
-    child: Child,
+    pty_master: Box<dyn MasterPty + Send>,
+    child: Box<dyn PtyChild + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     mission_id: Option<String>,
     pane_id: Option<String>,
     cwd: String,
@@ -42,8 +45,7 @@ struct ManagedTerminal {
     stop_flag: Arc<AtomicBool>,
     /// Buffer circular compartilhado entre as threads de leitura (lock curto só aqui).
     output_buffer: Arc<Mutex<VecDeque<String>>>,
-    stdout_thread: Option<JoinHandle<()>>,
-    stderr_thread: Option<JoinHandle<()>>,
+    reader_thread: Option<JoinHandle<()>>,
 }
 
 fn new_terminal_output_buffer() -> Arc<Mutex<VecDeque<String>>> {
@@ -122,33 +124,6 @@ fn run_legacy_schema_migrations(conn: &Connection) -> Result<(), String> {
     ensure_column(conn, "projects", "git_remote_url", "TEXT")?;
     ensure_column(conn, "projects", "last_opened_at", "TEXT")?;
 
-    // Missions
-    ensure_column(conn, "missions", "plan_provider_id", "TEXT")?;
-    ensure_column(conn, "missions", "code_provider_id", "TEXT")?;
-    ensure_column(
-        conn,
-        "missions",
-        "mission_type",
-        "TEXT DEFAULT 'implementation'",
-    )?;
-    ensure_column(conn, "missions", "preserve_instructions", "TEXT")?;
-    ensure_column(
-        conn,
-        "missions",
-        "code_generation_attempts",
-        "INTEGER DEFAULT 0",
-    )?;
-    ensure_column(conn, "missions", "is_committed", "INTEGER DEFAULT 0")?;
-    ensure_column(conn, "missions", "is_pushed", "INTEGER DEFAULT 0")?;
-    ensure_column(conn, "missions", "pending_commands", "TEXT")?;
-    ensure_column(conn, "missions", "worktree_path", "TEXT")?;
-    ensure_column(conn, "missions", "worktree_branch", "TEXT")?;
-    ensure_column(conn, "missions", "base_branch", "TEXT")?;
-    ensure_column(conn, "missions", "target_branch", "TEXT")?;
-    ensure_column(conn, "missions", "last_output_summary", "TEXT")?;
-    ensure_column(conn, "missions", "last_git_summary", "TEXT")?;
-    ensure_column(conn, "missions", "wall_status", "TEXT")?;
-
     // Combs
     ensure_column(conn, "combs", "review_targets", "TEXT")?;
     ensure_column(conn, "combs", "branch", "TEXT")?;
@@ -200,22 +175,6 @@ fn row_to_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     Ok(Value::Object(obj))
 }
 
-fn mission_row_to_json(mut mission: Value) -> Value {
-    let Some(obj) = mission.as_object_mut() else {
-        return mission;
-    };
-
-    for key in ["plan", "generated_code", "context", "pending_commands", "last_git_summary"] {
-        if let Some(Value::String(s)) = obj.get(key).cloned() {
-            if let Ok(parsed) = serde_json::from_str::<Value>(&s) {
-                obj.insert(key.to_string(), parsed);
-            }
-        }
-    }
-
-    mission
-}
-
 fn map_project_to_renderer(mut row: Value) -> Value {
     let Some(obj) = row.as_object_mut() else {
         return row;
@@ -239,108 +198,6 @@ fn map_project_to_renderer(mut row: Value) -> Value {
     );
     out.insert("createdAt".into(), obj.remove("created_at").unwrap_or(Value::Null));
     out.insert("updatedAt".into(), obj.remove("updated_at").unwrap_or(Value::Null));
-    Value::Object(out)
-}
-
-fn map_mission_to_renderer(row: Value) -> Value {
-    let mut row = mission_row_to_json(row);
-    let Some(obj) = row.as_object_mut() else {
-        return row;
-    };
-    let mut out = serde_json::Map::new();
-    out.insert("id".into(), obj.remove("id").unwrap_or(Value::Null));
-    out.insert("projectId".into(), obj.remove("project_id").unwrap_or(Value::Null));
-    out.insert("providerId".into(), obj.remove("provider_id").unwrap_or(Value::Null));
-    out.insert(
-        "planProviderId".into(),
-        obj.remove("plan_provider_id").unwrap_or(Value::Null),
-    );
-    out.insert(
-        "codeProviderId".into(),
-        obj.remove("code_provider_id").unwrap_or(Value::Null),
-    );
-    out.insert("title".into(), obj.remove("title").unwrap_or(Value::Null));
-    out.insert("description".into(), obj.remove("description").unwrap_or(Value::Null));
-    out.insert("status".into(), obj.remove("status").unwrap_or(Value::Null));
-    out.insert(
-        "missionType".into(),
-        obj.remove("mission_type")
-            .unwrap_or_else(|| Value::String("implementation".into())),
-    );
-    out.insert("plan".into(), obj.remove("plan").unwrap_or(Value::Null));
-    out.insert(
-        "generatedCode".into(),
-        obj.remove("generated_code").unwrap_or(Value::Null),
-    );
-    out.insert("context".into(), obj.remove("context").unwrap_or(Value::Null));
-    out.insert(
-        "preserveInstructions".into(),
-        obj.remove("preserve_instructions").unwrap_or(Value::Null),
-    );
-    out.insert("errorMessage".into(), obj.remove("error_message").unwrap_or(Value::Null));
-    out.insert(
-        "codeGenerationAttempts".into(),
-        obj.remove("code_generation_attempts")
-            .unwrap_or_else(|| Value::from(0)),
-    );
-    out.insert(
-        "isCommitted".into(),
-        obj.remove("is_committed")
-            .map(|v| Value::Bool(v.as_i64().unwrap_or(0) != 0))
-            .unwrap_or(Value::Bool(false)),
-    );
-    out.insert(
-        "isPushed".into(),
-        obj.remove("is_pushed")
-            .map(|v| Value::Bool(v.as_i64().unwrap_or(0) != 0))
-            .unwrap_or(Value::Bool(false)),
-    );
-    out.insert(
-        "pendingCommands".into(),
-        obj.remove("pending_commands").unwrap_or(Value::Null),
-    );
-    out.insert("worktreePath".into(), obj.remove("worktree_path").unwrap_or(Value::Null));
-    out.insert(
-        "worktreeBranch".into(),
-        obj.remove("worktree_branch").unwrap_or(Value::Null),
-    );
-    out.insert("baseBranch".into(), obj.remove("base_branch").unwrap_or(Value::Null));
-    out.insert("targetBranch".into(), obj.remove("target_branch").unwrap_or(Value::Null));
-    out.insert(
-        "lastOutputSummary".into(),
-        obj.remove("last_output_summary").unwrap_or(Value::Null),
-    );
-    out.insert(
-        "lastGitSummary".into(),
-        obj.remove("last_git_summary").unwrap_or(Value::Null),
-    );
-    out.insert("wallStatus".into(), obj.remove("wall_status").unwrap_or(Value::Null));
-    out.insert("startedAt".into(), obj.remove("started_at").unwrap_or(Value::Null));
-    out.insert(
-        "completedAt".into(),
-        obj.remove("completed_at").unwrap_or(Value::Null),
-    );
-    out.insert("createdAt".into(), obj.remove("created_at").unwrap_or(Value::Null));
-    out.insert("updatedAt".into(), obj.remove("updated_at").unwrap_or(Value::Null));
-    Value::Object(out)
-}
-
-fn map_mission_log_to_renderer(mut row: Value) -> Value {
-    let Some(obj) = row.as_object_mut() else {
-        return row;
-    };
-    let mut out = serde_json::Map::new();
-    out.insert("id".into(), obj.remove("id").unwrap_or(Value::Null));
-    out.insert("missionId".into(), obj.remove("mission_id").unwrap_or(Value::Null));
-    out.insert("type".into(), obj.remove("type").unwrap_or(Value::Null));
-    out.insert("content".into(), obj.remove("content").unwrap_or(Value::Null));
-    if let Some(Value::String(raw)) = obj.remove("metadata") {
-        let parsed = serde_json::from_str::<Value>(&raw).unwrap_or(Value::Null);
-        out.insert("metadata".into(), parsed);
-    } else {
-        out.insert("metadata".into(), Value::Null);
-    }
-    out.insert("createdAt".into(), obj.remove("created_at").unwrap_or(Value::Null));
     Value::Object(out)
 }
 
@@ -569,6 +426,7 @@ fn iso_now() -> String {
     format!("{secs}")
 }
 
+#[allow(dead_code)]
 fn copy_paths_from_worktree(
     worktree_root: &str,
     project_root: &str,
@@ -852,10 +710,84 @@ fn shell_validate_cli_path(_provider_type: String, cli_path: String) -> ApiResul
 
 #[tauri::command]
 fn shell_open_terminal_at_path(
-    _dir_path: String,
+    dir_path: String,
     _suggested_command: Option<Value>,
 ) -> ApiResult<Value> {
-    mapped_not_implemented("shell:openTerminalAtPath")
+    let path = expand_user_path(dir_path.trim());
+    if !path.exists() || !path.is_dir() {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": format!("Diretório inválido: {}", path.display())
+        }));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("open")
+            .arg("-a")
+            .arg("Terminal")
+            .arg(&path)
+            .status()
+            .map_err(|e| ApiError {
+                code: "SHELL_ERROR",
+                message: format!("Falha ao abrir Terminal.app: {e}"),
+            })?;
+
+        if status.success() {
+            return Ok(serde_json::json!({ "success": true }));
+        }
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": "Terminal.app retornou erro ao abrir o diretório"
+        }));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let attempts: &[(&str, &[&str])] = &[
+            ("x-terminal-emulator", &["--working-directory"]),
+            ("gnome-terminal", &["--working-directory"]),
+            ("konsole", &["--workdir"]),
+            ("xfce4-terminal", &["--working-directory"]),
+        ];
+        for (bin, flag) in attempts {
+            let status = Command::new(bin).arg(flag[0]).arg(&path).status();
+            if let Ok(s) = status {
+                if s.success() {
+                    return Ok(serde_json::json!({ "success": true }));
+                }
+            }
+        }
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": "Nenhum terminal suportado encontrado no Linux"
+        }));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let status = Command::new("cmd")
+            .args(["/C", "start", "wt", "-d"])
+            .arg(&path)
+            .status()
+            .map_err(|e| ApiError {
+                code: "SHELL_ERROR",
+                message: format!("Falha ao abrir Windows Terminal: {e}"),
+            })?;
+        if status.success() {
+            return Ok(serde_json::json!({ "success": true }));
+        }
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": "Windows Terminal retornou erro ao abrir o diretório"
+        }));
+    }
+
+    #[allow(unreachable_code)]
+    Ok(serde_json::json!({
+        "success": false,
+        "error": "Plataforma não suportada para abertura de terminal"
+    }))
 }
 
 #[tauri::command]
@@ -1163,6 +1095,7 @@ fn db_providers_is_encryption_available() -> ApiResult<bool> {
 }
 
 /// Fragmento dinâmico `coluna = ?` para UPDATEs (evita closure que captura `sets`/`bind_values`).
+#[allow(dead_code)]
 fn push_sql_set(
     column: &'static str,
     value: Option<String>,
@@ -1342,19 +1275,19 @@ fn db_projects_get_stats(state: State<'_, AppState>, id: String) -> ApiResult<Va
         .prepare(
             "SELECT
                 COUNT(*) as total,
-                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-                SUM(CASE WHEN status IN ('created', 'planning', 'plan_generated', 'generating_code', 'code_ready', 'applying') THEN 1 ELSE 0 END) as active,
-                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
-             FROM missions WHERE project_id = ?1",
+                SUM(CASE WHEN status = 'applied' THEN 1 ELSE 0 END) as applied,
+                SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active,
+                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as failed
+             FROM combs WHERE project_id = ?1",
         )
         .map_err(|e| db_error(e.to_string()))?;
     let value = stmt
         .query_row(params![id], |r| {
             Ok(serde_json::json!({
-              "totalMissions": r.get::<_, i64>(0).unwrap_or(0),
-              "completedMissions": r.get::<_, i64>(1).unwrap_or(0),
-              "activeMissions": r.get::<_, i64>(2).unwrap_or(0),
-              "failedMissions": r.get::<_, i64>(3).unwrap_or(0),
+              "totalWorkspaces": r.get::<_, i64>(0).unwrap_or(0),
+              "appliedWorkspaces": r.get::<_, i64>(1).unwrap_or(0),
+              "activeWorkspaces": r.get::<_, i64>(2).unwrap_or(0),
+              "failedWorkspaces": r.get::<_, i64>(3).unwrap_or(0),
             }))
         })
         .map_err(|e| db_error(e.to_string()))?;
@@ -1371,797 +1304,6 @@ fn db_projects_update_last_opened(state: State<'_, AppState>, id: String) -> Api
         .map_err(|e| db_error(e.to_string()))?;
     }
     db_projects_find_by_id(state, id)
-}
-
-#[tauri::command]
-fn db_missions_find_all(state: State<'_, AppState>) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let mut stmt = conn
-        .prepare("SELECT * FROM missions ORDER BY created_at DESC LIMIT 100 OFFSET 0")
-        .map_err(|e| db_error(e.to_string()))?;
-    let rows = stmt
-        .query_map([], row_to_json)
-        .map_err(|e| db_error(e.to_string()))?;
-    let items: Result<Vec<_>, _> = rows.collect();
-    Ok(Value::Array(
-        items
-            .map_err(|e| db_error(e.to_string()))?
-            .into_iter()
-            .map(map_mission_to_renderer)
-            .collect(),
-    ))
-}
-#[tauri::command]
-fn db_missions_find_by_id(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let mut stmt = conn
-        .prepare("SELECT * FROM missions WHERE id = ?1")
-        .map_err(|e| db_error(e.to_string()))?;
-    let row = stmt
-        .query_row(params![id], row_to_json)
-        .optional()
-        .map_err(|e| db_error(e.to_string()))?;
-    Ok(row.map(map_mission_to_renderer).unwrap_or(Value::Null))
-}
-#[tauri::command]
-fn db_missions_find_by_project(state: State<'_, AppState>, project_id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let mut stmt = conn
-        .prepare("SELECT * FROM missions WHERE project_id = ?1 ORDER BY created_at DESC")
-        .map_err(|e| db_error(e.to_string()))?;
-    let rows = stmt
-        .query_map(params![project_id], row_to_json)
-        .map_err(|e| db_error(e.to_string()))?;
-    let items: Result<Vec<_>, _> = rows.collect();
-    Ok(Value::Array(
-        items
-            .map_err(|e| db_error(e.to_string()))?
-            .into_iter()
-            .map(map_mission_to_renderer)
-            .collect(),
-    ))
-}
-#[tauri::command]
-fn db_missions_find_by_status(state: State<'_, AppState>, status: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let mut stmt = conn
-        .prepare("SELECT * FROM missions WHERE status = ?1 ORDER BY created_at DESC LIMIT 200")
-        .map_err(|e| db_error(e.to_string()))?;
-    let rows = stmt
-        .query_map(params![status], row_to_json)
-        .map_err(|e| db_error(e.to_string()))?;
-    let items: Result<Vec<_>, _> = rows.collect();
-    Ok(Value::Array(
-        items
-            .map_err(|e| db_error(e.to_string()))?
-            .into_iter()
-            .map(map_mission_to_renderer)
-            .collect(),
-    ))
-}
-#[tauri::command]
-fn db_missions_find_active(state: State<'_, AppState>) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT * FROM missions
-             WHERE status IN ('created','planning','plan_generated','generating_code','code_ready','applying')
-             ORDER BY created_at DESC",
-        )
-        .map_err(|e| db_error(e.to_string()))?;
-    let rows = stmt
-        .query_map([], row_to_json)
-        .map_err(|e| db_error(e.to_string()))?;
-    let items: Result<Vec<_>, _> = rows.collect();
-    Ok(Value::Array(
-        items
-            .map_err(|e| db_error(e.to_string()))?
-            .into_iter()
-            .map(map_mission_to_renderer)
-            .collect(),
-    ))
-}
-#[tauri::command]
-fn db_missions_search(
-    state: State<'_, AppState>,
-    query: String,
-    project_id: Option<String>,
-) -> ApiResult<Value> {
-    let term = format!("%{query}%");
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let (sql, params_vec): (String, Vec<String>) = if let Some(pid) = project_id {
-        (
-            "SELECT * FROM missions
-             WHERE (title LIKE ? OR description LIKE ?) AND project_id = ?
-             ORDER BY created_at DESC LIMIT 20"
-                .to_string(),
-            vec![term.clone(), term, pid],
-        )
-    } else {
-        (
-            "SELECT * FROM missions
-             WHERE title LIKE ? OR description LIKE ?
-             ORDER BY created_at DESC LIMIT 20"
-                .to_string(),
-            vec![term.clone(), term],
-        )
-    };
-
-    let mut stmt = conn.prepare(&sql).map_err(|e| db_error(e.to_string()))?;
-    let rows = stmt
-        .query_map(params_from_iter(params_vec.iter()), row_to_json)
-        .map_err(|e| db_error(e.to_string()))?;
-    let items: Result<Vec<_>, _> = rows.collect();
-    Ok(Value::Array(
-        items
-            .map_err(|e| db_error(e.to_string()))?
-            .into_iter()
-            .map(map_mission_to_renderer)
-            .collect(),
-    ))
-}
-#[tauri::command]
-fn db_missions_create(state: State<'_, AppState>, data: Value) -> ApiResult<Value> {
-    let obj = data
-        .as_object()
-        .ok_or_else(|| db_error("invalid mission payload"))?;
-    let id = next_id();
-    let project_id = obj
-        .get("projectId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| db_error("projectId is required"))?;
-    let title = obj
-        .get("title")
-        .and_then(Value::as_str)
-        .ok_or_else(|| db_error("title is required"))?;
-    let description = obj
-        .get("description")
-        .and_then(Value::as_str)
-        .ok_or_else(|| db_error("description is required"))?;
-    let provider_id = obj.get("providerId").and_then(Value::as_str);
-    let plan_provider_id = obj.get("planProviderId").and_then(Value::as_str);
-    let code_provider_id = obj.get("codeProviderId").and_then(Value::as_str);
-    let preserve_instructions = obj.get("preserveInstructions").and_then(Value::as_str);
-    let mission_type = obj
-        .get("missionType")
-        .and_then(Value::as_str)
-        .unwrap_or("implementation");
-    let base_branch = obj.get("baseBranch").and_then(Value::as_str);
-    let wall_status = if mission_type == "agents_cli" {
-        Some("running")
-    } else {
-        None
-    };
-
-    {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-        conn.execute(
-            "INSERT INTO missions
-             (id, project_id, provider_id, plan_provider_id, code_provider_id, title, description, preserve_instructions, mission_type, status, base_branch, wall_status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'created', ?10, ?11)",
-            params![
-                id,
-                project_id,
-                provider_id,
-                plan_provider_id,
-                code_provider_id,
-                title,
-                description,
-                preserve_instructions,
-                mission_type,
-                base_branch,
-                wall_status
-            ],
-        )
-        .map_err(|e| db_error(e.to_string()))?;
-    }
-    db_missions_find_by_id(state, id)
-}
-#[tauri::command]
-fn db_missions_update(state: State<'_, AppState>, id: String, data: Value) -> ApiResult<Value> {
-    let obj = data
-        .as_object()
-        .ok_or_else(|| db_error("invalid mission payload"))?;
-    let mut sets = Vec::new();
-    let mut bind_values: Vec<String> = Vec::new();
-
-    push_sql_set(
-        "title",
-        obj.get("title").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "description",
-        obj.get("description").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "provider_id",
-        obj.get("providerId").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "plan_provider_id",
-        obj.get("planProviderId").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "code_provider_id",
-        obj.get("codeProviderId").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "status",
-        obj.get("status").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "mission_type",
-        obj.get("missionType").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    if let Some(v) = obj.get("plan") {
-        sets.push("plan = ?".into());
-        bind_values.push(v.to_string());
-    }
-    if let Some(v) = obj.get("generatedCode") {
-        sets.push("generated_code = ?".into());
-        bind_values.push(v.to_string());
-    }
-    if let Some(v) = obj.get("context") {
-        sets.push("context = ?".into());
-        bind_values.push(v.to_string());
-    }
-    push_sql_set(
-        "preserve_instructions",
-        obj.get("preserveInstructions")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "error_message",
-        obj.get("errorMessage")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    if let Some(v) = obj.get("codeGenerationAttempts").and_then(Value::as_i64) {
-        sets.push("code_generation_attempts = ?".into());
-        bind_values.push(v.to_string());
-    }
-    if let Some(v) = obj.get("isCommitted").and_then(Value::as_bool) {
-        sets.push("is_committed = ?".into());
-        bind_values.push(if v { "1" } else { "0" }.to_string());
-    }
-    if let Some(v) = obj.get("isPushed").and_then(Value::as_bool) {
-        sets.push("is_pushed = ?".into());
-        bind_values.push(if v { "1" } else { "0" }.to_string());
-    }
-    if let Some(v) = obj.get("pendingCommands") {
-        sets.push("pending_commands = ?".into());
-        bind_values.push(v.to_string());
-    }
-    push_sql_set(
-        "worktree_path",
-        obj.get("worktreePath").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "worktree_branch",
-        obj.get("worktreeBranch").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "base_branch",
-        obj.get("baseBranch").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "target_branch",
-        obj.get("targetBranch").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "last_output_summary",
-        obj.get("lastOutputSummary")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    if let Some(v) = obj.get("lastGitSummary") {
-        sets.push("last_git_summary = ?".into());
-        bind_values.push(v.to_string());
-    }
-    push_sql_set(
-        "wall_status",
-        obj.get("wallStatus").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "started_at",
-        obj.get("startedAt").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-    push_sql_set(
-        "completed_at",
-        obj.get("completedAt").and_then(Value::as_str).map(str::to_string),
-        &mut sets,
-        &mut bind_values,
-    );
-
-    if sets.is_empty() {
-        return db_missions_find_by_id(state, id);
-    }
-    let sql = format!("UPDATE missions SET {} WHERE id = ?", sets.join(", "));
-    bind_values.push(id.clone());
-
-    {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-        conn.execute(&sql, params_from_iter(bind_values.iter()))
-            .map_err(|e| db_error(e.to_string()))?;
-    }
-    db_missions_find_by_id(state, id)
-}
-#[tauri::command]
-fn db_missions_delete(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let changed = conn
-        .execute("DELETE FROM missions WHERE id = ?1", params![id])
-        .map_err(|e| db_error(e.to_string()))?;
-    Ok(Value::Bool(changed > 0))
-}
-#[tauri::command]
-fn db_missions_update_status(state: State<'_, AppState>, id: String, status: String) -> ApiResult<Value> {
-    db_missions_update(state, id, serde_json::json!({ "status": status }))
-}
-#[tauri::command]
-fn db_missions_update_plan(state: State<'_, AppState>, id: String, plan: Value) -> ApiResult<Value> {
-    db_missions_update(
-        state,
-        id,
-        serde_json::json!({ "plan": plan, "status": "plan_generated" }),
-    )
-}
-#[tauri::command]
-fn db_missions_update_generated_code(
-    state: State<'_, AppState>,
-    id: String,
-    code: Value,
-) -> ApiResult<Value> {
-    db_missions_update(
-        state,
-        id,
-        serde_json::json!({ "generatedCode": code, "status": "code_ready" }),
-    )
-}
-#[tauri::command]
-fn db_missions_start(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-        conn.execute(
-            "UPDATE missions SET status = 'planning', started_at = datetime('now') WHERE id = ?1",
-            params![id.clone()],
-        )
-        .map_err(|e| db_error(e.to_string()))?;
-    }
-    db_missions_find_by_id(state, id)
-}
-#[tauri::command]
-fn db_missions_complete(
-    state: State<'_, AppState>,
-    id: String,
-    summary: Option<String>,
-) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    conn.execute(
-        "UPDATE missions SET status = 'completed', completed_at = datetime('now') WHERE id = ?1",
-        params![id.clone()],
-    )
-    .map_err(|e| db_error(e.to_string()))?;
-    if let Some(s) = summary {
-        let mut stmt = conn
-            .prepare("SELECT context FROM missions WHERE id = ?1")
-            .map_err(|e| db_error(e.to_string()))?;
-        let ctx_text = stmt
-            .query_row(params![id.clone()], |r| r.get::<_, Option<String>>(0))
-            .optional()
-            .map_err(|e| db_error(e.to_string()))?
-            .flatten();
-        let context = ctx_text
-            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        let mut context_obj = context.as_object().cloned().unwrap_or_default();
-        context_obj.insert("completionSummary".into(), Value::String(s));
-        drop(stmt);
-        drop(conn);
-        db_missions_update(state, id, serde_json::json!({ "context": context_obj }))
-    } else {
-        drop(conn);
-        db_missions_find_by_id(state, id)
-    }
-}
-#[tauri::command]
-fn db_missions_fail(state: State<'_, AppState>, id: String, error: String) -> ApiResult<Value> {
-    {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-        conn.execute(
-            "UPDATE missions SET status = 'failed', error_message = ?1, completed_at = datetime('now') WHERE id = ?2",
-            params![error, id.clone()],
-        )
-        .map_err(|e| db_error(e.to_string()))?;
-    }
-    db_missions_find_by_id(state, id)
-}
-#[tauri::command]
-fn db_missions_cancel(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-        conn.execute(
-            "UPDATE missions SET status = 'cancelled', wall_status = 'canceled', completed_at = datetime('now') WHERE id = ?1",
-            params![id.clone()],
-        )
-        .map_err(|e| db_error(e.to_string()))?;
-    }
-    db_missions_find_by_id(state, id)
-}
-#[tauri::command]
-fn db_missions_get_full_mission(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let mut mstmt = conn
-        .prepare("SELECT * FROM missions WHERE id = ?1")
-        .map_err(|e| db_error(e.to_string()))?;
-    let mission = mstmt
-        .query_row(params![id.clone()], row_to_json)
-        .optional()
-        .map_err(|e| db_error(e.to_string()))?;
-    let Some(mission) = mission else {
-        return Ok(Value::Null);
-    };
-
-    let mut stmt = conn
-        .prepare("SELECT * FROM mission_logs WHERE mission_id = ?1 ORDER BY created_at ASC")
-        .map_err(|e| db_error(e.to_string()))?;
-    let rows = stmt
-        .query_map(params![id], row_to_json)
-        .map_err(|e| db_error(e.to_string()))?;
-    let logs: Result<Vec<_>, _> = rows.collect();
-    Ok(serde_json::json!({
-      "mission": map_mission_to_renderer(mission),
-      "logs": logs.map_err(|e| db_error(e.to_string()))?
-    }))
-}
-
-#[tauri::command]
-fn db_mission_logs_find_all(state: State<'_, AppState>, options: Option<Value>) -> ApiResult<Value> {
-    let mission_id = options
-        .as_ref()
-        .and_then(|v| v.get("missionId"))
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let limit = options
-        .as_ref()
-        .and_then(|v| v.get("limit"))
-        .and_then(Value::as_u64)
-        .unwrap_or(100) as i64;
-    let offset = options
-        .as_ref()
-        .and_then(|v| v.get("offset"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0) as i64;
-
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let (sql, params_dyn): (&str, Vec<String>) = if let Some(mid) = mission_id {
-        (
-            "SELECT * FROM mission_logs WHERE mission_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
-            vec![mid, limit.to_string(), offset.to_string()],
-        )
-    } else {
-        (
-            "SELECT * FROM mission_logs ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
-            vec![limit.to_string(), offset.to_string()],
-        )
-    };
-    let mut stmt = conn.prepare(sql).map_err(|e| db_error(e.to_string()))?;
-    let rows = stmt
-        .query_map(params_from_iter(params_dyn.iter()), row_to_json)
-        .map_err(|e| db_error(e.to_string()))?;
-    let items: Result<Vec<_>, _> = rows.collect();
-    Ok(Value::Array(
-        items
-            .map_err(|e| db_error(e.to_string()))?
-            .into_iter()
-            .map(map_mission_log_to_renderer)
-            .collect(),
-    ))
-}
-#[tauri::command]
-fn db_mission_logs_find_by_id(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let mut stmt = conn
-        .prepare("SELECT * FROM mission_logs WHERE id = ?1")
-        .map_err(|e| db_error(e.to_string()))?;
-    let row = stmt
-        .query_row(params![id], row_to_json)
-        .optional()
-        .map_err(|e| db_error(e.to_string()))?;
-    Ok(row.map(map_mission_log_to_renderer).unwrap_or(Value::Null))
-}
-#[tauri::command]
-fn db_mission_logs_find_by_mission(
-    state: State<'_, AppState>,
-    mission_id: String,
-    limit: Option<u32>,
-    offset: Option<u32>,
-) -> ApiResult<Value> {
-    db_mission_logs_find_all(
-        state,
-        Some(serde_json::json!({ "missionId": mission_id, "limit": limit.unwrap_or(1000), "offset": offset.unwrap_or(0) })),
-    )
-}
-#[tauri::command]
-fn db_mission_logs_find_by_level(
-    state: State<'_, AppState>,
-    level: String,
-    mission_id: Option<String>,
-) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let (sql, params_dyn) = if let Some(mid) = mission_id {
-        (
-            "SELECT * FROM mission_logs WHERE type = ? AND mission_id = ? ORDER BY created_at ASC, rowid ASC",
-            vec![level, mid],
-        )
-    } else {
-        (
-            "SELECT * FROM mission_logs WHERE type = ? ORDER BY created_at DESC, rowid DESC LIMIT 100",
-            vec![level],
-        )
-    };
-    let mut stmt = conn.prepare(sql).map_err(|e| db_error(e.to_string()))?;
-    let rows = stmt
-        .query_map(params_from_iter(params_dyn.iter()), row_to_json)
-        .map_err(|e| db_error(e.to_string()))?;
-    let items: Result<Vec<_>, _> = rows.collect();
-    Ok(Value::Array(
-        items
-            .map_err(|e| db_error(e.to_string()))?
-            .into_iter()
-            .map(map_mission_log_to_renderer)
-            .collect(),
-    ))
-}
-#[tauri::command]
-fn db_mission_logs_search(
-    state: State<'_, AppState>,
-    query: String,
-    mission_id: Option<String>,
-) -> ApiResult<Value> {
-    let term = format!("%{query}%");
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let (sql, params_dyn) = if let Some(mid) = mission_id {
-        (
-            "SELECT * FROM mission_logs WHERE content LIKE ? AND mission_id = ? ORDER BY created_at ASC, rowid ASC",
-            vec![term, mid],
-        )
-    } else {
-        (
-            "SELECT * FROM mission_logs WHERE content LIKE ? ORDER BY created_at DESC, rowid DESC LIMIT 100",
-            vec![term],
-        )
-    };
-    let mut stmt = conn.prepare(sql).map_err(|e| db_error(e.to_string()))?;
-    let rows = stmt
-        .query_map(params_from_iter(params_dyn.iter()), row_to_json)
-        .map_err(|e| db_error(e.to_string()))?;
-    let items: Result<Vec<_>, _> = rows.collect();
-    Ok(Value::Array(
-        items
-            .map_err(|e| db_error(e.to_string()))?
-            .into_iter()
-            .map(map_mission_log_to_renderer)
-            .collect(),
-    ))
-}
-#[tauri::command]
-fn db_mission_logs_create(state: State<'_, AppState>, data: Value) -> ApiResult<Value> {
-    let obj = data
-        .as_object()
-        .ok_or_else(|| db_error("invalid mission log payload"))?;
-    let id = next_id();
-    let mission_id = obj
-        .get("missionId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| db_error("missionId is required"))?;
-    let log_type = obj
-        .get("type")
-        .and_then(Value::as_str)
-        .ok_or_else(|| db_error("type is required"))?;
-    let content = obj
-        .get("content")
-        .and_then(Value::as_str)
-        .ok_or_else(|| db_error("content is required"))?;
-    let metadata = obj.get("metadata").cloned();
-
-    {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-        conn.execute(
-            "INSERT INTO mission_logs (id, mission_id, type, content, metadata, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
-            params![
-                id.clone(),
-                mission_id,
-                log_type,
-                content,
-                metadata.map(|m| m.to_string())
-            ],
-        )
-        .map_err(|e| db_error(e.to_string()))?;
-    }
-    db_mission_logs_find_by_id(state, id)
-}
-#[tauri::command]
-fn db_mission_logs_delete(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let changed = conn
-        .execute("DELETE FROM mission_logs WHERE id = ?1", params![id])
-        .map_err(|e| db_error(e.to_string()))?;
-    Ok(Value::Bool(changed > 0))
-}
-#[tauri::command]
-fn db_mission_logs_delete_by_mission(
-    state: State<'_, AppState>,
-    mission_id: String,
-) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let changed = conn
-        .execute(
-            "DELETE FROM mission_logs WHERE mission_id = ?1",
-            params![mission_id],
-        )
-        .map_err(|e| db_error(e.to_string()))?;
-    Ok(Value::from(changed as i64))
-}
-#[tauri::command]
-fn db_mission_logs_log_info(
-    state: State<'_, AppState>,
-    mission_id: String,
-    message: String,
-    metadata: Option<Value>,
-) -> ApiResult<Value> {
-    db_mission_logs_create(
-        state,
-        serde_json::json!({ "missionId": mission_id, "type": "info", "content": message, "metadata": metadata }),
-    )
-}
-#[tauri::command]
-fn db_mission_logs_log_warning(
-    state: State<'_, AppState>,
-    mission_id: String,
-    message: String,
-    metadata: Option<Value>,
-) -> ApiResult<Value> {
-    db_mission_logs_create(
-        state,
-        serde_json::json!({ "missionId": mission_id, "type": "info", "content": format!("[WARNING] {}", message), "metadata": metadata }),
-    )
-}
-#[tauri::command]
-fn db_mission_logs_log_error(
-    state: State<'_, AppState>,
-    mission_id: String,
-    message: String,
-    metadata: Option<Value>,
-) -> ApiResult<Value> {
-    db_mission_logs_create(
-        state,
-        serde_json::json!({ "missionId": mission_id, "type": "error", "content": message, "metadata": metadata }),
-    )
-}
-#[tauri::command]
-fn db_mission_logs_log_debug(
-    state: State<'_, AppState>,
-    mission_id: String,
-    message: String,
-    metadata: Option<Value>,
-) -> ApiResult<Value> {
-    db_mission_logs_create(
-        state,
-        serde_json::json!({ "missionId": mission_id, "type": "info", "content": format!("[DEBUG] {}", message), "metadata": metadata }),
-    )
-}
-#[tauri::command]
-fn db_mission_logs_log_agent_action(
-    state: State<'_, AppState>,
-    mission_id: String,
-    action: String,
-    details: Option<Value>,
-) -> ApiResult<Value> {
-    db_mission_logs_create(
-        state,
-        serde_json::json!({ "missionId": mission_id, "type": "action", "content": action, "metadata": details }),
-    )
-}
-#[tauri::command]
-fn db_mission_logs_log_user_input(
-    state: State<'_, AppState>,
-    mission_id: String,
-    input: String,
-) -> ApiResult<Value> {
-    db_mission_logs_create(
-        state,
-        serde_json::json!({ "missionId": mission_id, "type": "user_input", "content": input }),
-    )
-}
-#[tauri::command]
-fn db_mission_logs_get_stats(state: State<'_, AppState>, mission_id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let total: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM mission_logs WHERE mission_id = ?1",
-            params![mission_id.clone()],
-            |r| r.get(0),
-        )
-        .map_err(|e| db_error(e.to_string()))?;
-    let mut stmt = conn
-        .prepare("SELECT type, COUNT(*) as c FROM mission_logs WHERE mission_id = ?1 GROUP BY type")
-        .map_err(|e| db_error(e.to_string()))?;
-    let rows = stmt
-        .query_map(params![mission_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
-        .map_err(|e| db_error(e.to_string()))?;
-    let mut by_type = serde_json::Map::new();
-    for row in rows {
-        let (t, c) = row.map_err(|e| db_error(e.to_string()))?;
-        by_type.insert(t, Value::from(c));
-    }
-    Ok(serde_json::json!({ "total": total, "byType": by_type }))
-}
-#[tauri::command]
-fn db_mission_logs_get_usage_stats(
-    state: State<'_, AppState>,
-    mission_id: String,
-) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let mut stmt = conn
-        .prepare("SELECT metadata FROM mission_logs WHERE mission_id = ?1")
-        .map_err(|e| db_error(e.to_string()))?;
-    let rows = stmt
-        .query_map(params![mission_id], |r| r.get::<_, Option<String>>(0))
-        .map_err(|e| db_error(e.to_string()))?;
-    let mut total_tokens = 0i64;
-    let mut total_duration_ms = 0i64;
-    for raw in rows {
-        if let Some(text) = raw.map_err(|e| db_error(e.to_string()))? {
-            if let Ok(v) = serde_json::from_str::<Value>(&text) {
-                total_tokens += v.get("tokensUsed").and_then(Value::as_i64).unwrap_or(0);
-                total_duration_ms += v.get("durationMs").and_then(Value::as_i64).unwrap_or(0);
-            }
-        }
-    }
-    Ok(serde_json::json!({ "totalTokens": total_tokens, "totalDurationMs": total_duration_ms }))
-}
-#[tauri::command]
-fn db_mission_logs_get_latest(
-    state: State<'_, AppState>,
-    mission_id: String,
-    count: Option<u32>,
-) -> ApiResult<Value> {
-    db_mission_logs_find_by_mission(state, mission_id, Some(count.unwrap_or(10)), Some(0))
 }
 
 #[tauri::command]
@@ -2552,68 +1694,10 @@ fn db_utils_backup(state: State<'_, AppState>, dest_path: String) -> ApiResult<b
         })
 }
 
-// ---------- AI ----------
-#[tauri::command]
-fn ai_generate_plan(_mission_id: String, _options: Option<Value>) -> ApiResult<Value> {
-    mapped_not_implemented("ai:generatePlan")
-}
-#[tauri::command]
-fn ai_generate_code(_mission_id: String, _options: Option<Value>) -> ApiResult<Value> {
-    mapped_not_implemented("ai:generateCode")
-}
-#[tauri::command]
-fn ai_apply_changes(_mission_id: String, _options: Option<Value>) -> ApiResult<Value> {
-    mapped_not_implemented("ai:applyChanges")
-}
-#[tauri::command]
-fn ai_test_connection(_provider_id: String) -> ApiResult<Value> {
-    mapped_not_implemented("ai:testConnection")
-}
-#[tauri::command]
-fn ai_validate_provider(_provider: Value) -> ApiResult<Value> {
-    mapped_not_implemented("ai:validateProvider")
-}
-#[tauri::command]
-fn ai_invalidate_adapter(_provider_id: String) -> ApiResult<bool> {
-    Err(ApiError::not_implemented("ai:invalidateAdapter"))
-}
-
 // ---------- Git / Worktree / Review ----------
-#[tauri::command]
-fn git_get_info(_project_path: String) -> ApiResult<Value> {
-    mapped_not_implemented("git:getInfo")
-}
-#[tauri::command]
-fn git_get_status(_project_path: String) -> ApiResult<Value> {
-    mapped_not_implemented("git:getStatus")
-}
-#[tauri::command]
-fn git_get_branch_state(_project_path: String) -> ApiResult<Value> {
-    mapped_not_implemented("git:getBranchState")
-}
-#[tauri::command]
-fn git_get_file_diff_head(_project_path: String, _file_path: String) -> ApiResult<Value> {
-    mapped_not_implemented("git:getFileDiffHead")
-}
-#[tauri::command]
-fn git_get_file_diff_against_base(
-    _project_path: String,
-    _file_path: String,
-    _base_ref: String,
-) -> ApiResult<Value> {
-    mapped_not_implemented("git:getFileDiffAgainstBase")
-}
-#[tauri::command]
-fn git_is_repo(_project_path: String) -> ApiResult<bool> {
-    Err(ApiError::not_implemented("git:isRepo"))
-}
 #[tauri::command]
 fn git_get_current_branch(project_path: String) -> ApiResult<String> {
     git_current_branch_impl(&project_path)
-}
-#[tauri::command]
-fn git_get_default_branch(_project_path: String) -> ApiResult<String> {
-    Err(ApiError::not_implemented("git:getDefaultBranch"))
 }
 #[tauri::command]
 fn git_get_local_branches(project_path: String) -> ApiResult<Value> {
@@ -2621,42 +1705,6 @@ fn git_get_local_branches(project_path: String) -> ApiResult<Value> {
     Ok(Value::Array(
         branches.into_iter().map(Value::String).collect(),
     ))
-}
-#[tauri::command]
-fn git_create_branch(
-    _project_path: String,
-    _branch_name: String,
-    _from_branch: Option<String>,
-) -> ApiResult<Value> {
-    mapped_not_implemented("git:createBranch")
-}
-#[tauri::command]
-fn git_list_files(_project_path: String, _max_files: Option<u32>) -> ApiResult<Value> {
-    mapped_not_implemented("git:listFiles")
-}
-#[tauri::command]
-fn git_get_recent_commits(_project_path: String, _count: Option<u32>) -> ApiResult<Value> {
-    mapped_not_implemented("git:getRecentCommits")
-}
-#[tauri::command]
-fn git_commit(_project_path: String, _message: String, _files: Option<Vec<String>>) -> ApiResult<Value> {
-    mapped_not_implemented("git:commit")
-}
-#[tauri::command]
-fn git_get_worktree_info(_project_path: String) -> ApiResult<Value> {
-    mapped_not_implemented("git:getWorktreeInfo")
-}
-#[tauri::command]
-fn git_push(_project_path: String) -> ApiResult<Value> {
-    mapped_not_implemented("git:push")
-}
-#[tauri::command]
-fn git_pull(_project_path: String) -> ApiResult<Value> {
-    mapped_not_implemented("git:pull")
-}
-#[tauri::command]
-fn git_reset(_project_path: String, _git_ref: Option<String>) -> ApiResult<Value> {
-    mapped_not_implemented("git:reset")
 }
 #[tauri::command]
 fn git_get_review_diffs(worktree_path: String) -> ApiResult<Value> {
@@ -2669,15 +1717,6 @@ fn git_get_review_diffs(worktree_path: String) -> ApiResult<Value> {
             "summary": Value::Null
         })),
     }
-}
-#[tauri::command]
-fn git_apply_worktree_patch(
-    _main_project_path: String,
-    _worktree_path: String,
-    _target_branch: String,
-    _options: Option<Value>,
-) -> ApiResult<Value> {
-    mapped_not_implemented("git:applyWorktreePatch")
 }
 #[tauri::command]
 fn review_get_diffs_bundle(worktree_paths: Vec<String>) -> ApiResult<Value> {
@@ -2706,218 +1745,20 @@ fn review_get_diffs_bundle(worktree_paths: Vec<String>) -> ApiResult<Value> {
     Ok(Value::Array(out))
 }
 #[tauri::command]
-fn worktree_ensure_for_mission(state: State<'_, AppState>, mission_id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let row: Option<(String, String, String, Option<String>, Option<String>, Option<String>)> = conn
-        .query_row(
-            "SELECT m.project_id, m.title, p.path, m.base_branch, m.worktree_path, m.worktree_branch
-             FROM missions m JOIN projects p ON p.id = m.project_id
-             WHERE m.id = ?1",
-            params![mission_id.clone()],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
-        )
-        .optional()
-        .map_err(|e| db_error(e.to_string()))?;
-    let Some((_project_id, title, project_path, base_branch, existing_path, existing_branch)) = row else {
-        return Ok(serde_json::json!({"success": false, "error": "Mission not found"}));
-    };
-    if let (Some(p), Some(b)) = (existing_path.clone(), existing_branch.clone()) {
-        return Ok(serde_json::json!({"success": true, "worktreePath": p, "worktreeBranch": b }));
-    }
-
-    let branch = safe_branch_name("dcc-mission", &mission_id, &title);
-    let worktree_path = format!("{}/.dcc/worktrees/{}", project_path, branch);
-    let from_ref = base_branch.unwrap_or_else(|| "HEAD".to_string());
-    let _ = std::fs::create_dir_all(format!("{}/.dcc/worktrees", project_path));
-    run_git(&project_path, &["worktree", "add", &worktree_path, "-b", &branch, &from_ref])?;
-    conn.execute(
-        "UPDATE missions SET worktree_path = ?1, worktree_branch = ?2 WHERE id = ?3",
-        params![worktree_path.clone(), branch.clone(), mission_id],
-    )
-    .map_err(|e| db_error(e.to_string()))?;
-    Ok(serde_json::json!({"success": true, "worktreePath": worktree_path, "worktreeBranch": branch }))
-}
-#[tauri::command]
-fn worktree_merge_into_main(state: State<'_, AppState>, mission_id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let row: Option<(String, Option<String>, Option<String>)> = conn
-        .query_row(
-            "SELECT p.path, m.worktree_path, m.worktree_branch
-             FROM missions m JOIN projects p ON p.id = m.project_id
-             WHERE m.id = ?1",
-            params![mission_id.clone()],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .optional()
-        .map_err(|e| db_error(e.to_string()))?;
-    let Some((project_path, worktree_path, worktree_branch)) = row else {
-        return Ok(serde_json::json!({"success": false, "error": "Mission not found"}));
-    };
-    let (Some(wp), Some(wb)) = (worktree_path, worktree_branch) else {
-        return Ok(serde_json::json!({"success": false, "error": "Mission has no worktree"}));
-    };
-
-    let target = run_git(&project_path, &["branch", "--show-current"])
-        .unwrap_or_else(|_| "main".to_string())
-        .trim()
-        .to_string();
-    let target_branch = if target.is_empty() { "main".to_string() } else { target };
-    run_git(&project_path, &["checkout", &target_branch])?;
-    run_git(&project_path, &["merge", &wb, "--no-edit"])?;
-    let _ = run_git(&project_path, &["worktree", "remove", "--force", &wp]);
-    let _ = run_git(&project_path, &["branch", "-D", &wb]);
-    conn.execute(
-        "UPDATE missions SET worktree_path = NULL, worktree_branch = NULL WHERE id = ?1",
-        params![mission_id],
-    )
-    .map_err(|e| db_error(e.to_string()))?;
-    Ok(serde_json::json!({"success": true}))
-}
-#[tauri::command]
-fn worktree_discard(state: State<'_, AppState>, mission_id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let row: Option<(String, Option<String>, Option<String>)> = conn
-        .query_row(
-            "SELECT p.path, m.worktree_path, m.worktree_branch
-             FROM missions m JOIN projects p ON p.id = m.project_id
-             WHERE m.id = ?1",
-            params![mission_id.clone()],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .optional()
-        .map_err(|e| db_error(e.to_string()))?;
-    let Some((project_path, worktree_path, worktree_branch)) = row else {
-        return Ok(serde_json::json!({"success": false, "error": "Mission not found"}));
-    };
-    let (Some(wp), Some(wb)) = (worktree_path, worktree_branch) else {
-        return Ok(serde_json::json!({"success": false, "error": "Mission has no worktree"}));
-    };
-    let _ = run_git(&project_path, &["worktree", "remove", "--force", &wp]);
-    let _ = run_git(&project_path, &["branch", "-D", &wb]);
-    conn.execute(
-        "UPDATE missions SET worktree_path = NULL, worktree_branch = NULL, wall_status = 'discarded' WHERE id = ?1",
-        params![mission_id],
-    )
-    .map_err(|e| db_error(e.to_string()))?;
-    Ok(serde_json::json!({"success": true}))
-}
-#[tauri::command]
-fn missions_get_diffs(state: State<'_, AppState>, mission_id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let row: Option<(Option<String>, Option<String>)> = conn
-        .query_row(
-            "SELECT mission_type, worktree_path FROM missions WHERE id = ?1",
-            params![mission_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()
-        .map_err(|e| db_error(e.to_string()))?;
-    let Some((mission_type, worktree_path)) = row else {
-        return Ok(serde_json::json!({"success": false, "error": "Mission not found", "files": [], "summary": Value::Null}));
-    };
-    if mission_type.as_deref() != Some("agents_cli") || worktree_path.is_none() {
-        return Ok(serde_json::json!({"success": false, "error": "Mission has no worktree or is not agents_cli", "files": [], "summary": Value::Null}));
-    }
-    build_review_diffs_for_path(worktree_path.as_deref().unwrap())
-}
-#[tauri::command]
-fn worktree_apply_mission_patch(
-    state: State<'_, AppState>,
-    mission_id: String,
-    target_branch: String,
-    options: Option<Value>,
-) -> ApiResult<Value> {
-    let row: Option<(String, Option<String>)> = {
+async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
+    let row: Option<(String, String, String, Option<String>, Option<String>)> = {
         let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-        conn.query_row(
-            "SELECT p.path, m.worktree_path
-             FROM missions m JOIN projects p ON p.id = m.project_id
-             WHERE m.id = ?1",
-            params![mission_id.clone()],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()
-        .map_err(|e| db_error(e.to_string()))?
+        conn
+            .query_row(
+                "SELECT c.name, p.path, c.base_branch, c.worktree_path, c.branch
+                 FROM combs c JOIN projects p ON p.id = c.project_id
+                 WHERE c.id = ?1",
+                params![comb_id.clone()],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .optional()
+            .map_err(|e| db_error(e.to_string()))?
     };
-    let Some((project_path, worktree_path)) = row else {
-        return Ok(serde_json::json!({"success": false, "error": "Mission not found"}));
-    };
-    let Some(worktree_path) = worktree_path else {
-        return Ok(serde_json::json!({"success": false, "error": "Mission has no worktree"}));
-    };
-
-    let patch = run_git(&worktree_path, &["diff", "HEAD"])?;
-    if patch.trim().is_empty() {
-        return Ok(serde_json::json!({"success": false, "error": "Nenhuma alteração para aplicar."}));
-    }
-    run_git(&project_path, &["checkout", &target_branch])?;
-    let mut child = Command::new("git")
-        .arg("apply")
-        .arg("-")
-        .current_dir(&project_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| db_error(e.to_string()))?;
-    {
-        use std::io::Write;
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin
-                .write_all(patch.as_bytes())
-                .map_err(|e| db_error(e.to_string()))?;
-        }
-    }
-    let output = child.wait_with_output().map_err(|e| db_error(e.to_string()))?;
-    if !output.status.success() {
-        let include_files = options
-            .as_ref()
-            .and_then(|v| v.get("includeFiles"))
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(str::to_string))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let paths_to_copy = if include_files.is_empty() {
-            parse_git_status_porcelain(&run_git(&worktree_path, &["status", "--porcelain"]).unwrap_or_default())
-                .into_iter()
-                .map(|(_, p)| p)
-                .collect::<Vec<_>>()
-        } else {
-            include_files
-        };
-        if let Err(copy_err) = copy_paths_from_worktree(&worktree_path, &project_path, &paths_to_copy)
-        {
-            return Ok(serde_json::json!({
-              "success": false,
-              "error": format!("{} (fallback copy failed: {})", String::from_utf8_lossy(&output.stderr), copy_err.message),
-              "applyFailed": true
-            }));
-        }
-    }
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    conn.execute(
-        "UPDATE missions SET target_branch = ?1, wall_status = 'applied' WHERE id = ?2",
-        params![target_branch, mission_id],
-    )
-    .map_err(|e| db_error(e.to_string()))?;
-    Ok(serde_json::json!({"success": true}))
-}
-#[tauri::command]
-fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    let row: Option<(String, String, String, Option<String>, Option<String>)> = conn
-        .query_row(
-            "SELECT c.name, p.path, c.base_branch, c.worktree_path, c.branch
-             FROM combs c JOIN projects p ON p.id = c.project_id
-             WHERE c.id = ?1",
-            params![comb_id.clone()],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-        )
-        .optional()
-        .map_err(|e| db_error(e.to_string()))?;
     let Some((name, project_path, base_branch, existing_path, existing_branch)) = row else {
         return Ok(serde_json::json!({"success": false, "error": "Comb not found"}));
     };
@@ -2929,8 +1770,6 @@ fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> ApiResul
         }));
     }
 
-    drop(conn);
-
     let branch = safe_branch_name("dcc-comb", &comb_id, &name);
     let worktree_path = format!("{}/.dcc/worktrees/{}", project_path, branch);
     let from_ref = if base_branch.trim().is_empty() {
@@ -2938,11 +1777,29 @@ fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> ApiResul
     } else {
         base_branch
     };
-    let _ = std::fs::create_dir_all(format!("{}/.dcc/worktrees", project_path));
-    run_git(
-        &project_path,
-        &["worktree", "add", &worktree_path, "-b", &branch, &from_ref],
-    )?;
+
+    let project_path_git = project_path.clone();
+    let worktree_path_git = worktree_path.clone();
+    let branch_git = branch.clone();
+    let from_ref_git = from_ref.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let wt_parent = format!("{}/.dcc/worktrees", project_path_git);
+        let _ = std::fs::create_dir_all(&wt_parent);
+        run_git(
+            &project_path_git,
+            &[
+                "worktree",
+                "add",
+                &worktree_path_git,
+                "-b",
+                &branch_git,
+                &from_ref_git,
+            ],
+        )
+    })
+    .await
+    .map_err(|e| db_error(e.to_string()))??;
 
     let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
     conn
@@ -3034,45 +1891,55 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
         .into_iter()
         .filter_map(|v| v.as_str().map(str::to_string))
         .collect::<Vec<_>>();
-    let pty_id = format!("pty-{}", next_id());
-    let mut child = Command::new(command)
-        .args(&args)
-        .current_dir(cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+
+    let cols = options.get("cols").and_then(Value::as_u64).unwrap_or(80) as u16;
+    let rows = options.get("rows").and_then(Value::as_u64).unwrap_or(24) as u16;
+
+    let pty_system = native_pty_system();
+    let pty_pair = pty_system
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .map_err(|e| db_error(e.to_string()))?;
+
+    let mut cmd = CommandBuilder::new(command);
+    cmd.args(&args);
+    cmd.cwd(cwd);
+
+    let child = pty_pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| db_error(e.to_string()))?;
+
+    let reader = pty_pair.master.try_clone_reader().map_err(|e| db_error(e.to_string()))?;
+    let writer = pty_pair.master.take_writer().map_err(|e| db_error(e.to_string()))?;
+    
+    let pty_id = format!("pty-{}", next_id());
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let output_buffer = new_terminal_output_buffer();
+    
+    let reader_thread = Some(spawn_terminal_reader_thread(
+        reader,
+        app.clone(),
+        pty_id.clone(),
+        stop_flag.clone(),
+        output_buffer.clone(),
+    ));
+
     let mut terminals = state
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    let output_buffer = new_terminal_output_buffer();
+
     terminals.insert(
         pty_id.clone(),
         ManagedTerminal {
-            stdout_thread: child.stdout.take().map(|stdout| {
-                spawn_terminal_reader_thread(
-                    stdout,
-                    app.clone(),
-                    pty_id.clone(),
-                    "stdout",
-                    stop_flag.clone(),
-                    output_buffer.clone(),
-                )
-            }),
-            stderr_thread: child.stderr.take().map(|stderr| {
-                spawn_terminal_reader_thread(
-                    stderr,
-                    app.clone(),
-                    pty_id.clone(),
-                    "stderr",
-                    stop_flag.clone(),
-                    output_buffer.clone(),
-                )
-            }),
+            pty_master: pty_pair.master,
             child,
+            writer: Arc::new(Mutex::new(writer)),
             mission_id: None,
             pane_id: None,
             cwd: cwd.to_string(),
@@ -3081,15 +1948,17 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
             started_at: iso_now(),
             stop_flag,
             output_buffer,
+            reader_thread,
         },
     );
+
     Ok(serde_json::json!({ "ptyId": pty_id }))
 }
 
 fn terminal_session_json(pty_id: &str, t: &mut ManagedTerminal) -> Value {
     let wait = t.child.try_wait().ok().flatten();
     let (status, exited_at, exit_code) = if let Some(s) = wait {
-        ("exited", Some(iso_now()), s.code())
+        ("exited", Some(iso_now()), Some(s.exit_code()))
     } else {
         ("running", None, None)
     };
@@ -3105,31 +1974,48 @@ fn terminal_session_json(pty_id: &str, t: &mut ManagedTerminal) -> Value {
     })
 }
 
-fn spawn_terminal_reader_thread<R: std::io::Read + Send + 'static>(
-    reader: R,
+fn spawn_terminal_reader_thread(
+    mut reader: Box<dyn Read + Send>,
     app: AppHandle,
     pty_id: String,
-    stream: &'static str,
     stop_flag: Arc<AtomicBool>,
     output_buffer: Arc<Mutex<VecDeque<String>>>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
-        let mut buf_reader = BufReader::new(reader);
+        let mut buffer = [0u8; 8192];
         loop {
             if stop_flag.load(Ordering::Relaxed) {
                 break;
             }
-            let mut line = String::new();
-            match buf_reader.read_line(&mut line) {
+            match reader.read(&mut buffer) {
                 Ok(0) => break,
-                Ok(_) => {
-                    append_terminal_line(&output_buffer, &line);
+                Ok(n) => {
+                    let data = String::from_utf8_lossy(&buffer[..n]).to_string();
+                    append_terminal_line(&output_buffer, &data);
+                    
+                    // Simple pattern matching for "Attention"
+                    // OSC 9;9; (Ghostty) or common waiting prompts
+                    let needs_attention = data.contains("\x1b]9;9;") 
+                        || data.contains("(y/n)?") 
+                        || data.contains("Waiting for input...")
+                        || data.contains("Continue? [Y/n]");
+                    
+                    if needs_attention {
+                        let _ = app.emit(
+                            "terminal-attention",
+                            serde_json::json!({
+                              "ptyId": pty_id,
+                              "status": "waiting"
+                            }),
+                        );
+                    }
+
                     let _ = app.emit(
                         "terminal-output",
                         serde_json::json!({
                           "ptyId": pty_id,
-                          "data": line,
-                          "stream": stream
+                          "data": data,
+                          "stream": "stdout"
                         }),
                     );
                 }
@@ -3150,87 +2036,39 @@ fn terminal_get_or_create(
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
+    
     let existing_id = terminals
         .iter_mut()
         .find(|(_, t)| t.mission_id.as_deref() == Some(mission_id.as_str()))
         .map(|(id, _)| id.clone());
+
     if let Some(pty_id) = existing_id {
         if let Some(t) = terminals.get_mut(&pty_id) {
             let session = terminal_session_json(&pty_id, t);
             return Ok(serde_json::json!({ "ptyId": pty_id, "session": session }));
         }
     }
-    let cwd = options
-        .get("cwd")
-        .and_then(Value::as_str)
-        .ok_or_else(|| db_error("cwd is required"))?;
-    let command = options
-        .get("command")
-        .and_then(Value::as_str)
-        .unwrap_or("bash");
-    let args = options
-        .get("args")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|v| v.as_str().map(str::to_string))
-        .collect::<Vec<_>>();
-    let mut child = Command::new(command)
-        .args(&args)
-        .current_dir(cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| db_error(e.to_string()))?;
-    let pty_id = format!("pty-{}", next_id());
+
+    // Drop lock before spawn to avoid deadlock or long stalls
+    drop(terminals);
+    
+    let spawn_result = terminal_spawn(state.clone(), app, options)?;
+    let pty_id = spawn_result.get("ptyId").and_then(Value::as_str).unwrap().to_string();
+    
     let mut terminals = state
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    let output_buffer = new_terminal_output_buffer();
-    terminals.insert(
-        pty_id.clone(),
-        ManagedTerminal {
-            stdout_thread: child.stdout.take().map(|stdout| {
-                spawn_terminal_reader_thread(
-                    stdout,
-                    app.clone(),
-                    pty_id.clone(),
-                    "stdout",
-                    stop_flag.clone(),
-                    output_buffer.clone(),
-                )
-            }),
-            stderr_thread: child.stderr.take().map(|stderr| {
-                spawn_terminal_reader_thread(
-                    stderr,
-                    app.clone(),
-                    pty_id.clone(),
-                    "stderr",
-                    stop_flag.clone(),
-                    output_buffer.clone(),
-                )
-            }),
-            child,
-            mission_id: Some(mission_id),
-            pane_id: None,
-            cwd: cwd.to_string(),
-            command: command.to_string(),
-            args,
-            started_at: iso_now(),
-            stop_flag,
-            output_buffer,
-        },
-    );
-    let session = terminals
-        .get_mut(&pty_id)
-        .map(|t| terminal_session_json(&pty_id, t))
-        .unwrap_or(Value::Null);
-    Ok(serde_json::json!({ "ptyId": pty_id, "session": session }))
+    
+    if let Some(t) = terminals.get_mut(&pty_id) {
+        t.mission_id = Some(mission_id);
+        let session = terminal_session_json(&pty_id, t);
+        return Ok(serde_json::json!({ "ptyId": pty_id, "session": session }));
+    }
+    
+    Err(db_error("Failed to re-acquire spawned terminal"))
 }
+
 #[tauri::command]
 fn terminal_get_session(state: State<'_, AppState>, mission_id: String) -> ApiResult<Value> {
     let mut terminals = state
@@ -3245,41 +2083,60 @@ fn terminal_get_session(state: State<'_, AppState>, mission_id: String) -> ApiRe
     }
     Ok(Value::Null)
 }
+
 #[tauri::command]
 fn terminal_write(state: State<'_, AppState>, pty_id: String, data: String) -> ApiResult<Value> {
-    let mut terminals = state
+    let terminals = state
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    if let Some(t) = terminals.get_mut(&pty_id) {
-        if let Some(stdin) = t.child.stdin.as_mut() {
-            stdin
-                .write_all(data.as_bytes())
-                .map_err(|e| db_error(e.to_string()))?;
-            return Ok(serde_json::json!({ "ok": true }));
-        }
+    
+    if let Some(t) = terminals.get(&pty_id) {
+        let mut writer = t.writer.lock().map_err(|_| db_error("writer lock poisoned"))?;
+        writer
+            .write_all(data.as_bytes())
+            .map_err(|e| db_error(e.to_string()))?;
+        return Ok(serde_json::json!({ "ok": true }));
     }
     Ok(serde_json::json!({ "ok": false }))
 }
+
 #[tauri::command]
-fn terminal_resize(_pty_id: String, _cols: u16, _rows: u16) -> ApiResult<Value> {
-    Ok(serde_json::json!({ "ok": true }))
+fn terminal_resize(state: State<'_, AppState>, pty_id: String, cols: u16, rows: u16) -> ApiResult<Value> {
+    let terminals = state
+        .terminals
+        .lock()
+        .map_err(|_| db_error("terminals lock poisoned"))?;
+    
+    if let Some(t) = terminals.get(&pty_id) {
+        t.pty_master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| db_error(e.to_string()))?;
+        return Ok(serde_json::json!({ "ok": true }));
+    }
+    Ok(serde_json::json!({ "ok": false }))
 }
+
 #[tauri::command]
 fn terminal_kill(state: State<'_, AppState>, app: AppHandle, pty_id: String) -> ApiResult<Value> {
     let mut terminals = state
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
+    
     if let Some(mut t) = terminals.remove(&pty_id) {
         t.stop_flag.store(true, Ordering::Relaxed);
-        let _ = t.child.kill();
-        if let Some(h) = t.stdout_thread.take() {
-            let _ = h.join();
+        // On some OSs, closing the pty master will signal the child
+        drop(t.pty_master); 
+        if let Some(reader_thread) = t.reader_thread.take() {
+            let _ = reader_thread.join();
         }
-        if let Some(h) = t.stderr_thread.take() {
-            let _ = h.join();
-        }
+        
         let _ = app.emit(
             "terminal-exit",
             serde_json::json!({ "ptyId": pty_id, "code": -1 }),
@@ -3288,6 +2145,7 @@ fn terminal_kill(state: State<'_, AppState>, app: AppHandle, pty_id: String) -> 
     }
     Ok(serde_json::json!({ "ok": false }))
 }
+
 #[tauri::command]
 fn terminal_kill_by_mission_id(
     state: State<'_, AppState>,
@@ -3298,28 +2156,26 @@ fn terminal_kill_by_mission_id(
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
+    
     let ids = terminals
         .iter()
         .filter(|(_, t)| t.mission_id.as_deref() == Some(mission_id.as_str()))
         .map(|(id, _)| id.clone())
         .collect::<Vec<_>>();
-    let mut killed = false;
+    
     for id in ids {
         if let Some(mut t) = terminals.remove(&id) {
             t.stop_flag.store(true, Ordering::Relaxed);
-            let _ = t.child.kill();
-            if let Some(h) = t.stdout_thread.take() {
-                let _ = h.join();
-            }
-            if let Some(h) = t.stderr_thread.take() {
-                let _ = h.join();
+            drop(t.pty_master);
+            if let Some(reader_thread) = t.reader_thread.take() {
+                let _ = reader_thread.join();
             }
             let _ = app.emit("terminal-exit", serde_json::json!({ "ptyId": id, "code": -1 }));
-            killed = true;
         }
     }
-    Ok(serde_json::json!({ "ok": killed }))
+    Ok(serde_json::json!({ "ok": true }))
 }
+
 #[tauri::command]
 fn terminal_get_or_create_for_pane(
     state: State<'_, AppState>,
@@ -3331,87 +2187,38 @@ fn terminal_get_or_create_for_pane(
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
+    
     let existing_id = terminals
         .iter_mut()
         .find(|(_, t)| t.pane_id.as_deref() == Some(pane_id.as_str()))
         .map(|(id, _)| id.clone());
+
     if let Some(pty_id) = existing_id {
         if let Some(t) = terminals.get_mut(&pty_id) {
             let session = terminal_session_json(&pty_id, t);
             return Ok(serde_json::json!({ "ptyId": pty_id, "session": session }));
         }
     }
-    let cwd = options
-        .get("cwd")
-        .and_then(Value::as_str)
-        .ok_or_else(|| db_error("cwd is required"))?;
-    let command = options
-        .get("command")
-        .and_then(Value::as_str)
-        .unwrap_or("bash");
-    let args = options
-        .get("args")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|v| v.as_str().map(str::to_string))
-        .collect::<Vec<_>>();
-    let mut child = Command::new(command)
-        .args(&args)
-        .current_dir(cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| db_error(e.to_string()))?;
-    let pty_id = format!("pty-{}", next_id());
+
+    drop(terminals);
+    
+    let spawn_result = terminal_spawn(state.clone(), app, options)?;
+    let pty_id = spawn_result.get("ptyId").and_then(Value::as_str).unwrap().to_string();
+    
     let mut terminals = state
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    let output_buffer = new_terminal_output_buffer();
-    terminals.insert(
-        pty_id.clone(),
-        ManagedTerminal {
-            stdout_thread: child.stdout.take().map(|stdout| {
-                spawn_terminal_reader_thread(
-                    stdout,
-                    app.clone(),
-                    pty_id.clone(),
-                    "stdout",
-                    stop_flag.clone(),
-                    output_buffer.clone(),
-                )
-            }),
-            stderr_thread: child.stderr.take().map(|stderr| {
-                spawn_terminal_reader_thread(
-                    stderr,
-                    app.clone(),
-                    pty_id.clone(),
-                    "stderr",
-                    stop_flag.clone(),
-                    output_buffer.clone(),
-                )
-            }),
-            child,
-            mission_id: None,
-            pane_id: Some(pane_id),
-            cwd: cwd.to_string(),
-            command: command.to_string(),
-            args,
-            started_at: iso_now(),
-            stop_flag,
-            output_buffer,
-        },
-    );
-    let session = terminals
-        .get_mut(&pty_id)
-        .map(|t| terminal_session_json(&pty_id, t))
-        .unwrap_or(Value::Null);
-    Ok(serde_json::json!({ "ptyId": pty_id, "session": session }))
+    
+    if let Some(t) = terminals.get_mut(&pty_id) {
+        t.pane_id = Some(pane_id);
+        let session = terminal_session_json(&pty_id, t);
+        return Ok(serde_json::json!({ "ptyId": pty_id, "session": session }));
+    }
+    
+    Err(db_error("Failed to re-acquire spawned terminal for pane"))
 }
+
 #[tauri::command]
 fn terminal_get_pane_session(state: State<'_, AppState>, pane_id: String) -> ApiResult<Value> {
     let mut terminals = state
@@ -3426,6 +2233,7 @@ fn terminal_get_pane_session(state: State<'_, AppState>, pane_id: String) -> Api
     }
     Ok(Value::Null)
 }
+
 #[tauri::command]
 fn terminal_kill_by_pane_id(
     state: State<'_, AppState>,
@@ -3436,27 +2244,24 @@ fn terminal_kill_by_pane_id(
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
+    
     let ids = terminals
         .iter()
         .filter(|(_, t)| t.pane_id.as_deref() == Some(pane_id.as_str()))
         .map(|(id, _)| id.clone())
         .collect::<Vec<_>>();
-    let mut killed = false;
+    
     for id in ids {
         if let Some(mut t) = terminals.remove(&id) {
             t.stop_flag.store(true, Ordering::Relaxed);
-            let _ = t.child.kill();
-            if let Some(h) = t.stdout_thread.take() {
-                let _ = h.join();
-            }
-            if let Some(h) = t.stderr_thread.take() {
-                let _ = h.join();
+            drop(t.pty_master);
+            if let Some(reader_thread) = t.reader_thread.take() {
+                let _ = reader_thread.join();
             }
             let _ = app.emit("terminal-exit", serde_json::json!({ "ptyId": id, "code": -1 }));
-            killed = true;
         }
     }
-    Ok(serde_json::json!({ "ok": killed }))
+    Ok(serde_json::json!({ "ok": true }))
 }
 
 #[tauri::command]
@@ -3532,40 +2337,6 @@ pub fn run() {
             db_projects_delete,
             db_projects_get_stats,
             db_projects_update_last_opened,
-            db_missions_find_all,
-            db_missions_find_by_id,
-            db_missions_find_by_project,
-            db_missions_find_by_status,
-            db_missions_find_active,
-            db_missions_search,
-            db_missions_create,
-            db_missions_update,
-            db_missions_delete,
-            db_missions_update_status,
-            db_missions_update_plan,
-            db_missions_update_generated_code,
-            db_missions_start,
-            db_missions_complete,
-            db_missions_fail,
-            db_missions_cancel,
-            db_missions_get_full_mission,
-            db_mission_logs_find_all,
-            db_mission_logs_find_by_id,
-            db_mission_logs_find_by_mission,
-            db_mission_logs_find_by_level,
-            db_mission_logs_search,
-            db_mission_logs_create,
-            db_mission_logs_delete,
-            db_mission_logs_delete_by_mission,
-            db_mission_logs_log_info,
-            db_mission_logs_log_warning,
-            db_mission_logs_log_error,
-            db_mission_logs_log_debug,
-            db_mission_logs_log_agent_action,
-            db_mission_logs_log_user_input,
-            db_mission_logs_get_stats,
-            db_mission_logs_get_usage_stats,
-            db_mission_logs_get_latest,
             db_combs_find_by_project,
             db_combs_find_by_id,
             db_combs_create,
@@ -3579,37 +2350,10 @@ pub fn run() {
             db_utils_backup,
             db_utils_get_path,
             db_utils_get_size,
-            ai_generate_plan,
-            ai_generate_code,
-            ai_apply_changes,
-            ai_test_connection,
-            ai_validate_provider,
-            ai_invalidate_adapter,
-            git_get_info,
-            git_get_status,
-            git_get_branch_state,
-            git_get_file_diff_head,
-            git_get_file_diff_against_base,
-            git_is_repo,
             git_get_current_branch,
-            git_get_default_branch,
             git_get_local_branches,
-            git_create_branch,
-            git_list_files,
-            git_get_recent_commits,
-            git_commit,
-            git_get_worktree_info,
-            git_push,
-            git_pull,
-            git_reset,
             git_get_review_diffs,
-            git_apply_worktree_patch,
             review_get_diffs_bundle,
-            worktree_ensure_for_mission,
-            worktree_merge_into_main,
-            worktree_discard,
-            missions_get_diffs,
-            worktree_apply_mission_patch,
             comb_ensure_worktree,
             comb_discard,
             comb_merge_into_main,

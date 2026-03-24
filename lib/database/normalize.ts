@@ -4,8 +4,6 @@
 const DATE_KEYS: Record<string, string[]> = {
   project: ['lastOpenedAt', 'createdAt', 'updatedAt'],
   provider: ['createdAt', 'updatedAt'],
-  mission: ['startedAt', 'completedAt', 'createdAt', 'updatedAt'],
-  missionLog: ['createdAt'],
   comb: ['lastOpenedAt', 'createdAt', 'updatedAt'],
   pane: ['lastActivityAt', 'createdAt', 'updatedAt'],
 };
@@ -18,7 +16,6 @@ function parseDate(value: unknown): Date | null {
     if (!isNaN(d.getTime())) return d;
 
     // SQLite/Tauri commonly returns "YYYY-MM-DD HH:mm:ss" (no timezone).
-    // WebKit may treat this as invalid, so parse it manually as local time.
     const sqliteMatch = raw.match(
       /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/,
     );
@@ -62,26 +59,6 @@ export function normalizeProvider(raw: Record<string, unknown>): Record<string, 
   return normalizeDates(raw, DATE_KEYS.provider);
 }
 
-export function normalizeMission(raw: Record<string, unknown>): Record<string, unknown> {
-  const normalized = normalizeDates(raw, DATE_KEYS.mission);
-  
-  // Normalize dates inside pendingCommands array
-  if (Array.isArray(normalized.pendingCommands)) {
-    normalized.pendingCommands = normalized.pendingCommands.map((cmd: Record<string, unknown>) => {
-      if (cmd && typeof cmd === 'object' && cmd.confirmedAt) {
-        return { ...cmd, confirmedAt: parseDate(cmd.confirmedAt) };
-      }
-      return cmd;
-    });
-  }
-  
-  return normalized;
-}
-
-export function normalizeMissionLog(raw: Record<string, unknown>): Record<string, unknown> {
-  return normalizeDates(raw, DATE_KEYS.missionLog);
-}
-
 export function normalizeProjects(raw: unknown[]): unknown[] {
   return raw.map((item) =>
     typeof item === 'object' && item !== null
@@ -94,22 +71,6 @@ export function normalizeProviders(raw: unknown[]): unknown[] {
   return raw.map((item) =>
     typeof item === 'object' && item !== null
       ? normalizeProvider(item as Record<string, unknown>)
-      : item,
-  );
-}
-
-export function normalizeMissions(raw: unknown[]): unknown[] {
-  return raw.map((item) =>
-    typeof item === 'object' && item !== null
-      ? normalizeMission(item as Record<string, unknown>)
-      : item,
-  );
-}
-
-export function normalizeMissionLogs(raw: unknown[]): unknown[] {
-  return raw.map((item) =>
-    typeof item === 'object' && item !== null
-      ? normalizeMissionLog(item as Record<string, unknown>)
       : item,
   );
 }
