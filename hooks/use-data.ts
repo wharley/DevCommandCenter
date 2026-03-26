@@ -435,6 +435,15 @@ export function useCombs(projectId?: string) {
     [],
   );
 
+  const togglePin = useCallback(
+    async (id: string) => {
+      if (!hasDesktopDb() || !window.db?.combs) return;
+      await window.db.combs.togglePin(id);
+      emitDataChange("combs");
+    },
+    [],
+  );
+
   return {
     combs,
     isLoading,
@@ -442,6 +451,7 @@ export function useCombs(projectId?: string) {
     create,
     update,
     remove,
+    togglePin,
   };
 }
 

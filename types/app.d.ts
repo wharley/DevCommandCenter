@@ -26,6 +26,8 @@ import type {
   PaneCreate,
   PaneUpdate,
   PaneSession,
+  CreateCombDTO,
+  UpdateCombDTO,
 } from "@/lib/database/types";
 import type { TerminalAttentionPayload } from "@/lib/terminal/attention-types";
 
@@ -565,6 +567,7 @@ declare global {
         create: (data: CombCreate) => Promise<Comb>;
         update: (id: string, data: CombUpdate) => Promise<Comb | undefined>;
         delete: (id: string) => Promise<boolean>;
+        togglePin: (id: string) => Promise<Comb | undefined>;
       };
 
       panes: {

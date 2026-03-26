@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS combs (
   worktree_path TEXT,
   review_targets TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ready_for_review', 'applied', 'discarded', 'archived', 'error')),
+  is_pinned INTEGER DEFAULT 0,
+  pinned_at TEXT,
   last_opened_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
@@ -83,6 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_projects_last_opened ON projects(last_opened_at D
 CREATE INDEX IF NOT EXISTS idx_combs_project ON combs(project_id);
 CREATE INDEX IF NOT EXISTS idx_combs_status ON combs(status);
 CREATE INDEX IF NOT EXISTS idx_combs_last_opened ON combs(last_opened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_combs_pinned ON combs(is_pinned DESC, pinned_at DESC);
 CREATE INDEX IF NOT EXISTS idx_panes_comb ON panes(comb_id);
 CREATE INDEX IF NOT EXISTS idx_panes_layout ON panes(comb_id, layout_order);
 

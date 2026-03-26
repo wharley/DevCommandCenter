@@ -145,6 +145,9 @@ export function initDatabase(): Database.Database {
   // Migração: review_targets (JSON) em combs para multi-repo na mesma Review
   migrateCombsReviewTargets(db);
 
+  // Migração: is_pinned e pinned_at em combs para fixar workspaces
+  migrateCombsPinned(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
 
   return db;
@@ -548,6 +551,38 @@ function migrateCombsReviewTargets(database: Database.Database): void {
   if (!names.has("review_targets")) {
     database.exec(`ALTER TABLE combs ADD COLUMN review_targets TEXT`);
     console.log("[Database] Migration: review_targets column added to combs.");
+  }
+}
+
+/**
+ * Adiciona colunas is_pinned e pinned_at em combs para permitir fixar workspaces.
+ */
+function migrateCombsPinned(database: Database.Database): void {
+  const combsExists = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'combs'")
+    .get();
+  if (!combsExists) return;
+
+  const columns = database.prepare("PRAGMA table_info(combs)").all() as { name: string }[];
+  const names = new Set(columns.map((c) => c.name));
+
+  if (!names.has("is_pinned")) {
+    database.exec(`ALTER TABLE combs ADD COLUMN is_pinned INTEGER DEFAULT 0`);
+    console.log("[Database] Migration: is_pinned column added to combs.");
+  }
+
+  if (!names.has("pinned_at")) {
+    database.exec(`ALTER TABLE combs ADD COLUMN pinned_at TEXT`);
+    console.log("[Database] Migration: pinned_at column added to combs.");
+  }
+
+  // Criar índice para performance ao ordenar por pinned
+  const indexExists = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_combs_pinned'")
+    .get();
+  if (!indexExists) {
+    database.exec(`CREATE INDEX idx_combs_pinned ON combs(is_pinned DESC, pinned_at DESC)`);
+    console.log("[Database] Migration: idx_combs_pinned index created.");
   }
 }
 

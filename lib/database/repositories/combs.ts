@@ -18,6 +18,8 @@ interface CombRow {
   worktree_path: string | null;
   review_targets: string | null;
   status: string;
+  is_pinned: number;
+  pinned_at: string | null;
   last_opened_at: string | null;
   created_at: string;
   updated_at: string;
@@ -45,6 +47,8 @@ function rowToComb(row: CombRow): Comb {
     worktreePath: row.worktree_path ?? null,
     reviewTargets: parseReviewTargetsJson(row.review_targets),
     status: row.status as CombStatus,
+    isPinned: row.is_pinned === 1,
+    pinnedAt: row.pinned_at ? new Date(row.pinned_at) : null,
     lastOpenedAt: row.last_opened_at ? new Date(row.last_opened_at) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -174,6 +178,14 @@ export const CombsRepository = {
       updates.push('status = ?');
       values.push(data.status);
     }
+    if (data.isPinned !== undefined) {
+      updates.push('is_pinned = ?');
+      values.push(data.isPinned ? 1 : 0);
+    }
+    if (data.pinnedAt !== undefined) {
+      updates.push('pinned_at = ?');
+      values.push(data.pinnedAt ? data.pinnedAt.toISOString() : null);
+    }
     if (data.lastOpenedAt !== undefined) {
       updates.push('last_opened_at = ?');
       values.push(data.lastOpenedAt.toISOString());
@@ -195,5 +207,16 @@ export const CombsRepository = {
   touchLastOpened(id: string): void {
     const db = getDatabase();
     db.prepare('UPDATE combs SET last_opened_at = datetime(\'now\') WHERE id = ?').run(id);
+  },
+
+  togglePin(id: string): Comb | undefined {
+    const comb = this.findById(id);
+    if (!comb) return undefined;
+
+    const newPinned = !comb.isPinned;
+    return this.update(id, {
+      isPinned: newPinned,
+      pinnedAt: newPinned ? new Date() : null,
+    });
   },
 };
