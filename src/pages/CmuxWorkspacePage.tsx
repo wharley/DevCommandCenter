@@ -10,6 +10,7 @@ import {
   GitPullRequest,
   Loader2,
   Merge,
+  Pin,
   Plus,
   Settings,
   Terminal,
@@ -217,8 +218,6 @@ function NewAgentPaneDialog({
   ensureCombWorktree: () => Promise<boolean>;
 }) {
   const [providerId, setProviderId] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [title, setTitle] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const { create } = usePanes(combId);
   const cliProviders = useMemo(
@@ -229,8 +228,6 @@ function NewAgentPaneDialog({
   useEffect(() => {
     if (!open) return;
     setProviderId(cliProviders[0]?.id ?? "");
-    setPrompt("");
-    setTitle("");
   }, [open, cliProviders]);
 
   const handleCreate = async () => {
@@ -242,8 +239,6 @@ function NewAgentPaneDialog({
         combId,
         type: "agent",
         providerId: providerId || undefined,
-        title: title.trim() || undefined,
-        initialPrompt: prompt.trim() || undefined,
       });
       onCreate(pane);
       onOpenChange(false);
@@ -260,7 +255,7 @@ function NewAgentPaneDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Novo Agent Pane</DialogTitle>
-          <DialogDescription>Abre um agente CLI no workspace atual.</DialogDescription>
+          <DialogDescription>Selecione o agente CLI para abrir no workspace.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-2">
@@ -277,14 +272,6 @@ function NewAgentPaneDialog({
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Titulo (opcional)</label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="ex.: Fix lint" />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Prompt inicial (opcional)</label>
-            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} />
           </div>
         </div>
         <DialogFooter>
@@ -309,6 +296,7 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
   hasAttention,
   onSelect,
   onRemove,
+  onTogglePin,
 }: {
   comb: Comb;
   isActive: boolean;
@@ -317,6 +305,7 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
   hasAttention: boolean;
   onSelect: (comb: Comb) => void;
   onRemove: (combId: string) => void;
+  onTogglePin: (combId: string) => void;
 }) {
   const handleSelect = useCallback(() => onSelect(comb), [onSelect, comb]);
   const handleRemove = useCallback(
@@ -326,13 +315,20 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
     },
     [onRemove, comb.id],
   );
+  const handleTogglePin = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      onTogglePin(comb.id);
+    },
+    [onTogglePin, comb.id],
+  );
 
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={handleSelect}
-      className={`titlebar-no-drag group rounded-lg border px-2.5 py-2 transition-colors ${
+      className={`titlebar-no-drag group cursor-pointer rounded-lg border px-2.5 py-2 transition-colors ${
         isActive ? "border-primary bg-sidebar-accent text-sidebar-accent-foreground" : "border-transparent hover:bg-sidebar-accent/50"
       }`}
     >
@@ -350,6 +346,19 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
           {attentionExcerpt ? <p className="mt-1 line-clamp-1 text-[11px] text-sidebar-foreground/70">{attentionExcerpt}</p> : null}
         </div>
         <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`h-6 w-6 ${comb.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+                onClick={handleTogglePin}
+              >
+                <Pin className={`h-3.5 w-3.5 ${comb.isPinned ? "fill-current text-primary" : ""}`} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{comb.isPinned ? "Desafixar workspace" : "Fixar workspace"}</TooltipContent>
+          </Tooltip>
           <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" onClick={handleRemove}>
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
@@ -449,7 +458,15 @@ export default function CmuxWorkspacePage() {
         sortedProjects.map((project) => window.db!.combs.findByProject(project.id)),
       );
       const flat = normalizeCombs(chunks.flat()) as Comb[];
-      flat.sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
+      // Ordenar: fixados primeiro (por pinnedAt desc), depois não-fixados (por updatedAt desc)
+      flat.sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        if (a.isPinned && b.isPinned) {
+          return +new Date(b.pinnedAt ?? 0) - +new Date(a.pinnedAt ?? 0);
+        }
+        return +new Date(b.updatedAt) - +new Date(a.updatedAt);
+      });
       setCombs(flat);
     } finally {
       setCombsLoading(false);
@@ -804,6 +821,18 @@ export default function CmuxWorkspacePage() {
     void handleRemovePane(paneId);
   }, [handleRemovePane]);
 
+  const handleTogglePin = useCallback(async (combId: string) => {
+    if (!window.db?.combs) return;
+    try {
+      await window.db.combs.togglePin(combId);
+      await refreshCombs();
+      toast.success("Workspace atualizado");
+    } catch (error) {
+      toast.error("Falha ao atualizar workspace");
+      console.error("Error toggling pin:", error);
+    }
+  }, [refreshCombs]);
+
   if (projectsLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
@@ -855,6 +884,7 @@ export default function CmuxWorkspacePage() {
                     attentionExcerpt={attentionForComb?.excerpt ?? null}
                     onSelect={handleSelectWorkspace}
                     onRemove={handleRemoveWorkspaceById}
+                    onTogglePin={handleTogglePin}
                   />
                 );
               })}

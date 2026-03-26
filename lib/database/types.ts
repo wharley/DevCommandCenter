@@ -87,6 +87,8 @@ export interface Comb {
   worktreePath?: string | null;
   reviewTargets?: ReviewTarget[] | null;
   status: CombStatus;
+  isPinned?: boolean;
+  pinnedAt?: Date | null;
   lastOpenedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -162,6 +164,8 @@ export interface UpdateCombDTO {
   worktreePath?: string | null;
   reviewTargets?: ReviewTarget[] | null;
   status?: CombStatus;
+  isPinned?: boolean;
+  pinnedAt?: Date | null;
   lastOpenedAt?: Date;
 }
 
@@ -189,3 +193,18 @@ export interface PaginationOptions {
   limit?: number;
   offset?: number;
 }
+
+export interface CombsQueryOptions {
+  limit?: number;
+  offset?: number;
+  projectId?: string;
+  status?: CombStatus | CombStatus[];
+  orderBy?: 'name' | 'status' | 'createdAt' | 'updatedAt' | 'lastOpenedAt';
+  orderDirection?: 'asc' | 'desc';
+}
+
+// Aliases para compatibilidade com tipos antigos
+export type CombCreate = CreateCombDTO;
+export type CombUpdate = UpdateCombDTO;
+export type PaneCreate = CreatePaneDTO;
+export type PaneUpdate = UpdatePaneDTO;
