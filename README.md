@@ -1,104 +1,77 @@
-# Dev Command Center
+# 🕹️ Dev Command Center (DCC)
 
-Multi-engine command center for coding agents. A local-first desktop app that orchestrates multiple providers (CLI and API) with BYOK, workspace-first sessions, and terminal-native flow.
+**A Central de Comando definitiva para Engenharia de Software assistida por IA.**
 
-For product and architecture notes, see the `docs/` folder. For positioning and landing-page copy (non-technical), see [docs/POSICIONAMENTO_E_LANDING.md](docs/POSICIONAMENTO_E_LANDING.md).
+O DCC é uma interface local-first que orquestra agentes de IA (Claude, Gemini, Codex) diretamente no seu fluxo de trabalho Git. Ele resolve o maior gargalo da produtividade moderna: **o custo da troca de contexto.**
 
-**Desktop stack:** o app migrou de Electron para **Tauri 2** — motivos, diferenças e **lista de instalação** (Node, Rust, dependências por SO): **[docs/MIGRACAO_TAURI.md](docs/MIGRACAO_TAURI.md)**.
+---
 
-## Why it exists
+## 🚀 O que torna o DCC único?
 
-Dev Command Center focuses on a clear agent workflow: select a repo, describe a mission, generate a plan, review changes, and apply safely. It aims to stay local-first and provider-agnostic while keeping execution transparent.
+Diferente de IDEs com chat, o DCC é um **gerenciador de estado de engenharia**. Ele não apenas conversa com a IA; ele prepara o terreno para que ela trabalhe com segurança e isolamento.
 
-## Features (developer-focused)
+### 🏗️ Worktree-First (Adeus, `git stash`)
+O DCC utiliza **Git Worktrees** para isolar cada tarefa. 
+- **Fluxo:** Uma tarefa (Mission) = Um diretório isolado no disco.
+- **Produtividade:** Corrija um bug crítico no Worktree A sem interromper o servidor de desenvolvimento ou "sujar" a branch que você está trabalhando no Worktree B.
 
-- **Workspace shell (single app shell):** project picker, missions as Git worktrees, multiple terminal/agent panes per mission, mission-level review
-- Multi-provider adapters (CLI and API) with validation and fallbacks
-- Git context collection (branch, status, recent commits)
-- Local SQLite persistence for projects, providers, missions, combs, and panes
-- Tauri bridge (`window.desktopAPI` / `window.db`) with mock fallback no browser
+### 🤖 Execução Multimodal (Panes & Agents)
+Execute múltiplos agentes e terminais simultaneamente no mesmo contexto.
+- **Claude Code** refatorando a lógica em um pane.
+- **Gemini** gerando testes unitários em outro pane.
+- **Terminal Nativo** monitorando logs em tempo real.
+Tudo compartilhando o mesmo diretório de trabalho (CWD).
 
-## Tech stack (condensed)
+### 🔔 Sistema de Atenção Inteligente
+Não fique vigiando o terminal. O DCC possui uma heurística que detecta quando um agente terminou ou precisa de interação, disparando notificações (Toasts/Badges) para que você mantenha o foco no que importa.
 
-- Tauri 2 + Vite + React + TypeScript
-- SQLite via Rust (rusqlite no backend)
-- Zustand, Radix UI, Tailwind CSS
+---
 
-## Architecture at a glance
+## 🛠️ Como usar para Máxima Produtividade
 
-- UI (React) → Zustand → Tauri `invoke` / eventos → Rust (`src-tauri`)
-- Processo Rust → SQLite, Git, terminal, serviços de IA
-- Adapters encapsulate provider-specific behavior
+O fluxo ideal para um desenvolvedor sênior no DCC:
 
-## Getting started
+1.  **Contexto:** Selecione um Projeto -> Crie um **Comb** (Workspace) para sua tarefa.
+2.  **Isolamento:** O DCC cria o Worktree automaticamente. 
+3.  **Delegação:** Abra um **Agent Pane** e descreva a missão.
+4.  **Paralelismo:** Abra um **Base Terminal** para consultar o código estável da `main` e um **Workspace Terminal** para rodar seus testes.
+5.  **Revisão:** Use o sistema de Diff integrado para validar cada mudança antes do commit.
 
-### Prerequisites (resumo)
+> 💡 **Dica de Especialista:** Use o DCC como um "segundo cérebro" para tarefas repetitivas (migrações, testes, documentação) enquanto você foca na arquitetura e resolução de problemas complexos.
 
-| Ferramenta | Notas |
-|------------|--------|
-| **Node.js** | 22+ |
-| **Yarn** | v1 classic (este repo) |
-| **Git** | Para worktrees / fluxo do app |
-| **Rust (stable)** | Obrigatório para `yarn dev` e `yarn build` — compila `src-tauri` |
-| **Deps de sistema** | macOS: Xcode CLT; Linux: WebKit/GTK dev libs; Windows: MSVC + WebView2 — **detalhe completo em [docs/MIGRACAO_TAURI.md](docs/MIGRACAO_TAURI.md)** |
+---
 
-### Install
+## 🧱 Stack Técnica
 
+- **Core:** Tauri 2 (Rust) + React + TypeScript.
+- **Database:** SQLite local para persistência total de sessões e contextos.
+- **Providers:** Abstração completa para CLI Agents e APIs (BYOK - Bring Your Own Key).
+- **Terminal:** xterm.js com integração nativa PTY.
+
+---
+
+## 🏁 Começando
+
+### Pré-requisitos
+- **Node.js 22+** e **Yarn v1**.
+- **Rust (stable)** para compilar o backend Tauri.
+- **Git** instalado (essencial para o gerenciamento de Worktrees).
+
+### Instalação e Execução
 ```bash
 yarn install
-# se necessário no teu ambiente:
-# yarn install --ignore-engines
+yarn dev # Inicia o App Desktop (Tauri + Vite)
 ```
 
-### Development (app desktop Tauri + Vite)
+---
 
-```bash
-yarn dev
-```
+## 📚 Documentação Detalhada
 
-### Development (só Vite no browser — APIs nativas indisponíveis)
+- 📖 **[Guia de Produtividade & Fluxos](docs/GUIA_DE_PRODUTIVIDADE.md)** - Como extrair o máximo do DCC.
+- 🏗️ **[Arquitetura do Sistema](docs/ARCHITECTURE.md)** - Como o DCC funciona por baixo do capô.
+- 🛠️ **[Guia de Migração Tauri](docs/MIGRACAO_TAURI.md)** - Detalhes sobre a stack Rust/Tauri.
 
-```bash
-yarn vite
-```
+---
 
-### Build (binários desktop)
-
-```bash
-yarn build
-```
-
-### Lint
-
-```bash
-yarn lint
-```
-
-## Primary user flow (workspace-first)
-
-The app opens on `/` into the main workspace shell: sidebar for **workspaces** and a main area for terminal/agent panes.
-
-1. **Add project** — Register at least one local repository path. This is required because workspaces attach to a project/repo context.
-2. **Create or select a workspace** — A workspace maps to a dedicated worktree/branch context.
-3. **Work in panes** — Add **Terminal** and **Agent** panes. Panes share the active workspace directory.
-4. **Watch notifications** — Attention events show toast + sidebar indicators and can be opened in the notifications panel.
-5. **Manage providers** — Configure CLI/API providers in the Providers screen, then use them when opening new agent panes.
-
-**In one sentence:** Add a repo → open a workspace → run terminals and agents in that directory → react to attention notifications quickly.
-
-The app route is **`/`** only (unknown paths redirect to the main workspace shell). Older mission/review/dashboard flows are no longer part of the primary UI.
-
-## Roadmap (proposal)
-
-- Workspace shell polish (onboarding, empty states)
-- Advanced diff review UX (selective apply, per-file previews)
-- Automation presets (apply + tests + commit with confirmation)
-- Provider profiles per project and mission templates
-
-## Contributing
-
-Issues and PRs are welcome. Please keep changes focused and aligned with the project direction documented in `docs/`.
-
-## License
-
-MIT
+## 📄 Licença
+MIT. Desenvolvido para devs, por devs.
