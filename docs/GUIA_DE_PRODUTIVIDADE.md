@@ -56,11 +56,24 @@ O DCC monitora a saída dos terminais e agentes para você.
 
 ## 4. Melhores Práticas para Devs
 
+### Dependências no worktree e limpeza após o merge
+
+Cada worktree do DCC é um **checkout Git em pasta própria** (em geral `<raiz-do-projeto>/.dcc/worktrees/<branch>`). Arquivos ignorados pelo Git — em especial **`node_modules`** — **não são herdados** do clone principal: cada worktree precisa do seu próprio install naquele diretório.
+
+- **Primeira vez (ou worktree novo):** dentro da pasta do worktree, rode o comando de instalação que o projeto usa — por exemplo `yarn install`, `npm ci` ou `pnpm install`. Siga o lockfile do repositório (`yarn.lock`, `package-lock.json`, `pnpm-lock.yaml`) para não misturar gerenciadores sem querer.
+- **Depois disso:** não é necessário instalar de novo só por reabrir o terminal ou o workspace; só quando as dependências mudarem, você apagar `node_modules` ou criar **outro** worktree.
+
+Quando o trabalho já estiver **integrado na branch principal** e você não precisar mais daquele checkout isolado:
+
+- **Remova o workspace na sidebar** (ícone de lixeira na lista). O DCC descarta o worktree no Git e apaga a pasta correspondente no disco — **incluindo `node_modules`** daquele caminho — o que evita acumular cópias grandes de dependências em tarefas já encerradas.
+
+Detalhes de caminho e política de worktree: [`WORKTREE_POLICY.md`](./WORKTREE_POLICY.md).
+
 ### 💡 Dicas de Especialista:
 
 1.  **Nomes de Workspaces:** Use nomes descritivos como `feat-auth-stripe` ou `fix-header-mobile`. Isso ajuda na organização do sistema de arquivos `.dcc/worktrees/`.
 2.  **BYOK (Bring Your Own Key):** Configure seus provedores (Claude, Gemini, OpenAI) na aba **Settings**. O DCC é agnóstico e permite que você use o melhor modelo para cada tipo de tarefa.
-3.  **Limpeza Periódica:** Worktrees ocupam espaço em disco. Use a política de cleanup do DCC para remover workspaces de tarefas já finalizadas e mergeadas.
+3.  **Limpeza após merge:** Quando a tarefa estiver na principal, remova o item da lista na sidebar (veja a subseção acima). Worktrees antigos ocupam espaço — principalmente por causa de `node_modules` duplicados.
 4.  **Uso do Terminal Base:** Sempre que precisar comparar "como era antes" sem usar o Git Diff, use o botão **Base Terminal**. Ele abre um terminal no diretório original do projeto (não no worktree), permitindo consultas rápidas.
 
 ---
@@ -69,9 +82,11 @@ O DCC monitora a saída dos terminais e agentes para você.
 
 1.  **Identifique a Tarefa:** Crie um Comb dedicado.
 2.  **Inicie o Agente:** Dê o contexto inicial e a missão.
-3.  **Monitore via Logs:** Abra um terminal paralelo no mesmo workspace para ver o impacto em tempo real (ex: logs do servidor).
-4.  **Aja sob Demanda:** Responda às notificações de atenção do DCC.
-5.  **Revise e Commite:** Valide o diff final e finalize a missão.
+3.  **Dependências:** Na primeira vez no worktree, instale pacotes no diretório do worktree (`yarn` / `npm` / `pnpm`, conforme o projeto).
+4.  **Monitore via Logs:** Abra um terminal paralelo no mesmo workspace para ver o impacto em tempo real (ex: logs do servidor).
+5.  **Aja sob Demanda:** Responda às notificações de atenção do DCC.
+6.  **Revise e Commite:** Valide o diff final e finalize a missão.
+7.  **Após merge na principal:** Remova o workspace na sidebar para liberar disco (worktree + `node_modules` daquele checkout).
 
 ---
 
