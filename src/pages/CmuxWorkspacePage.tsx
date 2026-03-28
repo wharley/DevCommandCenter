@@ -383,20 +383,107 @@ const PaneCard = React.memo(function PaneCard({
   const label = pane.type === "agent" ? (pane.title ?? provider?.name ?? "Agent") : (pane.title ?? "Terminal");
   const args = pane.initialPrompt ? [pane.initialPrompt] : [];
   const handleRemove = useCallback(() => onRemovePane(pane.id), [onRemovePane, pane.id]);
+  const [agentStatus, setAgentStatus] = useState<"stopped" | "running" | "exited">("stopped");
+  const [startAgentFn, setStartAgentFn] = useState<(() => void) | null>(null);
+
+  const handleStartRequest = useCallback((fn: () => void) => {
+    setStartAgentFn(() => fn);
+  }, []);
+
+  const handleReadyNotStarted = useCallback(() => {
+    setAgentStatus("stopped");
+  }, []);
+
+  const handleStartAgent = useCallback(() => {
+    if (startAgentFn) {
+      startAgentFn();
+      setAgentStatus("running");
+    }
+  }, [startAgentFn]);
+
+  const handleAgentExit = useCallback(() => {
+    setAgentStatus("exited");
+  }, []);
+
+  const isAgent = pane.type === "agent";
+  const autoStart = !isAgent; // Agents não auto-start, terminais sim
+
+  // PTY continua no backend ao trocar de pane/workspace; o estado local reiniciava e mostrava "Parado".
+  useEffect(() => {
+    if (!isAgent) return;
+    const api = window.desktopAPI?.terminal;
+    if (!api?.getPaneSession) return;
+    let cancelled = false;
+    void api.getPaneSession(pane.id).then((session) => {
+      if (cancelled) return;
+      if (!session || typeof session !== "object") {
+        setAgentStatus("stopped");
+        return;
+      }
+      const s = session as { ptyId?: string; status?: string };
+      if (s.status === "running" && s.ptyId) {
+        setAgentStatus("running");
+      } else if (s.status === "exited") {
+        setAgentStatus("exited");
+      } else {
+        setAgentStatus("stopped");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAgent, pane.id]);
 
   return (
     <div data-pane-id={pane.id} className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="mb-1 flex items-center justify-between gap-2 rounded border border-border px-2 py-1">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          {pane.type === "agent" ? <AgentKindBadge provider={provider} /> : null}
+          {isAgent ? <AgentKindBadge provider={provider} /> : null}
           <span className="truncate text-xs">{label}</span>
+          {isAgent && agentStatus === "stopped" ? (
+            <Badge variant="secondary" className="h-5 px-1.5 py-0 text-[10px]">
+              Parado
+            </Badge>
+          ) : null}
+          {isAgent && agentStatus === "running" ? (
+            <Badge variant="default" className="h-5 px-1.5 py-0 text-[10px]">
+              Rodando
+            </Badge>
+          ) : null}
+          {isAgent && agentStatus === "exited" ? (
+            <Badge variant="outline" className="h-5 px-1.5 py-0 text-[10px]">
+              Finalizado
+            </Badge>
+          ) : null}
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={handleRemove}>
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
+        <div className="flex items-center gap-1">
+          {isAgent && agentStatus === "stopped" ? (
+            <Button
+              variant="default"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={handleStartAgent}
+            >
+              Iniciar Agent
+            </Button>
+          ) : null}
+          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={handleRemove}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
-        <EmbeddedTerminal cwd={worktreePath} command={command} args={args} paneId={pane.id} title={label} />
+        <EmbeddedTerminal
+          cwd={worktreePath}
+          command={command}
+          args={args}
+          paneId={pane.id}
+          title={label}
+          autoStart={autoStart}
+          onReadyNotStarted={handleReadyNotStarted}
+          onStartRequest={handleStartRequest}
+          onExit={handleAgentExit}
+        />
       </div>
     </div>
   );
