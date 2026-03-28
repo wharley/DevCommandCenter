@@ -79,6 +79,8 @@ export function installDesktopBridge(): void {
           totalRunningPanes: number;
           runningPanesByCombId: Record<string, number>;
         }>("terminal_get_project_activity", { projectId }),
+      saveTempImage: (imageData: number[], extension: string) =>
+        call<{ path: string; filename: string }>("terminal_save_temp_image", { imageData, extension }),
       onData: (callback) => {
         let unlistenFn: (() => void) | null = null;
         void listen("terminal-output", (event: any) => {
@@ -238,6 +240,20 @@ export function installDesktopBridge(): void {
       create: (data) => call("db_combs_create", { data }),
       update: (id, data) => call("db_combs_update", { id, data }),
       delete: (id) => call("db_combs_delete", { id }),
+      togglePin: async (id: string) => {
+        const comb = await call<{ isPinned?: boolean } | null>("db_combs_find_by_id", {
+          id,
+        });
+        if (comb == null || comb === undefined) return undefined;
+        const newPinned = !comb.isPinned;
+        return call("db_combs_update", {
+          id,
+          data: {
+            isPinned: newPinned,
+            pinnedAt: newPinned ? new Date().toISOString() : null,
+          },
+        });
+      },
     },
     panes: {
       findByComb: (combId) => call("db_panes_find_by_comb", { combId }),

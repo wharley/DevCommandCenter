@@ -18,9 +18,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
+use regex::Regex;
 
 /// Schema SQLite compartilhado com `lib/database/schema.sql` (CREATE IF NOT EXISTS).
 const APP_SCHEMA_SQL: &str = include_str!("../../lib/database/schema.sql");
+
+// Regex para detectar quando um terminal está esperando input do usuário
+lazy_static::lazy_static! {
+    static ref WAIT_PATTERN: Regex = Regex::new(
+        r"(?i)(trust|workspace\s+trust|permission|approve|confirm|\(y/n\)|\[y/n\]|\by/n\b|press\s+enter|waiting\s+for|allow\s+edit|must\s+be\s+trusted|denied|blocked|requires?\s+your|intervention|open\s+.*\s+to\s+continue|do\s+you\s+want)"
+    ).unwrap();
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -105,7 +113,17 @@ fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool
     Ok(false)
 }
 
+fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
+    let mut stmt = conn
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1")
+        .map_err(|e| e.to_string())?;
+    stmt.exists(params![table]).map_err(|e| e.to_string())
+}
+
 fn ensure_column(conn: &Connection, table: &str, column: &str, sql_type: &str) -> Result<(), String> {
+    if !table_exists(conn, table)? {
+        return Ok(());
+    }
     if table_has_column(conn, table, column)? {
         return Ok(());
     }
@@ -135,6 +153,8 @@ fn run_legacy_schema_migrations(conn: &Connection) -> Result<(), String> {
         "TEXT NOT NULL DEFAULT 'active'",
     )?;
     ensure_column(conn, "combs", "last_opened_at", "TEXT")?;
+    ensure_column(conn, "combs", "is_pinned", "INTEGER DEFAULT 0")?;
+    ensure_column(conn, "combs", "pinned_at", "TEXT")?;
 
     // Panes
     ensure_column(conn, "panes", "pty_owner_key", "TEXT")?;
@@ -226,6 +246,14 @@ fn map_comb_to_renderer(mut row: Value) -> Value {
     out.insert("reviewTargets".into(), review_targets_v);
     out.insert("status".into(), obj.remove("status").unwrap_or(Value::Null));
     out.insert("lastOpenedAt".into(), obj.remove("last_opened_at").unwrap_or(Value::Null));
+    let is_pinned_val = obj.remove("is_pinned");
+    let is_pinned_bool = match is_pinned_val {
+        Some(Value::Number(n)) => n.as_i64().map(|i| i != 0).unwrap_or(false),
+        Some(Value::Bool(b)) => b,
+        _ => false,
+    };
+    out.insert("isPinned".into(), Value::Bool(is_pinned_bool));
+    out.insert("pinnedAt".into(), obj.remove("pinned_at").unwrap_or(Value::Null));
     out.insert("createdAt".into(), obj.remove("created_at").unwrap_or(Value::Null));
     out.insert("updatedAt".into(), obj.remove("updated_at").unwrap_or(Value::Null));
     Value::Object(out)
@@ -793,6 +821,26 @@ fn shell_open_terminal_at_path(
     Ok(serde_json::json!({
         "success": false,
         "error": "Plataforma não suportada para abertura de terminal"
+    }))
+}
+
+#[tauri::command]
+async fn terminal_save_temp_image(image_data: Vec<u8>, extension: String) -> ApiResult<Value> {
+    use uuid::Uuid;
+
+    let temp_dir = std::env::temp_dir();
+    let filename = format!("dcc_img_{}.{}", Uuid::new_v4(), extension);
+    let path = temp_dir.join(&filename);
+
+    std::fs::write(&path, image_data)
+        .map_err(|e| ApiError {
+            code: "FS_ERROR",
+            message: format!("Failed to save temp image: {}", e),
+        })?;
+
+    Ok(serde_json::json!({
+        "path": path.to_string_lossy().to_string(),
+        "filename": filename
     }))
 }
 
@@ -1459,6 +1507,24 @@ fn db_combs_update(state: State<'_, AppState>, id: String, data: Value) -> ApiRe
             None => SqlValue::Null,
         });
     }
+    if obj.contains_key("isPinned") {
+        sets.push("is_pinned = ?".into());
+        let pinned = obj.get("isPinned").and_then(|v| v.as_bool()).unwrap_or(false);
+        bind.push(SqlValue::Integer(if pinned { 1 } else { 0 }));
+    }
+    if obj.contains_key("pinnedAt") {
+        sets.push("pinned_at = ?".into());
+        let v = obj.get("pinnedAt").and_then(|v| {
+            if v.is_null() {
+                return None;
+            }
+            v.as_str().map(|s| s.to_string())
+        });
+        bind.push(match v {
+            Some(s) => SqlValue::Text(s),
+            None => SqlValue::Null,
+        });
+    }
 
     if sets.is_empty() {
         return db_combs_find_by_id(state, id);
@@ -1919,6 +1985,23 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
     #[cfg(unix)]
     {
         cmd.env("TERM", "xterm-256color");
+
+        // Detecta worktree e configura Git corretamente
+        // Worktrees têm um arquivo .git (não diretório) apontando para gitdir
+        let git_file_path = Path::new(cwd).join(".git");
+        if git_file_path.is_file() {
+            // Lê o arquivo .git para obter o gitdir
+            if let Ok(git_content) = std::fs::read_to_string(&git_file_path) {
+                // Formato: "gitdir: /path/to/.git/worktrees/name"
+                if let Some(gitdir_line) = git_content.lines().find(|l| l.starts_with("gitdir:")) {
+                    let gitdir = gitdir_line.trim_start_matches("gitdir:").trim();
+                    // Configura GIT_DIR para apontar para o gitdir do worktree
+                    cmd.env("GIT_DIR", gitdir);
+                    // GIT_WORK_TREE aponta para o diretório de trabalho atual (o worktree)
+                    cmd.env("GIT_WORK_TREE", cwd);
+                }
+            }
+        }
     }
 
     let child = pty_pair
@@ -1928,15 +2011,21 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
 
     let reader = pty_pair.master.try_clone_reader().map_err(|e| db_error(e.to_string()))?;
     let writer = pty_pair.master.take_writer().map_err(|e| db_error(e.to_string()))?;
-    
+
     let pty_id = format!("pty-{}", next_id());
     let stop_flag = Arc::new(AtomicBool::new(false));
     let output_buffer = new_terminal_output_buffer();
-    
+
+    // Extrair paneId das options se disponível
+    let pane_id_opt = options.get("paneId")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string());
+
     let reader_thread = Some(spawn_terminal_reader_thread(
         reader,
         app.clone(),
         pty_id.clone(),
+        pane_id_opt.clone(),
         stop_flag.clone(),
         output_buffer.clone(),
     ));
@@ -1953,7 +2042,7 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
             child,
             writer: Arc::new(Mutex::new(writer)),
             mission_id: None,
-            pane_id: None,
+            pane_id: pane_id_opt,
             cwd: cwd.to_string(),
             command: command.to_string(),
             args,
@@ -1986,10 +2075,75 @@ fn terminal_session_json(pty_id: &str, t: &mut ManagedTerminal) -> Value {
     })
 }
 
+/// Verifica se o terminal está aguardando input do usuário
+/// Retorna (needs_attention, excerpt_opcional)
+fn check_needs_attention(data: &str, output_buffer: &Arc<Mutex<VecDeque<String>>>) -> (bool, Option<String>) {
+    // OSC 9;9; protocol (Ghostty)
+    if data.contains("\x1b]9;9;") {
+        return (true, Some("Notification request".to_string()));
+    }
+
+    // Verificar últimas linhas do buffer para padrões de espera
+    if let Ok(buffer) = output_buffer.lock() {
+        // Pegar últimas 5 linhas
+        let tail: String = buffer.iter()
+            .rev()
+            .take(5)
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Strip ANSI para análise mais limpa
+        let stripped = strip_ansi_codes(&tail);
+
+        if WAIT_PATTERN.is_match(&stripped) {
+            // Extrair excerpt da última linha não vazia
+            let excerpt = buffer.iter()
+                .rev()
+                .find(|s| !s.trim().is_empty())
+                .map(|s| {
+                    let trimmed = strip_ansi_codes(s).trim().to_string();
+                    const MAX_EXCERPT_CHARS: usize = 220;
+                    if trimmed.chars().count() > MAX_EXCERPT_CHARS {
+                        format!(
+                            "{}…",
+                            trimmed.chars().take(MAX_EXCERPT_CHARS).collect::<String>()
+                        )
+                    } else {
+                        trimmed
+                    }
+                })
+                .unwrap_or_default();
+
+            return (true, Some(excerpt));
+        }
+    }
+
+    (false, None)
+}
+
+/// Remove códigos ANSI básicos para análise de texto
+fn strip_ansi_codes(input: &str) -> String {
+    // Remove SGR sequences: ESC [ ... m
+    let re_sgr = Regex::new(r"\x1b\[[\d;?]*[A-Za-z]").unwrap();
+    let s = re_sgr.replace_all(input, "");
+
+    // Remove OSC sequences: ESC ] ... BEL or ESC ]... ESC \
+    let re_osc1 = Regex::new(r"\x1b\][^\x07]*\x07").unwrap();
+    let s = re_osc1.replace_all(&s, "");
+
+    let re_osc2 = Regex::new(r"\x1b\][^\x1b\\]*\\").unwrap();
+    re_osc2.replace_all(&s, "").to_string()
+}
+
 fn spawn_terminal_reader_thread(
     mut reader: Box<dyn Read + Send>,
     app: AppHandle,
     pty_id: String,
+    pane_id: Option<String>,
     stop_flag: Arc<AtomicBool>,
     output_buffer: Arc<Mutex<VecDeque<String>>>,
 ) -> JoinHandle<()> {
@@ -2004,22 +2158,27 @@ fn spawn_terminal_reader_thread(
                 Ok(n) => {
                     let data = String::from_utf8_lossy(&buffer[..n]).to_string();
                     append_terminal_line(&output_buffer, &data);
-                    
-                    // Simple pattern matching for "Attention"
-                    // OSC 9;9; (Ghostty) or common waiting prompts
-                    let needs_attention = data.contains("\x1b]9;9;") 
-                        || data.contains("(y/n)?") 
-                        || data.contains("Waiting for input...")
-                        || data.contains("Continue? [Y/n]");
-                    
+
+                    // Verificar se precisa de atenção do usuário usando heurística avançada
+                    let (needs_attention, excerpt) = check_needs_attention(&data, &output_buffer);
+
                     if needs_attention {
-                        let _ = app.emit(
-                            "terminal-attention",
-                            serde_json::json!({
-                              "ptyId": pty_id,
-                              "status": "waiting"
-                            }),
-                        );
+                        let mut payload = serde_json::json!({
+                            "ptyId": pty_id,
+                            "status": "waiting"
+                        });
+
+                        // Adicionar paneId se disponível
+                        if let Some(ref pid) = pane_id {
+                            payload["paneId"] = serde_json::json!(pid);
+                        }
+
+                        // Adicionar excerpt se disponível
+                        if let Some(exc) = excerpt {
+                            payload["excerpt"] = serde_json::json!(exc);
+                        }
+
+                        let _ = app.emit("terminal-attention", payload);
                     }
 
                     let _ = app.emit(
@@ -2382,7 +2541,8 @@ pub fn run() {
             terminal_get_pane_session,
             terminal_kill_by_pane_id,
             terminal_get_backlog,
-            terminal_get_project_activity
+            terminal_get_project_activity,
+            terminal_save_temp_image
         ])
         .setup(|app| {
             let app_data_dir = app
@@ -2401,10 +2561,10 @@ pub fn run() {
                 ",
             )
             .map_err(|e| e.to_string())?;
-            conn.execute_batch(APP_SCHEMA_SQL)
-                .map_err(|e| format!("failed to apply schema: {e}"))?;
             run_legacy_schema_migrations(&conn)
                 .map_err(|e| format!("failed to migrate legacy schema: {e}"))?;
+            conn.execute_batch(APP_SCHEMA_SQL)
+                .map_err(|e| format!("failed to apply schema: {e}"))?;
             eprintln!("[DCC] Database ready at {:?}", db_path);
             app.manage(AppState {
                 db_path: Arc::new(db_path),

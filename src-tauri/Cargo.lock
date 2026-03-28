@@ -565,7 +565,9 @@ dependencies = [
 name = "dev-command-center-tauri"
 version = "0.1.0"
 dependencies = [
+ "lazy_static",
  "portable-pty",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
