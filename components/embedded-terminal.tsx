@@ -6,7 +6,7 @@ import { Terminal as XTerm } from "xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "xterm/css/xterm.css";
 import { Button } from "@/components/ui/button";
-import { X, Paperclip } from "lucide-react";
+import { X, Paperclip, ArrowDown } from "lucide-react";
 import type { TerminalAttentionPayload } from "@/lib/terminal/attention-types";
 
 export interface EmbeddedTerminalProps {
@@ -60,9 +60,13 @@ export function EmbeddedTerminal({
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
-  /** Evita duplicar output e perder chunks: só aceita stream ao vivo depois do backlog (ver race terminal-output vs listen). */
-  const allowLiveOutputRef = useRef(false);
   const onExitRef = useRef<typeof onExit>(onExit);
+  /** Rastreia se usuário está no final do terminal para auto-scroll inteligente */
+  const isAtBottomRef = useRef(true);
+  /** Rastreia estado de waiting para evitar re-renders desnecessários */
+  const isWaitingRef = useRef(false);
+  /** Contador de output novo quando usuário não está no final */
+  const [hasNewOutput, setHasNewOutput] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exited, setExited] = useState<number | null>(null);
   const [isWaiting, setIsWaiting] = useState(false);
@@ -80,10 +84,19 @@ export function EmbeddedTerminal({
     onExitRef.current = onExit;
   }, [onExit]);
 
-  const safeWrite = useCallback((term: XTerm, chunk: string) => {
+  const safeWrite = useCallback((term: XTerm, chunk: string, shouldScroll: boolean = true) => {
     if (!chunk || xtermRef.current !== term) return;
     try {
-      term.write(chunk);
+      term.write(chunk, () => {
+        // Callback executado após o write completar
+        if (shouldScroll && isAtBottomRef.current) {
+          // Se o usuário está no final, faz scroll automático
+          term.scrollToBottom();
+        } else if (shouldScroll && !isAtBottomRef.current) {
+          // Se o usuário não está no final, indica que há novo conteúdo
+          setHasNewOutput(true);
+        }
+      });
     } catch {
       // xterm may throw in teardown races; ignore stale writes
     }
@@ -134,7 +147,6 @@ export function EmbeddedTerminal({
     const api = window.desktopAPI?.terminal;
     const term = xtermRef.current;
     if (!api?.getOrCreateForPane || !paneId || !term) return;
-    allowLiveOutputRef.current = false;
     if (restart) term.reset();
     void api
       .getOrCreateForPane(paneId, {
@@ -149,9 +161,6 @@ export function EmbeddedTerminal({
         if (xtermRef.current !== term) return;
         applyPaneAttachResult(result, term);
         await hydrateTerminalBacklog(term, result.ptyId);
-        if (ptyIdRef.current) {
-          allowLiveOutputRef.current = true;
-        }
       });
   }, [applyPaneAttachResult, hydrateTerminalBacklog, paneId, cwd, command, stableArgs]);
 
@@ -239,6 +248,35 @@ export function EmbeddedTerminal({
     input.click();
   }, [processImageAndInject]);
 
+  const scrollToBottom = useCallback(() => {
+    const term = xtermRef.current;
+    if (term) {
+      term.scrollToBottom();
+      isAtBottomRef.current = true;
+      setHasNewOutput(false);
+    }
+  }, []);
+
+  const checkIfAtBottom = useCallback((term: XTerm) => {
+    // Verifica se o viewport está no final do buffer
+    // baseViewportY é 0-indexed, então comparamos com buffer.length - rows
+    const buffer = term.buffer.active;
+    const viewportY = term.buffer.active.viewportY;
+    const rows = term.rows;
+    const bufferLength = buffer.length;
+
+    // Considera "no final" se estiver nas últimas 2 linhas
+    const atBottom = viewportY >= bufferLength - rows - 2;
+    const wasAtBottom = isAtBottomRef.current;
+
+    isAtBottomRef.current = atBottom;
+
+    // Se voltou para o final, limpa o indicador de novo conteúdo
+    if (atBottom && !wasAtBottom) {
+      setHasNewOutput(false);
+    }
+  }, []);
+
   useEffect(() => {
     const api = window.desktopAPI?.terminal;
     if (!api || !containerRef.current) return;
@@ -247,8 +285,12 @@ export function EmbeddedTerminal({
 
     const term = new XTerm({
       cursorBlink: true,
-      /** Evita puxar o viewport para o fim a cada tecla quando há scrollback (friccao; default true). */
-      scrollOnUserInput: false,
+      /** Garante que o viewport sempre volte ao final quando o usuário digita */
+      scrollOnUserInput: true,
+      /** Permite scroll suave durante output */
+      fastScrollModifier: "alt",
+      fastScrollSensitivity: 5,
+      scrollSensitivity: 1,
       fontSize: 13,
       fontFamily: "var(--font-geist-mono, 'Menlo', monospace)",
       theme: {
@@ -293,7 +335,11 @@ export function EmbeddedTerminal({
       if (id === ptyIdRef.current) {
         ptyIdRef.current = null;
         setExited(code);
-        setIsWaiting(false);
+        // Só atualiza se realmente mudou (evita re-render)
+        if (isWaitingRef.current) {
+          isWaitingRef.current = false;
+          setIsWaiting(false);
+        }
         if (paneId && command) setAgentCanRestart(true);
         onExitRef.current?.(code);
       }
@@ -304,7 +350,11 @@ export function EmbeddedTerminal({
       const status = payload.status ?? (payload.reason === "idle" ? "idle" : "waiting");
       if (id === ptyIdRef.current) {
         const next = status === "waiting";
-        setIsWaiting((prev) => (prev === next ? prev : next));
+        // Só atualiza se o valor mudou (evita re-render)
+        if (isWaitingRef.current !== next) {
+          isWaitingRef.current = next;
+          setIsWaiting(next);
+        }
       }
     });
 
@@ -312,8 +362,18 @@ export function EmbeddedTerminal({
       const id = ptyIdRef.current;
       if (id) {
         api.write(id, data);
-        // Só atualiza quando estava em "waiting" — evita re-render a cada tecla (piscar no xterm).
-        setIsWaiting((w) => (w ? false : w));
+        // Só atualiza quando estava em "waiting" — evita re-render a cada tecla
+        if (isWaitingRef.current) {
+          isWaitingRef.current = false;
+          setIsWaiting(false);
+        }
+      }
+    });
+
+    // Usa evento nativo do xterm para detectar scroll (muito mais eficiente que polling)
+    term.onScroll(() => {
+      if (!disposed && xtermRef.current === term) {
+        checkIfAtBottom(term);
       }
     });
 
@@ -342,16 +402,6 @@ export function EmbeddedTerminal({
 
     const mountSession = async () => {
       try {
-        allowLiveOutputRef.current = false;
-        unlistenOutput = await listen("terminal-output", (event: { payload?: Record<string, unknown> }) => {
-          if (disposed || xtermRef.current !== term) return;
-          const payload = event?.payload ?? {};
-          const id = typeof payload.ptyId === "string" ? payload.ptyId : "";
-          const data = typeof payload.data === "string" ? payload.data : "";
-          if (!allowLiveOutputRef.current || id !== ptyIdRef.current) return;
-          safeWrite(term, data);
-        });
-
         if (paneId && api.getOrCreateForPane) {
           // Se !autoStart, primeiro verifica se já existe sessão
           if (!autoStart && api.getPaneSession) {
@@ -365,12 +415,14 @@ export function EmbeddedTerminal({
             const result = await api.getOrCreateForPane(paneId, spawnOptions);
             if (disposed || xtermRef.current !== term) return;
             applyPaneAttachResult(result, term);
+            // CRÍTICO: Hidrata backlog ANTES de registrar listener (evita race condition)
             await hydrateTerminalBacklog(term, result.ptyId);
           } else {
             // autoStart=true, comportamento normal
             const result = await api.getOrCreateForPane(paneId, spawnOptions);
             if (disposed || xtermRef.current !== term) return;
             applyPaneAttachResult(result, term);
+            // CRÍTICO: Hidrata backlog ANTES de registrar listener (evita race condition)
             await hydrateTerminalBacklog(term, result.ptyId);
           }
         } else {
@@ -386,25 +438,49 @@ export function EmbeddedTerminal({
             return;
           }
           if (result.ptyId) ptyIdRef.current = result.ptyId;
+          // CRÍTICO: Hidrata backlog ANTES de registrar listener (evita race condition)
           await hydrateTerminalBacklog(term, result.ptyId);
         }
-        if (ptyIdRef.current) {
-          allowLiveOutputRef.current = true;
-        }
+
+        // AGORA sim, registra listener de output (após backlog estar carregado)
+        unlistenOutput = await listen("terminal-output", (event: { payload?: Record<string, unknown> }) => {
+          if (disposed || xtermRef.current !== term) return;
+          const payload = event?.payload ?? {};
+          const id = typeof payload.ptyId === "string" ? payload.ptyId : "";
+          const data = typeof payload.data === "string" ? payload.data : "";
+          if (id !== ptyIdRef.current) return;
+          safeWrite(term, data);
+        });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        // Garante cleanup de listener mesmo em caso de erro
+        if (disposed && unlistenOutput) {
+          void unlistenOutput();
+          unlistenOutput = null;
+        }
       }
     };
 
     void mountSession();
 
+    let isResizing = false;
     const handleResize = () => {
-      if (disposed || xtermRef.current !== term) return;
+      if (disposed || xtermRef.current !== term || isResizing) return;
       if (fitAddonRef.current && ptyIdRef.current) {
-        safeFit();
-        const { cols, rows } = term;
-        if (cols && rows) {
-          api.resize(ptyIdRef.current, cols, rows);
+        // Proteção anti-loop: marca que estamos fazendo resize
+        isResizing = true;
+        try {
+          safeFit();
+          const { cols, rows } = term;
+          if (cols && rows) {
+            api.resize(ptyIdRef.current, cols, rows);
+          }
+        } finally {
+          // Libera flag após pequeno delay para evitar re-trigger imediato
+          setTimeout(() => {
+            isResizing = false;
+          }, 50);
         }
       }
     };
@@ -412,10 +488,14 @@ export function EmbeddedTerminal({
     let lastObservedW = 0;
     let lastObservedH = 0;
     const resizeObserver = new ResizeObserver((entries) => {
+      // Ignora eventos durante resize ativo (proteção anti-loop)
+      if (isResizing) return;
+
       const cr = entries[0]?.contentRect;
       if (cr) {
         const w = Math.round(cr.width);
         const h = Math.round(cr.height);
+        // Ignora se dimensões não mudaram (proteção adicional)
         if (w === lastObservedW && h === lastObservedH) return;
         lastObservedW = w;
         lastObservedH = h;
@@ -429,7 +509,6 @@ export function EmbeddedTerminal({
       disposed = true;
       if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
       resizeObserver.disconnect();
-      allowLiveOutputRef.current = false;
       void unlistenOutput?.();
       unsubExit();
       unsubAttention?.();
@@ -458,12 +537,16 @@ export function EmbeddedTerminal({
     };
   }, [
     applyPaneAttachResult,
+    autoStart,
+    checkIfAtBottom,
     command,
     cwd,
     handlePaste,
     hydrateTerminalBacklog,
+    onReadyNotStarted,
     paneId,
     safeWrite,
+    shellCommand,
     stableArgs,
   ]);
 
@@ -524,11 +607,25 @@ export function EmbeddedTerminal({
           {error}
         </div>
       )}
-      <div
-        ref={containerRef}
-        className="min-h-0 flex-1 overflow-hidden bg-[#1a1a1a] p-1"
-        style={{ height: "100%" }}
-      />
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div
+          ref={containerRef}
+          className="h-full w-full overflow-hidden bg-[#1a1a1a] p-1"
+        />
+        {hasNewOutput && (
+          <div className="absolute bottom-4 right-4 flex items-center gap-2">
+            <Button
+              onClick={scrollToBottom}
+              size="sm"
+              className="shadow-lg"
+              variant="default"
+            >
+              <ArrowDown className="mr-2 h-4 w-4" />
+              Novo conteúdo
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
