@@ -63,3 +63,4 @@ Quando implementar criação de worktrees:
 3. Registrar worktree no banco (missions.worktreePath ou tabela dedicada).
 4. Aplicar lock ao iniciar missão, liberar ao finalizar.
 5. Expor listagem e remoção na UI de configurações ou na página do projeto.
+6. Migrado para rust
