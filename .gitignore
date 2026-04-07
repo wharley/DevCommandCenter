@@ -38,3 +38,4 @@ src-tauri/target
 
 # macOS
 .DS_Store
+.cursor

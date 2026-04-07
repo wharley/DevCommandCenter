@@ -44,6 +44,10 @@ import {
   useTerminalAttentionToasts,
   type TerminalAttentionRecord,
 } from "@/hooks/use-terminal-attention-toasts";
+import {
+  bumpTerminalFontSize,
+  resetTerminalFontSize,
+} from "@/lib/terminal/terminal-preferences";
 
 const CLI_PROVIDER_TYPES = ["codex", "claude-code", "gemini", "cursor"] as const;
 
@@ -117,6 +121,13 @@ function NewWorkspaceDialog({
   const [baseBranch, setBaseBranch] = useState("main");
   const [projectId, setProjectId] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+  const [branchList, setBranchList] = useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) ?? null,
+    [projects, projectId],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -124,7 +135,49 @@ function NewWorkspaceDialog({
     setDescription("");
     setBaseBranch("main");
     setProjectId(selectedProjectId ?? projects[0]?.id ?? "");
+    setBranchList([]);
   }, [open, selectedProjectId, projects]);
+
+  useEffect(() => {
+    if (!open) return;
+    const path = selectedProject?.path?.trim();
+    if (!path) {
+      setBranchList([]);
+      setBranchesLoading(false);
+      return;
+    }
+    const git = window.desktopAPI?.git;
+    if (!git?.getLocalBranches) {
+      setBranchList([]);
+      setBranchesLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setBranchesLoading(true);
+    const currentP =
+      git.getCurrentBranch?.(path) ?? Promise.resolve("");
+    Promise.all([git.getLocalBranches(path), currentP])
+      .then(([branches, current]) => {
+        if (cancelled) return;
+        const list = (branches ?? []).map((b) => b.trim()).filter(Boolean);
+        setBranchList(list);
+        const c = (current ?? "").trim();
+        setBaseBranch((prev) => {
+          if (list.includes(prev)) return prev;
+          if (c && list.includes(c)) return c;
+          return (list[0] ?? prev) || "main";
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setBranchList([]);
+      })
+      .finally(() => {
+        if (!cancelled) setBranchesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selectedProject?.path, projectId]);
 
   const handleCreate = async () => {
     if (!name.trim() || !projectId) {
@@ -181,7 +234,31 @@ function NewWorkspaceDialog({
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Branch base</label>
-            <Input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
+            {branchesLoading ? (
+              <div className="flex h-10 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                A carregar branches…
+              </div>
+            ) : branchList.length > 0 ? (
+              <Select value={baseBranch} onValueChange={setBaseBranch}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branchList.map((br) => (
+                    <SelectItem key={br} value={br}>
+                      {br}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                value={baseBranch}
+                onChange={(e) => setBaseBranch(e.target.value)}
+                placeholder="main"
+              />
+            )}
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Descrição (opcional)</label>
@@ -650,7 +727,13 @@ export default function CmuxWorkspacePage() {
     if (!raw) return;
     try {
       const parsed = JSON.parse(raw) as TerminalAttentionRecord[];
-      if (Array.isArray(parsed)) setAttentionRecords(parsed.slice(0, 120));
+      if (Array.isArray(parsed))
+        setAttentionRecords(
+          parsed.slice(0, 120).map((r) => ({
+            ...r,
+            phase: r.phase ?? "needs_input",
+          })),
+        );
     } catch {
       // ignore malformed storage
     }
@@ -751,29 +834,88 @@ export default function CmuxWorkspacePage() {
     markPaneAttentionAsRead(paneId);
   }, [markPaneAttentionAsRead]);
 
+  /**
+   * Atalhos estilo Maestro: Cmd+1–9 (foco), Cmd+K (limpar), zoom, Shift+Cmd+[ ] (ciclo).
+   * Ignora quando Providers está aberto ou foco em dialog/input (exceto textarea do xterm).
+   * Conflitos possíveis: Cmd+K noutras apps; zoom do browser — aqui preventDefault no workspace.
+   */
   useEffect(() => {
     const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
+    const mod = isMac ? (e: KeyboardEvent) => e.metaKey : (e: KeyboardEvent) => e.ctrlKey;
+
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.shiftKey) return;
-      if (isMac ? !event.metaKey : !event.ctrlKey) return;
-      if (visiblePanes.length <= 1) return;
-      const key = event.key;
-      if (key !== "]" && key !== "[") return;
-      event.preventDefault();
-      const currentIdx = visiblePanes.findIndex((pane) => pane.id === activePaneId);
-      const baseIdx = currentIdx >= 0 ? currentIdx : 0;
-      const nextIdx =
-        key === "]"
-          ? (baseIdx + 1) % visiblePanes.length
-          : (baseIdx - 1 + visiblePanes.length) % visiblePanes.length;
-      const nextPaneId = visiblePanes[nextIdx]?.id;
-      if (!nextPaneId) return;
-      setActivePaneId(nextPaneId);
-      markPaneAttentionAsRead(nextPaneId);
+      if (showProviders) return;
+      if (!activeCombId) return;
+
+      const el = event.target;
+      if (el instanceof HTMLElement) {
+        const inXterm = el.closest(".xterm");
+        const inDialog = el.closest("[role=\"dialog\"], [data-radix-dialog-content]");
+        if (inDialog && !inXterm) return;
+        if (el.closest("input, textarea, select") && !inXterm) return;
+      }
+
+      if (!mod(event)) return;
+
+      if (event.shiftKey && visiblePanes.length > 1) {
+        const key = event.key;
+        if (key === "]" || key === "[") {
+          event.preventDefault();
+          const currentIdx = visiblePanes.findIndex((pane) => pane.id === activePaneId);
+          const baseIdx = currentIdx >= 0 ? currentIdx : 0;
+          const nextIdx =
+            key === "]"
+              ? (baseIdx + 1) % visiblePanes.length
+              : (baseIdx - 1 + visiblePanes.length) % visiblePanes.length;
+          const nextPaneId = visiblePanes[nextIdx]?.id;
+          if (!nextPaneId) return;
+          setActivePaneId(nextPaneId);
+          markPaneAttentionAsRead(nextPaneId);
+          return;
+        }
+      }
+
+      if (/^[1-9]$/.test(event.key) && visiblePanes.length > 0) {
+        event.preventDefault();
+        const idx = Number(event.key) - 1;
+        const pane = visiblePanes[idx];
+        if (pane) {
+          setActivePaneId(pane.id);
+          markPaneAttentionAsRead(pane.id);
+        }
+        return;
+      }
+
+      if (event.key === "k" || event.key === "K") {
+        event.preventDefault();
+        window.dispatchEvent(new CustomEvent("dcc-terminal-action", { detail: { type: "clearScrollback" } }));
+        return;
+      }
+
+      if (event.key === "=" || event.key === "+") {
+        event.preventDefault();
+        bumpTerminalFontSize(1);
+        return;
+      }
+      if (event.key === "-" || event.key === "_") {
+        event.preventDefault();
+        bumpTerminalFontSize(-1);
+        return;
+      }
+      if (event.key === "0") {
+        event.preventDefault();
+        resetTerminalFontSize();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activePaneId, markPaneAttentionAsRead, visiblePanes]);
+  }, [
+    activeCombId,
+    activePaneId,
+    markPaneAttentionAsRead,
+    showProviders,
+    visiblePanes,
+  ]);
 
   const ensureActiveCombWorktree = useCallback(async (): Promise<boolean> => {
     if (!activeCombId) return false;
@@ -1002,7 +1144,7 @@ export default function CmuxWorkspacePage() {
         </div>
       </aside>
 
-      <main className="flex min-h-0 flex-1 flex-col">
+      <main className="flex min-h-0 flex-1 flex-col" data-workspace-main>
         {showProviders ? (
           <div className="flex-1 overflow-auto mt-8">
             <SettingsPage />

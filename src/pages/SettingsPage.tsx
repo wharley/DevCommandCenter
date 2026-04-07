@@ -24,6 +24,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty } from "@/components/ui/empty";
 import { AddProviderDialog } from "@/components/dialogs/add-provider-dialog";
@@ -36,6 +45,19 @@ import {
 } from "@/lib/notifications";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import {
+  loadTerminalAppearance,
+  saveTerminalAppearance,
+  type TerminalAppearancePreferences,
+} from "@/lib/terminal/terminal-preferences";
+
+const TERMINAL_FONT_PRESETS: { label: string; value: string }[] = [
+  { label: "Geist / sistema (padrão)", value: "var(--font-geist-mono, 'Menlo', 'Monaco', monospace)" },
+  { label: "Menlo / Monaco", value: "Menlo, Monaco, 'Courier New', monospace" },
+  { label: "JetBrains Mono", value: "'JetBrains Mono', Menlo, monospace" },
+  { label: "Fira Code", value: "'Fira Code', Menlo, monospace" },
+  { label: "SF Mono", value: "'SF Mono', Menlo, monospace" },
+];
 
 const providerTypeConfig: Record<
   ProviderType,
@@ -96,6 +118,9 @@ export default function SettingsPage() {
 
   const [appVersion, setAppVersion] = useState<string>("—");
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [terminalAppearance, setTerminalAppearance] = useState<TerminalAppearancePreferences>(() =>
+    loadTerminalAppearance(),
+  );
   const gotUpdateEventRef = useRef(false);
   const hasAppUpdateAPI =
     typeof window !== "undefined" && !!window.desktopAPI?.app;
@@ -416,6 +441,82 @@ export default function SettingsPage() {
                 </Button>
               </div>
             )}
+          </section>
+
+          <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            <div className="border-b border-border px-4 py-3">
+              <p className="text-sm font-medium">Terminal embutido</p>
+              <p className="text-[11px] text-muted-foreground">
+                Aparência do xterm no workspace.                 Atalhos: Cmd+1–9 foco no pane, Cmd+K limpar scrollback,
+                Cmd+Plus/Cmd+Minus zoom, Cmd+0 reset do zoom (Ctrl no Windows/Linux).
+              </p>
+            </div>
+            <div className="space-y-4 px-4 py-3">
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+                <Label htmlFor="term-font-size">Tamanho da fonte</Label>
+                <Input
+                  id="term-font-size"
+                  type="number"
+                  min={8}
+                  max={32}
+                  value={terminalAppearance.fontSize}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isNaN(v)) return;
+                    const fontSize = Math.min(32, Math.max(8, v));
+                    const next = { ...terminalAppearance, fontSize };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                  className="max-w-[120px]"
+                />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+                <Label htmlFor="term-font-family">Fonte</Label>
+                <Select
+                  value={terminalAppearance.fontFamily}
+                  onValueChange={(value) => {
+                    const next = { ...terminalAppearance, fontFamily: value };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                >
+                  <SelectTrigger id="term-font-family" className="max-w-md">
+                    <SelectValue placeholder="Fonte" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TERMINAL_FONT_PRESETS.every((p) => p.value !== terminalAppearance.fontFamily) ? (
+                      <SelectItem value={terminalAppearance.fontFamily}>Valor guardado</SelectItem>
+                    ) : null}
+                    {TERMINAL_FONT_PRESETS.map((p) => (
+                      <SelectItem key={p.value} value={p.value}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Cores do tema do app</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Quando desligado, usa paleta escura fixa no terminal.
+                  </p>
+                </div>
+                <Switch
+                  checked={terminalAppearance.useAppThemeColors}
+                  onCheckedChange={(checked) => {
+                    const next = { ...terminalAppearance, useAppThemeColors: checked };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Métricas de throughput (dev):{" "}
+                <code className="rounded bg-muted px-1">localStorage.setItem(&apos;dcc.debugTerminalMetrics&apos;, &apos;1&apos;)</code>
+              </p>
+            </div>
           </section>
         </div>
       </div>

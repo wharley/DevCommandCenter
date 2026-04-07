@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
@@ -2147,33 +2147,58 @@ fn spawn_terminal_reader_thread(
     stop_flag: Arc<AtomicBool>,
     output_buffer: Arc<Mutex<VecDeque<String>>>,
 ) -> JoinHandle<()> {
+    /// Agrega writes ao evento `terminal-output` (~30fps) para reduzir pressão no IPC/UI (cf. Superset batching).
+    const FLUSH_INTERVAL: Duration = Duration::from_millis(33);
+    const MAX_PENDING_BYTES: usize = 256 * 1024;
+
     thread::spawn(move || {
         let mut buffer = [0u8; 8192];
+        let mut pending_out = String::new();
+        let mut last_flush = Instant::now();
+
+        let flush_output = |pending: &mut String, last_flush: &mut Instant| {
+            if pending.is_empty() {
+                return;
+            }
+            let data = std::mem::take(pending);
+            *last_flush = Instant::now();
+            let _ = app.emit(
+                "terminal-output",
+                serde_json::json!({
+                  "ptyId": pty_id,
+                  "data": data,
+                  "stream": "stdout"
+                }),
+            );
+        };
+
         loop {
             if stop_flag.load(Ordering::Relaxed) {
+                flush_output(&mut pending_out, &mut last_flush);
                 break;
             }
             match reader.read(&mut buffer) {
-                Ok(0) => break,
+                Ok(0) => {
+                    flush_output(&mut pending_out, &mut last_flush);
+                    break;
+                }
                 Ok(n) => {
                     let data = String::from_utf8_lossy(&buffer[..n]).to_string();
                     append_terminal_line(&output_buffer, &data);
 
-                    // Verificar se precisa de atenção do usuário usando heurística avançada
                     let (needs_attention, excerpt) = check_needs_attention(&data, &output_buffer);
 
                     if needs_attention {
                         let mut payload = serde_json::json!({
                             "ptyId": pty_id,
-                            "status": "waiting"
+                            "status": "waiting",
+                            "phase": "needs_input"
                         });
 
-                        // Adicionar paneId se disponível
                         if let Some(ref pid) = pane_id {
                             payload["paneId"] = serde_json::json!(pid);
                         }
 
-                        // Adicionar excerpt se disponível
                         if let Some(exc) = excerpt {
                             payload["excerpt"] = serde_json::json!(exc);
                         }
@@ -2181,16 +2206,21 @@ fn spawn_terminal_reader_thread(
                         let _ = app.emit("terminal-attention", payload);
                     }
 
-                    let _ = app.emit(
-                        "terminal-output",
-                        serde_json::json!({
-                          "ptyId": pty_id,
-                          "data": data,
-                          "stream": "stdout"
-                        }),
-                    );
+                    pending_out.push_str(&data);
+                    let now = Instant::now();
+                    // Leitura parcial: saída interativa ou fim de stream — envia já. Leitura cheia: provável flood (cf. batching Superset).
+                    let likely_flood_chunk = n == buffer.len();
+                    if !likely_flood_chunk
+                        || pending_out.len() >= MAX_PENDING_BYTES
+                        || now.duration_since(last_flush) >= FLUSH_INTERVAL
+                    {
+                        flush_output(&mut pending_out, &mut last_flush);
+                    }
                 }
-                Err(_) => break,
+                Err(_) => {
+                    flush_output(&mut pending_out, &mut last_flush);
+                    break;
+                }
             }
         }
     })

@@ -1,6 +1,10 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
-import type { TerminalAttentionPayload } from "@/lib/terminal/attention-types";
+import {
+  type AgentTerminalPhase,
+  type TerminalAttentionPayload,
+  resolveAttentionPhase,
+} from "@/lib/terminal/attention-types";
 
 export interface NavigateToPaneDetail {
   projectId: string;
@@ -16,6 +20,8 @@ export interface TerminalAttentionRecord {
   projectName: string;
   workspaceName: string;
   reason: string;
+  /** Estado estruturado (Maestro-style). Registos antigos podem omitir. */
+  phase?: AgentTerminalPhase;
   excerpt: string | null;
   createdAt: number;
   read: boolean;
@@ -43,8 +49,9 @@ export function useTerminalAttentionToasts(options?: {
 
     return subscribe(async (payload: TerminalAttentionPayload) => {
       const attentionId = payload.paneId ?? payload.ptyId ?? "unknown";
-      const reason = payload.reason ?? payload.status ?? "waiting";
-      const dedupeKey = `${attentionId}:${reason}:${payload.excerpt?.slice(0, 64) ?? ""}`;
+      const phase = resolveAttentionPhase(payload);
+      const reason = payload.reason ?? payload.status ?? phase;
+      const dedupeKey = `${attentionId}:${phase}:${payload.excerpt?.slice(0, 64) ?? ""}`;
       const now = Date.now();
       const prev = lastRendererEmit.current.get(dedupeKey) ?? 0;
       if (now - prev < RENDERER_DEDUPE_MS) return;
@@ -71,9 +78,11 @@ export function useTerminalAttentionToasts(options?: {
       const missionName = comb?.name ?? "Missão";
 
       const reasonLine =
-        payload.reason === "idle"
+        phase === "idle"
           ? "Sem saída há um tempo — pode estar à espera de interação no terminal."
-          : "O agente pode precisar da tua atenção no terminal.";
+          : phase === "error"
+            ? "Possível erro ou falha reportada no terminal."
+            : "O agente pode precisar da tua atenção no terminal.";
 
       const excerpt =
         payload.excerpt && payload.excerpt.trim().length > 0
@@ -103,7 +112,8 @@ export function useTerminalAttentionToasts(options?: {
               projectId: comb.projectId,
               projectName,
               workspaceName: missionName,
-              reason: typeof reason === "string" ? reason : "waiting",
+              reason: typeof reason === "string" ? reason : phase,
+              phase,
               excerpt,
               createdAt: now,
               read: false,

@@ -7,7 +7,14 @@ import { FitAddon } from "@xterm/addon-fit";
 import "xterm/css/xterm.css";
 import { Button } from "@/components/ui/button";
 import { X, Paperclip, ArrowDown } from "lucide-react";
-import type { TerminalAttentionPayload } from "@/lib/terminal/attention-types";
+import { useTheme } from "@/components/theme-provider";
+import {
+  type TerminalAttentionPayload,
+  resolveAttentionPhase,
+} from "@/lib/terminal/attention-types";
+import { recordTerminalOutputBytes } from "@/lib/terminal/output-metrics";
+import { loadTerminalAppearance } from "@/lib/terminal/terminal-preferences";
+import { getXtermColorTheme } from "@/lib/terminal/xterm-theme";
 
 export interface EmbeddedTerminalProps {
   cwd: string;
@@ -56,6 +63,8 @@ export function EmbeddedTerminal({
   onReadyNotStarted,
   onStartRequest,
 }: EmbeddedTerminalProps) {
+  const { resolvedTheme } = useTheme();
+  const [terminalPrefsEpoch, setTerminalPrefsEpoch] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -84,8 +93,42 @@ export function EmbeddedTerminal({
     onExitRef.current = onExit;
   }, [onExit]);
 
+  useEffect(() => {
+    const onPrefs = () => setTerminalPrefsEpoch((n) => n + 1);
+    window.addEventListener("dcc-terminal-prefs-changed", onPrefs);
+    return () => window.removeEventListener("dcc-terminal-prefs-changed", onPrefs);
+  }, []);
+
+  useEffect(() => {
+    const onAction = (ev: Event) => {
+      const ce = ev as CustomEvent<{ type?: string }>;
+      if (ce.detail?.type !== "clearScrollback") return;
+      const t = xtermRef.current;
+      if (t) t.clear();
+    };
+    window.addEventListener("dcc-terminal-action", onAction as EventListener);
+    return () => window.removeEventListener("dcc-terminal-action", onAction as EventListener);
+  }, []);
+
+  useEffect(() => {
+    const term = xtermRef.current;
+    if (!term) return;
+    const prefs = loadTerminalAppearance();
+    term.options.fontSize = prefs.fontSize;
+    term.options.fontFamily = prefs.fontFamily;
+    term.options.theme = getXtermColorTheme(resolvedTheme, prefs.useAppThemeColors);
+    requestAnimationFrame(() => {
+      try {
+        fitAddonRef.current?.fit();
+      } catch {
+        /* ignore */
+      }
+    });
+  }, [resolvedTheme, terminalPrefsEpoch]);
+
   const safeWrite = useCallback((term: XTerm, chunk: string, shouldScroll: boolean = true) => {
     if (!chunk || xtermRef.current !== term) return;
+    recordTerminalOutputBytes(chunk.length);
     try {
       term.write(chunk, () => {
         // Callback executado após o write completar
@@ -283,29 +326,16 @@ export function EmbeddedTerminal({
     let disposed = false;
     let resizeRaf: number | null = null;
 
+    const initialPrefs = loadTerminalAppearance();
     const term = new XTerm({
       cursorBlink: true,
-      /** Garante que o viewport sempre volte ao final quando o usuário digita */
       scrollOnUserInput: true,
-      /** Permite scroll suave durante output */
       fastScrollModifier: "alt",
       fastScrollSensitivity: 5,
       scrollSensitivity: 1,
-      fontSize: 13,
-      fontFamily: "var(--font-geist-mono, 'Menlo', monospace)",
-      theme: {
-        background: "#1a1a1a",
-        foreground: "#e5e5e5",
-        cursor: "#e5e5e5",
-        black: "#1e1e1e",
-        red: "#cd3131",
-        green: "#0dbc79",
-        yellow: "#e5e510",
-        blue: "#2472c8",
-        magenta: "#bc3fbc",
-        cyan: "#11a8cd",
-        white: "#e5e5e5",
-      },
+      fontSize: initialPrefs.fontSize,
+      fontFamily: initialPrefs.fontFamily,
+      theme: getXtermColorTheme(resolvedTheme, initialPrefs.useAppThemeColors),
     });
 
     const fitAddon = new FitAddon();
@@ -347,10 +377,9 @@ export function EmbeddedTerminal({
 
     const unsubAttention = api.onAttention?.((payload: TerminalAttentionPayload) => {
       const id = payload.ptyId ?? payload.paneId;
-      const status = payload.status ?? (payload.reason === "idle" ? "idle" : "waiting");
+      const phase = resolveAttentionPhase(payload);
       if (id === ptyIdRef.current) {
-        const next = status === "waiting";
-        // Só atualiza se o valor mudou (evita re-render)
+        const next = phase === "needs_input";
         if (isWaitingRef.current !== next) {
           isWaitingRef.current = next;
           setIsWaiting(next);
@@ -610,7 +639,7 @@ export function EmbeddedTerminal({
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div
           ref={containerRef}
-          className="h-full w-full overflow-hidden bg-[#1a1a1a] p-1"
+          className="h-full w-full overflow-hidden bg-background p-1"
         />
         {hasNewOutput && (
           <div className="absolute bottom-4 right-4 flex items-center gap-2">
