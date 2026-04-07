@@ -11,6 +11,7 @@
     "vite": "node scripts/ensure-node.mjs && vite",
     "vite:build": "node scripts/ensure-node.mjs && vite build",
     "preview": "vite preview",
+    "setup-worktree": "bash .devcommandcenter/setup-worktree.sh",
     "lint": "eslint .",
     "audit:tauri-stubs": "node scripts/audit-tauri-stubs.mjs",
     "postinstall": "node scripts/patch-xterm-viewport.mjs"
@@ -47,6 +48,7 @@
     "@radix-ui/react-toggle-group": "1.1.1",
     "@radix-ui/react-tooltip": "1.1.6",
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "@xterm/addon-fit": "^0.11.0",
     "autoprefixer": "^10.4.20",
     "better-sqlite3": "^11.8.0",

@@ -16,6 +16,7 @@ tauri-plugin-dialog = "2"
 portable-pty = "0.8"
 regex = "1.10"
 lazy_static = "1.4"
+tauri-plugin-notification = "2"
 
 [features]
 default = []

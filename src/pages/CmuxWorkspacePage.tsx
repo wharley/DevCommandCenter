@@ -460,32 +460,19 @@ const PaneCard = React.memo(function PaneCard({
   const label = pane.type === "agent" ? (pane.title ?? provider?.name ?? "Agent") : (pane.title ?? "Terminal");
   const args = pane.initialPrompt ? [pane.initialPrompt] : [];
   const handleRemove = useCallback(() => onRemovePane(pane.id), [onRemovePane, pane.id]);
-  const [agentStatus, setAgentStatus] = useState<"stopped" | "running" | "exited">("stopped");
-  const [startAgentFn, setStartAgentFn] = useState<(() => void) | null>(null);
-
-  const handleStartRequest = useCallback((fn: () => void) => {
-    setStartAgentFn(() => fn);
-  }, []);
-
-  const handleReadyNotStarted = useCallback(() => {
-    setAgentStatus("stopped");
-  }, []);
-
-  const handleStartAgent = useCallback(() => {
-    if (startAgentFn) {
-      startAgentFn();
-      setAgentStatus("running");
-    }
-  }, [startAgentFn]);
+  /** Sincroniza badge com sessão PTY no backend (reattach ao mudar de pane). */
+  const [agentStatus, setAgentStatus] = useState<"running" | "exited" | null>(null);
 
   const handleAgentExit = useCallback(() => {
     setAgentStatus("exited");
   }, []);
 
-  const isAgent = pane.type === "agent";
-  const autoStart = !isAgent; // Agents não auto-start, terminais sim
+  const handleAgentSessionActive = useCallback(() => {
+    setAgentStatus("running");
+  }, []);
 
-  // PTY continua no backend ao trocar de pane/workspace; o estado local reiniciava e mostrava "Parado".
+  const isAgent = pane.type === "agent";
+
   useEffect(() => {
     if (!isAgent) return;
     const api = window.desktopAPI?.terminal;
@@ -494,7 +481,7 @@ const PaneCard = React.memo(function PaneCard({
     void api.getPaneSession(pane.id).then((session) => {
       if (cancelled) return;
       if (!session || typeof session !== "object") {
-        setAgentStatus("stopped");
+        setAgentStatus(null);
         return;
       }
       const s = session as { ptyId?: string; status?: string };
@@ -503,7 +490,7 @@ const PaneCard = React.memo(function PaneCard({
       } else if (s.status === "exited") {
         setAgentStatus("exited");
       } else {
-        setAgentStatus("stopped");
+        setAgentStatus(null);
       }
     });
     return () => {
@@ -517,11 +504,6 @@ const PaneCard = React.memo(function PaneCard({
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {isAgent ? <AgentKindBadge provider={provider} /> : null}
           <span className="truncate text-xs">{label}</span>
-          {isAgent && agentStatus === "stopped" ? (
-            <Badge variant="secondary" className="h-5 px-1.5 py-0 text-[10px]">
-              Parado
-            </Badge>
-          ) : null}
           {isAgent && agentStatus === "running" ? (
             <Badge variant="default" className="h-5 px-1.5 py-0 text-[10px]">
               Rodando
@@ -534,31 +516,25 @@ const PaneCard = React.memo(function PaneCard({
           ) : null}
         </div>
         <div className="flex items-center gap-1">
-          {isAgent && agentStatus === "stopped" ? (
-            <Button
-              variant="default"
-              size="sm"
-              className="h-6 px-2 text-xs"
-              onClick={handleStartAgent}
-            >
-              Iniciar Agent
-            </Button>
-          ) : null}
           <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={handleRemove}>
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
+        {isAgent && !command ? (
+          <p className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-2 text-xs text-amber-200">
+            Nenhum CLI resolvido para este provedor. Configura o caminho do executável em Providers ou escolhe um
+            provedor ativo (Codex, Claude, Cursor, etc.).
+          </p>
+        ) : null}
         <EmbeddedTerminal
           cwd={worktreePath}
           command={command}
           args={args}
           paneId={pane.id}
           title={label}
-          autoStart={autoStart}
-          onReadyNotStarted={handleReadyNotStarted}
-          onStartRequest={handleStartRequest}
+          onSessionActive={isAgent ? handleAgentSessionActive : undefined}
           onExit={handleAgentExit}
         />
       </div>
@@ -703,6 +679,15 @@ export default function CmuxWorkspacePage() {
     return count;
   }, [attentionRecords]);
 
+  const isAttentionPaneInView = useCallback(
+    (detail: { paneId: string; combId: string }) => {
+      if (showProviders) return false;
+      if (!activeCombId || !activePaneId) return false;
+      return detail.combId === activeCombId && detail.paneId === activePaneId;
+    },
+    [showProviders, activeCombId, activePaneId],
+  );
+
   useTerminalAttentionToasts({
     onNavigateToPane: ({ projectId, combId, paneId }) => {
       setSelectedProjectId(projectId);
@@ -718,6 +703,7 @@ export default function CmuxWorkspacePage() {
         return next;
       });
     },
+    isAttentionPaneInView,
   });
 
   useEffect(() => {
@@ -1129,7 +1115,7 @@ export default function CmuxWorkspacePage() {
             onClick={() => setAttentionOpen(true)}
           >
             <Bell className="h-4 w-4" />
-            Notificacoes
+            Notificações
             {unreadCount > 0 ? <Badge className="ml-auto">{unreadCount}</Badge> : null}
           </Button>
           <Button
@@ -1267,12 +1253,12 @@ export default function CmuxWorkspacePage() {
       <Dialog open={attentionOpen} onOpenChange={setAttentionOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Notificacoes</DialogTitle>
-            <DialogDescription>Eventos recentes de atencao dos agentes e terminais.</DialogDescription>
+            <DialogTitle>Notificações</DialogTitle>
+            <DialogDescription>Eventos recentes de atenção dos agentes e terminais.</DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] space-y-2 overflow-auto">
             {attentionRecords.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sem notificacoes.</p>
+              <p className="text-sm text-muted-foreground">Sem notificações.</p>
             ) : (
               attentionRecords.map((item) => (
                 <button
@@ -1294,7 +1280,7 @@ export default function CmuxWorkspacePage() {
                     </p>
                     {!item.read ? <Badge>Novo</Badge> : null}
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{item.excerpt ?? "Agente aguardando interacao."}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{item.excerpt ?? "Agente aguardando interação."}</p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true, locale: ptBR })}
                   </p>

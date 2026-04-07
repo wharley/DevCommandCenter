@@ -63,6 +63,19 @@ yarn install
 yarn dev # Inicia o App Desktop (Tauri + Vite)
 ```
 
+### Git worktrees e `.env`
+
+Arquivos `.env` **não** vão para o Git (`.gitignore`). Cada clone ou **worktree** é uma pasta nova: se algo que você roda no terminal espera variáveis em `.env`, copie ou vincule o arquivo.
+
+- **Modelo recomendado:** na raiz do repositório há `.devcommandcenter/config.json` com um script de setup. Rode na raiz do worktree:
+  ```bash
+  yarn setup-worktree
+  ```
+  O script, se possível, cria um **symlink** do `.env` do worktree onde está a branch `main`; se não achar, copia `.env.example` → `.env`.
+- **Manual:** `cp .env.example .env` ou `ln -s /caminho/absoluto/do/repo-principal/.env .env`
+
+O template versionado é **`.env.example`** (este arquivo sim é commitado).
+
 ---
 
 ## 📚 Documentação Detalhada

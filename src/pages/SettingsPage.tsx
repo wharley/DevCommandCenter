@@ -41,6 +41,8 @@ import { useProviders } from "@/hooks/use-data";
 import type { Provider, ProviderType } from "@/lib/database/types";
 import {
   areNotificationsEnabled,
+  ensureOsNotificationPermission,
+  isTauriRuntime,
   setNotificationsEnabled,
 } from "@/lib/notifications";
 import { formatDistanceToNow } from "date-fns";
@@ -201,7 +203,7 @@ export default function SettingsPage() {
           <div>
             <h1 className="text-lg font-semibold tracking-tight text-foreground">Providers</h1>
             <p className="text-xs text-muted-foreground">
-              Configuracao dos agentes e notificacoes essenciais
+              Configuração dos agentes e notificações essenciais
             </p>
           </div>
         </div>
@@ -406,14 +408,24 @@ export default function SettingsPage() {
               <div className="min-w-0">
                 <p className="text-sm font-medium">Notificações nativas</p>
                 <p className="text-[11px] text-muted-foreground">
-                  Avisos do sistema ao concluir etapas da missão
+                  Avisos do sistema quando um agente ou terminal precisa de atenção (outro workspace, janela em
+                  segundo plano, etc.). O toast dentro do app continua sempre.
                 </p>
               </div>
               <Switch
                 checked={notificationsEnabled}
-                onCheckedChange={(checked) => {
+                onCheckedChange={async (checked) => {
                   setNotificationsEnabled(checked);
                   setNotificationsEnabledState(checked);
+                  if (checked && isTauriRuntime()) {
+                    const granted = await ensureOsNotificationPermission();
+                    if (!granted) {
+                      toast.info(
+                        "Permita notificações para o Dev Command Center nas definições do sistema, se quiser banners fora da janela.",
+                        { duration: 7000 },
+                      );
+                    }
+                  }
                 }}
               />
             </div>

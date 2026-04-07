@@ -11,11 +11,13 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
@@ -500,9 +502,53 @@ fn app_quit_and_install() -> ApiResult<Value> {
     mapped_not_implemented("app:quitAndInstall")
 }
 
+/// Corpo de notificação nativa: SO costuma truncar; evita payloads enormes no IPC.
+fn truncate_notification_body(s: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for ch in s.chars().take(max_chars) {
+        out.push(ch);
+    }
+    if s.chars().count() > max_chars {
+        out.push('…');
+    }
+    out
+}
+
 #[tauri::command]
-fn app_show_notification(_payload: Value) -> ApiResult<Value> {
-    mapped_not_implemented("app:showNotification")
+fn app_show_notification(app: AppHandle, payload: Value) -> ApiResult<Value> {
+    // Front-end: `invoke(..., { payload: { title, body } })` → este `payload` é o objeto interno.
+    let inner = payload
+        .get("payload")
+        .cloned()
+        .unwrap_or(payload);
+
+    let title = inner
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Dev Command Center");
+
+    let body_opt = inner
+        .get("body")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|b| truncate_notification_body(b, 1800));
+
+    let mut builder = app.notification().builder().title(title.to_string());
+    if let Some(body) = body_opt {
+        builder = builder.body(body);
+    }
+
+    match builder.show() {
+        Ok(()) => Ok(serde_json::json!({ "ok": true })),
+        Err(e) => Ok(serde_json::json!({
+            "ok": false,
+            "reason": "show_failed",
+            "message": e.to_string()
+        })),
+    }
 }
 
 // ---------- Dialog / Shell / Window ----------
@@ -2147,21 +2193,64 @@ fn spawn_terminal_reader_thread(
     stop_flag: Arc<AtomicBool>,
     output_buffer: Arc<Mutex<VecDeque<String>>>,
 ) -> JoinHandle<()> {
-    /// Agrega writes ao evento `terminal-output` (~30fps) para reduzir pressão no IPC/UI (cf. Superset batching).
-    const FLUSH_INTERVAL: Duration = Duration::from_millis(33);
-    const MAX_PENDING_BYTES: usize = 256 * 1024;
+    /// Batching alinhado a superset-sh (`apps/desktop/src/main/terminal-host/pty-subprocess.ts`):
+    /// ~60fps + limite por frame evita inundar o IPC com micro-chunks e mantém redesenhos de TUI (`\r`, escapes)
+    /// mais coerentes num único `terminal-output` antes do xterm.js — sem alterar o stream final concatenado.
+    const FLUSH_INTERVAL: Duration = Duration::from_millis(16);
+    const MAX_BATCH_BYTES: usize = 128 * 1024;
 
     thread::spawn(move || {
-        let mut buffer = [0u8; 8192];
-        let mut pending_out = String::new();
-        let mut last_flush = Instant::now();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
 
-        let flush_output = |pending: &mut String, last_flush: &mut Instant| {
+        let read_thread = thread::spawn(move || {
+            let mut buffer = [0u8; 8192];
+            loop {
+                if stop_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if tx.send(buffer[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let mut pending: Vec<u8> = Vec::new();
+
+        let flush_pending = |pending: &mut Vec<u8>| {
             if pending.is_empty() {
                 return;
             }
-            let data = std::mem::take(pending);
-            *last_flush = Instant::now();
+            let data = String::from_utf8_lossy(pending).to_string();
+            pending.clear();
+
+            append_terminal_line(&output_buffer, &data);
+
+            let (needs_attention, excerpt) = check_needs_attention(&data, &output_buffer);
+
+            if needs_attention {
+                let mut payload = serde_json::json!({
+                    "ptyId": pty_id,
+                    "status": "waiting",
+                    "phase": "needs_input"
+                });
+
+                if let Some(ref pid) = pane_id {
+                    payload["paneId"] = serde_json::json!(pid);
+                }
+
+                if let Some(exc) = excerpt {
+                    payload["excerpt"] = serde_json::json!(exc);
+                }
+
+                let _ = app.emit("terminal-attention", payload);
+            }
+
             let _ = app.emit(
                 "terminal-output",
                 serde_json::json!({
@@ -2173,56 +2262,34 @@ fn spawn_terminal_reader_thread(
         };
 
         loop {
-            if stop_flag.load(Ordering::Relaxed) {
-                flush_output(&mut pending_out, &mut last_flush);
-                break;
-            }
-            match reader.read(&mut buffer) {
-                Ok(0) => {
-                    flush_output(&mut pending_out, &mut last_flush);
-                    break;
-                }
-                Ok(n) => {
-                    let data = String::from_utf8_lossy(&buffer[..n]).to_string();
-                    append_terminal_line(&output_buffer, &data);
-
-                    let (needs_attention, excerpt) = check_needs_attention(&data, &output_buffer);
-
-                    if needs_attention {
-                        let mut payload = serde_json::json!({
-                            "ptyId": pty_id,
-                            "status": "waiting",
-                            "phase": "needs_input"
-                        });
-
-                        if let Some(ref pid) = pane_id {
-                            payload["paneId"] = serde_json::json!(pid);
+            match rx.recv_timeout(FLUSH_INTERVAL) {
+                Ok(chunk) => {
+                    pending.extend_from_slice(&chunk);
+                    while let Ok(more) = rx.try_recv() {
+                        pending.extend_from_slice(&more);
+                        if pending.len() >= MAX_BATCH_BYTES {
+                            flush_pending(&mut pending);
                         }
-
-                        if let Some(exc) = excerpt {
-                            payload["excerpt"] = serde_json::json!(exc);
-                        }
-
-                        let _ = app.emit("terminal-attention", payload);
                     }
-
-                    pending_out.push_str(&data);
-                    let now = Instant::now();
-                    // Leitura parcial: saída interativa ou fim de stream — envia já. Leitura cheia: provável flood (cf. batching Superset).
-                    let likely_flood_chunk = n == buffer.len();
-                    if !likely_flood_chunk
-                        || pending_out.len() >= MAX_PENDING_BYTES
-                        || now.duration_since(last_flush) >= FLUSH_INTERVAL
-                    {
-                        flush_output(&mut pending_out, &mut last_flush);
+                    if pending.len() >= MAX_BATCH_BYTES {
+                        flush_pending(&mut pending);
                     }
                 }
-                Err(_) => {
-                    flush_output(&mut pending_out, &mut last_flush);
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if !pending.is_empty() {
+                        flush_pending(&mut pending);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    if !pending.is_empty() {
+                        flush_pending(&mut pending);
+                    }
                     break;
                 }
             }
         }
+
+        let _ = read_thread.join();
     })
 }
 
@@ -2285,6 +2352,19 @@ fn terminal_get_session(state: State<'_, AppState>, mission_id: String) -> ApiRe
     Ok(Value::Null)
 }
 
+/// Escreve no PTY em pedaços para reduzir EIO/backpressure em colagens grandes (um único `write` enorme).
+const PTY_INPUT_CHUNK_BYTES: usize = 8192;
+
+fn pty_write_all_chunked(writer: &mut dyn Write, data: &[u8]) -> std::io::Result<()> {
+    if data.is_empty() {
+        return Ok(());
+    }
+    for chunk in data.chunks(PTY_INPUT_CHUNK_BYTES) {
+        writer.write_all(chunk)?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn terminal_write(state: State<'_, AppState>, pty_id: String, data: String) -> ApiResult<Value> {
     let terminals = state
@@ -2294,8 +2374,7 @@ fn terminal_write(state: State<'_, AppState>, pty_id: String, data: String) -> A
     
     if let Some(t) = terminals.get(&pty_id) {
         let mut writer = t.writer.lock().map_err(|_| db_error("writer lock poisoned"))?;
-        writer
-            .write_all(data.as_bytes())
+        pty_write_all_chunked(&mut *writer, data.as_bytes())
             .map_err(|e| db_error(e.to_string()))?;
         return Ok(serde_json::json!({ "ok": true }));
     }
@@ -2495,6 +2574,7 @@ fn terminal_get_project_activity(_project_id: String) -> ApiResult<Value> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             app_get_version,

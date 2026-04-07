@@ -1,0 +1,4 @@
+{
+  "setup": ["./.devcommandcenter/setup-worktree.sh"],
+  "teardown": []
+}

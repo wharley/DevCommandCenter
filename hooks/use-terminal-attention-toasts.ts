@@ -1,6 +1,10 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import {
+  areNotificationsEnabled,
+  showNativeNotification,
+} from "@/lib/notifications";
+import {
   type AgentTerminalPhase,
   type TerminalAttentionPayload,
   resolveAttentionPhase,
@@ -36,11 +40,21 @@ const RENDERER_DEDUPE_MS = 95_000;
 export function useTerminalAttentionToasts(options?: {
   onNavigateToPane?: (detail: NavigateToPaneDetail) => void;
   onAttentionRecord?: (record: TerminalAttentionRecord) => void;
+  /**
+   * Quando devolve true, o utilizador está a ver este pane no workspace (sem painel Providers por cima).
+   * Nesse caso evitamos notificação nativa duplicada; o toast in-app mantém-se.
+   */
+  isAttentionPaneInView?: (detail: {
+    paneId: string;
+    combId: string;
+  }) => boolean;
 }) {
   const navigateRef = useRef(options?.onNavigateToPane);
   navigateRef.current = options?.onNavigateToPane;
   const recordRef = useRef(options?.onAttentionRecord);
   recordRef.current = options?.onAttentionRecord;
+  const inViewRef = useRef(options?.isAttentionPaneInView);
+  inViewRef.current = options?.isAttentionPaneInView;
   const lastRendererEmit = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
@@ -104,7 +118,7 @@ export function useTerminalAttentionToasts(options?: {
             }
           : null;
       const record: TerminalAttentionRecord | null =
-        nav && payload.paneId
+        nav && payload.paneId && comb && project
           ? {
               id: `${payload.paneId}:${now}`,
               paneId: payload.paneId,
@@ -135,6 +149,21 @@ export function useTerminalAttentionToasts(options?: {
             }
           : {}),
       });
+
+      const viewingThisPane =
+        inViewRef.current?.({
+          paneId: pane.id,
+          combId: pane.combId,
+        }) ?? false;
+      const suppressOsBanner =
+        viewingThisPane &&
+        typeof document !== "undefined" &&
+        document.visibilityState === "visible" &&
+        document.hasFocus();
+
+      if (areNotificationsEnabled() && !suppressOsBanner) {
+        void showNativeNotification(title, description);
+      }
     });
   }, []);
 }

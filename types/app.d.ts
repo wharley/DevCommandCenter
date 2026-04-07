@@ -317,7 +317,7 @@ declare global {
         showNotification: (payload: {
           title: string;
           body?: string;
-        }) => Promise<void>;
+        }) => Promise<{ ok?: boolean } | void>;
         onUpdateStatus: (
           callback: (payload: {
             type: "available" | "not-available" | "downloaded" | "error";

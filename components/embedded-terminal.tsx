@@ -15,6 +15,7 @@ import {
 import { recordTerminalOutputBytes } from "@/lib/terminal/output-metrics";
 import { loadTerminalAppearance } from "@/lib/terminal/terminal-preferences";
 import { getXtermColorTheme } from "@/lib/terminal/xterm-theme";
+import { writePtyInputInChunks } from "@/lib/terminal/pty-input-write";
 
 export interface EmbeddedTerminalProps {
   cwd: string;
@@ -22,6 +23,8 @@ export interface EmbeddedTerminalProps {
   args?: string[];
   onClose?: () => void;
   onExit?: (code: number) => void;
+  /** Chamado quando um PTY fica associado ao pane (spawn ou reattach). Útil para badges no pai. */
+  onSessionActive?: () => void;
   /** Optional label for the terminal */
   title?: string;
   /**
@@ -29,20 +32,6 @@ export interface EmbeddedTerminalProps {
    * and the PTY is NOT killed on unmount for reattach.
    */
   paneId?: string;
-  /**
-   * Auto-start the process on mount. Default: true.
-   * Set to false for agent panes to avoid token consumption on app restart.
-   */
-  autoStart?: boolean;
-  /**
-   * Callback to notify parent that this terminal is ready but not started.
-   */
-  onReadyNotStarted?: () => void;
-  /**
-   * Callback when parent wants to start the agent manually.
-   * Only applicable when autoStart=false.
-   */
-  onStartRequest?: (startFn: () => void) => void;
 }
 
 type PaneAttachResult = {
@@ -57,11 +46,9 @@ export function EmbeddedTerminal({
   args = [],
   onClose,
   onExit,
+  onSessionActive,
   title,
   paneId,
-  autoStart = true,
-  onReadyNotStarted,
-  onStartRequest,
 }: EmbeddedTerminalProps) {
   const { resolvedTheme } = useTheme();
   const [terminalPrefsEpoch, setTerminalPrefsEpoch] = useState(0);
@@ -69,6 +56,8 @@ export function EmbeddedTerminal({
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
+  /** Serializa escritas no PTY (teclado + paste) e evita promise rejeitada sem catch. */
+  const ptyWriteChainRef = useRef<Promise<void>>(Promise.resolve());
   const onExitRef = useRef<typeof onExit>(onExit);
   /** Rastreia se usuário está no final do terminal para auto-scroll inteligente */
   const isAtBottomRef = useRef(true);
@@ -170,6 +159,7 @@ export function EmbeddedTerminal({
         ptyIdRef.current = result.ptyId;
         setAgentCanRestart(false);
         setExited(null);
+        onSessionActive?.();
       } else if (result.session?.status === "exited" && command) {
         setAgentCanRestart(true);
       }
@@ -183,43 +173,68 @@ export function EmbeddedTerminal({
         setExited(result.session.lastExitCode);
       }
     },
-    [command, safeWrite],
+    [command, onSessionActive, safeWrite],
   );
+
+  const enqueuePtyUserInput = useCallback((data: string) => {
+    if (!data) return;
+    const api = window.desktopAPI?.terminal;
+    if (!api?.write) return;
+
+    ptyWriteChainRef.current = ptyWriteChainRef.current
+      .catch(() => {
+        /* falha anterior: permite continuar a fila */
+      })
+      .then(async () => {
+        const id = ptyIdRef.current;
+        if (!id) return;
+        await writePtyInputInChunks(api.write.bind(api), id, data);
+        if (isWaitingRef.current) {
+          isWaitingRef.current = false;
+          setIsWaiting(false);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!xtermRef.current) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+      });
+  }, []);
 
   const handleStartOrRestartAgent = useCallback((restart: boolean = false) => {
     const api = window.desktopAPI?.terminal;
     const term = xtermRef.current;
     if (!api?.getOrCreateForPane || !paneId || !term) return;
+    try {
+      fitAddonRef.current?.fit();
+    } catch {
+      /* ignore */
+    }
+    const cols = Math.max(term.cols, 2) || 80;
+    const rows = Math.max(term.rows, 2) || 24;
     if (restart) term.reset();
     void api
       .getOrCreateForPane(paneId, {
         cwd,
         command,
         args: stableArgs,
-        cols: term.cols,
-        rows: term.rows,
+        cols,
+        rows,
         restart,
       })
       .then(async (result) => {
         if (xtermRef.current !== term) return;
         applyPaneAttachResult(result, term);
         await hydrateTerminalBacklog(term, result.ptyId);
+      })
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : String(e));
       });
   }, [applyPaneAttachResult, hydrateTerminalBacklog, paneId, cwd, command, stableArgs]);
 
   const handleRestartAgent = useCallback(() => {
     handleStartOrRestartAgent(true);
   }, [handleStartOrRestartAgent]);
-
-  const handleStartAgent = useCallback(() => {
-    handleStartOrRestartAgent(false);
-  }, [handleStartOrRestartAgent]);
-
-  useEffect(() => {
-    if (onStartRequest && !autoStart) {
-      onStartRequest(handleStartAgent);
-    }
-  }, [onStartRequest, autoStart, handleStartAgent]);
 
   const killPty = useCallback(() => {
     const id = ptyIdRef.current;
@@ -253,8 +268,16 @@ export function EmbeddedTerminal({
       const result = await api.saveTempImage(imageData, extension);
 
       if (result?.path) {
-        // Inject the path into the terminal
-        await api.write(ptyId, ` ${result.path}`);
+        ptyWriteChainRef.current = ptyWriteChainRef.current
+          .catch(() => {})
+          .then(async () => {
+            const id = ptyIdRef.current;
+            if (!id) return;
+            await writePtyInputInChunks(api.write.bind(api), id, ` ${result.path}`);
+          })
+          .catch((err: unknown) => {
+            console.error("[EmbeddedTerminal] Failed to inject image path:", err);
+          });
       }
     } catch (error) {
       console.error('[EmbeddedTerminal] Failed to process image:', error);
@@ -388,15 +411,7 @@ export function EmbeddedTerminal({
     });
 
     term.onData((data: string) => {
-      const id = ptyIdRef.current;
-      if (id) {
-        api.write(id, data);
-        // Só atualiza quando estava em "waiting" — evita re-render a cada tecla
-        if (isWaitingRef.current) {
-          isWaitingRef.current = false;
-          setIsWaiting(false);
-        }
-      }
+      enqueuePtyUserInput(data);
     });
 
     // Usa evento nativo do xterm para detectar scroll (muito mais eficiente que polling)
@@ -412,54 +427,33 @@ export function EmbeddedTerminal({
       container.addEventListener('paste', handlePaste as EventListener);
     }
 
+    const spawnCols = Math.max(term.cols, 2) || 80;
+    const spawnRows = Math.max(term.rows, 2) || 24;
     const spawnOptions =
       command && command.trim().length > 0
         ? {
             cwd,
             command: shellCommand,
             args: ["-il", "-c", `${command} ${stableArgs.join(" ")}`.trim()],
-            cols: term.cols,
-            rows: term.rows,
+            cols: spawnCols,
+            rows: spawnRows,
           }
         : {
             cwd,
             command: shellCommand,
             args: ["-il"],
-            cols: term.cols,
-            rows: term.rows,
+            cols: spawnCols,
+            rows: spawnRows,
           };
 
     const mountSession = async () => {
       try {
         if (paneId && api.getOrCreateForPane) {
-          // Se !autoStart, primeiro verifica se já existe sessão
-          if (!autoStart && api.getPaneSession) {
-            const session = await api.getPaneSession(paneId);
-            if (!session || typeof session !== "object" || !("ptyId" in session)) {
-              // Sem sessão ativa, notifica parent e espera user iniciar
-              onReadyNotStarted?.();
-              return;
-            }
-            // Sessão existe, faz reattach normal
-            const result = await api.getOrCreateForPane(paneId, spawnOptions);
-            if (disposed || xtermRef.current !== term) return;
-            applyPaneAttachResult(result, term);
-            // CRÍTICO: Hidrata backlog ANTES de registrar listener (evita race condition)
-            await hydrateTerminalBacklog(term, result.ptyId);
-          } else {
-            // autoStart=true, comportamento normal
-            const result = await api.getOrCreateForPane(paneId, spawnOptions);
-            if (disposed || xtermRef.current !== term) return;
-            applyPaneAttachResult(result, term);
-            // CRÍTICO: Hidrata backlog ANTES de registrar listener (evita race condition)
-            await hydrateTerminalBacklog(term, result.ptyId);
-          }
+          const result = await api.getOrCreateForPane(paneId, spawnOptions);
+          if (disposed || xtermRef.current !== term) return;
+          applyPaneAttachResult(result, term);
+          await hydrateTerminalBacklog(term, result.ptyId);
         } else {
-          // Para terminais sem paneId, sempre spawna se autoStart=true
-          if (!autoStart) {
-            onReadyNotStarted?.();
-            return;
-          }
           const result = await api.spawn(spawnOptions);
           if (disposed || xtermRef.current !== term) return;
           if (result.error) {
@@ -536,6 +530,7 @@ export function EmbeddedTerminal({
 
     return () => {
       disposed = true;
+      ptyWriteChainRef.current = Promise.resolve();
       if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
       resizeObserver.disconnect();
       void unlistenOutput?.();
@@ -566,13 +561,12 @@ export function EmbeddedTerminal({
     };
   }, [
     applyPaneAttachResult,
-    autoStart,
     checkIfAtBottom,
     command,
     cwd,
+    enqueuePtyUserInput,
     handlePaste,
     hydrateTerminalBacklog,
-    onReadyNotStarted,
     paneId,
     safeWrite,
     shellCommand,
