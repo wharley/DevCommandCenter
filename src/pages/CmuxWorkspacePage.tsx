@@ -1007,13 +1007,43 @@ export default function CmuxWorkspacePage() {
   };
 
   const handleRemoveWorkspace = async (combId: string) => {
+    // Check for unpushed commits first
+    let unpushedInfo = null;
+    try {
+      if (window.desktopAPI?.comb?.checkUnpushed) {
+        unpushedInfo = await window.desktopAPI.comb.checkUnpushed(combId);
+      }
+    } catch (error) {
+      console.warn("Failed to check unpushed commits:", error);
+    }
+
+    // Build confirmation message based on unpushed commits
+    let description = "Worktree e panes serão removidos.";
+    let title = "Remover workspace?";
+    let confirmLabel = "Remover";
+
+    if (unpushedInfo?.hasUnpushed) {
+      title = "⚠️ Commits não enviados detectados";
+      const commitPreview = unpushedInfo.commits
+        .slice(0, 5)
+        .map((c: string) => `  • ${c}`)
+        .join("\n");
+      const moreText =
+        unpushedInfo.count > 5 ? `\n  ... e mais ${unpushedInfo.count - 5} commit(s)` : "";
+
+      description = `Este workspace tem ${unpushedInfo.count} commit(s) não enviado(s) para o remote:\n\n${commitPreview}${moreText}\n\nRemover este workspace irá DELETAR permanentemente estes commits.\n\nTem certeza que deseja continuar?`;
+      confirmLabel = "Sim, remover mesmo assim";
+    }
+
     const confirmed = await confirmDialog({
-      title: "Remover workspace?",
-      description: "Worktree e panes serão removidos.",
-      confirmLabel: "Remover",
+      title,
+      description,
+      confirmLabel,
       cancelLabel: "Cancelar",
     });
+
     if (!confirmed) return;
+
     if (window.desktopAPI?.comb?.discard) {
       const result = await window.desktopAPI.comb.discard(combId);
       if (!result.success && result.error) toast.error(result.error);

@@ -123,3 +123,13 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Terminal bell flash animation */
+@keyframes terminal-bell-flash {
+  0%, 100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: hsl(var(--primary) / 0.2);
+  }
+}

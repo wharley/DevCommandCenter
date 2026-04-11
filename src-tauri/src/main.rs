@@ -358,6 +358,25 @@ fn git_current_branch_impl(project_path: &str) -> ApiResult<String> {
         .to_string())
 }
 
+fn get_unpushed_commits(cwd: &str, branch: &str) -> ApiResult<Vec<String>> {
+    // Check if remote tracking branch exists
+    let upstream = run_git(cwd, &["rev-parse", "--abbrev-ref", &format!("{}@{{u}}", branch)])
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    if upstream.is_empty() {
+        // No upstream, check all commits from base branch
+        // This is a worktree-specific scenario
+        let log = run_git(cwd, &["log", "--oneline", "HEAD"]).unwrap_or_default();
+        return Ok(log.lines().map(|s| s.to_string()).collect());
+    }
+
+    // Get commits ahead of remote
+    let log = run_git(cwd, &["log", "--oneline", &format!("{}..HEAD", upstream)])?;
+    Ok(log.lines().map(|s| s.to_string()).collect())
+}
+
 fn parse_git_status_porcelain(raw: &str) -> Vec<(String, String)> {
     raw.lines()
         .filter(|l| !l.trim().is_empty() && l.len() > 3)
@@ -726,18 +745,136 @@ fn try_cli_invocation(path: &Path) -> bool {
 }
 
 #[tauri::command]
-fn shell_open_external(_url: String) -> ApiResult<Value> {
-    mapped_not_implemented("shell:openExternal")
+fn shell_open_external(url: String) -> ApiResult<Value> {
+    use std::process::Command;
+
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open")
+        .arg(&url)
+        .status();
+
+    #[cfg(target_os = "linux")]
+    let status = Command::new("xdg-open")
+        .arg(&url)
+        .status();
+
+    #[cfg(target_os = "windows")]
+    let status = Command::new("cmd")
+        .args(["/C", "start", "", &url])
+        .status();
+
+    match status {
+        Ok(s) if s.success() => Ok(serde_json::json!({ "success": true })),
+        Ok(_) => Err(ApiError {
+            code: "SHELL_ERROR",
+            message: "Failed to open URL".into(),
+        }),
+        Err(e) => Err(ApiError {
+            code: "SHELL_ERROR",
+            message: e.to_string(),
+        }),
+    }
 }
 
 #[tauri::command]
-fn shell_open_path(_path: String) -> ApiResult<Value> {
-    mapped_not_implemented("shell:openPath")
+fn shell_open_path(path: String) -> ApiResult<Value> {
+    use std::process::Command;
+
+    let expanded = expand_user_path(path.trim());
+
+    if !expanded.exists() {
+        return Err(ApiError {
+            code: "PATH_NOT_FOUND",
+            message: format!("Path not found: {}", expanded.display()),
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open")
+        .arg(&expanded)
+        .status();
+
+    #[cfg(target_os = "linux")]
+    let status = Command::new("xdg-open")
+        .arg(&expanded)
+        .status();
+
+    #[cfg(target_os = "windows")]
+    let status = Command::new("explorer")
+        .arg(&expanded)
+        .status();
+
+    match status {
+        Ok(s) if s.success() => Ok(serde_json::json!({ "success": true })),
+        Ok(_) => Err(ApiError {
+            code: "SHELL_ERROR",
+            message: format!("Failed to open path: {}", expanded.display()),
+        }),
+        Err(e) => Err(ApiError {
+            code: "SHELL_ERROR",
+            message: e.to_string(),
+        }),
+    }
 }
 
 #[tauri::command]
-fn shell_show_item_in_folder(_path: String) -> ApiResult<Value> {
-    mapped_not_implemented("shell:showItemInFolder")
+fn shell_show_item_in_folder(path: String) -> ApiResult<Value> {
+    use std::process::Command;
+
+    let expanded = expand_user_path(path.trim());
+
+    if !expanded.exists() {
+        return Err(ApiError {
+            code: "PATH_NOT_FOUND",
+            message: format!("Path not found: {}", expanded.display()),
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open")
+        .args(["-R", &expanded.to_string_lossy()])
+        .status();
+
+    #[cfg(target_os = "linux")]
+    let status = {
+        // Try dbus for better file manager integration
+        let dbus_result = Command::new("dbus-send")
+            .args([
+                "--session",
+                "--dest=org.freedesktop.FileManager1",
+                "--type=method_call",
+                "/org/freedesktop/FileManager1",
+                "org.freedesktop.FileManager1.ShowItems",
+                &format!("array:string:file://{}", expanded.display()),
+                "string:",
+            ])
+            .status();
+
+        // Fallback to xdg-open on parent folder if dbus fails
+        if dbus_result.is_err() || !dbus_result.as_ref().unwrap().success() {
+            let parent = expanded.parent().unwrap_or(&expanded);
+            Command::new("xdg-open").arg(parent).status()
+        } else {
+            dbus_result
+        }
+    };
+
+    #[cfg(target_os = "windows")]
+    let status = Command::new("explorer")
+        .args(["/select,", &expanded.to_string_lossy()])
+        .status();
+
+    match status {
+        Ok(s) if s.success() => Ok(serde_json::json!({ "success": true })),
+        Ok(_) => Err(ApiError {
+            code: "SHELL_ERROR",
+            message: format!("Failed to show item in folder: {}", expanded.display()),
+        }),
+        Err(e) => Err(ApiError {
+            code: "SHELL_ERROR",
+            message: e.to_string(),
+        }),
+    }
 }
 
 #[tauri::command]
@@ -891,18 +1028,59 @@ async fn terminal_save_temp_image(image_data: Vec<u8>, extension: String) -> Api
 }
 
 #[tauri::command]
-fn window_minimize() -> ApiResult<Value> {
-    mapped_not_implemented("window:minimize")
+fn window_minimize(app: AppHandle) -> ApiResult<Value> {
+    let window = app.get_webview_window("main")
+        .ok_or_else(|| ApiError {
+            code: "WINDOW_NOT_FOUND",
+            message: "Main window not found".into(),
+        })?;
+
+    window.minimize().map_err(|e| ApiError {
+        code: "WINDOW_ERROR",
+        message: e.to_string(),
+    })?;
+
+    Ok(serde_json::json!({ "success": true }))
 }
 
 #[tauri::command]
-fn window_maximize() -> ApiResult<Value> {
-    mapped_not_implemented("window:maximize")
+fn window_maximize(app: AppHandle) -> ApiResult<Value> {
+    let window = app.get_webview_window("main")
+        .ok_or_else(|| ApiError {
+            code: "WINDOW_NOT_FOUND",
+            message: "Main window not found".into(),
+        })?;
+
+    // Toggle maximize/unmaximize
+    if window.is_maximized().unwrap_or(false) {
+        window.unmaximize().map_err(|e| ApiError {
+            code: "WINDOW_ERROR",
+            message: e.to_string(),
+        })?;
+    } else {
+        window.maximize().map_err(|e| ApiError {
+            code: "WINDOW_ERROR",
+            message: e.to_string(),
+        })?;
+    }
+
+    Ok(serde_json::json!({ "success": true }))
 }
 
 #[tauri::command]
-fn window_close() -> ApiResult<Value> {
-    mapped_not_implemented("window:close")
+fn window_close(app: AppHandle) -> ApiResult<Value> {
+    let window = app.get_webview_window("main")
+        .ok_or_else(|| ApiError {
+            code: "WINDOW_NOT_FOUND",
+            message: "Main window not found".into(),
+        })?;
+
+    window.close().map_err(|e| ApiError {
+        code: "WINDOW_ERROR",
+        message: e.to_string(),
+    })?;
+
+    Ok(serde_json::json!({ "success": true }))
 }
 
 #[tauri::command]
@@ -1964,9 +2142,159 @@ fn comb_discard(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value>
         .map_err(|e| db_error(e.to_string()))?;
     Ok(serde_json::json!({"success": true}))
 }
+
 #[tauri::command]
-fn comb_merge_into_main(_comb_id: String, _target_branch: Option<String>) -> ApiResult<Value> {
-    mapped_not_implemented("comb:mergeIntoMain")
+fn comb_check_unpushed(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
+    let (branch, worktree_path) = {
+        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+
+        let mut stmt = conn.prepare("SELECT branch, worktree_path FROM combs WHERE id = ?1")
+            .map_err(|e| db_error(e.to_string()))?;
+
+        let row: Option<(Option<String>, Option<String>)> = stmt
+            .query_row(params![comb_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .optional()
+            .map_err(|e| db_error(e.to_string()))?;
+
+        let Some((branch, worktree_path)) = row else {
+            return Err(db_error("Comb not found"));
+        };
+
+        (branch, worktree_path)
+    };
+
+    let Some(branch) = branch else {
+        return Ok(serde_json::json!({
+            "hasUnpushed": false,
+            "count": 0,
+            "commits": []
+        }));
+    };
+
+    let Some(worktree_path) = worktree_path else {
+        return Err(db_error("No worktree for comb"));
+    };
+
+    let unpushed = get_unpushed_commits(&worktree_path, &branch)?;
+
+    Ok(serde_json::json!({
+        "hasUnpushed": !unpushed.is_empty(),
+        "count": unpushed.len(),
+        "commits": unpushed,
+    }))
+}
+
+#[tauri::command]
+async fn comb_merge_into_main(
+    state: State<'_, AppState>,
+    comb_id: String,
+    target_branch: Option<String>,
+) -> ApiResult<Value> {
+    // 1. Buscar dados do comb
+    let (project_path, comb_branch, base_branch, comb_name) = {
+        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+
+        let row: Option<(String, Option<String>, Option<String>, String, String)> = conn
+            .query_row(
+                "SELECT p.path, c.branch, c.worktree_path, c.base_branch, c.name
+                 FROM combs c JOIN projects p ON p.id = c.project_id
+                 WHERE c.id = ?1",
+                params![comb_id.clone()],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .optional()
+            .map_err(|e| db_error(e.to_string()))?;
+
+        let Some((project_path, comb_branch, worktree_path, base_branch, comb_name)) = row else {
+            return Err(db_error("Comb not found"));
+        };
+
+        let Some(comb_branch) = comb_branch else {
+            return Err(db_error("Comb has no branch"));
+        };
+
+        let Some(_worktree_path) = worktree_path else {
+            return Err(db_error("Comb has no worktree"));
+        };
+
+        (project_path, comb_branch, base_branch, comb_name)
+    };
+
+    // 2. Executar merge em background
+    let comb_id_clone = comb_id.clone();
+    let state_clone = state.inner().clone();
+    let target = target_branch.unwrap_or(base_branch);
+    let project_path_clone = project_path.clone();
+    let comb_branch_clone = comb_branch.clone();
+    let comb_name_clone = comb_name.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // 3. Checkout target branch
+        if let Err(e) = run_git(&project_path_clone, &["checkout", &target]) {
+            return Err(ApiError {
+                code: "GIT_ERROR",
+                message: format!("Failed to checkout {}: {}", target, e.message),
+            });
+        }
+
+        // 4. Merge com --no-ff
+        let merge_msg = format!("Merge comb: {}", comb_name_clone);
+        let merge_result = run_git(
+            &project_path_clone,
+            &["merge", "--no-ff", &comb_branch_clone, "-m", &merge_msg],
+        );
+
+        match merge_result {
+            Ok(_) => {
+                // 5. Sucesso - atualizar status
+                let conn = state_clone.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+                conn.execute(
+                    "UPDATE combs SET status = 'applied' WHERE id = ?1",
+                    params![comb_id_clone],
+                )
+                .map_err(|e| db_error(e.to_string()))?;
+
+                Ok(serde_json::json!({
+                    "success": true,
+                    "message": format!("Successfully merged {} into {}", comb_branch_clone, target)
+                }))
+            }
+            Err(e) => {
+                // 6. Conflito ou erro - detectar conflicted files
+                let stderr = e.message.to_lowercase();
+                if stderr.contains("conflict") || stderr.contains("merge conflict") {
+                    // Obter lista de arquivos em conflito
+                    let conflicted = run_git(&project_path_clone, &["diff", "--name-only", "--diff-filter=U"])
+                        .unwrap_or_default();
+
+                    let conflicts: Vec<String> = conflicted
+                        .lines()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+
+                    // Abortar merge
+                    let _ = run_git(&project_path_clone, &["merge", "--abort"]);
+
+                    return Ok(serde_json::json!({
+                        "success": false,
+                        "conflict": true,
+                        "conflicts": conflicts,
+                        "message": format!("Merge conflict detected. {} file(s) have conflicts.", conflicts.len())
+                    }));
+                }
+
+                // Outro erro
+                Ok(serde_json::json!({
+                    "success": false,
+                    "conflict": false,
+                    "message": format!("Merge failed: {}", e.message)
+                }))
+            }
+        }
+    })
+    .await
+    .map_err(|e| db_error(e.to_string()))?
 }
 #[tauri::command]
 fn comb_get_diffs(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
@@ -1986,8 +2314,109 @@ fn comb_get_diffs(state: State<'_, AppState>, comb_id: String) -> ApiResult<Valu
     build_review_diffs_for_path(&wp)
 }
 #[tauri::command]
-fn comb_apply_patch(_comb_id: String, _target_branch: String, _options: Option<Value>) -> ApiResult<Value> {
-    mapped_not_implemented("comb:applyPatch")
+async fn comb_apply_patch(
+    state: State<'_, AppState>,
+    comb_id: String,
+    target_branch: String,
+    _options: Option<Value>,
+) -> ApiResult<Value> {
+    use std::fs;
+
+    // 1. Buscar dados do comb
+    let (project_path, worktree_path, base_branch) = {
+        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+
+        let row: Option<(String, Option<String>, Option<String>, String)> = conn
+            .query_row(
+                "SELECT p.path, c.branch, c.worktree_path, c.base_branch
+                 FROM combs c JOIN projects p ON p.id = c.project_id
+                 WHERE c.id = ?1",
+                params![comb_id.clone()],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()
+            .map_err(|e| db_error(e.to_string()))?;
+
+        let Some((project_path, _comb_branch, worktree_path, base_branch)) = row else {
+            return Err(db_error("Comb not found"));
+        };
+
+        let Some(worktree_path) = worktree_path else {
+            return Err(db_error("Comb has no worktree"));
+        };
+
+        (project_path, worktree_path, base_branch)
+    };
+
+    // 2. Executar apply patch em background
+    let comb_id_clone = comb_id.clone();
+    let state_clone = state.inner().clone();
+    let project_path_clone = project_path.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // 3. Gerar patch file
+        let patch_file = format!("/tmp/dcc-comb-{}.patch", comb_id_clone);
+
+        let patch_content = run_git(&worktree_path, &["diff", &base_branch, "HEAD"])
+            .map_err(|e| ApiError {
+                code: "GIT_ERROR",
+                message: format!("Failed to generate patch: {}", e.message),
+            })?;
+
+        fs::write(&patch_file, &patch_content).map_err(|e| ApiError {
+            code: "FILE_ERROR",
+            message: format!("Failed to write patch file: {}", e),
+        })?;
+
+        // 4. Checkout target branch
+        if let Err(e) = run_git(&project_path_clone, &["checkout", &target_branch]) {
+            let _ = fs::remove_file(&patch_file);
+            return Err(ApiError {
+                code: "GIT_ERROR",
+                message: format!("Failed to checkout {}: {}", target_branch, e.message),
+            });
+        }
+
+        // 5. Validar patch (dry run)
+        let check_result = run_git(&project_path_clone, &["apply", "--check", &patch_file]);
+
+        if let Err(e) = check_result {
+            let _ = fs::remove_file(&patch_file);
+            return Ok(serde_json::json!({
+                "success": false,
+                "message": format!("Patch validation failed: {}", e.message)
+            }));
+        }
+
+        // 6. Aplicar patch
+        let apply_result = run_git(&project_path_clone, &["apply", &patch_file]);
+
+        // 7. Cleanup patch file
+        let _ = fs::remove_file(&patch_file);
+
+        match apply_result {
+            Ok(_) => {
+                // 8. Sucesso - atualizar status
+                let conn = state_clone.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+                conn.execute(
+                    "UPDATE combs SET status = 'applied' WHERE id = ?1",
+                    params![comb_id_clone],
+                )
+                .map_err(|e| db_error(e.to_string()))?;
+
+                Ok(serde_json::json!({
+                    "success": true,
+                    "message": format!("Patch successfully applied to {}", target_branch)
+                }))
+            }
+            Err(e) => Ok(serde_json::json!({
+                "success": false,
+                "message": format!("Failed to apply patch: {}", e.message)
+            })),
+        }
+    })
+    .await
+    .map_err(|e| db_error(e.to_string()))?
 }
 
 // ---------- Terminal ----------
@@ -2637,6 +3066,7 @@ pub fn run() {
             review_get_diffs_bundle,
             comb_ensure_worktree,
             comb_discard,
+            comb_check_unpushed,
             comb_merge_into_main,
             comb_get_diffs,
             comb_apply_patch,

@@ -524,6 +524,118 @@ export default function SettingsPage() {
                   }}
                 />
               </div>
+
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+                <Label htmlFor="scrollback">Scrollback</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="scrollback"
+                    type="number"
+                    min={100}
+                    max={50000}
+                    step={1000}
+                    value={terminalAppearance.scrollback}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isNaN(v)) return;
+                      const scrollback = Math.min(50000, Math.max(100, v));
+                      const next = { ...terminalAppearance, scrollback };
+                      setTerminalAppearance(next);
+                      saveTerminalAppearance(next);
+                    }}
+                    className="max-w-[140px]"
+                  />
+                  <p className="text-xs text-muted-foreground">linhas</p>
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+                <Label htmlFor="cursor-style">Estilo do cursor</Label>
+                <Select
+                  value={terminalAppearance.cursorStyle}
+                  onValueChange={(value: "block" | "underline" | "bar") => {
+                    const next = { ...terminalAppearance, cursorStyle: value };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                >
+                  <SelectTrigger id="cursor-style" className="max-w-[200px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="block">Bloco</SelectItem>
+                    <SelectItem value="underline">Sublinhado</SelectItem>
+                    <SelectItem value="bar">Barra</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+                <Label htmlFor="bell-style">Estilo do bell</Label>
+                <Select
+                  value={terminalAppearance.bellStyle}
+                  onValueChange={(value: "none" | "visual" | "sound" | "both") => {
+                    const next = { ...terminalAppearance, bellStyle: value };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                >
+                  <SelectTrigger id="bell-style" className="max-w-[200px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhum</SelectItem>
+                    <SelectItem value="visual">Visual (Flash)</SelectItem>
+                    <SelectItem value="sound">Som</SelectItem>
+                    <SelectItem value="both">Ambos</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Cursor piscante</p>
+                </div>
+                <Switch
+                  checked={terminalAppearance.cursorBlink}
+                  onCheckedChange={(checked) => {
+                    const next = { ...terminalAppearance, cursorBlink: checked };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Copiar ao selecionar</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Copia automaticamente o texto selecionado
+                  </p>
+                </div>
+                <Switch
+                  checked={terminalAppearance.copyOnSelect}
+                  onCheckedChange={(checked) => {
+                    const next = { ...terminalAppearance, copyOnSelect: checked };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Clique direito seleciona palavra</p>
+                </div>
+                <Switch
+                  checked={terminalAppearance.rightClickSelectsWord}
+                  onCheckedChange={(checked) => {
+                    const next = { ...terminalAppearance, rightClickSelectsWord: checked };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                />
+              </div>
               <p className="text-[11px] text-muted-foreground">
                 Métricas de throughput (dev):{" "}
                 <code className="rounded bg-muted px-1">localStorage.setItem(&apos;dcc.debugTerminalMetrics&apos;, &apos;1&apos;)</code>

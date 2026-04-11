@@ -143,6 +143,7 @@ export function installDesktopBridge(): void {
     comb: {
       ensureWorktree: (combId) => call("comb_ensure_worktree", { combId }),
       discard: (combId) => call("comb_discard", { combId }),
+      checkUnpushed: (combId) => call<{ hasUnpushed: boolean; count: number; commits: string[] }>("comb_check_unpushed", { combId }),
       mergeIntoMain: (combId, targetBranch) =>
         call("comb_merge_into_main", { combId, targetBranch }),
       getDiffs: (combId) => call("comb_get_diffs", { combId }),

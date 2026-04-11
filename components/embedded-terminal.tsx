@@ -4,16 +4,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Terminal as XTerm } from "xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { SearchAddon } from "@xterm/addon-search";
 import "xterm/css/xterm.css";
 import { Button } from "@/components/ui/button";
-import { X, Paperclip, ArrowDown } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { X, Paperclip, ArrowDown, ChevronUp, ChevronDown } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import {
   type TerminalAttentionPayload,
   resolveAttentionPhase,
 } from "@/lib/terminal/attention-types";
 import { recordTerminalOutputBytes } from "@/lib/terminal/output-metrics";
-import { loadTerminalAppearance } from "@/lib/terminal/terminal-preferences";
+import { getTerminalAppearancePreferences } from "@/lib/terminal/terminal-preferences";
 import { getXtermColorTheme } from "@/lib/terminal/xterm-theme";
 import { writePtyInputInChunks } from "@/lib/terminal/pty-input-write";
 
@@ -55,6 +58,7 @@ export function EmbeddedTerminal({
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
   /** Serializa escritas no PTY (teclado + paste) e evita promise rejeitada sem catch. */
   const ptyWriteChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -70,6 +74,9 @@ export function EmbeddedTerminal({
   const [isWaiting, setIsWaiting] = useState(false);
   /** Pane agent: mostrar reinício quando o processo terminou ou só há sessão encerrada no main. */
   const [agentCanRestart, setAgentCanRestart] = useState(false);
+  /** Search bar visibility and state */
+  const [searchVisible, setSearchVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const argsKey = useMemo(() => JSON.stringify(args), [args]);
   const stableArgs = useMemo(() => args, [argsKey]);
   const shellCommand = useMemo(() => {
@@ -98,6 +105,23 @@ export function EmbeddedTerminal({
     window.addEventListener("dcc-terminal-action", onAction as EventListener);
     return () => window.removeEventListener("dcc-terminal-action", onAction as EventListener);
   }, []);
+
+  // Search keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        setSearchVisible((prev) => !prev);
+      }
+      if (e.key === "Escape" && searchVisible) {
+        setSearchVisible(false);
+        setSearchQuery("");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [searchVisible]);
 
   useEffect(() => {
     const term = xtermRef.current;
@@ -323,6 +347,16 @@ export function EmbeddedTerminal({
     }
   }, []);
 
+  const performSearch = useCallback((query: string, direction: "next" | "prev" = "next") => {
+    if (!searchAddonRef.current || !query) return;
+
+    const found = direction === "next"
+      ? searchAddonRef.current.findNext(query, { caseSensitive: false })
+      : searchAddonRef.current.findPrevious(query, { caseSensitive: false });
+
+    return found;
+  }, []);
+
   const checkIfAtBottom = useCallback((term: XTerm) => {
     // Verifica se o viewport está no final do buffer
     // baseViewportY é 0-indexed, então comparamos com buffer.length - rows
@@ -349,13 +383,16 @@ export function EmbeddedTerminal({
     let disposed = false;
     let resizeRaf: number | null = null;
 
-    const initialPrefs = loadTerminalAppearance();
+    const initialPrefs = getTerminalAppearancePreferences();
     const term = new XTerm({
-      cursorBlink: true,
+      cursorBlink: initialPrefs.cursorBlink,
+      cursorStyle: initialPrefs.cursorStyle,
+      scrollback: initialPrefs.scrollback,
       scrollOnUserInput: true,
       fastScrollModifier: "alt",
-      fastScrollSensitivity: 5,
+      fastScrollSensitivity: initialPrefs.fastScrollSensitivity,
       scrollSensitivity: 1,
+      rightClickSelectsWord: initialPrefs.rightClickSelectsWord,
       fontSize: initialPrefs.fontSize,
       fontFamily: initialPrefs.fontFamily,
       theme: getXtermColorTheme(resolvedTheme, initialPrefs.useAppThemeColors),
@@ -363,6 +400,24 @@ export function EmbeddedTerminal({
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
+
+    // WebGL Addon for better performance
+    try {
+      const webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => {
+        // Fallback to canvas renderer
+        webglAddon.dispose();
+      });
+      term.loadAddon(webglAddon);
+    } catch (e) {
+      console.warn("WebGL addon not available, using canvas renderer:", e);
+    }
+
+    // Search Addon
+    const searchAddon = new SearchAddon();
+    term.loadAddon(searchAddon);
+    searchAddonRef.current = searchAddon;
+
     term.open(containerRef.current);
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -412,6 +467,45 @@ export function EmbeddedTerminal({
 
     term.onData((data: string) => {
       enqueuePtyUserInput(data);
+    });
+
+    // Copy on select
+    if (initialPrefs.copyOnSelect) {
+      term.onSelectionChange(() => {
+        const selection = term.getSelection();
+        if (selection) {
+          navigator.clipboard.writeText(selection).catch(() => {
+            // Ignore clipboard errors
+          });
+        }
+      });
+    }
+
+    // Bell handler
+    term.onBell(() => {
+      const prefs = getTerminalAppearancePreferences();
+
+      if (prefs.bellStyle === "none") return;
+
+      // Visual bell
+      if (prefs.bellStyle === "visual" || prefs.bellStyle === "both") {
+        const container = containerRef.current;
+        if (container) {
+          container.style.animation = "terminal-bell-flash 0.3s ease-in-out";
+          setTimeout(() => {
+            if (container) container.style.animation = "";
+          }, 300);
+        }
+      }
+
+      // Sound bell via native OS notification
+      if (prefs.bellStyle === "sound" || prefs.bellStyle === "both") {
+        api.showNotification?.({
+          title: "Terminal Bell",
+          body: `Activity in terminal: ${paneId || ptyIdRef.current}`,
+          sound: true,
+        }).catch((err) => console.warn("Failed to show bell notification:", err));
+      }
     });
 
     // Usa evento nativo do xterm para detectar scroll (muito mais eficiente que polling)
@@ -635,6 +729,48 @@ export function EmbeddedTerminal({
           ref={containerRef}
           className="h-full w-full overflow-hidden bg-background p-1"
         />
+        {searchVisible && (
+          <div className="absolute right-2 top-2 z-10 flex items-center gap-2 rounded-md border bg-background p-2 shadow-lg">
+            <Input
+              type="text"
+              placeholder="Search..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                performSearch(e.target.value);
+              }}
+              className="w-64"
+              autoFocus
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => performSearch(searchQuery, "prev")}
+              aria-label="Previous match"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => performSearch(searchQuery, "next")}
+              aria-label="Next match"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setSearchVisible(false);
+                setSearchQuery("");
+              }}
+              aria-label="Close search"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
         {hasNewOutput && (
           <div className="absolute bottom-4 right-4 flex items-center gap-2">
             <Button
