@@ -15,6 +15,8 @@ import {
   Settings,
   Terminal,
   Trash2,
+  WandSparkles,
+  Workflow,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -35,11 +37,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmbeddedTerminal } from "@/components/embedded-terminal";
 import { AddProjectDialog } from "@/components/dialogs/add-project-dialog";
+import { ProjectRepoConfigDialog } from "@/components/dialogs/project-repo-config-dialog";
+import { ProjectRepoTomlDialog } from "@/components/dialogs/project-repo-toml-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { usePanes, useProjects, useProviders } from "@/hooks/use-data";
 import SettingsPage from "@/src/pages/SettingsPage";
 import { normalizeComb, normalizeCombs } from "@/lib/database/normalize";
-import type { Comb, CreateCombDTO, Pane, Project, Provider } from "@/lib/database/types";
+import type {
+  Comb,
+  CreateCombDTO,
+  Pane,
+  Project,
+  ProjectRepoConfig,
+  Provider,
+} from "@/lib/database/types";
 import {
   useTerminalAttentionToasts,
   type TerminalAttentionRecord,
@@ -48,6 +59,8 @@ import {
   bumpTerminalFontSize,
   resetTerminalFontSize,
 } from "@/lib/terminal/terminal-preferences";
+import { useTerminalProjectActivity } from "@/hooks/use-terminal-project-activity";
+import { WorkspaceCommandPalette } from "@/components/workspace-command-palette";
 
 const CLI_PROVIDER_TYPES = ["codex", "claude-code", "gemini", "cursor"] as const;
 
@@ -77,6 +90,15 @@ function cliAgentKindLabel(provider: Provider | null): string {
   if (t === "gemini") return "Gemini";
   if (t === "cursor") return "Cursor";
   return "Agent";
+}
+
+function getPaneRuntimeCommand(pane: Pane, provider: Provider | null): string | undefined {
+  if (pane.type === "agent") return buildCliCommand(provider);
+  return pane.initialPrompt?.trim() || undefined;
+}
+
+function getProjectConfigBranchPrefix(config: ProjectRepoConfig | null | undefined): string {
+  return config?.branchPrefix?.trim() || "dcc";
 }
 
 function AgentKindBadge({
@@ -284,6 +306,7 @@ function NewAgentPaneDialog({
   onOpenChange,
   combId,
   providers,
+  preferredProviderId,
   onCreate,
   ensureCombWorktree,
 }: {
@@ -291,6 +314,7 @@ function NewAgentPaneDialog({
   onOpenChange: (v: boolean) => void;
   combId: string;
   providers: Provider[];
+  preferredProviderId?: string | null;
   onCreate: (pane: Pane) => void;
   ensureCombWorktree: () => Promise<boolean>;
 }) {
@@ -304,8 +328,12 @@ function NewAgentPaneDialog({
 
   useEffect(() => {
     if (!open) return;
+    if (preferredProviderId && cliProviders.some((p) => p.id === preferredProviderId)) {
+      setProviderId(preferredProviderId);
+      return;
+    }
     setProviderId(cliProviders[0]?.id ?? "");
-  }, [open, cliProviders]);
+  }, [open, cliProviders, preferredProviderId]);
 
   const handleCreate = async () => {
     setIsCreating(true);
@@ -371,6 +399,7 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
   projectName,
   attentionExcerpt,
   hasAttention,
+  runningCount,
   onSelect,
   onRemove,
   onTogglePin,
@@ -380,6 +409,7 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
   projectName: string;
   attentionExcerpt: string | null;
   hasAttention: boolean;
+  runningCount: number;
   onSelect: (comb: Comb) => void;
   onRemove: (combId: string) => void;
   onTogglePin: (combId: string) => void;
@@ -420,6 +450,11 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
             <span className="truncate">{comb.branch ?? comb.baseBranch}</span>
           </div>
           <p className="mt-0.5 line-clamp-1 text-[10px] text-sidebar-foreground/50">{projectName}</p>
+          {runningCount > 0 ? (
+            <Badge variant="outline" className="mt-1 h-5 border-sidebar-border px-1.5 text-[10px] text-sidebar-foreground/70">
+              {runningCount} ativos
+            </Badge>
+          ) : null}
           {attentionExcerpt ? <p className="mt-1 line-clamp-1 text-[11px] text-sidebar-foreground/70">{attentionExcerpt}</p> : null}
         </div>
         <div className="flex items-center gap-1">
@@ -449,27 +484,31 @@ const PaneCard = React.memo(function PaneCard({
   pane,
   worktreePath,
   provider,
+  onPaneStatusChange,
   onRemovePane,
 }: {
   pane: Pane;
   worktreePath: string;
   provider: Provider | null;
+  onPaneStatusChange: (paneId: string, status: "running" | "exited") => void;
   onRemovePane: (paneId: string) => void;
 }) {
-  const command = pane.type === "agent" ? buildCliCommand(provider) : undefined;
+  const command = getPaneRuntimeCommand(pane, provider);
   const label = pane.type === "agent" ? (pane.title ?? provider?.name ?? "Agent") : (pane.title ?? "Terminal");
-  const args = pane.initialPrompt ? [pane.initialPrompt] : [];
+  const args = pane.type === "agent" && pane.initialPrompt ? [pane.initialPrompt] : [];
   const handleRemove = useCallback(() => onRemovePane(pane.id), [onRemovePane, pane.id]);
   /** Sincroniza badge com sessão PTY no backend (reattach ao mudar de pane). */
   const [agentStatus, setAgentStatus] = useState<"running" | "exited" | null>(null);
 
   const handleAgentExit = useCallback(() => {
     setAgentStatus("exited");
-  }, []);
+    onPaneStatusChange(pane.id, "exited");
+  }, [onPaneStatusChange, pane.id]);
 
   const handleAgentSessionActive = useCallback(() => {
     setAgentStatus("running");
-  }, []);
+    onPaneStatusChange(pane.id, "running");
+  }, [onPaneStatusChange, pane.id]);
 
   const isAgent = pane.type === "agent";
 
@@ -487,8 +526,10 @@ const PaneCard = React.memo(function PaneCard({
       const s = session as { ptyId?: string; status?: string };
       if (s.status === "running" && s.ptyId) {
         setAgentStatus("running");
+        onPaneStatusChange(pane.id, "running");
       } else if (s.status === "exited") {
         setAgentStatus("exited");
+        onPaneStatusChange(pane.id, "exited");
       } else {
         setAgentStatus(null);
       }
@@ -496,7 +537,9 @@ const PaneCard = React.memo(function PaneCard({
     return () => {
       cancelled = true;
     };
-  }, [isAgent, pane.id]);
+  }, [isAgent, pane.id, onPaneStatusChange]);
+
+  const isManagedProcess = pane.type === "term" && !!pane.initialPrompt?.trim();
 
   return (
     <div data-pane-id={pane.id} className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -504,12 +547,12 @@ const PaneCard = React.memo(function PaneCard({
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {isAgent ? <AgentKindBadge provider={provider} /> : null}
           <span className="truncate text-xs">{label}</span>
-          {isAgent && agentStatus === "running" ? (
+          {(isAgent || isManagedProcess) && agentStatus === "running" ? (
             <Badge variant="default" className="h-5 px-1.5 py-0 text-[10px]">
               Rodando
             </Badge>
           ) : null}
-          {isAgent && agentStatus === "exited" ? (
+          {(isAgent || isManagedProcess) && agentStatus === "exited" ? (
             <Badge variant="outline" className="h-5 px-1.5 py-0 text-[10px]">
               Finalizado
             </Badge>
@@ -564,7 +607,7 @@ function WorkflowTip({ centered = false }: { centered?: boolean }) {
 }
 
 export default function CmuxWorkspacePage() {
-  const { projects, isLoading: projectsLoading } = useProjects();
+  const { projects, isLoading: projectsLoading, update: updateProject, refresh: refreshProjects } = useProjects();
   const { providers } = useProviders();
   const { confirmDialog } = useConfirmDialog();
 
@@ -574,6 +617,9 @@ export default function CmuxWorkspacePage() {
   const [newCombOpen, setNewCombOpen] = useState(false);
   const [newAgentOpen, setNewAgentOpen] = useState(false);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const [repoConfigOpen, setRepoConfigOpen] = useState(false);
+  const [repoConfigTomlOpen, setRepoConfigTomlOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [attentionOpen, setAttentionOpen] = useState(false);
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [attentionRecords, setAttentionRecords] = useState<TerminalAttentionRecord[]>([]);
@@ -616,7 +662,7 @@ export default function CmuxWorkspacePage() {
   const createComb = useCallback(async (data: CreateCombDTO) => {
     if (!window.db?.combs) throw new Error("Combs indisponivel");
     const created = await window.db.combs.create(data);
-    const comb = normalizeComb(created as Record<string, unknown>) as Comb;
+    const comb = normalizeComb(created as unknown as Record<string, unknown>) as unknown as Comb;
     await refreshCombs();
     return comb;
   }, [refreshCombs]);
@@ -630,6 +676,7 @@ export default function CmuxWorkspacePage() {
     if (!activeComb) return null;
     return sortedProjects.find((project) => project.id === activeComb.projectId) ?? null;
   }, [activeComb, sortedProjects]);
+  const { activity: projectActivity } = useTerminalProjectActivity(activeProject?.id ?? null);
   const {
     panes,
     refresh: refreshPanes,
@@ -650,6 +697,7 @@ export default function CmuxWorkspacePage() {
     () => providers.filter((p) => p.isActive && isCliProviderType(p.type)),
     [providers],
   );
+  const activeRepoConfig = activeProject?.repoConfig ?? null;
   const projectNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of sortedProjects) map.set(p.id, p.name);
@@ -831,6 +879,17 @@ export default function CmuxWorkspacePage() {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (showProviders) return;
+
+      if (mod(event) && (event.key === "k" || event.key === "K")) {
+        event.preventDefault();
+        if (event.shiftKey) {
+          window.dispatchEvent(new CustomEvent("dcc-terminal-action", { detail: { type: "clearScrollback" } }));
+        } else {
+          setCommandPaletteOpen(true);
+        }
+        return;
+      }
+
       if (!activeCombId) return;
 
       const el = event.target;
@@ -871,13 +930,6 @@ export default function CmuxWorkspacePage() {
         }
         return;
       }
-
-      if (event.key === "k" || event.key === "K") {
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent("dcc-terminal-action", { detail: { type: "clearScrollback" } }));
-        return;
-      }
-
       if (event.key === "=" || event.key === "+") {
         event.preventDefault();
         bumpTerminalFontSize(1);
@@ -941,17 +993,67 @@ export default function CmuxWorkspacePage() {
       toast.error("Falha ao abrir terminal");
     }
   };
+
+  const launchManagedCommand = useCallback(
+    async (payload: {
+      title: string;
+      command: string;
+      cwdMode?: "project" | "worktree";
+      description?: string | null;
+    }) => {
+      if (!activeCombId) return;
+      const cwdMode = payload.cwdMode ?? "worktree";
+      const projectPath = activeProject?.path?.trim() ?? "";
+      let cwd = projectPath;
+      if (cwdMode === "worktree") {
+        const ok = await ensureActiveCombWorktree();
+        if (!ok) return;
+        const comb = window.db?.combs?.findById
+          ? await window.db.combs.findById(activeCombId)
+          : combsRef.current.find((item) => item.id === activeCombId) ?? null;
+        cwd = (comb?.worktreePath ?? "").trim();
+        if (!cwd) {
+          toast.error("Worktree indisponível para este workspace.");
+          return;
+        }
+      } else if (!projectPath) {
+        toast.error("Caminho do projeto indisponível.");
+        return;
+      }
+
+      try {
+        const pane = await createPane({
+          combId: activeCombId,
+          type: "term",
+          title: payload.title,
+          initialPrompt: payload.command,
+        });
+        await updatePane(pane.id, {
+          cwd,
+          status: "running",
+          lastActivityAt: new Date(),
+        });
+        await refreshPanes();
+        setActivePaneId(pane.id);
+        toast.success(payload.description ? `${payload.title} iniciado` : `Executando ${payload.title}`);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : `Falha ao iniciar ${payload.title}`);
+      }
+    },
+    [activeCombId, activeProject?.path, createPane, ensureActiveCombWorktree, refreshPanes, updatePane],
+  );
+
   const handleOpenBaseTerminal = async () => {
     if (!activeCombId) return;
     const basePath = activeProject?.path?.trim();
     if (!basePath) {
       toast.error("Projeto base indisponivel para este workspace.");
       return;
-    }
-    try {
-      const ok = await ensureActiveCombWorktree();
-      if (!ok) return;
-      const pane = await createPane({
+      }
+      try {
+        const ok = await ensureActiveCombWorktree();
+        if (!ok) return;
+        const pane = await createPane({
         combId: activeCombId,
         type: "term",
         title: "Base",
@@ -967,7 +1069,7 @@ export default function CmuxWorkspacePage() {
       } catch {
         // best effort: if no previous PTY exists, ignore
       }
-      refreshPanes();
+      await refreshPanes();
       setActiveCombId(activeCombId);
       setActivePaneId(pane.id);
       setInitializingBasePaneIds((prev) => {
@@ -1000,6 +1102,11 @@ export default function CmuxWorkspacePage() {
         nextVisiblePanes[0] ??
         null;
       setActivePaneId(fallback?.id ?? null);
+    }
+    try {
+      await window.desktopAPI?.terminal?.killByPaneId?.(paneId);
+    } catch {
+      /* ignore */
     }
     await removePane(paneId);
     refreshPanes();
@@ -1044,6 +1151,22 @@ export default function CmuxWorkspacePage() {
 
     if (!confirmed) return;
 
+    try {
+      const panesForComb = window.db?.panes?.findByComb
+        ? await window.db.panes.findByComb(combId)
+        : [];
+      for (const pane of panesForComb ?? []) {
+        if (!pane?.id) continue;
+        try {
+          await window.desktopAPI?.terminal?.killByPaneId?.(pane.id);
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      /* ignore pane lookup errors */
+    }
+
     if (window.desktopAPI?.comb?.discard) {
       const result = await window.desktopAPI.comb.discard(combId);
       if (!result.success && result.error) toast.error(result.error);
@@ -1065,6 +1188,23 @@ export default function CmuxWorkspacePage() {
   const handleRemovePaneById = useCallback((paneId: string) => {
     void handleRemovePane(paneId);
   }, [handleRemovePane]);
+
+  const handlePaneStatusChange = useCallback(
+    async (paneId: string, status: "running" | "exited") => {
+      try {
+        await updatePane(paneId, {
+          status,
+          lastActivityAt: new Date(),
+        });
+        if (status === "running") {
+          refreshPanes();
+        }
+      } catch {
+        /* ignore status sync errors */
+      }
+    },
+    [refreshPanes, updatePane],
+  );
 
   const handleTogglePin = useCallback(async (combId: string) => {
     if (!window.db?.combs) return;
@@ -1119,6 +1259,7 @@ export default function CmuxWorkspacePage() {
                 const attentionForComb = unreadAttentionByCombId.get(comb.id);
                 const isActive = comb.id === activeCombId;
                 const projectName = projectNameById.get(comb.projectId) ?? "Projeto";
+                const runningCount = projectActivity.runningPanesByCombId[comb.id] ?? 0;
                 return (
                   <WorkspaceListItem
                     key={comb.id}
@@ -1126,6 +1267,7 @@ export default function CmuxWorkspacePage() {
                     isActive={isActive}
                     projectName={projectName}
                     hasAttention={!!attentionForComb}
+                    runningCount={runningCount}
                     attentionExcerpt={attentionForComb?.excerpt ?? null}
                     onSelect={handleSelectWorkspace}
                     onRemove={handleRemoveWorkspaceById}
@@ -1157,6 +1299,170 @@ export default function CmuxWorkspacePage() {
             <Settings className="h-4 w-4" />
             Providers
           </Button>
+        </div>
+
+        <div className="border-t border-sidebar-border p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-sidebar-foreground/60">
+                Command Center
+              </p>
+              <p className="text-[11px] text-sidebar-foreground/50">
+                {activeProject ? activeProject.name : "Nenhum projeto ativo"}
+              </p>
+            </div>
+            <Badge variant="outline" className="border-sidebar-border text-[10px]">
+              {projectActivity.totalRunningPanes} ativos
+            </Badge>
+          </div>
+
+          {activeProject ? (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-3 py-2">
+                <p className="text-xs font-medium">{getProjectConfigBranchPrefix(activeRepoConfig)}</p>
+                <p className="mt-0.5 text-[11px] text-sidebar-foreground/60">
+                  Prefixo de branch do repo
+                </p>
+                <p className="mt-2 text-[11px] text-sidebar-foreground/70">
+                  Agente padrão{" "}
+                  <span className="font-medium">
+                    {activeRepoConfig?.defaultAgentProviderId
+                      ? (providerById.get(activeRepoConfig.defaultAgentProviderId)?.name ?? "definido")
+                      : "não definido"}
+                  </span>
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="titlebar-no-drag justify-start gap-2"
+                  onClick={() => setCommandPaletteOpen(true)}
+                >
+                  <WandSparkles className="h-3.5 w-3.5" />
+                  Abrir palette
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="titlebar-no-drag justify-start gap-2"
+                  onClick={() => setRepoConfigOpen(true)}
+                >
+                  <Settings className="h-3.5 w-3.5" />
+                  Configurar repo
+                </Button>
+              </div>
+
+              {activeRepoConfig?.setupCommand?.trim() ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="titlebar-no-drag w-full justify-start gap-2"
+                  onClick={() =>
+                    void launchManagedCommand({
+                      title: "Setup",
+                      command: activeRepoConfig.setupCommand ?? "",
+                      cwdMode: "project",
+                      description: "Executa o setup do repositório",
+                    })
+                  }
+                >
+                  <WandSparkles className="h-3.5 w-3.5" />
+                  Rodar setup
+                </Button>
+              ) : null}
+
+              {activeRepoConfig?.teardownCommand?.trim() ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="titlebar-no-drag w-full justify-start gap-2"
+                  onClick={() =>
+                    void launchManagedCommand({
+                      title: "Teardown",
+                      command: activeRepoConfig.teardownCommand ?? "",
+                      cwdMode: "project",
+                      description: "Executa o teardown do repositório",
+                    })
+                  }
+                >
+                  <Terminal className="h-3.5 w-3.5" />
+                  Rodar teardown
+                </Button>
+              ) : null}
+
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                  Processos
+                </p>
+                {(activeRepoConfig?.processes ?? []).length === 0 ? (
+                  <p className="text-[11px] text-sidebar-foreground/45">
+                    Sem processos configurados.
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    {activeRepoConfig?.processes?.map((process) => (
+                      <Button
+                        key={process.id}
+                        variant="ghost"
+                        size="sm"
+                        className="titlebar-no-drag w-full justify-start gap-2 border border-transparent px-2 text-left hover:border-sidebar-border"
+                        onClick={() =>
+                          void launchManagedCommand({
+                            title: process.name,
+                            command: process.command,
+                            cwdMode: process.cwdMode ?? "worktree",
+                            description: process.description ?? null,
+                          })
+                        }
+                      >
+                        <Workflow className="h-3.5 w-3.5" />
+                        <span className="truncate">{process.name}</span>
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                  Presets
+                </p>
+                {(activeRepoConfig?.presets ?? []).length === 0 ? (
+                  <p className="text-[11px] text-sidebar-foreground/45">
+                    Sem presets configurados.
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    {activeRepoConfig?.presets?.map((preset) => (
+                      <Button
+                        key={preset.id}
+                        variant="ghost"
+                        size="sm"
+                        className="titlebar-no-drag w-full justify-start gap-2 border border-transparent px-2 text-left hover:border-sidebar-border"
+                        onClick={() =>
+                          void launchManagedCommand({
+                            title: preset.name,
+                            command: preset.command,
+                            cwdMode: "worktree",
+                            description: preset.description ?? null,
+                          })
+                        }
+                      >
+                        <WandSparkles className="h-3.5 w-3.5" />
+                        <span className="truncate">{preset.name}</span>
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="text-[11px] text-sidebar-foreground/45">
+              Adiciona um projeto para expor processos e presets no workspace.
+            </p>
+          )}
         </div>
       </aside>
 
@@ -1254,6 +1560,7 @@ export default function CmuxWorkspacePage() {
                         pane={activePane}
                         worktreePath={activePane.cwd?.trim() || activeComb.worktreePath || ""}
                         provider={activePane.providerId ? (providerById.get(activePane.providerId) ?? null) : null}
+                        onPaneStatusChange={handlePaneStatusChange}
                         onRemovePane={handleRemovePaneById}
                       />
                     ) : null}
@@ -1349,6 +1656,7 @@ export default function CmuxWorkspacePage() {
           onOpenChange={setNewAgentOpen}
           combId={activeCombId}
           providers={providers}
+          preferredProviderId={activeRepoConfig?.defaultAgentProviderId ?? activeProject?.defaultProviderId ?? null}
           ensureCombWorktree={ensureActiveCombWorktree}
           onCreate={async (pane) => {
             await refreshPanes();
@@ -1358,6 +1666,63 @@ export default function CmuxWorkspacePage() {
       ) : null}
 
       <AddProjectDialog open={addProjectOpen} onOpenChange={setAddProjectOpen} />
+
+      <ProjectRepoConfigDialog
+        open={repoConfigOpen}
+        onOpenChange={setRepoConfigOpen}
+        project={activeProject}
+        providers={providers}
+        onEditToml={() => setRepoConfigTomlOpen(true)}
+        onSave={async (projectId, config) => {
+          await updateProject(projectId, { repoConfig: config });
+          await refreshProjects();
+          await refreshCombs();
+        }}
+      />
+
+      <ProjectRepoTomlDialog
+        open={repoConfigTomlOpen}
+        onOpenChange={setRepoConfigTomlOpen}
+        project={activeProject}
+        onSaved={async () => {
+          await refreshProjects();
+          await refreshCombs();
+        }}
+      />
+
+      <WorkspaceCommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        projects={sortedProjects}
+        combs={combs}
+        panes={visiblePanes}
+        activeProject={activeProject}
+        activeCombId={activeCombId}
+        activePaneId={activePaneId}
+        repoConfig={activeRepoConfig}
+        onOpenSettings={() => setShowProviders(true)}
+        onOpenNewWorkspace={() => setNewCombOpen(true)}
+        onOpenBaseTerminal={handleOpenBaseTerminal}
+        onOpenWorkspaceTerminal={handleAddTerminal}
+        onOpenNewAgent={() => setNewAgentOpen(true)}
+        onOpenRepoConfig={() => setRepoConfigOpen(true)}
+        onSelectProject={(projectId) => {
+          setSelectedProjectId(projectId);
+          const nextProjectComb = combs.find((comb) => comb.projectId === projectId) ?? null;
+          setActiveCombId(nextProjectComb?.id ?? null);
+        }}
+        onSelectWorkspace={(combId) => {
+          const comb = combs.find((item) => item.id === combId);
+          if (!comb) return;
+          setSelectedProjectId(comb.projectId);
+          setActiveCombId(comb.id);
+        }}
+        onSelectPane={(paneId) => {
+          setActivePaneId(paneId);
+          markPaneAttentionAsRead(paneId);
+        }}
+        onLaunchCommand={launchManagedCommand}
+      />
     </div>
   );
 }

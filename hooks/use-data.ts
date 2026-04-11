@@ -147,6 +147,7 @@ export function useProjects() {
           ...data,
           defaultProviderId: data.defaultProviderId ?? null,
           gitRemoteUrl: data.gitRemoteUrl ?? null,
+          repoConfig: data.repoConfig ?? null,
           lastOpenedAt: null,
         });
         emitDataChange("projects");

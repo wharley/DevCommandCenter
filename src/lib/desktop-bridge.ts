@@ -228,6 +228,18 @@ export function installDesktopBridge(): void {
       findAll: () => call("db_projects_find_all"),
       findById: (id) => call("db_projects_find_by_id", { id }),
       findByPath: (path) => call("db_projects_find_by_path", { path }),
+      getRepoConfigToml: (id) =>
+        call<{
+          exists: boolean;
+          source: "disk" | "db" | "generated" | "missing";
+          path: string | null;
+          content: string;
+        }>("db_projects_get_repo_config_toml", { id }),
+      saveRepoConfigToml: (id, content) =>
+        call<{ success: boolean; path?: string; error?: string }>(
+          "db_projects_save_repo_config_toml",
+          { id, content },
+        ),
       search: (query) => call("db_projects_search", { query }),
       create: (data) => call("db_projects_create", { data }),
       update: (id, data) => call("db_projects_update", { id, data }),

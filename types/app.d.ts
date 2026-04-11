@@ -192,6 +192,15 @@ declare global {
         killByPaneId: (paneId: string) => Promise<{ ok: boolean }>;
         /** Últimas linhas de output (reidratação ao remontar o xterm). */
         getBacklog?: (ptyId: string) => Promise<{ lines: string[] }>;
+        saveTempImage?: (
+          imageData: number[],
+          extension: string
+        ) => Promise<{ path: string; filename: string }>;
+        showNotification?: (payload: {
+          title: string;
+          body: string;
+          sound?: boolean;
+        }) => Promise<void>;
         getProjectActivity: (projectId: string) => Promise<{
           totalRunningPanes: number;
           runningPanesByCombId: Record<string, number>;
@@ -257,6 +266,11 @@ declare global {
         discard: (combId: string) => Promise<{
           success: boolean;
           error?: string;
+        }>;
+        checkUnpushed?: (combId: string) => Promise<{
+          hasUnpushed: boolean;
+          count: number;
+          commits: string[];
         }>;
         mergeIntoMain: (
           combId: string,
@@ -469,6 +483,16 @@ declare global {
         findAll: () => Promise<Project[]>;
         findById: (id: string) => Promise<Project | undefined>;
         findByPath: (path: string) => Promise<Project | undefined>;
+        getRepoConfigToml: (id: string) => Promise<{
+          exists: boolean;
+          source: "disk" | "db" | "generated" | "missing";
+          path: string | null;
+          content: string;
+        }>;
+        saveRepoConfigToml: (
+          id: string,
+          content: string,
+        ) => Promise<{ success: boolean; path?: string; error?: string }>;
         search: (query: string) => Promise<Project[]>;
         create: (data: ProjectCreate) => Promise<Project>;
         update: (

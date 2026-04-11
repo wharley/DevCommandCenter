@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS providers (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
--- Tabela de Projetos (repositórios locais)
+-- Tabela de Projetos (repositórios locais; repo_config é espelho da config canônica .dcc.toml)
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS projects (
   description TEXT,
   default_provider_id TEXT,
   git_remote_url TEXT,
+  repo_config TEXT,
   last_opened_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),

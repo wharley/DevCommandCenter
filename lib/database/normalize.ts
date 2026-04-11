@@ -52,7 +52,16 @@ function normalizeDates<T extends Record<string, unknown>>(
 }
 
 export function normalizeProject(raw: Record<string, unknown>): Record<string, unknown> {
-  return normalizeDates(raw, DATE_KEYS.project);
+  const normalized = normalizeDates(raw, DATE_KEYS.project);
+  const repoConfig = normalized.repoConfig ?? normalized.repo_config;
+  if (typeof repoConfig === "string" && repoConfig.trim()) {
+    try {
+      normalized.repoConfig = JSON.parse(repoConfig) as unknown;
+    } catch {
+      /* ignore */
+    }
+  }
+  return normalized;
 }
 
 export function normalizeProvider(raw: Record<string, unknown>): Record<string, unknown> {

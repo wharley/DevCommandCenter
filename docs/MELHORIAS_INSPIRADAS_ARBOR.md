@@ -96,7 +96,7 @@ Para cada área: **o que o Arbor destaca** → **benefício para o DCC** → **v
 
 | Inspiração Arbor | Benefício no DCC | Tauri |
 |------------------|------------------|-------|
-| **Regras de nome de branch** (`prefix_mode`: github-user, custom, etc.) | Branches previsíveis em equipas | **Sim**: ler `.devcommandcenter/config.toml` (ou `dcc.toml`) ao criar branch/worktree; validação antes de criar. |
+| **Regras de nome de branch** (`prefix_mode`: github-user, custom, etc.) | Branches previsíveis em equipas | **Sim**: ler `.dcc.toml` ao criar branch/worktree; validação antes de criar. |
 | **Scripts setup/teardown** com *rollback* se setup falhar | Worktrees nunca ficam “a meio” | **Sim**: executar comandos configurados; se falhar, undo + mensagem clara (Arbor documenta este comportamento). |
 | **Confirmação de delete** com deteção de **commits não pushed** | Evitar perda de trabalho | **Sim**: `git cherry` / `git log @{u}..` antes de `comb_discard`. |
 | **Histórico de navegação** entre worktrees | UX tipo browser para saltar entre contextos | **Sim** no front + pilha em memória ou SQLite. |
@@ -188,7 +188,7 @@ Fica **mais tarde na roadmap** por **complexidade** (rede, segurança, UX de fal
 
 ## 13. Configuração por repositório (equivalente a `arbor.toml`)
 
-Consolidar num esquema único (ex.: **`dcc.toml`** ou extensão de **`.devcommandcenter/config.json`**) campos inspirados no Arbor:
+Consolidar num esquema único, com **`dcc.toml`** como formato canônico do repositório, campos inspirados no Arbor:
 
 - `[[presets]]` — comandos nomeados (review, test, lint).
 - `[[processes]]` — serviços supervisionados.
@@ -198,7 +198,7 @@ Consolidar num esquema único (ex.: **`dcc.toml`** ou extensão de **`.devcomman
 - `[notifications]` — eventos e webhooks.
 - `[[tasks]]` — agendamento (se o daemon existir).
 
-Benefício: **reprodutibilidade** entre máquinas e equipas, tal como no Arbor.
+Benefício: **reprodutibilidade** entre máquinas e equipas, tal como no Arbor. O SQLite fica como cache/estado local; o arquivo do repositório é a fonte de verdade.
 
 ---
 

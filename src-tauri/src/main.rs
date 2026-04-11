@@ -1,12 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use rusqlite::{
-    params, params_from_iter, types::ValueRef, Connection, OptionalExtension,
-};
-use serde::Serialize;
+use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
+use regex::Regex;
+use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
 use std::collections::{HashMap, VecDeque};
+use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -17,13 +17,13 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_dialog::{DialogExt, FilePath};
-use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
-use regex::Regex;
+use tauri_plugin_notification::NotificationExt;
+use uuid::Uuid;
 
 /// Schema SQLite compartilhado com `lib/database/schema.sql` (CREATE IF NOT EXISTS).
 const APP_SCHEMA_SQL: &str = include_str!("../../lib/database/schema.sql");
+const REPO_CONFIG_FILENAME: &str = ".dcc.toml";
 
 // Regex para detectar quando um terminal está esperando input do usuário
 lazy_static::lazy_static! {
@@ -37,6 +37,109 @@ struct AppState {
     db_path: Arc<PathBuf>,
     conn: Arc<Mutex<Connection>>,
     terminals: Arc<Mutex<HashMap<String, ManagedTerminal>>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoConfigPayload {
+    branch_prefix: Option<String>,
+    default_agent_provider_id: Option<String>,
+    setup_command: Option<String>,
+    teardown_command: Option<String>,
+    #[serde(default)]
+    processes: Vec<RepoProcessPayload>,
+    #[serde(default)]
+    presets: Vec<RepoPresetPayload>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoProcessPayload {
+    id: String,
+    name: String,
+    command: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    cwd_mode: Option<String>,
+    #[serde(default)]
+    auto_restart: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoPresetPayload {
+    id: String,
+    name: String,
+    command: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RepoConfigToml {
+    #[serde(default)]
+    version: Option<u32>,
+    #[serde(default)]
+    branch: Option<RepoBranchToml>,
+    #[serde(default)]
+    agent: Option<RepoAgentToml>,
+    #[serde(default)]
+    scripts: Option<RepoScriptsToml>,
+    #[serde(default)]
+    branch_prefix: Option<String>,
+    #[serde(default)]
+    default_agent_provider_id: Option<String>,
+    #[serde(default)]
+    setup_command: Option<String>,
+    #[serde(default)]
+    teardown_command: Option<String>,
+    #[serde(default)]
+    processes: Vec<RepoProcessToml>,
+    #[serde(default)]
+    presets: Vec<RepoPresetToml>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RepoBranchToml {
+    #[serde(default)]
+    prefix: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RepoAgentToml {
+    #[serde(default)]
+    default_provider_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RepoScriptsToml {
+    #[serde(default)]
+    setup: Option<String>,
+    #[serde(default)]
+    teardown: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RepoProcessToml {
+    id: String,
+    name: String,
+    command: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    cwd_mode: Option<String>,
+    #[serde(default)]
+    auto_restart: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RepoPresetToml {
+    id: String,
+    name: String,
+    command: String,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 /// Últimas N linhas de stdout/stderr por sessão (reidratação do xterm ao remontar).
@@ -122,7 +225,12 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
     stmt.exists(params![table]).map_err(|e| e.to_string())
 }
 
-fn ensure_column(conn: &Connection, table: &str, column: &str, sql_type: &str) -> Result<(), String> {
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    sql_type: &str,
+) -> Result<(), String> {
     if !table_exists(conn, table)? {
         return Ok(());
     }
@@ -142,18 +250,14 @@ fn run_legacy_schema_migrations(conn: &Connection) -> Result<(), String> {
 
     // Projects
     ensure_column(conn, "projects", "git_remote_url", "TEXT")?;
+    ensure_column(conn, "projects", "repo_config", "TEXT")?;
     ensure_column(conn, "projects", "last_opened_at", "TEXT")?;
 
     // Combs
     ensure_column(conn, "combs", "review_targets", "TEXT")?;
     ensure_column(conn, "combs", "branch", "TEXT")?;
     ensure_column(conn, "combs", "worktree_path", "TEXT")?;
-    ensure_column(
-        conn,
-        "combs",
-        "status",
-        "TEXT NOT NULL DEFAULT 'active'",
-    )?;
+    ensure_column(conn, "combs", "status", "TEXT NOT NULL DEFAULT 'active'")?;
     ensure_column(conn, "combs", "last_opened_at", "TEXT")?;
     ensure_column(conn, "combs", "is_pinned", "INTEGER DEFAULT 0")?;
     ensure_column(conn, "combs", "pinned_at", "TEXT")?;
@@ -171,6 +275,270 @@ fn next_id() -> String {
         .unwrap_or_default()
         .as_nanos();
     format!("dcc-{now:x}")
+}
+
+fn repo_config_file_path(project_path: &str) -> PathBuf {
+    Path::new(project_path).join(REPO_CONFIG_FILENAME)
+}
+
+fn repo_config_payload_from_value(value: &Value) -> Result<RepoConfigPayload, String> {
+    serde_json::from_value(value.clone()).map_err(|e| e.to_string())
+}
+
+fn repo_config_value_from_payload(payload: &RepoConfigPayload) -> Result<Value, String> {
+    serde_json::to_value(payload).map_err(|e| e.to_string())
+}
+
+fn repo_config_toml_text_from_payload(payload: &RepoConfigPayload) -> Result<String, String> {
+    let toml_config = repo_config_toml_from_payload(payload);
+    toml::to_string_pretty(&toml_config).map_err(|e| e.to_string())
+}
+
+fn repo_config_toml_text_from_value(value: &Value) -> Result<String, String> {
+    let payload = repo_config_payload_from_value(value)?;
+    repo_config_toml_text_from_payload(&payload)
+}
+
+fn default_repo_config_value() -> Value {
+    serde_json::json!({
+        "branchPrefix": "dcc-comb",
+        "defaultAgentProviderId": Value::Null,
+        "setupCommand": Value::Null,
+        "teardownCommand": Value::Null,
+        "processes": [],
+        "presets": []
+    })
+}
+
+fn repo_config_toml_from_payload(payload: &RepoConfigPayload) -> RepoConfigToml {
+    RepoConfigToml {
+        version: Some(1),
+        branch: Some(RepoBranchToml {
+            prefix: payload.branch_prefix.clone(),
+        }),
+        agent: Some(RepoAgentToml {
+            default_provider_id: payload.default_agent_provider_id.clone(),
+        }),
+        scripts: Some(RepoScriptsToml {
+            setup: payload.setup_command.clone(),
+            teardown: payload.teardown_command.clone(),
+        }),
+        branch_prefix: None,
+        default_agent_provider_id: None,
+        setup_command: None,
+        teardown_command: None,
+        processes: payload
+            .processes
+            .iter()
+            .map(|process| RepoProcessToml {
+                id: process.id.clone(),
+                name: process.name.clone(),
+                command: process.command.clone(),
+                description: process.description.clone(),
+                cwd_mode: process.cwd_mode.clone(),
+                auto_restart: process.auto_restart,
+            })
+            .collect(),
+        presets: payload
+            .presets
+            .iter()
+            .map(|preset| RepoPresetToml {
+                id: preset.id.clone(),
+                name: preset.name.clone(),
+                command: preset.command.clone(),
+                description: preset.description.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn repo_config_payload_from_toml(config: RepoConfigToml) -> RepoConfigPayload {
+    let RepoConfigToml {
+        branch,
+        agent,
+        scripts,
+        branch_prefix: flat_branch_prefix,
+        default_agent_provider_id: flat_default_agent_provider_id,
+        setup_command: flat_setup_command,
+        teardown_command: flat_teardown_command,
+        processes,
+        presets,
+        ..
+    } = config;
+    let branch_prefix = branch
+        .and_then(|branch| branch.prefix)
+        .or(flat_branch_prefix);
+    let default_agent_provider_id = agent
+        .and_then(|agent| agent.default_provider_id)
+        .or(flat_default_agent_provider_id);
+    let setup_command = scripts
+        .as_ref()
+        .and_then(|scripts| scripts.setup.clone())
+        .or(flat_setup_command);
+    let teardown_command = scripts
+        .as_ref()
+        .and_then(|scripts| scripts.teardown.clone())
+        .or(flat_teardown_command);
+
+    RepoConfigPayload {
+        branch_prefix,
+        default_agent_provider_id,
+        setup_command,
+        teardown_command,
+        processes: processes
+            .into_iter()
+            .map(|process| RepoProcessPayload {
+                id: process.id,
+                name: process.name,
+                command: process.command,
+                description: process.description,
+                cwd_mode: process.cwd_mode,
+                auto_restart: process.auto_restart,
+            })
+            .collect(),
+        presets: presets
+            .into_iter()
+            .map(|preset| RepoPresetPayload {
+                id: preset.id,
+                name: preset.name,
+                command: preset.command,
+                description: preset.description,
+            })
+            .collect(),
+    }
+}
+
+fn read_repo_config_from_disk(project_path: &str) -> Result<Option<Value>, String> {
+    let path = repo_config_file_path(project_path);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&path).map_err(|e| format!("{}: {}", path.display(), e))?;
+    if raw.trim().is_empty() {
+        return Ok(None);
+    }
+    let toml_config: RepoConfigToml =
+        toml::from_str(&raw).map_err(|e| format!("{}: {}", path.display(), e))?;
+    let payload = repo_config_payload_from_toml(toml_config);
+    repo_config_value_from_payload(&payload).map(Some)
+}
+
+fn read_repo_config_text_from_disk(project_path: &str) -> Result<Option<String>, String> {
+    let path = repo_config_file_path(project_path);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&path).map_err(|e| format!("{}: {}", path.display(), e))?;
+    if raw.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(raw))
+}
+
+fn write_repo_config_to_disk(project_path: &str, config: Option<&Value>) -> Result<(), String> {
+    let path = repo_config_file_path(project_path);
+    match config {
+        Some(Value::Null) | None => {
+            if path.exists() {
+                fs::remove_file(&path).map_err(|e| format!("{}: {}", path.display(), e))?;
+            }
+            Ok(())
+        }
+        Some(value) => {
+            let payload = repo_config_payload_from_value(value)?;
+            let toml_config = repo_config_toml_from_payload(&payload);
+            let toml_text = toml::to_string_pretty(&toml_config).map_err(|e| e.to_string())?;
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|e| format!("{}: {}", parent.display(), e))?;
+            }
+            fs::write(&path, toml_text).map_err(|e| format!("{}: {}", path.display(), e))?;
+            Ok(())
+        }
+    }
+}
+
+fn resolve_repo_config_value(project_path: Option<&str>, db_repo_config: Option<Value>) -> Value {
+    if let Some(path) = project_path {
+        if let Ok(Some(value)) = read_repo_config_from_disk(path) {
+            return value;
+        }
+    }
+    if let Some(raw) = db_repo_config {
+        if raw.is_string() {
+            if let Some(raw_str) = raw.as_str() {
+                if raw_str.trim().is_empty() {
+                    return Value::Null;
+                }
+                return serde_json::from_str::<Value>(raw_str).unwrap_or(Value::Null);
+            }
+        }
+        return raw;
+    }
+    Value::Null
+}
+
+fn sync_existing_repo_configs(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("SELECT id, path, repo_config FROM projects")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    for row in rows {
+        let (id, path, repo_config_raw) = row.map_err(|e| e.to_string())?;
+        let file_path = repo_config_file_path(&path);
+        if file_path.exists() {
+            match read_repo_config_from_disk(&path) {
+                Ok(Some(value)) => {
+                    let normalized = value.to_string();
+                    if repo_config_raw.as_deref() != Some(normalized.as_str()) {
+                        conn.execute(
+                            "UPDATE projects SET repo_config = ?1 WHERE id = ?2",
+                            params![normalized, id],
+                        )
+                        .map_err(|e| e.to_string())?;
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!("[DCC] Skipping invalid .dcc.toml at {}: {}", file_path.display(), err);
+                }
+            }
+            continue;
+        }
+
+        let Some(raw) = repo_config_raw else {
+            continue;
+        };
+        if raw.trim().is_empty() {
+            continue;
+        }
+        let value = match serde_json::from_str::<Value>(&raw) {
+            Ok(value) => value,
+            Err(err) => {
+                eprintln!("[DCC] Skipping legacy repo_config for {}: {}", path, err);
+                continue;
+            }
+        };
+        let toml_text = repo_config_toml_text_from_value(&value)?;
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("{}: {}", parent.display(), e))?;
+        }
+        fs::write(&file_path, toml_text).map_err(|e| format!("{}: {}", file_path.display(), e))?;
+        conn.execute(
+            "UPDATE projects SET repo_config = ?1 WHERE id = ?2",
+            params![value.to_string(), id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 fn value_ref_to_json(value: ValueRef<'_>) -> Value {
@@ -201,11 +569,17 @@ fn map_project_to_renderer(mut row: Value) -> Value {
     let Some(obj) = row.as_object_mut() else {
         return row;
     };
+    let project_path = obj.get("path").and_then(Value::as_str).map(str::to_string);
+    let repo_config_v =
+        resolve_repo_config_value(project_path.as_deref(), obj.remove("repo_config"));
     let mut out = serde_json::Map::new();
     out.insert("id".into(), obj.remove("id").unwrap_or(Value::Null));
     out.insert("name".into(), obj.remove("name").unwrap_or(Value::Null));
     out.insert("path".into(), obj.remove("path").unwrap_or(Value::Null));
-    out.insert("description".into(), obj.remove("description").unwrap_or(Value::Null));
+    out.insert(
+        "description".into(),
+        obj.remove("description").unwrap_or(Value::Null),
+    );
     out.insert(
         "defaultProviderId".into(),
         obj.remove("default_provider_id").unwrap_or(Value::Null),
@@ -214,12 +588,19 @@ fn map_project_to_renderer(mut row: Value) -> Value {
         "gitRemoteUrl".into(),
         obj.remove("git_remote_url").unwrap_or(Value::Null),
     );
+    out.insert("repoConfig".into(), repo_config_v);
     out.insert(
         "lastOpenedAt".into(),
         obj.remove("last_opened_at").unwrap_or(Value::Null),
     );
-    out.insert("createdAt".into(), obj.remove("created_at").unwrap_or(Value::Null));
-    out.insert("updatedAt".into(), obj.remove("updated_at").unwrap_or(Value::Null));
+    out.insert(
+        "createdAt".into(),
+        obj.remove("created_at").unwrap_or(Value::Null),
+    );
+    out.insert(
+        "updatedAt".into(),
+        obj.remove("updated_at").unwrap_or(Value::Null),
+    );
     Value::Object(out)
 }
 
@@ -239,15 +620,30 @@ fn map_comb_to_renderer(mut row: Value) -> Value {
     }
     let mut out = serde_json::Map::new();
     out.insert("id".into(), obj.remove("id").unwrap_or(Value::Null));
-    out.insert("projectId".into(), obj.remove("project_id").unwrap_or(Value::Null));
+    out.insert(
+        "projectId".into(),
+        obj.remove("project_id").unwrap_or(Value::Null),
+    );
     out.insert("name".into(), obj.remove("name").unwrap_or(Value::Null));
-    out.insert("description".into(), obj.remove("description").unwrap_or(Value::Null));
-    out.insert("baseBranch".into(), obj.remove("base_branch").unwrap_or(Value::Null));
+    out.insert(
+        "description".into(),
+        obj.remove("description").unwrap_or(Value::Null),
+    );
+    out.insert(
+        "baseBranch".into(),
+        obj.remove("base_branch").unwrap_or(Value::Null),
+    );
     out.insert("branch".into(), obj.remove("branch").unwrap_or(Value::Null));
-    out.insert("worktreePath".into(), obj.remove("worktree_path").unwrap_or(Value::Null));
+    out.insert(
+        "worktreePath".into(),
+        obj.remove("worktree_path").unwrap_or(Value::Null),
+    );
     out.insert("reviewTargets".into(), review_targets_v);
     out.insert("status".into(), obj.remove("status").unwrap_or(Value::Null));
-    out.insert("lastOpenedAt".into(), obj.remove("last_opened_at").unwrap_or(Value::Null));
+    out.insert(
+        "lastOpenedAt".into(),
+        obj.remove("last_opened_at").unwrap_or(Value::Null),
+    );
     let is_pinned_val = obj.remove("is_pinned");
     let is_pinned_bool = match is_pinned_val {
         Some(Value::Number(n)) => n.as_i64().map(|i| i != 0).unwrap_or(false),
@@ -255,9 +651,18 @@ fn map_comb_to_renderer(mut row: Value) -> Value {
         _ => false,
     };
     out.insert("isPinned".into(), Value::Bool(is_pinned_bool));
-    out.insert("pinnedAt".into(), obj.remove("pinned_at").unwrap_or(Value::Null));
-    out.insert("createdAt".into(), obj.remove("created_at").unwrap_or(Value::Null));
-    out.insert("updatedAt".into(), obj.remove("updated_at").unwrap_or(Value::Null));
+    out.insert(
+        "pinnedAt".into(),
+        obj.remove("pinned_at").unwrap_or(Value::Null),
+    );
+    out.insert(
+        "createdAt".into(),
+        obj.remove("created_at").unwrap_or(Value::Null),
+    );
+    out.insert(
+        "updatedAt".into(),
+        obj.remove("updated_at").unwrap_or(Value::Null),
+    );
     Value::Object(out)
 }
 
@@ -267,21 +672,42 @@ fn map_pane_to_renderer(mut row: Value) -> Value {
     };
     let mut out = serde_json::Map::new();
     out.insert("id".into(), obj.remove("id").unwrap_or(Value::Null));
-    out.insert("combId".into(), obj.remove("comb_id").unwrap_or(Value::Null));
+    out.insert(
+        "combId".into(),
+        obj.remove("comb_id").unwrap_or(Value::Null),
+    );
     out.insert("type".into(), obj.remove("type").unwrap_or(Value::Null));
-    out.insert("providerId".into(), obj.remove("provider_id").unwrap_or(Value::Null));
+    out.insert(
+        "providerId".into(),
+        obj.remove("provider_id").unwrap_or(Value::Null),
+    );
     out.insert("title".into(), obj.remove("title").unwrap_or(Value::Null));
-    out.insert("initialPrompt".into(), obj.remove("initial_prompt").unwrap_or(Value::Null));
+    out.insert(
+        "initialPrompt".into(),
+        obj.remove("initial_prompt").unwrap_or(Value::Null),
+    );
     out.insert("cwd".into(), obj.remove("cwd").unwrap_or(Value::Null));
-    out.insert("ptyOwnerKey".into(), obj.remove("pty_owner_key").unwrap_or(Value::Null));
+    out.insert(
+        "ptyOwnerKey".into(),
+        obj.remove("pty_owner_key").unwrap_or(Value::Null),
+    );
     out.insert("status".into(), obj.remove("status").unwrap_or(Value::Null));
     out.insert(
         "layoutOrder".into(),
         obj.remove("layout_order").unwrap_or_else(|| Value::from(0)),
     );
-    out.insert("lastActivityAt".into(), obj.remove("last_activity_at").unwrap_or(Value::Null));
-    out.insert("createdAt".into(), obj.remove("created_at").unwrap_or(Value::Null));
-    out.insert("updatedAt".into(), obj.remove("updated_at").unwrap_or(Value::Null));
+    out.insert(
+        "lastActivityAt".into(),
+        obj.remove("last_activity_at").unwrap_or(Value::Null),
+    );
+    out.insert(
+        "createdAt".into(),
+        obj.remove("created_at").unwrap_or(Value::Null),
+    );
+    out.insert(
+        "updatedAt".into(),
+        obj.remove("updated_at").unwrap_or(Value::Null),
+    );
     Value::Object(out)
 }
 
@@ -331,7 +757,9 @@ fn run_git(cwd: &str, args: &[&str]) -> ApiResult<String> {
         .output()
         .map_err(|e| db_error(e.to_string()))?;
     if !output.status.success() {
-        return Err(db_error(String::from_utf8_lossy(&output.stderr).to_string()));
+        return Err(db_error(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
@@ -353,17 +781,22 @@ fn git_local_branch_names(project_path: &str) -> ApiResult<Vec<String>> {
 }
 
 fn git_current_branch_impl(project_path: &str) -> ApiResult<String> {
-    Ok(run_git(project_path, &["rev-parse", "--abbrev-ref", "HEAD"])?
-        .trim()
-        .to_string())
+    Ok(
+        run_git(project_path, &["rev-parse", "--abbrev-ref", "HEAD"])?
+            .trim()
+            .to_string(),
+    )
 }
 
 fn get_unpushed_commits(cwd: &str, branch: &str) -> ApiResult<Vec<String>> {
     // Check if remote tracking branch exists
-    let upstream = run_git(cwd, &["rev-parse", "--abbrev-ref", &format!("{}@{{u}}", branch)])
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let upstream = run_git(
+        cwd,
+        &["rev-parse", "--abbrev-ref", &format!("{}@{{u}}", branch)],
+    )
+    .unwrap_or_default()
+    .trim()
+    .to_string();
 
     if upstream.is_empty() {
         // No upstream, check all commits from base branch
@@ -411,8 +844,11 @@ fn build_review_diffs_for_path(target_path: &str) -> ApiResult<Value> {
     for (git_status, path) in &files_meta {
         let is_untracked = git_status.contains('?');
         let diff = if is_untracked {
-            run_git(target_path, &["diff", "--binary", "--no-index", "--", "/dev/null", path])
-                .unwrap_or_default()
+            run_git(
+                target_path,
+                &["diff", "--binary", "--no-index", "--", "/dev/null", path],
+            )
+            .unwrap_or_default()
         } else {
             run_git(target_path, &["diff", "HEAD", "--", path]).unwrap_or_default()
         };
@@ -457,8 +893,15 @@ fn safe_branch_name(prefix: &str, raw_id: &str, raw_title: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_string();
-    let slug = if title.is_empty() { "item".to_string() } else { title };
-    let id_suffix_source = raw_id.rsplit_once('-').map(|(_, tail)| tail).unwrap_or(raw_id);
+    let slug = if title.is_empty() {
+        "item".to_string()
+    } else {
+        title
+    };
+    let id_suffix_source = raw_id
+        .rsplit_once('-')
+        .map(|(_, tail)| tail)
+        .unwrap_or(raw_id);
     let id_short = id_suffix_source
         .chars()
         .filter(|c| c.is_ascii_hexdigit())
@@ -536,10 +979,7 @@ fn truncate_notification_body(s: &str, max_chars: usize) -> String {
 #[tauri::command]
 fn app_show_notification(app: AppHandle, payload: Value) -> ApiResult<Value> {
     // Front-end: `invoke(..., { payload: { title, body } })` → este `payload` é o objeto interno.
-    let inner = payload
-        .get("payload")
-        .cloned()
-        .unwrap_or(payload);
+    let inner = payload.get("payload").cloned().unwrap_or(payload);
 
     let title = inner
         .get("title")
@@ -734,7 +1174,12 @@ fn provider_cli_command(provider_type: &str) -> Option<&'static str> {
 }
 
 fn try_cli_invocation(path: &Path) -> bool {
-    for args in [&["--version"][..], &["-V"][..], &["-v"][..], &["--help"][..]] {
+    for args in [
+        &["--version"][..],
+        &["-V"][..],
+        &["-v"][..],
+        &["--help"][..],
+    ] {
         if let Ok(out) = Command::new(path).args(args).output() {
             if out.status.success() {
                 return true;
@@ -749,19 +1194,13 @@ fn shell_open_external(url: String) -> ApiResult<Value> {
     use std::process::Command;
 
     #[cfg(target_os = "macos")]
-    let status = Command::new("open")
-        .arg(&url)
-        .status();
+    let status = Command::new("open").arg(&url).status();
 
     #[cfg(target_os = "linux")]
-    let status = Command::new("xdg-open")
-        .arg(&url)
-        .status();
+    let status = Command::new("xdg-open").arg(&url).status();
 
     #[cfg(target_os = "windows")]
-    let status = Command::new("cmd")
-        .args(["/C", "start", "", &url])
-        .status();
+    let status = Command::new("cmd").args(["/C", "start", "", &url]).status();
 
     match status {
         Ok(s) if s.success() => Ok(serde_json::json!({ "success": true })),
@@ -790,19 +1229,13 @@ fn shell_open_path(path: String) -> ApiResult<Value> {
     }
 
     #[cfg(target_os = "macos")]
-    let status = Command::new("open")
-        .arg(&expanded)
-        .status();
+    let status = Command::new("open").arg(&expanded).status();
 
     #[cfg(target_os = "linux")]
-    let status = Command::new("xdg-open")
-        .arg(&expanded)
-        .status();
+    let status = Command::new("xdg-open").arg(&expanded).status();
 
     #[cfg(target_os = "windows")]
-    let status = Command::new("explorer")
-        .arg(&expanded)
-        .status();
+    let status = Command::new("explorer").arg(&expanded).status();
 
     match status {
         Ok(s) if s.success() => Ok(serde_json::json!({ "success": true })),
@@ -1015,11 +1448,10 @@ async fn terminal_save_temp_image(image_data: Vec<u8>, extension: String) -> Api
     let filename = format!("dcc_img_{}.{}", Uuid::new_v4(), extension);
     let path = temp_dir.join(&filename);
 
-    std::fs::write(&path, image_data)
-        .map_err(|e| ApiError {
-            code: "FS_ERROR",
-            message: format!("Failed to save temp image: {}", e),
-        })?;
+    std::fs::write(&path, image_data).map_err(|e| ApiError {
+        code: "FS_ERROR",
+        message: format!("Failed to save temp image: {}", e),
+    })?;
 
     Ok(serde_json::json!({
         "path": path.to_string_lossy().to_string(),
@@ -1029,11 +1461,10 @@ async fn terminal_save_temp_image(image_data: Vec<u8>, extension: String) -> Api
 
 #[tauri::command]
 fn window_minimize(app: AppHandle) -> ApiResult<Value> {
-    let window = app.get_webview_window("main")
-        .ok_or_else(|| ApiError {
-            code: "WINDOW_NOT_FOUND",
-            message: "Main window not found".into(),
-        })?;
+    let window = app.get_webview_window("main").ok_or_else(|| ApiError {
+        code: "WINDOW_NOT_FOUND",
+        message: "Main window not found".into(),
+    })?;
 
     window.minimize().map_err(|e| ApiError {
         code: "WINDOW_ERROR",
@@ -1045,11 +1476,10 @@ fn window_minimize(app: AppHandle) -> ApiResult<Value> {
 
 #[tauri::command]
 fn window_maximize(app: AppHandle) -> ApiResult<Value> {
-    let window = app.get_webview_window("main")
-        .ok_or_else(|| ApiError {
-            code: "WINDOW_NOT_FOUND",
-            message: "Main window not found".into(),
-        })?;
+    let window = app.get_webview_window("main").ok_or_else(|| ApiError {
+        code: "WINDOW_NOT_FOUND",
+        message: "Main window not found".into(),
+    })?;
 
     // Toggle maximize/unmaximize
     if window.is_maximized().unwrap_or(false) {
@@ -1069,11 +1499,10 @@ fn window_maximize(app: AppHandle) -> ApiResult<Value> {
 
 #[tauri::command]
 fn window_close(app: AppHandle) -> ApiResult<Value> {
-    let window = app.get_webview_window("main")
-        .ok_or_else(|| ApiError {
-            code: "WINDOW_NOT_FOUND",
-            message: "Main window not found".into(),
-        })?;
+    let window = app.get_webview_window("main").ok_or_else(|| ApiError {
+        code: "WINDOW_NOT_FOUND",
+        message: "Main window not found".into(),
+    })?;
 
     window.close().map_err(|e| ApiError {
         code: "WINDOW_ERROR",
@@ -1116,9 +1545,14 @@ fn license_skip_activation() -> ApiResult<Value> {
 // ---------- Providers / Projects / Missions / Logs / Combs / Panes ----------
 #[tauri::command]
 fn db_providers_find_all(state: State<'_, AppState>) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
-        .prepare(&format!("{PROVIDER_SELECT_SQL} ORDER BY name ASC LIMIT 100 OFFSET 0"))
+        .prepare(&format!(
+            "{PROVIDER_SELECT_SQL} ORDER BY name ASC LIMIT 100 OFFSET 0"
+        ))
         .map_err(|e| db_error(e.to_string()))?;
     let rows = stmt
         .query_map([], provider_from_row)
@@ -1129,7 +1563,10 @@ fn db_providers_find_all(state: State<'_, AppState>) -> ApiResult<Value> {
 
 #[tauri::command]
 fn db_providers_find_by_id(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare(&format!("{PROVIDER_SELECT_SQL} WHERE id = ?1"))
         .map_err(|e| db_error(e.to_string()))?;
@@ -1142,9 +1579,14 @@ fn db_providers_find_by_id(state: State<'_, AppState>, id: String) -> ApiResult<
 
 #[tauri::command]
 fn db_providers_find_by_type(state: State<'_, AppState>, kind: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
-        .prepare(&format!("{PROVIDER_SELECT_SQL} WHERE type = ?1 ORDER BY name ASC"))
+        .prepare(&format!(
+            "{PROVIDER_SELECT_SQL} WHERE type = ?1 ORDER BY name ASC"
+        ))
         .map_err(|e| db_error(e.to_string()))?;
     let rows = stmt
         .query_map(params![kind], provider_from_row)
@@ -1155,7 +1597,10 @@ fn db_providers_find_by_type(state: State<'_, AppState>, kind: String) -> ApiRes
 
 #[tauri::command]
 fn db_providers_find_active(state: State<'_, AppState>) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare(&format!(
             "{PROVIDER_SELECT_SQL} WHERE is_active = 1 ORDER BY name ASC"
@@ -1194,14 +1639,14 @@ fn db_providers_create(state: State<'_, AppState>, data: Value) -> ApiResult<Val
         None | Some(Value::Null) => None,
         Some(v) => Some(serde_json::to_string(v).map_err(|e| db_error(e.to_string()))?),
     };
-    let is_active = obj
-        .get("isActive")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
+    let is_active = obj.get("isActive").and_then(Value::as_bool).unwrap_or(true);
     let is_active_i: i64 = if is_active { 1 } else { 0 };
 
     {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         conn.execute(
             "INSERT INTO providers (id, name, type, api_key, api_key_encrypted, cli_path, config, is_active)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -1290,7 +1735,10 @@ fn db_providers_update(state: State<'_, AppState>, id: String, data: Value) -> A
     bind.push(SqlValue::Text(id.clone()));
     let sql = format!("UPDATE providers SET {} WHERE id = ?", sets.join(", "));
     {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         conn.execute(&sql, params_from_iter(bind))
             .map_err(|e| db_error(e.to_string()))?;
     }
@@ -1299,7 +1747,10 @@ fn db_providers_update(state: State<'_, AppState>, id: String, data: Value) -> A
 
 #[tauri::command]
 fn db_providers_delete(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let changed = conn
         .execute("DELETE FROM providers WHERE id = ?1", params![id])
         .map_err(|e| db_error(e.to_string()))?;
@@ -1313,7 +1764,10 @@ fn db_providers_set_active(
     is_active: bool,
 ) -> ApiResult<Value> {
     {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         conn.execute(
             "UPDATE providers SET is_active = ?1 WHERE id = ?2",
             params![if is_active { 1 } else { 0 }, id],
@@ -1325,7 +1779,10 @@ fn db_providers_set_active(
 
 #[tauri::command]
 fn db_providers_test_connection(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare(&format!("{PROVIDER_SELECT_SQL} WHERE id = ?1"))
         .map_err(|e| db_error(e.to_string()))?;
@@ -1339,10 +1796,7 @@ fn db_providers_test_connection(state: State<'_, AppState>, id: String) -> ApiRe
             "error": "Provider not found"
         }));
     };
-    let typ = provider
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let typ = provider.get("type").and_then(|v| v.as_str()).unwrap_or("");
     let has_key = provider
         .get("hasApiKey")
         .and_then(|v| v.as_bool())
@@ -1388,7 +1842,10 @@ fn push_sql_set(
 
 #[tauri::command]
 fn db_projects_find_all(state: State<'_, AppState>) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare(
             "SELECT * FROM projects
@@ -1409,7 +1866,10 @@ fn db_projects_find_all(state: State<'_, AppState>) -> ApiResult<Value> {
 }
 #[tauri::command]
 fn db_projects_find_by_id(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare("SELECT * FROM projects WHERE id = ?1")
         .map_err(|e| db_error(e.to_string()))?;
@@ -1421,7 +1881,10 @@ fn db_projects_find_by_id(state: State<'_, AppState>, id: String) -> ApiResult<V
 }
 #[tauri::command]
 fn db_projects_find_by_path(state: State<'_, AppState>, path: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare("SELECT * FROM projects WHERE path = ?1")
         .map_err(|e| db_error(e.to_string()))?;
@@ -1431,9 +1894,116 @@ fn db_projects_find_by_path(state: State<'_, AppState>, path: String) -> ApiResu
         .map_err(|e| db_error(e.to_string()))?;
     Ok(row.map(map_project_to_renderer).unwrap_or(Value::Null))
 }
+
+#[tauri::command]
+fn db_projects_get_repo_config_toml(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
+    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let mut stmt = conn
+        .prepare("SELECT path, repo_config FROM projects WHERE id = ?1")
+        .map_err(|e| db_error(e.to_string()))?;
+    let row = stmt
+        .query_row(params![id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))
+        .optional()
+        .map_err(|e| db_error(e.to_string()))?;
+    let Some((project_path, repo_config_raw)) = row else {
+        return Ok(serde_json::json!({
+            "exists": false,
+            "source": "missing",
+            "path": null,
+            "content": ""
+        }));
+    };
+    let file_path = repo_config_file_path(&project_path);
+    if let Some(content) = read_repo_config_text_from_disk(&project_path).map_err(db_error)? {
+        return Ok(serde_json::json!({
+            "exists": true,
+            "source": "disk",
+            "path": file_path.to_string_lossy().to_string(),
+            "content": content
+        }));
+    }
+
+    let default_value = default_repo_config_value();
+    let has_db_repo_config = repo_config_raw.is_some();
+
+    let content = if let Some(raw) = repo_config_raw {
+        if raw.trim().is_empty() {
+            repo_config_toml_text_from_value(&default_value).map_err(db_error)?
+        } else {
+            let value = serde_json::from_str::<Value>(&raw).unwrap_or(Value::Null);
+            if value.is_null() {
+                repo_config_toml_text_from_value(&default_value).map_err(db_error)?
+            } else {
+                repo_config_toml_text_from_value(&value).map_err(db_error)?
+            }
+        }
+    } else {
+        repo_config_toml_text_from_value(&default_value).map_err(db_error)?
+    };
+
+    Ok(serde_json::json!({
+        "exists": false,
+        "source": if has_db_repo_config { "db" } else { "generated" },
+        "path": file_path.to_string_lossy().to_string(),
+        "content": content
+    }))
+}
+
+#[tauri::command]
+fn db_projects_save_repo_config_toml(
+    state: State<'_, AppState>,
+    id: String,
+    content: String,
+) -> ApiResult<Value> {
+    let project_path = {
+        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        conn.query_row(
+            "SELECT path FROM projects WHERE id = ?1",
+            params![id.clone()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| db_error(e.to_string()))?
+    };
+    let Some(project_path) = project_path else {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": "Project not found"
+        }));
+    };
+
+    let parsed: RepoConfigToml = toml::from_str(&content)
+        .map_err(|e| db_error(format!("{}: {}", repo_config_file_path(&project_path).display(), e)))?;
+    let payload = repo_config_payload_from_toml(parsed);
+    let normalized = repo_config_value_from_payload(&payload).map_err(db_error)?;
+
+    let file_path = repo_config_file_path(&project_path);
+    if let Some(parent) = file_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| db_error(format!("{}: {}", parent.display(), e)))?;
+    }
+    fs::write(&file_path, content).map_err(|e| db_error(format!("{}: {}", file_path.display(), e)))?;
+
+    {
+        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        conn.execute(
+            "UPDATE projects SET repo_config = ?1 WHERE id = ?2",
+            params![normalized.to_string(), id],
+        )
+        .map_err(|e| db_error(e.to_string()))?;
+    }
+
+    Ok(serde_json::json!({
+        "success": true,
+        "path": file_path.to_string_lossy().to_string()
+    }))
+}
+
 #[tauri::command]
 fn db_projects_search(state: State<'_, AppState>, query: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let term = format!("%{query}%");
     let mut stmt = conn
         .prepare(
@@ -1472,13 +2042,37 @@ fn db_projects_create(state: State<'_, AppState>, data: Value) -> ApiResult<Valu
     let description = obj.get("description").and_then(Value::as_str);
     let default_provider_id = obj.get("defaultProviderId").and_then(Value::as_str);
     let git_remote_url = obj.get("gitRemoteUrl").and_then(Value::as_str);
+    let repo_config = if let Some(explicit_repo_config) = obj.get("repoConfig") {
+        if !explicit_repo_config.is_null() {
+            write_repo_config_to_disk(path, Some(explicit_repo_config)).map_err(db_error)?;
+            Some(explicit_repo_config.to_string())
+        } else {
+            write_repo_config_to_disk(path, Some(&Value::Null)).map_err(db_error)?;
+            None
+        }
+    } else {
+        read_repo_config_from_disk(path)
+            .map_err(db_error)?
+            .map(|v| v.to_string())
+    };
 
     {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         conn.execute(
-            "INSERT INTO projects (id, name, path, description, default_provider_id, git_remote_url)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, name, path, description, default_provider_id, git_remote_url],
+            "INSERT INTO projects (id, name, path, description, default_provider_id, git_remote_url, repo_config)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                name,
+                path,
+                description,
+                default_provider_id,
+                git_remote_url,
+                repo_config
+            ],
         )
         .map_err(|e| db_error(e.to_string()))?;
     }
@@ -1523,6 +2117,43 @@ fn db_projects_update(state: State<'_, AppState>, id: String, data: Value) -> Ap
                 .to_string(),
         );
     }
+    if obj.get("repoConfig").is_some() {
+        if let Some(project_path) = {
+            let conn = state
+                .conn
+                .lock()
+                .map_err(|_| db_error("db lock poisoned"))?;
+            conn.query_row(
+                "SELECT path FROM projects WHERE id = ?1",
+                params![id.clone()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| db_error(e.to_string()))?
+        } {
+            let repo_config = obj.get("repoConfig").cloned();
+            if let Some(ref config) = repo_config {
+                if !config.is_null() {
+                    write_repo_config_to_disk(&project_path, Some(config)).map_err(db_error)?;
+                } else {
+                    write_repo_config_to_disk(&project_path, Some(&Value::Null))
+                        .map_err(db_error)?;
+                }
+            }
+        }
+        sets.push("repo_config = ?");
+        values.push(
+            obj.get("repoConfig")
+                .and_then(|v| {
+                    if v.is_null() {
+                        None
+                    } else {
+                        Some(v.to_string())
+                    }
+                })
+                .unwrap_or_default(),
+        );
+    }
     if sets.is_empty() {
         return db_projects_find_by_id(state, id);
     }
@@ -1530,7 +2161,10 @@ fn db_projects_update(state: State<'_, AppState>, id: String, data: Value) -> Ap
     let mut sql = format!("UPDATE projects SET {} WHERE id = ?", sets.join(", "));
     sql.push_str("");
     {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         let mut dyn_params = values.iter().map(|v| v.as_str()).collect::<Vec<_>>();
         dyn_params.push(id.as_str());
         conn.execute(&sql, params_from_iter(dyn_params))
@@ -1540,7 +2174,10 @@ fn db_projects_update(state: State<'_, AppState>, id: String, data: Value) -> Ap
 }
 #[tauri::command]
 fn db_projects_delete(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let changed = conn
         .execute("DELETE FROM projects WHERE id = ?1", params![id])
         .map_err(|e| db_error(e.to_string()))?;
@@ -1548,7 +2185,10 @@ fn db_projects_delete(state: State<'_, AppState>, id: String) -> ApiResult<Value
 }
 #[tauri::command]
 fn db_projects_get_stats(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare(
             "SELECT
@@ -1574,7 +2214,10 @@ fn db_projects_get_stats(state: State<'_, AppState>, id: String) -> ApiResult<Va
 #[tauri::command]
 fn db_projects_update_last_opened(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
     {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         conn.execute(
             "UPDATE projects SET last_opened_at = datetime('now') WHERE id = ?1",
             params![id.clone()],
@@ -1586,7 +2229,10 @@ fn db_projects_update_last_opened(state: State<'_, AppState>, id: String) -> Api
 
 #[tauri::command]
 fn db_combs_find_by_project(state: State<'_, AppState>, project_id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare(
             "SELECT * FROM combs WHERE project_id = ?1
@@ -1608,7 +2254,10 @@ fn db_combs_find_by_project(state: State<'_, AppState>, project_id: String) -> A
 }
 #[tauri::command]
 fn db_combs_find_by_id(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare("SELECT * FROM combs WHERE id = ?1")
         .map_err(|e| db_error(e.to_string()))?;
@@ -1639,7 +2288,10 @@ fn db_combs_create(state: State<'_, AppState>, data: Value) -> ApiResult<Value> 
         .ok_or_else(|| db_error("baseBranch is required"))?;
 
     {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         conn.execute(
             "INSERT INTO combs (id, project_id, name, description, base_branch, review_targets, status, last_opened_at, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, NULL, 'active', datetime('now'), datetime('now'), datetime('now'))",
@@ -1733,7 +2385,10 @@ fn db_combs_update(state: State<'_, AppState>, id: String, data: Value) -> ApiRe
     }
     if obj.contains_key("isPinned") {
         sets.push("is_pinned = ?".into());
-        let pinned = obj.get("isPinned").and_then(|v| v.as_bool()).unwrap_or(false);
+        let pinned = obj
+            .get("isPinned")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         bind.push(SqlValue::Integer(if pinned { 1 } else { 0 }));
     }
     if obj.contains_key("pinnedAt") {
@@ -1757,7 +2412,10 @@ fn db_combs_update(state: State<'_, AppState>, id: String, data: Value) -> ApiRe
     bind.push(SqlValue::Text(id.clone()));
     let sql = format!("UPDATE combs SET {} WHERE id = ?", sets.join(", "));
     {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         conn.execute(&sql, params_from_iter(bind))
             .map_err(|e| db_error(e.to_string()))?;
     }
@@ -1765,7 +2423,10 @@ fn db_combs_update(state: State<'_, AppState>, id: String, data: Value) -> ApiRe
 }
 #[tauri::command]
 fn db_combs_delete(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let changed = conn
         .execute("DELETE FROM combs WHERE id = ?1", params![id])
         .map_err(|e| db_error(e.to_string()))?;
@@ -1774,7 +2435,10 @@ fn db_combs_delete(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
 
 #[tauri::command]
 fn db_panes_find_by_comb(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare("SELECT * FROM panes WHERE comb_id = ?1 ORDER BY layout_order ASC")
         .map_err(|e| db_error(e.to_string()))?;
@@ -1792,7 +2456,10 @@ fn db_panes_find_by_comb(state: State<'_, AppState>, comb_id: String) -> ApiResu
 }
 #[tauri::command]
 fn db_panes_find_by_id(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare("SELECT * FROM panes WHERE id = ?1")
         .map_err(|e| db_error(e.to_string()))?;
@@ -1824,18 +2491,23 @@ fn db_panes_create(state: State<'_, AppState>, data: Value) -> ApiResult<Value> 
     let layout_order: i64 = if let Some(lo) = layout_order_opt {
         lo
     } else {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-        conn
-            .query_row(
-                "SELECT COALESCE(MAX(layout_order), -1) + 1 FROM panes WHERE comb_id = ?1",
-                params![comb_id],
-                |r| r.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+        conn.query_row(
+            "SELECT COALESCE(MAX(layout_order), -1) + 1 FROM panes WHERE comb_id = ?1",
+            params![comb_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
     };
 
     {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         conn.execute(
             "INSERT INTO panes (id, comb_id, type, provider_id, title, initial_prompt, status, layout_order, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'idle', ?7, datetime('now'), datetime('now'))",
@@ -1949,7 +2621,10 @@ fn db_panes_update(state: State<'_, AppState>, id: String, data: Value) -> ApiRe
     bind.push(SqlValue::Text(id.clone()));
     let sql = format!("UPDATE panes SET {} WHERE id = ?", sets.join(", "));
     {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         conn.execute(&sql, params_from_iter(bind))
             .map_err(|e| db_error(e.to_string()))?;
     }
@@ -1957,7 +2632,10 @@ fn db_panes_update(state: State<'_, AppState>, id: String, data: Value) -> ApiRe
 }
 #[tauri::command]
 fn db_panes_delete(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let changed = conn
         .execute("DELETE FROM panes WHERE id = ?1", params![id])
         .map_err(|e| db_error(e.to_string()))?;
@@ -2042,20 +2720,40 @@ fn review_get_diffs_bundle(worktree_paths: Vec<String>) -> ApiResult<Value> {
 }
 #[tauri::command]
 async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
-    let row: Option<(String, String, String, Option<String>, Option<String>)> = {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-        conn
-            .query_row(
-                "SELECT c.name, p.path, c.base_branch, c.worktree_path, c.branch
+    let row: Option<(
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+        conn.query_row(
+            "SELECT c.name, p.path, c.base_branch, c.worktree_path, c.branch, p.repo_config
                  FROM combs c JOIN projects p ON p.id = c.project_id
                  WHERE c.id = ?1",
-                params![comb_id.clone()],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-            )
-            .optional()
-            .map_err(|e| db_error(e.to_string()))?
+            params![comb_id.clone()],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| db_error(e.to_string()))?
     };
-    let Some((name, project_path, base_branch, existing_path, existing_branch)) = row else {
+    let Some((name, project_path, base_branch, existing_path, existing_branch, repo_config_raw)) =
+        row
+    else {
         return Ok(serde_json::json!({"success": false, "error": "Comb not found"}));
     };
     if let Some(p) = existing_path.clone() {
@@ -2066,7 +2764,14 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
         }));
     }
 
-    let branch = safe_branch_name("dcc-comb", &comb_id, &name);
+    let branch_prefix =
+        resolve_repo_config_value(Some(&project_path), repo_config_raw.map(Value::String))
+            .get("branchPrefix")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .filter(|prefix| !prefix.trim().is_empty())
+            .unwrap_or_else(|| "dcc-comb".to_string());
+    let branch = safe_branch_name(&branch_prefix, &comb_id, &name);
     let worktree_path = format!("{}/.dcc/worktrees/{}", project_path, branch);
     let from_ref = if base_branch.trim().is_empty() {
         "HEAD".to_string()
@@ -2097,13 +2802,15 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
     .await
     .map_err(|e| db_error(e.to_string()))??;
 
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    conn
-        .execute(
-            "UPDATE combs SET worktree_path = ?1, branch = ?2 WHERE id = ?3",
-            params![worktree_path.clone(), branch.clone(), comb_id],
-        )
-        .map_err(|e| db_error(e.to_string()))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
+    conn.execute(
+        "UPDATE combs SET worktree_path = ?1, branch = ?2 WHERE id = ?3",
+        params![worktree_path.clone(), branch.clone(), comb_id],
+    )
+    .map_err(|e| db_error(e.to_string()))?;
     Ok(serde_json::json!({
         "success": true,
         "worktreePath": worktree_path,
@@ -2112,7 +2819,10 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
 }
 #[tauri::command]
 fn comb_discard(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let row: Option<(String, Option<String>, Option<String>)> = conn
         .query_row(
             "SELECT p.path, c.worktree_path, c.branch
@@ -2133,22 +2843,28 @@ fn comb_discard(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value>
     if let Some(wb) = worktree_branch {
         let _ = run_git(&project_path, &["branch", "-D", &wb]);
     }
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
-    conn
-        .execute(
-            "UPDATE combs SET worktree_path = NULL, branch = NULL, status = 'discarded' WHERE id = ?1",
-            params![comb_id],
-        )
-        .map_err(|e| db_error(e.to_string()))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
+    conn.execute(
+        "UPDATE combs SET worktree_path = NULL, branch = NULL, status = 'discarded' WHERE id = ?1",
+        params![comb_id],
+    )
+    .map_err(|e| db_error(e.to_string()))?;
     Ok(serde_json::json!({"success": true}))
 }
 
 #[tauri::command]
 fn comb_check_unpushed(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
     let (branch, worktree_path) = {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
 
-        let mut stmt = conn.prepare("SELECT branch, worktree_path FROM combs WHERE id = ?1")
+        let mut stmt = conn
+            .prepare("SELECT branch, worktree_path FROM combs WHERE id = ?1")
             .map_err(|e| db_error(e.to_string()))?;
 
         let row: Option<(Option<String>, Option<String>)> = stmt
@@ -2192,7 +2908,10 @@ async fn comb_merge_into_main(
 ) -> ApiResult<Value> {
     // 1. Buscar dados do comb
     let (project_path, comb_branch, base_branch, comb_name) = {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
 
         let row: Option<(String, Option<String>, Option<String>, String, String)> = conn
             .query_row(
@@ -2298,7 +3017,10 @@ async fn comb_merge_into_main(
 }
 #[tauri::command]
 fn comb_get_diffs(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let worktree_path: Option<String> = conn
         .query_row(
             "SELECT worktree_path FROM combs WHERE id = ?1",
@@ -2309,7 +3031,9 @@ fn comb_get_diffs(state: State<'_, AppState>, comb_id: String) -> ApiResult<Valu
         .map_err(|e| db_error(e.to_string()))?
         .flatten();
     let Some(wp) = worktree_path else {
-        return Ok(serde_json::json!({"success": false, "error": "Comb has no worktree", "files": [], "summary": Value::Null}));
+        return Ok(
+            serde_json::json!({"success": false, "error": "Comb has no worktree", "files": [], "summary": Value::Null}),
+        );
     };
     build_review_diffs_for_path(&wp)
 }
@@ -2324,7 +3048,10 @@ async fn comb_apply_patch(
 
     // 1. Buscar dados do comb
     let (project_path, worktree_path, base_branch) = {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
 
         let row: Option<(String, Option<String>, Option<String>, String)> = conn
             .query_row(
@@ -2357,8 +3084,8 @@ async fn comb_apply_patch(
         // 3. Gerar patch file
         let patch_file = format!("/tmp/dcc-comb-{}.patch", comb_id_clone);
 
-        let patch_content = run_git(&worktree_path, &["diff", &base_branch, "HEAD"])
-            .map_err(|e| ApiError {
+        let patch_content =
+            run_git(&worktree_path, &["diff", &base_branch, "HEAD"]).map_err(|e| ApiError {
                 code: "GIT_ERROR",
                 message: format!("Failed to generate patch: {}", e.message),
             })?;
@@ -2397,7 +3124,10 @@ async fn comb_apply_patch(
         match apply_result {
             Ok(_) => {
                 // 8. Sucesso - atualizar status
-                let conn = state_clone.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+                let conn = state_clone
+                    .conn
+                    .lock()
+                    .map_err(|_| db_error("db lock poisoned"))?;
                 conn.execute(
                     "UPDATE combs SET status = 'applied' WHERE id = ?1",
                     params![comb_id_clone],
@@ -2484,15 +3214,22 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
         .spawn_command(cmd)
         .map_err(|e| db_error(e.to_string()))?;
 
-    let reader = pty_pair.master.try_clone_reader().map_err(|e| db_error(e.to_string()))?;
-    let writer = pty_pair.master.take_writer().map_err(|e| db_error(e.to_string()))?;
+    let reader = pty_pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| db_error(e.to_string()))?;
+    let writer = pty_pair
+        .master
+        .take_writer()
+        .map_err(|e| db_error(e.to_string()))?;
 
     let pty_id = format!("pty-{}", next_id());
     let stop_flag = Arc::new(AtomicBool::new(false));
     let output_buffer = new_terminal_output_buffer();
 
     // Extrair paneId das options se disponível
-    let pane_id_opt = options.get("paneId")
+    let pane_id_opt = options
+        .get("paneId")
         .and_then(Value::as_str)
         .map(|s| s.to_string());
 
@@ -2504,6 +3241,15 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
         stop_flag.clone(),
         output_buffer.clone(),
     ));
+
+    if let Some(pane_id) = pane_id_opt.as_ref() {
+        if let Ok(conn) = state.conn.lock() {
+            let _ = conn.execute(
+                "UPDATE panes SET status = 'running', last_activity_at = datetime('now') WHERE id = ?1",
+                params![pane_id],
+            );
+        }
+    }
 
     let mut terminals = state
         .terminals
@@ -2552,7 +3298,10 @@ fn terminal_session_json(pty_id: &str, t: &mut ManagedTerminal) -> Value {
 
 /// Verifica se o terminal está aguardando input do usuário
 /// Retorna (needs_attention, excerpt_opcional)
-fn check_needs_attention(data: &str, output_buffer: &Arc<Mutex<VecDeque<String>>>) -> (bool, Option<String>) {
+fn check_needs_attention(
+    data: &str,
+    output_buffer: &Arc<Mutex<VecDeque<String>>>,
+) -> (bool, Option<String>) {
     // OSC 9;9; protocol (Ghostty)
     if data.contains("\x1b]9;9;") {
         return (true, Some("Notification request".to_string()));
@@ -2561,7 +3310,8 @@ fn check_needs_attention(data: &str, output_buffer: &Arc<Mutex<VecDeque<String>>
     // Verificar últimas linhas do buffer para padrões de espera
     if let Ok(buffer) = output_buffer.lock() {
         // Pegar últimas 5 linhas
-        let tail: String = buffer.iter()
+        let tail: String = buffer
+            .iter()
             .rev()
             .take(5)
             .map(|s| s.as_str())
@@ -2576,7 +3326,8 @@ fn check_needs_attention(data: &str, output_buffer: &Arc<Mutex<VecDeque<String>>
 
         if WAIT_PATTERN.is_match(&stripped) {
             // Extrair excerpt da última linha não vazia
-            let excerpt = buffer.iter()
+            let excerpt = buffer
+                .iter()
                 .rev()
                 .find(|s| !s.trim().is_empty())
                 .map(|s| {
@@ -2733,7 +3484,7 @@ fn terminal_get_or_create(
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    
+
     let existing_id = terminals
         .iter_mut()
         .find(|(_, t)| t.mission_id.as_deref() == Some(mission_id.as_str()))
@@ -2748,21 +3499,25 @@ fn terminal_get_or_create(
 
     // Drop lock before spawn to avoid deadlock or long stalls
     drop(terminals);
-    
+
     let spawn_result = terminal_spawn(state.clone(), app, options)?;
-    let pty_id = spawn_result.get("ptyId").and_then(Value::as_str).unwrap().to_string();
-    
+    let pty_id = spawn_result
+        .get("ptyId")
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_string();
+
     let mut terminals = state
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    
+
     if let Some(t) = terminals.get_mut(&pty_id) {
         t.mission_id = Some(mission_id);
         let session = terminal_session_json(&pty_id, t);
         return Ok(serde_json::json!({ "ptyId": pty_id, "session": session }));
     }
-    
+
     Err(db_error("Failed to re-acquire spawned terminal"))
 }
 
@@ -2800,9 +3555,12 @@ fn terminal_write(state: State<'_, AppState>, pty_id: String, data: String) -> A
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    
+
     if let Some(t) = terminals.get(&pty_id) {
-        let mut writer = t.writer.lock().map_err(|_| db_error("writer lock poisoned"))?;
+        let mut writer = t
+            .writer
+            .lock()
+            .map_err(|_| db_error("writer lock poisoned"))?;
         pty_write_all_chunked(&mut *writer, data.as_bytes())
             .map_err(|e| db_error(e.to_string()))?;
         return Ok(serde_json::json!({ "ok": true }));
@@ -2811,12 +3569,17 @@ fn terminal_write(state: State<'_, AppState>, pty_id: String, data: String) -> A
 }
 
 #[tauri::command]
-fn terminal_resize(state: State<'_, AppState>, pty_id: String, cols: u16, rows: u16) -> ApiResult<Value> {
+fn terminal_resize(
+    state: State<'_, AppState>,
+    pty_id: String,
+    cols: u16,
+    rows: u16,
+) -> ApiResult<Value> {
     let terminals = state
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    
+
     if let Some(t) = terminals.get(&pty_id) {
         t.pty_master
             .resize(PtySize {
@@ -2837,15 +3600,15 @@ fn terminal_kill(state: State<'_, AppState>, app: AppHandle, pty_id: String) -> 
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    
+
     if let Some(mut t) = terminals.remove(&pty_id) {
         t.stop_flag.store(true, Ordering::Relaxed);
         // On some OSs, closing the pty master will signal the child
-        drop(t.pty_master); 
+        drop(t.pty_master);
         if let Some(reader_thread) = t.reader_thread.take() {
             let _ = reader_thread.join();
         }
-        
+
         let _ = app.emit(
             "terminal-exit",
             serde_json::json!({ "ptyId": pty_id, "code": -1 }),
@@ -2865,13 +3628,13 @@ fn terminal_kill_by_mission_id(
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    
+
     let ids = terminals
         .iter()
         .filter(|(_, t)| t.mission_id.as_deref() == Some(mission_id.as_str()))
         .map(|(id, _)| id.clone())
         .collect::<Vec<_>>();
-    
+
     for id in ids {
         if let Some(mut t) = terminals.remove(&id) {
             t.stop_flag.store(true, Ordering::Relaxed);
@@ -2879,7 +3642,10 @@ fn terminal_kill_by_mission_id(
             if let Some(reader_thread) = t.reader_thread.take() {
                 let _ = reader_thread.join();
             }
-            let _ = app.emit("terminal-exit", serde_json::json!({ "ptyId": id, "code": -1 }));
+            let _ = app.emit(
+                "terminal-exit",
+                serde_json::json!({ "ptyId": id, "code": -1 }),
+            );
         }
     }
     Ok(serde_json::json!({ "ok": true }))
@@ -2896,7 +3662,7 @@ fn terminal_get_or_create_for_pane(
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    
+
     let existing_id = terminals
         .iter_mut()
         .find(|(_, t)| t.pane_id.as_deref() == Some(pane_id.as_str()))
@@ -2910,21 +3676,25 @@ fn terminal_get_or_create_for_pane(
     }
 
     drop(terminals);
-    
+
     let spawn_result = terminal_spawn(state.clone(), app, options)?;
-    let pty_id = spawn_result.get("ptyId").and_then(Value::as_str).unwrap().to_string();
-    
+    let pty_id = spawn_result
+        .get("ptyId")
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_string();
+
     let mut terminals = state
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    
+
     if let Some(t) = terminals.get_mut(&pty_id) {
         t.pane_id = Some(pane_id);
         let session = terminal_session_json(&pty_id, t);
         return Ok(serde_json::json!({ "ptyId": pty_id, "session": session }));
     }
-    
+
     Err(db_error("Failed to re-acquire spawned terminal for pane"))
 }
 
@@ -2949,17 +3719,24 @@ fn terminal_kill_by_pane_id(
     app: AppHandle,
     pane_id: String,
 ) -> ApiResult<Value> {
+    if let Ok(conn) = state.conn.lock() {
+        let _ = conn.execute(
+            "UPDATE panes SET status = 'exited', last_activity_at = datetime('now') WHERE id = ?1",
+            params![pane_id.clone()],
+        );
+    }
+
     let mut terminals = state
         .terminals
         .lock()
         .map_err(|_| db_error("terminals lock poisoned"))?;
-    
+
     let ids = terminals
         .iter()
         .filter(|(_, t)| t.pane_id.as_deref() == Some(pane_id.as_str()))
         .map(|(id, _)| id.clone())
         .collect::<Vec<_>>();
-    
+
     for id in ids {
         if let Some(mut t) = terminals.remove(&id) {
             t.stop_flag.store(true, Ordering::Relaxed);
@@ -2967,7 +3744,10 @@ fn terminal_kill_by_pane_id(
             if let Some(reader_thread) = t.reader_thread.take() {
                 let _ = reader_thread.join();
             }
-            let _ = app.emit("terminal-exit", serde_json::json!({ "ptyId": id, "code": -1 }));
+            let _ = app.emit(
+                "terminal-exit",
+                serde_json::json!({ "ptyId": id, "code": -1 }),
+            );
         }
     }
     Ok(serde_json::json!({ "ok": true }))
@@ -2993,10 +3773,60 @@ fn terminal_get_backlog(state: State<'_, AppState>, pty_id: String) -> ApiResult
 }
 
 #[tauri::command]
-fn terminal_get_project_activity(_project_id: String) -> ApiResult<Value> {
+fn terminal_get_project_activity(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> ApiResult<Value> {
+    let pane_to_comb: HashMap<String, String> = {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT p.id, p.comb_id
+                 FROM panes p
+                 JOIN combs c ON c.id = p.comb_id
+                 WHERE c.project_id = ?1",
+            )
+            .map_err(|e| db_error(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![project_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| db_error(e.to_string()))?;
+        let mut map = HashMap::new();
+        for item in rows {
+            let (pane_id, comb_id) = item.map_err(|e| db_error(e.to_string()))?;
+            map.insert(pane_id, comb_id);
+        }
+        map
+    };
+
+    let mut running_by_comb: HashMap<String, i64> = HashMap::new();
+    let mut total_running = 0i64;
+    let mut terminals = state
+        .terminals
+        .lock()
+        .map_err(|_| db_error("terminals lock poisoned"))?;
+
+    for terminal in terminals.values_mut() {
+        let Some(pane_id) = terminal.pane_id.as_ref() else {
+            continue;
+        };
+        let Some(comb_id) = pane_to_comb.get(pane_id) else {
+            continue;
+        };
+        let is_running = terminal.child.try_wait().ok().flatten().is_none();
+        if is_running {
+            total_running += 1;
+            *running_by_comb.entry(comb_id.clone()).or_insert(0) += 1;
+        }
+    }
+
     Ok(serde_json::json!({
-      "totalRunningPanes": 0,
-      "runningPanesByCombId": {}
+      "totalRunningPanes": total_running,
+      "runningPanesByCombId": running_by_comb
     }))
 }
 
@@ -3041,6 +3871,8 @@ pub fn run() {
             db_projects_find_all,
             db_projects_find_by_id,
             db_projects_find_by_path,
+            db_projects_get_repo_config_toml,
+            db_projects_save_repo_config_toml,
             db_projects_search,
             db_projects_create,
             db_projects_update,
@@ -3105,6 +3937,8 @@ pub fn run() {
                 .map_err(|e| format!("failed to migrate legacy schema: {e}"))?;
             conn.execute_batch(APP_SCHEMA_SQL)
                 .map_err(|e| format!("failed to apply schema: {e}"))?;
+            sync_existing_repo_configs(&conn)
+                .map_err(|e| format!("failed to sync repo configs: {e}"))?;
             eprintln!("[DCC] Database ready at {:?}", db_path);
             app.manage(AppState {
                 db_path: Arc::new(db_path),

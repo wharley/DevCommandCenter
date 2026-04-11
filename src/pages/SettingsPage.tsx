@@ -459,7 +459,8 @@ export default function SettingsPage() {
             <div className="border-b border-border px-4 py-3">
               <p className="text-sm font-medium">Terminal embutido</p>
               <p className="text-[11px] text-muted-foreground">
-                Aparência do xterm no workspace.                 Atalhos: Cmd+1–9 foco no pane, Cmd+K limpar scrollback,
+                Aparência do xterm no workspace. Atalhos: Cmd+1–9 foco no pane,
+                Cmd+K abre a palette global, Cmd+Shift+K limpa scrollback,
                 Cmd+Plus/Cmd+Minus zoom, Cmd+0 reset do zoom (Ctrl no Windows/Linux).
               </p>
             </div>

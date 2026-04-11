@@ -126,7 +126,7 @@ export function EmbeddedTerminal({
   useEffect(() => {
     const term = xtermRef.current;
     if (!term) return;
-    const prefs = loadTerminalAppearance();
+    const prefs = getTerminalAppearancePreferences();
     term.options.fontSize = prefs.fontSize;
     term.options.fontFamily = prefs.fontFamily;
     term.options.theme = getXtermColorTheme(resolvedTheme, prefs.useAppThemeColors);
@@ -504,7 +504,7 @@ export function EmbeddedTerminal({
           title: "Terminal Bell",
           body: `Activity in terminal: ${paneId || ptyIdRef.current}`,
           sound: true,
-        }).catch((err) => console.warn("Failed to show bell notification:", err));
+        }).catch((err: unknown) => console.warn("Failed to show bell notification:", err));
       }
     });
 
