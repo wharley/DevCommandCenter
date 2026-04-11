@@ -2,6 +2,8 @@
 
 Este guia detalha como utilizar o DCC para maximizar sua eficiência como desenvolvedor, explorando os conceitos de isolamento de contexto, execução paralela e automação assistida.
 
+Para um **mapa de recursos atuais** (daemon, `.dcc.toml`, processos supervisionados, tasks, paleta ⌘K, CLI/MCP) e **fluxos que cruzam estes benefícios**, veja também **[Guia de recursos e fluxos](GUIA_RECURSOS_E_FLUXOS_DCC.md)**.
+
 ---
 
 ## 1. O Conceito de Worktree-per-Task

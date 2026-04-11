@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, WandSparkles } from "lucide-react";
+import { Clock3, Plus, Trash2, WandSparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -14,11 +14,15 @@ import type {
   ProjectRepoConfig,
   RepoCommandPreset,
   RepoProcessDefinition,
+  RepoTaskDefinition,
+  RepoTaskTriggerDefinition,
   Provider,
 } from "@/lib/database/types";
 
 type LocalProcess = RepoProcessDefinition;
 type LocalPreset = RepoCommandPreset;
+type LocalTask = RepoTaskDefinition;
+type LocalTaskTrigger = RepoTaskTriggerDefinition;
 
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -44,6 +48,27 @@ function createPreset(): LocalPreset {
   };
 }
 
+function createTaskTrigger(): LocalTaskTrigger {
+  return {
+    when: "complete",
+    prompt: "",
+    providerId: null,
+  };
+}
+
+function createTask(): LocalTask {
+  return {
+    id: makeId("task"),
+    name: "Snapshot",
+    command: "npm test",
+    schedule: "0 */2 * * * *",
+    description: "",
+    cwdMode: "worktree",
+    enabled: true,
+    trigger: createTaskTrigger(),
+  };
+}
+
 function normalizeConfig(config?: ProjectRepoConfig | null): ProjectRepoConfig {
   return {
     branchPrefix: config?.branchPrefix ?? "dcc-comb",
@@ -59,6 +84,19 @@ function normalizeConfig(config?: ProjectRepoConfig | null): ProjectRepoConfig {
     presets: (config?.presets ?? []).map((item) => ({
       ...item,
       description: item.description ?? "",
+    })),
+    tasks: (config?.tasks ?? []).map((item) => ({
+      ...item,
+      description: item.description ?? "",
+      cwdMode: item.cwdMode ?? "worktree",
+      enabled: item.enabled ?? true,
+      trigger: item.trigger
+        ? {
+            when: item.trigger.when ?? "complete",
+            prompt: item.trigger.prompt ?? "",
+            providerId: item.trigger.providerId ?? null,
+          }
+        : createTaskTrigger(),
     })),
   };
 }
@@ -87,6 +125,7 @@ export function ProjectRepoConfigDialog({
   const [teardownCommand, setTeardownCommand] = useState("");
   const [processes, setProcesses] = useState<LocalProcess[]>([]);
   const [presets, setPresets] = useState<LocalPreset[]>([]);
+  const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -98,6 +137,7 @@ export function ProjectRepoConfigDialog({
     setTeardownCommand(normalized.teardownCommand ?? "");
     setProcesses(normalized.processes?.length ? normalized.processes : [createProcess()]);
     setPresets(normalized.presets?.length ? normalized.presets : [createPreset()]);
+    setTasks(normalized.tasks?.length ? normalized.tasks : [createTask()]);
   }, [open, project]);
 
   const handleSave = async () => {
@@ -125,6 +165,22 @@ export function ProjectRepoConfigDialog({
             description: preset.description?.trim() || "",
           }))
           .filter((preset) => preset.name && preset.command),
+        tasks: tasks
+          .map((task) => ({
+            ...task,
+            name: task.name.trim(),
+            command: task.command.trim(),
+            schedule: task.schedule.trim(),
+            description: task.description?.trim() || "",
+            trigger: task.trigger
+              ? {
+                  when: task.trigger.when ?? "complete",
+                  prompt: task.trigger.prompt?.trim() || "",
+                  providerId: task.trigger.providerId ?? null,
+                }
+              : null,
+          }))
+          .filter((task) => task.name && task.command && task.schedule),
       };
       await onSave(project.id, nextConfig);
       onOpenChange(false);
@@ -409,6 +465,207 @@ export function ProjectRepoConfigDialog({
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground">
                       {index + 1} preset configurado.
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="space-y-3 rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Tarefas agendadas</p>
+                  <p className="text-xs text-muted-foreground">
+                    Entradas `[[tasks]]` com cron e um gatilho opcional após a execução.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setTasks((prev) => [...prev, createTask()])}
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  Adicionar tarefa
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {tasks.map((task, index) => (
+                  <div key={task.id} className="rounded-md border border-border bg-muted/20 p-3">
+                    <div className="grid gap-3 md:grid-cols-[1fr_1.5fr_1.2fr_130px_auto] md:items-end">
+                      <div className="space-y-2">
+                        <Label>Nome</Label>
+                        <Input
+                          value={task.name}
+                          onChange={(event) =>
+                            setTasks((prev) =>
+                              prev.map((item) =>
+                                item.id === task.id ? { ...item, name: event.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="Snapshot"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Comando</Label>
+                        <Input
+                          value={task.command}
+                          onChange={(event) =>
+                            setTasks((prev) =>
+                              prev.map((item) =>
+                                item.id === task.id ? { ...item, command: event.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="npm test"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Cron</Label>
+                        <Input
+                          value={task.schedule}
+                          onChange={(event) =>
+                            setTasks((prev) =>
+                              prev.map((item) =>
+                                item.id === task.id ? { ...item, schedule: event.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="0 */2 * * * *"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>CWD</Label>
+                        <Select
+                          value={task.cwdMode ?? "worktree"}
+                          onValueChange={(value: "project" | "worktree") =>
+                            setTasks((prev) =>
+                              prev.map((item) =>
+                                item.id === task.id ? { ...item, cwdMode: value } : item,
+                              ),
+                            )
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="worktree">Worktree</SelectItem>
+                            <SelectItem value="project">Projeto</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9"
+                          onClick={() =>
+                            setTasks((prev) => prev.filter((item) => item.id !== task.id))
+                          }
+                          disabled={tasks.length === 1}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-[1.2fr_1fr]">
+                      <div className="space-y-2">
+                        <Label>Descrição</Label>
+                        <Input
+                          value={task.description ?? ""}
+                          onChange={(event) =>
+                            setTasks((prev) =>
+                              prev.map((item) =>
+                                item.id === task.id ? { ...item, description: event.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="Opcional"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Ativa</Label>
+                        <div className="flex h-10 items-center">
+                          <Switch
+                            checked={task.enabled ?? true}
+                            onCheckedChange={(checked) =>
+                              setTasks((prev) =>
+                                prev.map((item) =>
+                                  item.id === task.id ? { ...item, enabled: checked } : item,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-md border border-border/70 bg-background/60 p-3">
+                      <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+                        <Clock3 className="h-3.5 w-3.5" />
+                        Gatilho pós-execução
+                      </div>
+                      <div className="mt-3 grid gap-3 md:grid-cols-[140px_1fr]">
+                        <div className="space-y-2">
+                          <Label>Quando</Label>
+                          <Select
+                            value={task.trigger?.when ?? "complete"}
+                            onValueChange={(value: "success" | "failure" | "complete") =>
+                              setTasks((prev) =>
+                                prev.map((item) =>
+                                  item.id === task.id
+                                    ? {
+                                        ...item,
+                                        trigger: {
+                                          ...(item.trigger ?? createTaskTrigger()),
+                                          when: value,
+                                        },
+                                      }
+                                    : item,
+                                ),
+                              )
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="complete">Ao concluir</SelectItem>
+                              <SelectItem value="success">Ao finalizar com sucesso</SelectItem>
+                              <SelectItem value="failure">Ao falhar</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Prompt / nota</Label>
+                          <Textarea
+                            value={task.trigger?.prompt ?? ""}
+                            onChange={(event) =>
+                              setTasks((prev) =>
+                                prev.map((item) =>
+                                  item.id === task.id
+                                    ? {
+                                        ...item,
+                                        trigger: {
+                                          ...(item.trigger ?? createTaskTrigger()),
+                                          prompt: event.target.value,
+                                        },
+                                      }
+                                    : item,
+                                ),
+                              )
+                            }
+                            rows={3}
+                            placeholder="Revisar saída, abrir agente ou registrar próxima ação."
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground">
+                      {index + 1} tarefa configurada.
                     </p>
                   </div>
                 ))}

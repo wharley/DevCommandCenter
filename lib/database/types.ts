@@ -183,6 +183,25 @@ export interface RepoCommandPreset {
   description?: string | null;
 }
 
+export type RepoTaskTriggerWhen = "success" | "failure" | "complete";
+
+export interface RepoTaskTriggerDefinition {
+  when?: RepoTaskTriggerWhen;
+  prompt?: string | null;
+  providerId?: string | null;
+}
+
+export interface RepoTaskDefinition {
+  id: string;
+  name: string;
+  command: string;
+  schedule: string;
+  description?: string | null;
+  cwdMode?: "project" | "worktree";
+  enabled?: boolean;
+  trigger?: RepoTaskTriggerDefinition | null;
+}
+
 export interface ProjectRepoConfig {
   branchPrefix?: string | null;
   defaultAgentProviderId?: string | null;
@@ -190,6 +209,7 @@ export interface ProjectRepoConfig {
   teardownCommand?: string | null;
   processes?: RepoProcessDefinition[];
   presets?: RepoCommandPreset[];
+  tasks?: RepoTaskDefinition[];
 }
 
 // ============================================

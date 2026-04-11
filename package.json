@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
+    "build:sidecars": "node scripts/build-sidecars.mjs",
     "vite": "node scripts/ensure-node.mjs && vite",
     "vite:build": "node scripts/ensure-node.mjs && vite build",
     "preview": "vite preview",

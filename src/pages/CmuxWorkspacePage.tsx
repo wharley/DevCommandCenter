@@ -1,10 +1,14 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   Bell,
   Bot,
+  Clock3,
   ChevronRight,
+  ChevronDown,
+  Database,
   FolderGit2,
   GitBranch,
   GitPullRequest,
@@ -12,6 +16,7 @@ import {
   Merge,
   Pin,
   Plus,
+  RefreshCw,
   Settings,
   Terminal,
   Trash2,
@@ -32,6 +37,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -42,15 +48,17 @@ import { ProjectRepoTomlDialog } from "@/components/dialogs/project-repo-toml-di
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { usePanes, useProjects, useProviders } from "@/hooks/use-data";
 import SettingsPage from "@/src/pages/SettingsPage";
-import { normalizeComb, normalizeCombs } from "@/lib/database/normalize";
+import { normalizeComb, normalizeCombs, normalizePanes } from "@/lib/database/normalize";
 import type {
   Comb,
   CreateCombDTO,
   Pane,
   Project,
   ProjectRepoConfig,
+  RepoTaskDefinition,
   Provider,
 } from "@/lib/database/types";
+import type { DaemonDiffBundleItem, DaemonStatus, DaemonTaskStatus } from "@/types/app";
 import {
   useTerminalAttentionToasts,
   type TerminalAttentionRecord,
@@ -61,6 +69,7 @@ import {
 } from "@/lib/terminal/terminal-preferences";
 import { useTerminalProjectActivity } from "@/hooks/use-terminal-project-activity";
 import { WorkspaceCommandPalette } from "@/components/workspace-command-palette";
+import { ProcessesPanel } from "@/components/processes-panel";
 
 const CLI_PROVIDER_TYPES = ["codex", "claude-code", "gemini", "cursor"] as const;
 
@@ -401,6 +410,7 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
   hasAttention,
   runningCount,
   onSelect,
+  onSelectBegin,
   onRemove,
   onTogglePin,
 }: {
@@ -411,10 +421,28 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
   hasAttention: boolean;
   runningCount: number;
   onSelect: (comb: Comb) => void;
+  onSelectBegin?: (comb: Comb) => void;
   onRemove: (combId: string) => void;
   onTogglePin: (combId: string) => void;
 }) {
   const handleSelect = useCallback(() => onSelect(comb), [onSelect, comb]);
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button !== 0) return;
+      onSelectBegin?.(comb);
+    },
+    [onSelectBegin, comb],
+  );
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onSelectBegin?.(comb);
+        onSelect(comb);
+      }
+    },
+    [onSelectBegin, onSelect, comb],
+  );
   const handleRemove = useCallback(
     (e: React.MouseEvent<HTMLButtonElement>) => {
       e.stopPropagation();
@@ -435,6 +463,8 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
       role="button"
       tabIndex={0}
       onClick={handleSelect}
+      onPointerDown={handlePointerDown}
+      onKeyDown={handleKeyDown}
       className={`titlebar-no-drag group cursor-pointer rounded-lg border px-2.5 py-2 transition-colors ${
         isActive ? "border-primary bg-sidebar-accent text-sidebar-accent-foreground" : "border-transparent hover:bg-sidebar-accent/50"
       }`}
@@ -464,6 +494,7 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
                 variant="ghost"
                 size="icon"
                 className={`h-6 w-6 ${comb.isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={handleTogglePin}
               >
                 <Pin className={`h-3.5 w-3.5 ${comb.isPinned ? "fill-current text-primary" : ""}`} />
@@ -471,7 +502,13 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
             </TooltipTrigger>
             <TooltipContent>{comb.isPinned ? "Desafixar workspace" : "Fixar workspace"}</TooltipContent>
           </Tooltip>
-          <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" onClick={handleRemove}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 opacity-0 group-hover:opacity-100"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={handleRemove}
+          >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -606,6 +643,48 @@ function WorkflowTip({ centered = false }: { centered?: boolean }) {
   );
 }
 
+function SidebarSection({
+  title,
+  description,
+  defaultOpen = false,
+  count,
+  children,
+}: {
+  title: string;
+  description?: string;
+  defaultOpen?: boolean;
+  count?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Collapsible defaultOpen={defaultOpen} className="rounded-lg border border-sidebar-border/70 bg-sidebar-accent/20">
+      <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-sidebar-accent/35">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/60">
+            {title}
+          </p>
+          {description ? (
+            <p className="mt-0.5 text-[11px] text-sidebar-foreground/45">
+              {description}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2">
+          {count ? (
+            <Badge variant="outline" className="border-sidebar-border text-[10px] text-sidebar-foreground/70">
+              {count}
+            </Badge>
+          ) : null}
+          <ChevronDown className="h-4 w-4 shrink-0 opacity-70 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-t border-sidebar-border/60 px-3 pb-3 pt-2">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 export default function CmuxWorkspacePage() {
   const { projects, isLoading: projectsLoading, update: updateProject, refresh: refreshProjects } = useProjects();
   const { providers } = useProviders();
@@ -621,9 +700,18 @@ export default function CmuxWorkspacePage() {
   const [repoConfigTomlOpen, setRepoConfigTomlOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [attentionOpen, setAttentionOpen] = useState(false);
+  const [daemonStatus, setDaemonStatus] = useState<DaemonStatus | null>(null);
+  const [daemonTasks, setDaemonTasks] = useState<DaemonTaskStatus[]>([]);
+  const [daemonCombs, setDaemonCombs] = useState<Comb[]>([]);
+  const [daemonPanes, setDaemonPanes] = useState<Pane[]>([]);
+  const [daemonDiffBundle, setDaemonDiffBundle] = useState<DaemonDiffBundleItem[]>([]);
+  const [daemonExplorerLoading, setDaemonExplorerLoading] = useState(false);
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [attentionRecords, setAttentionRecords] = useState<TerminalAttentionRecord[]>([]);
   const [initializingBasePaneIds, setInitializingBasePaneIds] = useState<Set<string>>(new Set());
+  /** Feedback imediato na sidebar antes do commit pesado (xterm / área principal). */
+  const [pointerSelectedCombId, setPointerSelectedCombId] = useState<string | null>(null);
+  const pointerPressClearTimeoutRef = useRef<number | null>(null);
   const hydratedAttentionRef = useRef(false);
 
   const sortedProjects = useMemo(
@@ -679,6 +767,7 @@ export default function CmuxWorkspacePage() {
   const { activity: projectActivity } = useTerminalProjectActivity(activeProject?.id ?? null);
   const {
     panes,
+    isLoading: panesLoading,
     refresh: refreshPanes,
     create: createPane,
     update: updatePane,
@@ -698,11 +787,21 @@ export default function CmuxWorkspacePage() {
     [providers],
   );
   const activeRepoConfig = activeProject?.repoConfig ?? null;
+  const activeRepoTasks = useMemo(
+    () => activeRepoConfig?.tasks ?? [],
+    [activeRepoConfig],
+  );
+  const daemonApi = window.desktopAPI?.daemon;
   const projectNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of sortedProjects) map.set(p.id, p.name);
     return map;
   }, [sortedProjects]);
+  const combById = useMemo(() => {
+    const map = new Map<string, Comb>();
+    for (const comb of combs) map.set(comb.id, comb);
+    return map;
+  }, [combs]);
   const unreadAttentionByCombId = useMemo(() => {
     const map = new Map<string, TerminalAttentionRecord>();
     for (const record of attentionRecords) {
@@ -726,6 +825,14 @@ export default function CmuxWorkspacePage() {
     }
     return count;
   }, [attentionRecords]);
+  const daemonTaskById = useMemo(() => {
+    const map = new Map<string, DaemonTaskStatus>();
+    for (const task of daemonTasks) {
+      if (activeProject?.id && task.projectId !== activeProject.id) continue;
+      map.set(task.taskId, task);
+    }
+    return map;
+  }, [activeProject?.id, daemonTasks]);
 
   const isAttentionPaneInView = useCallback(
     (detail: { paneId: string; combId: string }) => {
@@ -776,6 +883,89 @@ export default function CmuxWorkspacePage() {
   useEffect(() => {
     localStorage.setItem("dcc:attention:records", JSON.stringify(attentionRecords.slice(0, 120)));
   }, [attentionRecords]);
+
+  useEffect(() => {
+    if (!daemonApi?.getStatus || !daemonApi?.listTasks) return;
+    let cancelled = false;
+    const refreshDaemon = async () => {
+      try {
+        const [status, tasks] = await Promise.all([
+          daemonApi.getStatus(),
+          daemonApi.listTasks(),
+        ]);
+        if (cancelled) return;
+        setDaemonStatus(status);
+        setDaemonTasks(tasks ?? []);
+      } catch {
+        if (!cancelled) {
+          setDaemonStatus(null);
+          setDaemonTasks([]);
+        }
+      }
+    };
+    void refreshDaemon();
+    const timer = window.setInterval(() => {
+      void refreshDaemon();
+    }, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [daemonApi]);
+
+  const refreshDaemonExplorer = useCallback(async () => {
+    if (!daemonApi?.listCombs || !daemonApi?.listPanes || !daemonApi?.getDiffsBundle) {
+      setDaemonCombs([]);
+      setDaemonPanes([]);
+      setDaemonDiffBundle([]);
+      setDaemonExplorerLoading(false);
+      return;
+    }
+
+    setDaemonExplorerLoading(true);
+    try {
+      const projectId = activeProject?.id ?? undefined;
+      const combId = activeCombId ?? undefined;
+      const [combsRaw, panesRaw] = await Promise.all([
+        daemonApi.listCombs(projectId),
+        daemonApi.listPanes(projectId, combId),
+      ]);
+      const normalizedDaemonCombs = normalizeCombs((combsRaw ?? []) as unknown[]) as Comb[];
+      const normalizedDaemonPanes = normalizePanes((panesRaw ?? []) as unknown[]) as Pane[];
+      setDaemonCombs(normalizedDaemonCombs);
+      setDaemonPanes(normalizedDaemonPanes);
+
+      const worktreePaths = normalizedDaemonCombs
+        .map((comb) => comb.worktreePath?.trim())
+        .filter((value): value is string => Boolean(value));
+      if (worktreePaths.length === 0) {
+        setDaemonDiffBundle([]);
+        return;
+      }
+
+      const bundleRaw = await daemonApi.getDiffsBundle(
+        worktreePaths,
+        normalizedDaemonCombs.map((comb) => comb.id),
+      );
+      setDaemonDiffBundle(Array.isArray(bundleRaw) ? (bundleRaw as DaemonDiffBundleItem[]) : []);
+    } catch {
+      setDaemonCombs([]);
+      setDaemonPanes([]);
+      setDaemonDiffBundle([]);
+    } finally {
+      setDaemonExplorerLoading(false);
+    }
+  }, [activeCombId, activeProject?.id, daemonApi]);
+
+  useEffect(() => {
+    void refreshDaemonExplorer();
+    const timer = window.setInterval(() => {
+      void refreshDaemonExplorer();
+    }, 15000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [refreshDaemonExplorer]);
 
   useEffect(() => {
     if (selectedProjectId && projects.some((p) => p.id === selectedProjectId)) return;
@@ -981,6 +1171,29 @@ export default function CmuxWorkspacePage() {
     setShowProviders(false);
   }, []);
 
+  const handleWorkspacePointerDown = useCallback((comb: Comb) => {
+    if (pointerPressClearTimeoutRef.current != null) {
+      window.clearTimeout(pointerPressClearTimeoutRef.current);
+      pointerPressClearTimeoutRef.current = null;
+    }
+    flushSync(() => {
+      setPointerSelectedCombId(comb.id);
+    });
+    pointerPressClearTimeoutRef.current = window.setTimeout(() => {
+      pointerPressClearTimeoutRef.current = null;
+      setPointerSelectedCombId((prev) => (prev === comb.id ? null : prev));
+    }, 600);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (pointerSelectedCombId === null || pointerSelectedCombId !== activeCombId) return;
+    if (pointerPressClearTimeoutRef.current != null) {
+      window.clearTimeout(pointerPressClearTimeoutRef.current);
+      pointerPressClearTimeoutRef.current = null;
+    }
+    setPointerSelectedCombId(null);
+  }, [activeCombId, pointerSelectedCombId]);
+
   const handleAddTerminal = async () => {
     if (!activeCombId) return;
     try {
@@ -1041,6 +1254,40 @@ export default function CmuxWorkspacePage() {
       }
     },
     [activeCombId, activeProject?.path, createPane, ensureActiveCombWorktree, refreshPanes, updatePane],
+  );
+
+  const runRepoTask = useCallback(
+    async (task: RepoTaskDefinition) => {
+      if (!activeProject) return;
+      if (daemonApi?.runTask) {
+        try {
+          const result = await daemonApi.runTask(activeProject.id, task.id);
+          if (!result.success) {
+            toast.error(result.error ?? `Falha ao iniciar ${task.name}`);
+            return;
+          }
+          setDaemonTasks((prev) => {
+            if (!result.task) return prev;
+            const next = prev.filter((item) => item.taskId !== task.id);
+            next.push(result.task);
+            return next;
+          });
+          toast.success(`${task.name} iniciado pelo daemon`);
+          return;
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : `Falha ao iniciar ${task.name}`);
+          return;
+        }
+      }
+
+      await launchManagedCommand({
+        title: task.name,
+        command: task.command,
+        cwdMode: task.cwdMode ?? "worktree",
+        description: task.description ?? null,
+      });
+    },
+    [activeProject, daemonApi, launchManagedCommand],
   );
 
   const handleOpenBaseTerminal = async () => {
@@ -1109,7 +1356,6 @@ export default function CmuxWorkspacePage() {
       /* ignore */
     }
     await removePane(paneId);
-    refreshPanes();
     setAttentionRecords((prev) => prev.filter((item) => item.paneId !== paneId));
   };
 
@@ -1196,14 +1442,11 @@ export default function CmuxWorkspacePage() {
           status,
           lastActivityAt: new Date(),
         });
-        if (status === "running") {
-          refreshPanes();
-        }
       } catch {
         /* ignore status sync errors */
       }
     },
-    [refreshPanes, updatePane],
+    [updatePane],
   );
 
   const handleTogglePin = useCallback(async (combId: string) => {
@@ -1229,8 +1472,8 @@ export default function CmuxWorkspacePage() {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <div className="titlebar-drag-region fixed top-0 left-0 right-0 h-8 z-50" />
-      <aside className="flex w-72 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
-        <div className="border-b border-sidebar-border px-3 pt-10 pb-3">
+      <aside className="flex h-full min-h-0 w-72 shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+        <div className="shrink-0 border-b border-sidebar-border px-3 pt-10 pb-3">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <img src="/dcc-mark.svg" alt="DCC" className="h-7 w-7 rounded-lg" />
@@ -1246,227 +1489,481 @@ export default function CmuxWorkspacePage() {
           </Button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2">
-          {combsLoading ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-sidebar-foreground/40" />
-            </div>
-          ) : combs.length === 0 ? (
-            <p className="px-3 py-4 text-center text-xs text-sidebar-foreground/40">Nenhum workspace neste projeto.</p>
-          ) : (
-            <div className="space-y-1">
-              {combs.map((comb) => {
-                const attentionForComb = unreadAttentionByCombId.get(comb.id);
-                const isActive = comb.id === activeCombId;
-                const projectName = projectNameById.get(comb.projectId) ?? "Projeto";
-                const runningCount = projectActivity.runningPanesByCombId[comb.id] ?? 0;
-                return (
-                  <WorkspaceListItem
-                    key={comb.id}
-                    comb={comb}
-                    isActive={isActive}
-                    projectName={projectName}
-                    hasAttention={!!attentionForComb}
-                    runningCount={runningCount}
-                    attentionExcerpt={attentionForComb?.excerpt ?? null}
-                    onSelect={handleSelectWorkspace}
-                    onRemove={handleRemoveWorkspaceById}
-                    onTogglePin={handleTogglePin}
-                  />
-                );
-              })}
-            </div>
-          )}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="p-2">
+            {combsLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-sidebar-foreground/40" />
+              </div>
+            ) : combs.length === 0 ? (
+              <p className="px-3 py-4 text-center text-xs text-sidebar-foreground/40">Nenhum workspace neste projeto.</p>
+            ) : (
+              <div className="space-y-1">
+                {combs.map((comb) => {
+                  const attentionForComb = unreadAttentionByCombId.get(comb.id);
+                  const isActive = comb.id === activeCombId || comb.id === pointerSelectedCombId;
+                  const projectName = projectNameById.get(comb.projectId) ?? "Projeto";
+                  const runningCount = projectActivity.runningPanesByCombId[comb.id] ?? 0;
+                  return (
+                    <WorkspaceListItem
+                      key={comb.id}
+                      comb={comb}
+                      isActive={isActive}
+                      projectName={projectName}
+                      hasAttention={!!attentionForComb}
+                      runningCount={runningCount}
+                      attentionExcerpt={attentionForComb?.excerpt ?? null}
+                      onSelect={handleSelectWorkspace}
+                      onSelectBegin={handleWorkspacePointerDown}
+                      onRemove={handleRemoveWorkspaceById}
+                      onTogglePin={handleTogglePin}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="border-t border-sidebar-border p-2 space-y-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="titlebar-no-drag w-full justify-start gap-2"
-            onClick={() => setAttentionOpen(true)}
-          >
-            <Bell className="h-4 w-4" />
-            Notificações
-            {unreadCount > 0 ? <Badge className="ml-auto">{unreadCount}</Badge> : null}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="titlebar-no-drag w-full justify-start gap-2"
-            onClick={() => setShowProviders((prev) => !prev)}
-          >
-            <Settings className="h-4 w-4" />
-            Providers
-          </Button>
-        </div>
-
-        <div className="border-t border-sidebar-border p-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-sidebar-foreground/60">
-                Command Center
-              </p>
-              <p className="text-[11px] text-sidebar-foreground/50">
-                {activeProject ? activeProject.name : "Nenhum projeto ativo"}
-              </p>
-            </div>
-            <Badge variant="outline" className="border-sidebar-border text-[10px]">
-              {projectActivity.totalRunningPanes} ativos
-            </Badge>
+        <div className="max-h-[48%] shrink-0 overflow-y-auto border-t border-sidebar-border bg-sidebar/95 px-3 py-3">
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="titlebar-no-drag w-full justify-start gap-2"
+              onClick={() => setAttentionOpen(true)}
+            >
+              <Bell className="h-4 w-4" />
+              Notificações
+              {unreadCount > 0 ? <Badge className="ml-auto">{unreadCount}</Badge> : null}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="titlebar-no-drag w-full justify-start gap-2"
+              onClick={() => setShowProviders((prev) => !prev)}
+            >
+              <Settings className="h-4 w-4" />
+              Providers
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="titlebar-no-drag w-full justify-start gap-2"
+              onClick={() => setCommandPaletteOpen(true)}
+            >
+              <WandSparkles className="h-4 w-4" />
+              Palette
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="titlebar-no-drag w-full justify-start gap-2"
+              onClick={() => setRepoConfigOpen(true)}
+            >
+              <Settings className="h-4 w-4" />
+              Repo
+            </Button>
           </div>
 
-          {activeProject ? (
-            <div className="space-y-3">
-              <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-3 py-2">
-                <p className="text-xs font-medium">{getProjectConfigBranchPrefix(activeRepoConfig)}</p>
-                <p className="mt-0.5 text-[11px] text-sidebar-foreground/60">
-                  Prefixo de branch do repo
+          <div className="mt-3 rounded-lg border border-sidebar-border bg-sidebar-accent/30 px-3 py-3">
+            <div className="mb-2 flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wide text-sidebar-foreground/60">
+                  Command Center
                 </p>
-                <p className="mt-2 text-[11px] text-sidebar-foreground/70">
-                  Agente padrão{" "}
-                  <span className="font-medium">
-                    {activeRepoConfig?.defaultAgentProviderId
-                      ? (providerById.get(activeRepoConfig.defaultAgentProviderId)?.name ?? "definido")
-                      : "não definido"}
-                  </span>
+                <p className="truncate text-[11px] text-sidebar-foreground/50">
+                  {activeProject ? activeProject.name : "Nenhum projeto ativo"}
                 </p>
               </div>
+              <Badge variant="outline" className="border-sidebar-border text-[10px]">
+                {projectActivity.totalRunningPanes} ativos
+              </Badge>
+            </div>
 
-              <div className="grid grid-cols-1 gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="titlebar-no-drag justify-start gap-2"
-                  onClick={() => setCommandPaletteOpen(true)}
-                >
-                  <WandSparkles className="h-3.5 w-3.5" />
-                  Abrir palette
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="titlebar-no-drag justify-start gap-2"
-                  onClick={() => setRepoConfigOpen(true)}
-                >
-                  <Settings className="h-3.5 w-3.5" />
-                  Configurar repo
-                </Button>
-              </div>
-
-              {activeRepoConfig?.setupCommand?.trim() ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="titlebar-no-drag w-full justify-start gap-2"
-                  onClick={() =>
-                    void launchManagedCommand({
-                      title: "Setup",
-                      command: activeRepoConfig.setupCommand ?? "",
-                      cwdMode: "project",
-                      description: "Executa o setup do repositório",
-                    })
-                  }
-                >
-                  <WandSparkles className="h-3.5 w-3.5" />
-                  Rodar setup
-                </Button>
-              ) : null}
-
-              {activeRepoConfig?.teardownCommand?.trim() ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="titlebar-no-drag w-full justify-start gap-2"
-                  onClick={() =>
-                    void launchManagedCommand({
-                      title: "Teardown",
-                      command: activeRepoConfig.teardownCommand ?? "",
-                      cwdMode: "project",
-                      description: "Executa o teardown do repositório",
-                    })
-                  }
-                >
-                  <Terminal className="h-3.5 w-3.5" />
-                  Rodar teardown
-                </Button>
-              ) : null}
-
-              <div className="space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
-                  Processos
-                </p>
-                {(activeRepoConfig?.processes ?? []).length === 0 ? (
-                  <p className="text-[11px] text-sidebar-foreground/45">
-                    Sem processos configurados.
+            {activeProject ? (
+              <div className="space-y-3">
+                <div className="rounded-md border border-sidebar-border/70 bg-sidebar-accent/40 px-3 py-2">
+                  <p className="text-xs font-medium">{getProjectConfigBranchPrefix(activeRepoConfig)}</p>
+                  <p className="mt-0.5 text-[11px] text-sidebar-foreground/60">
+                    Prefixo de branch do repo
                   </p>
-                ) : (
-                  <div className="space-y-1">
-                    {activeRepoConfig?.processes?.map((process) => (
-                      <Button
-                        key={process.id}
-                        variant="ghost"
-                        size="sm"
-                        className="titlebar-no-drag w-full justify-start gap-2 border border-transparent px-2 text-left hover:border-sidebar-border"
-                        onClick={() =>
-                          void launchManagedCommand({
-                            title: process.name,
-                            command: process.command,
-                            cwdMode: process.cwdMode ?? "worktree",
-                            description: process.description ?? null,
-                          })
-                        }
-                      >
-                        <Workflow className="h-3.5 w-3.5" />
-                        <span className="truncate">{process.name}</span>
-                      </Button>
-                    ))}
+                  <p className="mt-2 text-[11px] text-sidebar-foreground/70">
+                    Agente padrão{" "}
+                    <span className="font-medium">
+                      {activeRepoConfig?.defaultAgentProviderId
+                        ? (providerById.get(activeRepoConfig.defaultAgentProviderId)?.name ?? "definido")
+                        : "não definido"}
+                    </span>
+                  </p>
+                </div>
+
+                <div className="rounded-md border border-sidebar-border/70 bg-sidebar-accent/30 px-3 py-2">
+                  <div className="flex items-center gap-2 text-xs font-medium">
+                    <Clock3 className="h-3.5 w-3.5" />
+                    Daemon local
                   </div>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
-                  Presets
-                </p>
-                {(activeRepoConfig?.presets ?? []).length === 0 ? (
-                  <p className="text-[11px] text-sidebar-foreground/45">
-                    Sem presets configurados.
+                  <p className="mt-1 text-[11px] text-sidebar-foreground/60">
+                    {daemonStatus?.running ? "Executando" : "Parado"}{" "}
+                    {daemonStatus?.lastTickAt ? `· update ${daemonStatus.lastTickAt}` : ""}
                   </p>
-                ) : (
-                  <div className="space-y-1">
-                    {activeRepoConfig?.presets?.map((preset) => (
+                  <p className="mt-1 text-[11px] text-sidebar-foreground/70">
+                    {daemonStatus?.runningTasks ?? 0} em execução ·{" "}
+                    {daemonStatus?.enabledTasks ?? activeRepoTasks.length} tarefas habilitadas
+                  </p>
+                </div>
+
+                <div className="rounded-md border border-sidebar-border/70 bg-sidebar-accent/20 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                    Ações do projeto
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {activeRepoConfig?.setupCommand?.trim() ? (
                       <Button
-                        key={preset.id}
-                        variant="ghost"
+                        variant="secondary"
                         size="sm"
-                        className="titlebar-no-drag w-full justify-start gap-2 border border-transparent px-2 text-left hover:border-sidebar-border"
+                        className="titlebar-no-drag min-w-[120px] flex-1 justify-start gap-2"
                         onClick={() =>
                           void launchManagedCommand({
-                            title: preset.name,
-                            command: preset.command,
-                            cwdMode: "worktree",
-                            description: preset.description ?? null,
+                            title: "Setup",
+                            command: activeRepoConfig.setupCommand ?? "",
+                            cwdMode: "project",
+                            description: "Executa o setup do repositório",
                           })
                         }
                       >
                         <WandSparkles className="h-3.5 w-3.5" />
-                        <span className="truncate">{preset.name}</span>
+                        Setup
                       </Button>
-                    ))}
+                    ) : null}
+                    {activeRepoConfig?.teardownCommand?.trim() ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="titlebar-no-drag min-w-[120px] flex-1 justify-start gap-2"
+                        onClick={() =>
+                          void launchManagedCommand({
+                            title: "Teardown",
+                            command: activeRepoConfig.teardownCommand ?? "",
+                            cwdMode: "project",
+                            description: "Executa o teardown do repositório",
+                          })
+                        }
+                      >
+                        <Terminal className="h-3.5 w-3.5" />
+                        Teardown
+                      </Button>
+                    ) : null}
                   </div>
-                )}
+                  {!(activeRepoConfig?.setupCommand?.trim() || activeRepoConfig?.teardownCommand?.trim()) ? (
+                    <p className="mt-2 text-[11px] text-sidebar-foreground/45">
+                      Sem ações globais configuradas.
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2">
+                  <SidebarSection
+                    title="Explorer do daemon"
+                    description="Snapshot de combs, panes e diffs"
+                    count={`${daemonCombs.length}/${daemonPanes.length}/${daemonDiffBundle.length}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] text-sidebar-foreground/55">
+                        {daemonExplorerLoading
+                          ? "Sincronizando combs, panes e diffs…"
+                          : "Visão rápida do estado do daemon"}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="titlebar-no-drag h-6 w-6"
+                        onClick={() => void refreshDaemonExplorer()}
+                      >
+                        <RefreshCw className={`h-3 w-3 ${daemonExplorerLoading ? "animate-spin" : ""}`} />
+                      </Button>
+                    </div>
+
+                    <div className="mt-2 space-y-2">
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                          Combs
+                        </p>
+                        {daemonCombs.length === 0 ? (
+                          <p className="text-[10px] text-sidebar-foreground/45">Sem combs no snapshot.</p>
+                        ) : (
+                          <div className="space-y-1">
+                            {daemonCombs.slice(0, 4).map((comb) => (
+                              <button
+                                key={comb.id}
+                                type="button"
+                                className="flex w-full items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1 text-left text-[11px] hover:border-sidebar-border hover:bg-sidebar-accent/40"
+                                onClick={() => {
+                                  setSelectedProjectId(comb.projectId);
+                                  setActiveCombId(comb.id);
+                                  setShowProviders(false);
+                                }}
+                              >
+                                <span className="truncate">{comb.name}</span>
+                                <span className="shrink-0 text-[10px] text-sidebar-foreground/55">
+                                  {comb.worktreePath ? "worktree" : "sem worktree"}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                          Panes
+                        </p>
+                        {daemonPanes.length === 0 ? (
+                          <p className="text-[10px] text-sidebar-foreground/45">Sem panes no snapshot.</p>
+                        ) : (
+                          <div className="space-y-1">
+                            {daemonPanes.slice(0, 4).map((pane) => {
+                              const comb = combById.get(pane.combId) ?? daemonCombs.find((item) => item.id === pane.combId) ?? null;
+                              const label = pane.title ?? (pane.type === "agent" ? "Agent" : "Terminal");
+                              return (
+                                <button
+                                  key={pane.id}
+                                  type="button"
+                                  className="flex w-full items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1 text-left text-[11px] hover:border-sidebar-border hover:bg-sidebar-accent/40"
+                                  onClick={() => {
+                                    if (comb) {
+                                      setSelectedProjectId(comb.projectId);
+                                      setActiveCombId(comb.id);
+                                    }
+                                    setActivePaneId(pane.id);
+                                    setShowProviders(false);
+                                  }}
+                                >
+                                  <span className="truncate">{label}</span>
+                                  <span className="shrink-0 text-[10px] text-sidebar-foreground/55">
+                                    {pane.status}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                          Diffs
+                        </p>
+                        {daemonDiffBundle.length === 0 ? (
+                          <p className="text-[10px] text-sidebar-foreground/45">Sem bundle de diffs disponível.</p>
+                        ) : (
+                          <div className="space-y-1">
+                            {daemonDiffBundle.slice(0, 4).map((item) => (
+                              <div
+                                key={item.worktreePath}
+                                className="rounded-md border border-sidebar-border/70 bg-sidebar-accent/20 px-2 py-1 text-[10px]"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className="truncate">{item.worktreePath}</span>
+                                  <span className={`shrink-0 ${item.success ? "text-emerald-500" : "text-destructive"}`}>
+                                    {item.success ? "ok" : "erro"}
+                                  </span>
+                                </div>
+                                <p className="mt-0.5 text-[10px] text-sidebar-foreground/55">
+                                  {item.success && item.summary
+                                    ? `${item.summary.changedFiles} arquivos · +${item.summary.insertions} -${item.summary.deletions}`
+                                    : item.error ?? "Sem resumo"}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Processos"
+                    description="Supervisor (daemon), métricas e atalhos no terminal"
+                    defaultOpen={(activeRepoConfig?.processes?.length ?? 0) > 0}
+                    count={`${activeRepoConfig?.processes?.length ?? 0}`}
+                  >
+                    {activeProject && daemonApi?.listProcesses ? (
+                      <div className="-mx-1 max-h-[min(42vh,400px)] overflow-x-hidden overflow-y-auto pr-0.5">
+                        <ProcessesPanel project={activeProject} embedded refreshInterval={4000} />
+                      </div>
+                    ) : null}
+
+                    {(activeRepoConfig?.processes ?? []).length === 0 ? (
+                      <p className="text-[11px] text-sidebar-foreground/45">
+                        Sem processos configurados.
+                      </p>
+                    ) : (
+                      <>
+                        {activeProject && daemonApi?.listProcesses ? (
+                          <p className="mb-1.5 mt-2 text-[10px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                            Abrir no terminal
+                          </p>
+                        ) : null}
+                        <div className="space-y-1">
+                          {activeRepoConfig?.processes?.map((process) => (
+                            <Button
+                              key={process.id}
+                              variant="ghost"
+                              size="sm"
+                              className="titlebar-no-drag w-full justify-start gap-2 border border-transparent px-2 text-left hover:border-sidebar-border"
+                              onClick={() =>
+                                void launchManagedCommand({
+                                  title: process.name,
+                                  command: process.command,
+                                  cwdMode: process.cwdMode ?? "worktree",
+                                  description: process.description ?? null,
+                                })
+                              }
+                            >
+                              <Workflow className="h-3.5 w-3.5" />
+                              <span className="truncate">{process.name}</span>
+                            </Button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Presets"
+                    description="Executa comandos prontos"
+                    count={`${activeRepoConfig?.presets?.length ?? 0}`}
+                  >
+                    {(activeRepoConfig?.presets ?? []).length === 0 ? (
+                      <p className="text-[11px] text-sidebar-foreground/45">
+                        Sem presets configurados.
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        {activeRepoConfig?.presets?.map((preset) => (
+                          <Button
+                            key={preset.id}
+                            variant="ghost"
+                            size="sm"
+                            className="titlebar-no-drag w-full justify-start gap-2 border border-transparent px-2 text-left hover:border-sidebar-border"
+                            onClick={() =>
+                              void launchManagedCommand({
+                                title: preset.name,
+                                command: preset.command,
+                                cwdMode: "worktree",
+                                description: preset.description ?? null,
+                              })
+                            }
+                          >
+                            <WandSparkles className="h-3.5 w-3.5" />
+                            <span className="truncate">{preset.name}</span>
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Tarefas"
+                    description="Agendamentos do projeto"
+                    defaultOpen={activeRepoTasks.length > 0}
+                    count={`${activeRepoTasks.length}`}
+                  >
+                    {activeRepoTasks.length === 0 ? (
+                      <p className="text-[11px] text-sidebar-foreground/45">
+                        Sem tarefas agendadas.
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        {activeRepoTasks.map((task) => {
+                          const runtime = daemonTaskById.get(task.id);
+                          return (
+                            <div
+                              key={task.id}
+                              className="rounded-lg border border-sidebar-border/70 bg-sidebar-accent/25 px-2 py-2"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="truncate text-[12px] font-medium">{task.name}</p>
+                                  <p className="truncate text-[10px] text-sidebar-foreground/55">
+                                    {task.schedule}
+                                  </p>
+                                </div>
+                                <Badge
+                                  variant={task.enabled === false ? "outline" : "secondary"}
+                                  className="shrink-0 text-[10px]"
+                                >
+                                  {task.enabled === false ? "desativada" : runtime?.status ?? "idle"}
+                                </Badge>
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="titlebar-no-drag h-7 px-2 text-[11px]"
+                                  onClick={() => void runRepoTask(task)}
+                                >
+                                  <Clock3 className="mr-1 h-3 w-3" />
+                                  Executar
+                                </Button>
+                                {runtime ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="titlebar-no-drag h-7 px-2 text-[11px]"
+                                    onClick={async () => {
+                                      if (!daemonApi) return;
+                                      try {
+                                        const next = runtime.attached
+                                          ? await daemonApi.detachTask(activeProject?.id ?? "", task.id)
+                                          : await daemonApi.attachTask(activeProject?.id ?? "", task.id);
+                                        if (!next.success) {
+                                          toast.error(next.error ?? "Falha ao alternar attachment");
+                                          return;
+                                        }
+                                        setDaemonTasks((prev) =>
+                                          prev.map((item) =>
+                                            item.projectId === runtime.projectId && item.taskId === task.id
+                                              ? (next.task ?? { ...item, attached: !item.attached })
+                                              : item,
+                                          ),
+                                        );
+                                      } catch (error) {
+                                        toast.error(error instanceof Error ? error.message : "Falha ao alternar attachment");
+                                      }
+                                    }}
+                                  >
+                                    {runtime.attached ? "Desanexar" : "Anexar"}
+                                  </Button>
+                                ) : null}
+                                {runtime?.nextRunAt ? (
+                                  <span className="text-[10px] text-sidebar-foreground/55">
+                                    próxima {runtime.nextRunAt}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </SidebarSection>
+                </div>
               </div>
-            </div>
-          ) : (
-            <p className="text-[11px] text-sidebar-foreground/45">
-              Adiciona um projeto para expor processos e presets no workspace.
-            </p>
-          )}
+            ) : (
+              <p className="text-[11px] text-sidebar-foreground/45">
+                Adiciona um projeto para expor processos e presets no workspace.
+              </p>
+            )}
+          </div>
         </div>
       </aside>
 
-      <main className="flex min-h-0 flex-1 flex-col" data-workspace-main>
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden" data-workspace-main>
         {showProviders ? (
           <div className="flex-1 overflow-auto mt-8">
             <SettingsPage />
@@ -1512,7 +2009,12 @@ export default function CmuxWorkspacePage() {
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-hidden">
-              {visiblePanes.length === 0 ? (
+              {panesLoading ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
+                  <Loader2 className="h-10 w-10 animate-spin text-muted-foreground/35" />
+                  <p className="text-sm text-muted-foreground">A abrir workspace…</p>
+                </div>
+              ) : visiblePanes.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
                   <Terminal className="h-12 w-12 text-muted-foreground/30" />
                   <p className="text-sm text-muted-foreground">Nenhum pane aberto neste workspace</p>
@@ -1700,6 +2202,7 @@ export default function CmuxWorkspacePage() {
         activeCombId={activeCombId}
         activePaneId={activePaneId}
         repoConfig={activeRepoConfig}
+        tasks={activeRepoTasks}
         onOpenSettings={() => setShowProviders(true)}
         onOpenNewWorkspace={() => setNewCombOpen(true)}
         onOpenBaseTerminal={handleOpenBaseTerminal}

@@ -28,6 +28,8 @@ import type {
   PaneSession,
   CreateCombDTO,
   UpdateCombDTO,
+  RepoTaskDefinition,
+  RepoTaskTriggerDefinition,
 } from "@/lib/database/types";
 import type { TerminalAttentionPayload } from "@/lib/terminal/attention-types";
 
@@ -107,6 +109,78 @@ export interface GitCommit {
   message: string;
   author: string;
   date: Date;
+}
+
+export interface DaemonTaskStatus {
+  projectId: string;
+  projectName: string;
+  taskId: string;
+  taskName: string;
+  command: string;
+  schedule: string;
+  cwdMode: "project" | "worktree";
+  enabled: boolean;
+  status: "idle" | "scheduled" | "running" | "waiting" | "completed" | "failed" | "disabled" | "skipped";
+  attached: boolean;
+  ptyId?: string | null;
+  paneId?: string | null;
+  combId?: string | null;
+  nextRunAt?: string | null;
+  lastRunAt?: string | null;
+  lastExitCode?: number | null;
+  lastError?: string | null;
+  lastOutputExcerpt?: string | null;
+  trigger?: RepoTaskTriggerDefinition | null;
+  updatedAt?: string | null;
+}
+
+export interface DaemonProcessStatus {
+  projectId: string;
+  projectName: string;
+  processId: string;
+  processName: string;
+  command: string;
+  cwdMode: "project" | "worktree";
+  autoRestart: boolean;
+  status: "stopped" | "starting" | "running" | "stopping" | "restarting" | "crashed" | "failed";
+  ptyId?: string | null;
+  paneId?: string | null;
+  combId?: string | null;
+  pid?: number | null;
+  exitCode?: number | null;
+  restartCount: number;
+  lastRestartAt?: string | null;
+  backoffSeconds: number;
+  cpuPercent: number;
+  memoryMb: number;
+  lastMetricsAt?: string | null;
+  lastError?: string | null;
+  lastOutputExcerpt?: string | null;
+  startedAt?: string | null;
+  stoppedAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface DaemonStatus {
+  mode: "in-process" | "sidecar";
+  running: boolean;
+  startedAt: string;
+  lastTickAt?: string | null;
+  totalTasks: number;
+  runningTasks: number;
+  enabledTasks: number;
+}
+
+export interface DaemonDiffBundleItem {
+  worktreePath: string;
+  success: boolean;
+  error?: string;
+  files: Array<{ path: string; status: string; diff: string }>;
+  summary: {
+    changedFiles: number;
+    insertions: number;
+    deletions: number;
+  } | null;
 }
 
 declare global {
@@ -214,6 +288,48 @@ declare global {
         onAttention: (
           callback: (payload: TerminalAttentionPayload) => void
         ) => () => void;
+      };
+
+      daemon?: {
+        getStatus: () => Promise<DaemonStatus>;
+        listTasks: () => Promise<DaemonTaskStatus[]>;
+        listProcesses: (projectId?: string | null) => Promise<DaemonProcessStatus[]>;
+        startProcess: (projectId: string, processId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          process?: DaemonProcessStatus | null;
+        }>;
+        stopProcess: (projectId: string, processId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          process?: DaemonProcessStatus | null;
+        }>;
+        restartProcess: (projectId: string, processId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          process?: DaemonProcessStatus | null;
+        }>;
+        listCombs: (projectId?: string | null) => Promise<Comb[]>;
+        listPanes: (projectId?: string | null, combId?: string | null) => Promise<Pane[]>;
+        getDiffsBundle: (
+          worktreePaths: string[],
+          combIds?: string[] | null
+        ) => Promise<DaemonDiffBundleItem[]>;
+        runTask: (projectId: string, taskId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          task?: DaemonTaskStatus | null;
+        }>;
+        attachTask: (projectId: string, taskId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          task?: DaemonTaskStatus | null;
+        }>;
+        detachTask: (projectId: string, taskId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          task?: DaemonTaskStatus | null;
+        }>;
       };
 
       worktree: {

@@ -80,7 +80,9 @@ O template versionado é **`.env.example`** (este arquivo sim é commitado).
 
 ## 📚 Documentação Detalhada
 
-- 📖 **[Guia de Produtividade & Fluxos](docs/GUIA_DE_PRODUTIVIDADE.md)** - Como extrair o máximo do DCC.
+- 📖 **[Guia de Produtividade & Fluxos](docs/GUIA_DE_PRODUTIVIDADE.md)** — Worktrees, panes, atenção e boas práticas.
+- 🧭 **[Guia de recursos e fluxos (DCC atual)](docs/GUIA_RECURSOS_E_FLUXOS_DCC.md)** — Como usar daemon, `.dcc.toml`, processos, tasks, palette, CLI/MCP e fluxos que combinam estes benefícios.
+- 🌲 **[Melhorias inspiradas no Arbor](docs/MELHORIAS_INSPIRADAS_ARBOR.md)** — Visão de produto, checklist de implementação e roadmap.
 - 🏗️ **[Arquitetura do Sistema](docs/ARCHITECTURE.md)** - Como o DCC funciona por baixo do capô.
 - 🛠️ **[Guia de Migração Tauri](docs/MIGRACAO_TAURI.md)** - Detalhes sobre a stack Rust/Tauri.
 

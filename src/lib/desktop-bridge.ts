@@ -130,6 +130,28 @@ export function installDesktopBridge(): void {
         };
       },
     },
+    daemon: {
+      getStatus: () => call("daemon_get_status"),
+      listTasks: () => call("daemon_list_tasks"),
+      listProcesses: (projectId) => call("daemon_list_processes", { projectId }),
+      startProcess: (projectId, processId) =>
+        call("daemon_start_process", { projectId, processId }),
+      stopProcess: (projectId, processId) =>
+        call("daemon_stop_process", { projectId, processId }),
+      restartProcess: (projectId, processId) =>
+        call("daemon_restart_process", { projectId, processId }),
+      listCombs: (projectId) => call("daemon_list_combs", { projectId }),
+      listPanes: (projectId, combId) =>
+        call("daemon_list_panes", { projectId, combId }),
+      getDiffsBundle: (worktreePaths, combIds) =>
+        call("daemon_get_diffs_bundle", { worktreePaths, combIds }),
+      runTask: (projectId, taskId) =>
+        call("daemon_run_task", { projectId, taskId }),
+      attachTask: (projectId, taskId) =>
+        call("daemon_attach_task", { projectId, taskId }),
+      detachTask: (projectId, taskId) =>
+        call("daemon_detach_task", { projectId, taskId }),
+    },
     worktree: {
       ensureForMission: (missionId) =>
         call("worktree_ensure_for_mission", { missionId }),

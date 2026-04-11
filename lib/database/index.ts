@@ -33,6 +33,8 @@ export type {
   ProjectRepoConfig,
   RepoCommandPreset,
   RepoProcessDefinition,
+  RepoTaskDefinition,
+  RepoTaskTriggerDefinition,
   Comb,
   Pane,
   PaneSession,

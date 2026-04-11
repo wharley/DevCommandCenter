@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike};
 use regex::Regex;
 use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
+use dev_command_center_tauri::daemon_client::{ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo};
 
 /// Schema SQLite compartilhado com `lib/database/schema.sql` (CREATE IF NOT EXISTS).
 const APP_SCHEMA_SQL: &str = include_str!("../../lib/database/schema.sql");
@@ -35,8 +37,11 @@ lazy_static::lazy_static! {
 #[derive(Clone)]
 struct AppState {
     db_path: Arc<PathBuf>,
+    app_data_dir: Arc<PathBuf>,
     conn: Arc<Mutex<Connection>>,
     terminals: Arc<Mutex<HashMap<String, ManagedTerminal>>>,
+    daemon: Arc<DaemonState>,
+    daemon_endpoint: Arc<Mutex<Option<DaemonRuntimeInfo>>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -50,6 +55,8 @@ struct RepoConfigPayload {
     processes: Vec<RepoProcessPayload>,
     #[serde(default)]
     presets: Vec<RepoPresetPayload>,
+    #[serde(default)]
+    tasks: Vec<RepoTaskPayload>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -77,6 +84,34 @@ struct RepoPresetPayload {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoTaskTriggerPayload {
+    #[serde(default)]
+    when: Option<String>,
+    #[serde(default)]
+    prompt: Option<String>,
+    #[serde(default)]
+    provider_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoTaskPayload {
+    id: String,
+    name: String,
+    command: String,
+    schedule: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    cwd_mode: Option<String>,
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    trigger: Option<RepoTaskTriggerPayload>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct RepoConfigToml {
     #[serde(default)]
     version: Option<u32>,
@@ -98,6 +133,8 @@ struct RepoConfigToml {
     processes: Vec<RepoProcessToml>,
     #[serde(default)]
     presets: Vec<RepoPresetToml>,
+    #[serde(default)]
+    tasks: Vec<RepoTaskToml>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -142,6 +179,32 @@ struct RepoPresetToml {
     description: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RepoTaskTriggerToml {
+    #[serde(default)]
+    when: Option<String>,
+    #[serde(default)]
+    prompt: Option<String>,
+    #[serde(default)]
+    provider_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RepoTaskToml {
+    id: String,
+    name: String,
+    command: String,
+    schedule: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    cwd_mode: Option<String>,
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    trigger: Option<RepoTaskTriggerToml>,
+}
+
 /// Últimas N linhas de stdout/stderr por sessão (reidratação do xterm ao remontar).
 const TERMINAL_OUTPUT_MAX_LINES: usize = 1000;
 
@@ -151,14 +214,23 @@ struct ManagedTerminal {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     mission_id: Option<String>,
     pane_id: Option<String>,
+    pty_owner_key: Option<String>,
     cwd: String,
     command: String,
     args: Vec<String>,
     started_at: String,
     stop_flag: Arc<AtomicBool>,
+    exit_notified: Arc<AtomicBool>,
     /// Buffer circular compartilhado entre as threads de leitura (lock curto só aqui).
     output_buffer: Arc<Mutex<VecDeque<String>>>,
     reader_thread: Option<JoinHandle<()>>,
+}
+
+#[derive(Clone)]
+struct DaemonState {
+    started_at: String,
+    last_tick_at: Arc<Mutex<Option<String>>>,
+    running: Arc<AtomicBool>,
 }
 
 fn new_terminal_output_buffer() -> Arc<Mutex<VecDeque<String>>> {
@@ -306,7 +378,8 @@ fn default_repo_config_value() -> Value {
         "setupCommand": Value::Null,
         "teardownCommand": Value::Null,
         "processes": [],
-        "presets": []
+        "presets": [],
+        "tasks": []
     })
 }
 
@@ -349,6 +422,24 @@ fn repo_config_toml_from_payload(payload: &RepoConfigPayload) -> RepoConfigToml 
                 description: preset.description.clone(),
             })
             .collect(),
+        tasks: payload
+            .tasks
+            .iter()
+            .map(|task| RepoTaskToml {
+                id: task.id.clone(),
+                name: task.name.clone(),
+                command: task.command.clone(),
+                schedule: task.schedule.clone(),
+                description: task.description.clone(),
+                cwd_mode: task.cwd_mode.clone(),
+                enabled: task.enabled,
+                trigger: task.trigger.as_ref().map(|trigger| RepoTaskTriggerToml {
+                    when: trigger.when.clone(),
+                    prompt: trigger.prompt.clone(),
+                    provider_id: trigger.provider_id.clone(),
+                }),
+            })
+            .collect(),
     }
 }
 
@@ -363,6 +454,7 @@ fn repo_config_payload_from_toml(config: RepoConfigToml) -> RepoConfigPayload {
         teardown_command: flat_teardown_command,
         processes,
         presets,
+        tasks,
         ..
     } = config;
     let branch_prefix = branch
@@ -403,6 +495,23 @@ fn repo_config_payload_from_toml(config: RepoConfigToml) -> RepoConfigPayload {
                 name: preset.name,
                 command: preset.command,
                 description: preset.description,
+            })
+            .collect(),
+        tasks: tasks
+            .into_iter()
+            .map(|task| RepoTaskPayload {
+                id: task.id,
+                name: task.name,
+                command: task.command,
+                schedule: task.schedule,
+                description: task.description,
+                cwd_mode: task.cwd_mode,
+                enabled: task.enabled,
+                trigger: task.trigger.map(|trigger| RepoTaskTriggerPayload {
+                    when: trigger.when,
+                    prompt: trigger.prompt,
+                    provider_id: trigger.provider_id,
+                }),
             })
             .collect(),
     }
@@ -924,6 +1033,1112 @@ fn iso_now() -> String {
     format!("{secs}")
 }
 
+fn local_now_string() -> String {
+    Local::now().to_rfc3339()
+}
+
+#[derive(Debug, Clone)]
+struct CronSchedule {
+    seconds: Vec<u32>,
+    minutes: Vec<u32>,
+    hours: Vec<u32>,
+    days_of_month: Vec<u32>,
+    months: Vec<u32>,
+    days_of_week: Vec<u32>,
+}
+
+fn expand_cron_field(raw: &str, min: u32, max: u32) -> Result<Vec<u32>, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("campo cron vazio".into());
+    }
+    if trimmed == "*" {
+        return Ok((min..=max).collect());
+    }
+
+    let mut values = Vec::new();
+    for part in trimmed.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (range_part, step) = if let Some((range, step_raw)) = part.split_once('/') {
+            let step = step_raw
+                .parse::<u32>()
+                .map_err(|_| format!("passo cron inválido: {step_raw}"))?;
+            (range.trim(), step.max(1))
+        } else {
+            (part, 1)
+        };
+
+        let (start, end) = if range_part == "*" {
+            (min, max)
+        } else if let Some((start_raw, end_raw)) = range_part.split_once('-') {
+            let start = start_raw
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| format!("valor cron inválido: {start_raw}"))?;
+            let end = end_raw
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| format!("valor cron inválido: {end_raw}"))?;
+            (start, end)
+        } else {
+            let value = range_part
+                .parse::<u32>()
+                .map_err(|_| format!("valor cron inválido: {range_part}"))?;
+            (value, value)
+        };
+
+        if start > end {
+            return Err(format!("intervalo cron inválido: {part}"));
+        }
+
+        let upper = end.min(max);
+        let mut current = start.max(min);
+        while current <= upper {
+            values.push(current);
+            current = current.saturating_add(step);
+            if current == u32::MAX {
+                break;
+            }
+        }
+    }
+
+    values.sort_unstable();
+    values.dedup();
+    if values.is_empty() {
+        return Err(format!("campo cron sem valores válidos: {raw}"));
+    }
+    Ok(values)
+}
+
+fn parse_cron_schedule(raw: &str) -> Result<CronSchedule, String> {
+    let parts = raw
+        .split_whitespace()
+        .filter(|p| !p.trim().is_empty())
+        .collect::<Vec<_>>();
+    match parts.len() {
+        5 => Ok(CronSchedule {
+            seconds: vec![0],
+            minutes: expand_cron_field(parts[0], 0, 59)?,
+            hours: expand_cron_field(parts[1], 0, 23)?,
+            days_of_month: expand_cron_field(parts[2], 1, 31)?,
+            months: expand_cron_field(parts[3], 1, 12)?,
+            days_of_week: expand_cron_field(parts[4], 0, 6)?,
+        }),
+        6 => Ok(CronSchedule {
+            seconds: expand_cron_field(parts[0], 0, 59)?,
+            minutes: expand_cron_field(parts[1], 0, 59)?,
+            hours: expand_cron_field(parts[2], 0, 23)?,
+            days_of_month: expand_cron_field(parts[3], 1, 31)?,
+            months: expand_cron_field(parts[4], 1, 12)?,
+            days_of_week: expand_cron_field(parts[5], 0, 6)?,
+        }),
+        _ => Err(format!(
+            "cron inválido: esperado 5 ou 6 campos, obtido {}",
+            parts.len()
+        )),
+    }
+}
+
+fn cron_field_matches(value: u32, allowed: &[u32]) -> bool {
+    allowed.binary_search(&value).is_ok()
+}
+
+fn cron_schedule_matches(schedule: &CronSchedule, dt: DateTime<Local>) -> bool {
+    let weekday = dt.weekday().num_days_from_sunday();
+    cron_field_matches(dt.second(), &schedule.seconds)
+        && cron_field_matches(dt.minute(), &schedule.minutes)
+        && cron_field_matches(dt.hour(), &schedule.hours)
+        && cron_field_matches(dt.day(), &schedule.days_of_month)
+        && cron_field_matches(dt.month(), &schedule.months)
+        && cron_field_matches(weekday, &schedule.days_of_week)
+}
+
+fn next_cron_run_after(schedule: &CronSchedule, after: DateTime<Local>) -> Option<DateTime<Local>> {
+    let mut candidate = after + ChronoDuration::seconds(1);
+    let limit = after + ChronoDuration::days(366);
+    while candidate <= limit {
+        if cron_schedule_matches(schedule, candidate) {
+            return Some(candidate);
+        }
+        candidate += ChronoDuration::seconds(1);
+    }
+    None
+}
+
+fn normalize_task_cwd_mode(raw: Option<&str>) -> String {
+    match raw.unwrap_or("worktree").trim() {
+        "project" => "project".to_string(),
+        "worktree" => "worktree".to_string(),
+        other if other.is_empty() => "worktree".to_string(),
+        other => other.to_string(),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RepoTaskRuntime {
+    project_id: String,
+    project_name: String,
+    task: RepoTaskPayload,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DaemonTaskRunState {
+    pty_id: Option<String>,
+    pane_id: Option<String>,
+    comb_id: Option<String>,
+    status: String,
+    attached: bool,
+    next_run_at: Option<String>,
+    last_run_at: Option<String>,
+    last_exit_code: Option<i64>,
+    last_error: Option<String>,
+    last_output_excerpt: Option<String>,
+    updated_at: Option<String>,
+}
+
+fn collect_repo_tasks(state: &AppState) -> Result<Vec<RepoTaskRuntime>, String> {
+    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, path, repo_config FROM projects ORDER BY name ASC")
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+    let mut tasks = Vec::new();
+
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let project_id: String = row.get(0).map_err(|e| e.to_string())?;
+        let project_name: String = row.get(1).map_err(|e| e.to_string())?;
+        let project_path: String = row.get(2).map_err(|e| e.to_string())?;
+        let repo_config_raw: Option<String> = row.get(3).map_err(|e| e.to_string())?;
+        let repo_config_value = resolve_repo_config_value(
+            Some(project_path.as_str()),
+            repo_config_raw
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<Value>(raw).ok()),
+        );
+        let payload = repo_config_payload_from_value(&repo_config_value).unwrap_or_default();
+        for task in payload.tasks {
+            tasks.push(RepoTaskRuntime {
+                project_id: project_id.clone(),
+                project_name: project_name.clone(),
+                task,
+            });
+        }
+    }
+
+    Ok(tasks)
+}
+
+fn read_daemon_task_state(
+    conn: &Connection,
+    project_id: &str,
+    task_id: &str,
+) -> Result<Option<DaemonTaskRunState>, String> {
+    conn.query_row(
+        "SELECT pty_id, pane_id, comb_id, status, attached, next_run_at, last_run_at, last_exit_code, last_error, last_output_excerpt, trigger_when, trigger_prompt, trigger_provider_id, updated_at
+         FROM daemon_task_runs
+         WHERE project_id = ?1 AND task_id = ?2
+         LIMIT 1",
+        params![project_id, task_id],
+        |row| {
+            let attached: i64 = row.get(4)?;
+            Ok(DaemonTaskRunState {
+                pty_id: row.get(0)?,
+                pane_id: row.get(1)?,
+                comb_id: row.get(2)?,
+                status: row.get(3)?,
+                attached: attached != 0,
+                next_run_at: row.get(5)?,
+                last_run_at: row.get(6)?,
+                last_exit_code: row.get(7)?,
+                last_error: row.get(8)?,
+                last_output_excerpt: row.get(9)?,
+                updated_at: row.get(13)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+fn upsert_daemon_task_state(
+    conn: &Connection,
+    runtime: &RepoTaskRuntime,
+    state: &DaemonTaskRunState,
+    schedule: &str,
+    cwd_mode: &str,
+    enabled: bool,
+) -> Result<(), String> {
+    let trigger = runtime.task.trigger.clone();
+    let id = format!("daemon-task-state-{}-{}", runtime.project_id, runtime.task.id);
+    conn.execute(
+        "
+        INSERT INTO daemon_task_runs (
+          id, project_id, task_id, task_name, command, schedule, cwd_mode, enabled,
+          trigger_when, trigger_prompt, trigger_provider_id,
+          status, attached, pty_id, pane_id, comb_id,
+          next_run_at, last_run_at, last_exit_code, last_output_excerpt, last_error,
+          created_at, updated_at
+        ) VALUES (
+          ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+          ?9, ?10, ?11,
+          ?12, ?13, ?14, ?15, ?16,
+          ?17, ?18, ?19, ?20, ?21,
+          datetime('now'), datetime('now')
+        )
+        ON CONFLICT(project_id, task_id) DO UPDATE SET
+          task_name = excluded.task_name,
+          command = excluded.command,
+          schedule = excluded.schedule,
+          cwd_mode = excluded.cwd_mode,
+          enabled = excluded.enabled,
+          trigger_when = excluded.trigger_when,
+          trigger_prompt = excluded.trigger_prompt,
+          trigger_provider_id = excluded.trigger_provider_id,
+          status = excluded.status,
+          attached = excluded.attached,
+          pty_id = COALESCE(excluded.pty_id, daemon_task_runs.pty_id),
+          pane_id = COALESCE(excluded.pane_id, daemon_task_runs.pane_id),
+          comb_id = COALESCE(excluded.comb_id, daemon_task_runs.comb_id),
+          next_run_at = excluded.next_run_at,
+          last_run_at = COALESCE(excluded.last_run_at, daemon_task_runs.last_run_at),
+          last_exit_code = COALESCE(excluded.last_exit_code, daemon_task_runs.last_exit_code),
+          last_output_excerpt = COALESCE(excluded.last_output_excerpt, daemon_task_runs.last_output_excerpt),
+          last_error = COALESCE(excluded.last_error, daemon_task_runs.last_error),
+          updated_at = datetime('now')
+        ",
+        params![
+            id,
+            &runtime.project_id,
+            &runtime.task.id,
+            &runtime.task.name,
+            &runtime.task.command,
+            schedule,
+            cwd_mode,
+            if enabled { 1 } else { 0 },
+            trigger.as_ref().and_then(|t| t.when.clone()),
+            trigger.as_ref().and_then(|t| t.prompt.clone()),
+            trigger.as_ref().and_then(|t| t.provider_id.clone()),
+            state.status.clone(),
+            if state.attached { 1 } else { 0 },
+            state.pty_id.clone(),
+            state.pane_id.clone(),
+            state.comb_id.clone(),
+            state.next_run_at.clone(),
+            state.last_run_at.clone(),
+            state.last_exit_code,
+            state.last_output_excerpt.clone(),
+            state.last_error.clone(),
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn daemon_task_state_to_payload(
+    runtime: &RepoTaskRuntime,
+    state: Option<DaemonTaskRunState>,
+) -> Value {
+    let state = state.unwrap_or_default();
+    let status = if state.status.is_empty() {
+        "idle".to_string()
+    } else {
+        state.status.clone()
+    };
+    serde_json::json!({
+        "projectId": runtime.project_id.clone(),
+        "projectName": runtime.project_name.clone(),
+        "taskId": runtime.task.id.clone(),
+        "taskName": runtime.task.name.clone(),
+        "command": runtime.task.command.clone(),
+        "schedule": runtime.task.schedule.clone(),
+        "cwdMode": normalize_task_cwd_mode(runtime.task.cwd_mode.as_deref()),
+        "enabled": runtime.task.enabled.unwrap_or(true),
+        "status": status,
+        "attached": state.attached,
+        "ptyId": state.pty_id,
+        "paneId": state.pane_id,
+        "combId": state.comb_id,
+        "nextRunAt": state.next_run_at,
+        "lastRunAt": state.last_run_at,
+        "lastExitCode": state.last_exit_code,
+        "lastError": state.last_error,
+        "lastOutputExcerpt": state.last_output_excerpt,
+        "trigger": runtime.task.trigger.clone(),
+        "updatedAt": state.updated_at,
+    })
+}
+
+fn parse_local_datetime(raw: &str) -> Option<DateTime<Local>> {
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|dt| dt.with_timezone(&Local))
+}
+
+fn task_next_run_at(task: &RepoTaskPayload, from: DateTime<Local>) -> Result<Option<String>, String> {
+    if !task.enabled.unwrap_or(true) {
+        return Ok(None);
+    }
+    let schedule = parse_cron_schedule(&task.schedule)?;
+    Ok(next_cron_run_after(&schedule, from).map(|dt| dt.to_rfc3339()))
+}
+
+fn task_shell_command(command: &str) -> (String, Vec<String>) {
+    parse_command_payload(command)
+}
+
+fn daemon_get_status_internal(state: &AppState) -> Result<Value, String> {
+    let tasks = collect_repo_tasks(state)?;
+    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let mut total_tasks = 0i64;
+    let mut enabled_tasks = 0i64;
+    let mut running_tasks = 0i64;
+    let mut terminals = state
+        .terminals
+        .lock()
+        .map_err(|_| "terminals lock poisoned".to_string())?;
+
+    for runtime in &tasks {
+        total_tasks += 1;
+        if runtime.task.enabled.unwrap_or(true) {
+            enabled_tasks += 1;
+        }
+        if let Some(state_row) = read_daemon_task_state(&conn, &runtime.project_id, &runtime.task.id)? {
+            let is_running = state_row.status == "running"
+                && state_row
+                    .pty_id
+                    .as_ref()
+                    .and_then(|pty_id| terminals.get_mut(pty_id))
+                    .map(|terminal| terminal.child.try_wait().ok().flatten().is_none())
+                    .unwrap_or(false);
+            if is_running {
+                running_tasks += 1;
+            }
+        }
+    }
+
+    let last_tick_at = state
+        .daemon
+        .last_tick_at
+        .lock()
+        .map_err(|_| "daemon lock poisoned".to_string())?
+        .clone();
+
+    Ok(serde_json::json!({
+        "mode": "in-process",
+        "running": state.daemon.running.load(Ordering::Relaxed),
+        "startedAt": state.daemon.started_at.clone(),
+        "lastTickAt": last_tick_at,
+        "totalTasks": total_tasks,
+        "runningTasks": running_tasks,
+        "enabledTasks": enabled_tasks
+    }))
+}
+
+fn daemon_list_tasks_internal(state: &AppState) -> Result<Value, String> {
+    let tasks = collect_repo_tasks(state)?;
+    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let mut out = Vec::new();
+
+    for runtime in tasks {
+        let state_row = read_daemon_task_state(&conn, &runtime.project_id, &runtime.task.id)?;
+        out.push(daemon_task_state_to_payload(&runtime, state_row));
+    }
+
+    Ok(Value::Array(out))
+}
+
+fn daemon_list_combs_internal(state: &AppState, project_id: Option<&str>) -> Result<Value, String> {
+    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let mut out = Vec::new();
+
+    match project_id {
+        Some(project_id) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT * FROM combs WHERE project_id = ?1
+                     ORDER BY (last_opened_at IS NULL), last_opened_at DESC
+                     LIMIT 100",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params![project_id], row_to_json)
+                .map_err(|e| e.to_string())?;
+            for row in rows {
+                out.push(row.map(map_comb_to_renderer).map_err(|e| e.to_string())?);
+            }
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT * FROM combs
+                     ORDER BY (last_opened_at IS NULL), last_opened_at DESC
+                     LIMIT 100",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], row_to_json)
+                .map_err(|e| e.to_string())?;
+            for row in rows {
+                out.push(row.map(map_comb_to_renderer).map_err(|e| e.to_string())?);
+            }
+        }
+    }
+
+    Ok(Value::Array(out))
+}
+
+fn daemon_list_panes_internal(
+    state: &AppState,
+    project_id: Option<&str>,
+    comb_id: Option<&str>,
+) -> Result<Value, String> {
+    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let mut out = Vec::new();
+
+    if let Some(comb_id) = comb_id {
+        let mut stmt = conn
+            .prepare("SELECT * FROM panes WHERE comb_id = ?1 ORDER BY layout_order ASC, created_at ASC")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![comb_id], row_to_json)
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            out.push(row.map(map_pane_to_renderer).map_err(|e| e.to_string())?);
+        }
+        return Ok(Value::Array(out));
+    }
+
+    if let Some(project_id) = project_id {
+        let mut stmt = conn
+            .prepare(
+                "SELECT p.*
+                FROM panes p
+                 JOIN combs c ON c.id = p.comb_id
+                 WHERE c.project_id = ?1
+                 ORDER BY p.layout_order ASC, p.created_at ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![project_id], row_to_json)
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            out.push(row.map(map_pane_to_renderer).map_err(|e| e.to_string())?);
+        }
+        return Ok(Value::Array(out));
+    }
+
+    let mut stmt = conn
+        .prepare("SELECT * FROM panes ORDER BY layout_order ASC, created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], row_to_json)
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        out.push(row.map(map_pane_to_renderer).map_err(|e| e.to_string())?);
+    }
+
+    Ok(Value::Array(out))
+}
+
+fn daemon_get_diffs_bundle_internal(
+    state: &AppState,
+    worktree_paths: Vec<String>,
+    comb_ids: Vec<String>,
+) -> Result<Value, String> {
+    let mut paths = worktree_paths;
+
+    if !comb_ids.is_empty() {
+        let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT worktree_path FROM combs WHERE id = ?1 AND worktree_path IS NOT NULL AND worktree_path != ''")
+            .map_err(|e| e.to_string())?;
+        for comb_id in &comb_ids {
+            let maybe_path: Option<String> = stmt
+                .query_row(params![comb_id], |row| row.get(0))
+                .optional()
+                .map_err(|e| e.to_string())?;
+            if let Some(path) = maybe_path {
+                paths.push(path);
+            }
+        }
+    }
+
+    paths.sort();
+    paths.dedup();
+
+    let mut out = Vec::new();
+    for worktree_path in paths {
+        match build_review_diffs_for_path(&worktree_path) {
+            Ok(payload) => {
+                out.push(serde_json::json!({
+                    "worktreePath": worktree_path,
+                    "success": true,
+                    "files": payload.get("files").cloned().unwrap_or(Value::Array(vec![])),
+                    "summary": payload.get("summary").cloned().unwrap_or(Value::Null)
+                }));
+            }
+            Err(e) => {
+                out.push(serde_json::json!({
+                    "worktreePath": worktree_path,
+                    "success": false,
+                    "error": e.message,
+                    "files": [],
+                    "summary": Value::Null
+                }));
+            }
+        }
+    }
+
+    Ok(Value::Array(out))
+}
+
+fn daemon_spawn_task_runtime(
+    app: &AppHandle,
+    state: &AppState,
+    runtime: &RepoTaskRuntime,
+    attach: bool,
+    force: bool,
+) -> Result<Value, String> {
+    let enabled = runtime.task.enabled.unwrap_or(true);
+    if !enabled && !force {
+        let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let state_row = DaemonTaskRunState {
+            status: "disabled".into(),
+            ..Default::default()
+        };
+        upsert_daemon_task_state(
+            &conn,
+            runtime,
+            &state_row,
+            &runtime.task.schedule,
+            &normalize_task_cwd_mode(runtime.task.cwd_mode.as_deref()),
+            false,
+        )?;
+        return Ok(daemon_task_state_to_payload(runtime, Some(state_row)));
+    }
+
+    let now = Local::now();
+    let next_run_at = task_next_run_at(&runtime.task, now)?;
+    let cwd_mode = normalize_task_cwd_mode(runtime.task.cwd_mode.as_deref());
+    let (comb_id, cwd) = choose_project_comb_and_cwd(state, &runtime.project_id, &cwd_mode)?;
+    let pty_owner_key = daemon_task_owner_key(&runtime.project_id, &runtime.task.id);
+    let (command, args) = task_shell_command(&runtime.task.command);
+    let pane_id = comb_id.as_ref().map(|_| next_id());
+
+    if let Some(comb_id_value) = comb_id.as_ref() {
+        let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let layout_order = conn
+            .query_row(
+                "SELECT COALESCE(MAX(layout_order), -1) + 1 FROM panes WHERE comb_id = ?1",
+                params![comb_id_value],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0);
+        if let Some(ref pane_id_value) = pane_id {
+            conn.execute(
+                "INSERT INTO panes (id, comb_id, type, provider_id, title, initial_prompt, cwd, pty_owner_key, status, layout_order, last_activity_at, created_at, updated_at)
+                 VALUES (?1, ?2, 'term', NULL, ?3, ?4, ?5, ?6, 'running', ?7, datetime('now'), datetime('now'), datetime('now'))",
+                params![
+                    pane_id_value,
+                    comb_id_value,
+                    &runtime.task.name,
+                    &runtime.task.command,
+                    &cwd,
+                    &pty_owner_key,
+                    layout_order,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
+    let pty_id = match spawn_terminal_session_with_options(
+        state,
+        app,
+        cwd.clone(),
+        command,
+        args,
+        pane_id.clone(),
+        Some(pty_owner_key.clone()),
+    ) {
+        Ok(id) => id,
+        Err(err) => {
+            if let (Some(comb_id_value), Some(pane_id_value)) = (comb_id.as_ref(), pane_id.as_ref()) {
+                if let Ok(conn) = state.conn.lock() {
+                    let _ = conn.execute(
+                        "DELETE FROM panes WHERE id = ?1 AND comb_id = ?2",
+                        params![pane_id_value, comb_id_value],
+                    );
+                }
+            }
+            if let Ok(conn) = state.conn.lock() {
+                let failed_row = DaemonTaskRunState {
+                    status: "failed".into(),
+                    last_error: Some(err.message.clone()),
+                    ..Default::default()
+                };
+                let _ = upsert_daemon_task_state(
+                    &conn,
+                    runtime,
+                    &failed_row,
+                    &runtime.task.schedule,
+                    &cwd_mode,
+                    enabled,
+                );
+            }
+            return Err(err.message);
+        }
+    };
+
+    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let mut last_run_state = DaemonTaskRunState::default();
+    last_run_state.status = "running".into();
+    last_run_state.attached = attach || pane_id.is_some();
+    last_run_state.pty_id = Some(pty_id.clone());
+    last_run_state.pane_id = pane_id.clone();
+    last_run_state.comb_id = comb_id.clone();
+    last_run_state.last_run_at = Some(local_now_string());
+    last_run_state.next_run_at = next_run_at;
+    last_run_state.last_error = None;
+    last_run_state.last_exit_code = None;
+    upsert_daemon_task_state(
+        &conn,
+        runtime,
+        &last_run_state,
+        &runtime.task.schedule,
+        &cwd_mode,
+        enabled,
+    )?;
+
+    Ok(daemon_task_state_to_payload(runtime, Some(last_run_state)))
+}
+
+fn daemon_attach_task_internal(state: &AppState, project_id: &str, task_id: &str) -> Result<Value, String> {
+    let tasks = collect_repo_tasks(state)?;
+    let runtime = tasks
+        .into_iter()
+        .find(|item| item.project_id == project_id && item.task.id == task_id)
+        .ok_or_else(|| "task not found".to_string())?;
+    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let mut row = read_daemon_task_state(&conn, project_id, task_id)?.unwrap_or_default();
+    row.attached = true;
+    row.status = if row.status.is_empty() {
+        "idle".into()
+    } else {
+        row.status
+    };
+    upsert_daemon_task_state(
+        &conn,
+        &runtime,
+        &row,
+        &runtime.task.schedule,
+        &normalize_task_cwd_mode(runtime.task.cwd_mode.as_deref()),
+        runtime.task.enabled.unwrap_or(true),
+    )?;
+    Ok(daemon_task_state_to_payload(&runtime, Some(row)))
+}
+
+fn daemon_detach_task_internal(state: &AppState, project_id: &str, task_id: &str) -> Result<Value, String> {
+    let tasks = collect_repo_tasks(state)?;
+    let runtime = tasks
+        .into_iter()
+        .find(|item| item.project_id == project_id && item.task.id == task_id)
+        .ok_or_else(|| "task not found".to_string())?;
+    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let mut row = read_daemon_task_state(&conn, project_id, task_id)?.unwrap_or_default();
+    row.attached = false;
+    if row.status.is_empty() {
+        row.status = "idle".into();
+    }
+    upsert_daemon_task_state(
+        &conn,
+        &runtime,
+        &row,
+        &runtime.task.schedule,
+        &normalize_task_cwd_mode(runtime.task.cwd_mode.as_deref()),
+        runtime.task.enabled.unwrap_or(true),
+    )?;
+    Ok(daemon_task_state_to_payload(&runtime, Some(row)))
+}
+
+fn daemon_sweep_terminal_exits_internal(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let task_catalog = collect_repo_tasks(state)?;
+    let mut events: Vec<(String, Option<String>, Option<String>, Option<String>, Option<i64>, String)> = Vec::new();
+    {
+        let mut terminals = state
+            .terminals
+            .lock()
+            .map_err(|_| "terminals lock poisoned".to_string())?;
+        for (pty_id, terminal) in terminals.iter_mut() {
+            if terminal.exit_notified.load(Ordering::Relaxed) {
+                continue;
+            }
+            let Some(status) = terminal.child.try_wait().ok().flatten() else {
+                continue;
+            };
+            terminal.exit_notified.store(true, Ordering::Relaxed);
+            let exit_code = Some(status.exit_code() as i64);
+            let excerpt = terminal
+                .output_buffer
+                .lock()
+                .ok()
+                .and_then(|buffer| {
+                    buffer
+                        .iter()
+                        .rev()
+                        .find(|line| !line.trim().is_empty())
+                        .map(|line| {
+                            let trimmed = line.trim();
+                            trimmed.chars().take(240).collect::<String>()
+                        })
+                });
+            events.push((
+                pty_id.clone(),
+                terminal.pty_owner_key.clone(),
+                terminal.pane_id.clone(),
+                excerpt,
+                exit_code,
+                terminal.started_at.clone(),
+            ));
+        }
+    }
+
+    if events.is_empty() {
+        return Ok(());
+    }
+
+    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    for (pty_id, owner_key, pane_id, excerpt, exit_code, started_at) in events {
+        let code = exit_code.unwrap_or(-1);
+        let status = if code == 0 { "completed" } else { "failed" };
+        if let Some(owner_key) = owner_key {
+            if let Some(rest) = owner_key.strip_prefix("daemon-task:") {
+                let mut parts = rest.splitn(2, ':');
+                let project_id = parts.next().unwrap_or_default();
+                let task_id = parts.next().unwrap_or_default();
+                if !project_id.is_empty() && !task_id.is_empty() {
+                    if let Some(runtime) = task_catalog.iter().find(|item| item.project_id == project_id && item.task.id == task_id) {
+                        let mut row = read_daemon_task_state(&conn, project_id, task_id)?.unwrap_or_default();
+                        row.status = status.to_string();
+                        row.attached = false;
+                        row.pty_id = Some(pty_id.clone());
+                        row.pane_id = pane_id.clone();
+                        row.last_exit_code = Some(code);
+                        row.last_output_excerpt = excerpt.clone();
+                        row.last_run_at = Some(started_at.clone());
+                        row.last_error = if code == 0 { None } else { Some(format!("exit code {code}")) };
+                        upsert_daemon_task_state(
+                            &conn,
+                            &runtime,
+                            &row,
+                            &runtime.task.schedule,
+                            &normalize_task_cwd_mode(runtime.task.cwd_mode.as_deref()),
+                            runtime.task.enabled.unwrap_or(true),
+                        )?;
+
+                        let notification_body = if code == 0 {
+                            format!("{} concluiu com sucesso", runtime.task.name.clone())
+                        } else {
+                            format!("{} terminou com código {code}", runtime.task.name.clone())
+                        };
+                        let _ = app.notification().builder().title("Tarefa do daemon").body(notification_body).show();
+                    }
+                }
+            }
+        }
+        let _ = app.emit(
+            "terminal-exit",
+            serde_json::json!({
+                "ptyId": pty_id,
+                "code": code
+            }),
+        );
+    }
+
+    Ok(())
+}
+
+fn daemon_tick_internal(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    if !state.daemon.running.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+    {
+        let mut last_tick = state
+            .daemon
+            .last_tick_at
+            .lock()
+            .map_err(|_| "daemon lock poisoned".to_string())?;
+        *last_tick = Some(local_now_string());
+    }
+
+    daemon_sweep_terminal_exits_internal(app, state)?;
+
+    let tasks = collect_repo_tasks(state)?;
+    let now = Local::now();
+
+    for runtime in tasks {
+        let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let enabled = runtime.task.enabled.unwrap_or(true);
+        let state_row = read_daemon_task_state(&conn, &runtime.project_id, &runtime.task.id)?.unwrap_or_default();
+        let cwd_mode = normalize_task_cwd_mode(runtime.task.cwd_mode.as_deref());
+
+        let mut parsed_next_run = state_row
+            .next_run_at
+            .as_deref()
+            .and_then(parse_local_datetime);
+
+        if state_row.status == "running" {
+            continue;
+        }
+
+        if parsed_next_run.is_none() && enabled {
+            parsed_next_run = task_next_run_at(&runtime.task, now).ok().flatten().and_then(|s| parse_local_datetime(&s));
+        }
+
+        if !enabled {
+            let mut disabled_row = state_row.clone();
+            disabled_row.status = "disabled".into();
+            disabled_row.attached = false;
+            disabled_row.next_run_at = None;
+            upsert_daemon_task_state(
+                &conn,
+                &runtime,
+                &disabled_row,
+                &runtime.task.schedule,
+                &cwd_mode,
+                false,
+            )?;
+            continue;
+        }
+
+        if let Some(due_at) = parsed_next_run {
+            if now >= due_at {
+                drop(conn);
+                let _ = daemon_spawn_task_runtime(app, state, &runtime, false, false)?;
+            }
+        } else if state_row.next_run_at.is_none() {
+            let next_run_at = task_next_run_at(&runtime.task, now).ok().flatten();
+            let mut next_row = state_row.clone();
+            next_row.next_run_at = next_run_at;
+            next_row.status = if next_row.status.is_empty() {
+                "idle".into()
+            } else {
+                next_row.status
+            };
+            next_row.attached = state_row.attached;
+            upsert_daemon_task_state(
+                &conn,
+                &runtime,
+                &next_row,
+                &runtime.task.schedule,
+                &cwd_mode,
+                true,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn start_daemon_worker(app: AppHandle, state: AppState) {
+    state.daemon.running.store(true, Ordering::Relaxed);
+    thread::spawn(move || {
+        while state.daemon.running.load(Ordering::Relaxed) {
+            if let Err(err) = daemon_tick_internal(&app, &state) {
+                eprintln!("[DCC][daemon] tick error: {err}");
+            }
+            thread::sleep(Duration::from_secs(5));
+        }
+    });
+}
+
+fn daemon_runtime_endpoint(state: &AppState) -> Option<DaemonRuntimeInfo> {
+    state
+        .daemon_endpoint
+        .lock()
+        .ok()
+        .and_then(|endpoint| endpoint.clone())
+}
+
+#[tauri::command]
+fn daemon_get_status(state: State<'_, AppState>) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(&info, "daemon.getStatus", serde_json::json!({})).map_err(db_error);
+    }
+    daemon_get_status_internal(state.inner()).map_err(db_error)
+}
+
+#[tauri::command]
+fn daemon_list_tasks(state: State<'_, AppState>) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(&info, "daemon.listTasks", serde_json::json!({})).map_err(db_error);
+    }
+    daemon_list_tasks_internal(state.inner()).map_err(db_error)
+}
+
+#[tauri::command]
+fn daemon_list_processes(state: State<'_, AppState>, project_id: Option<String>) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(
+            &info,
+            "daemon.listProcesses",
+            serde_json::json!({ "projectId": project_id }),
+        )
+        .map_err(db_error);
+    }
+    Err(db_error("daemon not available".to_string()))
+}
+
+#[tauri::command]
+fn daemon_start_process(
+    state: State<'_, AppState>,
+    project_id: String,
+    process_id: String,
+) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(
+            &info,
+            "daemon.startProcess",
+            serde_json::json!({ "projectId": project_id, "processId": process_id }),
+        )
+        .map_err(db_error);
+    }
+    Err(db_error("daemon not available".to_string()))
+}
+
+#[tauri::command]
+fn daemon_stop_process(
+    state: State<'_, AppState>,
+    project_id: String,
+    process_id: String,
+) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(
+            &info,
+            "daemon.stopProcess",
+            serde_json::json!({ "projectId": project_id, "processId": process_id }),
+        )
+        .map_err(db_error);
+    }
+    Err(db_error("daemon not available".to_string()))
+}
+
+#[tauri::command]
+fn daemon_restart_process(
+    state: State<'_, AppState>,
+    project_id: String,
+    process_id: String,
+) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(
+            &info,
+            "daemon.restartProcess",
+            serde_json::json!({ "projectId": project_id, "processId": process_id }),
+        )
+        .map_err(db_error);
+    }
+    Err(db_error("daemon not available".to_string()))
+}
+
+#[tauri::command]
+fn daemon_list_combs(state: State<'_, AppState>, project_id: Option<String>) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(
+            &info,
+            "combs.list",
+            serde_json::json!({ "projectId": project_id }),
+        )
+        .map_err(db_error);
+    }
+    daemon_list_combs_internal(state.inner(), project_id.as_deref()).map_err(db_error)
+}
+
+#[tauri::command]
+fn daemon_list_panes(
+    state: State<'_, AppState>,
+    project_id: Option<String>,
+    comb_id: Option<String>,
+) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(
+            &info,
+            "panes.list",
+            serde_json::json!({ "projectId": project_id, "combId": comb_id }),
+        )
+        .map_err(db_error);
+    }
+    daemon_list_panes_internal(state.inner(), project_id.as_deref(), comb_id.as_deref()).map_err(db_error)
+}
+
+#[tauri::command]
+fn daemon_get_diffs_bundle(
+    state: State<'_, AppState>,
+    worktree_paths: Vec<String>,
+    comb_ids: Vec<String>,
+) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(
+            &info,
+            "diffs.bundle",
+            serde_json::json!({ "worktreePaths": worktree_paths, "combIds": comb_ids }),
+        )
+        .map_err(db_error);
+    }
+    daemon_get_diffs_bundle_internal(state.inner(), worktree_paths, comb_ids).map_err(db_error)
+}
+
+#[tauri::command]
+fn daemon_run_task(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    project_id: String,
+    task_id: String,
+) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(
+            &info,
+            "daemon.runTask",
+            serde_json::json!({ "projectId": project_id.clone(), "taskId": task_id.clone() }),
+        )
+        .map_err(db_error);
+    }
+    let tasks = collect_repo_tasks(state.inner()).map_err(db_error)?;
+    let runtime = tasks
+        .into_iter()
+        .find(|item| item.project_id == project_id && item.task.id == task_id)
+        .ok_or_else(|| db_error("task not found"))?;
+    daemon_spawn_task_runtime(&app, state.inner(), &runtime, true, true).map_err(db_error)
+}
+
+#[tauri::command]
+fn daemon_attach_task(state: State<'_, AppState>, project_id: String, task_id: String) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(
+            &info,
+            "daemon.attachTask",
+            serde_json::json!({ "projectId": project_id.clone(), "taskId": task_id.clone() }),
+        )
+        .map_err(db_error);
+    }
+    daemon_attach_task_internal(state.inner(), &project_id, &task_id).map_err(db_error)
+}
+
+#[tauri::command]
+fn daemon_detach_task(state: State<'_, AppState>, project_id: String, task_id: String) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(
+            &info,
+            "daemon.detachTask",
+            serde_json::json!({ "projectId": project_id.clone(), "taskId": task_id.clone() }),
+        )
+        .map_err(db_error);
+    }
+    daemon_detach_task_internal(state.inner(), &project_id, &task_id).map_err(db_error)
+}
+
 #[allow(dead_code)]
 fn copy_paths_from_worktree(
     worktree_root: &str,
@@ -946,6 +2161,173 @@ fn copy_paths_from_worktree(
         }
     }
     Ok(())
+}
+
+fn shell_command_for_text(command: &str) -> (String, Vec<String>) {
+    #[cfg(target_os = "windows")]
+    {
+        ("cmd".to_string(), vec!["/C".to_string(), command.to_string()])
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        (
+            "/bin/sh".to_string(),
+            vec!["-lc".to_string(), command.to_string()],
+        )
+    }
+}
+
+fn daemon_task_owner_key(project_id: &str, task_id: &str) -> String {
+    format!("daemon-task:{project_id}:{task_id}")
+}
+
+fn choose_project_comb_and_cwd(
+    state: &AppState,
+    project_id: &str,
+    cwd_mode: &str,
+) -> Result<(Option<String>, String), String> {
+    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let project_path: Option<String> = conn
+        .query_row(
+            "SELECT path FROM projects WHERE id = ?1",
+            params![project_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(project_path) = project_path else {
+        return Err("project not found".into());
+    };
+
+    let comb = conn
+        .query_row(
+            "SELECT id, worktree_path
+             FROM combs
+             WHERE project_id = ?1
+             ORDER BY (last_opened_at IS NULL), last_opened_at DESC, updated_at DESC
+             LIMIT 1",
+            params![project_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let comb_id = comb.as_ref().map(|(id, _)| id.clone());
+    let cwd = if cwd_mode == "worktree" {
+        comb.and_then(|(_, worktree_path)| worktree_path)
+            .filter(|path| !path.trim().is_empty())
+            .unwrap_or(project_path)
+    } else {
+        project_path
+    };
+
+    Ok((comb_id, cwd))
+}
+
+fn parse_command_payload(command: &str) -> (String, Vec<String>) {
+    shell_command_for_text(command)
+}
+
+fn spawn_terminal_session_with_options(
+    state: &AppState,
+    app: &AppHandle,
+    cwd: String,
+    command: String,
+    args: Vec<String>,
+    pane_id_opt: Option<String>,
+    pty_owner_key_opt: Option<String>,
+) -> ApiResult<String> {
+    let cols = 80u16;
+    let rows = 24u16;
+    let pty_system = native_pty_system();
+    let pty_pair = pty_system
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| db_error(e.to_string()))?;
+
+    let mut cmd = CommandBuilder::new(&command);
+    cmd.args(&args);
+    cmd.cwd(&cwd);
+    #[cfg(unix)]
+    {
+        cmd.env("TERM", "xterm-256color");
+        let git_file_path = Path::new(&cwd).join(".git");
+        if git_file_path.is_file() {
+            if let Ok(git_content) = std::fs::read_to_string(&git_file_path) {
+                if let Some(gitdir_line) = git_content.lines().find(|l| l.starts_with("gitdir:")) {
+                    let gitdir = gitdir_line.trim_start_matches("gitdir:").trim();
+                    cmd.env("GIT_DIR", gitdir);
+                    cmd.env("GIT_WORK_TREE", &cwd);
+                }
+            }
+        }
+    }
+
+    let child = pty_pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| db_error(e.to_string()))?;
+
+    let reader = pty_pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| db_error(e.to_string()))?;
+    let writer = pty_pair
+        .master
+        .take_writer()
+        .map_err(|e| db_error(e.to_string()))?;
+
+    let pty_id = format!("pty-{}", next_id());
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let output_buffer = new_terminal_output_buffer();
+    let reader_thread = Some(spawn_terminal_reader_thread(
+        reader,
+        app.clone(),
+        pty_id.clone(),
+        pane_id_opt.clone(),
+        stop_flag.clone(),
+        output_buffer.clone(),
+    ));
+
+    if let Some(pane_id) = pane_id_opt.as_ref() {
+        if let Ok(conn) = state.conn.lock() {
+            let _ = conn.execute(
+                "UPDATE panes SET status = 'running', last_activity_at = datetime('now') WHERE id = ?1",
+                params![pane_id],
+            );
+        }
+    }
+
+    let mut terminals = state
+        .terminals
+        .lock()
+        .map_err(|_| db_error("terminals lock poisoned"))?;
+
+    terminals.insert(
+        pty_id.clone(),
+        ManagedTerminal {
+            pty_master: pty_pair.master,
+            child,
+            writer: Arc::new(Mutex::new(writer)),
+            mission_id: None,
+            pane_id: pane_id_opt,
+            pty_owner_key: pty_owner_key_opt,
+            cwd,
+            command,
+            args,
+            started_at: iso_now(),
+            stop_flag,
+            exit_notified: Arc::new(AtomicBool::new(false)),
+            output_buffer,
+            reader_thread,
+        },
+    );
+
+    Ok(pty_id)
 }
 
 // ---------- App ----------
@@ -3232,6 +4614,10 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
         .get("paneId")
         .and_then(Value::as_str)
         .map(|s| s.to_string());
+    let pty_owner_key_opt = options
+        .get("ptyOwnerKey")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string());
 
     let reader_thread = Some(spawn_terminal_reader_thread(
         reader,
@@ -3264,11 +4650,13 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
             writer: Arc::new(Mutex::new(writer)),
             mission_id: None,
             pane_id: pane_id_opt,
+            pty_owner_key: pty_owner_key_opt,
             cwd: cwd.to_string(),
             command: command.to_string(),
             args,
             started_at: iso_now(),
             stop_flag,
+            exit_notified: Arc::new(AtomicBool::new(false)),
             output_buffer,
             reader_thread,
         },
@@ -3289,6 +4677,7 @@ fn terminal_session_json(pty_id: &str, t: &mut ManagedTerminal) -> Value {
       "cwd": t.cwd,
       "command": t.command,
       "args": t.args,
+      "ptyOwnerKey": t.pty_owner_key,
       "status": status,
       "startedAt": t.started_at,
       "exitedAt": exited_at,
@@ -3858,6 +5247,18 @@ pub fn run() {
             license_get_machine_id,
             license_activate,
             license_skip_activation,
+            daemon_get_status,
+            daemon_list_tasks,
+            daemon_list_processes,
+            daemon_start_process,
+            daemon_stop_process,
+            daemon_restart_process,
+            daemon_list_combs,
+            daemon_list_panes,
+            daemon_get_diffs_bundle,
+            daemon_run_task,
+            daemon_attach_task,
+            daemon_detach_task,
             db_providers_find_all,
             db_providers_find_by_id,
             db_providers_find_by_type,
@@ -3940,11 +5341,33 @@ pub fn run() {
             sync_existing_repo_configs(&conn)
                 .map_err(|e| format!("failed to sync repo configs: {e}"))?;
             eprintln!("[DCC] Database ready at {:?}", db_path);
-            app.manage(AppState {
+            let state = AppState {
                 db_path: Arc::new(db_path),
+                app_data_dir: Arc::new(app_data_dir.clone()),
                 conn: Arc::new(Mutex::new(conn)),
                 terminals: Arc::new(Mutex::new(HashMap::new())),
-            });
+                daemon: Arc::new(DaemonState {
+                    started_at: local_now_string(),
+                    last_tick_at: Arc::new(Mutex::new(None)),
+                    running: Arc::new(AtomicBool::new(true)),
+                }),
+                daemon_endpoint: Arc::new(Mutex::new(None)),
+            };
+            let app_handle = app.handle().clone();
+            match ensure_sidecar_running(&app_handle, state.db_path.as_ref(), state.app_data_dir.as_ref()) {
+                Ok(runtime) => {
+                    if let Ok(mut endpoint) = state.daemon_endpoint.lock() {
+                        *endpoint = Some(runtime);
+                    }
+                    state.daemon.running.store(false, Ordering::Relaxed);
+                }
+                Err(err) => {
+                    eprintln!("[DCC][daemon] sidecar unavailable, using in-process fallback: {err}");
+                    let state_for_daemon = state.clone();
+                    start_daemon_worker(app_handle, state_for_daemon);
+                }
+            }
+            app.manage(state);
             Ok(())
         })
         .run(tauri::generate_context!())

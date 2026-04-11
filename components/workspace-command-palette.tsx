@@ -10,9 +10,10 @@ import {
   Terminal,
   Workflow,
   WandSparkles,
+  Clock3,
 } from "lucide-react";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
-import type { Comb, Pane, Project, ProjectRepoConfig } from "@/lib/database/types";
+import type { Comb, Pane, Project, ProjectRepoConfig, RepoTaskDefinition } from "@/lib/database/types";
 
 interface WorkspaceCommandPaletteProps {
   open: boolean;
@@ -24,6 +25,7 @@ interface WorkspaceCommandPaletteProps {
   activeCombId: string | null;
   activePaneId: string | null;
   repoConfig: ProjectRepoConfig | null;
+  tasks: RepoTaskDefinition[];
   onOpenSettings: () => void;
   onOpenNewWorkspace: () => void;
   onOpenBaseTerminal: () => void;
@@ -51,6 +53,7 @@ export function WorkspaceCommandPalette({
   activeCombId,
   activePaneId,
   repoConfig,
+  tasks,
   onOpenSettings,
   onOpenNewWorkspace,
   onOpenBaseTerminal,
@@ -245,6 +248,29 @@ export function WorkspaceCommandPalette({
             >
               <WandSparkles className="h-4 w-4" />
               {preset.name}
+            </CommandItem>
+          ))}
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        <CommandGroup heading="Tarefas agendadas">
+          {tasks.map((task) => (
+            <CommandItem
+              key={task.id}
+              value={`task tarefa ${task.name} ${task.command} ${task.schedule}`}
+              onSelect={() => {
+                onLaunchCommand({
+                  title: task.name,
+                  command: task.command,
+                  cwdMode: task.cwdMode ?? "worktree",
+                  description: task.description ?? null,
+                });
+                onOpenChange(false);
+              }}
+            >
+              <Clock3 className="h-4 w-4" />
+              {task.name}
             </CommandItem>
           ))}
         </CommandGroup>
