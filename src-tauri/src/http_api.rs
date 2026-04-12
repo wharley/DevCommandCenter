@@ -10,12 +10,13 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::daemon_client::rpc_with_db_path_timeout;
-use crate::http_auth::api_key_auth;
-use crate::http_config::HttpConfig;
+use crate::http_auth::auth_middleware;
+use crate::http_config::{HttpAuthMode, HttpConfig};
 use crate::http_rpc_handler::handle_rpc as handle_json_rpc;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -132,7 +133,8 @@ impl IntoResponse for HttpApiError {
     }
 }
 
-pub fn build_router(config: Arc<HttpConfig>) -> Router {
+pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
+    let cors_config = config.blocking_read().clone();
     let protected_routes = Router::new()
         .route("/rpc", post(handle_json_rpc))
         .route("/api/v1/status", get(status_handler))
@@ -143,8 +145,14 @@ pub fn build_router(config: Arc<HttpConfig>) -> Router {
             post(attach_task_handler).delete(detach_task_handler),
         )
         .route("/api/v1/processes", get(list_processes_handler))
-        .route("/api/v1/processes/:process_id/start", post(start_process_handler))
-        .route("/api/v1/processes/:process_id/stop", post(stop_process_handler))
+        .route(
+            "/api/v1/processes/:process_id/start",
+            post(start_process_handler),
+        )
+        .route(
+            "/api/v1/processes/:process_id/stop",
+            post(stop_process_handler),
+        )
         .route(
             "/api/v1/processes/:process_id/restart",
             post(restart_process_handler),
@@ -152,9 +160,13 @@ pub fn build_router(config: Arc<HttpConfig>) -> Router {
         .route("/api/v1/combs", get(list_combs_handler))
         .route("/api/v1/panes", get(list_panes_handler))
         .route("/api/v1/diffs/bundle", post(diffs_bundle_handler))
+        .route(
+            "/api/v1/auth/bearer/rotate",
+            post(rotate_bearer_token_handler),
+        )
         .route_layer(middleware::from_fn_with_state(
             config.clone(),
-            api_key_auth,
+            auth_middleware,
         ));
 
     Router::new()
@@ -162,14 +174,18 @@ pub fn build_router(config: Arc<HttpConfig>) -> Router {
         .route("/health", get(health_handler))
         .route("/openapi.json", get(openapi_handler))
         .merge(protected_routes)
-        .layer(build_cors_layer(&config))
+        .layer(build_cors_layer(&cors_config))
         .layer(TraceLayer::new_for_http())
         .with_state(config)
 }
 
 pub fn build_cors_layer(config: &HttpConfig) -> CorsLayer {
     let methods = [Method::GET, Method::POST, Method::DELETE, Method::OPTIONS];
-    let headers = [CONTENT_TYPE, HeaderName::from_static("x-api-key")];
+    let headers = [
+        CONTENT_TYPE,
+        HeaderName::from_static("x-api-key"),
+        HeaderName::from_static("authorization"),
+    ];
 
     if config.cors_origins.is_empty() || config.cors_origins.iter().any(|origin| origin == "*") {
         CorsLayer::new()
@@ -198,12 +214,15 @@ pub fn build_cors_layer(config: &HttpConfig) -> CorsLayer {
 }
 
 async fn rpc_value(
-    config: Arc<HttpConfig>,
+    config: Arc<RwLock<HttpConfig>>,
     method: &'static str,
     params: Value,
     timeout: Duration,
 ) -> Result<Value, HttpApiError> {
-    let db_path = config.db_path.clone();
+    let db_path = {
+        let config = config.read().await;
+        config.db_path.clone()
+    };
     let method = method.to_string();
 
     tokio::task::spawn_blocking(move || {
@@ -255,16 +274,14 @@ fn filter_by_string_field(
     }
 }
 
-async fn root_handler() -> Json<Value> {
+async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Value> {
+    let config = config.read().await;
     Json(json!({
         "name": "DCC HTTP API",
         "version": env!("CARGO_PKG_VERSION"),
         "documentation": "/openapi.json",
         "guide": "docs/GUIA_HTTP_API.md",
-        "authentication": {
-            "type": "apiKey",
-            "header": "X-API-Key"
-        },
+        "authentication": authentication_descriptor(&config),
         "publicEndpoints": [
             "GET /",
             "GET /health",
@@ -282,27 +299,26 @@ async fn root_handler() -> Json<Value> {
             "POST /api/v1/processes/:process_id/restart",
             "GET /api/v1/combs",
             "GET /api/v1/panes",
-            "POST /api/v1/diffs/bundle"
+            "POST /api/v1/diffs/bundle",
+            "POST /api/v1/auth/bearer/rotate"
         ],
         "rpcCompatibility": "POST /rpc"
     }))
 }
 
-async fn health_handler(State(config): State<Arc<HttpConfig>>) -> Response {
-    match rpc_value(
-        config.clone(),
-        "daemon.health",
-        Value::Null,
-        HEALTH_TIMEOUT,
-    )
-    .await
-    {
+async fn health_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Response {
+    let database = {
+        let config = config.read().await;
+        config.db_path.to_string_lossy().to_string()
+    };
+
+    match rpc_value(config.clone(), "daemon.health", Value::Null, HEALTH_TIMEOUT).await {
         Ok(payload) => (
             StatusCode::OK,
             Json(json!({
                 "status": "ok",
                 "daemon": "connected",
-                "database": config.db_path.to_string_lossy(),
+                "database": database,
                 "daemonHealth": payload,
             })),
         )
@@ -312,7 +328,7 @@ async fn health_handler(State(config): State<Arc<HttpConfig>>) -> Response {
             Json(json!({
                 "status": "degraded",
                 "daemon": "disconnected",
-                "database": config.db_path.to_string_lossy(),
+                "database": database,
                 "error": {
                     "code": error.code(),
                     "message": error.message(),
@@ -323,11 +339,18 @@ async fn health_handler(State(config): State<Arc<HttpConfig>>) -> Response {
     }
 }
 
-async fn openapi_handler(State(config): State<Arc<HttpConfig>>) -> Json<Value> {
+async fn openapi_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Value> {
+    let config = config.read().await;
     Json(build_openapi_document(&config))
 }
 
 fn build_openapi_document(config: &HttpConfig) -> Value {
+    let security = match config.effective_auth_mode() {
+        HttpAuthMode::Local => json!([{ "ApiKeyAuth": [] }]),
+        HttpAuthMode::Remote => json!([{ "BearerAuth": [] }]),
+        HttpAuthMode::Mixed => json!([{ "ApiKeyAuth": [] }, { "BearerAuth": [] }]),
+    };
+
     json!({
         "openapi": "3.0.3",
         "info": {
@@ -340,24 +363,36 @@ fn build_openapi_document(config: &HttpConfig) -> Value {
                 "url": format!("http://{}:{}", config.host, config.port)
             }
         ],
-        "security": [
-            {
-                "ApiKeyAuth": []
-            }
-        ],
         "components": {
             "securitySchemes": {
                 "ApiKeyAuth": {
                     "type": "apiKey",
                     "in": "header",
                     "name": "X-API-Key"
+                },
+                "BearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "JWT"
                 }
             }
         },
         "paths": {
+            "/": {
+                "get": {
+                    "summary": "Server info",
+                    "security": [],
+                    "responses": {
+                        "200": {
+                            "description": "Server metadata"
+                        }
+                    }
+                }
+            },
             "/health": {
                 "get": {
                     "summary": "Health check",
+                    "security": [],
                     "responses": {
                         "200": {
                             "description": "Daemon reachable"
@@ -368,9 +403,47 @@ fn build_openapi_document(config: &HttpConfig) -> Value {
                     }
                 }
             },
+            "/openapi.json": {
+                "get": {
+                    "summary": "OpenAPI document",
+                    "security": [],
+                    "responses": {
+                        "200": {
+                            "description": "OpenAPI document"
+                        }
+                    }
+                }
+            },
+            "/rpc": {
+                "post": {
+                    "summary": "RPC compatibility endpoint",
+                    "security": security.clone(),
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["method"],
+                                    "properties": {
+                                        "method": { "type": "string" },
+                                        "params": { "type": "object" }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "RPC response"
+                        }
+                    }
+                }
+            },
             "/api/v1/status": {
                 "get": {
                     "summary": "Daemon status",
+                    "security": security.clone(),
                     "responses": {
                         "200": {
                             "description": "Status payload"
@@ -381,6 +454,7 @@ fn build_openapi_document(config: &HttpConfig) -> Value {
             "/api/v1/tasks": {
                 "get": {
                     "summary": "List daemon tasks",
+                    "security": security.clone(),
                     "parameters": [
                         {
                             "name": "projectId",
@@ -398,6 +472,7 @@ fn build_openapi_document(config: &HttpConfig) -> Value {
             "/api/v1/tasks/{taskId}/run": {
                 "post": {
                     "summary": "Run a task",
+                    "security": security.clone(),
                     "parameters": [
                         {
                             "name": "taskId",
@@ -422,6 +497,7 @@ fn build_openapi_document(config: &HttpConfig) -> Value {
             "/api/v1/tasks/{taskId}/attach": {
                 "post": {
                     "summary": "Attach a task",
+                    "security": security.clone(),
                     "parameters": [
                         {
                             "name": "taskId",
@@ -444,6 +520,7 @@ fn build_openapi_document(config: &HttpConfig) -> Value {
                 },
                 "delete": {
                     "summary": "Detach a task",
+                    "security": security.clone(),
                     "parameters": [
                         {
                             "name": "taskId",
@@ -464,13 +541,203 @@ fn build_openapi_document(config: &HttpConfig) -> Value {
                         }
                     }
                 }
+            },
+            "/api/v1/processes": {
+                "get": {
+                    "summary": "List daemon processes",
+                    "security": security.clone(),
+                    "parameters": [
+                        {
+                            "name": "projectId",
+                            "in": "query",
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Process collection"
+                        }
+                    }
+                }
+            },
+            "/api/v1/processes/{processId}/start": {
+                "post": {
+                    "summary": "Start a process",
+                    "security": security.clone(),
+                    "parameters": [
+                        {
+                            "name": "processId",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        },
+                        {
+                            "name": "projectId",
+                            "in": "query",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Process runtime payload"
+                        }
+                    }
+                }
+            },
+            "/api/v1/processes/{processId}/stop": {
+                "post": {
+                    "summary": "Stop a process",
+                    "security": security.clone(),
+                    "parameters": [
+                        {
+                            "name": "processId",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        },
+                        {
+                            "name": "projectId",
+                            "in": "query",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Process runtime payload"
+                        }
+                    }
+                }
+            },
+            "/api/v1/processes/{processId}/restart": {
+                "post": {
+                    "summary": "Restart a process",
+                    "security": security.clone(),
+                    "parameters": [
+                        {
+                            "name": "processId",
+                            "in": "path",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        },
+                        {
+                            "name": "projectId",
+                            "in": "query",
+                            "required": true,
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Process runtime payload"
+                        }
+                    }
+                }
+            },
+            "/api/v1/combs": {
+                "get": {
+                    "summary": "List combs",
+                    "security": security.clone(),
+                    "parameters": [
+                        {
+                            "name": "projectId",
+                            "in": "query",
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Comb collection"
+                        }
+                    }
+                }
+            },
+            "/api/v1/panes": {
+                "get": {
+                    "summary": "List panes",
+                    "security": security.clone(),
+                    "parameters": [
+                        {
+                            "name": "projectId",
+                            "in": "query",
+                            "schema": { "type": "string" }
+                        },
+                        {
+                            "name": "combId",
+                            "in": "query",
+                            "schema": { "type": "string" }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Pane collection"
+                        }
+                    }
+                }
+            },
+            "/api/v1/diffs/bundle": {
+                "post": {
+                    "summary": "Build a diff bundle",
+                    "security": security.clone(),
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "worktreePaths": {
+                                            "type": "array",
+                                            "items": { "type": "string" }
+                                        },
+                                        "combIds": {
+                                            "type": "array",
+                                            "items": { "type": "string" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Diff bundle payload"
+                        }
+                    }
+                }
+            },
+            "/api/v1/auth/bearer/rotate": {
+                "post": {
+                    "summary": "Rotate bearer token",
+                    "security": security.clone(),
+                    "requestBody": {
+                        "required": false,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "ttlSeconds": { "type": "integer", "minimum": 60 },
+                                        "graceSeconds": { "type": "integer", "minimum": 0 }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Rotated bearer token"
+                        }
+                    }
+                }
             }
         }
     })
 }
 
 async fn list_tasks_handler(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Query(query): Query<ProjectFilterQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
     let payload = rpc_value(config, "daemon.listTasks", Value::Null, DEFAULT_TIMEOUT).await?;
@@ -479,7 +746,7 @@ async fn list_tasks_handler(
 }
 
 async fn run_task_handler(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Path(task_id): Path<String>,
     Query(query): Query<ProjectTaskActionQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
@@ -497,7 +764,7 @@ async fn run_task_handler(
 }
 
 async fn attach_task_handler(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Path(task_id): Path<String>,
     Query(query): Query<ProjectTaskActionQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
@@ -515,7 +782,7 @@ async fn attach_task_handler(
 }
 
 async fn detach_task_handler(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Path(task_id): Path<String>,
     Query(query): Query<ProjectTaskActionQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
@@ -532,13 +799,15 @@ async fn detach_task_handler(
     Ok(Json(payload))
 }
 
-async fn status_handler(State(config): State<Arc<HttpConfig>>) -> Result<Json<Value>, HttpApiError> {
+async fn status_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+) -> Result<Json<Value>, HttpApiError> {
     let payload = rpc_value(config, "daemon.getStatus", Value::Null, DEFAULT_TIMEOUT).await?;
     Ok(Json(payload))
 }
 
 async fn list_processes_handler(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Query(query): Query<ProjectFilterQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
     let payload = rpc_value(
@@ -552,7 +821,7 @@ async fn list_processes_handler(
 }
 
 async fn start_process_handler(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Path(process_id): Path<String>,
     Query(query): Query<ProjectTaskActionQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
@@ -570,7 +839,7 @@ async fn start_process_handler(
 }
 
 async fn stop_process_handler(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Path(process_id): Path<String>,
     Query(query): Query<ProjectTaskActionQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
@@ -588,7 +857,7 @@ async fn stop_process_handler(
 }
 
 async fn restart_process_handler(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Path(process_id): Path<String>,
     Query(query): Query<ProjectTaskActionQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
@@ -606,7 +875,7 @@ async fn restart_process_handler(
 }
 
 async fn list_combs_handler(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Query(query): Query<ProjectFilterQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
     let payload = rpc_value(
@@ -620,7 +889,7 @@ async fn list_combs_handler(
 }
 
 async fn list_panes_handler(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Query(query): Query<ProjectAndCombFilterQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
     let payload = rpc_value(
@@ -637,7 +906,7 @@ async fn list_panes_handler(
 }
 
 async fn diffs_bundle_handler(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Json(body): Json<BundleRequest>,
 ) -> Result<Json<Value>, HttpApiError> {
     let payload = rpc_value(
@@ -651,6 +920,56 @@ async fn diffs_bundle_handler(
     )
     .await?;
     Ok(Json(payload))
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct RotateBearerTokenRequest {
+    #[serde(default)]
+    ttl_seconds: Option<i64>,
+    #[serde(default)]
+    grace_seconds: Option<i64>,
+}
+
+async fn rotate_bearer_token_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    body: Option<Json<RotateBearerTokenRequest>>,
+) -> Result<Json<Value>, HttpApiError> {
+    let mut config = config.write().await;
+    let body = body.map(|Json(body)| body).unwrap_or_default();
+    let rotation = config.rotate_bearer_token(body.ttl_seconds, body.grace_seconds);
+
+    if let Some(path) = crate::http_config::HttpConfig::default_config_path() {
+        let _ = config.save(&path);
+    }
+
+    let mut response = json!({
+        "ok": true,
+        "authMode": format!("{:?}", config.effective_auth_mode()).to_lowercase(),
+        "bearerToken": rotation.token,
+        "expiresAt": rotation.expires_at,
+    });
+
+    if let Some(previous_expires_at) = rotation.previous_expires_at {
+        response["previousExpiresAt"] = json!(previous_expires_at);
+    }
+
+    Ok(Json(response))
+}
+
+fn authentication_descriptor(config: &HttpConfig) -> Value {
+    json!({
+        "mode": format!("{:?}", config.effective_auth_mode()).to_lowercase(),
+        "local": {
+            "header": "X-API-Key"
+        },
+        "remote": {
+            "header": "Authorization",
+            "scheme": "Bearer",
+            "bearerTokenExpiresAt": config.bearer_token_expires_at,
+            "bearerTokenPreviousExpiresAt": config.bearer_token_previous_expires_at,
+        }
+    })
 }
 
 #[cfg(test)]
@@ -679,7 +998,22 @@ mod tests {
     fn openapi_document_exposes_api_key_security() {
         let doc = build_openapi_document(&HttpConfig::default());
         assert_eq!(doc["openapi"], "3.0.3");
-        assert_eq!(doc["components"]["securitySchemes"]["ApiKeyAuth"]["name"], "X-API-Key");
+        assert_eq!(
+            doc["components"]["securitySchemes"]["ApiKeyAuth"]["name"],
+            "X-API-Key"
+        );
+        assert_eq!(
+            doc["components"]["securitySchemes"]["BearerAuth"]["scheme"],
+            "bearer"
+        );
         assert!(doc["paths"]["/api/v1/tasks"].is_object());
+        assert!(doc["paths"]["/api/v1/processes"].is_object());
+        assert!(doc["paths"]["/api/v1/combs"].is_object());
+        assert!(doc["paths"]["/api/v1/panes"].is_object());
+        assert!(doc["paths"]["/api/v1/diffs/bundle"].is_object());
+        assert!(doc["paths"]["/api/v1/auth/bearer/rotate"].is_object());
+        assert!(doc["paths"]["/rpc"].is_object());
+        assert_eq!(doc["paths"]["/health"]["get"]["security"], json!([]));
+        assert_eq!(doc["paths"]["/"]["get"]["security"], json!([]));
     }
 }

@@ -29,6 +29,7 @@ import type {
   CreateCombDTO,
   UpdateCombDTO,
   RepoTaskDefinition,
+  RepoTaskTemplate,
   RepoTaskTriggerDefinition,
 } from "@/lib/database/types";
 import type { TerminalAttentionPayload } from "@/lib/terminal/attention-types";
@@ -266,6 +267,8 @@ declare global {
         killByPaneId: (paneId: string) => Promise<{ ok: boolean }>;
         /** Últimas linhas de output (reidratação ao remontar o xterm). */
         getBacklog?: (ptyId: string) => Promise<{ lines: string[] }>;
+        /** Limpa scrollback persistido em SQLite + buffer Rust para o painel (comando "limpar scrollback"). */
+        clearPersistedScrollback?: (paneId: string) => Promise<{ ok: boolean }>;
         saveTempImage?: (
           imageData: number[],
           extension: string
@@ -419,6 +422,10 @@ declare global {
         }>;
       };
 
+      repo?: {
+        listTaskTemplates: (projectPath: string) => Promise<RepoTaskTemplate[]>;
+      };
+
       window: {
         minimize: () => Promise<void>;
         maximize: () => Promise<void>;
@@ -533,7 +540,13 @@ declare global {
         getReviewDiffs: (worktreePath: string) => Promise<{
           success: boolean;
           error?: string;
-          files: Array<{ path: string; status: string; diff: string }>;
+          files: Array<{
+            path: string;
+            status: string;
+            diff: string;
+            insertions?: number;
+            deletions?: number;
+          }>;
           summary: {
             changedFiles: number;
             insertions: number;
@@ -562,7 +575,13 @@ declare global {
             worktreePath: string;
             success: boolean;
             error?: string;
-            files: Array<{ path: string; status: string; diff: string }>;
+            files: Array<{
+              path: string;
+              status: string;
+              diff: string;
+              insertions?: number;
+              deletions?: number;
+            }>;
             summary: {
               changedFiles: number;
               insertions: number;

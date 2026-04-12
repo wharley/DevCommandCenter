@@ -60,7 +60,10 @@ fn ensure_daemon_running() -> Result<DaemonRuntimeInfo, String> {
         let mut cargo = Command::new("cargo");
         cargo
             .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .env("CARGO_TARGET_DIR", std::env::temp_dir().join("dcc-sidecar-target"))
+            .env(
+                "CARGO_TARGET_DIR",
+                std::env::temp_dir().join("dcc-sidecar-target"),
+            )
             .args(["run", "--quiet", "--bin", "dccd", "--"]);
         cargo
     };
@@ -259,7 +262,10 @@ fn handle_mcp_request(request: Value) -> Option<Value> {
 
     if method == "tools/call" {
         let params = request.get("params").cloned().unwrap_or(Value::Null);
-        let tool_name = params.get("name").and_then(|value| value.as_str()).unwrap_or_default();
+        let tool_name = params
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
         let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
         let result = match tool_name {
             "daemon_status" => call_daemon("daemon.getStatus", serde_json::json!({})),
@@ -307,15 +313,11 @@ fn handle_mcp_request(request: Value) -> Option<Value> {
                 )
             }
             "combs_list" => {
-                let project_id = arguments
-                    .get("projectId")
-                    .and_then(|value| value.as_str());
+                let project_id = arguments.get("projectId").and_then(|value| value.as_str());
                 call_daemon("combs.list", serde_json::json!({ "projectId": project_id }))
             }
             "panes_list" => {
-                let project_id = arguments
-                    .get("projectId")
-                    .and_then(|value| value.as_str());
+                let project_id = arguments.get("projectId").and_then(|value| value.as_str());
                 let comb_id = arguments.get("combId").and_then(|value| value.as_str());
                 call_daemon(
                     "panes.list",

@@ -2,6 +2,7 @@ use dev_command_center_tauri::http_api::build_router;
 use dev_command_center_tauri::http_config::HttpConfig;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 #[tokio::main]
 async fn main() {
@@ -32,7 +33,12 @@ async fn main() {
         }
     };
 
-    let config = Arc::new(config);
+    println!("[DCC HTTP] Auth mode: {:?}", config.effective_auth_mode());
+    if let Some(expires_at) = config.bearer_token_expires_at {
+        println!("[DCC HTTP] Bearer token expires at: {expires_at}");
+    }
+
+    let config = Arc::new(RwLock::new(config));
     let app = build_router(config.clone());
 
     println!("[DCC HTTP] Listening on http://{addr}");

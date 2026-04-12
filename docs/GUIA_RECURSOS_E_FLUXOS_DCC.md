@@ -339,7 +339,7 @@ flowchart TB
 
 ## 15. Limitações e próximos passos
 
-Funcionalidades **ainda não** cobertas por este guia (HTTP API do daemon, integração Issues/PR, scrollback persistente, confirmações UI adicionais, etc.) estão listadas por prioridade em [`MELHORIAS_INSPIRADAS_ARBOR.md`](./MELHORIAS_INSPIRADAS_ARBOR.md). Use esse documento para alinhar expectativas de roadmap com a visão Arbor.
+Funcionalidades **ainda não** cobertas por este guia (HTTP API do daemon em modo remoto como produto, integração Issues/PR, confirmações UI adicionais, etc.) estão listadas por prioridade em [`MELHORIAS_INSPIRADAS_ARBOR.md`](./MELHORIAS_INSPIRADAS_ARBOR.md). **Nota:** o **histórico do terminal por painel** já **persiste** após reinício da aplicação (SQLite comprimido por `pane_id`; ver secção 1 e “Implementações Recentes” em MELHORIAS). Use esse documento para alinhar expectativas de roadmap com a visão Arbor.
 
 ---
 

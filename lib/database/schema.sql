@@ -90,6 +90,16 @@ CREATE INDEX IF NOT EXISTS idx_combs_pinned ON combs(is_pinned DESC, pinned_at D
 CREATE INDEX IF NOT EXISTS idx_panes_comb ON panes(comb_id);
 CREATE INDEX IF NOT EXISTS idx_panes_layout ON panes(comb_id, layout_order);
 
+-- Histórico de terminal (scrollback) persistido por painel — gzip(JSON array de chunks UTF-8), reidratação após reinício da app
+CREATE TABLE IF NOT EXISTS pane_terminal_scrollback (
+  pane_id TEXT PRIMARY KEY,
+  payload_z BLOB NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (pane_id) REFERENCES panes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pane_scrollback_updated ON pane_terminal_scrollback(updated_at DESC);
+
 -- Tabela de estado do daemon (tasks agendadas + sessões persistentes no processo)
 CREATE TABLE IF NOT EXISTS daemon_task_runs (
   id TEXT PRIMARY KEY,

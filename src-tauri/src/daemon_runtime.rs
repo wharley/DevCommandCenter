@@ -254,9 +254,15 @@ fn open_connection(db_path: &Path) -> Result<Connection, String> {
 
 fn local_shell_command(command: &str) -> (String, Vec<String>) {
     if cfg!(windows) {
-        ("cmd".to_string(), vec!["/C".to_string(), command.to_string()])
+        (
+            "cmd".to_string(),
+            vec!["/C".to_string(), command.to_string()],
+        )
     } else {
-        ("sh".to_string(), vec!["-lc".to_string(), command.to_string()])
+        (
+            "sh".to_string(),
+            vec!["-lc".to_string(), command.to_string()],
+        )
     }
 }
 
@@ -504,7 +510,10 @@ fn upsert_daemon_task_state(
     enabled: bool,
 ) -> Result<(), String> {
     let trigger = runtime.task.trigger.clone();
-    let id = format!("daemon-task-state-{}-{}", runtime.project_id, runtime.task.id);
+    let id = format!(
+        "daemon-task-state-{}-{}",
+        runtime.project_id, runtime.task.id
+    );
     conn.execute(
         "
         INSERT INTO daemon_task_runs (
@@ -569,7 +578,10 @@ fn upsert_daemon_task_state(
     Ok(())
 }
 
-fn daemon_task_state_to_payload(runtime: &RepoTaskRuntime, state: Option<DaemonTaskRunState>) -> Value {
+fn daemon_task_state_to_payload(
+    runtime: &RepoTaskRuntime,
+    state: Option<DaemonTaskRunState>,
+) -> Value {
     let state = state.unwrap_or_default();
     let status = if state.status.is_empty() {
         "idle".to_string()
@@ -650,7 +662,10 @@ fn upsert_daemon_process_state(
     cwd_mode: &str,
     auto_restart: bool,
 ) -> Result<(), String> {
-    let id = format!("daemon-process-state-{}-{}", runtime.project_id, runtime.process.id);
+    let id = format!(
+        "daemon-process-state-{}-{}",
+        runtime.project_id, runtime.process.id
+    );
     conn.execute(
         "
         INSERT INTO daemon_processes (
@@ -717,7 +732,10 @@ fn upsert_daemon_process_state(
     Ok(())
 }
 
-fn daemon_process_state_to_payload(runtime: &RepoProcessRuntime, state: Option<DaemonProcessState>) -> Value {
+fn daemon_process_state_to_payload(
+    runtime: &RepoProcessRuntime,
+    state: Option<DaemonProcessState>,
+) -> Value {
     let state = state.unwrap_or_default();
     let status = if state.status.is_empty() {
         "stopped".to_string()
@@ -752,7 +770,10 @@ fn daemon_process_state_to_payload(runtime: &RepoProcessRuntime, state: Option<D
     })
 }
 
-fn task_next_run_at(task: &RepoTaskPayload, from: DateTime<Local>) -> Result<Option<String>, String> {
+fn task_next_run_at(
+    task: &RepoTaskPayload,
+    from: DateTime<Local>,
+) -> Result<Option<String>, String> {
     if !task.enabled.unwrap_or(true) {
         return Ok(None);
     }
@@ -857,7 +878,10 @@ impl DaemonService {
     }
 
     fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
-        let conn = self.conn.lock().map_err(|_| "daemon db lock poisoned".to_string())?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "daemon db lock poisoned".to_string())?;
         f(&conn)
     }
 
@@ -900,7 +924,9 @@ impl DaemonService {
                 let project_path: String = row.get(2).map_err(|e| e.to_string())?;
                 let repo_config_raw: Option<String> = row.get(3).map_err(|e| e.to_string())?;
                 let project_path_buf = PathBuf::from(&project_path);
-                for process in parse_repo_config_processes(repo_config_raw.as_deref(), &project_path_buf) {
+                for process in
+                    parse_repo_config_processes(repo_config_raw.as_deref(), &project_path_buf)
+                {
                     processes.push(RepoProcessRuntime {
                         project_id: project_id.clone(),
                         project_name: project_name.clone(),
@@ -913,7 +939,11 @@ impl DaemonService {
         })
     }
 
-    fn resolve_task_cwd(&self, runtime: &RepoTaskRuntime, cwd_mode: &str) -> Result<String, String> {
+    fn resolve_task_cwd(
+        &self,
+        runtime: &RepoTaskRuntime,
+        cwd_mode: &str,
+    ) -> Result<String, String> {
         if cwd_mode == "project" {
             return Ok(runtime.project_path.clone());
         }
@@ -931,7 +961,11 @@ impl DaemonService {
         })
     }
 
-    fn resolve_process_cwd(&self, runtime: &RepoProcessRuntime, cwd_mode: &str) -> Result<String, String> {
+    fn resolve_process_cwd(
+        &self,
+        runtime: &RepoProcessRuntime,
+        cwd_mode: &str,
+    ) -> Result<String, String> {
         if cwd_mode == "project" {
             return Ok(runtime.project_path.clone());
         }
@@ -965,7 +999,10 @@ impl DaemonService {
 
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         let pid = child.id();
-        let pty_id = format!("daemon-task-{}-{}-{pid}", runtime.project_id, runtime.task.id);
+        let pty_id = format!(
+            "daemon-task-{}-{}-{pid}",
+            runtime.project_id, runtime.task.id
+        );
         let output_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(160)));
 
         if let Some(stdout) = child.stdout.take() {
@@ -1017,10 +1054,7 @@ impl DaemonService {
         Ok(daemon_task_state_to_payload(&runtime, Some(state)))
     }
 
-    fn create_managed_process(
-        &self,
-        runtime: RepoProcessRuntime,
-    ) -> Result<Value, String> {
+    fn create_managed_process(&self, runtime: RepoProcessRuntime) -> Result<Value, String> {
         let cwd_mode = normalize_task_cwd_mode(runtime.process.cwd_mode.as_deref());
         let cwd = self.resolve_process_cwd(&runtime, &cwd_mode)?;
         let (program, args) = task_shell_command(&runtime.process.command);
@@ -1032,7 +1066,10 @@ impl DaemonService {
 
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         let pid = child.id();
-        let pty_id = format!("daemon-process-{}-{}-{pid}", runtime.project_id, runtime.process.id);
+        let pty_id = format!(
+            "daemon-process-{}-{}-{pid}",
+            runtime.project_id, runtime.process.id
+        );
         let output_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(160)));
 
         if let Some(stdout) = child.stdout.take() {
@@ -1099,7 +1136,15 @@ impl DaemonService {
                 .map_err(|_| "daemon run lock poisoned".to_string())?;
             for (key, task) in active.iter_mut() {
                 if let Some(status) = task.child.try_wait().map_err(|e| e.to_string())? {
-                    finished.push((key.clone(), task.runtime.clone(), task.started_at.clone(), status.code().unwrap_or(-1), task.output_buffer.clone(), task.attached, task.next_run_at.clone()));
+                    finished.push((
+                        key.clone(),
+                        task.runtime.clone(),
+                        task.started_at.clone(),
+                        status.code().unwrap_or(-1),
+                        task.output_buffer.clone(),
+                        task.attached,
+                        task.next_run_at.clone(),
+                    ));
                 }
             }
             for (key, _, _, _, _, _, _) in &finished {
@@ -1115,16 +1160,13 @@ impl DaemonService {
 
         self.with_conn(|conn| {
             for (_, runtime, started_at, code, output_buffer, _, _) in finished {
-                let excerpt = output_buffer
-                    .lock()
-                    .ok()
-                    .and_then(|buffer| {
-                        buffer
-                            .iter()
-                            .rev()
-                            .find(|line| !line.trim().is_empty())
-                            .map(|line| line.trim().chars().take(240).collect::<String>())
-                    });
+                let excerpt = output_buffer.lock().ok().and_then(|buffer| {
+                    buffer
+                        .iter()
+                        .rev()
+                        .find(|line| !line.trim().is_empty())
+                        .map(|line| line.trim().chars().take(240).collect::<String>())
+                });
                 let cwd_mode = normalize_task_cwd_mode(runtime.task.cwd_mode.as_deref());
                 let mut row = read_daemon_task_state(conn, &runtime.project_id, &runtime.task.id)?
                     .unwrap_or_default();
@@ -1167,7 +1209,8 @@ impl DaemonService {
 
         // Executar triggers coletados (fora do with_conn para evitar deadlock)
         for (runtime, trigger, exit_code, output_excerpt) in triggers_to_execute {
-            if let Err(err) = execute_trigger(&runtime, &trigger, exit_code, &output_excerpt, self) {
+            if let Err(err) = execute_trigger(&runtime, &trigger, exit_code, &output_excerpt, self)
+            {
                 eprintln!(
                     "[DCC][trigger] Erro ao executar trigger para task '{}': {}",
                     runtime.task.name, err
@@ -1247,21 +1290,29 @@ impl DaemonService {
         }
 
         self.with_conn(|conn| {
-            for (_, runtime, _started_at, code, output_buffer, restart_count, backoff_seconds, should_restart) in finished {
-                let excerpt = output_buffer
-                    .lock()
-                    .ok()
-                    .and_then(|buffer| {
-                        buffer
-                            .iter()
-                            .rev()
-                            .find(|line| !line.trim().is_empty())
-                            .map(|line| line.trim().chars().take(240).collect::<String>())
-                    });
+            for (
+                _,
+                runtime,
+                _started_at,
+                code,
+                output_buffer,
+                restart_count,
+                backoff_seconds,
+                should_restart,
+            ) in finished
+            {
+                let excerpt = output_buffer.lock().ok().and_then(|buffer| {
+                    buffer
+                        .iter()
+                        .rev()
+                        .find(|line| !line.trim().is_empty())
+                        .map(|line| line.trim().chars().take(240).collect::<String>())
+                });
 
                 let cwd_mode = normalize_task_cwd_mode(runtime.process.cwd_mode.as_deref());
-                let mut row = read_daemon_process_state(conn, &runtime.project_id, &runtime.process.id)?
-                    .unwrap_or_default();
+                let mut row =
+                    read_daemon_process_state(conn, &runtime.project_id, &runtime.process.id)?
+                        .unwrap_or_default();
 
                 let crashed = code != 0;
 
@@ -1290,15 +1341,19 @@ impl DaemonService {
                     row.last_restart_at = Some(local_now_string());
                     row.status = "restarting".to_string();
 
-                    println!("[daemon] Process {} crashed (exit {}), will restart in {}s (restart #{})",
-                             runtime.process.name, code, new_backoff, new_restart_count);
+                    println!(
+                        "[daemon] Process {} crashed (exit {}), will restart in {}s (restart #{})",
+                        runtime.process.name, code, new_backoff, new_restart_count
+                    );
 
                     // Preparar para restart após backoff
                     to_restart.push((runtime.clone(), new_backoff, new_restart_count));
                 } else if crashed {
                     row.restart_count = restart_count;
-                    println!("[daemon] Process {} crashed (exit {}) but auto_restart is disabled",
-                             runtime.process.name, code);
+                    println!(
+                        "[daemon] Process {} crashed (exit {}) but auto_restart is disabled",
+                        runtime.process.name, code
+                    );
                 }
 
                 upsert_daemon_process_state(
@@ -1319,15 +1374,25 @@ impl DaemonService {
             // Re-criar o processo
             match self.restart_managed_process(runtime.clone(), restart_count, backoff_seconds) {
                 Ok(_) => {
-                    println!("[daemon] Process {} restarted successfully", runtime.process.name);
+                    println!(
+                        "[daemon] Process {} restarted successfully",
+                        runtime.process.name
+                    );
                 }
                 Err(e) => {
-                    println!("[daemon] Failed to restart process {}: {}", runtime.process.name, e);
+                    println!(
+                        "[daemon] Failed to restart process {}: {}",
+                        runtime.process.name, e
+                    );
                     // Marcar como failed no banco
                     let _ = self.with_conn(|conn| {
                         let cwd_mode = normalize_task_cwd_mode(runtime.process.cwd_mode.as_deref());
-                        let mut row = read_daemon_process_state(conn, &runtime.project_id, &runtime.process.id)?
-                            .unwrap_or_default();
+                        let mut row = read_daemon_process_state(
+                            conn,
+                            &runtime.project_id,
+                            &runtime.process.id,
+                        )?
+                        .unwrap_or_default();
                         row.status = "failed".to_string();
                         row.last_error = Some(format!("restart failed: {}", e));
                         upsert_daemon_process_state(
@@ -1362,7 +1427,10 @@ impl DaemonService {
 
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         let pid = child.id();
-        let pty_id = format!("daemon-process-{}-{}-{pid}", runtime.project_id, runtime.process.id);
+        let pty_id = format!(
+            "daemon-process-{}-{}-{pid}",
+            runtime.project_id, runtime.process.id
+        );
         let output_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(160)));
 
         if let Some(stdout) = child.stdout.take() {
@@ -1435,7 +1503,9 @@ impl DaemonService {
                 if runtime.task.enabled.unwrap_or(true) {
                     enabled_tasks += 1;
                 }
-                if let Some(state_row) = read_daemon_task_state(conn, &runtime.project_id, &runtime.task.id)? {
+                if let Some(state_row) =
+                    read_daemon_task_state(conn, &runtime.project_id, &runtime.task.id)?
+                {
                     if state_row.status == "running" {
                         running_tasks += 1;
                     }
@@ -1468,7 +1538,8 @@ impl DaemonService {
         self.with_conn(|conn| {
             let mut out = Vec::new();
             for runtime in tasks {
-                let state_row = read_daemon_task_state(conn, &runtime.project_id, &runtime.task.id)?;
+                let state_row =
+                    read_daemon_task_state(conn, &runtime.project_id, &runtime.task.id)?;
                 out.push(daemon_task_state_to_payload(&runtime, state_row));
             }
             Ok(Value::Array(out))
@@ -1531,7 +1602,8 @@ impl DaemonService {
                         continue;
                     }
                 }
-                let state_row = read_daemon_process_state(conn, &runtime.project_id, &runtime.process.id)?;
+                let state_row =
+                    read_daemon_process_state(conn, &runtime.project_id, &runtime.process.id)?;
                 out.push(daemon_process_state_to_payload(&runtime, state_row));
             }
             Ok(Value::Array(out))
@@ -1581,8 +1653,8 @@ impl DaemonService {
 
             self.with_conn(|conn| {
                 let cwd_mode = normalize_task_cwd_mode(runtime.process.cwd_mode.as_deref());
-                let mut state = read_daemon_process_state(conn, project_id, process_id)?
-                    .unwrap_or_default();
+                let mut state =
+                    read_daemon_process_state(conn, project_id, process_id)?.unwrap_or_default();
                 state.status = "stopped".to_string();
                 state.pid = None;
                 state.stopped_at = Some(local_now_string());
@@ -1805,8 +1877,9 @@ impl DaemonService {
             let mut next_run_at = None;
 
             self.with_conn(|conn| {
-                let mut state_row = read_daemon_task_state(conn, &runtime.project_id, &runtime.task.id)?
-                    .unwrap_or_default();
+                let mut state_row =
+                    read_daemon_task_state(conn, &runtime.project_id, &runtime.task.id)?
+                        .unwrap_or_default();
                 if !enabled {
                     state_row.status = "disabled".to_string();
                     state_row.attached = false;
@@ -1826,7 +1899,12 @@ impl DaemonService {
                     return Ok(());
                 }
 
-                if let Some(due_at) = state_row.next_run_at.as_deref().and_then(|raw| DateTime::parse_from_rfc3339(raw).ok()).map(|dt| dt.with_timezone(&Local)) {
+                if let Some(due_at) = state_row
+                    .next_run_at
+                    .as_deref()
+                    .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
+                    .map(|dt| dt.with_timezone(&Local))
+                {
                     if now >= due_at {
                         should_run = true;
                         next_run_at = task_next_run_at(&runtime.task, now).ok().flatten();
@@ -1839,8 +1917,9 @@ impl DaemonService {
                 let _ = self.create_running_task(runtime.clone(), false)?;
                 if let Some(next_run_at) = next_run_at {
                     self.with_conn(|conn| {
-                        let mut state_row = read_daemon_task_state(conn, &runtime.project_id, &runtime.task.id)?
-                            .unwrap_or_default();
+                        let mut state_row =
+                            read_daemon_task_state(conn, &runtime.project_id, &runtime.task.id)?
+                                .unwrap_or_default();
                         state_row.next_run_at = Some(next_run_at);
                         upsert_daemon_task_state(conn, &runtime, &state_row, &cwd_mode, true)
                     })?;
@@ -1862,8 +1941,14 @@ fn handle_rpc(service: &DaemonService, request: RpcRequest) -> RpcResponse {
         "daemon.listTasks" => service.list_tasks(),
         "daemon.runTask" => {
             match (
-                request.params.get("projectId").and_then(|value| value.as_str()),
-                request.params.get("taskId").and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("projectId")
+                    .and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("taskId")
+                    .and_then(|value| value.as_str()),
             ) {
                 (Some(project_id), Some(task_id)) => service.run_task(project_id, task_id),
                 (None, _) => Err("missing projectId".to_string()),
@@ -1872,8 +1957,14 @@ fn handle_rpc(service: &DaemonService, request: RpcRequest) -> RpcResponse {
         }
         "daemon.attachTask" => {
             match (
-                request.params.get("projectId").and_then(|value| value.as_str()),
-                request.params.get("taskId").and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("projectId")
+                    .and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("taskId")
+                    .and_then(|value| value.as_str()),
             ) {
                 (Some(project_id), Some(task_id)) => service.attach_task(project_id, task_id),
                 (None, _) => Err("missing projectId".to_string()),
@@ -1882,8 +1973,14 @@ fn handle_rpc(service: &DaemonService, request: RpcRequest) -> RpcResponse {
         }
         "daemon.detachTask" => {
             match (
-                request.params.get("projectId").and_then(|value| value.as_str()),
-                request.params.get("taskId").and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("projectId")
+                    .and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("taskId")
+                    .and_then(|value| value.as_str()),
             ) {
                 (Some(project_id), Some(task_id)) => service.detach_task(project_id, task_id),
                 (None, _) => Err("missing projectId".to_string()),
@@ -1891,46 +1988,82 @@ fn handle_rpc(service: &DaemonService, request: RpcRequest) -> RpcResponse {
             }
         }
         "daemon.listProcesses" => {
-            let project_id = request.params.get("projectId").and_then(|value| value.as_str());
+            let project_id = request
+                .params
+                .get("projectId")
+                .and_then(|value| value.as_str());
             service.list_processes(project_id)
         }
         "daemon.startProcess" => {
             match (
-                request.params.get("projectId").and_then(|value| value.as_str()),
-                request.params.get("processId").and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("projectId")
+                    .and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("processId")
+                    .and_then(|value| value.as_str()),
             ) {
-                (Some(project_id), Some(process_id)) => service.start_process(project_id, process_id),
+                (Some(project_id), Some(process_id)) => {
+                    service.start_process(project_id, process_id)
+                }
                 (None, _) => Err("missing projectId".to_string()),
                 (_, None) => Err("missing processId".to_string()),
             }
         }
         "daemon.stopProcess" => {
             match (
-                request.params.get("projectId").and_then(|value| value.as_str()),
-                request.params.get("processId").and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("projectId")
+                    .and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("processId")
+                    .and_then(|value| value.as_str()),
             ) {
-                (Some(project_id), Some(process_id)) => service.stop_process(project_id, process_id),
+                (Some(project_id), Some(process_id)) => {
+                    service.stop_process(project_id, process_id)
+                }
                 (None, _) => Err("missing projectId".to_string()),
                 (_, None) => Err("missing processId".to_string()),
             }
         }
         "daemon.restartProcess" => {
             match (
-                request.params.get("projectId").and_then(|value| value.as_str()),
-                request.params.get("processId").and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("projectId")
+                    .and_then(|value| value.as_str()),
+                request
+                    .params
+                    .get("processId")
+                    .and_then(|value| value.as_str()),
             ) {
-                (Some(project_id), Some(process_id)) => service.restart_process(project_id, process_id),
+                (Some(project_id), Some(process_id)) => {
+                    service.restart_process(project_id, process_id)
+                }
                 (None, _) => Err("missing projectId".to_string()),
                 (_, None) => Err("missing processId".to_string()),
             }
         }
         "combs.list" => {
-            let project_id = request.params.get("projectId").and_then(|value| value.as_str());
+            let project_id = request
+                .params
+                .get("projectId")
+                .and_then(|value| value.as_str());
             service.list_combs(project_id)
         }
         "panes.list" => {
-            let project_id = request.params.get("projectId").and_then(|value| value.as_str());
-            let comb_id = request.params.get("combId").and_then(|value| value.as_str());
+            let project_id = request
+                .params
+                .get("projectId")
+                .and_then(|value| value.as_str());
+            let comb_id = request
+                .params
+                .get("combId")
+                .and_then(|value| value.as_str());
             service.list_panes(project_id, comb_id)
         }
         "diffs.bundle" => {
@@ -2073,13 +2206,22 @@ fn render_trigger_prompt(
         .replace("{{command}}", command)
         .replace("{{exit_code}}", &exit_code.to_string())
         .replace("{{output}}", output)
-        .replace("{{status}}", if exit_code == 0 { "success" } else { "failure" })
+        .replace(
+            "{{status}}",
+            if exit_code == 0 { "success" } else { "failure" },
+        )
 }
 
 fn call_anthropic_api(provider: &ProviderRow, prompt: &str) -> Result<String, String> {
     let client = reqwest::blocking::Client::new();
-    let model = provider.model.as_deref().unwrap_or("claude-3-5-sonnet-20241022");
-    let base_url = provider.base_url.as_deref().unwrap_or("https://api.anthropic.com");
+    let model = provider
+        .model
+        .as_deref()
+        .unwrap_or("claude-3-5-sonnet-20241022");
+    let base_url = provider
+        .base_url
+        .as_deref()
+        .unwrap_or("https://api.anthropic.com");
 
     let response = client
         .post(format!("{}/v1/messages", base_url))
@@ -2119,7 +2261,10 @@ fn call_anthropic_api(provider: &ProviderRow, prompt: &str) -> Result<String, St
 fn call_openai_api(provider: &ProviderRow, prompt: &str) -> Result<String, String> {
     let client = reqwest::blocking::Client::new();
     let model = provider.model.as_deref().unwrap_or("gpt-4");
-    let base_url = provider.base_url.as_deref().unwrap_or("https://api.openai.com");
+    let base_url = provider
+        .base_url
+        .as_deref()
+        .unwrap_or("https://api.openai.com");
 
     let response = client
         .post(format!("{}/v1/chat/completions", base_url))
@@ -2159,7 +2304,10 @@ fn call_ai_provider(provider: &ProviderRow, prompt: &str) -> Result<String, Stri
     match provider.provider_type.as_str() {
         "anthropic" => call_anthropic_api(provider, prompt),
         "openai" => call_openai_api(provider, prompt),
-        _ => Err(format!("Provider type '{}' não suportado", provider.provider_type)),
+        _ => Err(format!(
+            "Provider type '{}' não suportado",
+            provider.provider_type
+        )),
     }
 }
 
@@ -2251,8 +2399,11 @@ pub fn serve(service: Arc<DaemonService>, runtime_file: &Path) -> Result<(), Str
     if let Some(parent) = runtime_file.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(runtime_file, serde_json::to_string_pretty(&runtime).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    fs::write(
+        runtime_file,
+        serde_json::to_string_pretty(&runtime).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
 
     let request_service = service.clone();
     thread::spawn(move || request_loop(request_service));

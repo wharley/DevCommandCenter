@@ -22,7 +22,11 @@ fn binary_stem() -> &'static str {
 }
 
 fn binary_extension() -> &'static str {
-    if cfg!(windows) { ".exe" } else { "" }
+    if cfg!(windows) {
+        ".exe"
+    } else {
+        ""
+    }
 }
 
 fn target_triple() -> &'static str {
@@ -64,7 +68,12 @@ fn target_triple() -> &'static str {
 pub fn sidecar_binary_candidates() -> Vec<String> {
     vec![
         format!("{}{}", binary_stem(), binary_extension()),
-        format!("{}-{}{}", binary_stem(), target_triple(), binary_extension()),
+        format!(
+            "{}-{}{}",
+            binary_stem(),
+            target_triple(),
+            binary_extension()
+        ),
     ]
 }
 
@@ -182,7 +191,11 @@ fn wait_for_runtime_info(app_data_dir: &Path, timeout: Duration) -> Option<Daemo
     None
 }
 
-fn wait_for_rpc_response(db_path: &Path, request_id: &str, timeout: Duration) -> Result<Value, String> {
+fn wait_for_rpc_response(
+    db_path: &Path,
+    request_id: &str,
+    timeout: Duration,
+) -> Result<Value, String> {
     let started = Instant::now();
     loop {
         let conn = open_connection(db_path)?;
@@ -204,18 +217,18 @@ fn wait_for_rpc_response(db_path: &Path, request_id: &str, timeout: Duration) ->
         if let Some((status, response_json, error)) = row {
             match status.as_str() {
                 "done" => {
-                    let raw = response_json.ok_or_else(|| "daemon response missing payload".to_string())?;
-                    let response = serde_json::from_str::<Value>(&raw).map_err(|e| e.to_string())?;
+                    let raw = response_json
+                        .ok_or_else(|| "daemon response missing payload".to_string())?;
+                    let response =
+                        serde_json::from_str::<Value>(&raw).map_err(|e| e.to_string())?;
                     if response.get("ok").and_then(|value| value.as_bool()) == Some(true) {
                         return Ok(response.get("result").cloned().unwrap_or(Value::Null));
                     }
-                    return Err(
-                        response
-                            .get("error")
-                            .and_then(|value| value.as_str())
-                            .unwrap_or("daemon request failed")
-                            .to_string(),
-                    );
+                    return Err(response
+                        .get("error")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("daemon request failed")
+                        .to_string());
                 }
                 "error" => {
                     return Err(error.unwrap_or_else(|| "daemon request failed".to_string()));
@@ -231,8 +244,17 @@ fn wait_for_rpc_response(db_path: &Path, request_id: &str, timeout: Duration) ->
     }
 }
 
-pub fn rpc_with_info(info: &DaemonRuntimeInfo, method: &str, params: Value) -> Result<Value, String> {
-    rpc_with_db_path_timeout(Path::new(&info.db_path), method, params, Duration::from_secs(30))
+pub fn rpc_with_info(
+    info: &DaemonRuntimeInfo,
+    method: &str,
+    params: Value,
+) -> Result<Value, String> {
+    rpc_with_db_path_timeout(
+        Path::new(&info.db_path),
+        method,
+        params,
+        Duration::from_secs(30),
+    )
 }
 
 pub fn rpc_with_db_path(db_path: &Path, method: &str, params: Value) -> Result<Value, String> {
@@ -286,7 +308,10 @@ pub fn ensure_sidecar_running(
         let mut cargo = Command::new("cargo");
         cargo
             .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .env("CARGO_TARGET_DIR", std::env::temp_dir().join("dcc-sidecar-target"))
+            .env(
+                "CARGO_TARGET_DIR",
+                std::env::temp_dir().join("dcc-sidecar-target"),
+            )
             .args(["run", "--quiet", "--bin", "dccd", "--"]);
         cargo
     };

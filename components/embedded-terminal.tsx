@@ -101,10 +101,13 @@ export function EmbeddedTerminal({
       if (ce.detail?.type !== "clearScrollback") return;
       const t = xtermRef.current;
       if (t) t.clear();
+      if (paneId && window.desktopAPI?.terminal?.clearPersistedScrollback) {
+        void window.desktopAPI.terminal.clearPersistedScrollback(paneId);
+      }
     };
     window.addEventListener("dcc-terminal-action", onAction as EventListener);
     return () => window.removeEventListener("dcc-terminal-action", onAction as EventListener);
-  }, []);
+  }, [paneId]);
 
   // Search keyboard shortcuts
   useEffect(() => {

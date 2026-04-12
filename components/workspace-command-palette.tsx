@@ -11,9 +11,17 @@ import {
   Workflow,
   WandSparkles,
   Clock3,
+  FileText,
 } from "lucide-react";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
-import type { Comb, Pane, Project, ProjectRepoConfig, RepoTaskDefinition } from "@/lib/database/types";
+import type {
+  Comb,
+  Pane,
+  Project,
+  ProjectRepoConfig,
+  RepoTaskDefinition,
+  RepoTaskTemplate,
+} from "@/lib/database/types";
 
 interface WorkspaceCommandPaletteProps {
   open: boolean;
@@ -25,6 +33,8 @@ interface WorkspaceCommandPaletteProps {
   activeCombId: string | null;
   activePaneId: string | null;
   repoConfig: ProjectRepoConfig | null;
+  /** Templates Markdown em `.dcc/tasks` (repo). */
+  taskTemplates: RepoTaskTemplate[];
   tasks: RepoTaskDefinition[];
   onOpenSettings: () => void;
   onOpenNewWorkspace: () => void;
@@ -53,6 +63,7 @@ export function WorkspaceCommandPalette({
   activeCombId,
   activePaneId,
   repoConfig,
+  taskTemplates,
   tasks,
   onOpenSettings,
   onOpenNewWorkspace,
@@ -251,6 +262,32 @@ export function WorkspaceCommandPalette({
             </CommandItem>
           ))}
         </CommandGroup>
+
+        {taskTemplates.length > 0 ? (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Templates de tarefas (.dcc/tasks)">
+              {taskTemplates.map((tpl) => (
+                <CommandItem
+                  key={tpl.id}
+                  value={`template task ${tpl.name} ${tpl.id} ${tpl.command}`}
+                  onSelect={() => {
+                    onLaunchCommand({
+                      title: tpl.name,
+                      command: tpl.command,
+                      cwdMode: tpl.cwdMode ?? "worktree",
+                      description: tpl.description ?? null,
+                    });
+                    onOpenChange(false);
+                  }}
+                >
+                  <FileText className="h-4 w-4" />
+                  {tpl.name}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        ) : null}
 
         <CommandSeparator />
 

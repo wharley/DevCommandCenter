@@ -74,6 +74,8 @@ export function installDesktopBridge(): void {
       killByPaneId: (paneId) => call("terminal_kill_by_pane_id", { paneId }),
       getBacklog: (ptyId) =>
         call<{ lines: string[] }>("terminal_get_backlog", { ptyId }),
+      clearPersistedScrollback: (paneId: string) =>
+        call<{ ok: boolean }>("terminal_clear_persisted_scrollback", { paneId }),
       getProjectActivity: (projectId) =>
         call<{
           totalRunningPanes: number;
@@ -171,6 +173,18 @@ export function installDesktopBridge(): void {
       getDiffs: (combId) => call("comb_get_diffs", { combId }),
       applyPatch: (combId, targetBranch, options) =>
         call("comb_apply_patch", { combId, targetBranch, options }),
+    },
+    repo: {
+      listTaskTemplates: (projectPath: string) =>
+        call<
+          Array<{
+            id: string;
+            name: string;
+            command: string;
+            description?: string | null;
+            cwdMode: "project" | "worktree";
+          }>
+        >("repo_list_task_templates", { projectPath }),
     },
     window: {
       minimize: () => call<void>("window_minimize"),

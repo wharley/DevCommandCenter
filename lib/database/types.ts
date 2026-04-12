@@ -202,6 +202,16 @@ export interface RepoTaskDefinition {
   trigger?: RepoTaskTriggerDefinition | null;
 }
 
+/** Template Markdown em `.dcc/tasks/*.md` (partilhável no repositório). */
+export interface RepoTaskTemplate {
+  id: string;
+  name: string;
+  /** Texto inicial do painel (comando shell ou prompt longo). */
+  command: string;
+  description?: string | null;
+  cwdMode: "project" | "worktree";
+}
+
 export interface ProjectRepoConfig {
   branchPrefix?: string | null;
   defaultAgentProviderId?: string | null;

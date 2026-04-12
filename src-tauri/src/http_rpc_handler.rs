@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 
 use crate::daemon_client::rpc_with_db_path_timeout;
 use crate::http_config::HttpConfig;
@@ -32,9 +33,11 @@ pub struct RpcResponse {
 
 /// Handler for POST /rpc endpoint
 pub async fn handle_rpc(
-    State(config): State<Arc<HttpConfig>>,
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     Json(request): Json<RpcRequest>,
 ) -> Result<Json<RpcResponse>, RpcError> {
+    let config = config.read().await;
+
     // Validate method against whitelist
     if !is_valid_method(&request.method) {
         return Ok(Json(RpcResponse {
@@ -103,18 +106,9 @@ pub enum RpcError {
 impl IntoResponse for RpcError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
-            RpcError::DaemonNotRunning => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Daemon not running",
-            ),
-            RpcError::Timeout => (
-                StatusCode::GATEWAY_TIMEOUT,
-                "Daemon timeout",
-            ),
-            RpcError::Internal(ref msg) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                msg.as_str(),
-            ),
+            RpcError::DaemonNotRunning => (StatusCode::SERVICE_UNAVAILABLE, "Daemon not running"),
+            RpcError::Timeout => (StatusCode::GATEWAY_TIMEOUT, "Daemon timeout"),
+            RpcError::Internal(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.as_str()),
         };
 
         (

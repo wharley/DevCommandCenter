@@ -806,6 +806,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "chrono",
+ "flate2",
  "lazy_static",
  "portable-pty",
  "regex",

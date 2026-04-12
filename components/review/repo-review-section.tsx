@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
   ArrowDownToLine,
@@ -47,6 +48,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { DiffFileTree } from "@/components/review/diff-file-tree";
 import { DiffCodeBlock } from "@/components/diff-code-block";
 import { CommitDialog } from "@/components/dialogs/commit-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
@@ -134,13 +136,22 @@ export function RepoReviewSection({
   const [diffs, setDiffs] = useState<{
     loading: boolean;
     error?: string;
-    files: Array<{ path: string; status: string; diff: string }>;
+    files: Array<{
+      path: string;
+      status: string;
+      diff: string;
+      insertions?: number;
+      deletions?: number;
+    }>;
     summary: {
       changedFiles: number;
       insertions: number;
       deletions: number;
     } | null;
   }>({ loading: false, files: [], summary: null });
+
+  const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
+  const diffFileCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const [fileFlags, setFileFlags] = useState<Record<string, ReviewFlag>>({});
   const [included, setIncluded] = useState<Record<string, boolean>>({});
@@ -173,6 +184,20 @@ export function RepoReviewSection({
     () => diffs.files.map((f) => f.path).sort().join("\0"),
     [diffs.files],
   );
+
+  useEffect(() => {
+    setSelectedDiffPath(null);
+  }, [filePathsKey]);
+
+  const navigateToDiffFile = useCallback((path: string) => {
+    setSelectedDiffPath(path);
+    requestAnimationFrame(() => {
+      diffFileCardRefs.current[path]?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    });
+  }, []);
 
   const addTrail = useCallback(
     (message: string) => {
@@ -1083,27 +1108,51 @@ export function RepoReviewSection({
         </DialogContent>
       </Dialog>
 
-      <ScrollArea
-        className={
-          compact ? "max-h-[min(70vh,560px)]" : "min-h-0 flex-1"
-        }
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col md:flex-row",
+          compact ? "max-h-[min(70vh,560px)]" : "",
+        )}
       >
-        {diffs.loading ? (
-          <div className="flex items-center justify-center p-8">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : diffs.error ? (
-          <div className="p-4 text-sm text-destructive">{diffs.error}</div>
-        ) : diffs.files.length === 0 ? (
-          <div className="p-8 text-center text-sm text-muted-foreground">
-            Nenhuma alteração detectada neste repositório.
-          </div>
-        ) : (
-          <div className="space-y-4 p-4">
-            {diffs.files.map((file) => {
-              const tokens = extractContextTokens(file.diff);
-              return (
-                <div key={file.path} className="rounded-lg border border-border">
+        {diffs.loading ? null : diffs.error ? null : diffs.files.length === 0 ? null : (
+          <DiffFileTree
+            files={diffs.files}
+            selectedPath={selectedDiffPath}
+            onFileSelect={navigateToDiffFile}
+            compact={compact}
+          />
+        )}
+        <ScrollArea
+          className={cn(
+            compact ? "min-h-0 flex-1 md:min-h-[min(70vh,560px)]" : "min-h-0 flex-1",
+          )}
+        >
+          {diffs.loading ? (
+            <div className="flex items-center justify-center p-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : diffs.error ? (
+            <div className="p-4 text-sm text-destructive">{diffs.error}</div>
+          ) : diffs.files.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              Nenhuma alteração detectada neste repositório.
+            </div>
+          ) : (
+            <div className="space-y-4 p-4">
+              {diffs.files.map((file) => {
+                const tokens = extractContextTokens(file.diff);
+                return (
+                  <div
+                    key={file.path}
+                    ref={(el) => {
+                      diffFileCardRefs.current[file.path] = el;
+                    }}
+                    className={cn(
+                      "scroll-mt-2 rounded-lg border border-border transition-shadow",
+                      selectedDiffPath === file.path &&
+                        "ring-2 ring-primary/35 shadow-sm",
+                    )}
+                  >
                   <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
                     <Checkbox
                       checked={included[file.path] !== false}
@@ -1143,6 +1192,20 @@ export function RepoReviewSection({
                     <span className="min-w-0 flex-1 truncate font-mono text-sm">
                       {file.path}
                     </span>
+                    {(file.insertions ?? 0) > 0 || (file.deletions ?? 0) > 0 ? (
+                      <span
+                        className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground"
+                        title="Inserções / remoções (diff)"
+                      >
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          +{file.insertions ?? 0}
+                        </span>
+                        <span className="mx-0.5 opacity-40">/</span>
+                        <span className="text-rose-600 dark:text-rose-400">
+                          −{file.deletions ?? 0}
+                        </span>
+                      </span>
+                    ) : null}
                     <Badge variant="outline" className="shrink-0 text-[10px]">
                       {file.status}
                     </Badge>
@@ -1166,11 +1229,12 @@ export function RepoReviewSection({
                   ) : null}
                   <DiffCodeBlock content={file.diff} />
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </ScrollArea>
+                );
+              })}
+            </div>
+          )}
+        </ScrollArea>
+      </div>
 
       <div
         className={`shrink-0 border-t border-border bg-muted/20 ${compact ? "py-1.5" : ""}`}

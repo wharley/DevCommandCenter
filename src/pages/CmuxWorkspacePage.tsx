@@ -56,6 +56,7 @@ import type {
   Project,
   ProjectRepoConfig,
   RepoTaskDefinition,
+  RepoTaskTemplate,
   Provider,
 } from "@/lib/database/types";
 import type { DaemonDiffBundleItem, DaemonStatus, DaemonTaskStatus } from "@/types/app";
@@ -70,6 +71,7 @@ import {
 import { useTerminalProjectActivity } from "@/hooks/use-terminal-project-activity";
 import { WorkspaceCommandPalette } from "@/components/workspace-command-palette";
 import { ProcessesPanel } from "@/components/processes-panel";
+import { getCombDiscardDialogCopy } from "@/lib/comb-discard-confirmation";
 
 const CLI_PROVIDER_TYPES = ["codex", "claude-code", "gemini", "cursor"] as const;
 
@@ -702,6 +704,7 @@ export default function CmuxWorkspacePage() {
   const [attentionOpen, setAttentionOpen] = useState(false);
   const [daemonStatus, setDaemonStatus] = useState<DaemonStatus | null>(null);
   const [daemonTasks, setDaemonTasks] = useState<DaemonTaskStatus[]>([]);
+  const [taskTemplates, setTaskTemplates] = useState<RepoTaskTemplate[]>([]);
   const [daemonCombs, setDaemonCombs] = useState<Comb[]>([]);
   const [daemonPanes, setDaemonPanes] = useState<Pane[]>([]);
   const [daemonDiffBundle, setDaemonDiffBundle] = useState<DaemonDiffBundleItem[]>([]);
@@ -791,6 +794,25 @@ export default function CmuxWorkspacePage() {
     () => activeRepoConfig?.tasks ?? [],
     [activeRepoConfig],
   );
+  useEffect(() => {
+    const path = activeProject?.path?.trim();
+    if (!path || !window.desktopAPI?.repo?.listTaskTemplates) {
+      setTaskTemplates([]);
+      return;
+    }
+    let cancelled = false;
+    void window.desktopAPI.repo
+      .listTaskTemplates(path)
+      .then((list) => {
+        if (!cancelled) setTaskTemplates(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setTaskTemplates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject?.path]);
   const daemonApi = window.desktopAPI?.daemon;
   const projectNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -1360,39 +1382,14 @@ export default function CmuxWorkspacePage() {
   };
 
   const handleRemoveWorkspace = async (combId: string) => {
-    // Check for unpushed commits first
-    let unpushedInfo = null;
-    try {
-      if (window.desktopAPI?.comb?.checkUnpushed) {
-        unpushedInfo = await window.desktopAPI.comb.checkUnpushed(combId);
-      }
-    } catch (error) {
-      console.warn("Failed to check unpushed commits:", error);
-    }
-
-    // Build confirmation message based on unpushed commits
-    let description = "Worktree e panes serão removidos.";
-    let title = "Remover workspace?";
-    let confirmLabel = "Remover";
-
-    if (unpushedInfo?.hasUnpushed) {
-      title = "⚠️ Commits não enviados detectados";
-      const commitPreview = unpushedInfo.commits
-        .slice(0, 5)
-        .map((c: string) => `  • ${c}`)
-        .join("\n");
-      const moreText =
-        unpushedInfo.count > 5 ? `\n  ... e mais ${unpushedInfo.count - 5} commit(s)` : "";
-
-      description = `Este workspace tem ${unpushedInfo.count} commit(s) não enviado(s) para o remote:\n\n${commitPreview}${moreText}\n\nRemover este workspace irá DELETAR permanentemente estes commits.\n\nTem certeza que deseja continuar?`;
-      confirmLabel = "Sim, remover mesmo assim";
-    }
+    const dialogCopy = await getCombDiscardDialogCopy(combId);
 
     const confirmed = await confirmDialog({
-      title,
-      description,
-      confirmLabel,
+      title: dialogCopy.title,
+      description: dialogCopy.description,
+      confirmLabel: dialogCopy.confirmLabel,
       cancelLabel: "Cancelar",
+      confirmVariant: dialogCopy.confirmVariant,
     });
 
     if (!confirmed) return;
@@ -2202,6 +2199,7 @@ export default function CmuxWorkspacePage() {
         activeCombId={activeCombId}
         activePaneId={activePaneId}
         repoConfig={activeRepoConfig}
+        taskTemplates={taskTemplates}
         tasks={activeRepoTasks}
         onOpenSettings={() => setShowProviders(true)}
         onOpenNewWorkspace={() => setNewCombOpen(true)}

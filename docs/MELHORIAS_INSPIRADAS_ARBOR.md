@@ -7,7 +7,7 @@ O DCC pretende ser **ferramenta de uso diário** o mais completa e útil possív
 
 **Base no DCC atual (auditoria interna):**
 
-- Terminal: `portable_pty` + eventos `terminal-output` / `terminal-attention` / `terminal-exit`, buffer de backlog (`terminal_get_backlog`), `TERM=xterm-256color` em Unix, integração Git em worktrees via `GIT_DIR` / `GIT_WORK_TREE`.
+- Terminal: `portable_pty` + eventos `terminal-output` / `terminal-attention` / `terminal-exit`, buffer de backlog (`terminal_get_backlog`) com **persistência por painel** (`pane_terminal_scrollback`, gzip/JSON), `TERM=xterm-256color` em Unix, integração Git em worktrees via `GIT_DIR` / `GIT_WORK_TREE`.
 - UI: `xterm.js` + `FitAddon`, preferências em `localStorage`, heurística de atenção e integração com panes (`paneId`, reattach).
 - Dados: SQLite (`projects`, `combs`, `panes`, `providers`).
 - Worktree: `comb_ensure_worktree`, `comb_discard`, diffs de review; **`comb_merge_into_main` e `comb_apply_patch` já foram implementados** e fecham o ciclo de integração do worktree.
@@ -48,7 +48,7 @@ Para cada área: **o que o Arbor destaca** → **benefício para o DCC** → **v
 | Motor VT opcional (ex.: Ghostty) embutido no app nativo | Melhor desempenho em cenários extremos | **Parcial**: em stack WebView, o gargalo é **xterm.js + canvas/WebGL**, não um VT nativo alternativo sem reescrever a camada de render. Priorizar **addons** e tuning. |
 | **Várias abas de terminal por worktree** | Menos panes “genéricos”, mais sessões nomeadas no mesmo workspace | **Sim**: UI de abas no painel de terminal ou múltiplos `ptyId` agrupados por `combId`, reutilizando o mesmo `cwd`. |
 | **Bell** e notificações conscientes de atividade | Utilizador não perde eventos quando o terminal está em segundo plano | **Sim**: mapear **bell** do xterm (`onBell`) → `app_show_notification` ou evento de atenção; alinhar com OSC já tratados no Rust (ex.: protocolos tipo Ghostty no `check_needs_attention`). |
-| Scrollback grande / histórico | Depuração de logs longos sem perder contexto | **Sim**: aumentar limites configuráveis; opcional **persistência** do scrollback por sessão (ficheiro ou SQLite comprimido). |
+| Scrollback grande / histórico | Depuração de logs longos sem perder contexto | **Sim**: limites no buffer em memória (~1000 chunks); **persistência** por `pane_id` em SQLite (payload gzip + JSON), reidratação ao reabrir o workspace. |
 | **Batching** de output para o renderer | Menos jank e menos pressão no IPC | **Já existe** padrão ~60fps + limite de bytes no reader. Documentar e afinar constantes por plataforma. |
 
 **Implementações concretas recomendadas**
@@ -147,7 +147,7 @@ As **`[[tasks]]` com cron** e os **triggers** pós-execução (ver Arbor) já es
 |------------------|------------------|-------|
 | **`[[tasks]]` com cron** (incl. segundos) no daemon | *Triage* periódico, relatórios, sync | **Já existe** um scheduler no daemon com UI para listar, executar, anexar e desanexar tarefas. |
 | **Triggers** pós-execução (stdout → prompt para agente) | Automação “quando o script terminar, pedir revisão à IA” | **Parcial**: a infraestrutura está montada, mas o pipeline declarativo ainda pode ficar mais rico. |
-| **Templates** Markdown em pasta do repo (`.arbor/tasks` → `.dcc/tasks`) | Presets partilháveis no repositório | **Sim**: ler ficheiros + mostrar na paleta de comandos. |
+| **Templates** Markdown em pasta do repo (`.arbor/tasks` → `.dcc/tasks`) | Presets partilháveis no repositório | **Implementado**: ficheiros `.md` em `.dcc/tasks/` (subpastas incluídas), frontmatter opcional (`title`, `command`, `description`, `cwd_mode`), corpo como prompt se `command` vazio; grupo na paleta (**⌘K**) e API `repo_list_task_templates`. |
 | **Webhooks** para eventos (agent started/finished) | Integração com Slack/Discord/CI | **Ainda por fazer**: pode ser encaixado no daemon ou como *hook* opcional no app. |
 
 ---
@@ -157,7 +157,7 @@ As **`[[tasks]]` com cron** e os **triggers** pós-execução (ver Arbor) já es
 | Inspiração Arbor | Benefício no DCC | Tauri |
 |------------------|------------------|-------|
 | **`dcc-mcp`** (stdio) a falar com API local | Cursor/Codex/Claude Desktop orquestram worktrees/terminais via MCP | **Já existe** um servidor MCP via stdio no binário `dcc`, com tools mínimas e expansão incremental. |
-| **HTTP API** + **CLI** (`arbor-cli` → `dcc`) | Scripts CI, automação remota (com token) | **CLI já existe**; a **HTTP API mínima** já existe e o próximo passo é separar consumo local de consumo remoto com auth própria. |
+| **HTTP API** + **CLI** (`arbor-cli` → `dcc`) | Scripts CI, automação remota (com token) | **CLI já existe**; a **HTTP API** já suporta modo local e remoto com auth própria e rotação de token. |
 | **Recursos MCP** (snapshot do daemon, *prompts* de workflow) | Onboarding consistente para agentes | **Parcial**: já há snapshot do daemon, mas a camada de prompts/workflows ainda pode crescer. |
 
 Isto posiciona o DCC como **hub** para ferramentas externas, não só GUI — alinhado ao modelo Arbor sem exigir GPUI. **MCP e API/CLI** são parte desse **ecossistema pretendido**, quando o daemon estiver disponível.
@@ -207,7 +207,7 @@ Benefício: **reprodutibilidade** entre máquinas e equipas, tal como no Arbor. 
 
 | Inspiração / boa prática | Benefício no DCC | Tauri |
 |---------------------------|------------------|-------|
-| Tokens para API remota | Mesmo padrão Arbor (`Authorization: Bearer`) | **Fase 2**: necessário quando o daemon sair do localhost. |
+| Tokens para API remota | Mesmo padrão Arbor (`Authorization: Bearer`) | **Já existe**: modo remoto/híbrido com rotação e expiração configuráveis. |
 | **Secrets** só no *keychain* / *credential manager** | Menos exposição que SQLite em texto | Já há rumo a `api_key_encrypted`; estender padrão. |
 | Sandboxing de comandos de *preset* | Evitar `rm -rf /` acidental | **Sim**: confirmação + lista de permitidos. |
 
@@ -246,7 +246,7 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 1. Fechar o que ainda está pendente nos comandos de app/diálogo/licença, mantendo o contrato Tauri estável.
 2. **Terminal**: addons WebGL/search, preferências de scrollback, **bell** → notificação.
 3. **Confirmação de discard** com **commits não pushed**.
-4. **HTTP API**: a superfície mínima já existe; o próximo foco é auth remota, SDK/cliente tipado e rotas mais resource-oriented.
+4. **Criptografia de Secrets**: fechar `api_key_encrypted` com keychain/credential manager.
 
 **P1 — Diferenciação forte**
 
@@ -285,7 +285,7 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 | xterm.js com WebGL addon | ✅ | `embedded-terminal.tsx:7` | v5.3.0 com FitAddon, SearchAddon |
 | xterm Search addon | ✅ | `embedded-terminal.tsx:8` | UI de busca integrada |
 | Preferências de aparência (font, theme) | ✅ | `terminal-preferences.ts` | `getTerminalAppearancePreferences` |
-| Scrollback persistente em SQLite | ❌ | - | Buffer só em memória, perda ao reiniciar |
+| Scrollback persistente em SQLite | ✅ | `schema.sql:pane_terminal_scrollback`, `main.rs` (`persist_pane_scrollback_compressed`, `load_pane_scrollback_deque`, `terminal_clear_persisted_scrollback`) | Gzip(JSON dos chunks); throttle ~1,6s + flush ao fechar reader; `restart: true` limpa persistido; ação UI “limpar scrollback” sincroniza DB + buffer |
 | OSC 52 (remote clipboard) | ❌ | - | Não implementado |
 | Signal handling explícito (SIGTERM/SIGKILL) | 🟡 | - | Ctrl+C funciona, mas sem API customizada para sinais |
 | Configuração scrollback lines no UI | ❌ | - | Falta exposição no settings |
@@ -305,7 +305,7 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 | Runtime file (daemon-runtime.json) | ✅ | `daemon_runtime.rs:83` | PID, started_at, db_path |
 | RPC via SQLite (daemon_rpc_requests) | ✅ | `daemon_runtime.rs:1233` | Request loop processa até 32 requests/200ms |
 | WebSocket/Event stream tempo real | ❌ | - | Polling via RPC, sem WebSocket |
-| HTTP API REST | 🟡 | `src-tauri/src/http_api.rs` | REST local com auth X-API-Key e OpenAPI |
+| HTTP API REST | ✅ | `src-tauri/src/http_api.rs` | REST local + remota, auth `X-API-Key`/`Bearer`, OpenAPI e rotação |
 | Health metrics (CPU/RAM daemon) | ❌ | - | Status básico existe, métricas de recursos não |
 
 ---
@@ -350,7 +350,7 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 | Regras de nome de branch (prefix_mode) | ✅ | `main.rs:375` | Leitura de `branchPrefix` do .dcc.toml |
 | Scripts setup/teardown | ✅ | `main.rs:4040,4139` | Executa comandos configurados |
 | Rollback se setup falhar | ❌ | - | Setup retorna erro, mas não faz undo do worktree |
-| Confirmação de delete com unpushed | 🟡 | - | Check implementado, UI não força confirmação |
+| Confirmação de delete com unpushed | ✅ | `lib/comb-discard-confirmation.ts`, `CmuxWorkspacePage.tsx` | `comb_check_unpushed` + diálogo (variante destrutiva se há unpushed ou se a verificação falha) |
 | Histórico de navegação entre worktrees | ❌ | - | Falta pilha de navegação (browser-like) |
 | Última atividade Git por worktree | 🟡 | `schema.sql:daemon_task_runs` | `last_run_at` existe, falta watch periódico Git |
 | Preview de branch/path sanitizado | 🟡 | `main.rs:4047` | Sanitização existe, falta preview na UI |
@@ -374,8 +374,8 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 | Item | Status | Referência | Notas |
 |------|--------|------------|-------|
 | Várias abas de diff | ❌ | - | Falta componente de tabs no frontend |
-| Contagens +/- por ficheiro | 🟡 | `main.rs:4570` | `build_review_diffs_for_path` calcula, falta UI |
-| Lista de ficheiros + árvore expand/collapse | ❌ | - | Falta componente de árvore |
+| Contagens +/- por ficheiro | ✅ | `main.rs` (`build_review_diffs_for_path`), `repo-review-section.tsx`, `diff-file-tree.tsx` | Campos `insertions`/`deletions` por ficheiro no JSON; UI na árvore e no cabeçalho do cartão |
+| Lista de ficheiros + árvore expand/collapse | ✅ | `diff-file-tree.tsx`, `lib/review/diff-file-tree-model.ts`, `repo-review-section.tsx` | Pastas expand/recolher; clique faz scroll ao diff; destaque do ficheiro ativo |
 | Notas por worktree (.dcc/notes.md) | ❌ | - | Falta editor Markdown no UI |
 | Comentários inline de PR | ❌ | - | Falta integração com API forge |
 | DiffCodeBlock | ✅ | `diff-code-block.tsx` | Syntax highlighting com Prism.js |
@@ -403,7 +403,7 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 | Execução de tasks agendadas | ✅ | `daemon_runtime.rs:614` | `create_running_task` spawn comandos |
 | UI para listar/run tasks | ✅ | `workspace-command-palette.tsx` | Grupo Tasks com ícone Clock3 |
 | **Triggers pós-execução (stdout → prompt)** | ✅ | `daemon_runtime.rs:2020-2071` | **IMPLEMENTADO**: Pipeline completo com suporte Anthropic + OpenAI |
-| Templates Markdown em .dcc/tasks | ❌ | - | Falta leitura de pasta de templates |
+| Templates Markdown em .dcc/tasks | ✅ | `main.rs` (`repo_list_task_templates`, `list_repo_task_templates_impl`), `workspace-command-palette.tsx`, `CmuxWorkspacePage.tsx` | Leitura recursiva de `*.md`; YAML frontmatter simples; limite 256 KB/ficheiro; grupo na paleta quando há ficheiros |
 | Webhooks para eventos (agent started/finished) | ❌ | - | Falta infraestrutura de webhooks |
 | [[tasks]] em .dcc.toml | ✅ | `daemon_runtime.rs:308` | `parse_task_toml_from_repo_config` |
 
@@ -419,18 +419,16 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 | Resources MCP (snapshots, prompts) | ❌ | - | Falta implementação de resources |
 | Prompts MCP (workflows) | ❌ | - | Falta templates pré-definidos |
 | CLI dcc (daemon status/tasks/run/attach/detach) | ✅ | `dcc.rs:18-67` | Comandos completos |
-| HTTP API REST | 🟡 | `src-tauri/src/http_api.rs`, `src-tauri/src/bin/dccd-http.rs` | **CRÍTICO**: REST mínima local + compatibilidade `/rpc`; próximo: recursos tipados e auth remota |
+| HTTP API REST | ✅ | `src-tauri/src/http_api.rs`, `src-tauri/src/bin/dccd-http.rs` | REST local + remota com `X-API-Key`/`Bearer`, compatibilidade `/rpc` e rotação de token |
 | Autenticação local | ✅ | `src-tauri/src/http_auth.rs` | Header `X-API-Key` nas rotas protegidas |
-| Autenticação remota (Bearer/token) | ❌ | - | Próximo passo para expor o daemon fora da máquina local |
+| Autenticação remota (Bearer/token) | ✅ | `src-tauri/src/http_auth.rs`, `src-tauri/src/http_config.rs` | `Authorization: Bearer`, rotação e expiração configuráveis |
 | Documentação OpenAPI | ✅ | `docs/GUIA_HTTP_API.md`, `src-tauri/src/http_api.rs` | `GET /openapi.json` |
 
 **Próximos passos recomendados nesta área**
 
-1. Separar formalmente o contrato local do contrato remoto.
-2. Evoluir os endpoints atuais para payloads resource-oriented e tipados.
-3. Implementar auth remota com Bearer token e rotação/expiração.
-4. Gerar um client tipado para o frontend ou integrações externas.
-5. Crescer os resources MCP e prompts sobre a mesma base de dados/contrato.
+1. Evoluir os endpoints atuais para payloads resource-oriented e tipados.
+2. Consolidar clientes tipados e SDK para integrações externas.
+3. Crescer os resources MCP e prompts sobre a mesma base de dados/contrato.
 
 ---
 
@@ -448,7 +446,7 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 
 | Item | Status | Referência | Notas |
 |------|--------|------------|-------|
-| Command palette (cmd+k) | ✅ | `workspace-command-palette.tsx` | Grupos: Global, Projeto, Workspaces, Panes, Presets, Tasks |
+| Command palette (cmd+k) | ✅ | `workspace-command-palette.tsx` | Grupos: Global, Projeto, Workspaces, Panes, Processos, Presets, Templates (.dcc/tasks), Tasks |
 | Fuzzy search | ✅ | `workspace-command-palette.tsx` | Sobre projetos, combs, panes, comandos |
 | Temas partilhados | ✅ | `xterm-theme.ts` | `getXtermColorTheme`, ThemeProvider |
 | Título da janela com branch/worktree | ❌ | - | Falta API de janela Tauri para dynamic title |
@@ -481,7 +479,7 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 
 | Item | Status | Referência | Notas |
 |------|--------|------------|-------|
-| Tokens para API remota (Bearer) | ❌ | - | Ainda não existe para uso remoto; localmente já usamos `X-API-Key` |
+| Tokens para API remota (Bearer) | ✅ | `src-tauri/src/http_auth.rs`, `src-tauri/src/http_config.rs` | `Authorization: Bearer` com rotação e expiração |
 | Secrets no keychain/credential manager | 🟡 | `schema.sql:providers.api_key_encrypted` | Campo existe, criptografia não implementada |
 | `db_providers_is_encryption_available` | ✅ | `main.rs:3642` | Retorna false (stub) |
 | Sandboxing de comandos preset | ❌ | - | Falta confirmação + allow list |
@@ -534,31 +532,32 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
    - ✅ Log de execução com `println!` (tabela SQL em Fase 2)
    - ✅ Documentação completa: `docs/GUIA_TRIGGERS_TASKS.md`
 
-3. **HTTP API REST** (Secção 10)
-   - REST mínima já implementada em `dccd-http` com auth por API key
-   - Próximo passo: expandir recursos e contratos públicos
+3. ✅ **HTTP API REST** (Secção 10)
+   - ✅ REST local + remota em `dccd-http`
+   - ✅ Auth por `X-API-Key` no modo local e `Authorization: Bearer` no modo remoto/híbrido
+   - ✅ Rotação de bearer token e OpenAPI atualizado
+   - Próximo foco: recursos tipados e SDK/clientes para integrações externas
 
-4. **Criptografia de Secrets** (Secção 14)
+4. 🟡 **Criptografia de Secrets** (Secção 14)
+   - Importante para endurecer credenciais, mas já não bloqueia o fluxo completo
    - `api_key_encrypted` usa keychain/credential manager
    - Estimativa: ~200 linhas Rust
 
 ### 🟡 **IMPORTANTE** (Completam funcionalidades existentes)
 
-5. **Scrollback Persistente** (Secção 1)
-   - Salvar buffer terminal em SQLite comprimido
-   - Estimativa: ~150 linhas Rust
+5. ✅ **Scrollback Persistente** (Secção 1) — **implementado**
+   - Tabela `pane_terminal_scrollback`, gzip sobre JSON dos mesmos chunks que o buffer circular; `terminal_get_or_create_for_pane` injeta `paneId` no spawn para o reader persistir por painel.
 
-6. **Confirmação de Delete com Unpushed** (Secção 5)
-   - UI força confirmação quando há commits não pushed
-   - Estimativa: ~50 linhas React
+6. ✅ **Confirmação de Delete com Unpushed** (Secção 5)
+   - Helper `getCombDiscardDialogCopy` + botão de confirmação destrutivo quando há unpushed ou erro ao verificar
 
-7. **Árvore de Arquivos para Diffs** (Secção 7)
-   - Componente de navegação em diffs grandes
-   - Estimativa: ~300 linhas React
+7. ✅ **Árvore de Arquivos para Diffs** (Secção 7) — **implementado**
+   - `DiffFileTree` + modelo `buildDiffFileTree`; integração em `RepoReviewSection` (layout árvore + lista, scroll para ficheiro, ring no cartão)
+   - API `git_get_review_diffs`: métricas `insertions`/`deletions` por ficheiro; tipos em `types/app.d.ts`
 
-8. **Templates de Tasks** (Secção 9)
-   - Ler `.dcc/tasks/*.md` e expor na command palette
-   - Estimativa: ~100 linhas Rust + 100 linhas React
+8. ✅ **Templates de Tasks** (Secção 9) — **COMPLETO**
+   - Comando Tauri `repo_list_task_templates`, ponte `desktopAPI.repo.listTaskTemplates`
+   - Grupo «Templates de tarefas (.dcc/tasks)» na paleta (antes de «Tarefas agendadas»)
 
 ### 🟢 **DESEJÁVEL** (Polimento e UX)
 
@@ -582,16 +581,16 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 
 | Área | Implementado | Parcial | Pendente | % Completo |
 |------|-------------|---------|----------|------------|
-| Terminal PTY | 9 | 3 | 5 | 75% |
+| Terminal PTY | 10 | 3 | 4 | ~76% |
 | Daemon/Sessões | 7 | 0 | 3 | 70% |
 | Sinais/Lifecycle | 2 | 1 | 3 | 50% |
 | **Processos** | **9** | **0** | **0** | **100%** |
 | Worktrees/Git | 8 | 3 | 3 | 79% |
 | Issues/Forges | 1 | 1 | 4 | 20% |
-| Diff/Review | 1 | 1 | 4 | 25% |
+| Diff/Review | 3 | 0 | 3 | ~50% |
 | Agentes IA | 1 | 1 | 3 | 30% |
-| **Tasks Agendadas** | **6** | **0** | **3** | **67% → 75%** |
-| MCP/API/CLI | 5 | 0 | 4 | 56% |
+| **Tasks Agendadas** | **7** | **0** | **2** | **~78%** (falta webhooks + evoluções opcionais) |
+| MCP/API/CLI | 7 | 0 | 2 | 78% |
 | Acesso Remoto | 0 | 0 | 3 | 0% (Fase 2) |
 | UI/UX | 6 | 2 | 3 | 67% |
 | Config Repo | 10 | 0 | 2 | 83% |
@@ -599,11 +598,29 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 | Observabilidade | 0 | 2 | 2 | 25% |
 | Stubs Tauri | 0 | 0 | 8 | 0% |
 
-**TOTAL GERAL: 66 implementados (+2) + 15 parciais (-1) + 52 pendentes ≈ 69% completo (+2%)**
+**TOTAL GERAL: 72 implementados (+1 templates de tasks) + 13 parciais + 46 pendentes ≈ 73% completo (métricas aproximadas)**
 
 ---
 
 ## 🎉 Implementações Recentes
+
+### Templates de tarefas `.dcc/tasks` (Secção 9) — (2026-04-11) ✅
+
+- **Rust**: `repo_list_task_templates` em `src-tauri/src/main.rs` — pasta `.dcc/tasks`, ficheiros `*.md` (árvore recursiva), frontmatter `---` … `---` com chaves `title` / `name`, `command`, `description`, `cwd_mode` (`project` \| `worktree`); se `command` estiver vazio, usa o corpo Markdown como texto inicial do painel (mesmo fluxo que presets).
+- **Frontend**: estado em `CmuxWorkspacePage.tsx` (carrega ao mudar o path do projeto), `WorkspaceCommandPalette` com grupo condicional e ícone `FileText`.
+- **Ponte**: `window.desktopAPI.repo.listTaskTemplates(projectPath)` em `src/lib/desktop-bridge.ts`; tipos `RepoTaskTemplate` em `lib/database/types.ts` e `types/app.d.ts`.
+
+### Árvore de ficheiros para revisão de diffs (Secção 7) — (2026-04-11) ✅
+
+- **Rust**: `build_review_diffs_for_path` em `src-tauri/src/main.rs` inclui `insertions` e `deletions` por ficheiro no payload JSON (reutiliza `count_diff_stats` já usado no resumo).
+- **Frontend**: `components/review/diff-file-tree.tsx`, `lib/review/diff-file-tree-model.ts`; lista hierárquica com pastas expansíveis, contagens +/− por ficheiro quando aplicável, seleção e scroll até ao bloco de diff em `components/review/repo-review-section.tsx`.
+- **Tipos**: `types/app.d.ts` (`getReviewDiffs` / bundle de review).
+
+### Scrollback persistente — terminal por painel (2026-04-11) ✅
+
+- **SQLite**: tabela `pane_terminal_scrollback` (`pane_id`, `payload_z` gzip, `updated_at`), ver `lib/database/schema.sql`.
+- **Host Rust**: serialização JSON dos chunks do buffer circular → gzip (`flate2`); carregamento ao `terminal_spawn` quando há `paneId`; persistência com throttle (~1,6s), flush ao terminar o reader e ao matar o PTY; comando `terminal_clear_persisted_scrollback` alinhado à ação “limpar scrollback” na UI (`embedded-terminal.tsx` + `desktop-bridge.ts`).
+- **Workspace**: `terminal_get_or_create_for_pane` passa `paneId` nas options do spawn (o reader e o UPDATE de `panes` passam a receber o id na criação do PTY).
 
 ### Triggers de Tasks (2026-04-11) ✅
 

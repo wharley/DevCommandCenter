@@ -1,7 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike};
+use dev_command_center_tauri::daemon_client::{
+    ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo,
+};
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use flate2::Compression;
+use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
 use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -16,12 +22,11 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
-use dev_command_center_tauri::daemon_client::{ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo};
 
 /// Schema SQLite compartilhado com `lib/database/schema.sql` (CREATE IF NOT EXISTS).
 const APP_SCHEMA_SQL: &str = include_str!("../../lib/database/schema.sql");
@@ -246,6 +251,74 @@ fn append_terminal_line(buffer: &Arc<Mutex<VecDeque<String>>>, line: &str) {
             guard.pop_front();
         }
         guard.push_back(line.to_string());
+    }
+}
+
+/// Intervalo mínimo entre escritas do scrollback comprimido no SQLite (evita pressão no WAL).
+const PANE_SCROLLBACK_PERSIST_INTERVAL: Duration = Duration::from_millis(1600);
+
+fn persist_pane_scrollback_compressed(
+    conn: &Connection,
+    pane_id: &str,
+    lines: &[String],
+) -> Result<(), String> {
+    if lines.is_empty() {
+        conn.execute(
+            "DELETE FROM pane_terminal_scrollback WHERE pane_id = ?1",
+            params![pane_id],
+        )
+        .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let json = serde_json::to_vec(lines).map_err(|e| e.to_string())?;
+    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+    enc.write_all(&json).map_err(|e| e.to_string())?;
+    let compressed = enc.finish().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO pane_terminal_scrollback (pane_id, payload_z, updated_at) VALUES (?1, ?2, datetime('now')) \
+         ON CONFLICT(pane_id) DO UPDATE SET payload_z = excluded.payload_z, updated_at = excluded.updated_at",
+        params![pane_id, compressed],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn load_pane_scrollback_deque(conn: &Connection, pane_id: &str) -> Option<VecDeque<String>> {
+    let blob: Vec<u8> = conn
+        .query_row(
+            "SELECT payload_z FROM pane_terminal_scrollback WHERE pane_id = ?1",
+            params![pane_id],
+            |row| row.get(0),
+        )
+        .ok()?;
+    let mut decoder = GzDecoder::new(&blob[..]);
+    let mut json = Vec::new();
+    decoder.read_to_end(&mut json).ok()?;
+    let lines: Vec<String> = serde_json::from_slice(&json).ok()?;
+    let mut dq = VecDeque::with_capacity(lines.len().min(TERMINAL_OUTPUT_MAX_LINES));
+    for line in lines {
+        while dq.len() >= TERMINAL_OUTPUT_MAX_LINES {
+            dq.pop_front();
+        }
+        dq.push_back(line);
+    }
+    Some(dq)
+}
+
+fn persist_managed_terminal_buffer(state: &AppState, t: &ManagedTerminal) {
+    let Some(ref pane_id) = t.pane_id else {
+        return;
+    };
+    let lines: Vec<String> = t
+        .output_buffer
+        .lock()
+        .ok()
+        .map(|g| g.iter().cloned().collect())
+        .unwrap_or_default();
+    if let Ok(conn) = state.conn.lock() {
+        if let Err(e) = persist_pane_scrollback_compressed(&conn, pane_id, &lines) {
+            eprintln!("[DCC] pane scrollback persist failed: {e}");
+        }
     }
 }
 
@@ -617,7 +690,11 @@ fn sync_existing_repo_configs(conn: &Connection) -> Result<(), String> {
                 }
                 Ok(None) => {}
                 Err(err) => {
-                    eprintln!("[DCC] Skipping invalid .dcc.toml at {}: {}", file_path.display(), err);
+                    eprintln!(
+                        "[DCC] Skipping invalid .dcc.toml at {}: {}",
+                        file_path.display(),
+                        err
+                    );
                 }
             }
             continue;
@@ -974,7 +1051,9 @@ fn build_review_diffs_for_path(target_path: &str) -> ApiResult<Value> {
         files.push(serde_json::json!({
             "path": path,
             "status": status,
-            "diff": diff
+            "diff": diff,
+            "insertions": ins,
+            "deletions": del
         }));
     }
 
@@ -1200,7 +1279,10 @@ struct DaemonTaskRunState {
 }
 
 fn collect_repo_tasks(state: &AppState) -> Result<Vec<RepoTaskRuntime>, String> {
-    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, name, path, repo_config FROM projects ORDER BY name ASC")
         .map_err(|e| e.to_string())?;
@@ -1272,7 +1354,10 @@ fn upsert_daemon_task_state(
     enabled: bool,
 ) -> Result<(), String> {
     let trigger = runtime.task.trigger.clone();
-    let id = format!("daemon-task-state-{}-{}", runtime.project_id, runtime.task.id);
+    let id = format!(
+        "daemon-task-state-{}-{}",
+        runtime.project_id, runtime.task.id
+    );
     conn.execute(
         "
         INSERT INTO daemon_task_runs (
@@ -1377,7 +1462,10 @@ fn parse_local_datetime(raw: &str) -> Option<DateTime<Local>> {
         .map(|dt| dt.with_timezone(&Local))
 }
 
-fn task_next_run_at(task: &RepoTaskPayload, from: DateTime<Local>) -> Result<Option<String>, String> {
+fn task_next_run_at(
+    task: &RepoTaskPayload,
+    from: DateTime<Local>,
+) -> Result<Option<String>, String> {
     if !task.enabled.unwrap_or(true) {
         return Ok(None);
     }
@@ -1391,7 +1479,10 @@ fn task_shell_command(command: &str) -> (String, Vec<String>) {
 
 fn daemon_get_status_internal(state: &AppState) -> Result<Value, String> {
     let tasks = collect_repo_tasks(state)?;
-    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
     let mut total_tasks = 0i64;
     let mut enabled_tasks = 0i64;
     let mut running_tasks = 0i64;
@@ -1405,7 +1496,9 @@ fn daemon_get_status_internal(state: &AppState) -> Result<Value, String> {
         if runtime.task.enabled.unwrap_or(true) {
             enabled_tasks += 1;
         }
-        if let Some(state_row) = read_daemon_task_state(&conn, &runtime.project_id, &runtime.task.id)? {
+        if let Some(state_row) =
+            read_daemon_task_state(&conn, &runtime.project_id, &runtime.task.id)?
+        {
             let is_running = state_row.status == "running"
                 && state_row
                     .pty_id
@@ -1439,7 +1532,10 @@ fn daemon_get_status_internal(state: &AppState) -> Result<Value, String> {
 
 fn daemon_list_tasks_internal(state: &AppState) -> Result<Value, String> {
     let tasks = collect_repo_tasks(state)?;
-    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
     let mut out = Vec::new();
 
     for runtime in tasks {
@@ -1451,7 +1547,10 @@ fn daemon_list_tasks_internal(state: &AppState) -> Result<Value, String> {
 }
 
 fn daemon_list_combs_internal(state: &AppState, project_id: Option<&str>) -> Result<Value, String> {
-    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
     let mut out = Vec::new();
 
     match project_id {
@@ -1478,9 +1577,7 @@ fn daemon_list_combs_internal(state: &AppState, project_id: Option<&str>) -> Res
                      LIMIT 100",
                 )
                 .map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map([], row_to_json)
-                .map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([], row_to_json).map_err(|e| e.to_string())?;
             for row in rows {
                 out.push(row.map(map_comb_to_renderer).map_err(|e| e.to_string())?);
             }
@@ -1495,12 +1592,17 @@ fn daemon_list_panes_internal(
     project_id: Option<&str>,
     comb_id: Option<&str>,
 ) -> Result<Value, String> {
-    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
     let mut out = Vec::new();
 
     if let Some(comb_id) = comb_id {
         let mut stmt = conn
-            .prepare("SELECT * FROM panes WHERE comb_id = ?1 ORDER BY layout_order ASC, created_at ASC")
+            .prepare(
+                "SELECT * FROM panes WHERE comb_id = ?1 ORDER BY layout_order ASC, created_at ASC",
+            )
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(params![comb_id], row_to_json)
@@ -1533,9 +1635,7 @@ fn daemon_list_panes_internal(
     let mut stmt = conn
         .prepare("SELECT * FROM panes ORDER BY layout_order ASC, created_at ASC")
         .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], row_to_json)
-        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], row_to_json).map_err(|e| e.to_string())?;
     for row in rows {
         out.push(row.map(map_pane_to_renderer).map_err(|e| e.to_string())?);
     }
@@ -1551,7 +1651,10 @@ fn daemon_get_diffs_bundle_internal(
     let mut paths = worktree_paths;
 
     if !comb_ids.is_empty() {
-        let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| "db lock poisoned".to_string())?;
         let mut stmt = conn
             .prepare("SELECT worktree_path FROM combs WHERE id = ?1 AND worktree_path IS NOT NULL AND worktree_path != ''")
             .map_err(|e| e.to_string())?;
@@ -1604,7 +1707,10 @@ fn daemon_spawn_task_runtime(
 ) -> Result<Value, String> {
     let enabled = runtime.task.enabled.unwrap_or(true);
     if !enabled && !force {
-        let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| "db lock poisoned".to_string())?;
         let state_row = DaemonTaskRunState {
             status: "disabled".into(),
             ..Default::default()
@@ -1629,7 +1735,10 @@ fn daemon_spawn_task_runtime(
     let pane_id = comb_id.as_ref().map(|_| next_id());
 
     if let Some(comb_id_value) = comb_id.as_ref() {
-        let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| "db lock poisoned".to_string())?;
         let layout_order = conn
             .query_row(
                 "SELECT COALESCE(MAX(layout_order), -1) + 1 FROM panes WHERE comb_id = ?1",
@@ -1666,7 +1775,8 @@ fn daemon_spawn_task_runtime(
     ) {
         Ok(id) => id,
         Err(err) => {
-            if let (Some(comb_id_value), Some(pane_id_value)) = (comb_id.as_ref(), pane_id.as_ref()) {
+            if let (Some(comb_id_value), Some(pane_id_value)) = (comb_id.as_ref(), pane_id.as_ref())
+            {
                 if let Ok(conn) = state.conn.lock() {
                     let _ = conn.execute(
                         "DELETE FROM panes WHERE id = ?1 AND comb_id = ?2",
@@ -1693,7 +1803,10 @@ fn daemon_spawn_task_runtime(
         }
     };
 
-    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
     let mut last_run_state = DaemonTaskRunState::default();
     last_run_state.status = "running".into();
     last_run_state.attached = attach || pane_id.is_some();
@@ -1716,13 +1829,20 @@ fn daemon_spawn_task_runtime(
     Ok(daemon_task_state_to_payload(runtime, Some(last_run_state)))
 }
 
-fn daemon_attach_task_internal(state: &AppState, project_id: &str, task_id: &str) -> Result<Value, String> {
+fn daemon_attach_task_internal(
+    state: &AppState,
+    project_id: &str,
+    task_id: &str,
+) -> Result<Value, String> {
     let tasks = collect_repo_tasks(state)?;
     let runtime = tasks
         .into_iter()
         .find(|item| item.project_id == project_id && item.task.id == task_id)
         .ok_or_else(|| "task not found".to_string())?;
-    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
     let mut row = read_daemon_task_state(&conn, project_id, task_id)?.unwrap_or_default();
     row.attached = true;
     row.status = if row.status.is_empty() {
@@ -1741,13 +1861,20 @@ fn daemon_attach_task_internal(state: &AppState, project_id: &str, task_id: &str
     Ok(daemon_task_state_to_payload(&runtime, Some(row)))
 }
 
-fn daemon_detach_task_internal(state: &AppState, project_id: &str, task_id: &str) -> Result<Value, String> {
+fn daemon_detach_task_internal(
+    state: &AppState,
+    project_id: &str,
+    task_id: &str,
+) -> Result<Value, String> {
     let tasks = collect_repo_tasks(state)?;
     let runtime = tasks
         .into_iter()
         .find(|item| item.project_id == project_id && item.task.id == task_id)
         .ok_or_else(|| "task not found".to_string())?;
-    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
     let mut row = read_daemon_task_state(&conn, project_id, task_id)?.unwrap_or_default();
     row.attached = false;
     if row.status.is_empty() {
@@ -1766,7 +1893,14 @@ fn daemon_detach_task_internal(state: &AppState, project_id: &str, task_id: &str
 
 fn daemon_sweep_terminal_exits_internal(app: &AppHandle, state: &AppState) -> Result<(), String> {
     let task_catalog = collect_repo_tasks(state)?;
-    let mut events: Vec<(String, Option<String>, Option<String>, Option<String>, Option<i64>, String)> = Vec::new();
+    let mut events: Vec<(
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        String,
+    )> = Vec::new();
     {
         let mut terminals = state
             .terminals
@@ -1781,20 +1915,16 @@ fn daemon_sweep_terminal_exits_internal(app: &AppHandle, state: &AppState) -> Re
             };
             terminal.exit_notified.store(true, Ordering::Relaxed);
             let exit_code = Some(status.exit_code() as i64);
-            let excerpt = terminal
-                .output_buffer
-                .lock()
-                .ok()
-                .and_then(|buffer| {
-                    buffer
-                        .iter()
-                        .rev()
-                        .find(|line| !line.trim().is_empty())
-                        .map(|line| {
-                            let trimmed = line.trim();
-                            trimmed.chars().take(240).collect::<String>()
-                        })
-                });
+            let excerpt = terminal.output_buffer.lock().ok().and_then(|buffer| {
+                buffer
+                    .iter()
+                    .rev()
+                    .find(|line| !line.trim().is_empty())
+                    .map(|line| {
+                        let trimmed = line.trim();
+                        trimmed.chars().take(240).collect::<String>()
+                    })
+            });
             events.push((
                 pty_id.clone(),
                 terminal.pty_owner_key.clone(),
@@ -1810,7 +1940,10 @@ fn daemon_sweep_terminal_exits_internal(app: &AppHandle, state: &AppState) -> Re
         return Ok(());
     }
 
-    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
     for (pty_id, owner_key, pane_id, excerpt, exit_code, started_at) in events {
         let code = exit_code.unwrap_or(-1);
         let status = if code == 0 { "completed" } else { "failed" };
@@ -1820,8 +1953,12 @@ fn daemon_sweep_terminal_exits_internal(app: &AppHandle, state: &AppState) -> Re
                 let project_id = parts.next().unwrap_or_default();
                 let task_id = parts.next().unwrap_or_default();
                 if !project_id.is_empty() && !task_id.is_empty() {
-                    if let Some(runtime) = task_catalog.iter().find(|item| item.project_id == project_id && item.task.id == task_id) {
-                        let mut row = read_daemon_task_state(&conn, project_id, task_id)?.unwrap_or_default();
+                    if let Some(runtime) = task_catalog
+                        .iter()
+                        .find(|item| item.project_id == project_id && item.task.id == task_id)
+                    {
+                        let mut row =
+                            read_daemon_task_state(&conn, project_id, task_id)?.unwrap_or_default();
                         row.status = status.to_string();
                         row.attached = false;
                         row.pty_id = Some(pty_id.clone());
@@ -1829,7 +1966,11 @@ fn daemon_sweep_terminal_exits_internal(app: &AppHandle, state: &AppState) -> Re
                         row.last_exit_code = Some(code);
                         row.last_output_excerpt = excerpt.clone();
                         row.last_run_at = Some(started_at.clone());
-                        row.last_error = if code == 0 { None } else { Some(format!("exit code {code}")) };
+                        row.last_error = if code == 0 {
+                            None
+                        } else {
+                            Some(format!("exit code {code}"))
+                        };
                         upsert_daemon_task_state(
                             &conn,
                             &runtime,
@@ -1844,7 +1985,12 @@ fn daemon_sweep_terminal_exits_internal(app: &AppHandle, state: &AppState) -> Re
                         } else {
                             format!("{} terminou com código {code}", runtime.task.name.clone())
                         };
-                        let _ = app.notification().builder().title("Tarefa do daemon").body(notification_body).show();
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title("Tarefa do daemon")
+                            .body(notification_body)
+                            .show();
                     }
                 }
             }
@@ -1880,9 +2026,13 @@ fn daemon_tick_internal(app: &AppHandle, state: &AppState) -> Result<(), String>
     let now = Local::now();
 
     for runtime in tasks {
-        let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| "db lock poisoned".to_string())?;
         let enabled = runtime.task.enabled.unwrap_or(true);
-        let state_row = read_daemon_task_state(&conn, &runtime.project_id, &runtime.task.id)?.unwrap_or_default();
+        let state_row = read_daemon_task_state(&conn, &runtime.project_id, &runtime.task.id)?
+            .unwrap_or_default();
         let cwd_mode = normalize_task_cwd_mode(runtime.task.cwd_mode.as_deref());
 
         let mut parsed_next_run = state_row
@@ -1895,7 +2045,10 @@ fn daemon_tick_internal(app: &AppHandle, state: &AppState) -> Result<(), String>
         }
 
         if parsed_next_run.is_none() && enabled {
-            parsed_next_run = task_next_run_at(&runtime.task, now).ok().flatten().and_then(|s| parse_local_datetime(&s));
+            parsed_next_run = task_next_run_at(&runtime.task, now)
+                .ok()
+                .flatten()
+                .and_then(|s| parse_local_datetime(&s));
         }
 
         if !enabled {
@@ -1980,7 +2133,10 @@ fn daemon_list_tasks(state: State<'_, AppState>) -> ApiResult<Value> {
 }
 
 #[tauri::command]
-fn daemon_list_processes(state: State<'_, AppState>, project_id: Option<String>) -> ApiResult<Value> {
+fn daemon_list_processes(
+    state: State<'_, AppState>,
+    project_id: Option<String>,
+) -> ApiResult<Value> {
     if let Some(info) = daemon_runtime_endpoint(state.inner()) {
         return rpc_with_info(
             &info,
@@ -2070,7 +2226,8 @@ fn daemon_list_panes(
         )
         .map_err(db_error);
     }
-    daemon_list_panes_internal(state.inner(), project_id.as_deref(), comb_id.as_deref()).map_err(db_error)
+    daemon_list_panes_internal(state.inner(), project_id.as_deref(), comb_id.as_deref())
+        .map_err(db_error)
 }
 
 #[tauri::command]
@@ -2114,7 +2271,11 @@ fn daemon_run_task(
 }
 
 #[tauri::command]
-fn daemon_attach_task(state: State<'_, AppState>, project_id: String, task_id: String) -> ApiResult<Value> {
+fn daemon_attach_task(
+    state: State<'_, AppState>,
+    project_id: String,
+    task_id: String,
+) -> ApiResult<Value> {
     if let Some(info) = daemon_runtime_endpoint(state.inner()) {
         return rpc_with_info(
             &info,
@@ -2127,7 +2288,11 @@ fn daemon_attach_task(state: State<'_, AppState>, project_id: String, task_id: S
 }
 
 #[tauri::command]
-fn daemon_detach_task(state: State<'_, AppState>, project_id: String, task_id: String) -> ApiResult<Value> {
+fn daemon_detach_task(
+    state: State<'_, AppState>,
+    project_id: String,
+    task_id: String,
+) -> ApiResult<Value> {
     if let Some(info) = daemon_runtime_endpoint(state.inner()) {
         return rpc_with_info(
             &info,
@@ -2166,7 +2331,10 @@ fn copy_paths_from_worktree(
 fn shell_command_for_text(command: &str) -> (String, Vec<String>) {
     #[cfg(target_os = "windows")]
     {
-        ("cmd".to_string(), vec!["/C".to_string(), command.to_string()])
+        (
+            "cmd".to_string(),
+            vec!["/C".to_string(), command.to_string()],
+        )
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -2186,7 +2354,10 @@ fn choose_project_comb_and_cwd(
     project_id: &str,
     cwd_mode: &str,
 ) -> Result<(Option<String>, String), String> {
-    let conn = state.conn.lock().map_err(|_| "db lock poisoned".to_string())?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
     let project_path: Option<String> = conn
         .query_row(
             "SELECT path FROM projects WHERE id = ?1",
@@ -2284,6 +2455,15 @@ fn spawn_terminal_session_with_options(
     let pty_id = format!("pty-{}", next_id());
     let stop_flag = Arc::new(AtomicBool::new(false));
     let output_buffer = new_terminal_output_buffer();
+    if let Some(ref pid) = pane_id_opt {
+        if let Ok(conn) = state.conn.lock() {
+            if let Some(loaded) = load_pane_scrollback_deque(&conn, pid) {
+                if let Ok(mut guard) = output_buffer.lock() {
+                    *guard = loaded;
+                }
+            }
+        }
+    }
     let reader_thread = Some(spawn_terminal_reader_thread(
         reader,
         app.clone(),
@@ -2291,6 +2471,7 @@ fn spawn_terminal_session_with_options(
         pane_id_opt.clone(),
         stop_flag.clone(),
         output_buffer.clone(),
+        state.conn.clone(),
     ));
 
     if let Some(pane_id) = pane_id_opt.as_ref() {
@@ -3279,12 +3460,17 @@ fn db_projects_find_by_path(state: State<'_, AppState>, path: String) -> ApiResu
 
 #[tauri::command]
 fn db_projects_get_repo_config_toml(state: State<'_, AppState>, id: String) -> ApiResult<Value> {
-    let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
     let mut stmt = conn
         .prepare("SELECT path, repo_config FROM projects WHERE id = ?1")
         .map_err(|e| db_error(e.to_string()))?;
     let row = stmt
-        .query_row(params![id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))
+        .query_row(params![id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })
         .optional()
         .map_err(|e| db_error(e.to_string()))?;
     let Some((project_path, repo_config_raw)) = row else {
@@ -3338,7 +3524,10 @@ fn db_projects_save_repo_config_toml(
     content: String,
 ) -> ApiResult<Value> {
     let project_path = {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         conn.query_row(
             "SELECT path FROM projects WHERE id = ?1",
             params![id.clone()],
@@ -3354,8 +3543,13 @@ fn db_projects_save_repo_config_toml(
         }));
     };
 
-    let parsed: RepoConfigToml = toml::from_str(&content)
-        .map_err(|e| db_error(format!("{}: {}", repo_config_file_path(&project_path).display(), e)))?;
+    let parsed: RepoConfigToml = toml::from_str(&content).map_err(|e| {
+        db_error(format!(
+            "{}: {}",
+            repo_config_file_path(&project_path).display(),
+            e
+        ))
+    })?;
     let payload = repo_config_payload_from_toml(parsed);
     let normalized = repo_config_value_from_payload(&payload).map_err(db_error)?;
 
@@ -3363,10 +3557,14 @@ fn db_projects_save_repo_config_toml(
     if let Some(parent) = file_path.parent() {
         fs::create_dir_all(parent).map_err(|e| db_error(format!("{}: {}", parent.display(), e)))?;
     }
-    fs::write(&file_path, content).map_err(|e| db_error(format!("{}: {}", file_path.display(), e)))?;
+    fs::write(&file_path, content)
+        .map_err(|e| db_error(format!("{}: {}", file_path.display(), e)))?;
 
     {
-        let conn = state.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
         conn.execute(
             "UPDATE projects SET repo_config = ?1 WHERE id = ?2",
             params![normalized.to_string(), id],
@@ -4100,6 +4298,219 @@ fn review_get_diffs_bundle(worktree_paths: Vec<String>) -> ApiResult<Value> {
     }
     Ok(Value::Array(out))
 }
+
+const DCC_TASKS_DIR: &str = ".dcc/tasks";
+const MAX_TASK_TEMPLATE_BYTES: usize = 256 * 1024;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoTaskTemplateDto {
+    id: String,
+    name: String,
+    command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    cwd_mode: String,
+}
+
+fn split_markdown_frontmatter(raw: &str) -> (Option<&str>, &str) {
+    let t = raw.trim_start();
+    if !t.starts_with("---") {
+        return (None, raw);
+    }
+    let after_open = match t.get(3..) {
+        Some(r) => r,
+        None => return (None, raw),
+    };
+    let after_open = after_open.strip_prefix('\n').unwrap_or(after_open);
+    if let Some(end) = after_open.find("\n---") {
+        let front = &after_open[..end];
+        let mut body = &after_open[end + 4..];
+        if let Some(stripped) = body.strip_prefix('\n') {
+            body = stripped;
+        }
+        return (Some(front), body);
+    }
+    (None, raw)
+}
+
+fn parse_simple_fm_map(fm: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for line in fm.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
+        let key = k.trim().to_ascii_lowercase();
+        let val = v.trim().trim_matches('"').trim_matches('\'').to_string();
+        if !key.is_empty() {
+            map.insert(key, val);
+        }
+    }
+    map
+}
+
+fn first_markdown_h1(body: &str) -> Option<String> {
+    for line in body.lines() {
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix("# ") {
+            let s = rest.trim();
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn collect_repo_task_md_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
+    let read = match fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    for entry in read {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_repo_task_md_files(&path, out)?;
+        } else if path.extension().and_then(|s| s.to_str()) == Some("md") {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn parse_task_template_file(
+    rel_id: &str,
+    stem: &str,
+    raw: &str,
+) -> Result<RepoTaskTemplateDto, String> {
+    let (fm_opt, body) = split_markdown_frontmatter(raw);
+    let fm_map = fm_opt.map(parse_simple_fm_map).unwrap_or_default();
+    let get = |k: &str| fm_map.get(k).map(|s| s.as_str());
+
+    let name = get("title")
+        .or_else(|| get("name"))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| first_markdown_h1(body))
+        .unwrap_or_else(|| stem.to_string());
+
+    let description = get("description")
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let mut cwd_raw = get("cwd_mode")
+        .or_else(|| get("cwdmode"))
+        .unwrap_or("worktree")
+        .to_ascii_lowercase();
+    if cwd_raw != "project" && cwd_raw != "worktree" {
+        cwd_raw = "worktree".to_string();
+    }
+
+    let cmd_fm = get("command").unwrap_or("").trim();
+    let command = if !cmd_fm.is_empty() {
+        cmd_fm.to_string()
+    } else {
+        body.trim().to_string()
+    };
+
+    if command.is_empty() {
+        return Err("empty command and body".into());
+    }
+
+    Ok(RepoTaskTemplateDto {
+        id: rel_id.to_string(),
+        name,
+        command,
+        description,
+        cwd_mode: cwd_raw,
+    })
+}
+
+fn list_repo_task_templates_impl(project_path: &str) -> Result<Vec<RepoTaskTemplateDto>, ApiError> {
+    let root = Path::new(project_path.trim());
+    if !root.is_dir() {
+        return Err(ApiError {
+            code: "INVALID_PATH",
+            message: "project path is not a directory".into(),
+        });
+    }
+    let tasks_dir = root.join(DCC_TASKS_DIR);
+    let mut paths = Vec::new();
+    if let Err(e) = collect_repo_task_md_files(&tasks_dir, &mut paths) {
+        return Err(ApiError {
+            code: "IO_ERROR",
+            message: format!("{}: {}", tasks_dir.display(), e),
+        });
+    }
+    paths.sort();
+    let base = tasks_dir.as_path();
+    let mut out = Vec::new();
+    for path in paths {
+        let rel = path
+            .strip_prefix(base)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| {
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            });
+        if rel.is_empty() {
+            continue;
+        }
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("template");
+        let meta = fs::metadata(&path).map_err(|e| ApiError {
+            code: "IO_ERROR",
+            message: format!("{}: {}", path.display(), e),
+        })?;
+        let len = meta.len() as usize;
+        if len > MAX_TASK_TEMPLATE_BYTES {
+            eprintln!(
+                "[DCC] skip task template {}: exceeds {} bytes",
+                path.display(),
+                MAX_TASK_TEMPLATE_BYTES
+            );
+            continue;
+        }
+        let raw = fs::read_to_string(&path).map_err(|e| ApiError {
+            code: "IO_ERROR",
+            message: format!("{}: {}", path.display(), e),
+        })?;
+        match parse_task_template_file(&rel, stem, &raw) {
+            Ok(dto) => out.push(dto),
+            Err(reason) => {
+                eprintln!(
+                    "[DCC] skip invalid task template {}: {}",
+                    path.display(),
+                    reason
+                );
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+fn repo_list_task_templates(project_path: String) -> ApiResult<Value> {
+    let list = list_repo_task_templates_impl(&project_path)?;
+    Ok(serde_json::to_value(list).map_err(|e| ApiError {
+        code: "SERIALIZE_ERROR",
+        message: e.to_string(),
+    })?)
+}
+
 #[tauri::command]
 async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
     let row: Option<(
@@ -4607,17 +5018,39 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
 
     let pty_id = format!("pty-{}", next_id());
     let stop_flag = Arc::new(AtomicBool::new(false));
-    let output_buffer = new_terminal_output_buffer();
 
-    // Extrair paneId das options se disponível
     let pane_id_opt = options
         .get("paneId")
         .and_then(Value::as_str)
         .map(|s| s.to_string());
+    let skip_scrollback_restore = options
+        .get("restart")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let pty_owner_key_opt = options
         .get("ptyOwnerKey")
         .and_then(Value::as_str)
         .map(|s| s.to_string());
+
+    let output_buffer = new_terminal_output_buffer();
+    if skip_scrollback_restore {
+        if let Some(ref pid) = pane_id_opt {
+            if let Ok(conn) = state.conn.lock() {
+                let _ = conn.execute(
+                    "DELETE FROM pane_terminal_scrollback WHERE pane_id = ?1",
+                    params![pid],
+                );
+            }
+        }
+    } else if let Some(ref pid) = pane_id_opt {
+        if let Ok(conn) = state.conn.lock() {
+            if let Some(loaded) = load_pane_scrollback_deque(&conn, pid) {
+                if let Ok(mut guard) = output_buffer.lock() {
+                    *guard = loaded;
+                }
+            }
+        }
+    }
 
     let reader_thread = Some(spawn_terminal_reader_thread(
         reader,
@@ -4626,6 +5059,7 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
         pane_id_opt.clone(),
         stop_flag.clone(),
         output_buffer.clone(),
+        state.conn.clone(),
     ));
 
     if let Some(pane_id) = pane_id_opt.as_ref() {
@@ -4761,6 +5195,7 @@ fn spawn_terminal_reader_thread(
     pane_id: Option<String>,
     stop_flag: Arc<AtomicBool>,
     output_buffer: Arc<Mutex<VecDeque<String>>>,
+    conn: Arc<Mutex<Connection>>,
 ) -> JoinHandle<()> {
     /// Batching alinhado a superset-sh (`apps/desktop/src/main/terminal-host/pty-subprocess.ts`):
     /// ~60fps + limite por frame evita inundar o IPC com micro-chunks e mantém redesenhos de TUI (`\r`, escapes)
@@ -4770,6 +5205,9 @@ fn spawn_terminal_reader_thread(
 
     thread::spawn(move || {
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let last_persist = Arc::new(Mutex::new(
+            Instant::now() - PANE_SCROLLBACK_PERSIST_INTERVAL,
+        ));
 
         let read_thread = thread::spawn(move || {
             let mut buffer = [0u8; 8192];
@@ -4799,6 +5237,24 @@ fn spawn_terminal_reader_thread(
             pending.clear();
 
             append_terminal_line(&output_buffer, &data);
+
+            if let Some(ref pid) = pane_id {
+                if let Ok(mut lp) = last_persist.lock() {
+                    if lp.elapsed() >= PANE_SCROLLBACK_PERSIST_INTERVAL {
+                        *lp = Instant::now();
+                        let lines: Vec<String> = output_buffer
+                            .lock()
+                            .ok()
+                            .map(|g| g.iter().cloned().collect())
+                            .unwrap_or_default();
+                        if let Ok(c) = conn.lock() {
+                            if let Err(e) = persist_pane_scrollback_compressed(&c, pid, &lines) {
+                                eprintln!("[DCC] pane scrollback persist (throttled): {e}");
+                            }
+                        }
+                    }
+                }
+            }
 
             let (needs_attention, excerpt) = check_needs_attention(&data, &output_buffer);
 
@@ -4859,6 +5315,19 @@ fn spawn_terminal_reader_thread(
         }
 
         let _ = read_thread.join();
+
+        if let Some(ref pid) = pane_id {
+            let lines: Vec<String> = output_buffer
+                .lock()
+                .ok()
+                .map(|g| g.iter().cloned().collect())
+                .unwrap_or_default();
+            if let Ok(c) = conn.lock() {
+                if let Err(e) = persist_pane_scrollback_compressed(&c, pid, &lines) {
+                    eprintln!("[DCC] pane scrollback persist (final): {e}");
+                }
+            }
+        }
     })
 }
 
@@ -4991,6 +5460,7 @@ fn terminal_kill(state: State<'_, AppState>, app: AppHandle, pty_id: String) -> 
         .map_err(|_| db_error("terminals lock poisoned"))?;
 
     if let Some(mut t) = terminals.remove(&pty_id) {
+        persist_managed_terminal_buffer(&state, &t);
         t.stop_flag.store(true, Ordering::Relaxed);
         // On some OSs, closing the pty master will signal the child
         drop(t.pty_master);
@@ -5026,6 +5496,7 @@ fn terminal_kill_by_mission_id(
 
     for id in ids {
         if let Some(mut t) = terminals.remove(&id) {
+            persist_managed_terminal_buffer(&state, &t);
             t.stop_flag.store(true, Ordering::Relaxed);
             drop(t.pty_master);
             if let Some(reader_thread) = t.reader_thread.take() {
@@ -5066,7 +5537,14 @@ fn terminal_get_or_create_for_pane(
 
     drop(terminals);
 
-    let spawn_result = terminal_spawn(state.clone(), app, options)?;
+    let merged_options = match options {
+        Value::Object(mut m) => {
+            m.insert("paneId".to_string(), Value::String(pane_id.clone()));
+            Value::Object(m)
+        }
+        _ => serde_json::json!({ "paneId": pane_id.clone() }),
+    };
+    let spawn_result = terminal_spawn(state.clone(), app, merged_options)?;
     let pty_id = spawn_result
         .get("ptyId")
         .and_then(Value::as_str)
@@ -5079,7 +5557,6 @@ fn terminal_get_or_create_for_pane(
         .map_err(|_| db_error("terminals lock poisoned"))?;
 
     if let Some(t) = terminals.get_mut(&pty_id) {
-        t.pane_id = Some(pane_id);
         let session = terminal_session_json(&pty_id, t);
         return Ok(serde_json::json!({ "ptyId": pty_id, "session": session }));
     }
@@ -5128,6 +5605,7 @@ fn terminal_kill_by_pane_id(
 
     for id in ids {
         if let Some(mut t) = terminals.remove(&id) {
+            persist_managed_terminal_buffer(&state, &t);
             t.stop_flag.store(true, Ordering::Relaxed);
             drop(t.pty_master);
             if let Some(reader_thread) = t.reader_thread.take() {
@@ -5137,6 +5615,32 @@ fn terminal_kill_by_pane_id(
                 "terminal-exit",
                 serde_json::json!({ "ptyId": id, "code": -1 }),
             );
+        }
+    }
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+/// Remove histórico persistido e o buffer em memória do painel (alinhado a "limpar scrollback" na UI).
+#[tauri::command]
+fn terminal_clear_persisted_scrollback(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> ApiResult<Value> {
+    if let Ok(conn) = state.conn.lock() {
+        let _ = conn.execute(
+            "DELETE FROM pane_terminal_scrollback WHERE pane_id = ?1",
+            params![pane_id.clone()],
+        );
+    }
+    let mut terminals = state
+        .terminals
+        .lock()
+        .map_err(|_| db_error("terminals lock poisoned"))?;
+    for t in terminals.values_mut() {
+        if t.pane_id.as_deref() == Some(pane_id.as_str()) {
+            if let Ok(mut g) = t.output_buffer.lock() {
+                g.clear();
+            }
         }
     }
     Ok(serde_json::json!({ "ok": true }))
@@ -5297,6 +5801,7 @@ pub fn run() {
             git_get_local_branches,
             git_get_review_diffs,
             review_get_diffs_bundle,
+            repo_list_task_templates,
             comb_ensure_worktree,
             comb_discard,
             comb_check_unpushed,
@@ -5314,6 +5819,7 @@ pub fn run() {
             terminal_get_pane_session,
             terminal_kill_by_pane_id,
             terminal_get_backlog,
+            terminal_clear_persisted_scrollback,
             terminal_get_project_activity,
             terminal_save_temp_image
         ])
@@ -5354,7 +5860,11 @@ pub fn run() {
                 daemon_endpoint: Arc::new(Mutex::new(None)),
             };
             let app_handle = app.handle().clone();
-            match ensure_sidecar_running(&app_handle, state.db_path.as_ref(), state.app_data_dir.as_ref()) {
+            match ensure_sidecar_running(
+                &app_handle,
+                state.db_path.as_ref(),
+                state.app_data_dir.as_ref(),
+            ) {
                 Ok(runtime) => {
                     if let Ok(mut endpoint) = state.daemon_endpoint.lock() {
                         *endpoint = Some(runtime);
@@ -5362,7 +5872,9 @@ pub fn run() {
                     state.daemon.running.store(false, Ordering::Relaxed);
                 }
                 Err(err) => {
-                    eprintln!("[DCC][daemon] sidecar unavailable, using in-process fallback: {err}");
+                    eprintln!(
+                        "[DCC][daemon] sidecar unavailable, using in-process fallback: {err}"
+                    );
                     let state_for_daemon = state.clone();
                     start_daemon_worker(app_handle, state_for_daemon);
                 }

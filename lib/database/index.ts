@@ -34,6 +34,7 @@ export type {
   RepoCommandPreset,
   RepoProcessDefinition,
   RepoTaskDefinition,
+  RepoTaskTemplate,
   RepoTaskTriggerDefinition,
   Comb,
   Pane,

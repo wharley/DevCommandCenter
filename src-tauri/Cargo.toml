@@ -22,6 +22,7 @@ tauri-plugin-notification = "2"
 chrono = { version = "0.4", features = ["serde"] }
 sysinfo = "0.30"
 reqwest = { version = "0.11", features = ["blocking", "json"] }
+flate2 = "1"
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
 tower = "0.4"
