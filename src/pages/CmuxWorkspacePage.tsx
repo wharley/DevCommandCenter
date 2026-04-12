@@ -72,6 +72,7 @@ import { useTerminalProjectActivity } from "@/hooks/use-terminal-project-activit
 import { WorkspaceCommandPalette } from "@/components/workspace-command-palette";
 import { ProcessesPanel } from "@/components/processes-panel";
 import { getCombDiscardDialogCopy } from "@/lib/comb-discard-confirmation";
+import { useAppWindowTitle } from "@/hooks/use-app-window-title";
 
 const CLI_PROVIDER_TYPES = ["codex", "claude-code", "gemini", "cursor"] as const;
 
@@ -767,6 +768,15 @@ export default function CmuxWorkspacePage() {
     if (!activeComb) return null;
     return sortedProjects.find((project) => project.id === activeComb.projectId) ?? null;
   }, [activeComb, sortedProjects]);
+  const windowTitleProject = useMemo(
+    () =>
+      activeProject ??
+      (selectedProjectId
+        ? (sortedProjects.find((p) => p.id === selectedProjectId) ?? null)
+        : null),
+    [activeProject, selectedProjectId, sortedProjects],
+  );
+  useAppWindowTitle(windowTitleProject, activeComb);
   const { activity: projectActivity } = useTerminalProjectActivity(activeProject?.id ?? null);
   const {
     panes,
@@ -879,6 +889,22 @@ export default function CmuxWorkspacePage() {
         const next = [record, ...prev].slice(0, 120);
         return next;
       });
+    },
+    onAttentionAction: (event) => {
+      setAttentionRecords((prev) =>
+        prev.map((record) =>
+          record.id === event.notificationId ||
+          (record.paneId === event.paneId && record.combId === event.combId)
+            ? { ...record, read: true }
+            : record,
+        ),
+      );
+      if (event.actionId === "dismiss" || event.actionId === "__closed") {
+        return;
+      }
+      if (event.actionId === "reply") {
+        setAttentionOpen(false);
+      }
     },
     isAttentionPaneInView,
   });

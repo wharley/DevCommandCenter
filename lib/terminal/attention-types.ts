@@ -18,6 +18,7 @@ export interface TerminalAttentionPayload {
   excerpt?: string;
   projectId?: string;
   createdAt?: number;
+  notificationId?: string;
 }
 
 /** Deriva fase a partir do payload (novo + compatível com `status`). */

@@ -9,6 +9,24 @@ const STORAGE_KEY = "dcc:notificationsEnabled";
 const DEFAULT_ENABLED = true;
 const BODY_MAX_CHARS = 1800;
 
+export interface NativeNotificationAction {
+  id: string;
+  label: string;
+}
+
+export interface NativeNotificationPayload {
+  title: string;
+  body?: string;
+  icon?: string;
+  sound?: boolean | string;
+  notificationId?: string;
+  source?: string;
+  paneId?: string;
+  combId?: string;
+  projectId?: string;
+  actions?: NativeNotificationAction[];
+}
+
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -42,6 +60,25 @@ export function truncateNotificationBody(
   return `${chars.slice(0, maxChars - 1).join("")}…`;
 }
 
+function normalizeNativeNotificationPayload(
+  input: string | NativeNotificationPayload,
+  body?: string
+): NativeNotificationPayload {
+  if (typeof input === "string") {
+    return {
+      title: input,
+      body,
+    };
+  }
+  return {
+    ...input,
+    body:
+      input.body !== undefined
+        ? input.body
+        : body,
+  };
+}
+
 /**
  * Pede permissão ao SO (macOS/Windows/Linux conforme suportado pelo plugin).
  * Chamado ao ativar o toggle em Configurações; não falha a app se o utilizador recusar.
@@ -65,22 +102,26 @@ export async function ensureOsNotificationPermission(): Promise<boolean> {
  * Supressão de ruído (mesmo pane visível) fica no hook de atenção do terminal.
  */
 export async function showNativeNotification(
-  title: string,
+  titleOrPayload: string | NativeNotificationPayload,
   body?: string
-): Promise<{ ok: boolean }> {
+): Promise<{ ok: boolean; notificationId?: string }> {
   if (!areNotificationsEnabled()) return { ok: false };
   if (!isTauriRuntime()) return { ok: false };
   try {
-    const result = await invoke<{ ok?: boolean; reason?: string }>(
+    const payload = normalizeNativeNotificationPayload(titleOrPayload, body);
+    const result = await invoke<{ ok?: boolean; reason?: string; notificationId?: string }>(
       "app_show_notification",
       {
         payload: {
-          title,
-          body: body ? truncateNotificationBody(body) : undefined,
+          ...payload,
+          body: payload.body ? truncateNotificationBody(payload.body) : undefined,
         },
       }
     );
-    return { ok: result?.ok !== false };
+    return {
+      ok: result?.ok !== false,
+      notificationId: result?.notificationId ?? payload.notificationId,
+    };
   } catch {
     return { ok: false };
   }

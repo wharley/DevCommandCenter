@@ -55,7 +55,7 @@ Para cada área: **o que o Arbor destaca** → **benefício para o DCC** → **v
 
 - **xterm addons**: `@xterm/addon-webgl` (ou canvas otimizado) para **renderização GPU no browser**; `addon-search`; opcional **unicode11** para larguras corretas; revisar `scripts/patch-xterm-viewport.mjs` como parte da estratégia de estabilidade.
 - **Preferências**: expor no UI (além de fonte/tema) **scrollback lines**, **cursor style**, **copy on select**, **right-click paste**, **audible bell** on/off.
-- **Seleção e clipboard**: integração nativa Tauri para cópia rica e **OSC 52** (colar remoto) se fizer sentido para o público-alvo.
+- **Seleção e clipboard**: integração nativa Tauri para cópia rica; **OSC 52** (clipboard remota) implementado no emulador (`registerOscHandler(52)` + `lib/terminal/osc52.ts`, escrita/leitura via `navigator.clipboard` e resposta injectada no PTY).
 - **Deteção de “ligação lenta”**: indicador quando o batching descarta fluidez (métricas em `output-metrics`).
 
 ---
@@ -181,7 +181,7 @@ Fica **mais tarde na roadmap** por **complexidade** (rede, segurança, UX de fal
 |------------------|------------------|-------|
 | **Command palette** densa (ações, repos, worktrees, issues, presets) | Navegação sem rato | **Sim**: `cmd-k` + fuzzy search; dados já em SQLite. |
 | **Temas** partilhados (38 no Arbor) | Personalização e *branding* | **Sim**: tokens CSS + presets; import/export. |
-| **Título da janela** com branch/worktree | Orientação rápida | **Sim** via API de janela Tauri. |
+| **Título da janela** com branch/worktree | Orientação rápida | **Sim** — **implementado** no front: `getCurrentWindow().setTitle` (`@tauri-apps/api/window`) + `document.title`; ver `hooks/use-app-window-title.ts`. |
 | Notificações desktop **ricas** | Completar `app_show_notification` com ícones e ações | **Sim**. |
 | Layout **três painéis** redimensionáveis | Já há filosofia cmux; refinar *resizable* e atalhos | **Sim**. |
 
@@ -286,8 +286,8 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 | xterm Search addon | ✅ | `embedded-terminal.tsx:8` | UI de busca integrada |
 | Preferências de aparência (font, theme) | ✅ | `terminal-preferences.ts` | `getTerminalAppearancePreferences` |
 | Scrollback persistente em SQLite | ✅ | `schema.sql:pane_terminal_scrollback`, `main.rs` (`persist_pane_scrollback_compressed`, `load_pane_scrollback_deque`, `terminal_clear_persisted_scrollback`) | Gzip(JSON dos chunks); throttle ~1,6s + flush ao fechar reader; `restart: true` limpa persistido; ação UI “limpar scrollback” sincroniza DB + buffer |
-| OSC 52 (remote clipboard) | ❌ | - | Não implementado |
-| Signal handling explícito (SIGTERM/SIGKILL) | 🟡 | - | Ctrl+C funciona, mas sem API customizada para sinais |
+| OSC 52 (remote clipboard) | ✅ | `lib/terminal/osc52.ts`, `embedded-terminal.tsx` (`term.parser.registerOscHandler(52)`) | Copiar (base64 → clipboard), pedido `?` / `c;?` → `readText` + sequência OSC de volta ao PTY; fila `enqueuePtyUserInput` |
+| Signal handling explícito (SIGTERM/SIGKILL) | ✅ | `terminal_send_signal` (`main.rs`), `sendSignal` na bridge, menu «Sinais» em `embedded-terminal.tsx` | Unix: `kill(-pgid, …)` ao grupo do PTY; Windows: `\x03` (SIGINT) ou `taskkill /T` (TERM) e `/F` (KILL) |
 | Configuração scrollback lines no UI | ❌ | - | Falta exposição no settings |
 | Bell → notificação desktop | 🟡 | `embedded-terminal.tsx` | `onBell` existe, mas integração com `app_show_notification` incompleta |
 | Múltiplas abas de terminal por worktree | ❌ | - | Só 1 pane por comb, sem tabs agrupadas |
@@ -314,8 +314,8 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 
 | Item | Status | Referência | Notas |
 |------|--------|------------|-------|
-| Interrupt/Terminate/Kill explícitos | 🟡 | `main.rs:4930` | `terminal_kill` envia signal, mas sem API para SIGTERM customizado |
-| Grupo de processos (killpg Unix) | ❌ | - | Falta envio de sinal ao grupo inteiro |
+| Interrupt/Terminate/Kill explícitos | ✅ | `main.rs` `terminal_send_signal` | SIGINT/SIGTERM/SIGKILL via `terminal_send_signal`; `terminal_kill` continua a fechar o PTY |
+| Grupo de processos (killpg Unix) | ✅ | `main.rs` `send_signal_to_managed_terminal` | `kill(-pgid, sig)` com fallback ao PID do filho |
 | Windows job object para terminação | ❌ | - | Falta implementação Windows-specific |
 | Abrir terminal externo | ✅ | `main.rs:2052` | `shell_open_terminal_at_path` implementado |
 | Integração com Terminal.app/iTerm | ✅ | `main.rs:2052` | Via script AppleScript |
@@ -449,7 +449,7 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 | Command palette (cmd+k) | ✅ | `workspace-command-palette.tsx` | Grupos: Global, Projeto, Workspaces, Panes, Processos, Presets, Templates (.dcc/tasks), Tasks |
 | Fuzzy search | ✅ | `workspace-command-palette.tsx` | Sobre projetos, combs, panes, comandos |
 | Temas partilhados | ✅ | `xterm-theme.ts` | `getXtermColorTheme`, ThemeProvider |
-| Título da janela com branch/worktree | ❌ | - | Falta API de janela Tauri para dynamic title |
+| Título da janela com branch/worktree | ✅ | `hooks/use-app-window-title.ts`, `CmuxWorkspacePage.tsx` | Branch · basename do worktree (ou nome do workspace) · projeto — `Dev Command Center`; fallback só projeto quando não há comb |
 | Notificações desktop ricas (ações) | 🟡 | `main.rs:1824` | `app_show_notification` básico, falta ações |
 | Layout 3 painéis redimensionáveis | ✅ | `CmuxWorkspacePage.tsx` | Sidebar, terminal/agent, diffs |
 | Atalhos de teclado | 🟡 | - | cmd+k existe, falta outros atalhos |
@@ -561,13 +561,14 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 
 ### 🟢 **DESEJÁVEL** (Polimento e UX)
 
-9. **Título Dinâmico da Janela** (Secção 12)
-   - Mostrar branch/worktree atual no título
-   - Estimativa: ~20 linhas Rust
+9. ✅ **Título Dinâmico da Janela** (Secção 12) — **COMPLETO**
+   - Hook `useAppWindowTitle` + `buildAppWindowTitle`; Tauri `setTitle` quando `desktopAPI` está disponível
+   - Ver `hooks/use-app-window-title.ts`, integração em `CmuxWorkspacePage.tsx`
 
-10. **Notificações Ricas** (Secção 12)
-    - Ações (reply, dismiss) em notificações desktop
-    - Estimativa: ~100 linhas Rust
+10. ✅ **Notificações Ricas** (Secção 12) — **COMPLETO**
+    - `app_show_notification` aceita `icon`, `sound`, `notificationId` e `actions`
+    - Eventos `notification-action` para `reply` / `dismiss` no renderer
+    - `terminal:attention` agora carrega `notificationId` estável para correlacionar cliques e histórico
 
 11. **Webhooks** (Secção 9)
     - Eventos para Slack/Discord/CI
@@ -581,9 +582,9 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 
 | Área | Implementado | Parcial | Pendente | % Completo |
 |------|-------------|---------|----------|------------|
-| Terminal PTY | 10 | 3 | 4 | ~76% |
+| Terminal PTY | 10 | 1 | 3 | ~75% |
 | Daemon/Sessões | 7 | 0 | 3 | 70% |
-| Sinais/Lifecycle | 2 | 1 | 3 | 50% |
+| Sinais/Lifecycle | 4 | 0 | 1 | ~80% |
 | **Processos** | **9** | **0** | **0** | **100%** |
 | Worktrees/Git | 8 | 3 | 3 | 79% |
 | Issues/Forges | 1 | 1 | 4 | 20% |
@@ -592,17 +593,29 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 | **Tasks Agendadas** | **7** | **0** | **2** | **~78%** (falta webhooks + evoluções opcionais) |
 | MCP/API/CLI | 7 | 0 | 2 | 78% |
 | Acesso Remoto | 0 | 0 | 3 | 0% (Fase 2) |
-| UI/UX | 6 | 2 | 3 | 67% |
+| UI/UX | 7 | 2 | 2 | ~64% |
 | Config Repo | 10 | 0 | 2 | 83% |
 | Segurança | 1 | 2 | 2 | 40% |
 | Observabilidade | 0 | 2 | 2 | 25% |
 | Stubs Tauri | 0 | 0 | 8 | 0% |
 
-**TOTAL GERAL: 72 implementados (+1 templates de tasks) + 13 parciais + 46 pendentes ≈ 73% completo (métricas aproximadas)**
+**TOTAL GERAL: 78 implementados + 11 parciais + 42 pendentes ≈ 76% completo (métricas aproximadas)**
 
 ---
 
 ## 🎉 Implementações Recentes
+
+### OSC 52 — clipboard remota (Secção 1) — (2026-04-11) ✅
+
+- **Frontend**: `lib/terminal/osc52.ts` — parse do payload `Pt;Pd` (ex.: `c;…`); cópia remota com base64 UTF-8 → `navigator.clipboard.writeText`; pedido de leitura (`?` ou `c;?`) → `readText` e injecção de `\e]52;Pt;<base64>\a` no PTY via `enqueuePtyUserInput`.
+- **Integração**: `components/embedded-terminal.tsx` — `term.parser.registerOscHandler(52, …)` após `open()`, `dispose` no teardown do efeito.
+- **Notas**: leitura do clipboard pode falhar por permissões do WebView; nesse caso envia-se sequência OSC 52 vazia.
+
+### Título dinâmico da janela (Secção 12) — (2026-04-11) ✅
+
+- **Frontend**: `hooks/use-app-window-title.ts` — `buildAppWindowTitle(project, comb)`; formato `branch · pasta-do-worktree · nomeDoProjeto — Dev Command Center` (basename do path do worktree; sem worktree usa o nome do workspace); só projeto quando ainda não há comb ativo.
+- **Tauri**: import dinâmico de `getCurrentWindow` de `@tauri-apps/api/window` e `setTitle`; sempre atualiza `document.title` para alinhar browser/dev e barra de título nativa.
+- **Integração**: `CmuxWorkspacePage.tsx` — `windowTitleProject` (projeto do comb ou projeto selecionado na sidebar) + `useAppWindowTitle(windowTitleProject, activeComb)`.
 
 ### Templates de tarefas `.dcc/tasks` (Secção 9) — (2026-04-11) ✅
 
@@ -621,6 +634,12 @@ Completar os itens restantes **remove fricção** e mantém o contrato de integr
 - **SQLite**: tabela `pane_terminal_scrollback` (`pane_id`, `payload_z` gzip, `updated_at`), ver `lib/database/schema.sql`.
 - **Host Rust**: serialização JSON dos chunks do buffer circular → gzip (`flate2`); carregamento ao `terminal_spawn` quando há `paneId`; persistência com throttle (~1,6s), flush ao terminar o reader e ao matar o PTY; comando `terminal_clear_persisted_scrollback` alinhado à ação “limpar scrollback” na UI (`embedded-terminal.tsx` + `desktop-bridge.ts`).
 - **Workspace**: `terminal_get_or_create_for_pane` passa `paneId` nas options do spawn (o reader e o UPDATE de `panes` passam a receber o id na criação do PTY).
+
+### Notificações ricas (Secção 12) — (2026-04-11) ✅
+
+- **Rust/Tauri**: `app_show_notification` passou a aceitar payload rico com `icon`, `sound`, `notificationId` e lista de `actions`; em desktop UNIX/BSD a ação escolhida é emitida como evento `notification-action`.
+- **Frontend**: `lib/notifications.ts` normaliza payload rico; `useTerminalAttentionToasts` injeta ações `Abrir painel` / `Dispensar` e reage a `notification-action` para navegar ou marcar o alerta como lido.
+- **Bridge/tipos**: `window.desktopAPI.app.onNotificationAction`, payload tipado em `types/app.d.ts`; `terminal:attention` agora carrega `notificationId` para ligar banner nativo e registo persistido.
 
 ### Triggers de Tasks (2026-04-11) ✅
 

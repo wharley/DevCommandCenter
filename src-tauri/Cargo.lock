@@ -808,6 +808,8 @@ dependencies = [
  "chrono",
  "flate2",
  "lazy_static",
+ "libc",
+ "notify-rust",
  "portable-pty",
  "regex",
  "reqwest 0.11.27",

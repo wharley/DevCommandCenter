@@ -8,8 +8,15 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { SearchAddon } from "@xterm/addon-search";
 import "xterm/css/xterm.css";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { X, Paperclip, ArrowDown, ChevronUp, ChevronDown } from "lucide-react";
+import { X, Paperclip, ArrowDown, ChevronUp, ChevronDown, Signal } from "lucide-react";
+import { toast } from "sonner";
 import { useTheme } from "@/components/theme-provider";
 import {
   type TerminalAttentionPayload,
@@ -19,6 +26,7 @@ import { recordTerminalOutputBytes } from "@/lib/terminal/output-metrics";
 import { getTerminalAppearancePreferences } from "@/lib/terminal/terminal-preferences";
 import { getXtermColorTheme } from "@/lib/terminal/xterm-theme";
 import { writePtyInputInChunks } from "@/lib/terminal/pty-input-write";
+import { handleOsc52Payload } from "@/lib/terminal/osc52";
 
 export interface EmbeddedTerminalProps {
   cwd: string;
@@ -77,6 +85,8 @@ export function EmbeddedTerminal({
   /** Search bar visibility and state */
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  /** Espelha sessão ativa para mostrar ações que dependem de `ptyId` (ex.: envio de sinais). */
+  const [ptySessionId, setPtySessionId] = useState<string | null>(null);
   const argsKey = useMemo(() => JSON.stringify(args), [args]);
   const stableArgs = useMemo(() => args, [argsKey]);
   const shellCommand = useMemo(() => {
@@ -184,11 +194,15 @@ export function EmbeddedTerminal({
       setError(null);
       if (result.ptyId) {
         ptyIdRef.current = result.ptyId;
+        setPtySessionId(result.ptyId);
         setAgentCanRestart(false);
         setExited(null);
         onSessionActive?.();
-      } else if (result.session?.status === "exited" && command) {
-        setAgentCanRestart(true);
+      } else {
+        setPtySessionId(null);
+        if (result.session?.status === "exited" && command) {
+          setAgentCanRestart(true);
+        }
       }
       if (result.session?.outputPreview) {
         safeWrite(term, result.session.outputPreview);
@@ -202,6 +216,20 @@ export function EmbeddedTerminal({
     },
     [command, onSessionActive, safeWrite],
   );
+
+  const handleSendSignal = useCallback(async (sig: "SIGINT" | "SIGTERM" | "SIGKILL") => {
+    const id = ptyIdRef.current;
+    const send = window.desktopAPI?.terminal?.sendSignal;
+    if (!id || !send) return;
+    try {
+      const r = await send(id, sig);
+      if (!r?.ok) {
+        toast.error(r?.error ?? "Falha ao enviar sinal");
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Falha ao enviar sinal");
+    }
+  }, []);
 
   const enqueuePtyUserInput = useCallback((data: string) => {
     if (!data) return;
@@ -268,6 +296,7 @@ export function EmbeddedTerminal({
     if (id && window.desktopAPI?.terminal?.kill) {
       window.desktopAPI.terminal.kill(id);
       ptyIdRef.current = null;
+      setPtySessionId(null);
     }
   }, []);
 
@@ -424,6 +453,13 @@ export function EmbeddedTerminal({
     term.open(containerRef.current);
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
+
+    const osc52Dispose = term.parser.registerOscHandler(52, (data) =>
+      handleOsc52Payload(data, {
+        writeText: (text) => navigator.clipboard.writeText(text),
+        sendToPty: enqueuePtyUserInput,
+      }),
+    );
     const safeFit = () => {
       if (disposed || xtermRef.current !== term) return;
       const el = containerRef.current;
@@ -445,6 +481,7 @@ export function EmbeddedTerminal({
     const unsubExit = api.onExit((id: string, code: number) => {
       if (id === ptyIdRef.current) {
         ptyIdRef.current = null;
+        setPtySessionId(null);
         setExited(code);
         // Só atualiza se realmente mudou (evita re-render)
         if (isWaitingRef.current) {
@@ -506,6 +543,7 @@ export function EmbeddedTerminal({
         api.showNotification?.({
           title: "Terminal Bell",
           body: `Activity in terminal: ${paneId || ptyIdRef.current}`,
+          icon: "auto",
           sound: true,
         }).catch((err: unknown) => console.warn("Failed to show bell notification:", err));
       }
@@ -557,7 +595,10 @@ export function EmbeddedTerminal({
             setError(result.error);
             return;
           }
-          if (result.ptyId) ptyIdRef.current = result.ptyId;
+          if (result.ptyId) {
+            ptyIdRef.current = result.ptyId;
+            setPtySessionId(result.ptyId);
+          }
           // CRÍTICO: Hidrata backlog ANTES de registrar listener (evita race condition)
           await hydrateTerminalBacklog(term, result.ptyId);
         }
@@ -627,6 +668,7 @@ export function EmbeddedTerminal({
 
     return () => {
       disposed = true;
+      osc52Dispose.dispose();
       ptyWriteChainRef.current = Promise.resolve();
       if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
       resizeObserver.disconnect();
@@ -697,6 +739,38 @@ export function EmbeddedTerminal({
               (saiu com código {exited})
             </span>
           )}
+          {ptySessionId &&
+            exited === null &&
+            typeof window.desktopAPI?.terminal?.sendSignal === "function" && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    title="Enviar sinal ao grupo de processos (SIGINT / SIGTERM / SIGKILL)"
+                    aria-label="Sinais do processo"
+                  >
+                    <Signal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onClick={() => void handleSendSignal("SIGINT")}>
+                    SIGINT — interromper (Ctrl+C)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void handleSendSignal("SIGTERM")}>
+                    SIGTERM — encerramento amigável
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => void handleSendSignal("SIGKILL")}
+                  >
+                    SIGKILL — forçar fim
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           {command && (
             <Button
               variant="ghost"

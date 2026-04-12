@@ -184,6 +184,35 @@ export interface DaemonDiffBundleItem {
   } | null;
 }
 
+export interface NativeNotificationAction {
+  id: string;
+  label: string;
+}
+
+export interface NativeNotificationPayload {
+  title: string;
+  body?: string;
+  icon?: string;
+  sound?: boolean | string;
+  notificationId?: string;
+  source?: string;
+  paneId?: string;
+  combId?: string;
+  projectId?: string;
+  actions?: NativeNotificationAction[];
+}
+
+export interface NativeNotificationActionEvent {
+  notificationId: string;
+  actionId: string;
+  title: string;
+  source?: string | null;
+  paneId?: string | null;
+  combId?: string | null;
+  projectId?: string | null;
+  body?: string | null;
+}
+
 declare global {
   interface Window {
     /**
@@ -250,6 +279,11 @@ declare global {
           cols: number,
           rows: number
         ) => Promise<{ ok: boolean }>;
+        /** Envia sinal ao grupo de processos do PTY (SIGINT / SIGTERM / SIGKILL). */
+        sendSignal?: (
+          ptyId: string,
+          signal: "SIGINT" | "SIGTERM" | "SIGKILL"
+        ) => Promise<{ ok: boolean; error?: string }>;
         kill: (ptyId: string) => Promise<{ ok: boolean }>;
         killByMissionId: (missionId: string) => Promise<{ ok: boolean }>;
         getOrCreateForPane: (
@@ -273,11 +307,9 @@ declare global {
           imageData: number[],
           extension: string
         ) => Promise<{ path: string; filename: string }>;
-        showNotification?: (payload: {
-          title: string;
-          body: string;
-          sound?: boolean;
-        }) => Promise<void>;
+        showNotification?: (
+          payload: NativeNotificationPayload
+        ) => Promise<{ ok?: boolean; notificationId?: string } | void>;
         getProjectActivity: (projectId: string) => Promise<{
           totalRunningPanes: number;
           runningPanesByCombId: Record<string, number>;
@@ -451,10 +483,10 @@ declare global {
         getVersion: () => Promise<string>;
         checkForUpdates: () => Promise<void>;
         quitAndInstall: () => Promise<void>;
-        showNotification: (payload: {
-          title: string;
-          body?: string;
-        }) => Promise<{ ok?: boolean } | void>;
+        showNotification: (payload: NativeNotificationPayload) => Promise<{ ok?: boolean; notificationId?: string } | void>;
+        onNotificationAction: (
+          callback: (payload: NativeNotificationActionEvent) => void
+        ) => () => void;
         onUpdateStatus: (
           callback: (payload: {
             type: "available" | "not-available" | "downloaded" | "error";

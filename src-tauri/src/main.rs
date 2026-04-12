@@ -13,16 +13,23 @@ use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OptionalEx
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::io::{Read, Write};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use notify_rust::Notification as DesktopNotification;
+#[cfg(all(unix, not(target_os = "macos")))]
+use notify_rust::NotificationHandle as DesktopNotificationHandle;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_notification::NotificationExt;
@@ -208,6 +215,51 @@ struct RepoTaskToml {
     enabled: Option<bool>,
     #[serde(default)]
     trigger: Option<RepoTaskTriggerToml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopNotificationActionToml {
+    id: String,
+    label: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum DesktopNotificationSoundToml {
+    Enabled(bool),
+    Named(String),
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopNotificationRequest {
+    title: Option<String>,
+    body: Option<String>,
+    icon: Option<String>,
+    sound: Option<DesktopNotificationSoundToml>,
+    notification_id: Option<String>,
+    source: Option<String>,
+    pane_id: Option<String>,
+    comb_id: Option<String>,
+    project_id: Option<String>,
+    #[serde(default)]
+    actions: Vec<DesktopNotificationActionToml>,
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopNotificationActionEvent {
+    notification_id: String,
+    action_id: String,
+    title: String,
+    source: Option<String>,
+    pane_id: Option<String>,
+    comb_id: Option<String>,
+    project_id: Option<String>,
+    body: Option<String>,
 }
 
 /// Últimas N linhas de stdout/stderr por sessão (reidratação do xterm ao remontar).
@@ -2539,37 +2591,161 @@ fn truncate_notification_body(s: &str, max_chars: usize) -> String {
     out
 }
 
+fn stable_notification_id_u32(notification_id: &str) -> u32 {
+    let mut hasher = DefaultHasher::new();
+    notification_id.hash(&mut hasher);
+    let raw = hasher.finish() as u32;
+    if raw == 0 { 1 } else { raw }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn emit_notification_action(app: &AppHandle, event: DesktopNotificationActionEvent) {
+    let _ = app.emit("notification-action", event);
+}
+
 #[tauri::command]
-fn app_show_notification(app: AppHandle, payload: Value) -> ApiResult<Value> {
+fn app_show_notification(_app: AppHandle, payload: Value) -> ApiResult<Value> {
     // Front-end: `invoke(..., { payload: { title, body } })` → este `payload` é o objeto interno.
     let inner = payload.get("payload").cloned().unwrap_or(payload);
 
-    let title = inner
-        .get("title")
-        .and_then(|v| v.as_str())
+    let request: DesktopNotificationRequest =
+        serde_json::from_value(inner).unwrap_or_default();
+    let title = request
+        .title
+        .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or("Dev Command Center");
-
-    let body_opt = inner
-        .get("body")
-        .and_then(|v| v.as_str())
+    let body = request
+        .body
+        .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|b| truncate_notification_body(b, 1800));
+    let notification_id = request
+        .notification_id
+        .filter(|id| !id.trim().is_empty())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let _has_actions = !request.actions.is_empty();
 
-    let mut builder = app.notification().builder().title(title.to_string());
-    if let Some(body) = body_opt {
-        builder = builder.body(body);
+    let mut notification = DesktopNotification::new();
+    notification.summary(title);
+    if let Some(body) = body.as_deref() {
+        notification.body(body);
+    }
+    match request.icon.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(icon) if icon.eq_ignore_ascii_case("auto") => {
+            notification.auto_icon();
+        }
+        Some(icon) => {
+            notification.icon(icon);
+        }
+        None => {
+            notification.auto_icon();
+        }
     }
 
-    match builder.show() {
-        Ok(()) => Ok(serde_json::json!({ "ok": true })),
-        Err(e) => Ok(serde_json::json!({
-            "ok": false,
-            "reason": "show_failed",
-            "message": e.to_string()
-        })),
+    if let Some(sound) = request.sound.as_ref() {
+        match sound {
+            DesktopNotificationSoundToml::Enabled(true) => {
+                notification.sound_name("default");
+            }
+            DesktopNotificationSoundToml::Named(name) if !name.trim().is_empty() => {
+                notification.sound_name(name.trim());
+            }
+            _ => {}
+        }
+    }
+
+    notification.id(stable_notification_id_u32(&notification_id));
+    for action in &request.actions {
+        let action_id = action.id.trim();
+        let action_label = action.label.trim();
+        if !action_id.is_empty() && !action_label.is_empty() {
+            notification.action(action_id, action_label);
+        }
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let handle: DesktopNotificationHandle = match notification.show() {
+            Ok(handle) => handle,
+            Err(e) => {
+                return Ok(serde_json::json!({
+                    "ok": false,
+                    "reason": "show_failed",
+                    "message": e.to_string()
+                }));
+            }
+        };
+
+        if _has_actions {
+            let app_handle = app.clone();
+            let notification_id = notification_id.clone();
+            let title = title.to_string();
+            let body = body.clone();
+            let source = request.source.clone();
+            let pane_id = request.pane_id.clone();
+            let comb_id = request.comb_id.clone();
+            let project_id = request.project_id.clone();
+            thread::spawn(move || {
+                handle.wait_for_action(|action| {
+                    let action_id = if action == "__closed" {
+                        "dismiss".to_string()
+                    } else {
+                        action.to_string()
+                    };
+                    emit_notification_action(
+                        &app_handle,
+                        DesktopNotificationActionEvent {
+                            notification_id: notification_id.clone(),
+                            action_id,
+                            title: title.clone(),
+                            source: source.clone(),
+                            pane_id: pane_id.clone(),
+                            comb_id: comb_id.clone(),
+                            project_id: project_id.clone(),
+                            body: body.clone(),
+                        },
+                    );
+                });
+            });
+        }
+
+        return Ok(serde_json::json!({
+            "ok": true,
+            "notificationId": notification_id
+        }));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(e) = notification.show() {
+            return Ok(serde_json::json!({
+                "ok": false,
+                "reason": "show_failed",
+                "message": e.to_string()
+            }));
+        }
+        return Ok(serde_json::json!({
+            "ok": true,
+            "notificationId": notification_id
+        }));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Err(e) = notification.show() {
+            return Ok(serde_json::json!({
+                "ok": false,
+                "reason": "show_failed",
+                "message": e.to_string()
+            }));
+        }
+        return Ok(serde_json::json!({
+            "ok": true,
+            "notificationId": notification_id
+        }));
     }
 }
 
@@ -5259,10 +5435,21 @@ fn spawn_terminal_reader_thread(
             let (needs_attention, excerpt) = check_needs_attention(&data, &output_buffer);
 
             if needs_attention {
+                let excerpt_key = excerpt
+                    .as_ref()
+                    .map(|s| s.chars().take(64).collect::<String>())
+                    .unwrap_or_default();
+                let notification_id = format!(
+                    "{}:{}:{}",
+                    pane_id.as_deref().unwrap_or_else(|| pty_id.as_str()),
+                    "needs_input",
+                    excerpt_key
+                );
                 let mut payload = serde_json::json!({
                     "ptyId": pty_id,
                     "status": "waiting",
-                    "phase": "needs_input"
+                    "phase": "needs_input",
+                    "notificationId": notification_id
                 });
 
                 if let Some(ref pid) = pane_id {
@@ -5450,6 +5637,111 @@ fn terminal_resize(
         return Ok(serde_json::json!({ "ok": true }));
     }
     Ok(serde_json::json!({ "ok": false }))
+}
+
+/// Envia sinal ao **grupo de processos** ligado ao PTY (Unix: `kill(-pgid, …)`; Windows: Ctrl+C no stream ou `taskkill /T`).
+fn send_signal_to_managed_terminal(t: &ManagedTerminal, signal: &str) -> Result<(), String> {
+    let Some(pid_u) = t.child.process_id() else {
+        return Err("PID da sessão PTY indisponível".into());
+    };
+    let normalized = signal.trim().to_ascii_uppercase();
+    let name = normalized
+        .strip_prefix("SIG")
+        .map(str::to_string)
+        .unwrap_or(normalized);
+
+    #[cfg(unix)]
+    {
+        let sig = match name.as_str() {
+            "INT" => libc::SIGINT,
+            "TERM" => libc::SIGTERM,
+            "KILL" => libc::SIGKILL,
+            _ => {
+                return Err(format!(
+                    "Sinal não suportado: {signal} (use SIGINT, SIGTERM ou SIGKILL)"
+                ));
+            }
+        };
+        let pid = pid_u as i32;
+        let pgrp = unsafe { libc::getpgid(pid) };
+        if pgrp < 0 {
+            return Err(format!("getpgid: {}", std::io::Error::last_os_error()));
+        }
+        let rc = unsafe { libc::kill(-pgrp, sig) };
+        if rc == 0 {
+            return Ok(());
+        }
+        let err = std::io::Error::last_os_error();
+        let rc2 = unsafe { libc::kill(pid, sig) };
+        if rc2 == 0 {
+            return Ok(());
+        }
+        return Err(format!("kill: {err}"));
+    }
+
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        match name.as_str() {
+            "INT" => {
+                let mut w = t
+                    .writer
+                    .lock()
+                    .map_err(|_| "writer lock poisoned".to_string())?;
+                w.write_all(b"\x03")
+                    .map_err(|e| format!("enviar Ctrl+C ao PTY: {e}"))?;
+                Ok(())
+            }
+            "TERM" => {
+                let status = std::process::Command::new("taskkill")
+                    .args(["/PID", &pid_u.to_string(), "/T"])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .status()
+                    .map_err(|e| e.to_string())?;
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("taskkill (TERM) falhou: {status}"))
+                }
+            }
+            "KILL" => {
+                let status = std::process::Command::new("taskkill")
+                    .args(["/PID", &pid_u.to_string(), "/T", "/F"])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .status()
+                    .map_err(|e| e.to_string())?;
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("taskkill (KILL) falhou: {status}"))
+                }
+            }
+            _ => Err(format!(
+                "Sinal não suportado: {signal} (use SIGINT, SIGTERM ou SIGKILL)"
+            )),
+        }
+    }
+
+    #[cfg(all(not(unix), not(windows)))]
+    {
+        let _ = (pid_u, name);
+        Err("envio de sinais PTY não suportado nesta plataforma".into())
+    }
+}
+
+#[tauri::command]
+fn terminal_send_signal(state: State<'_, AppState>, pty_id: String, signal: String) -> ApiResult<Value> {
+    let terminals = state
+        .terminals
+        .lock()
+        .map_err(|_| db_error("terminals lock poisoned"))?;
+    let Some(t) = terminals.get(&pty_id) else {
+        return Ok(serde_json::json!({ "ok": false, "error": "sessão PTY não encontrada" }));
+    };
+    match send_signal_to_managed_terminal(t, &signal) {
+        Ok(()) => Ok(serde_json::json!({ "ok": true })),
+        Err(e) => Ok(serde_json::json!({ "ok": false, "error": e })),
+    }
 }
 
 #[tauri::command]
@@ -5813,6 +6105,7 @@ pub fn run() {
             terminal_get_session,
             terminal_write,
             terminal_resize,
+            terminal_send_signal,
             terminal_kill,
             terminal_kill_by_mission_id,
             terminal_get_or_create_for_pane,

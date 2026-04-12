@@ -3,12 +3,14 @@ import { toast } from "sonner";
 import {
   areNotificationsEnabled,
   showNativeNotification,
+  type NativeNotificationAction,
 } from "@/lib/notifications";
 import {
   type AgentTerminalPhase,
   type TerminalAttentionPayload,
   resolveAttentionPhase,
 } from "@/lib/terminal/attention-types";
+import type { NativeNotificationActionEvent } from "@/types/app";
 
 export interface NavigateToPaneDetail {
   projectId: string;
@@ -32,6 +34,13 @@ export interface TerminalAttentionRecord {
 }
 
 const RENDERER_DEDUPE_MS = 95_000;
+const ACTIONS_WITH_NAV: NativeNotificationAction[] = [
+  { id: "reply", label: "Abrir painel" },
+  { id: "dismiss", label: "Dispensar" },
+];
+const ACTIONS_DISMISS_ONLY: NativeNotificationAction[] = [
+  { id: "dismiss", label: "Dispensar" },
+];
 
 /**
  * Subscreve `terminal:attention` (main), resolve nomes (projeto · missão · excerto),
@@ -40,6 +49,7 @@ const RENDERER_DEDUPE_MS = 95_000;
 export function useTerminalAttentionToasts(options?: {
   onNavigateToPane?: (detail: NavigateToPaneDetail) => void;
   onAttentionRecord?: (record: TerminalAttentionRecord) => void;
+  onAttentionAction?: (event: NativeNotificationActionEvent) => void;
   /**
    * Quando devolve true, o utilizador está a ver este pane no workspace (sem painel Providers por cima).
    * Nesse caso evitamos notificação nativa duplicada; o toast in-app mantém-se.
@@ -53,6 +63,8 @@ export function useTerminalAttentionToasts(options?: {
   navigateRef.current = options?.onNavigateToPane;
   const recordRef = useRef(options?.onAttentionRecord);
   recordRef.current = options?.onAttentionRecord;
+  const actionRef = useRef(options?.onAttentionAction);
+  actionRef.current = options?.onAttentionAction;
   const inViewRef = useRef(options?.isAttentionPaneInView);
   inViewRef.current = options?.isAttentionPaneInView;
   const lastRendererEmit = useRef<Map<string, number>>(new Map());
@@ -66,6 +78,9 @@ export function useTerminalAttentionToasts(options?: {
       const phase = resolveAttentionPhase(payload);
       const reason = payload.reason ?? payload.status ?? phase;
       const dedupeKey = `${attentionId}:${phase}:${payload.excerpt?.slice(0, 64) ?? ""}`;
+      const notificationId =
+        payload.notificationId ??
+        `${attentionId}:${phase}:${payload.excerpt?.slice(0, 64) ?? ""}`;
       const now = Date.now();
       const prev = lastRendererEmit.current.get(dedupeKey) ?? 0;
       if (now - prev < RENDERER_DEDUPE_MS) return;
@@ -87,15 +102,16 @@ export function useTerminalAttentionToasts(options?: {
         comb && window.db.projects?.findById
           ? await window.db.projects.findById(comb.projectId)
           : null;
+      const projectId = comb?.projectId ?? project?.id ?? "";
 
       const projectName = project?.name ?? "Projeto";
       const missionName = comb?.name ?? "Missão";
 
       const reasonLine =
         phase === "idle"
-          ? "Sem saída há um tempo — pode estar à espera de interação no terminal."
+          ? "Sem saída há um tempo - pode estar a espera de interação no terminal."
           : phase === "error"
-            ? "Possível erro ou falha reportada no terminal."
+            ? "Possivel erro ou falha reportada no terminal."
             : "O agente pode precisar da tua atenção no terminal.";
 
       const excerpt =
@@ -103,16 +119,13 @@ export function useTerminalAttentionToasts(options?: {
           ? payload.excerpt.trim()
           : null;
 
-      const description = excerpt
-        ? `${reasonLine}\n${excerpt}`
-        : reasonLine;
-
+      const description = excerpt ? `${reasonLine}\n${excerpt}` : reasonLine;
       const title = `${projectName} · ${missionName}`;
 
       const nav =
         comb && project
           ? {
-              projectId: comb.projectId,
+              projectId,
               combId: pane.combId,
               paneId: pane.id,
             }
@@ -120,10 +133,10 @@ export function useTerminalAttentionToasts(options?: {
       const record: TerminalAttentionRecord | null =
         nav && payload.paneId && comb && project
           ? {
-              id: `${payload.paneId}:${now}`,
+              id: notificationId,
               paneId: payload.paneId,
               combId: pane.combId,
-              projectId: comb.projectId,
+              projectId,
               projectName,
               workspaceName: missionName,
               reason: typeof reason === "string" ? reason : phase,
@@ -162,7 +175,45 @@ export function useTerminalAttentionToasts(options?: {
         document.hasFocus();
 
       if (areNotificationsEnabled() && !suppressOsBanner) {
-        void showNativeNotification(title, description);
+        void showNativeNotification({
+          title,
+          body: description,
+          icon: "auto",
+          notificationId,
+          source: "terminal-attention",
+          paneId: payload.paneId,
+          combId: pane.combId,
+          projectId,
+          actions: nav ? ACTIONS_WITH_NAV : ACTIONS_DISMISS_ONLY,
+        });
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const subscribe = window.desktopAPI?.app?.onNotificationAction;
+    if (!subscribe) return;
+
+    return subscribe((payload: NativeNotificationActionEvent) => {
+      if (payload.source && payload.source !== "terminal-attention") return;
+
+      actionRef.current?.(payload);
+
+      if (payload.actionId === "dismiss" || payload.actionId === "__closed") {
+        return;
+      }
+
+      if (
+        payload.projectId &&
+        payload.combId &&
+        payload.paneId &&
+        navigateRef.current
+      ) {
+        navigateRef.current({
+          projectId: payload.projectId,
+          combId: payload.combId,
+          paneId: payload.paneId,
+        });
       }
     });
   }, []);

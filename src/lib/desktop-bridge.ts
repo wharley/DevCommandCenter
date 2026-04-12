@@ -1,5 +1,9 @@
 // @ts-nocheck
 import type { DesktopPlatform } from "@/types/app";
+import type {
+  NativeNotificationActionEvent,
+  NativeNotificationPayload,
+} from "@/types/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -30,8 +34,25 @@ export function installDesktopBridge(): void {
       getVersion: () => call<string>("app_get_version"),
       checkForUpdates: () => call<void>("app_check_for_updates"),
       quitAndInstall: () => call<void>("app_quit_and_install"),
-      showNotification: (payload) => call<void>("app_show_notification", { payload }),
+      showNotification: (payload: NativeNotificationPayload) =>
+        call<{ ok?: boolean; notificationId?: string }>("app_show_notification", { payload }),
       onUpdateStatus: (_callback) => () => {},
+      onNotificationAction: (callback) => {
+        let unlistenFn: (() => void) | null = null;
+        void listen("notification-action", (event: any) => {
+          const payload = event?.payload ?? {};
+          callback(payload as NativeNotificationActionEvent);
+        })
+          .then((unlisten) => {
+            unlistenFn = unlisten;
+          })
+          .catch((err) => {
+            console.warn("[desktop-bridge] app onNotificationAction listen failed:", err);
+          });
+        return () => {
+          if (unlistenFn) unlistenFn();
+        };
+      },
     },
     dialog: {
       selectDirectory: () => call<string | null>("dialog_select_directory"),
@@ -66,6 +87,8 @@ export function installDesktopBridge(): void {
       getSession: (missionId) => call("terminal_get_session", { missionId }),
       write: (ptyId, data) => call("terminal_write", { ptyId, data }),
       resize: (ptyId, cols, rows) => call("terminal_resize", { ptyId, cols, rows }),
+      sendSignal: (ptyId, signal) =>
+        call<{ ok: boolean; error?: string }>("terminal_send_signal", { ptyId, signal }),
       kill: (ptyId) => call("terminal_kill", { ptyId }),
       killByMissionId: (missionId) => call("terminal_kill_by_mission_id", { missionId }),
       getOrCreateForPane: (paneId, options) =>
