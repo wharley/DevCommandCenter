@@ -29,7 +29,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { toast } from "sonner";
-import { formatDistanceToNow } from "date-fns";
+import { format, formatDistanceToNow, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -101,6 +101,11 @@ function formatDaemonMemory(mb: number): string {
   if (mb < 1) return `${(mb * 1024).toFixed(0)} KB`;
   if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
   return `${mb.toFixed(1)} MB`;
+}
+
+function formatDaemonLastTick(iso: string): string {
+  const d = new Date(iso);
+  return isValid(d) ? format(d, "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR }) : iso;
 }
 
 function buildCliCommand(provider: Provider | null): string | undefined {
@@ -2176,8 +2181,13 @@ export default function CmuxWorkspacePage() {
                     Daemon local
                   </div>
                   <p className="mt-1 text-[11px] text-sidebar-foreground/60">
-                    {daemonStatus?.running ? "Executando" : "Parado"}{" "}
-                    {daemonStatus?.lastTickAt ? `· update ${daemonStatus.lastTickAt}` : ""}
+                    {daemonStatus?.running ? "Executando" : "Parado"}
+                    {daemonStatus?.lastTickAt ? (
+                      <>
+                        {" "}
+                        · atualizado em {formatDaemonLastTick(daemonStatus.lastTickAt)}
+                      </>
+                    ) : null}
                   </p>
                   <p className="mt-1 text-[11px] text-sidebar-foreground/70">
                     {daemonStatus?.runningTasks ?? 0} em execução ·{" "}
