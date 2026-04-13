@@ -21,15 +21,16 @@ Um **ambiente local-first** (Tauri + SQLite + Git worktrees) onde você isola ta
 | Área | Onde na app | Benefício principal |
 |------|-------------|---------------------|
 | **Projeto Git** | Adicionar projeto, sidebar | Raiz de tudo: caminho do repo, providers, config. |
-| **Comb (workspace)** | Novo workspace, lista na sidebar | Uma **branch + worktree** por tarefa — isolamento real no disco; lista ordenada por fixados e **última atividade Git** (reflog/commit/index), com tempo relativo por workspace quando disponível. |
-| **Panes (terminal / agente)** | Botões Workspace, Base, Novo agente | Paralelismo: testes, servidor e agente no mesmo contexto. |
+| **Comb (workspace)** | Novo workspace, lista na sidebar | Uma **branch + worktree** por tarefa — isolamento real no disco; **pré-visualização** de branch/pasta ao escrever o nome; opcional **carregar issue** (GitHub/GitLab) para preencher nome/descrição; lista ordenada por fixados e **última atividade Git** (reflog/commit/index), com tempo relativo por workspace quando disponível. |
+| **Panes (terminal / agente)** | Botões Workspace, Base, Novo agente; **⌘⇧T** / **⌘⇧A** / **⌘⇧B** | Paralelismo: testes, servidor e agente no mesmo contexto; **agente** usa provider CLI de **Providers** e **default** do `.dcc.toml`; worktree é **garantido** antes de abrir agente. |
 | **Terminal embutido** | Painel principal | PTY nativo, xterm, busca; saída com batching suave. |
-| **Atenção / notificações** | Badges, toasts | Menos tempo a olhar para o terminal à espera. |
-| **Diffs / revisão** | Área de diffs do workspace | Ver impacto antes de integrar na base. |
+| **Atenção / notificações** | Badges, toasts, **⌘⇧I** | Menos tempo a olhar para o terminal à espera. |
+| **Diffs / revisão** | Painel **Review** do workspace | Diffs por ficheiro, **flags** (OK / depois / suspeito), notas, **merge** vs **patch**, estado do **principal** e da **worktree**, comentários de **PR/MR** com `forge_link`; **multi-repo** na mesma revisão. |
 | **`.dcc.toml` + editor UI** | Config do repositório, diálogo TOML | Presets, processos, tasks, scripts, branch — **reprodutível em equipa**. |
 | **Processos supervisionados** | Secção **Processos** na sidebar (com daemon) | Start/stop/restart, CPU/RAM, auto-restart — tipo Procfile com estado. |
 | **Tarefas agendadas** | Secção **Tarefas** + palette | Cron no daemon; executar, anexar/desanexar stream. |
-| **Paleta de comandos** | **⌘K** (macOS) / atalho configurado | Saltar para projeto, comb, pane, preset, task sem rato. |
+| **Paleta de comandos** | **⌘K** / **Ctrl+K**; grupos na lista | Saltar para projeto, comb, pane, preset, processo, template `.dcc/tasks`, task agendada; ver **[atalhos](GUIA_DE_PRODUTIVIDADE.md#6-atalhos-de-teclado-workspace)** no guia de produtividade. |
+| **Atalhos globais workspace** | Teclado (ver guia) | Novo workspace (**⌘⇧N**), terminais, agente, histórico de Combs (**⌘[** / **⌘]**), temas, zoom de fonte do terminal (**⌘±**), **⌘1–9** para panes. |
 | **Integração Git avançada** | Ações no workspace | Merge para main, apply patch, discard — fechar o ciclo do worktree. |
 | **CLI `dcc`** | Terminal do sistema | `daemon status`, `run`/`attach`/`detach` de tasks, `mcp`. |
 | **MCP** | `dcc mcp` (stdio) | Cursor / Claude Desktop / outro cliente MCP a orquestrar o daemon. |
@@ -55,17 +56,23 @@ Esta secção é o **roteiro**: cada bloco tem passos **numerados** para puder s
 
 1. Abre o **DCC** (app desktop Tauri).
 2. **Adiciona um projeto**: escolhe a pasta raiz do repositório Git (clone local).
-3. (Opcional) Em **Definições / Settings**, configura **providers** (CLI dos agentes) se fores usar panes de agente.
+3. (Opcional) Em **Definições / Settings**, configura **providers** (CLI dos agentes) se fores usar panes de agente. No **`.dcc.toml`** podes definir **agente padrão** (`defaultAgentProviderId`) para o diálogo “Novo Agent Pane” pré-selecionar o mesmo modelo em toda a equipa.
 4. Na sidebar, **seleciona o projeto** (se tiveres vários).
-5. Cria um **novo workspace (Comb)** — dá um nome descritivo (ex. `feat-login-oauth`).
-6. Confirma que o **worktree** / branch foi criado: o Comb aparece selecionado e o cabeçalho mostra a branch.
-7. Se for a **primeira vez** neste worktree e o projeto tiver dependências, abre um **terminal do workspace** e corre o instalador (`yarn`, `npm ci`, `pnpm install`, etc.) **dentro da pasta do worktree**.
-8. Abre um **terminal do workspace** para comandos no diretório da feature; usa **terminal Base** só quando precisares de ler o código na árvore principal (clone “base”).
-9. (Opcional) Abre um **pane de agente**, escolhe o provider e descreve a tarefa.
-10. Trabalha normalmente; consulta o painel de **diffs** no workspace para ver o que mudou.
-11. Faz **commit** a partir do terminal ou da tua ferramenta Git habitual **no diretório do worktree**.
+5. Cria um **novo workspace (Comb)** (**botão +**, **⌘⇧N** ou paleta **⌘K** → “Novo workspace”):
+   - Escolhe o **projeto** na lista.
+   - (Opcional) Secção **Issue (GitHub / GitLab):** cola URL da issue ou `owner/repo#123`; token PAT opcional para privados; **Carregar** — o DCC preenche **nome** e **descrição** sugeridos (revê antes de criar).
+   - Escreve o **nome** do workspace; observa a caixa **Branch e pasta (pré-visualização)** — mostra o nome de **branch** e **caminho** do worktree (suíxo hex de exemplo até criares de facto).
+   - Escolhe a **branch base** (lista carregada do Git ou texto livre).
+   - (Opcional) **Descrição** para contexto humano.
+   - **Criar** — o registo do Comb fica na base local; o **worktree em disco** pode ser criado na primeira operação que precise dele (**garantir worktree** ao abrir terminal/agente).
+6. Confirma que o Comb aparece na lista (branch pode ainda estar pendente até o primeiro `ensure`).
+7. Se for a **primeira vez** neste worktree e o projeto tiver dependências, abre um **terminal do workspace** (**⌘⇧T** ou botão) — o DCC prepara o worktree se necessário — e corre o instalador (`yarn`, `npm ci`, `pnpm install`, etc.) **dentro da pasta do worktree**.
+8. Usa **terminal do workspace** para a feature; **terminal Base** (**⌘⇧B**) só quando precisares do clone principal sem mudar de Comb.
+9. (Opcional) **Novo agente** (**⌘⇧A**): escolhe o provider CLI; o worktree é garantido antes de arrancar o PTY.
+10. Trabalha normalmente; abre o painel **Review** para diffs, flags por ficheiro, notas e integração Git (ver **4.6**).
+11. Faz **commit** a partir do fluxo do painel Review, do **Commit…** na própria UI, ou do terminal / ferramenta Git **no diretório do worktree**.
 
-**Checkpoint:** tens alterações no Comb, diffs visíveis no DCC e commits no branch do worktree.
+**Checkpoint:** tens alterações no Comb, revisão no painel Review (ou diffs coerentes) e commits no branch do worktree.
 
 ---
 
@@ -120,25 +127,35 @@ Esta secção é o **roteiro**: cada bloco tem passos **numerados** para puder s
 
 ---
 
-### 4.6 Revisar e integrar na branch principal
+### 4.6 Revisar e integrar na branch principal (painel Review)
 
-1. Com o **Comb** ativo, abre/revê o painel de **diffs** até estares confortável com as alterações.
-2. Garante o worktree atualizado (**garantir worktree** / ensure, se a tua UI expuser após criar ou recuperar estado).
-3. Quando a feature estiver pronta, usa a ação de **merge para main** (ou equivalente) com a branch alvo correta — confirma diálogos e mensagens de conflito se aparecerem.
-4. Alternativa pontual: **apply patch** para aplicar o trabalho noutra base, conforme o teu fluxo.
-5. Depois do merge na remota / política da equipa, **remove o Comb** na sidebar (descartar workspace) **só quando** não precisares mais do worktree — lê avisos sobre commits não enviados.
+O painel **Review** concentra o ciclo **ver → classificar → commit/push → merge ou patch** sem depender só da linha de comandos.
 
-**Checkpoint:** código integrado ou aplicado de forma controlada; worktree antigo removido para libertar disco (ver [WORKTREE_POLICY](WORKTREE_POLICY.md)).
+1. Com o **Comb** ativo, abre o separador/painel **Review** (diffs relativos à base; vários ficheiros em árvore).
+2. **Por ficheiro:** marca **OK**, **rever depois** ou **suspeito**; o estado guarda-se localmente por *target* de revisão. Usa a **trilha** (trail) para ver o histórico curto de ações na sessão.
+3. **Lê os alertas:** se o **repositório principal** (clone na raiz do projeto) tiver alterações por commitar, **merge** e **patch** no principal ficam bloqueados até commitares, stash ou **descartares no principal** — evita merges falhados por ficheiros sujos fora da worktree. Da mesma forma, com alterações por commitar **na worktree**, o merge integra o **branch**, não o working tree: faz **Commit…** ou descarta na Missão primeiro.
+4. **Branch de destino:** escolhe no seletor a branch do **repo principal** para onde queres integrar (ex. `main`).
+5. **Passo worktree — Missão:** **Pull** no branch da Missão se precisares de alinhar com o remoto; **Commit…** e **Push** quando estiver pronto; opcionalmente **Descartar** alterações locais na worktree (reset) com confirmação.
+6. **Integração no principal:**
+   - **Merge** — caminho normal: integra o branch da Missão na branch de destino no repositório principal (histórico preservado).
+   - **Aplicar (patch)** — aplica diffs no checkout principal (casos pontuais; ver colapsável “merge vs patch” na UI).
+7. Se ligaste um **PR/MR** (`forge_link`) e token, usa o painel de **comentários de review** para alinhar com o código (GitHub / GitLab conforme backend).
+8. **Vários repositórios:** se adicionaste **outros projetos do Hive a esta revisão**, cada *target* tem a sua secção `RepoReviewSection` — vês **tokens entre repos** quando o mesmo símbolo aparece em mais do que um checkout.
+9. Depois do merge na remota / política da equipa, **remove o Comb** na sidebar **só quando** não precisares mais do worktree — confirma avisos sobre commits não enviados.
+
+**Checkpoint:** código revisto com flags, integrado por merge ou patch de forma controlada; worktree antigo removido para libertar disco (ver [WORKTREE_POLICY](WORKTREE_POLICY.md)).
 
 ---
 
-### 4.7 Paleta de comandos em 30 segundos
+### 4.7 Paleta de comandos e atalhos em 30 segundos
 
-1. Carrega **⌘K** (macOS) ou o atalho equivalente no teu SO.
-2. Escreve parte do nome: projeto, Comb, pane, preset ou task.
-3. Usa as **setas** e **Enter** para executar.
+1. Carrega **⌘K** (macOS) ou **Ctrl+K** (Windows/Linux) para abrir a paleta. **⌘⇧K** / **Ctrl+Shift+K** limpa o **scrollback** do terminal ativo (ação separada, não abre a paleta).
+2. Escreve parte do nome: **projeto**, **Comb**, **pane**, **preset**, **processo** do `.dcc.toml`, **template** em `.dcc/tasks` ou **task** agendada.
+3. Usa as **setas** e **Enter** para executar; grupos **Histórico de workspaces**, **Temas** e **Global** estão sempre visíveis com os respetivos atalhos.
 
-**Checkpoint:** navegação sem percorrer toda a sidebar.
+Lista completa de atalhos do workspace (incl. **⌘⇧N**, **⌘⇧T**, **⌘⇧A**, **⌘[** / **⌘]**, **⌘1–9**, zoom): **[Guia de produtividade — secção 6](GUIA_DE_PRODUTIVIDADE.md#6-atalhos-de-teclado-workspace)**.
+
+**Checkpoint:** navegação e ações frequentes sem percorrer toda a sidebar.
 
 ---
 
@@ -176,7 +193,7 @@ flowchart LR
 1. **Registe o projeto** (caminho do repositório) e, se necessário, **providers** (CLI dos agentes) em Definições.
 2. Crie um **Comb** com nome claro (ex.: `feat-api-pagamentos`). O DCC prepara o **worktree** e a branch conforme a política do repo.
 3. Abra **terminais** (workspace = diretório do worktree; **base** = raiz do clone principal) e/ou **panes de agente** para delegar tarefas.
-4. Use o painel de **diffs** para rever alterações antes de integrar.
+4. Use o painel **Review** (diffs, flags, merge/patch) para rever e integrar com controlo.
 
 Este fluxo sozinho já reduz troca de contexto e custo cognitivo em relação a um único checkout.
 
@@ -230,26 +247,30 @@ Na secção **Processos** do workspace (com projeto e daemon):
 
 ---
 
-## 10. Paleta de comandos (⌘K)
+## 10. Paleta de comandos (⌘K / Ctrl+K)
 
-Agrupamentos típicos: **Global** (novo workspace, terminal, agente, settings), **Projeto**, **Workspaces**, **Panes**, **Presets**, **Processos**, **Tasks**.
+Agrupamentos na UI: **Global** (novo workspace **⌘⇧N**, terminal **⌘⇧T**, agente **⌘⇧A**, base **⌘⇧B**, repo **⌘⇧R**, notificações **⌘⇧I**, providers **⌘⇧P**), **Histórico de workspaces** (**⌘[** / **⌘]**), **Temas** (**⌘⌥T**, **⌘⇧D/L/S**), **Projetos**, **Workspaces**, **Panes ativos**, **Processos gerenciados**, **Presets rápidos**, **Templates .dcc/tasks**, **Tarefas agendadas**, **Foco atual**.
 
-**Dica:** memorize **⌘K** como “ir para qualquer coisa” — reduz navegação na sidebar em sessões longas.
+**Dica:** trata **⌘K** como “ir para qualquer coisa”; **segura ⌘** (ou **Ctrl**) na sidebar para revelar os mesmos atalhos nos botões.
+
+Referência completa: [Guia de produtividade — atalhos](GUIA_DE_PRODUTIVIDADE.md#6-atalhos-de-teclado-workspace).
 
 ---
 
 ## 11. Git: integrar o trabalho do worktree
 
-Operações expostas no fluxo do Comb (conforme UI atual):
+Operações expostas no **painel Review** e no fluxo do Comb:
 
 | Ação | Quando usar |
 |------|-------------|
-| Garantir worktree | Após criar Comb ou recuperar estado — sincroniza árvore de trabalho. |
-| **Merge para main** | Feature pronta para integrar na branch principal configurada. |
-| **Apply patch** | Aplicar alterações do worktree noutra base com controlo. |
-| **Descartar** | Remover workspace; atenção a commits não enviados (há checagens no backend — confirme na UI antes de destruir trabalho). |
+| **Garantir worktree** | Na primeira vez que um terminal/agente precisa do checkout — cria/prepara o diretório da Missão. |
+| **Commit / Push / Pull** | Na worktree, alinhar com o remoto e publicar o branch da Missão antes do merge. |
+| **Merge** (para branch de destino no principal) | Feature pronta; **principal** tem de estar limpo (sem alterações locais por commitar). |
+| **Aplicar (patch)** | Copiar diffs para o checkout principal — uso mais pontual; ver texto de ajuda na UI. |
+| **Descartar** (worktree ou principal) | Reset controlado de alterações locais; **remover Comb** elimina workspace e worktree — confirma diálogos sobre commits não enviados. |
+| **Comentários PR/MR** | Quando existe `forge_link` e credenciais — cruzar review remota com o diff local. |
 
-Combine sempre com **revisão de diffs** no painel antes de merge final.
+Combine sempre **classificação por ficheiro** (flags) e **estado do principal** com o merge final.
 
 ---
 
@@ -280,10 +301,10 @@ dcc mcp
 
 ### A) Dia de desenvolvimento “full stack” no mesmo Comb
 
-1. Manhã: criar Comb para a feature; correr **preset** `install` ou script de **setup** do `.dcc.toml`.
+1. Manhã: criar Comb para a feature (opcional: **carregar issue** no diálogo); correr **preset** `install` ou script de **setup** do `.dcc.toml`.
 2. Ligar **processos** `web` + `api` no supervisor; deixar **terminal** com logs de teste.
-3. Abrir **agente** num pane para refatoração; **Base terminal** noutro para consultar `main`.
-4. Tarde: rever **diffs**; **merge** ou **apply patch**; descartar Comb após integração.
+3. Abrir **agente** (**⌘⇧A**) num pane para refatoração; **Base terminal** (**⌘⇧B**) noutro para consultar `main`.
+4. Tarde: painel **Review** (flags, merge/patch, estado do principal); descartar Comb após integração.
 
 *Ganho:* isolamento, paralelismo humano+IA, serviços estáveis, integração Git fechada no próprio produto.
 
@@ -352,7 +373,7 @@ Funcionalidades **ainda não** cobertas por este guia (HTTP API do daemon em mod
 | Repetição e disciplina | Presets + `.dcc.toml` |
 | Serviços sempre ligados | Processos + daemon |
 | Rotinas periódicas | Tasks + cron |
-| Navegação rápida | Paleta ⌘K |
+| Navegação rápida | Paleta **⌘K** / **Ctrl+K** + atalhos (ver [guia](GUIA_DE_PRODUTIVIDADE.md#6-atalhos-de-teclado-workspace)) |
 | Automação fora da GUI | CLI `dcc` + MCP |
 | Integração Git segura | Diffs + merge / patch / discard |
 
