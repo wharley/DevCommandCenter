@@ -1576,11 +1576,9 @@ export default function CmuxWorkspacePage() {
     if (!basePath) {
       toast.error("Projeto base indisponivel para este workspace.");
       return;
-      }
-      try {
-        const ok = await ensureActiveCombWorktree();
-        if (!ok) return;
-        const pane = await createPane({
+    }
+    try {
+      const pane = await createPane({
         combId: activeCombId,
         type: "term",
         title: "Base",

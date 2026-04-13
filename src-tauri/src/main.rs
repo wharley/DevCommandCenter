@@ -1316,33 +1316,76 @@ fn git_worktree_last_activity_epoch(worktree: &str) -> Option<i64> {
     max_ts
 }
 
-/// Executa o script de setup do repositório no diretório do worktree (`sh -c` / `cmd /C`).
+fn stderr_mentions_missing_command(output: &std::process::Output) -> bool {
+    let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+    let combined = format!("{stderr}\n{stdout}");
+    combined.contains("command not found") || combined.contains("not found")
+}
+
+/// Executa o script de setup do repositório no diretório do worktree.
 fn run_repo_setup_script(worktree_path: &str, script: &str) -> Result<(), String> {
     let script = script.trim();
     if script.is_empty() {
         return Ok(());
     }
+    #[cfg(windows)]
     let output = {
-        #[cfg(windows)]
-        {
-            let mut c = Command::new("cmd");
-            c.args(["/C", script]).current_dir(worktree_path);
-            c.creation_flags(0x08000000); // CREATE_NO_WINDOW
-            c.output()
-        }
-        #[cfg(not(windows))]
-        {
-            Command::new("sh")
-                .args(["-c", script])
-                .current_dir(worktree_path)
-                .output()
-        }
-    }
-    .map_err(|e| format!("{e}"))?;
+        let mut c = Command::new("cmd");
+        c.args(["/C", script]).current_dir(worktree_path);
+        c.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        c.output().map_err(|e| e.to_string())?
+    };
+
+    #[cfg(not(windows))]
+    let output = run_repo_setup_script_unix(worktree_path, script)?;
 
     if output.status.success() {
         return Ok(());
     }
+    Err(format_output_failure(&output))
+}
+
+#[cfg(not(windows))]
+fn run_repo_setup_script_unix(
+    worktree_path: &str,
+    script: &str,
+) -> Result<std::process::Output, String> {
+    let shells = [
+        std::env::var("SHELL").ok(),
+        Some("/bin/zsh".to_string()),
+        Some("/bin/bash".to_string()),
+        Some("/bin/sh".to_string()),
+    ];
+
+    let mut last_error: Option<std::io::Error> = None;
+    for shell in shells.into_iter().flatten() {
+        match Command::new(&shell)
+            .args(["-lc", script])
+            .current_dir(worktree_path)
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    return Ok(output);
+                }
+                if stderr_mentions_missing_command(&output) {
+                    continue;
+                }
+                return Ok(output);
+            }
+            Err(err) => {
+                last_error = Some(err);
+            }
+        }
+    }
+
+    Err(last_error
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "nenhum shell disponível para executar o setup".into()))
+}
+
+fn format_output_failure(output: &std::process::Output) -> String {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let mut detail = String::new();
@@ -1365,7 +1408,7 @@ fn run_repo_setup_script(worktree_path: &str, script: &str) -> Result<(), String
                 .unwrap_or_else(|| "?".into())
         );
     }
-    Err(detail)
+    detail
 }
 
 /// Reverte `git worktree add` + branch local após falha do setup (best-effort, alinhado a `comb_discard`).
