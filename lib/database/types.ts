@@ -245,6 +245,16 @@ export interface ReviewTarget {
   sourceCombId?: string | null;
 }
 
+/** PR/MR aberto detetado pela branch do worktree (persistido em `forge_link`). */
+export interface ForgePrLink {
+  forge: "github" | "gitlab";
+  number: number;
+  url: string;
+  title?: string;
+  branch?: string;
+  syncedAt?: string;
+}
+
 export interface Comb {
   id: string;
   projectId: string;
@@ -253,11 +263,14 @@ export interface Comb {
   baseBranch: string;
   branch?: string | null;
   worktreePath?: string | null;
+  /** Ligação automática a PR (GitHub) ou MR (GitLab) aberto na mesma branch. */
+  forgeLink?: ForgePrLink | null;
   reviewTargets?: ReviewTarget[] | null;
   status: CombStatus;
   isPinned?: boolean;
   pinnedAt?: Date | null;
   lastOpenedAt?: Date | null;
+  lastGitActivityAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -332,11 +345,13 @@ export interface UpdateCombDTO {
   description?: string | null;
   branch?: string | null;
   worktreePath?: string | null;
+  forgeLink?: ForgePrLink | null;
   reviewTargets?: ReviewTarget[] | null;
   status?: CombStatus;
   isPinned?: boolean;
   pinnedAt?: Date | null;
   lastOpenedAt?: Date;
+  lastGitActivityAt?: Date | null;
 }
 
 export interface CreatePaneDTO {

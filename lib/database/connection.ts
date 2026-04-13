@@ -148,6 +148,12 @@ export function initDatabase(): Database.Database {
   // Migração: is_pinned e pinned_at em combs para fixar workspaces
   migrateCombsPinned(db);
 
+  // Migração: última atividade Git por worktree (sidebar / ordenação)
+  migrateCombsLastGitActivity(db);
+
+  // Migração: ligação automática PR/MR (JSON em combs.forge_link)
+  migrateCombsForgeLink(db);
+
   console.log(`[Database] Initialized at: ${dbPath}`);
 
   return db;
@@ -583,6 +589,48 @@ function migrateCombsPinned(database: Database.Database): void {
   if (!indexExists) {
     database.exec(`CREATE INDEX idx_combs_pinned ON combs(is_pinned DESC, pinned_at DESC)`);
     console.log("[Database] Migration: idx_combs_pinned index created.");
+  }
+}
+
+/**
+ * Coluna last_git_activity_at em combs (timestamp da última atividade Git no worktree).
+ */
+function migrateCombsLastGitActivity(database: Database.Database): void {
+  const combsExists = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'combs'")
+    .get();
+  if (!combsExists) return;
+
+  const columns = database.prepare("PRAGMA table_info(combs)").all() as { name: string }[];
+  const names = new Set(columns.map((c) => c.name));
+
+  if (!names.has("last_git_activity_at")) {
+    database.exec(`ALTER TABLE combs ADD COLUMN last_git_activity_at TEXT`);
+    console.log("[Database] Migration: last_git_activity_at column added to combs.");
+  }
+
+  const indexExists = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_combs_last_git_activity'")
+    .get();
+  if (!indexExists) {
+    database.exec(`CREATE INDEX idx_combs_last_git_activity ON combs(last_git_activity_at DESC)`);
+    console.log("[Database] Migration: idx_combs_last_git_activity index created.");
+  }
+}
+
+/** JSON com PR/MR aberto ligado à branch do worktree (GitHub/GitLab). */
+function migrateCombsForgeLink(database: Database.Database): void {
+  const combsExists = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'combs'")
+    .get();
+  if (!combsExists) return;
+
+  const columns = database.prepare("PRAGMA table_info(combs)").all() as { name: string }[];
+  const names = new Set(columns.map((c) => c.name));
+
+  if (!names.has("forge_link")) {
+    database.exec(`ALTER TABLE combs ADD COLUMN forge_link TEXT`);
+    console.log("[Database] Migration: forge_link column added to combs.");
   }
 }
 

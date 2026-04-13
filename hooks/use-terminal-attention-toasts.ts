@@ -42,6 +42,15 @@ const ACTIONS_DISMISS_ONLY: NativeNotificationAction[] = [
   { id: "dismiss", label: "Dispensar" },
 ];
 
+function focusDesktopWindow(): void {
+  const promise = window.desktopAPI?.window?.focus?.();
+  if (promise) {
+    void promise.catch(() => {
+      // ignore focus failures; navigation still runs
+    });
+  }
+}
+
 /**
  * Subscreve `terminal:attention` (main), resolve nomes (projeto · missão · excerto),
  * mostra toast Sonner e opcionalmente navega para o painel.
@@ -195,7 +204,10 @@ export function useTerminalAttentionToasts(options?: {
     if (!subscribe) return;
 
     return subscribe((payload: NativeNotificationActionEvent) => {
-      if (payload.source && payload.source !== "terminal-attention") return;
+      // Processa ações de terminal-attention e terminal-bell
+      if (payload.source && payload.source !== "terminal-attention" && payload.source !== "terminal-bell") {
+        return;
+      }
 
       actionRef.current?.(payload);
 
@@ -203,12 +215,14 @@ export function useTerminalAttentionToasts(options?: {
         return;
       }
 
+      // Ação "reply" (Abrir painel) navega para o painel
       if (
         payload.projectId &&
         payload.combId &&
         payload.paneId &&
         navigateRef.current
       ) {
+        focusDesktopWindow();
         navigateRef.current({
           projectId: payload.projectId,
           combId: payload.combId,

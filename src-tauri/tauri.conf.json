@@ -24,6 +24,14 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc4QTA3NDg0NEY0MDQ4RDkKUldUWlNFQlBoSFNnZU5DUEZkMW1lcE8xYTlZcXArYWlua3p0dHB5WU91aXpoQjBSTFk4My80Wk4K",
+      "endpoints": [
+        "https://httpbin.org/status/204"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

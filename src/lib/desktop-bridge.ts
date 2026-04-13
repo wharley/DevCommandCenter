@@ -3,6 +3,7 @@ import type { DesktopPlatform } from "@/types/app";
 import type {
   NativeNotificationActionEvent,
   NativeNotificationPayload,
+  TerminalProjectActivity,
 } from "@/types/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -32,8 +33,16 @@ export function installDesktopBridge(): void {
     platform: platformFromUA(),
     app: {
       getVersion: () => call<string>("app_get_version"),
-      checkForUpdates: () => call<void>("app_check_for_updates"),
-      quitAndInstall: () => call<void>("app_quit_and_install"),
+      checkForUpdates: () =>
+        call<{
+          available: boolean;
+          currentVersion: string;
+          version?: string;
+          date?: string;
+          body?: string | null;
+          checkError?: string;
+        }>("app_check_for_updates"),
+      quitAndInstall: () => call<{ success: boolean }>("app_quit_and_install"),
       showNotification: (payload: NativeNotificationPayload) =>
         call<{ ok?: boolean; notificationId?: string }>("app_show_notification", { payload }),
       onUpdateStatus: (_callback) => () => {},
@@ -100,10 +109,7 @@ export function installDesktopBridge(): void {
       clearPersistedScrollback: (paneId: string) =>
         call<{ ok: boolean }>("terminal_clear_persisted_scrollback", { paneId }),
       getProjectActivity: (projectId) =>
-        call<{
-          totalRunningPanes: number;
-          runningPanesByCombId: Record<string, number>;
-        }>("terminal_get_project_activity", { projectId }),
+        call<TerminalProjectActivity>("terminal_get_project_activity", { projectId }),
       saveTempImage: (imageData: number[], extension: string) =>
         call<{ path: string; filename: string }>("terminal_save_temp_image", { imageData, extension }),
       onData: (callback) => {
@@ -138,6 +144,22 @@ export function installDesktopBridge(): void {
           if (unlistenFn) unlistenFn();
         };
       },
+      onActivity: (callback) => {
+        let unlistenFn: (() => void) | null = null;
+        void listen("terminal-activity", (event: any) => {
+          const payload = event?.payload ?? {};
+          callback(payload);
+        })
+          .then((unlisten) => {
+            unlistenFn = unlisten;
+          })
+          .catch((err) => {
+            console.warn("[desktop-bridge] terminal onActivity listen failed:", err);
+          });
+        return () => {
+          if (unlistenFn) unlistenFn();
+        };
+      },
       onAttention: (callback) => {
         let unlistenFn: (() => void) | null = null;
         void listen("terminal-attention", (event: any) => {
@@ -157,6 +179,7 @@ export function installDesktopBridge(): void {
     },
     daemon: {
       getStatus: () => call("daemon_get_status"),
+      health: () => call("daemon_health"),
       listTasks: () => call("daemon_list_tasks"),
       listProcesses: (projectId) => call("daemon_list_processes", { projectId }),
       startProcess: (projectId, processId) =>
@@ -188,7 +211,17 @@ export function installDesktopBridge(): void {
         call("worktree_apply_mission_patch", { missionId, targetBranch, options }),
     },
     comb: {
+      previewWorktreeNaming: (projectId, workspaceTitle) =>
+        call<{
+          branchPrefix: string;
+          slug: string;
+          idSuffixExample: string;
+          branch: string;
+          worktreePath: string;
+        }>("comb_preview_worktree_naming", { projectId, workspaceTitle }),
       ensureWorktree: (combId) => call("comb_ensure_worktree", { combId }),
+      refreshGitActivity: (projectId: string) =>
+        call<{ updated: number }>("comb_refresh_git_activity", { projectId }),
       discard: (combId) => call("comb_discard", { combId }),
       checkUnpushed: (combId) => call<{ hasUnpushed: boolean; count: number; commits: string[] }>("comb_check_unpushed", { combId }),
       mergeIntoMain: (combId, targetBranch) =>
@@ -209,10 +242,63 @@ export function installDesktopBridge(): void {
           }>
         >("repo_list_task_templates", { projectPath }),
     },
+    forge: {
+      fetchIssue: (
+        projectId: string,
+        issueRef: string,
+        token?: string | null,
+      ) =>
+        call<{
+          forge: "github" | "gitlab";
+          issueNumber: number;
+          title: string;
+          body: string;
+          webUrl: string;
+          suggestedWorkspaceName: string;
+          suggestedDescription: string;
+          owner?: string;
+          repo?: string;
+          projectPath?: string;
+        }>("forge_fetch_issue", { projectId, issueRef, token: token ?? undefined }),
+      syncPrLink: (combId: string, token?: string | null) =>
+        call<{
+          ok?: boolean;
+          linked?: boolean;
+          skipped?: boolean;
+          reason?: string;
+          forgeLink?: {
+            forge: "github" | "gitlab";
+            number: number;
+            url: string;
+            title?: string;
+            branch?: string;
+            syncedAt?: string;
+          } | null;
+          error?: string;
+        }>("forge_sync_pr_link", { combId, token: token ?? undefined }),
+      fetchPrReviewComments: (combId: string, token?: string | null) =>
+        call<{
+          success?: boolean;
+          skipped?: boolean;
+          reason?: string;
+          forge?: string;
+          error?: string;
+          comments?: Array<{
+            path: string;
+            line: number | null;
+            side: string;
+            body: string;
+            author: string;
+            url: string;
+            createdAt: string;
+          }>;
+        }>("forge_fetch_pr_review_comments", { combId, token: token ?? undefined }),
+    },
     window: {
       minimize: () => call<void>("window_minimize"),
       maximize: () => call<void>("window_maximize"),
       close: () => call<void>("window_close"),
+      focus: () => call<void>("window_focus"),
       isMaximized: () => call<boolean>("window_is_maximized"),
     },
     license: {
@@ -267,6 +353,18 @@ export function installDesktopBridge(): void {
     },
     review: {
       getDiffsBundle: (worktreePaths) => call("review_get_diffs_bundle", { worktreePaths }),
+    },
+    worktree: {
+      readNotes: (worktreePath) =>
+        call<{ success: boolean; content?: string; error?: string }>(
+          "worktree_read_notes",
+          { worktreePath },
+        ),
+      writeNotes: (worktreePath, content) =>
+        call<{ success: boolean; error?: string }>("worktree_write_notes", {
+          worktreePath,
+          content,
+        }),
     },
   } as any;
 

@@ -7,6 +7,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { SearchAddon } from "@xterm/addon-search";
 import "xterm/css/xterm.css";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -15,18 +16,30 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { X, Paperclip, ArrowDown, ChevronUp, ChevronDown, Signal } from "lucide-react";
+import {
+  X,
+  Paperclip,
+  ArrowDown,
+  ChevronUp,
+  ChevronDown,
+  Signal,
+  AlertTriangle,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "@/components/theme-provider";
 import {
   type TerminalAttentionPayload,
   resolveAttentionPhase,
 } from "@/lib/terminal/attention-types";
-import { recordTerminalOutputBytes } from "@/lib/terminal/output-metrics";
+import {
+  createTerminalOutputMetricsTracker,
+  recordTerminalOutputBytes,
+} from "@/lib/terminal/output-metrics";
 import { getTerminalAppearancePreferences } from "@/lib/terminal/terminal-preferences";
 import { getXtermColorTheme } from "@/lib/terminal/xterm-theme";
 import { writePtyInputInChunks } from "@/lib/terminal/pty-input-write";
 import { handleOsc52Payload } from "@/lib/terminal/osc52";
+import { showNativeNotification } from "@/lib/notifications";
 
 export interface EmbeddedTerminalProps {
   cwd: string;
@@ -43,6 +56,10 @@ export interface EmbeddedTerminalProps {
    * and the PTY is NOT killed on unmount for reattach.
    */
   paneId?: string;
+  /** ID do comb (worktree) para metadata de notificações e navegação */
+  combId?: string;
+  /** ID do projeto para metadata de notificações e navegação */
+  projectId?: string;
 }
 
 type PaneAttachResult = {
@@ -50,6 +67,13 @@ type PaneAttachResult = {
   error?: string;
   session?: any | null;
 };
+
+function formatTerminalThroughput(bytesPerSecond: number): string {
+  if (bytesPerSecond >= 1024 * 1024) {
+    return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MiB/s`;
+  }
+  return `${(bytesPerSecond / 1024).toFixed(0)} KiB/s`;
+}
 
 export function EmbeddedTerminal({
   cwd,
@@ -60,6 +84,8 @@ export function EmbeddedTerminal({
   onSessionActive,
   title,
   paneId,
+  combId,
+  projectId,
 }: EmbeddedTerminalProps) {
   const { resolvedTheme } = useTheme();
   const [terminalPrefsEpoch, setTerminalPrefsEpoch] = useState(0);
@@ -67,12 +93,15 @@ export function EmbeddedTerminal({
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
+  const [outputHealthTracker] = useState(() => createTerminalOutputMetricsTracker());
   const ptyIdRef = useRef<string | null>(null);
   /** Serializa escritas no PTY (teclado + paste) e evita promise rejeitada sem catch. */
   const ptyWriteChainRef = useRef<Promise<void>>(Promise.resolve());
   const onExitRef = useRef<typeof onExit>(onExit);
   /** Rastreia se usuário está no final do terminal para auto-scroll inteligente */
   const isAtBottomRef = useRef(true);
+  /** Cooldown para bell notifications (evita spam) - timestamp da última notificação */
+  const lastBellNotificationRef = useRef<number>(0);
   /** Rastreia estado de waiting para evitar re-renders desnecessários */
   const isWaitingRef = useRef(false);
   /** Contador de output novo quando usuário não está no final */
@@ -82,6 +111,7 @@ export function EmbeddedTerminal({
   const [isWaiting, setIsWaiting] = useState(false);
   /** Pane agent: mostrar reinício quando o processo terminou ou só há sessão encerrada no main. */
   const [agentCanRestart, setAgentCanRestart] = useState(false);
+  const [outputHealth, setOutputHealth] = useState(() => outputHealthTracker.getSnapshot());
   /** Search bar visibility and state */
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -104,6 +134,12 @@ export function EmbeddedTerminal({
     window.addEventListener("dcc-terminal-prefs-changed", onPrefs);
     return () => window.removeEventListener("dcc-terminal-prefs-changed", onPrefs);
   }, []);
+
+  useEffect(() => {
+    return outputHealthTracker.subscribe(setOutputHealth);
+  }, [outputHealthTracker]);
+
+  useEffect(() => () => outputHealthTracker.dispose(), [outputHealthTracker]);
 
   useEffect(() => {
     const onAction = (ev: Event) => {
@@ -155,8 +191,10 @@ export function EmbeddedTerminal({
   const safeWrite = useCallback((term: XTerm, chunk: string, shouldScroll: boolean = true) => {
     if (!chunk || xtermRef.current !== term) return;
     recordTerminalOutputBytes(chunk.length);
+    const finishTracking = outputHealthTracker.beginChunk(chunk.length);
     try {
       term.write(chunk, () => {
+        finishTracking?.();
         // Callback executado após o write completar
         if (shouldScroll && isAtBottomRef.current) {
           // Se o usuário está no final, faz scroll automático
@@ -167,6 +205,7 @@ export function EmbeddedTerminal({
         }
       });
     } catch {
+      finishTracking?.();
       // xterm may throw in teardown races; ignore stale writes
     }
   }, []);
@@ -521,13 +560,13 @@ export function EmbeddedTerminal({
       });
     }
 
-    // Bell handler
+    // Bell handler with cooldown to prevent spam
     term.onBell(() => {
       const prefs = getTerminalAppearancePreferences();
 
       if (prefs.bellStyle === "none") return;
 
-      // Visual bell
+      // Visual bell (sempre executado, sem cooldown)
       if (prefs.bellStyle === "visual" || prefs.bellStyle === "both") {
         const container = containerRef.current;
         if (container) {
@@ -538,14 +577,44 @@ export function EmbeddedTerminal({
         }
       }
 
-      // Sound bell via native OS notification
+      // Sound bell via native OS notification (respects user notification preferences)
       if (prefs.bellStyle === "sound" || prefs.bellStyle === "both") {
-        api.showNotification?.({
-          title: "Terminal Bell",
-          body: `Activity in terminal: ${paneId || ptyIdRef.current}`,
+        const now = Date.now();
+        const BELL_COOLDOWN_MS = 3000; // 3 segundos de cooldown entre notificações
+
+        // Aplica cooldown para evitar spam de notificações
+        if (now - lastBellNotificationRef.current < BELL_COOLDOWN_MS) {
+          return;
+        }
+
+        lastBellNotificationRef.current = now;
+
+        const terminalLabel = title ?? "Terminal";
+        const displayPath = cwd.length > 50 ? `...${cwd.slice(-47)}` : cwd;
+
+        // Ações disponíveis quando há metadata completa para navegação
+        const hasNavigationContext = paneId && combId && projectId;
+        const actions = hasNavigationContext
+          ? [
+              { id: "reply", label: "Abrir painel" },
+              { id: "dismiss", label: "Dispensar" },
+            ]
+          : [{ id: "dismiss", label: "Dispensar" }];
+
+        void showNativeNotification({
+          title: `🔔 ${terminalLabel}`,
+          body: `Terminal activity detected in:\n${displayPath}`,
           icon: "auto",
           sound: true,
-        }).catch((err: unknown) => console.warn("Failed to show bell notification:", err));
+          source: "terminal-bell",
+          paneId: paneId ?? undefined,
+          combId: combId ?? undefined,
+          projectId: projectId ?? undefined,
+          notificationId: paneId ? `bell-${paneId}` : `bell-${ptyIdRef.current}`,
+          actions,
+        }).catch((err: unknown) => {
+          console.warn("[EmbeddedTerminal] Failed to show bell notification:", err);
+        });
       }
     });
 
@@ -712,10 +781,30 @@ export function EmbeddedTerminal({
     stableArgs,
   ]);
 
+  const slowLinkBadgeTitle = outputHealth.isSlowLink
+    ? [
+        "Ligação lenta detectada",
+        outputHealth.reason === "pending-writes"
+          ? "motivo: fila pendente"
+          : outputHealth.reason === "render-latency"
+            ? "motivo: latência de render"
+            : outputHealth.reason === "throughput"
+              ? "motivo: throughput alto"
+              : null,
+        `throughput ${formatTerminalThroughput(outputHealth.bytesPerSecond)}`,
+        `fila ${outputHealth.pendingWrites}`,
+        outputHealth.avgWriteLatencyMs !== null
+          ? `latência média ${outputHealth.avgWriteLatencyMs.toFixed(1)} ms`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
+
   return (
     <div className={`flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border transition-[border-color,box-shadow] duration-200 ${
       isWaiting ? "border-primary shadow-[0_0_15px_rgba(var(--primary),0.3)] ring-1 ring-primary" : "border-border"
-    } bg-background`}>
+    } ${outputHealth.isSlowLink ? "shadow-[0_0_0_1px_rgba(245,158,11,0.28)]" : ""} bg-background`}>
       <div className={`flex items-center justify-between border-b px-2 py-1.5 ${
         isWaiting ? "border-primary bg-primary/5" : "border-border"
       }`}>
@@ -723,6 +812,20 @@ export function EmbeddedTerminal({
           {title ?? "Terminal"} — {cwd}
         </span>
         <div className="flex items-center gap-1">
+          {outputHealth.isSlowLink && (
+            <Badge
+              variant="outline"
+              className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              title={slowLinkBadgeTitle}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              Ligação lenta
+              <span className="hidden sm:inline">
+                {" "}
+                · {formatTerminalThroughput(outputHealth.bytesPerSecond)}
+              </span>
+            </Badge>
+          )}
           {paneId && command && agentCanRestart && (
             <Button
               type="button"

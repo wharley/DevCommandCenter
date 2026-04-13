@@ -172,6 +172,15 @@ struct DaemonProcessState {
     updated_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaemonHealthSnapshot {
+    pid: u32,
+    cpu_percent: f64,
+    memory_mb: f64,
+    last_metrics_at: String,
+}
+
 #[derive(Debug)]
 struct RunningTask {
     child: Child,
@@ -813,6 +822,18 @@ fn collect_process_metrics(pid: u32) -> Option<(f64, f64)> {
     }
 }
 
+fn collect_daemon_health_snapshot() -> DaemonHealthSnapshot {
+    let pid = std::process::id();
+    let (cpu_percent, memory_mb) = collect_process_metrics(pid).unwrap_or((0.0, 0.0));
+
+    DaemonHealthSnapshot {
+        pid,
+        cpu_percent,
+        memory_mb,
+        last_metrics_at: local_now_string(),
+    }
+}
+
 fn git_output_in_path(cwd: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .current_dir(cwd)
@@ -951,7 +972,7 @@ impl DaemonService {
         self.with_conn(|conn| {
             let worktree = conn
                 .query_row(
-                    "SELECT worktree_path FROM combs WHERE project_id = ?1 AND worktree_path IS NOT NULL AND worktree_path != '' ORDER BY COALESCE(last_opened_at, created_at) DESC LIMIT 1",
+                    "SELECT worktree_path FROM combs WHERE project_id = ?1 AND worktree_path IS NOT NULL AND worktree_path != '' ORDER BY COALESCE(last_git_activity_at, last_opened_at, created_at) DESC LIMIT 1",
                     params![runtime.project_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -973,7 +994,7 @@ impl DaemonService {
         self.with_conn(|conn| {
             let worktree = conn
                 .query_row(
-                    "SELECT worktree_path FROM combs WHERE project_id = ?1 AND worktree_path IS NOT NULL AND worktree_path != '' ORDER BY COALESCE(last_opened_at, created_at) DESC LIMIT 1",
+                    "SELECT worktree_path FROM combs WHERE project_id = ?1 AND worktree_path IS NOT NULL AND worktree_path != '' ORDER BY COALESCE(last_git_activity_at, last_opened_at, created_at) DESC LIMIT 1",
                     params![runtime.project_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -1492,6 +1513,7 @@ impl DaemonService {
     pub fn status(&self) -> Result<Value, String> {
         self.sweep_finished_tasks()?;
         self.sweep_managed_processes()?;
+        let health = collect_daemon_health_snapshot();
         let tasks = self.load_tasks()?;
         let mut total_tasks = 0i64;
         let mut enabled_tasks = 0i64;
@@ -1525,9 +1547,34 @@ impl DaemonService {
             "running": self.running.load(Ordering::Relaxed),
             "startedAt": self.started_at.clone(),
             "lastTickAt": last_tick_at,
+            "pid": health.pid,
+            "cpuPercent": health.cpu_percent,
+            "memoryMb": health.memory_mb,
+            "lastMetricsAt": health.last_metrics_at,
             "totalTasks": total_tasks,
             "runningTasks": running_tasks,
             "enabledTasks": enabled_tasks
+        }))
+    }
+
+    pub fn health(&self) -> Result<Value, String> {
+        let health = collect_daemon_health_snapshot();
+        let last_tick_at = self
+            .last_tick_at
+            .lock()
+            .map_err(|_| "daemon lock poisoned".to_string())?
+            .clone();
+
+        Ok(serde_json::json!({
+            "ok": true,
+            "mode": "sidecar",
+            "running": self.running.load(Ordering::Relaxed),
+            "startedAt": self.started_at.clone(),
+            "lastTickAt": last_tick_at,
+            "pid": health.pid,
+            "cpuPercent": health.cpu_percent,
+            "memoryMb": health.memory_mb,
+            "lastMetricsAt": health.last_metrics_at,
         }))
     }
 
@@ -1552,10 +1599,12 @@ impl DaemonService {
                 .prepare(
                     "SELECT c.id, c.project_id, c.name, c.description, c.base_branch, c.branch, c.worktree_path,
                             c.review_targets, c.status, c.is_pinned, c.pinned_at, c.last_opened_at, c.created_at,
-                            c.updated_at, p.name, p.path
+                            c.updated_at, c.last_git_activity_at, c.forge_link, p.name, p.path
                      FROM combs c
                      LEFT JOIN projects p ON p.id = c.project_id
-                     ORDER BY COALESCE(c.last_opened_at, c.created_at) DESC",
+                     ORDER BY COALESCE(c.is_pinned, 0) DESC,
+                              (c.last_git_activity_at IS NULL), c.last_git_activity_at DESC,
+                              COALESCE(c.last_opened_at, c.created_at) DESC",
                 )
                 .map_err(|e| e.to_string())?;
             let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
@@ -1568,23 +1617,26 @@ impl DaemonService {
                     }
                 }
                 let review_targets_raw: Option<String> = row.get(7).map_err(|e| e.to_string())?;
+                let forge_link_raw: Option<String> = row.get(15).map_err(|e| e.to_string())?;
                 out.push(serde_json::json!({
                     "id": row.get::<_, String>(0).map_err(|e| e.to_string())?,
                     "projectId": row_project_id,
-                    "projectName": row.get::<_, Option<String>>(14).map_err(|e| e.to_string())?,
-                    "projectPath": row.get::<_, Option<String>>(15).map_err(|e| e.to_string())?,
+                    "projectName": row.get::<_, Option<String>>(16).map_err(|e| e.to_string())?,
+                    "projectPath": row.get::<_, Option<String>>(17).map_err(|e| e.to_string())?,
                     "name": row.get::<_, String>(2).map_err(|e| e.to_string())?,
                     "description": row.get::<_, Option<String>>(3).map_err(|e| e.to_string())?,
                     "baseBranch": row.get::<_, String>(4).map_err(|e| e.to_string())?,
                     "branch": row.get::<_, Option<String>>(5).map_err(|e| e.to_string())?,
                     "worktreePath": row.get::<_, Option<String>>(6).map_err(|e| e.to_string())?,
                     "reviewTargets": parse_json_value(review_targets_raw.as_deref()),
+                    "forgeLink": parse_json_value(forge_link_raw.as_deref()),
                     "status": row.get::<_, String>(8).map_err(|e| e.to_string())?,
                     "isPinned": row.get::<_, i64>(9).map_err(|e| e.to_string())? != 0,
                     "pinnedAt": row.get::<_, Option<String>>(10).map_err(|e| e.to_string())?,
                     "lastOpenedAt": row.get::<_, Option<String>>(11).map_err(|e| e.to_string())?,
                     "createdAt": row.get::<_, Option<String>>(12).map_err(|e| e.to_string())?,
                     "updatedAt": row.get::<_, Option<String>>(13).map_err(|e| e.to_string())?,
+                    "lastGitActivityAt": row.get::<_, Option<String>>(14).map_err(|e| e.to_string())?,
                 }));
             }
             Ok(Value::Array(out))
@@ -1933,10 +1985,7 @@ impl DaemonService {
 
 fn handle_rpc(service: &DaemonService, request: RpcRequest) -> RpcResponse {
     let result = match request.method.as_str() {
-        "daemon.health" => Ok(serde_json::json!({
-            "ok": true,
-            "startedAt": service.started_at.clone(),
-        })),
+        "daemon.health" => service.health(),
         "daemon.getStatus" => service.status(),
         "daemon.listTasks" => service.list_tasks(),
         "daemon.runTask" => {

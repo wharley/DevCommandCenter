@@ -292,7 +292,7 @@ pub fn ensure_sidecar_running(
     if let Some(info) = read_runtime_info(app_data_dir) {
         if rpc_with_db_path_timeout(
             Path::new(&info.db_path),
-            "daemon.getStatus",
+            "daemon.health",
             serde_json::json!({}),
             Duration::from_secs(2),
         )

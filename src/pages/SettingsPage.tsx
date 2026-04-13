@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -52,6 +53,11 @@ import {
   saveTerminalAppearance,
   type TerminalAppearancePreferences,
 } from "@/lib/terminal/terminal-preferences";
+import {
+  loadTerminalOutputLagPreferences,
+  saveTerminalOutputLagPreferences,
+  type TerminalOutputLagPreferences,
+} from "@/lib/terminal/output-lag-preferences";
 
 const TERMINAL_FONT_PRESETS: { label: string; value: string }[] = [
   { label: "Geist / sistema (padrão)", value: "var(--font-geist-mono, 'Menlo', 'Monaco', monospace)" },
@@ -123,6 +129,9 @@ export default function SettingsPage() {
   const [terminalAppearance, setTerminalAppearance] = useState<TerminalAppearancePreferences>(() =>
     loadTerminalAppearance(),
   );
+  const [terminalOutputLag, setTerminalOutputLag] = useState<TerminalOutputLagPreferences>(() =>
+    loadTerminalOutputLagPreferences(),
+  );
   const gotUpdateEventRef = useRef(false);
   const hasAppUpdateAPI =
     typeof window !== "undefined" && !!window.desktopAPI?.app;
@@ -175,16 +184,20 @@ export default function SettingsPage() {
     gotUpdateEventRef.current = false;
     setCheckingUpdate(true);
     try {
-      await window.desktopAPI.app.checkForUpdates();
-      setTimeout(() => {
-        setCheckingUpdate((prev) => {
-          if (!prev) return prev;
-          if (!gotUpdateEventRef.current) {
-            toast.success("Você está na versão mais recente.");
-          }
-          return false;
-        });
-      }, 3000);
+      const result = await window.desktopAPI.app.checkForUpdates();
+      setCheckingUpdate(false);
+      if (result.checkError) {
+        toast.error(result.checkError);
+        return;
+      }
+      if (result.available && result.version) {
+        toast.info(
+          `Nova versão ${result.version} disponível. Use «Reiniciar e instalar» quando estiver pronto.`,
+          { duration: 6000 }
+        );
+        return;
+      }
+      toast.success("Você está na versão mais recente.");
     } catch {
       setCheckingUpdate(false);
       toast.error("Falha ao verificar atualização.");
@@ -636,6 +649,31 @@ export default function SettingsPage() {
                     saveTerminalAppearance(next);
                   }}
                 />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-start">
+                <Label htmlFor="term-output-lag">Ligação lenta</Label>
+                <div className="space-y-2">
+                  <Slider
+                    id="term-output-lag"
+                    min={0.75}
+                    max={1.5}
+                    step={0.05}
+                    value={[terminalOutputLag.sensitivity]}
+                    onValueChange={(value) => {
+                      const sensitivity = value[0] ?? terminalOutputLag.sensitivity;
+                      const next = { sensitivity };
+                      setTerminalOutputLag(next);
+                      saveTerminalOutputLagPreferences(next);
+                    }}
+                    className="max-w-md"
+                  />
+                  <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                    <span>Menor = mais sensível; maior = mais tolerante a bursts.</span>
+                    <span className="tabular-nums font-medium text-foreground">
+                      {terminalOutputLag.sensitivity.toFixed(2)}x
+                    </span>
+                  </div>
+                </div>
               </div>
               <p className="text-[11px] text-muted-foreground">
                 Métricas de throughput (dev):{" "}

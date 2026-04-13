@@ -4,7 +4,7 @@
 const DATE_KEYS: Record<string, string[]> = {
   project: ['lastOpenedAt', 'createdAt', 'updatedAt'],
   provider: ['createdAt', 'updatedAt'],
-  comb: ['lastOpenedAt', 'createdAt', 'updatedAt'],
+  comb: ['lastOpenedAt', 'lastGitActivityAt', 'createdAt', 'updatedAt'],
   pane: ['lastActivityAt', 'createdAt', 'updatedAt'],
 };
 
@@ -90,6 +90,14 @@ export function normalizeComb(raw: Record<string, unknown>): Record<string, unkn
   if (typeof rt === "string" && rt.trim()) {
     try {
       normalized.reviewTargets = JSON.parse(rt) as unknown;
+    } catch {
+      /* ignore */
+    }
+  }
+  const fl = normalized.forge_link ?? normalized.forgeLink;
+  if (typeof fl === "string" && fl.trim()) {
+    try {
+      normalized.forgeLink = JSON.parse(fl) as unknown;
     } catch {
       /* ignore */
     }

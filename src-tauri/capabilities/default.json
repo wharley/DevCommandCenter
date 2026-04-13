@@ -7,6 +7,7 @@
     "core:default",
     "core:app:allow-set-app-theme",
     "dialog:default",
-    "notification:default"
+    "notification:default",
+    "updater:default"
   ]
 }

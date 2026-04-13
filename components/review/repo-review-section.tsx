@@ -18,6 +18,7 @@ import {
   GitMerge,
   Loader2,
   Upload,
+  X,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +50,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { DiffFileTree } from "@/components/review/diff-file-tree";
+import { WorktreeNotesPanel } from "@/components/review/worktree-notes-panel";
+import { PrReviewCommentsPanel } from "@/components/review/pr-review-comments-panel";
 import { DiffCodeBlock } from "@/components/diff-code-block";
 import { CommitDialog } from "@/components/dialogs/commit-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
@@ -66,6 +69,14 @@ const reviewIncludedKey = (storageKey: string) =>
   `dcc-review-included-${storageKey}`;
 const reviewTrailKey = (storageKey: string) =>
   `dcc-review-trail-${storageKey}`;
+
+const MAX_DIFF_TABS = 16;
+
+function diffTabLabel(path: string): string {
+  const parts = path.split(/[/\\]/);
+  const base = parts[parts.length - 1] || path;
+  return base.length > 28 ? `${base.slice(0, 25)}…` : base;
+}
 
 function loadReviewJson<T>(key: string): T | null {
   if (typeof window === "undefined") return null;
@@ -150,8 +161,11 @@ export function RepoReviewSection({
     } | null;
   }>({ loading: false, files: [], summary: null });
 
-  const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
-  const diffFileCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  /** Separadores de diff por path (ordem = ordem dos separadores). */
+  const [diffOpenTabs, setDiffOpenTabs] = useState<string[]>([]);
+  const [activeDiffTabPath, setActiveDiffTabPath] = useState<string | null>(
+    null,
+  );
 
   const [fileFlags, setFileFlags] = useState<Record<string, ReviewFlag>>({});
   const [included, setIncluded] = useState<Record<string, boolean>>({});
@@ -186,18 +200,59 @@ export function RepoReviewSection({
   );
 
   useEffect(() => {
-    setSelectedDiffPath(null);
+    const paths = filePathsKey ? filePathsKey.split("\0") : [];
+    const pathSet = new Set(paths);
+    setDiffOpenTabs((prevTabs) => {
+      const filtered = prevTabs.filter((p) => pathSet.has(p));
+      const nextTabs =
+        filtered.length === 0 && paths.length > 0 ? [paths[0]!] : filtered;
+      setActiveDiffTabPath((active) => {
+        if (nextTabs.length === 0) return null;
+        if (active && nextTabs.includes(active)) return active;
+        return nextTabs[0] ?? null;
+      });
+      return nextTabs;
+    });
   }, [filePathsKey]);
 
   const navigateToDiffFile = useCallback((path: string) => {
-    setSelectedDiffPath(path);
-    requestAnimationFrame(() => {
-      diffFileCardRefs.current[path]?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
+    setDiffOpenTabs((prev) => {
+      if (prev.includes(path)) return prev;
+      const next = [...prev, path];
+      return next.slice(-MAX_DIFF_TABS);
     });
+    setActiveDiffTabPath(path);
   }, []);
+
+  const closeDiffTab = useCallback(
+    (path: string, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      e?.preventDefault();
+      setDiffOpenTabs((prev) => {
+        const idx = prev.indexOf(path);
+        const next = prev.filter((p) => p !== path);
+        setActiveDiffTabPath((active) => {
+          if (active !== path) return active;
+          if (next.length === 0) return null;
+          if (idx <= 0) return next[0] ?? null;
+          return next[Math.min(idx - 1, next.length - 1)] ?? next[0] ?? null;
+        });
+        return next;
+      });
+    },
+    [],
+  );
+
+  const activeDiffFile = useMemo(
+    () => diffs.files.find((f) => f.path === activeDiffTabPath),
+    [diffs.files, activeDiffTabPath],
+  );
+
+  const activeDiffTokens = useMemo(
+    () =>
+      activeDiffFile ? extractContextTokens(activeDiffFile.diff) : [],
+    [activeDiffFile],
+  );
 
   const addTrail = useCallback(
     (message: string) => {
@@ -991,6 +1046,21 @@ export function RepoReviewSection({
         </div>
       </div>
 
+      <div className="shrink-0 space-y-3 px-4">
+        <WorktreeNotesPanel
+          worktreePath={worktreePath}
+          idKey={storageKey}
+          compact={compact}
+        />
+        <PrReviewCommentsPanel
+          combId={combId}
+          enabled={Boolean(useCombWorktreeApis && combId)}
+          activeFilePath={activeDiffFile?.path ?? null}
+          idKey={storageKey}
+          compact={compact}
+        />
+      </div>
+
       <Dialog open={mergeDialogOpen} onOpenChange={setMergeDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -1117,61 +1187,93 @@ export function RepoReviewSection({
         {diffs.loading ? null : diffs.error ? null : diffs.files.length === 0 ? null : (
           <DiffFileTree
             files={diffs.files}
-            selectedPath={selectedDiffPath}
+            selectedPath={activeDiffTabPath}
             onFileSelect={navigateToDiffFile}
             compact={compact}
           />
         )}
-        <ScrollArea
-          className={cn(
-            compact ? "min-h-0 flex-1 md:min-h-[min(70vh,560px)]" : "min-h-0 flex-1",
-          )}
-        >
-          {diffs.loading ? (
-            <div className="flex items-center justify-center p-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : diffs.error ? (
-            <div className="p-4 text-sm text-destructive">{diffs.error}</div>
-          ) : diffs.files.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">
-              Nenhuma alteração detectada neste repositório.
-            </div>
-          ) : (
-            <div className="space-y-4 p-4">
-              {diffs.files.map((file) => {
-                const tokens = extractContextTokens(file.diff);
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {diffs.loading ? null : diffs.error ? null : diffs.files.length === 0 ? null : (
+            <div
+              className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/20 px-2 py-1.5"
+              role="tablist"
+              aria-label="Separadores de diff"
+            >
+              {diffOpenTabs.map((tabPath) => {
+                const active = tabPath === activeDiffTabPath;
                 return (
                   <div
-                    key={file.path}
-                    ref={(el) => {
-                      diffFileCardRefs.current[file.path] = el;
-                    }}
+                    key={tabPath}
+                    role="tab"
+                    aria-selected={active}
                     className={cn(
-                      "scroll-mt-2 rounded-lg border border-border transition-shadow",
-                      selectedDiffPath === file.path &&
-                        "ring-2 ring-primary/35 shadow-sm",
+                      "group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-0.5 rounded-md border px-2 py-1 text-left text-[11px] transition-colors",
+                      active
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border/80 bg-muted/40 text-muted-foreground hover:bg-muted/70",
                     )}
+                    onClick={() => setActiveDiffTabPath(tabPath)}
                   >
+                    <span
+                      className="min-w-0 flex-1 truncate font-mono"
+                      title={tabPath}
+                    >
+                      {diffTabLabel(tabPath)}
+                    </span>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded p-0.5 opacity-60 hover:bg-background/80 hover:opacity-100"
+                      aria-label={`Fechar diff ${tabPath}`}
+                      onClick={(e) => closeDiffTab(tabPath, e)}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <ScrollArea
+            className={cn(
+              compact ? "min-h-0 flex-1 md:min-h-[min(70vh,560px)]" : "min-h-0 flex-1",
+            )}
+          >
+            {diffs.loading ? (
+              <div className="flex items-center justify-center p-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : diffs.error ? (
+              <div className="p-4 text-sm text-destructive">{diffs.error}</div>
+            ) : diffs.files.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">
+                Nenhuma alteração detectada neste repositório.
+              </div>
+            ) : !activeDiffFile ? (
+              <div className="p-6 text-center text-sm text-muted-foreground">
+                Seleciona um ficheiro na árvore ou num separador.
+              </div>
+            ) : (
+              <div className="space-y-4 p-4">
+                <div className="scroll-mt-2 rounded-lg border border-border shadow-sm">
                   <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
                     <Checkbox
-                      checked={included[file.path] !== false}
+                      checked={included[activeDiffFile.path] !== false}
                       onCheckedChange={(c) =>
                         setIncluded((prev) => ({
                           ...prev,
-                          [file.path]: c === true,
+                          [activeDiffFile.path]: c === true,
                         }))
                       }
-                      aria-label={`Incluir ${file.path} no patch`}
+                      aria-label={`Incluir ${activeDiffFile.path} no patch`}
                     />
                     <ToggleGroup
                       type="single"
-                      value={fileFlags[file.path] ?? "ok"}
+                      value={fileFlags[activeDiffFile.path] ?? "ok"}
                       onValueChange={(v) => {
                         if (!v) return;
                         setFileFlags((prev) => ({
                           ...prev,
-                          [file.path]: v as ReviewFlag,
+                          [activeDiffFile.path]: v as ReviewFlag,
                         }));
                       }}
                       variant="outline"
@@ -1190,32 +1292,33 @@ export function RepoReviewSection({
                     </ToggleGroup>
                     <FileCode className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate font-mono text-sm">
-                      {file.path}
+                      {activeDiffFile.path}
                     </span>
-                    {(file.insertions ?? 0) > 0 || (file.deletions ?? 0) > 0 ? (
+                    {(activeDiffFile.insertions ?? 0) > 0 ||
+                    (activeDiffFile.deletions ?? 0) > 0 ? (
                       <span
                         className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground"
                         title="Inserções / remoções (diff)"
                       >
                         <span className="text-emerald-600 dark:text-emerald-400">
-                          +{file.insertions ?? 0}
+                          +{activeDiffFile.insertions ?? 0}
                         </span>
                         <span className="mx-0.5 opacity-40">/</span>
                         <span className="text-rose-600 dark:text-rose-400">
-                          −{file.deletions ?? 0}
+                          −{activeDiffFile.deletions ?? 0}
                         </span>
                       </span>
                     ) : null}
                     <Badge variant="outline" className="shrink-0 text-[10px]">
-                      {file.status}
+                      {activeDiffFile.status}
                     </Badge>
                   </div>
-                  {tokens.length > 0 ? (
+                  {activeDiffTokens.length > 0 ? (
                     <div className="flex flex-wrap gap-1 border-b border-border/60 bg-muted/20 px-3 py-1.5">
                       <span className="text-[10px] text-muted-foreground w-full">
                         Contexto
                       </span>
-                      {tokens.map((tok) => (
+                      {activeDiffTokens.map((tok) => (
                         <Badge
                           key={tok}
                           variant="secondary"
@@ -1227,13 +1330,12 @@ export function RepoReviewSection({
                       ))}
                     </div>
                   ) : null}
-                  <DiffCodeBlock content={file.diff} />
+                  <DiffCodeBlock content={activeDiffFile.diff} />
                 </div>
-                );
-              })}
-            </div>
-          )}
-        </ScrollArea>
+              </div>
+            )}
+          </ScrollArea>
+        </div>
       </div>
 
       <div

@@ -21,7 +21,7 @@ Um **ambiente local-first** (Tauri + SQLite + Git worktrees) onde você isola ta
 | Área | Onde na app | Benefício principal |
 |------|-------------|---------------------|
 | **Projeto Git** | Adicionar projeto, sidebar | Raiz de tudo: caminho do repo, providers, config. |
-| **Comb (workspace)** | Novo workspace, lista na sidebar | Uma **branch + worktree** por tarefa — isolamento real no disco. |
+| **Comb (workspace)** | Novo workspace, lista na sidebar | Uma **branch + worktree** por tarefa — isolamento real no disco; lista ordenada por fixados e **última atividade Git** (reflog/commit/index), com tempo relativo por workspace quando disponível. |
 | **Panes (terminal / agente)** | Botões Workspace, Base, Novo agente | Paralelismo: testes, servidor e agente no mesmo contexto. |
 | **Terminal embutido** | Painel principal | PTY nativo, xterm, busca; saída com batching suave. |
 | **Atenção / notificações** | Badges, toasts | Menos tempo a olhar para o terminal à espera. |

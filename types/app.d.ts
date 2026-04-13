@@ -167,6 +167,10 @@ export interface DaemonStatus {
   running: boolean;
   startedAt: string;
   lastTickAt?: string | null;
+  pid?: number;
+  cpuPercent?: number;
+  memoryMb?: number;
+  lastMetricsAt?: string | null;
   totalTasks: number;
   runningTasks: number;
   enabledTasks: number;
@@ -182,6 +186,37 @@ export interface DaemonDiffBundleItem {
     insertions: number;
     deletions: number;
   } | null;
+}
+
+export interface DetectedTerminalAgent {
+  ptyId: string;
+  paneId?: string | null;
+  combId?: string | null;
+  projectId: string;
+  projectName: string;
+  workspaceName?: string | null;
+  agentKind: string;
+  agentLabel: string;
+  status: "working" | "waiting";
+  cwd: string;
+  command: string;
+  args: string[];
+  pid?: number | null;
+  title?: string | null;
+  providerId?: string | null;
+  providerName?: string | null;
+  detectedBy: string;
+  excerpt?: string | null;
+  startedAt: string;
+}
+
+export interface TerminalProjectActivity {
+  totalRunningPanes: number;
+  runningPanesByCombId: Record<string, number>;
+  activeAgentsByCombId?: Record<string, number>;
+  workingAgents?: number;
+  waitingAgents?: number;
+  activeAgents?: DetectedTerminalAgent[];
 }
 
 export interface NativeNotificationAction {
@@ -310,15 +345,22 @@ declare global {
         showNotification?: (
           payload: NativeNotificationPayload
         ) => Promise<{ ok?: boolean; notificationId?: string } | void>;
-        getProjectActivity: (projectId: string) => Promise<{
-          totalRunningPanes: number;
-          runningPanesByCombId: Record<string, number>;
-        }>;
+        getProjectActivity: (projectId: string) => Promise<TerminalProjectActivity>;
         onData: (
           callback: (ptyId: string, data: string) => void
         ) => () => void;
         onExit: (
           callback: (ptyId: string, code: number) => void
+        ) => () => void;
+        onActivity?: (
+          callback: (payload: {
+            projectId?: string;
+            combId?: string;
+            paneId?: string;
+            ptyId?: string;
+            status?: "working" | "waiting" | "idle";
+            excerpt?: string | null;
+          }) => void
         ) => () => void;
         onAttention: (
           callback: (payload: TerminalAttentionPayload) => void
@@ -327,6 +369,7 @@ declare global {
 
       daemon?: {
         getStatus: () => Promise<DaemonStatus>;
+        health: () => Promise<DaemonStatus>;
         listTasks: () => Promise<DaemonTaskStatus[]>;
         listProcesses: (projectId?: string | null) => Promise<DaemonProcessStatus[]>;
         startProcess: (projectId: string, processId: string) => Promise<{
@@ -408,12 +451,27 @@ declare global {
       };
 
       comb: {
+        /** Pré-visualização de branch/path sanitizados (sufixo hex é exemplo até criar o workspace). */
+        previewWorktreeNaming: (
+          projectId: string,
+          workspaceTitle: string
+        ) => Promise<{
+          branchPrefix: string;
+          slug: string;
+          idSuffixExample: string;
+          branch: string;
+          worktreePath: string;
+        }>;
         ensureWorktree: (combId: string) => Promise<{
           success: boolean;
           error?: string;
+          /** Presente quando o script de setup falhou e o worktree/branch foram revertidos */
+          rolledBack?: boolean;
           worktreePath?: string;
           branch?: string;
         }>;
+        /** Atualiza última atividade Git por worktree (reflog/log/index) para combs do projeto. */
+        refreshGitActivity: (projectId: string) => Promise<{ updated: number }>;
         discard: (combId: string) => Promise<{
           success: boolean;
           error?: string;
@@ -458,10 +516,70 @@ declare global {
         listTaskTemplates: (projectPath: string) => Promise<RepoTaskTemplate[]>;
       };
 
+      /** GitHub / GitLab issue → metadados para pré-preencher novo workspace (worktree). */
+      forge?: {
+        fetchIssue: (
+          projectId: string,
+          issueRef: string,
+          token?: string | null
+        ) => Promise<{
+          forge: "github" | "gitlab";
+          issueNumber: number;
+          title: string;
+          body: string;
+          webUrl: string;
+          suggestedWorkspaceName: string;
+          suggestedDescription: string;
+          owner?: string;
+          repo?: string;
+          projectPath?: string;
+        }>;
+        /** PR/MR aberto na mesma branch do worktree (persistido no comb). */
+        syncPrLink?: (
+          combId: string,
+          token?: string | null
+        ) => Promise<{
+          ok?: boolean;
+          linked?: boolean;
+          skipped?: boolean;
+          reason?: string;
+          forgeLink?: {
+            forge: "github" | "gitlab";
+            number: number;
+            url: string;
+            title?: string;
+            branch?: string;
+            syncedAt?: string;
+          } | null;
+          error?: string;
+        }>;
+        /** Comentários inline do PR/MR ligado ao comb (`forge_link`). GitHub: review comments; GitLab: notas com posição. */
+        fetchPrReviewComments?: (
+          combId: string,
+          token?: string | null
+        ) => Promise<{
+          success?: boolean;
+          skipped?: boolean;
+          reason?: string;
+          forge?: string;
+          error?: string;
+          comments?: Array<{
+            path: string;
+            line: number | null;
+            side: string;
+            body: string;
+            author: string;
+            url: string;
+            createdAt: string;
+          }>;
+        }>;
+      };
+
       window: {
         minimize: () => Promise<void>;
         maximize: () => Promise<void>;
         close: () => Promise<void>;
+        focus: () => Promise<void>;
         isMaximized: () => Promise<boolean>;
       };
 
@@ -470,6 +588,7 @@ declare global {
           activated: boolean;
           email?: string;
           activatedAt?: string;
+          tier?: string;
         }>;
         getMachineId: () => Promise<string>;
         activate: (email: string) => Promise<{
@@ -481,8 +600,15 @@ declare global {
 
       app: {
         getVersion: () => Promise<string>;
-        checkForUpdates: () => Promise<void>;
-        quitAndInstall: () => Promise<void>;
+        checkForUpdates: () => Promise<{
+          available: boolean;
+          currentVersion: string;
+          version?: string;
+          date?: string;
+          body?: string | null;
+          checkError?: string;
+        }>;
+        quitAndInstall: () => Promise<{ success: boolean }>;
         showNotification: (payload: NativeNotificationPayload) => Promise<{ ok?: boolean; notificationId?: string } | void>;
         onNotificationAction: (
           callback: (payload: NativeNotificationActionEvent) => void
@@ -621,6 +747,16 @@ declare global {
             } | null;
           }>
         >;
+      };
+
+      worktree: {
+        readNotes: (
+          worktreePath: string,
+        ) => Promise<{ success: boolean; content?: string; error?: string }>;
+        writeNotes: (
+          worktreePath: string,
+          content: string,
+        ) => Promise<{ success: boolean; error?: string }>;
       };
     };
 

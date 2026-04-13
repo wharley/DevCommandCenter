@@ -2,18 +2,33 @@
 
 import { useMemo } from "react";
 import {
+  Bell,
   Bot,
+  ChevronLeft,
+  ChevronRight,
   FolderGit2,
   ListPlus,
   PanelLeftOpen,
+  Monitor,
+  Moon,
   Settings2,
+  SunMedium,
   Terminal,
   Workflow,
   WandSparkles,
   Clock3,
   FileText,
 } from "lucide-react";
-import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+  CommandShortcut,
+} from "@/components/ui/command";
 import type {
   Comb,
   Pane,
@@ -42,9 +57,18 @@ interface WorkspaceCommandPaletteProps {
   onOpenWorkspaceTerminal: () => void;
   onOpenNewAgent: () => void;
   onOpenRepoConfig: () => void;
+  onOpenNotifications: () => void;
+  currentTheme: "dark" | "light" | "system";
+  onSetTheme: (theme: "dark" | "light" | "system") => void;
+  onToggleTheme: () => void;
   onSelectProject: (projectId: string) => void;
   onSelectWorkspace: (combId: string) => void;
   onSelectPane: (paneId: string) => void;
+  /** Histórico de navegação entre worktrees (⌘[ / ⌘]) */
+  canGoBackWorktree?: boolean;
+  canGoForwardWorktree?: boolean;
+  onWorktreeHistoryBack?: () => void;
+  onWorktreeHistoryForward?: () => void;
   onLaunchCommand: (payload: {
     title: string;
     command: string;
@@ -71,9 +95,17 @@ export function WorkspaceCommandPalette({
   onOpenWorkspaceTerminal,
   onOpenNewAgent,
   onOpenRepoConfig,
+  onOpenNotifications,
+  currentTheme,
+  onSetTheme,
+  onToggleTheme,
   onSelectProject,
   onSelectWorkspace,
   onSelectPane,
+  canGoBackWorktree = false,
+  canGoForwardWorktree = false,
+  onWorktreeHistoryBack,
+  onWorktreeHistoryForward,
   onLaunchCommand,
 }: WorkspaceCommandPaletteProps) {
   const activeProjectCombs = useMemo(
@@ -110,6 +142,7 @@ export function WorkspaceCommandPalette({
           >
             <ListPlus className="h-4 w-4" />
             Novo workspace
+            <CommandShortcut>⌘⇧N</CommandShortcut>
           </CommandItem>
           <CommandItem
             value="novo terminal"
@@ -120,6 +153,7 @@ export function WorkspaceCommandPalette({
           >
             <Terminal className="h-4 w-4" />
             Abrir terminal do workspace
+            <CommandShortcut>⌘⇧T</CommandShortcut>
           </CommandItem>
           <CommandItem
             value="novo agente"
@@ -130,6 +164,7 @@ export function WorkspaceCommandPalette({
           >
             <Bot className="h-4 w-4" />
             Abrir agente CLI
+            <CommandShortcut>⌘⇧A</CommandShortcut>
           </CommandItem>
           <CommandItem
             value="terminal base"
@@ -140,6 +175,7 @@ export function WorkspaceCommandPalette({
           >
             <FolderGit2 className="h-4 w-4" />
             Abrir terminal base
+            <CommandShortcut>⌘⇧B</CommandShortcut>
           </CommandItem>
           <CommandItem
             value="configurar repo"
@@ -150,16 +186,107 @@ export function WorkspaceCommandPalette({
           >
             <Workflow className="h-4 w-4" />
             Configurar repositório
+            <CommandShortcut>⌘⇧R</CommandShortcut>
           </CommandItem>
           <CommandItem
-            value="configurações"
+            value="notificações"
+            onSelect={() => {
+              onOpenNotifications();
+              onOpenChange(false);
+            }}
+          >
+            <Bell className="h-4 w-4" />
+            Notificações
+            <CommandShortcut>⌘⇧I</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            value="providers settings configurações"
             onSelect={() => {
               onOpenSettings();
               onOpenChange(false);
             }}
           >
             <Settings2 className="h-4 w-4" />
-            Abrir settings
+            Abrir providers
+            <CommandShortcut>⌘⇧P</CommandShortcut>
+          </CommandItem>
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        <CommandGroup heading="Histórico de workspaces">
+          <CommandItem
+            value="workspace anterior voltar histórico"
+            disabled={!canGoBackWorktree}
+            onSelect={() => {
+              onWorktreeHistoryBack?.();
+              onOpenChange(false);
+            }}
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Workspace anterior
+            <CommandShortcut>⌘[</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            value="workspace seguinte avançar histórico"
+            disabled={!canGoForwardWorktree}
+            onSelect={() => {
+              onWorktreeHistoryForward?.();
+              onOpenChange(false);
+            }}
+          >
+            <ChevronRight className="h-4 w-4" />
+            Workspace seguinte
+            <CommandShortcut>⌘]</CommandShortcut>
+          </CommandItem>
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        <CommandGroup heading="Temas">
+          <CommandItem
+            value={`tema alternar ${currentTheme}`}
+            onSelect={() => {
+              onToggleTheme();
+              onOpenChange(false);
+            }}
+          >
+            <Monitor className="h-4 w-4" />
+            Alternar tema
+            <CommandShortcut>⌘⌥T</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            value="tema escuro dark"
+            onSelect={() => {
+              onSetTheme("dark");
+              onOpenChange(false);
+            }}
+          >
+            <Moon className="h-4 w-4" />
+            Tema escuro
+            <CommandShortcut>⌘⇧D</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            value="tema claro light"
+            onSelect={() => {
+              onSetTheme("light");
+              onOpenChange(false);
+            }}
+          >
+            <SunMedium className="h-4 w-4" />
+            Tema claro
+            <CommandShortcut>⌘⇧L</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            value="tema sistema system"
+            onSelect={() => {
+              onSetTheme("system");
+              onOpenChange(false);
+            }}
+          >
+            <Monitor className="h-4 w-4" />
+            Tema do sistema
+            <CommandShortcut>⌘⇧S</CommandShortcut>
           </CommandItem>
         </CommandGroup>
 

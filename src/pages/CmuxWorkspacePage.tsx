@@ -2,22 +2,27 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
 import {
   Bell,
   Bot,
   Clock3,
+  ChevronLeft,
   ChevronRight,
   ChevronDown,
+  Cpu,
   Database,
   FolderGit2,
   GitBranch,
   GitPullRequest,
   Loader2,
   Merge,
+  MemoryStick,
   Pin,
   Plus,
   RefreshCw,
   Settings,
+  Tag,
   Terminal,
   Trash2,
   WandSparkles,
@@ -28,6 +33,7 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +53,7 @@ import { ProjectRepoConfigDialog } from "@/components/dialogs/project-repo-confi
 import { ProjectRepoTomlDialog } from "@/components/dialogs/project-repo-toml-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { usePanes, useProjects, useProviders } from "@/hooks/use-data";
+import { useTheme } from "@/components/theme-provider";
 import SettingsPage from "@/src/pages/SettingsPage";
 import { normalizeComb, normalizeCombs, normalizePanes } from "@/lib/database/normalize";
 import type {
@@ -59,7 +66,12 @@ import type {
   RepoTaskTemplate,
   Provider,
 } from "@/lib/database/types";
-import type { DaemonDiffBundleItem, DaemonStatus, DaemonTaskStatus } from "@/types/app";
+import type {
+  DaemonDiffBundleItem,
+  DaemonStatus,
+  DaemonTaskStatus,
+  DetectedTerminalAgent,
+} from "@/types/app";
 import {
   useTerminalAttentionToasts,
   type TerminalAttentionRecord,
@@ -73,6 +85,9 @@ import { WorkspaceCommandPalette } from "@/components/workspace-command-palette"
 import { ProcessesPanel } from "@/components/processes-panel";
 import { getCombDiscardDialogCopy } from "@/lib/comb-discard-confirmation";
 import { useAppWindowTitle } from "@/hooks/use-app-window-title";
+import { useWorktreeNavigationHistory } from "@/hooks/use-worktree-navigation-history";
+import { PaneTab } from "@/components/pane-tab";
+import { formatRelativeTimeFromNow } from "@/lib/format-relative-time";
 
 const CLI_PROVIDER_TYPES = ["codex", "claude-code", "gemini", "cursor"] as const;
 
@@ -80,6 +95,12 @@ const activePaneStorageKey = (combId: string) => `dcc:workspace:${combId}:active
 
 function isCliProviderType(type: string): type is (typeof CLI_PROVIDER_TYPES)[number] {
   return CLI_PROVIDER_TYPES.includes(type as (typeof CLI_PROVIDER_TYPES)[number]);
+}
+
+function formatDaemonMemory(mb: number): string {
+  if (mb < 1) return `${(mb * 1024).toFixed(0)} KB`;
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
+  return `${mb.toFixed(1)} MB`;
 }
 
 function buildCliCommand(provider: Provider | null): string | undefined {
@@ -157,6 +178,17 @@ function NewWorkspaceDialog({
   const [isCreating, setIsCreating] = useState(false);
   const [branchList, setBranchList] = useState<string[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
+  const [namingPreview, setNamingPreview] = useState<{
+    branchPrefix: string;
+    slug: string;
+    idSuffixExample: string;
+    branch: string;
+    worktreePath: string;
+  } | null>(null);
+  const [namingPreviewLoading, setNamingPreviewLoading] = useState(false);
+  const [forgeIssueRef, setForgeIssueRef] = useState("");
+  const [forgeToken, setForgeToken] = useState("");
+  const [forgeLoading, setForgeLoading] = useState(false);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
@@ -170,6 +202,9 @@ function NewWorkspaceDialog({
     setBaseBranch("main");
     setProjectId(selectedProjectId ?? projects[0]?.id ?? "");
     setBranchList([]);
+    setForgeIssueRef("");
+    setForgeToken("");
+    setForgeLoading(false);
   }, [open, selectedProjectId, projects]);
 
   useEffect(() => {
@@ -212,6 +247,63 @@ function NewWorkspaceDialog({
       cancelled = true;
     };
   }, [open, selectedProject?.path, projectId]);
+
+  useEffect(() => {
+    if (!open) {
+      setNamingPreview(null);
+      setNamingPreviewLoading(false);
+      return;
+    }
+    const api = window.desktopAPI?.comb?.previewWorktreeNaming;
+    if (!api || !projectId) {
+      setNamingPreview(null);
+      setNamingPreviewLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setNamingPreviewLoading(true);
+    const id = window.setTimeout(() => {
+      void api(projectId, name)
+        .then((data) => {
+          if (!cancelled) setNamingPreview(data);
+        })
+        .catch(() => {
+          if (!cancelled) setNamingPreview(null);
+        })
+        .finally(() => {
+          if (!cancelled) setNamingPreviewLoading(false);
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(id);
+    };
+  }, [open, projectId, name]);
+
+  const handleForgeFetch = async () => {
+    const ref = forgeIssueRef.trim();
+    if (!ref || !projectId) {
+      toast.error("Indica o URL ou owner/repo#123 da issue.");
+      return;
+    }
+    const api = window.desktopAPI?.forge?.fetchIssue;
+    if (!api) {
+      toast.error("Carregar issues só está disponível na aplicação desktop.");
+      return;
+    }
+    setForgeLoading(true);
+    try {
+      const data = await api(projectId, ref, forgeToken.trim() || undefined);
+      const desc = (data.suggestedDescription ?? "").slice(0, 12000);
+      setName(data.suggestedWorkspaceName);
+      setDescription(desc);
+      toast.success("Issue carregada — revê o nome e cria o workspace.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao carregar a issue");
+    } finally {
+      setForgeLoading(false);
+    }
+  };
 
   const handleCreate = async () => {
     if (!name.trim() || !projectId) {
@@ -262,10 +354,85 @@ function NewWorkspaceDialog({
               </SelectContent>
             </Select>
           </div>
+          {projectId && window.desktopAPI?.forge?.fetchIssue ? (
+            <div className="space-y-2 rounded-md border border-border bg-muted/15 px-3 py-2">
+              <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+                <Tag className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                Issue (GitHub / GitLab)
+              </div>
+              <p className="text-[10px] leading-snug text-muted-foreground">
+                Cola o URL da issue, ou <span className="font-mono">owner/repo#123</span> (GitHub). Repositórios
+                privados: token nas variáveis de ambiente ou abaixo.
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  value={forgeIssueRef}
+                  onChange={(e) => setForgeIssueRef(e.target.value)}
+                  placeholder="https://github.com/org/repo/issues/42 ou org/repo#42"
+                  disabled={forgeLoading}
+                  className="sm:flex-1"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleForgeFetch();
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="shrink-0"
+                  disabled={forgeLoading || !forgeIssueRef.trim()}
+                  onClick={() => void handleForgeFetch()}
+                >
+                  {forgeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Carregar"}
+                </Button>
+              </div>
+              <Input
+                type="password"
+                value={forgeToken}
+                onChange={(e) => setForgeToken(e.target.value)}
+                placeholder="Token opcional (PAT) — não é guardado"
+                disabled={forgeLoading}
+                autoComplete="off"
+                className="font-mono text-xs"
+              />
+            </div>
+          ) : null}
           <div className="space-y-2">
             <label className="text-sm font-medium">Nome</label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="ex.: auth-refactor" />
           </div>
+          {projectId && window.desktopAPI?.comb?.previewWorktreeNaming ? (
+            <div className="space-y-1.5 rounded-md border border-border bg-muted/20 px-3 py-2">
+              <p className="text-xs font-medium text-foreground">Branch e pasta (pré-visualização)</p>
+              {namingPreviewLoading ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                  A calcular…
+                </div>
+              ) : namingPreview ? (
+                <>
+                  <p
+                    className="break-all font-mono text-[11px] leading-snug text-muted-foreground"
+                    title={namingPreview.branch}
+                  >
+                    <span className="text-foreground/85">Branch:</span> {namingPreview.branch}
+                  </p>
+                  <p
+                    className="break-all font-mono text-[11px] leading-snug text-muted-foreground"
+                    title={namingPreview.worktreePath}
+                  >
+                    <span className="text-foreground/85">Pasta:</span> {namingPreview.worktreePath}
+                  </p>
+                  <p className="text-[10px] leading-snug text-muted-foreground/90">
+                    O nome é sanitizado para Git (não-alfanuméricos → hífen). O sufixo final de 8 caracteres
+                    hexadecimais vem do ID do workspace ao criar; aqui mostra-se um valor de exemplo (
+                    {namingPreview.idSuffixExample}).
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">Não foi possível pré-visualizar.</p>
+              )}
+            </div>
+          ) : null}
           <div className="space-y-2">
             <label className="text-sm font-medium">Branch base</label>
             {branchesLoading ? (
@@ -412,6 +579,8 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
   attentionExcerpt,
   hasAttention,
   runningCount,
+  agentCount,
+  agentPreview,
   onSelect,
   onSelectBegin,
   onRemove,
@@ -423,6 +592,8 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
   attentionExcerpt: string | null;
   hasAttention: boolean;
   runningCount: number;
+  agentCount: number;
+  agentPreview: DetectedTerminalAgent[];
   onSelect: (comb: Comb) => void;
   onSelectBegin?: (comb: Comb) => void;
   onRemove: (combId: string) => void;
@@ -482,11 +653,55 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
             <GitBranch className="h-3 w-3" />
             <span className="truncate">{comb.branch ?? comb.baseBranch}</span>
           </div>
+          {comb.forgeLink?.url ? (
+            <div className="mt-0.5 flex min-w-0 items-start gap-1">
+              <GitPullRequest className="mt-0.5 h-3 w-3 shrink-0 text-sidebar-foreground/55" />
+              <button
+                type="button"
+                className="line-clamp-2 text-left text-[10px] text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
+                title={comb.forgeLink.title ?? comb.forgeLink.url}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void window.desktopAPI?.shell?.openExternal(comb.forgeLink!.url);
+                }}
+              >
+                {comb.forgeLink.forge === "gitlab" ? "MR" : "PR"} #{comb.forgeLink.number}
+                {comb.forgeLink.title
+                  ? ` · ${comb.forgeLink.title.length > 48 ? `${comb.forgeLink.title.slice(0, 48)}…` : comb.forgeLink.title}`
+                  : ""}
+              </button>
+            </div>
+          ) : null}
+          {comb.lastGitActivityAt ? (
+            <p className="mt-0.5 text-[10px] text-sidebar-foreground/45" title="Última atividade Git no worktree">
+              {formatRelativeTimeFromNow(comb.lastGitActivityAt) ?? ""}
+            </p>
+          ) : null}
           <p className="mt-0.5 line-clamp-1 text-[10px] text-sidebar-foreground/50">{projectName}</p>
           {runningCount > 0 ? (
             <Badge variant="outline" className="mt-1 h-5 border-sidebar-border px-1.5 text-[10px] text-sidebar-foreground/70">
               {runningCount} ativos
             </Badge>
+          ) : null}
+          {agentCount > 0 ? (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {agentPreview.map((agent) => (
+                <Badge
+                  key={`${agent.ptyId}:${agent.agentKind}`}
+                  variant={agent.status === "waiting" ? "destructive" : "secondary"}
+                  className="h-5 px-1.5 text-[10px]"
+                  title={`${agent.agentLabel} · ${agent.cwd}`}
+                >
+                  {agent.agentLabel}
+                  <span className="ml-1 opacity-70">{agent.status}</span>
+                </Badge>
+              ))}
+              {agentCount > agentPreview.length ? (
+                <Badge variant="outline" className="h-5 border-sidebar-border px-1.5 text-[10px] text-sidebar-foreground/70">
+                  +{agentCount - agentPreview.length}
+                </Badge>
+              ) : null}
+            </div>
           ) : null}
           {attentionExcerpt ? <p className="mt-1 line-clamp-1 text-[11px] text-sidebar-foreground/70">{attentionExcerpt}</p> : null}
         </div>
@@ -524,12 +739,16 @@ const PaneCard = React.memo(function PaneCard({
   pane,
   worktreePath,
   provider,
+  combId,
+  projectId,
   onPaneStatusChange,
   onRemovePane,
 }: {
   pane: Pane;
   worktreePath: string;
   provider: Provider | null;
+  combId?: string;
+  projectId?: string;
   onPaneStatusChange: (paneId: string, status: "running" | "exited") => void;
   onRemovePane: (paneId: string) => void;
 }) {
@@ -616,6 +835,8 @@ const PaneCard = React.memo(function PaneCard({
           command={command}
           args={args}
           paneId={pane.id}
+          combId={combId}
+          projectId={projectId}
           title={label}
           onSessionActive={isAgent ? handleAgentSessionActive : undefined}
           onExit={handleAgentExit}
@@ -692,6 +913,7 @@ export default function CmuxWorkspacePage() {
   const { projects, isLoading: projectsLoading, update: updateProject, refresh: refreshProjects } = useProjects();
   const { providers } = useProviders();
   const { confirmDialog } = useConfirmDialog();
+  const { theme, setTheme } = useTheme();
 
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [activeCombId, setActiveCombId] = useState<string | null>(null);
@@ -713,10 +935,13 @@ export default function CmuxWorkspacePage() {
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [attentionRecords, setAttentionRecords] = useState<TerminalAttentionRecord[]>([]);
   const [initializingBasePaneIds, setInitializingBasePaneIds] = useState<Set<string>>(new Set());
+  const [showShortcutHints, setShowShortcutHints] = useState(false);
   /** Feedback imediato na sidebar antes do commit pesado (xterm / área principal). */
   const [pointerSelectedCombId, setPointerSelectedCombId] = useState<string | null>(null);
   const pointerPressClearTimeoutRef = useRef<number | null>(null);
   const hydratedAttentionRef = useRef(false);
+  const isMacPlatform =
+    typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
 
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt)),
@@ -724,32 +949,70 @@ export default function CmuxWorkspacePage() {
   );
   const [combs, setCombs] = useState<Comb[]>([]);
   const [combsLoading, setCombsLoading] = useState(true);
-  const refreshCombs = useCallback(async () => {
+  const refreshCombs = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
     if (!window.db?.combs || sortedProjects.length === 0) {
       setCombs([]);
-      setCombsLoading(false);
+      if (!silent) setCombsLoading(false);
       return;
     }
-    setCombsLoading(true);
+    if (!silent) setCombsLoading(true);
     try {
       const chunks = await Promise.all(
         sortedProjects.map((project) => window.db!.combs.findByProject(project.id)),
       );
       const flat = normalizeCombs(chunks.flat()) as Comb[];
-      // Ordenar: fixados primeiro (por pinnedAt desc), depois não-fixados (por updatedAt desc)
+      // Ordenar: fixados primeiro (por pinnedAt desc), depois atividade Git recente, depois updatedAt
       flat.sort((a, b) => {
         if (a.isPinned && !b.isPinned) return -1;
         if (!a.isPinned && b.isPinned) return 1;
         if (a.isPinned && b.isPinned) {
           return +new Date(b.pinnedAt ?? 0) - +new Date(a.pinnedAt ?? 0);
         }
+        const ta = a.lastGitActivityAt ? +new Date(a.lastGitActivityAt) : NaN;
+        const tb = b.lastGitActivityAt ? +new Date(b.lastGitActivityAt) : NaN;
+        const ha = Number.isFinite(ta);
+        const hb = Number.isFinite(tb);
+        if (ha && hb && tb !== ta) return tb - ta;
+        if (ha !== hb) return ha ? -1 : 1;
         return +new Date(b.updatedAt) - +new Date(a.updatedAt);
       });
       setCombs(flat);
     } finally {
-      setCombsLoading(false);
+      if (!silent) setCombsLoading(false);
     }
   }, [sortedProjects]);
+
+  const sortedProjectsRef = useRef(sortedProjects);
+  sortedProjectsRef.current = sortedProjects;
+
+  useEffect(() => {
+    const api = window.desktopAPI?.comb?.refreshGitActivity;
+    if (!api) return;
+
+    const tick = async () => {
+      const projects = sortedProjectsRef.current;
+      if (projects.length === 0) return;
+      await Promise.all(projects.map((p) => api(p.id).catch(() => undefined)));
+      await refreshCombs({ silent: true });
+    };
+
+    const firstDelay = window.setTimeout(() => {
+      void tick();
+    }, 2500);
+    const id = window.setInterval(() => {
+      void tick();
+    }, 60_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") void tick();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.clearTimeout(firstDelay);
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [refreshCombs]);
 
   const createComb = useCallback(async (data: CreateCombDTO) => {
     if (!window.db?.combs) throw new Error("Combs indisponivel");
@@ -764,6 +1027,20 @@ export default function CmuxWorkspacePage() {
     () => (activeCombId ? (combs.find((c) => c.id === activeCombId) ?? null) : null),
     [activeCombId, combs],
   );
+  const activeCombWorktreeKey = activeComb?.worktreePath?.trim()
+    ? `${activeComb.branch ?? ""}@${activeComb.worktreePath}`
+    : "";
+  useEffect(() => {
+    if (!activeCombId || !activeCombWorktreeKey) return;
+    const api = window.desktopAPI?.forge?.syncPrLink;
+    if (!api) return;
+    const timer = window.setTimeout(() => {
+      void api(activeCombId)
+        .then(() => refreshCombs({ silent: true }))
+        .catch(() => undefined);
+    }, 1400);
+    return () => window.clearTimeout(timer);
+  }, [activeCombId, activeCombWorktreeKey, refreshCombs]);
   const activeProject = useMemo(() => {
     if (!activeComb) return null;
     return sortedProjects.find((project) => project.id === activeComb.projectId) ?? null;
@@ -778,6 +1055,22 @@ export default function CmuxWorkspacePage() {
   );
   useAppWindowTitle(windowTitleProject, activeComb);
   const { activity: projectActivity } = useTerminalProjectActivity(activeProject?.id ?? null);
+  const activeAgentsByCombId = useMemo(() => {
+    const map = new Map<string, DetectedTerminalAgent[]>();
+    for (const agent of projectActivity.activeAgents ?? []) {
+      if (!agent.combId) continue;
+      const next = map.get(agent.combId) ?? [];
+      next.push(agent);
+      map.set(agent.combId, next);
+    }
+    for (const agents of map.values()) {
+      agents.sort((a, b) => {
+        const statusRank = a.status === b.status ? 0 : a.status === "waiting" ? -1 : 1;
+        return statusRank || a.agentLabel.localeCompare(b.agentLabel) || a.cwd.localeCompare(b.cwd);
+      });
+    }
+    return map;
+  }, [projectActivity.activeAgents]);
   const {
     panes,
     isLoading: panesLoading,
@@ -787,7 +1080,7 @@ export default function CmuxWorkspacePage() {
     remove: removePane,
   } = usePanes(activeCombId ?? undefined);
   useEffect(() => {
-    void refreshCombs();
+    void refreshCombs({ silent: false });
   }, [refreshCombs]);
 
   const providerById = useMemo(() => {
@@ -834,6 +1127,13 @@ export default function CmuxWorkspacePage() {
     for (const comb of combs) map.set(comb.id, comb);
     return map;
   }, [combs]);
+  const {
+    navigateToComb,
+    goBack: goWorktreeBack,
+    goForward: goWorktreeForward,
+    canGoBack: canGoWorktreeBack,
+    canGoForward: canGoWorktreeForward,
+  } = useWorktreeNavigationHistory(combs, activeCombId, setActiveCombId, setSelectedProjectId);
   const unreadAttentionByCombId = useMemo(() => {
     const map = new Map<string, TerminalAttentionRecord>();
     for (const record of attentionRecords) {
@@ -876,9 +1176,8 @@ export default function CmuxWorkspacePage() {
   );
 
   useTerminalAttentionToasts({
-    onNavigateToPane: ({ projectId, combId, paneId }) => {
-      setSelectedProjectId(projectId);
-      setActiveCombId(combId);
+    onNavigateToPane: ({ combId, paneId }) => {
+      navigateToComb(combId);
       setActivePaneId(paneId);
     },
     onAttentionRecord: (record) => {
@@ -1106,92 +1405,18 @@ export default function CmuxWorkspacePage() {
     markPaneAttentionAsRead(paneId);
   }, [markPaneAttentionAsRead]);
 
-  /**
-   * Atalhos estilo Maestro: Cmd+1–9 (foco), Cmd+K (limpar), zoom, Shift+Cmd+[ ] (ciclo).
-   * Ignora quando Providers está aberto ou foco em dialog/input (exceto textarea do xterm).
-   * Conflitos possíveis: Cmd+K noutras apps; zoom do browser — aqui preventDefault no workspace.
-   */
-  useEffect(() => {
-    const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
-    const mod = isMac ? (e: KeyboardEvent) => e.metaKey : (e: KeyboardEvent) => e.ctrlKey;
+  const handleSetTheme = useCallback(
+    (nextTheme: "dark" | "light" | "system") => {
+      setTheme(nextTheme);
+    },
+    [setTheme],
+  );
 
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (showProviders) return;
-
-      if (mod(event) && (event.key === "k" || event.key === "K")) {
-        event.preventDefault();
-        if (event.shiftKey) {
-          window.dispatchEvent(new CustomEvent("dcc-terminal-action", { detail: { type: "clearScrollback" } }));
-        } else {
-          setCommandPaletteOpen(true);
-        }
-        return;
-      }
-
-      if (!activeCombId) return;
-
-      const el = event.target;
-      if (el instanceof HTMLElement) {
-        const inXterm = el.closest(".xterm");
-        const inDialog = el.closest("[role=\"dialog\"], [data-radix-dialog-content]");
-        if (inDialog && !inXterm) return;
-        if (el.closest("input, textarea, select") && !inXterm) return;
-      }
-
-      if (!mod(event)) return;
-
-      if (event.shiftKey && visiblePanes.length > 1) {
-        const key = event.key;
-        if (key === "]" || key === "[") {
-          event.preventDefault();
-          const currentIdx = visiblePanes.findIndex((pane) => pane.id === activePaneId);
-          const baseIdx = currentIdx >= 0 ? currentIdx : 0;
-          const nextIdx =
-            key === "]"
-              ? (baseIdx + 1) % visiblePanes.length
-              : (baseIdx - 1 + visiblePanes.length) % visiblePanes.length;
-          const nextPaneId = visiblePanes[nextIdx]?.id;
-          if (!nextPaneId) return;
-          setActivePaneId(nextPaneId);
-          markPaneAttentionAsRead(nextPaneId);
-          return;
-        }
-      }
-
-      if (/^[1-9]$/.test(event.key) && visiblePanes.length > 0) {
-        event.preventDefault();
-        const idx = Number(event.key) - 1;
-        const pane = visiblePanes[idx];
-        if (pane) {
-          setActivePaneId(pane.id);
-          markPaneAttentionAsRead(pane.id);
-        }
-        return;
-      }
-      if (event.key === "=" || event.key === "+") {
-        event.preventDefault();
-        bumpTerminalFontSize(1);
-        return;
-      }
-      if (event.key === "-" || event.key === "_") {
-        event.preventDefault();
-        bumpTerminalFontSize(-1);
-        return;
-      }
-      if (event.key === "0") {
-        event.preventDefault();
-        resetTerminalFontSize();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    activeCombId,
-    activePaneId,
-    markPaneAttentionAsRead,
-    showProviders,
-    visiblePanes,
-  ]);
+  const handleToggleTheme = useCallback(() => {
+    const nextTheme =
+      theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
+    setTheme(nextTheme);
+  }, [setTheme, theme]);
 
   const ensureActiveCombWorktree = useCallback(async (): Promise<boolean> => {
     if (!activeCombId) return false;
@@ -1213,11 +1438,13 @@ export default function CmuxWorkspacePage() {
       return false;
     }
   }, [activeCombId, refreshCombs]);
-  const handleSelectWorkspace = useCallback((comb: Comb) => {
-    setSelectedProjectId(comb.projectId);
-    setActiveCombId(comb.id);
-    setShowProviders(false);
-  }, []);
+  const handleSelectWorkspace = useCallback(
+    (comb: Comb) => {
+      navigateToComb(comb.id);
+      setShowProviders(false);
+    },
+    [navigateToComb],
+  );
 
   const handleWorkspacePointerDown = useCallback((comb: Comb) => {
     if (pointerPressClearTimeoutRef.current != null) {
@@ -1458,6 +1685,48 @@ export default function CmuxWorkspacePage() {
     void handleRemovePane(paneId);
   }, [handleRemovePane]);
 
+  const handleRenamePane = useCallback(
+    async (paneId: string, newTitle: string) => {
+      try {
+        await updatePane(paneId, { title: newTitle });
+        toast.success("Tab renomeado");
+      } catch (error) {
+        toast.error("Falha ao renomear tab");
+        console.error("Error renaming pane:", error);
+      }
+    },
+    [updatePane],
+  );
+
+  const handleDragEnd = useCallback(
+    async (result: DropResult) => {
+      if (!result.destination) return;
+
+      const sourceIndex = result.source.index;
+      const destIndex = result.destination.index;
+
+      if (sourceIndex === destIndex) return;
+
+      // Reordenar array
+      const reordered = Array.from(visiblePanes);
+      const [movedPane] = reordered.splice(sourceIndex, 1);
+      reordered.splice(destIndex, 0, movedPane);
+
+      // Atualizar layout_order no DB
+      try {
+        const updates = reordered.map((pane, index) =>
+          updatePane(pane.id, { layoutOrder: index })
+        );
+        await Promise.all(updates);
+        toast.success("Tabs reordenados");
+      } catch (error) {
+        toast.error("Falha ao reordenar tabs");
+        console.error("Error reordering panes:", error);
+      }
+    },
+    [visiblePanes, updatePane],
+  );
+
   const handlePaneStatusChange = useCallback(
     async (paneId: string, status: "running" | "exited") => {
       try {
@@ -1484,6 +1753,200 @@ export default function CmuxWorkspacePage() {
     }
   }, [refreshCombs]);
 
+  useEffect(() => {
+    const isModifierPressed = (event: KeyboardEvent) =>
+      isMacPlatform ? event.metaKey : event.ctrlKey;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isModifierPressed(event)) {
+        setShowShortcutHints(true);
+      }
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (
+        event.key === "Meta" ||
+        event.key === "Control" ||
+        !isModifierPressed(event)
+      ) {
+        setShowShortcutHints(false);
+      }
+    };
+
+    const handleBlur = () => setShowShortcutHints(false);
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleBlur);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [isMacPlatform]);
+
+  /**
+   * Atalhos estilo Maestro: Cmd+1–9 (foco), Cmd+K (palette / limpar), zoom e comandos rápidos.
+   * Inclui ações de UI/UX: notificações, tema e comandos do workspace.
+   * Ignora foco em dialog/input (exceto textarea do xterm).
+   * Conflitos possíveis: Cmd+K noutras apps; zoom do browser — aqui preventDefault no workspace.
+   */
+  useEffect(() => {
+    const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
+    const mod = isMac ? (e: KeyboardEvent) => e.metaKey : (e: KeyboardEvent) => e.ctrlKey;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (mod(event) && (event.key === "k" || event.key === "K")) {
+        event.preventDefault();
+        if (event.shiftKey) {
+          window.dispatchEvent(new CustomEvent("dcc-terminal-action", { detail: { type: "clearScrollback" } }));
+        } else {
+          setCommandPaletteOpen(true);
+        }
+        return;
+      }
+
+      const el = event.target;
+      if (el instanceof HTMLElement) {
+        const inXterm = el.closest(".xterm");
+        const inDialog = el.closest("[role=\"dialog\"], [data-radix-dialog-content]");
+        if (inDialog && !inXterm) return;
+        if (el.closest("input, textarea, select, [contenteditable='true']") && !inXterm) return;
+      }
+
+      if (mod(event) && !event.shiftKey && (event.key === "[" || event.key === "]")) {
+        event.preventDefault();
+        if (event.key === "[") {
+          goWorktreeBack();
+        } else {
+          goWorktreeForward();
+        }
+        return;
+      }
+
+      if (!mod(event)) return;
+
+      if (event.shiftKey) {
+        const key = event.key.toLowerCase();
+        if (key === "n") {
+          event.preventDefault();
+          setNewCombOpen(true);
+          return;
+        }
+        if (key === "t") {
+          event.preventDefault();
+          void handleAddTerminal();
+          return;
+        }
+        if (key === "a") {
+          event.preventDefault();
+          if (!activeCombId) return;
+          setNewAgentOpen(true);
+          return;
+        }
+        if (key === "b") {
+          event.preventDefault();
+          void handleOpenBaseTerminal();
+          return;
+        }
+        if (key === "r") {
+          event.preventDefault();
+          setRepoConfigOpen(true);
+          return;
+        }
+        if (key === "i") {
+          event.preventDefault();
+          setAttentionOpen(true);
+          return;
+        }
+        if (key === "p") {
+          event.preventDefault();
+          setShowProviders((prev) => !prev);
+          return;
+        }
+        if (key === "d") {
+          event.preventDefault();
+          handleSetTheme("dark");
+          return;
+        }
+        if (key === "l") {
+          event.preventDefault();
+          handleSetTheme("light");
+          return;
+        }
+        if (key === "s") {
+          event.preventDefault();
+          handleSetTheme("system");
+          return;
+        }
+      }
+
+      if (event.altKey && (event.key === "t" || event.key === "T")) {
+        event.preventDefault();
+        handleToggleTheme();
+        return;
+      }
+
+      if (!activeCombId) return;
+
+      if (event.shiftKey && visiblePanes.length > 1) {
+        const key = event.key;
+        if (key === "]" || key === "[") {
+          event.preventDefault();
+          const currentIdx = visiblePanes.findIndex((pane) => pane.id === activePaneId);
+          const baseIdx = currentIdx >= 0 ? currentIdx : 0;
+          const nextIdx =
+            key === "]"
+              ? (baseIdx + 1) % visiblePanes.length
+              : (baseIdx - 1 + visiblePanes.length) % visiblePanes.length;
+          const nextPaneId = visiblePanes[nextIdx]?.id;
+          if (!nextPaneId) return;
+          setActivePaneId(nextPaneId);
+          markPaneAttentionAsRead(nextPaneId);
+          return;
+        }
+      }
+
+      if (/^[1-9]$/.test(event.key) && visiblePanes.length > 0) {
+        event.preventDefault();
+        const idx = Number(event.key) - 1;
+        const pane = visiblePanes[idx];
+        if (pane) {
+          setActivePaneId(pane.id);
+          markPaneAttentionAsRead(pane.id);
+        }
+        return;
+      }
+      if (event.key === "=" || event.key === "+") {
+        event.preventDefault();
+        bumpTerminalFontSize(1);
+        return;
+      }
+      if (event.key === "-" || event.key === "_") {
+        event.preventDefault();
+        bumpTerminalFontSize(-1);
+        return;
+      }
+      if (event.key === "0") {
+        event.preventDefault();
+        resetTerminalFontSize();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    activeCombId,
+    activePaneId,
+    goWorktreeBack,
+    goWorktreeForward,
+    handleAddTerminal,
+    handleOpenBaseTerminal,
+    handleSetTheme,
+    handleToggleTheme,
+    markPaneAttentionAsRead,
+    visiblePanes,
+  ]);
+
   if (projectsLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
@@ -1506,7 +1969,11 @@ export default function CmuxWorkspacePage() {
               <Plus className="h-4 w-4" />
             </Button>
           </div>
-          <Button variant="outline" className="titlebar-no-drag w-full justify-start gap-2" onClick={() => setAddProjectOpen(true)}>
+          <Button
+            variant="outline"
+            className="titlebar-no-drag w-full justify-start gap-2"
+            onClick={() => setAddProjectOpen(true)}
+          >
             <FolderGit2 className="h-4 w-4" />
             Adicionar projeto
           </Button>
@@ -1527,6 +1994,7 @@ export default function CmuxWorkspacePage() {
                   const isActive = comb.id === activeCombId || comb.id === pointerSelectedCombId;
                   const projectName = projectNameById.get(comb.projectId) ?? "Projeto";
                   const runningCount = projectActivity.runningPanesByCombId[comb.id] ?? 0;
+                  const agents = activeAgentsByCombId.get(comb.id) ?? [];
                   return (
                     <WorkspaceListItem
                       key={comb.id}
@@ -1535,6 +2003,8 @@ export default function CmuxWorkspacePage() {
                       projectName={projectName}
                       hasAttention={!!attentionForComb}
                       runningCount={runningCount}
+                      agentCount={agents.length}
+                      agentPreview={agents.slice(0, 2)}
                       attentionExcerpt={attentionForComb?.excerpt ?? null}
                       onSelect={handleSelectWorkspace}
                       onSelectBegin={handleWorkspacePointerDown}
@@ -1558,7 +2028,12 @@ export default function CmuxWorkspacePage() {
             >
               <Bell className="h-4 w-4" />
               Notificações
-              {unreadCount > 0 ? <Badge className="ml-auto">{unreadCount}</Badge> : null}
+              {showShortcutHints ? (
+                <Kbd className="ml-auto h-5 px-1.5 text-[10px] font-medium">
+                  {isMacPlatform ? "⌘⇧I" : "Ctrl+Shift+I"}
+                </Kbd>
+              ) : null}
+              {unreadCount > 0 ? <Badge className="ml-1">{unreadCount}</Badge> : null}
             </Button>
             <Button
               variant="ghost"
@@ -1568,6 +2043,11 @@ export default function CmuxWorkspacePage() {
             >
               <Settings className="h-4 w-4" />
               Providers
+              {showShortcutHints ? (
+                <Kbd className="ml-auto h-5 px-1.5 text-[10px] font-medium">
+                  {isMacPlatform ? "⌘⇧P" : "Ctrl+Shift+P"}
+                </Kbd>
+              ) : null}
             </Button>
             <Button
               variant="outline"
@@ -1577,6 +2057,11 @@ export default function CmuxWorkspacePage() {
             >
               <WandSparkles className="h-4 w-4" />
               Palette
+              {showShortcutHints ? (
+                <Kbd className="ml-auto h-5 px-1.5 text-[10px] font-medium">
+                  {isMacPlatform ? "⌘K" : "Ctrl+K"}
+                </Kbd>
+              ) : null}
             </Button>
             <Button
               variant="outline"
@@ -1586,6 +2071,11 @@ export default function CmuxWorkspacePage() {
             >
               <Settings className="h-4 w-4" />
               Repo
+              {showShortcutHints ? (
+                <Kbd className="ml-auto h-5 px-1.5 text-[10px] font-medium">
+                  {isMacPlatform ? "⌘⇧R" : "Ctrl+Shift+R"}
+                </Kbd>
+              ) : null}
             </Button>
           </div>
 
@@ -1597,6 +2087,11 @@ export default function CmuxWorkspacePage() {
                 </p>
                 <p className="truncate text-[11px] text-sidebar-foreground/50">
                   {activeProject ? activeProject.name : "Nenhum projeto ativo"}
+                </p>
+                <p className="mt-1 text-[10px] text-sidebar-foreground/45">
+                  {isMacPlatform
+                    ? "Segure ⌘ para revelar atalhos."
+                    : "Segure Ctrl para revelar atalhos."}
                 </p>
               </div>
               <Badge variant="outline" className="border-sidebar-border text-[10px]">
@@ -1621,6 +2116,60 @@ export default function CmuxWorkspacePage() {
                   </p>
                 </div>
 
+                {projectActivity.activeAgents?.length ? (
+                  <div className="rounded-md border border-sidebar-border/70 bg-sidebar-accent/25 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                        Agentes detectados
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                          {projectActivity.workingAgents ?? 0} working
+                        </Badge>
+                        <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">
+                          {projectActivity.waitingAgents ?? 0} waiting
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      {projectActivity.activeAgents.slice(0, 4).map((agent) => (
+                        <div
+                          key={agent.ptyId}
+                          className="flex items-start justify-between gap-2 rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-[11px] font-medium">
+                              {agent.agentLabel}
+                              <span className="ml-1 text-[10px] font-normal text-sidebar-foreground/55">
+                                {agent.workspaceName ?? agent.projectName}
+                              </span>
+                            </p>
+                            {agent.title ? (
+                              <p className="truncate text-[10px] text-sidebar-foreground/50">
+                                {agent.title}
+                              </p>
+                            ) : null}
+                            <p className="truncate text-[10px] text-sidebar-foreground/50">
+                              {agent.cwd}
+                            </p>
+                          </div>
+                          <Badge
+                            variant={agent.status === "waiting" ? "destructive" : "secondary"}
+                            className="shrink-0 h-5 px-1.5 text-[10px]"
+                          >
+                            {agent.status}
+                          </Badge>
+                        </div>
+                      ))}
+                      {projectActivity.activeAgents.length > 4 ? (
+                        <p className="text-[10px] text-sidebar-foreground/45">
+                          +{projectActivity.activeAgents.length - 4} agentes adicionais.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="rounded-md border border-sidebar-border/70 bg-sidebar-accent/30 px-3 py-2">
                   <div className="flex items-center gap-2 text-xs font-medium">
                     <Clock3 className="h-3.5 w-3.5" />
@@ -1634,6 +2183,39 @@ export default function CmuxWorkspacePage() {
                     {daemonStatus?.runningTasks ?? 0} em execução ·{" "}
                     {daemonStatus?.enabledTasks ?? activeRepoTasks.length} tarefas habilitadas
                   </p>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div className="rounded-md border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1.5">
+                      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-sidebar-foreground/50">
+                        <Cpu className="h-3 w-3" />
+                        CPU
+                      </div>
+                      <p className="mt-1 text-xs font-semibold text-sidebar-foreground/90">
+                        {typeof daemonStatus?.cpuPercent === "number"
+                          ? `${daemonStatus.cpuPercent.toFixed(1)}%`
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="rounded-md border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1.5">
+                      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-sidebar-foreground/50">
+                        <MemoryStick className="h-3 w-3" />
+                        RAM
+                      </div>
+                      <p className="mt-1 text-xs font-semibold text-sidebar-foreground/90">
+                        {typeof daemonStatus?.memoryMb === "number"
+                          ? formatDaemonMemory(daemonStatus.memoryMb)
+                          : "—"}
+                      </p>
+                    </div>
+                  </div>
+                  {daemonStatus?.lastMetricsAt ? (
+                    <p className="mt-2 text-[10px] text-sidebar-foreground/45">
+                      Métricas atualizadas{" "}
+                      {formatDistanceToNow(new Date(daemonStatus.lastMetricsAt), {
+                        locale: ptBR,
+                        addSuffix: true,
+                      })}
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="rounded-md border border-sidebar-border/70 bg-sidebar-accent/20 px-3 py-2">
@@ -1723,8 +2305,7 @@ export default function CmuxWorkspacePage() {
                                 type="button"
                                 className="flex w-full items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1 text-left text-[11px] hover:border-sidebar-border hover:bg-sidebar-accent/40"
                                 onClick={() => {
-                                  setSelectedProjectId(comb.projectId);
-                                  setActiveCombId(comb.id);
+                                  navigateToComb(comb.id);
                                   setShowProviders(false);
                                 }}
                               >
@@ -1756,8 +2337,7 @@ export default function CmuxWorkspacePage() {
                                   className="flex w-full items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1 text-left text-[11px] hover:border-sidebar-border hover:bg-sidebar-accent/40"
                                   onClick={() => {
                                     if (comb) {
-                                      setSelectedProjectId(comb.projectId);
-                                      setActiveCombId(comb.id);
+                                      navigateToComb(comb.id);
                                     }
                                     setActivePaneId(pane.id);
                                     setShowProviders(false);
@@ -1994,7 +2574,59 @@ export default function CmuxWorkspacePage() {
         ) : activeComb ? (
           <>
             <div className="mt-8 flex items-center justify-between border-b border-border px-4 py-2">
-              <div className="flex min-w-0 items-center gap-3">
+              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="titlebar-no-drag h-8 w-8 shrink-0"
+                        disabled={!canGoWorktreeBack}
+                        aria-label="Workspace anterior"
+                        onClick={() => goWorktreeBack()}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <span className="inline-flex items-center gap-2">
+                        Workspace anterior
+                        {showShortcutHints ? (
+                          <Kbd className="h-5 px-1.5 text-[10px] font-medium">
+                            {isMacPlatform ? "⌘[" : "Ctrl+["}
+                          </Kbd>
+                        ) : null}
+                      </span>
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="titlebar-no-drag h-8 w-8 shrink-0"
+                        disabled={!canGoWorktreeForward}
+                        aria-label="Workspace seguinte"
+                        onClick={() => goWorktreeForward()}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <span className="inline-flex items-center gap-2">
+                        Workspace seguinte
+                        {showShortcutHints ? (
+                          <Kbd className="h-5 px-1.5 text-[10px] font-medium">
+                            {isMacPlatform ? "⌘]" : "Ctrl+]"}
+                          </Kbd>
+                        ) : null}
+                      </span>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
                 <h3 className="truncate text-sm font-semibold">{activeComb.name}</h3>
                 <Badge variant="outline" className="gap-1">
                   <GitBranch className="h-3 w-3" />
@@ -2004,31 +2636,46 @@ export default function CmuxWorkspacePage() {
               <div className="flex items-center gap-2">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="outline" size="sm" onClick={handleOpenBaseTerminal}>
-                      <FolderGit2 className="mr-1 h-3.5 w-3.5" />
-                      Base
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Terminal no repositorio principal</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="outline" size="sm" onClick={handleAddTerminal}>
-                      <Terminal className="mr-1 h-3.5 w-3.5" />
-                      Workspace
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Terminal no worktree atual</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="outline" size="sm" onClick={() => setNewAgentOpen(true)} disabled={cliProviders.length === 0}>
-                      <Bot className="mr-1 h-3.5 w-3.5" />
-                      Agent
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Abrir agente CLI no workspace</TooltipContent>
-                </Tooltip>
+            <Button variant="outline" size="sm" onClick={handleOpenBaseTerminal}>
+              <FolderGit2 className="mr-1 h-3.5 w-3.5" />
+              Base
+              {showShortcutHints ? (
+                <Kbd className="ml-2 h-5 px-1.5 text-[10px] font-medium">
+                  {isMacPlatform ? "⌘⇧B" : "Ctrl+Shift+B"}
+                </Kbd>
+              ) : null}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Terminal no repositorio principal</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="outline" size="sm" onClick={handleAddTerminal}>
+              <Terminal className="mr-1 h-3.5 w-3.5" />
+              Workspace
+              {showShortcutHints ? (
+                <Kbd className="ml-2 h-5 px-1.5 text-[10px] font-medium">
+                  {isMacPlatform ? "⌘⇧T" : "Ctrl+Shift+T"}
+                </Kbd>
+              ) : null}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Terminal no worktree atual</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="outline" size="sm" onClick={() => setNewAgentOpen(true)} disabled={cliProviders.length === 0}>
+              <Bot className="mr-1 h-3.5 w-3.5" />
+              Agent
+              {showShortcutHints ? (
+                <Kbd className="ml-2 h-5 px-1.5 text-[10px] font-medium">
+                  {isMacPlatform ? "⌘⇧A" : "Ctrl+Shift+A"}
+                </Kbd>
+              ) : null}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Abrir agente CLI no workspace</TooltipContent>
+        </Tooltip>
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-hidden">
@@ -2044,47 +2691,55 @@ export default function CmuxWorkspacePage() {
                 </div>
               ) : (
                 <div className="flex h-full min-h-0 flex-col overflow-hidden p-1">
-                  <div role="tablist" aria-label="Panes do workspace" className="mb-1 flex shrink-0 gap-1 overflow-x-auto">
-                    {visiblePanes.map((pane) => {
-                      const provider = pane.providerId ? (providerById.get(pane.providerId) ?? null) : null;
-                      const label = pane.type === "agent" ? (pane.title ?? provider?.name ?? "Agent") : (pane.title ?? "Terminal");
-                      const selected = pane.id === activePane?.id;
-                      const hasUnreadAttention = hasUnreadAttentionByPaneId.has(pane.id);
-                      return (
+                  <DragDropContext onDragEnd={handleDragEnd}>
+                    <Droppable droppableId="pane-tabs" direction="horizontal">
+                      {(provided) => (
                         <div
-                          key={pane.id}
-                          role="tab"
-                          aria-selected={selected}
-                          onClick={() => handleSelectPaneTab(pane.id)}
-                          className={`group flex min-w-[170px] max-w-[260px] cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 ${
-                            selected ? "border-primary bg-primary/10" : "border-border bg-muted/30 hover:bg-muted/50"
-                          }`}
+                          role="tablist"
+                          aria-label="Panes do workspace"
+                          className="mb-1 flex shrink-0 gap-1 overflow-x-auto"
+                          ref={provided.innerRef}
+                          {...provided.droppableProps}
                         >
-                          {pane.type === "agent" ? <Bot className="h-3.5 w-3.5 shrink-0" /> : <Terminal className="h-3.5 w-3.5 shrink-0" />}
-                          {pane.type === "agent" ? <AgentKindBadge provider={provider} compact /> : null}
-                          <span className="min-w-0 flex-1 truncate text-xs">{label}</span>
-                          {hasUnreadAttention ? <span className="h-2 w-2 shrink-0 rounded-full bg-sky-400" /> : null}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="ml-auto h-5 w-5 shrink-0 opacity-70 hover:opacity-100"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleRemovePaneById(pane.id);
-                            }}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
+                          {visiblePanes.map((pane, index) => {
+                            const provider = pane.providerId ? (providerById.get(pane.providerId) ?? null) : null;
+                            const label = pane.type === "agent" ? (pane.title ?? provider?.name ?? "Agent") : (pane.title ?? "Terminal");
+                            const selected = pane.id === activePane?.id;
+                            const hasUnreadAttention = hasUnreadAttentionByPaneId.has(pane.id);
+                            return (
+                              <Draggable key={pane.id} draggableId={pane.id} index={index}>
+                                {(provided, snapshot) => (
+                                  <div ref={provided.innerRef} {...provided.draggableProps}>
+                                    <PaneTab
+                                      pane={pane}
+                                      provider={provider}
+                                      selected={selected}
+                                      hasUnreadAttention={hasUnreadAttention}
+                                      label={label}
+                                      onSelect={handleSelectPaneTab}
+                                      onRemove={handleRemovePaneById}
+                                      onRename={handleRenamePane}
+                                      isDragging={snapshot.isDragging}
+                                      dragHandleProps={provided.dragHandleProps}
+                                    />
+                                  </div>
+                                )}
+                              </Draggable>
+                            );
+                          })}
+                          {provided.placeholder}
                         </div>
-                      );
-                    })}
-                  </div>
+                      )}
+                    </Droppable>
+                  </DragDropContext>
                   <div className="min-h-0 flex-1 overflow-hidden">
                     {activePane ? (
                       <PaneCard
                         pane={activePane}
                         worktreePath={activePane.cwd?.trim() || activeComb.worktreePath || ""}
                         provider={activePane.providerId ? (providerById.get(activePane.providerId) ?? null) : null}
+                        combId={activeComb.id}
+                        projectId={activeComb.projectId}
                         onPaneStatusChange={handlePaneStatusChange}
                         onRemovePane={handleRemovePaneById}
                       />
@@ -2128,8 +2783,7 @@ export default function CmuxWorkspacePage() {
                   type="button"
                   className="w-full rounded border border-border p-3 text-left hover:bg-muted/50"
                   onClick={() => {
-                    setSelectedProjectId(item.projectId);
-                    setActiveCombId(item.combId);
+                    navigateToComb(item.combId);
                     setActivePaneId(item.paneId);
                     setShowProviders(false);
                     setAttentionRecords((prev) => prev.map((r) => (r.id === item.id ? { ...r, read: true } : r)));
@@ -2167,8 +2821,7 @@ export default function CmuxWorkspacePage() {
         projects={sortedProjects}
         selectedProjectId={selectedProjectId}
         onCreate={(comb) => {
-          setSelectedProjectId(comb.projectId);
-          setActiveCombId(comb.id);
+          navigateToComb(comb.id);
           setShowProviders(false);
           refreshCombs();
         }}
@@ -2233,17 +2886,24 @@ export default function CmuxWorkspacePage() {
         onOpenWorkspaceTerminal={handleAddTerminal}
         onOpenNewAgent={() => setNewAgentOpen(true)}
         onOpenRepoConfig={() => setRepoConfigOpen(true)}
+        onOpenNotifications={() => setAttentionOpen(true)}
+        currentTheme={theme}
+        onSetTheme={handleSetTheme}
+        onToggleTheme={handleToggleTheme}
         onSelectProject={(projectId) => {
           setSelectedProjectId(projectId);
           const nextProjectComb = combs.find((comb) => comb.projectId === projectId) ?? null;
-          setActiveCombId(nextProjectComb?.id ?? null);
+          navigateToComb(nextProjectComb?.id ?? null);
         }}
         onSelectWorkspace={(combId) => {
           const comb = combs.find((item) => item.id === combId);
           if (!comb) return;
-          setSelectedProjectId(comb.projectId);
-          setActiveCombId(comb.id);
+          navigateToComb(comb.id);
         }}
+        canGoBackWorktree={canGoWorktreeBack}
+        canGoForwardWorktree={canGoWorktreeForward}
+        onWorktreeHistoryBack={() => goWorktreeBack()}
+        onWorktreeHistoryForward={() => goWorktreeForward()}
         onSelectPane={(paneId) => {
           setActivePaneId(paneId);
           markPaneAttentionAsRead(paneId);

@@ -1,20 +1,27 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike};
+mod forge_issue;
+
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike, Utc};
 use dev_command_center_tauri::daemon_client::{
     ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo,
 };
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use notify_rust::Notification as DesktopNotification;
+#[cfg(all(unix, not(target_os = "macos")))]
+use notify_rust::NotificationHandle as DesktopNotificationHandle;
 use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
 use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, VecDeque};
+use sha2::{Digest, Sha256};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -22,16 +29,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use notify_rust::Notification as DesktopNotification;
-#[cfg(all(unix, not(target_os = "macos")))]
-use notify_rust::NotificationHandle as DesktopNotificationHandle;
+use sysinfo::{Pid, System};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_dialog::{DialogExt, FilePath};
+use tauri_plugin_dialog::{DialogExt, FilePath, MessageDialogButtons, MessageDialogKind, MessageDialogResult};
+use tauri_plugin_updater::UpdaterExt;
 use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
 
@@ -265,13 +270,182 @@ struct DesktopNotificationActionEvent {
 /// Últimas N linhas de stdout/stderr por sessão (reidratação do xterm ao remontar).
 const TERMINAL_OUTPUT_MAX_LINES: usize = 1000;
 
+#[cfg(windows)]
+mod windows_job {
+    use std::ffi::c_void;
+    use std::mem::size_of;
+    use std::ptr::null_mut;
+
+    type Handle = *mut c_void;
+
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS: u32 = 9;
+
+    const PROCESS_TERMINATE: u32 = 0x0001;
+    const PROCESS_SET_QUOTA: u32 = 0x0100;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+
+    #[repr(C)]
+    struct IoCounters {
+        read_operation_count: u64,
+        write_operation_count: u64,
+        other_operation_count: u64,
+        read_transfer_count: u64,
+        write_transfer_count: u64,
+        other_transfer_count: u64,
+    }
+
+    #[repr(C)]
+    struct JobObjectBasicLimitInformation {
+        per_process_user_time_limit: i64,
+        per_job_user_time_limit: i64,
+        limit_flags: u32,
+        minimum_working_set_size: usize,
+        maximum_working_set_size: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+
+    #[repr(C)]
+    struct JobObjectExtendedLimitInformation {
+        basic_limit_information: JobObjectBasicLimitInformation,
+        io_counters: IoCounters,
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory_used: usize,
+        peak_job_memory_used: usize,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateJobObjectW(lp_job_attributes: *mut c_void, lp_name: *const u16) -> Handle;
+        fn SetInformationJobObject(
+            h_job: Handle,
+            job_object_info_class: u32,
+            lp_job_object_info: *mut c_void,
+            cb_job_object_info_length: u32,
+        ) -> i32;
+        fn AssignProcessToJobObject(h_job: Handle, h_process: Handle) -> i32;
+        fn TerminateJobObject(h_job: Handle, u_exit_code: u32) -> i32;
+        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32)
+            -> Handle;
+        fn CloseHandle(h_object: Handle) -> i32;
+    }
+
+    pub struct WindowsJobObject {
+        handle: Handle,
+    }
+
+    impl WindowsJobObject {
+        pub fn attach_process(pid: u32) -> Result<Self, String> {
+            unsafe {
+                let handle = CreateJobObjectW(null_mut(), null_mut());
+                if handle.is_null() {
+                    return Err(format!(
+                        "CreateJobObjectW falhou: {}",
+                        std::io::Error::last_os_error()
+                    ));
+                }
+
+                let mut info = JobObjectExtendedLimitInformation {
+                    basic_limit_information: JobObjectBasicLimitInformation {
+                        per_process_user_time_limit: 0,
+                        per_job_user_time_limit: 0,
+                        limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                        minimum_working_set_size: 0,
+                        maximum_working_set_size: 0,
+                        active_process_limit: 0,
+                        affinity: 0,
+                        priority_class: 0,
+                        scheduling_class: 0,
+                    },
+                    io_counters: IoCounters {
+                        read_operation_count: 0,
+                        write_operation_count: 0,
+                        other_operation_count: 0,
+                        read_transfer_count: 0,
+                        write_transfer_count: 0,
+                        other_transfer_count: 0,
+                    },
+                    process_memory_limit: 0,
+                    job_memory_limit: 0,
+                    peak_process_memory_used: 0,
+                    peak_job_memory_used: 0,
+                };
+
+                if SetInformationJobObject(
+                    handle,
+                    JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+                    &mut info as *mut _ as *mut c_void,
+                    size_of::<JobObjectExtendedLimitInformation>() as u32,
+                ) == 0
+                {
+                    let err = std::io::Error::last_os_error();
+                    let _ = CloseHandle(handle);
+                    return Err(format!("SetInformationJobObject falhou: {err}"));
+                }
+
+                let process = OpenProcess(
+                    PROCESS_TERMINATE | PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION,
+                    0,
+                    pid,
+                );
+                if process.is_null() {
+                    let err = std::io::Error::last_os_error();
+                    let _ = CloseHandle(handle);
+                    return Err(format!("OpenProcess falhou: {err}"));
+                }
+
+                if AssignProcessToJobObject(handle, process) == 0 {
+                    let err = std::io::Error::last_os_error();
+                    let _ = CloseHandle(process);
+                    let _ = CloseHandle(handle);
+                    return Err(format!("AssignProcessToJobObject falhou: {err}"));
+                }
+
+                let _ = CloseHandle(process);
+                Ok(Self { handle })
+            }
+        }
+
+        pub fn terminate(&self, exit_code: u32) -> Result<(), String> {
+            unsafe {
+                if TerminateJobObject(self.handle, exit_code) == 0 {
+                    Err(format!(
+                        "TerminateJobObject falhou: {}",
+                        std::io::Error::last_os_error()
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    impl Drop for WindowsJobObject {
+        fn drop(&mut self) {
+            unsafe {
+                if !self.handle.is_null() {
+                    let _ = CloseHandle(self.handle);
+                    self.handle = null_mut();
+                }
+            }
+        }
+    }
+}
+
 struct ManagedTerminal {
     pty_master: Box<dyn MasterPty + Send>,
     child: Box<dyn PtyChild + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    #[cfg(windows)]
+    windows_job: Option<windows_job::WindowsJobObject>,
     mission_id: Option<String>,
     pane_id: Option<String>,
     pty_owner_key: Option<String>,
+    title: Arc<Mutex<Option<String>>>,
     cwd: String,
     command: String,
     args: Vec<String>,
@@ -283,11 +457,53 @@ struct ManagedTerminal {
     reader_thread: Option<JoinHandle<()>>,
 }
 
+#[cfg(windows)]
+fn attach_windows_job_object(
+    child: &Box<dyn PtyChild + Send>,
+) -> Option<windows_job::WindowsJobObject> {
+    child
+        .process_id()
+        .and_then(|pid| windows_job::WindowsJobObject::attach_process(pid).ok())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DetectedTerminalAgent {
+    pty_id: String,
+    pane_id: Option<String>,
+    comb_id: Option<String>,
+    project_id: String,
+    project_name: String,
+    workspace_name: Option<String>,
+    agent_kind: String,
+    agent_label: String,
+    status: String,
+    cwd: String,
+    command: String,
+    args: Vec<String>,
+    pid: Option<u32>,
+    title: Option<String>,
+    provider_id: Option<String>,
+    provider_name: Option<String>,
+    detected_by: String,
+    excerpt: Option<String>,
+    started_at: String,
+}
+
 #[derive(Clone)]
 struct DaemonState {
     started_at: String,
     last_tick_at: Arc<Mutex<Option<String>>>,
     running: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaemonHealthSnapshot {
+    pid: u32,
+    cpu_percent: f64,
+    memory_mb: f64,
+    last_metrics_at: String,
 }
 
 fn new_terminal_output_buffer() -> Arc<Mutex<VecDeque<String>>> {
@@ -380,20 +596,7 @@ struct ApiError {
     message: String,
 }
 
-impl ApiError {
-    fn not_implemented(op: &'static str) -> Self {
-        Self {
-            code: "NOT_IMPLEMENTED",
-            message: format!("{op} is mapped but not implemented yet"),
-        }
-    }
-}
-
 type ApiResult<T> = Result<T, ApiError>;
-
-fn mapped_not_implemented(op: &'static str) -> ApiResult<Value> {
-    Err(ApiError::not_implemented(op))
-}
 
 fn db_error(message: impl Into<String>) -> ApiError {
     ApiError {
@@ -458,6 +661,8 @@ fn run_legacy_schema_migrations(conn: &Connection) -> Result<(), String> {
     ensure_column(conn, "combs", "last_opened_at", "TEXT")?;
     ensure_column(conn, "combs", "is_pinned", "INTEGER DEFAULT 0")?;
     ensure_column(conn, "combs", "pinned_at", "TEXT")?;
+    ensure_column(conn, "combs", "last_git_activity_at", "TEXT")?;
+    ensure_column(conn, "combs", "forge_link", "TEXT")?;
 
     // Panes
     ensure_column(conn, "panes", "pty_owner_key", "TEXT")?;
@@ -882,6 +1087,10 @@ fn map_comb_to_renderer(mut row: Value) -> Value {
         "lastOpenedAt".into(),
         obj.remove("last_opened_at").unwrap_or(Value::Null),
     );
+    out.insert(
+        "lastGitActivityAt".into(),
+        obj.remove("last_git_activity_at").unwrap_or(Value::Null),
+    );
     let is_pinned_val = obj.remove("is_pinned");
     let is_pinned_bool = match is_pinned_val {
         Some(Value::Number(n)) => n.as_i64().map(|i| i != 0).unwrap_or(false),
@@ -901,6 +1110,17 @@ fn map_comb_to_renderer(mut row: Value) -> Value {
         "updatedAt".into(),
         obj.remove("updated_at").unwrap_or(Value::Null),
     );
+    let mut forge_link_v = Value::Null;
+    if let Some(v) = obj.remove("forge_link") {
+        forge_link_v = match v {
+            Value::String(ref s) if !s.trim().is_empty() => {
+                serde_json::from_str::<Value>(s).unwrap_or(Value::Null)
+            }
+            Value::Null => Value::Null,
+            other => other,
+        };
+    }
+    out.insert("forgeLink".into(), forge_link_v);
     Value::Object(out)
 }
 
@@ -1000,6 +1220,152 @@ fn run_git(cwd: &str, args: &[&str]) -> ApiResult<String> {
         ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Caminho do ficheiro `index` do repositório para um worktree (dir `.git` ou ficheiro `gitdir:`).
+fn resolve_git_index_path(worktree: &str) -> Option<PathBuf> {
+    let wt = Path::new(worktree);
+    let git_marker = wt.join(".git");
+    if git_marker.is_dir() {
+        return Some(git_marker.join("index"));
+    }
+    if git_marker.is_file() {
+        let content = fs::read_to_string(&git_marker).ok()?;
+        let rest = content.strip_prefix("gitdir:")?;
+        let line = rest.trim();
+        let gitdir = Path::new(line);
+        let resolved = if gitdir.is_absolute() {
+            gitdir.to_path_buf()
+        } else {
+            wt.join(gitdir)
+        };
+        return Some(resolved.join("index"));
+    }
+    None
+}
+
+fn git_parse_first_unix_ts(worktree: &str, args: &[&str]) -> Option<i64> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(worktree)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&output.stdout);
+    let line = s.lines().next()?.trim();
+    if line.is_empty() {
+        return None;
+    }
+    line.parse().ok()
+}
+
+/// Heurística: max(reflog HEAD, último commit, mtime do index se working tree dirty).
+fn git_worktree_last_activity_epoch(worktree: &str) -> Option<i64> {
+    let mut max_ts: Option<i64> = None;
+    let mut bump = |t: i64| {
+        max_ts = Some(match max_ts {
+            Some(m) => m.max(t),
+            None => t,
+        });
+    };
+
+    if let Some(t) = git_parse_first_unix_ts(worktree, &["reflog", "-1", "--format=%ct", "HEAD"]) {
+        bump(t);
+    }
+    if let Some(t) = git_parse_first_unix_ts(worktree, &["log", "-1", "--format=%ct"]) {
+        bump(t);
+    }
+
+    let dirty = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(worktree)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+        .unwrap_or(false);
+
+    if dirty {
+        if let Some(index_path) = resolve_git_index_path(worktree) {
+            if let Ok(meta) = fs::metadata(&index_path) {
+                if let Ok(st) = meta.modified() {
+                    if let Ok(dur) = st.duration_since(UNIX_EPOCH) {
+                        bump(dur.as_secs() as i64);
+                    }
+                }
+            }
+        }
+    }
+
+    if max_ts.is_none() {
+        if let Some(index_path) = resolve_git_index_path(worktree) {
+            if let Ok(meta) = fs::metadata(&index_path) {
+                if let Ok(st) = meta.modified() {
+                    if let Ok(dur) = st.duration_since(UNIX_EPOCH) {
+                        return Some(dur.as_secs() as i64);
+                    }
+                }
+            }
+        }
+    }
+
+    max_ts
+}
+
+/// Executa o script de setup do repositório no diretório do worktree (`sh -c` / `cmd /C`).
+fn run_repo_setup_script(worktree_path: &str, script: &str) -> Result<(), String> {
+    let script = script.trim();
+    if script.is_empty() {
+        return Ok(());
+    }
+    let output = {
+        #[cfg(windows)]
+        {
+            let mut c = Command::new("cmd");
+            c.args(["/C", script]).current_dir(worktree_path);
+            c.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            c.output()
+        }
+        #[cfg(not(windows))]
+        {
+            Command::new("sh")
+                .args(["-c", script])
+                .current_dir(worktree_path)
+                .output()
+        }
+    }
+    .map_err(|e| format!("{e}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut detail = String::new();
+    if !stderr.trim().is_empty() {
+        detail.push_str(stderr.trim());
+    }
+    if !stdout.trim().is_empty() {
+        if !detail.is_empty() {
+            detail.push('\n');
+        }
+        detail.push_str(stdout.trim());
+    }
+    if detail.is_empty() {
+        detail = format!(
+            "exit code {}",
+            output.status.code().map(|c| c.to_string()).unwrap_or_else(|| "?".into())
+        );
+    }
+    Err(detail)
+}
+
+/// Reverte `git worktree add` + branch local após falha do setup (best-effort, alinhado a `comb_discard`).
+fn git_remove_worktree_and_branch_best_effort(project_path: &str, worktree_path: &str, branch: &str) {
+    let _ = run_git(project_path, &["worktree", "remove", "--force", worktree_path]);
+    let _ = run_git(project_path, &["branch", "-D", branch]);
 }
 
 /// Branches locais (`refs/heads/`), ordenadas, sem duplicatas.
@@ -1120,7 +1486,8 @@ fn build_review_diffs_for_path(target_path: &str) -> ApiResult<Value> {
     }))
 }
 
-fn safe_branch_name(prefix: &str, raw_id: &str, raw_title: &str) -> String {
+/// Partes da branch: slug (nome sanitizado) e sufixo hex derivado do ID do comb.
+fn safe_branch_name_parts(raw_id: &str, raw_title: &str) -> (String, String) {
     let title = raw_title
         .chars()
         .map(|c| {
@@ -1153,6 +1520,11 @@ fn safe_branch_name(prefix: &str, raw_id: &str, raw_title: &str) -> String {
     } else {
         id_short
     };
+    (slug, suffix)
+}
+
+fn safe_branch_name(prefix: &str, raw_id: &str, raw_title: &str) -> String {
+    let (slug, suffix) = safe_branch_name_parts(raw_id, raw_title);
     format!("{prefix}-{slug}-{suffix}")
 }
 
@@ -1166,6 +1538,31 @@ fn iso_now() -> String {
 
 fn local_now_string() -> String {
     Local::now().to_rfc3339()
+}
+
+fn collect_daemon_health_snapshot() -> DaemonHealthSnapshot {
+    let pid = std::process::id();
+    let mut system = System::new();
+    let sysinfo_pid = Pid::from_u32(pid);
+
+    system.refresh_process_specifics(sysinfo_pid, sysinfo::ProcessRefreshKind::new());
+
+    let (cpu_percent, memory_mb) = system
+        .process(sysinfo_pid)
+        .map(|process| {
+            (
+                process.cpu_usage() as f64,
+                process.memory() as f64 / 1_024.0 / 1_024.0,
+            )
+        })
+        .unwrap_or((0.0, 0.0));
+
+    DaemonHealthSnapshot {
+        pid,
+        cpu_percent,
+        memory_mb,
+        last_metrics_at: local_now_string(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1570,15 +1967,42 @@ fn daemon_get_status_internal(state: &AppState) -> Result<Value, String> {
         .lock()
         .map_err(|_| "daemon lock poisoned".to_string())?
         .clone();
+    let health = collect_daemon_health_snapshot();
 
     Ok(serde_json::json!({
         "mode": "in-process",
         "running": state.daemon.running.load(Ordering::Relaxed),
         "startedAt": state.daemon.started_at.clone(),
         "lastTickAt": last_tick_at,
+        "pid": health.pid,
+        "cpuPercent": health.cpu_percent,
+        "memoryMb": health.memory_mb,
+        "lastMetricsAt": health.last_metrics_at,
         "totalTasks": total_tasks,
         "runningTasks": running_tasks,
         "enabledTasks": enabled_tasks
+    }))
+}
+
+fn daemon_health_internal(state: &AppState) -> Result<Value, String> {
+    let last_tick_at = state
+        .daemon
+        .last_tick_at
+        .lock()
+        .map_err(|_| "daemon lock poisoned".to_string())?
+        .clone();
+    let health = collect_daemon_health_snapshot();
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "mode": "in-process",
+        "running": state.daemon.running.load(Ordering::Relaxed),
+        "startedAt": state.daemon.started_at.clone(),
+        "lastTickAt": last_tick_at,
+        "pid": health.pid,
+        "cpuPercent": health.cpu_percent,
+        "memoryMb": health.memory_mb,
+        "lastMetricsAt": health.last_metrics_at,
     }))
 }
 
@@ -1610,7 +2034,9 @@ fn daemon_list_combs_internal(state: &AppState, project_id: Option<&str>) -> Res
             let mut stmt = conn
                 .prepare(
                     "SELECT * FROM combs WHERE project_id = ?1
-                     ORDER BY (last_opened_at IS NULL), last_opened_at DESC
+                     ORDER BY COALESCE(is_pinned, 0) DESC,
+                              (last_git_activity_at IS NULL), last_git_activity_at DESC,
+                              (last_opened_at IS NULL), last_opened_at DESC
                      LIMIT 100",
                 )
                 .map_err(|e| e.to_string())?;
@@ -1625,7 +2051,9 @@ fn daemon_list_combs_internal(state: &AppState, project_id: Option<&str>) -> Res
             let mut stmt = conn
                 .prepare(
                     "SELECT * FROM combs
-                     ORDER BY (last_opened_at IS NULL), last_opened_at DESC
+                     ORDER BY COALESCE(is_pinned, 0) DESC,
+                              (last_git_activity_at IS NULL), last_git_activity_at DESC,
+                              (last_opened_at IS NULL), last_opened_at DESC
                      LIMIT 100",
                 )
                 .map_err(|e| e.to_string())?;
@@ -2177,6 +2605,14 @@ fn daemon_get_status(state: State<'_, AppState>) -> ApiResult<Value> {
 }
 
 #[tauri::command]
+fn daemon_health(state: State<'_, AppState>) -> ApiResult<Value> {
+    if let Some(info) = daemon_runtime_endpoint(state.inner()) {
+        return rpc_with_info(&info, "daemon.health", serde_json::json!({})).map_err(db_error);
+    }
+    daemon_health_internal(state.inner()).map_err(db_error)
+}
+
+#[tauri::command]
 fn daemon_list_tasks(state: State<'_, AppState>) -> ApiResult<Value> {
     if let Some(info) = daemon_runtime_endpoint(state.inner()) {
         return rpc_with_info(&info, "daemon.listTasks", serde_json::json!({})).map_err(db_error);
@@ -2427,7 +2863,9 @@ fn choose_project_comb_and_cwd(
             "SELECT id, worktree_path
              FROM combs
              WHERE project_id = ?1
-             ORDER BY (last_opened_at IS NULL), last_opened_at DESC, updated_at DESC
+             ORDER BY COALESCE(is_pinned, 0) DESC,
+                      (last_git_activity_at IS NULL), last_git_activity_at DESC,
+                      (last_opened_at IS NULL), last_opened_at DESC, updated_at DESC
              LIMIT 1",
             params![project_id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
@@ -2494,6 +2932,8 @@ fn spawn_terminal_session_with_options(
         .slave
         .spawn_command(cmd)
         .map_err(|e| db_error(e.to_string()))?;
+    #[cfg(windows)]
+    let windows_job = attach_windows_job_object(&child);
 
     let reader = pty_pair
         .master
@@ -2506,6 +2946,7 @@ fn spawn_terminal_session_with_options(
 
     let pty_id = format!("pty-{}", next_id());
     let stop_flag = Arc::new(AtomicBool::new(false));
+    let title_state = Arc::new(Mutex::new(None));
     let output_buffer = new_terminal_output_buffer();
     if let Some(ref pid) = pane_id_opt {
         if let Ok(conn) = state.conn.lock() {
@@ -2521,6 +2962,7 @@ fn spawn_terminal_session_with_options(
         app.clone(),
         pty_id.clone(),
         pane_id_opt.clone(),
+        title_state.clone(),
         stop_flag.clone(),
         output_buffer.clone(),
         state.conn.clone(),
@@ -2546,9 +2988,12 @@ fn spawn_terminal_session_with_options(
             pty_master: pty_pair.master,
             child,
             writer: Arc::new(Mutex::new(writer)),
+            #[cfg(windows)]
+            windows_job,
             mission_id: None,
             pane_id: pane_id_opt,
             pty_owner_key: pty_owner_key_opt,
+            title: title_state,
             cwd,
             command,
             args,
@@ -2563,6 +3008,42 @@ fn spawn_terminal_session_with_options(
     Ok(pty_id)
 }
 
+fn compute_stable_machine_id(app_data_dir: &Path) -> String {
+    let host = System::host_name().unwrap_or_else(|| "unknown".into());
+    let mut hasher = Sha256::new();
+    hasher.update(std::env::consts::OS.as_bytes());
+    hasher.update(b"|");
+    hasher.update(std::env::consts::ARCH.as_bytes());
+    hasher.update(b"|");
+    hasher.update(host.as_bytes());
+    hasher.update(b"|");
+    hasher.update(app_data_dir.to_string_lossy().as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+fn dialog_result_to_button_index(result: MessageDialogResult, labels: &[String]) -> i32 {
+    if !labels.is_empty() {
+        if let MessageDialogResult::Custom(ref s) = result {
+            if let Some(idx) = labels.iter().position(|l| l == s) {
+                return idx as i32;
+            }
+        }
+    }
+    match result {
+        MessageDialogResult::Ok => 0,
+        MessageDialogResult::Cancel => {
+            if labels.len() >= 2 {
+                (labels.len() - 1) as i32
+            } else {
+                1
+            }
+        }
+        MessageDialogResult::Yes => 0,
+        MessageDialogResult::No => 1,
+        MessageDialogResult::Custom(_) => 0,
+    }
+}
+
 // ---------- App ----------
 #[tauri::command]
 fn app_get_version(app: AppHandle) -> String {
@@ -2570,13 +3051,62 @@ fn app_get_version(app: AppHandle) -> String {
 }
 
 #[tauri::command]
-fn app_check_for_updates() -> ApiResult<Value> {
-    mapped_not_implemented("app:checkForUpdates")
+async fn app_check_for_updates(app: AppHandle) -> ApiResult<Value> {
+    let pkg = app.package_info().version.to_string();
+    match app.updater() {
+        Ok(updater) => match updater.check().await {
+            Ok(Some(update)) => {
+                let date_str = update.date.map(|d| d.to_string());
+                Ok(serde_json::json!({
+                    "available": true,
+                    "version": update.version,
+                    "currentVersion": update.current_version,
+                    "date": date_str,
+                    "body": update.body,
+                }))
+            }
+            Ok(None) => Ok(serde_json::json!({
+                "available": false,
+                "currentVersion": pkg,
+            })),
+            Err(e) => Ok(serde_json::json!({
+                "available": false,
+                "currentVersion": pkg,
+                "checkError": e.to_string(),
+            })),
+        },
+        Err(e) => Ok(serde_json::json!({
+            "available": false,
+            "currentVersion": pkg,
+            "checkError": e.to_string(),
+        })),
+    }
 }
 
 #[tauri::command]
-fn app_quit_and_install() -> ApiResult<Value> {
-    mapped_not_implemented("app:quitAndInstall")
+async fn app_quit_and_install(app: AppHandle) -> ApiResult<Value> {
+    let updater = app.updater().map_err(|e| ApiError {
+        code: "UPDATER_CONFIG",
+        message: e.to_string(),
+    })?;
+    let Some(update) = updater.check().await.map_err(|e| ApiError {
+        code: "UPDATER_CHECK",
+        message: e.to_string(),
+    })?
+    else {
+        return Err(ApiError {
+            code: "NO_UPDATE",
+            message: "Nenhuma atualização disponível para instalar.".into(),
+        });
+    };
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| ApiError {
+            code: "UPDATER_INSTALL",
+            message: e.to_string(),
+        })?;
+    Ok(serde_json::json!({ "success": true }))
 }
 
 /// Corpo de notificação nativa: SO costuma truncar; evita payloads enormes no IPC.
@@ -2595,7 +3125,11 @@ fn stable_notification_id_u32(notification_id: &str) -> u32 {
     let mut hasher = DefaultHasher::new();
     notification_id.hash(&mut hasher);
     let raw = hasher.finish() as u32;
-    if raw == 0 { 1 } else { raw }
+    if raw == 0 {
+        1
+    } else {
+        raw
+    }
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -2608,8 +3142,7 @@ fn app_show_notification(_app: AppHandle, payload: Value) -> ApiResult<Value> {
     // Front-end: `invoke(..., { payload: { title, body } })` → este `payload` é o objeto interno.
     let inner = payload.get("payload").cloned().unwrap_or(payload);
 
-    let request: DesktopNotificationRequest =
-        serde_json::from_value(inner).unwrap_or_default();
+    let request: DesktopNotificationRequest = serde_json::from_value(inner).unwrap_or_default();
     let title = request
         .title
         .as_deref()
@@ -2633,7 +3166,12 @@ fn app_show_notification(_app: AppHandle, payload: Value) -> ApiResult<Value> {
     if let Some(body) = body.as_deref() {
         notification.body(body);
     }
-    match request.icon.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    match request
+        .icon
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(icon) if icon.eq_ignore_ascii_case("auto") => {
             notification.auto_icon();
         }
@@ -2773,13 +3311,94 @@ async fn dialog_select_directory(app: AppHandle) -> ApiResult<Value> {
 }
 
 #[tauri::command]
-fn dialog_show_message(_options: Value) -> ApiResult<Value> {
-    mapped_not_implemented("dialog:showMessage")
+async fn dialog_show_message(app: AppHandle, options: Value) -> ApiResult<Value> {
+    let inner = options;
+    let title = inner
+        .get("title")
+        .and_then(|t| t.as_str())
+        .unwrap_or("Dev Command Center")
+        .to_string();
+    let message_text = inner
+        .get("message")
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
+    let detail = inner
+        .get("detail")
+        .and_then(|t| t.as_str())
+        .unwrap_or("");
+    let body = if detail.is_empty() {
+        message_text
+    } else {
+        format!("{message_text}\n\n{detail}")
+    };
+    let kind = match inner.get("type").and_then(|t| t.as_str()) {
+        Some("warning") => MessageDialogKind::Warning,
+        Some("error") => MessageDialogKind::Error,
+        _ => MessageDialogKind::Info,
+    };
+    let button_labels: Vec<String> = inner
+        .get("buttons")
+        .and_then(|b| b.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let buttons = match button_labels.len() {
+        0 => MessageDialogButtons::Ok,
+        1 => MessageDialogButtons::OkCustom(button_labels[0].clone()),
+        2 => MessageDialogButtons::OkCancelCustom(button_labels[0].clone(), button_labels[1].clone()),
+        _ => MessageDialogButtons::YesNoCancelCustom(
+            button_labels[0].clone(),
+            button_labels[1].clone(),
+            button_labels[2].clone(),
+        ),
+    };
+
+    let app_handle = app.clone();
+    let labels_for_index = button_labels.clone();
+    let idx = tauri::async_runtime::spawn_blocking(move || {
+        let dialog_builder = app_handle
+            .dialog()
+            .message(body)
+            .title(title)
+            .kind(kind)
+            .buttons(buttons);
+        let dialog_builder = if let Some(w) = app_handle.get_webview_window("main") {
+            dialog_builder.parent(&w)
+        } else {
+            dialog_builder
+        };
+        let result = dialog_builder.blocking_show_with_result();
+        dialog_result_to_button_index(result, &labels_for_index)
+    })
+    .await
+    .map_err(|e| db_error(e.to_string()))?;
+
+    Ok(Value::Number(idx.into()))
 }
 
 #[tauri::command]
-fn dialog_confirm(_message: String) -> ApiResult<bool> {
-    Err(ApiError::not_implemented("dialog:confirm"))
+async fn dialog_confirm(app: AppHandle, message: String) -> ApiResult<bool> {
+    let app_handle = app.clone();
+    let ok = tauri::async_runtime::spawn_blocking(move || {
+        let dialog_builder = app_handle
+            .dialog()
+            .message(message)
+            .buttons(MessageDialogButtons::OkCancel);
+        let dialog_builder = if let Some(w) = app_handle.get_webview_window("main") {
+            dialog_builder.parent(&w)
+        } else {
+            dialog_builder
+        };
+        dialog_builder.blocking_show()
+    })
+    .await
+    .map_err(|e| db_error(e.to_string()))?;
+    Ok(ok)
 }
 
 // ---------- CLI path (PATH ampliado: apps GUI no macOS costumam ter PATH mínimo) ----------
@@ -2908,6 +3527,9 @@ fn provider_cli_command(provider_type: &str) -> Option<&'static str> {
         "codex" => Some("codex"),
         "cursor" => Some("agent"),
         "gemini" => Some("gemini"),
+        // Forge (secção 6): deteção opcional na UI / integrações
+        "gh" | "github-cli" | "github_forge" => Some("gh"),
+        "glab" | "gitlab-cli" | "gitlab_forge" => Some("glab"),
         _ => None,
     }
 }
@@ -3252,33 +3874,175 @@ fn window_close(app: AppHandle) -> ApiResult<Value> {
 }
 
 #[tauri::command]
-fn window_is_maximized() -> ApiResult<bool> {
-    Err(ApiError::not_implemented("window:isMaximized"))
+fn window_focus(app: AppHandle) -> ApiResult<Value> {
+    let window = app.get_webview_window("main").ok_or_else(|| ApiError {
+        code: "WINDOW_NOT_FOUND",
+        message: "Main window not found".into(),
+    })?;
+
+    window.show().map_err(|e| ApiError {
+        code: "WINDOW_ERROR",
+        message: e.to_string(),
+    })?;
+    let _ = window.unminimize();
+    window.set_focus().map_err(|e| ApiError {
+        code: "WINDOW_ERROR",
+        message: e.to_string(),
+    })?;
+
+    Ok(serde_json::json!({ "success": true }))
+}
+
+#[tauri::command]
+fn window_is_maximized(app: AppHandle) -> ApiResult<bool> {
+    let window = app.get_webview_window("main").ok_or_else(|| ApiError {
+        code: "WINDOW_NOT_FOUND",
+        message: "Main window not found".into(),
+    })?;
+    window.is_maximized().map_err(|e| ApiError {
+        code: "WINDOW_ERROR",
+        message: e.to_string(),
+    })
 }
 
 // ---------- License ----------
 #[tauri::command]
-fn license_get_status() -> ApiResult<Value> {
-    // Stub: UI de licença não bloqueia dev; integração real pode preencher depois.
-    Ok(serde_json::json!({
-        "activated": true,
-        "tier": "dev"
-    }))
+fn license_get_status(state: State<'_, AppState>) -> ApiResult<Value> {
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
+    let row: Option<(String, i64, Option<String>)> = conn
+        .query_row(
+            "SELECT email, activated, activated_at FROM activation WHERE id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(|e| db_error(e.to_string()))?;
+    Ok(match row {
+        Some((email, activated, activated_at)) if activated != 0 => serde_json::json!({
+            "activated": true,
+            "email": email,
+            "activatedAt": activated_at,
+            "tier": "beta"
+        }),
+        Some((email, _, _)) => serde_json::json!({
+            "activated": false,
+            "email": email
+        }),
+        None => serde_json::json!({
+            "activated": false,
+            "tier": "dev"
+        }),
+    })
 }
 
 #[tauri::command]
-fn license_get_machine_id() -> ApiResult<String> {
-    Err(ApiError::not_implemented("license:getMachineId"))
+fn license_get_machine_id(state: State<'_, AppState>) -> ApiResult<String> {
+    Ok(compute_stable_machine_id(state.app_data_dir.as_ref()))
 }
 
 #[tauri::command]
-fn license_activate(_email: String) -> ApiResult<Value> {
-    mapped_not_implemented("license:activate")
+async fn license_activate(state: State<'_, AppState>, email: String) -> ApiResult<Value> {
+    let email = email.trim().to_string();
+    if email.is_empty() {
+        return Ok(serde_json::json!({
+            "success": false,
+            "message": "Indique um e-mail válido."
+        }));
+    }
+    let machine_id = compute_stable_machine_id(state.app_data_dir.as_ref());
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(25))
+        .build()
+        .map_err(|e| db_error(e.to_string()))?;
+    let response = client
+        .post("https://www.devcommandcenter.com/api/beta-activate")
+        .json(&serde_json::json!({ "email": email, "machineId": machine_id }))
+        .send()
+        .await
+        .map_err(|e| ApiError {
+            code: "NETWORK_ERROR",
+            message: e.to_string(),
+        })?;
+    let status = response.status();
+    let body_text = response
+        .text()
+        .await
+        .map_err(|e| db_error(e.to_string()))?;
+    let parsed: Value =
+        serde_json::from_str(&body_text).unwrap_or_else(|_| serde_json::json!({}));
+    let ok_flag = parsed.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    let server_msg = parsed
+        .get("message")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let token = parsed.get("token").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+    if !status.is_success() {
+        return Ok(serde_json::json!({
+            "success": false,
+            "message": server_msg.unwrap_or_else(|| format!("Servidor respondeu HTTP {}.", status.as_u16()))
+        }));
+    }
+    if !ok_flag {
+        return Ok(serde_json::json!({
+            "success": false,
+            "message": server_msg.unwrap_or_else(|| "Activation refused.".into())
+        }));
+    }
+
+    let now = local_now_string();
+    {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+        conn.execute(
+            "INSERT INTO activation (id, email, machine_id, activated, token, activated_at, created_at, updated_at)
+             VALUES (1, ?1, ?2, 1, ?3, ?4, ?4, ?4)
+             ON CONFLICT(id) DO UPDATE SET
+               email = excluded.email,
+               machine_id = excluded.machine_id,
+               activated = 1,
+               token = excluded.token,
+               activated_at = excluded.activated_at,
+               updated_at = excluded.updated_at",
+            params![email, machine_id, token, now],
+        )
+        .map_err(|e| db_error(e.to_string()))?;
+    }
+
+    Ok(serde_json::json!({ "success": true, "message": server_msg }))
 }
 
 #[tauri::command]
-fn license_skip_activation() -> ApiResult<Value> {
-    mapped_not_implemented("license:skipActivation")
+fn license_skip_activation(state: State<'_, AppState>) -> ApiResult<Value> {
+    if !cfg!(debug_assertions) {
+        return Err(ApiError {
+            code: "SKIP_FORBIDDEN",
+            message: "Pular ativação só está disponível em builds de desenvolvimento.".into(),
+        });
+    }
+    let machine_id = compute_stable_machine_id(state.app_data_dir.as_ref());
+    let now = local_now_string();
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| db_error("db lock poisoned"))?;
+    conn.execute(
+        "INSERT INTO activation (id, email, machine_id, activated, token, activated_at, created_at, updated_at)
+         VALUES (1, 'dev@local', ?1, 1, NULL, ?2, ?2, ?2)
+         ON CONFLICT(id) DO UPDATE SET
+           email = 'dev@local',
+           machine_id = excluded.machine_id,
+           activated = 1,
+           updated_at = excluded.updated_at",
+        params![machine_id, now],
+    )
+    .map_err(|e| db_error(e.to_string()))?;
+    Ok(serde_json::json!({ "success": true }))
 }
 
 // ---------- Providers / Projects / Missions / Logs / Combs / Panes ----------
@@ -3992,7 +4756,9 @@ fn db_combs_find_by_project(state: State<'_, AppState>, project_id: String) -> A
     let mut stmt = conn
         .prepare(
             "SELECT * FROM combs WHERE project_id = ?1
-             ORDER BY (last_opened_at IS NULL), last_opened_at DESC
+             ORDER BY COALESCE(is_pinned, 0) DESC,
+                      (last_git_activity_at IS NULL), last_git_activity_at DESC,
+                      (last_opened_at IS NULL), last_opened_at DESC
              LIMIT 50",
         )
         .map_err(|e| db_error(e.to_string()))?;
@@ -4159,6 +4925,30 @@ fn db_combs_update(state: State<'_, AppState>, id: String, data: Value) -> ApiRe
             Some(s) => SqlValue::Text(s),
             None => SqlValue::Null,
         });
+    }
+    if obj.contains_key("lastGitActivityAt") {
+        sets.push("last_git_activity_at = ?".into());
+        let v = obj.get("lastGitActivityAt").and_then(|v| {
+            if v.is_null() {
+                return None;
+            }
+            v.as_str().map(|s| s.to_string())
+        });
+        bind.push(match v {
+            Some(s) => SqlValue::Text(s),
+            None => SqlValue::Null,
+        });
+    }
+    if obj.contains_key("forgeLink") {
+        sets.push("forge_link = ?".into());
+        let cfg = match obj.get("forgeLink") {
+            None | Some(Value::Null) => SqlValue::Null,
+            Some(v) => {
+                let s = serde_json::to_string(v).map_err(|e| db_error(e.to_string()))?;
+                SqlValue::Text(s)
+            }
+        };
+        bind.push(cfg);
     }
 
     if sets.is_empty() {
@@ -4475,6 +5265,96 @@ fn review_get_diffs_bundle(worktree_paths: Vec<String>) -> ApiResult<Value> {
     Ok(Value::Array(out))
 }
 
+/// Notas humanas por worktree (paridade com `.arbor/notes.md` no Arbor).
+const DCC_NOTES_DIR: &str = ".dcc";
+const DCC_NOTES_FILE: &str = "notes.md";
+const MAX_WORKTREE_NOTES_BYTES: usize = 512 * 1024;
+
+#[tauri::command]
+fn worktree_read_notes(worktree_path: String) -> ApiResult<Value> {
+    let root = Path::new(worktree_path.trim());
+    if !root.is_dir() {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": "worktree path is not a directory",
+            "content": "",
+        }));
+    }
+    let notes_path = root.join(DCC_NOTES_DIR).join(DCC_NOTES_FILE);
+    if !notes_path.is_file() {
+        return Ok(serde_json::json!({
+            "success": true,
+            "content": "",
+        }));
+    }
+    let meta = match fs::metadata(&notes_path) {
+        Ok(m) => m,
+        Err(e) => {
+            return Ok(serde_json::json!({
+                "success": false,
+                "error": format!("{}", e),
+                "content": "",
+            }));
+        }
+    };
+    if meta.len() as usize > MAX_WORKTREE_NOTES_BYTES {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": format!(
+                "notes.md exceeds max size ({} KiB)",
+                MAX_WORKTREE_NOTES_BYTES / 1024
+            ),
+            "content": "",
+        }));
+    }
+    let content = match fs::read_to_string(&notes_path) {
+        Ok(c) => c,
+        Err(e) => {
+            return Ok(serde_json::json!({
+                "success": false,
+                "error": format!("{}", e),
+                "content": "",
+            }));
+        }
+    };
+    Ok(serde_json::json!({ "success": true, "content": content }))
+}
+
+#[tauri::command]
+fn worktree_write_notes(worktree_path: String, content: String) -> ApiResult<Value> {
+    let root = Path::new(worktree_path.trim());
+    if !root.is_dir() {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": "worktree path is not a directory",
+        }));
+    }
+    if content.as_bytes().len() > MAX_WORKTREE_NOTES_BYTES {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": format!(
+                "content exceeds max size ({} KiB)",
+                MAX_WORKTREE_NOTES_BYTES / 1024
+            ),
+        }));
+    }
+    let dcc_dir = root.join(DCC_NOTES_DIR);
+    if let Err(e) = fs::create_dir_all(&dcc_dir) {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": format!("{}: {}", dcc_dir.display(), e),
+        }));
+    }
+    let notes_path = dcc_dir.join(DCC_NOTES_FILE);
+    if let Err(e) = fs::write(&notes_path, content.as_bytes()) {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": format!("{}: {}", notes_path.display(), e),
+        }));
+    }
+    Ok(serde_json::json!({ "success": true }))
+}
+
 const DCC_TASKS_DIR: &str = ".dcc/tasks";
 const MAX_TASK_TEMPLATE_BYTES: usize = 256 * 1024;
 
@@ -4687,6 +5567,258 @@ fn repo_list_task_templates(project_path: String) -> ApiResult<Value> {
     })?)
 }
 
+/// Obtém título e corpo de uma issue (GitHub ou GitLab) para pré-preencher o nome do workspace antes de `comb_ensure_worktree`.
+/// Aceita URL completo da issue ou `owner/repo#123` (GitHub); GitLab com subgrupos usa `grupo/sub/repo#123`.
+/// Tokens: variáveis de ambiente `GITHUB_TOKEN`/`GH_TOKEN`, `GITLAB_TOKEN`, ou `token` opcional (repos privados).
+#[tauri::command]
+async fn forge_fetch_issue(
+    state: State<'_, AppState>,
+    project_id: String,
+    issue_ref: String,
+    token: Option<String>,
+) -> ApiResult<Value> {
+    let row: Option<(String, Option<String>)> = {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+        conn
+            .query_row(
+                "SELECT p.path, p.git_remote_url FROM projects p WHERE p.id = ?1",
+                params![project_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| db_error(e.to_string()))?
+    };
+    let Some((project_path, git_remote_url)) = row else {
+        return Err(ApiError {
+            code: "NOT_FOUND",
+            message: "Projeto não encontrado".into(),
+        });
+    };
+    forge_issue::fetch_issue_for_project(
+        &project_path,
+        git_remote_url.as_deref(),
+        &issue_ref,
+        token.as_deref(),
+    )
+    .await
+}
+
+async fn forge_sync_pr_link_run(
+    state: AppState,
+    comb_id: String,
+    token: Option<String>,
+) -> ApiResult<Value> {
+    let row: Option<(String, Option<String>, Option<String>)> = {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+        conn
+            .query_row(
+                "SELECT p.path, p.git_remote_url, c.branch FROM combs c \
+                 JOIN projects p ON p.id = c.project_id WHERE c.id = ?1",
+                params![comb_id.clone()],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .map_err(|e| db_error(e.to_string()))?
+    };
+    let Some((project_path, git_remote_url, branch_opt)) = row else {
+        return Err(ApiError {
+            code: "NOT_FOUND",
+            message: "Workspace não encontrado".into(),
+        });
+    };
+    let Some(branch) = branch_opt.filter(|s| !s.trim().is_empty()) else {
+        return Ok(serde_json::json!({
+            "ok": true,
+            "linked": false,
+            "skipped": true,
+            "reason": "no_branch"
+        }));
+    };
+
+    match forge_issue::resolve_open_pr_mr_for_branch(
+        &project_path,
+        git_remote_url.as_deref(),
+        &branch,
+        token.as_deref(),
+    )
+    .await
+    {
+        Ok(Some(v)) => {
+            let payload_str =
+                serde_json::to_string(&v).map_err(|e| db_error(e.to_string()))?;
+            {
+                let conn = state
+                    .conn
+                    .lock()
+                    .map_err(|_| db_error("db lock poisoned"))?;
+                conn.execute(
+                    "UPDATE combs SET forge_link = ?1, updated_at = datetime('now') WHERE id = ?2",
+                    params![payload_str, comb_id],
+                )
+                .map_err(|e| db_error(e.to_string()))?;
+            }
+            Ok(serde_json::json!({
+                "ok": true,
+                "linked": true,
+                "forgeLink": v
+            }))
+        }
+        Ok(None) => {
+            {
+                let conn = state
+                    .conn
+                    .lock()
+                    .map_err(|_| db_error("db lock poisoned"))?;
+                conn.execute(
+                    "UPDATE combs SET forge_link = NULL, updated_at = datetime('now') WHERE id = ?1",
+                    params![comb_id],
+                )
+                .map_err(|e| db_error(e.to_string()))?;
+            }
+            Ok(serde_json::json!({
+                "ok": true,
+                "linked": false,
+                "forgeLink": Value::Null
+            }))
+        }
+        Err(e) => {
+            eprintln!("[forge_sync_pr_link] {}", e.message);
+            Ok(serde_json::json!({
+                "ok": false,
+                "linked": false,
+                "skipped": true,
+                "error": e.message
+            }))
+        }
+    }
+}
+
+/// Resolve e persiste PR/MR aberto cuja branch coincide com o worktree (GitHub/GitLab REST).
+#[tauri::command]
+async fn forge_sync_pr_link(
+    state: State<'_, AppState>,
+    comb_id: String,
+    token: Option<String>,
+) -> ApiResult<Value> {
+    forge_sync_pr_link_run(state.inner().clone(), comb_id, token).await
+}
+
+/// Comentários inline de revisão no PR/MR ligado ao comb (`forge_link`), quando existir.
+#[tauri::command]
+async fn forge_fetch_pr_review_comments(
+    state: State<'_, AppState>,
+    comb_id: String,
+    token: Option<String>,
+) -> ApiResult<Value> {
+    let row: Option<(String, Option<String>, Option<String>)> = {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+        conn
+            .query_row(
+                "SELECT p.path, p.git_remote_url, c.forge_link FROM combs c \
+                 JOIN projects p ON p.id = c.project_id WHERE c.id = ?1",
+                params![comb_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .map_err(|e| db_error(e.to_string()))?
+    };
+    let Some((project_path, git_remote_url, forge_link_raw)) = row else {
+        return Err(ApiError {
+            code: "NOT_FOUND".into(),
+            message: "Workspace não encontrado".into(),
+        });
+    };
+    let forge_parsed: Value = match forge_link_raw {
+        Some(s) if !s.trim().is_empty() => {
+            serde_json::from_str(&s).unwrap_or(Value::Null)
+        }
+        _ => Value::Null,
+    };
+    if forge_parsed.is_null() || forge_parsed.get("number").is_none() {
+        return Ok(serde_json::json!({
+            "success": false,
+            "skipped": true,
+            "reason": "no_forge_link",
+            "comments": [],
+        }));
+    }
+    match forge_issue::fetch_pr_review_comments(
+        &project_path,
+        git_remote_url.as_deref(),
+        &forge_parsed,
+        token.as_deref(),
+    )
+    .await
+    {
+        Ok(v) => Ok(v),
+        Err(e) => Ok(serde_json::json!({
+            "success": false,
+            "error": e.message,
+            "comments": [],
+        })),
+    }
+}
+
+/// Pré-visualização do nome de branch e path do worktree após sanitização (alinhado a `safe_branch_name` / `comb_ensure_worktree`).
+/// O sufixo hex é de exemplo (UUID fixo); na criação real usa-se o ID do comb.
+#[tauri::command]
+fn comb_preview_worktree_naming(
+    state: State<'_, AppState>,
+    project_id: String,
+    workspace_title: String,
+) -> ApiResult<Value> {
+    let row: Option<(String, Option<String>)> = {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+        conn.query_row(
+            "SELECT p.path, p.repo_config FROM projects p WHERE p.id = ?1",
+            params![project_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| db_error(e.to_string()))?
+    };
+    let Some((project_path, repo_config_raw)) = row else {
+        return Err(ApiError {
+            code: "NOT_FOUND",
+            message: "Projeto não encontrado".into(),
+        });
+    };
+
+    let resolved_repo_config =
+        resolve_repo_config_value(Some(&project_path), repo_config_raw.map(Value::String));
+    let branch_prefix = resolved_repo_config
+        .get("branchPrefix")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .filter(|prefix| !prefix.trim().is_empty())
+        .unwrap_or_else(|| "dcc-comb".to_string());
+
+    const PREVIEW_COMB_ID: &str = "00000000-0000-4000-8000-123456789abc";
+    let branch = safe_branch_name(&branch_prefix, PREVIEW_COMB_ID, &workspace_title);
+    let worktree_path = format!("{}/.dcc/worktrees/{}", project_path, branch);
+    let (slug, id_suffix_example) = safe_branch_name_parts(PREVIEW_COMB_ID, &workspace_title);
+
+    Ok(serde_json::json!({
+        "branchPrefix": branch_prefix,
+        "slug": slug,
+        "idSuffixExample": id_suffix_example,
+        "branch": branch,
+        "worktreePath": worktree_path,
+    }))
+}
+
 #[tauri::command]
 async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
     let row: Option<(
@@ -4726,6 +5858,7 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
         return Ok(serde_json::json!({"success": false, "error": "Comb not found"}));
     };
     if let Some(p) = existing_path.clone() {
+        let _ = forge_sync_pr_link_run(state.inner().clone(), comb_id.clone(), None).await;
         return Ok(serde_json::json!({
             "success": true,
             "worktreePath": p,
@@ -4733,13 +5866,20 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
         }));
     }
 
-    let branch_prefix =
-        resolve_repo_config_value(Some(&project_path), repo_config_raw.map(Value::String))
-            .get("branchPrefix")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .filter(|prefix| !prefix.trim().is_empty())
-            .unwrap_or_else(|| "dcc-comb".to_string());
+    let resolved_repo_config =
+        resolve_repo_config_value(Some(&project_path), repo_config_raw.map(Value::String));
+    let branch_prefix = resolved_repo_config
+        .get("branchPrefix")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .filter(|prefix| !prefix.trim().is_empty())
+        .unwrap_or_else(|| "dcc-comb".to_string());
+    let setup_script = resolved_repo_config
+        .get("setupCommand")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let branch = safe_branch_name(&branch_prefix, &comb_id, &name);
     let worktree_path = format!("{}/.dcc/worktrees/{}", project_path, branch);
     let from_ref = if base_branch.trim().is_empty() {
@@ -4753,7 +5893,12 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
     let branch_git = branch.clone();
     let from_ref_git = from_ref.clone();
 
-    tauri::async_runtime::spawn_blocking(move || {
+    enum EnsureWorktreeStep {
+        Ok,
+        SetupFailedAfterRollback(String),
+    }
+
+    let step = tauri::async_runtime::spawn_blocking(move || -> Result<EnsureWorktreeStep, ApiError> {
         let wt_parent = format!("{}/.dcc/worktrees", project_path_git);
         let _ = std::fs::create_dir_all(&wt_parent);
         run_git(
@@ -4766,25 +5911,98 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
                 &branch_git,
                 &from_ref_git,
             ],
-        )
+        )?;
+        if let Some(ref script) = setup_script {
+            if let Err(reason) = run_repo_setup_script(&worktree_path_git, script) {
+                git_remove_worktree_and_branch_best_effort(
+                    &project_path_git,
+                    &worktree_path_git,
+                    &branch_git,
+                );
+                return Ok(EnsureWorktreeStep::SetupFailedAfterRollback(reason));
+            }
+        }
+        Ok(EnsureWorktreeStep::Ok)
     })
     .await
     .map_err(|e| db_error(e.to_string()))??;
 
-    let conn = state
-        .conn
-        .lock()
-        .map_err(|_| db_error("db lock poisoned"))?;
-    conn.execute(
-        "UPDATE combs SET worktree_path = ?1, branch = ?2 WHERE id = ?3",
-        params![worktree_path.clone(), branch.clone(), comb_id],
-    )
-    .map_err(|e| db_error(e.to_string()))?;
+    if let EnsureWorktreeStep::SetupFailedAfterRollback(reason) = step {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": format!("O script de setup falhou; o worktree foi revertido.\n\n{reason}"),
+            "rolledBack": true
+        }));
+    }
+
+    {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+        conn.execute(
+            "UPDATE combs SET worktree_path = ?1, branch = ?2, last_git_activity_at = datetime('now') WHERE id = ?3",
+            params![worktree_path.clone(), branch.clone(), comb_id],
+        )
+        .map_err(|e| db_error(e.to_string()))?;
+    }
+    let _ = forge_sync_pr_link_run(state.inner().clone(), comb_id, None).await;
     Ok(serde_json::json!({
         "success": true,
         "worktreePath": worktree_path,
         "worktreeBranch": branch
     }))
+}
+#[tauri::command]
+async fn comb_refresh_git_activity(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> ApiResult<Value> {
+    let conn_arc = state.conn.clone();
+    let count = tauri::async_runtime::spawn_blocking(move || -> Result<u32, ApiError> {
+        let rows: Vec<(String, String)> = {
+            let conn = conn_arc.lock().map_err(|_| db_error("db lock poisoned"))?;
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, worktree_path FROM combs WHERE project_id = ?1 \
+                     AND worktree_path IS NOT NULL AND trim(worktree_path) != ''",
+                )
+                .map_err(|e| db_error(e.to_string()))?;
+            let mapped = stmt
+                .query_map(params![project_id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })
+                .map_err(|e| db_error(e.to_string()))?;
+            mapped
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| db_error(e.to_string()))?
+        };
+
+        let mut updates: Vec<(String, String)> = Vec::new();
+        for (id, wt) in rows {
+            if let Some(ts) = git_worktree_last_activity_epoch(&wt) {
+                if let Some(iso) = Utc.timestamp_opt(ts, 0).single().map(|d| d.to_rfc3339()) {
+                    updates.push((id, iso));
+                }
+            }
+        }
+
+        let mut n = 0u32;
+        let conn = conn_arc.lock().map_err(|_| db_error("db lock poisoned"))?;
+        for (id, iso) in updates {
+            conn.execute(
+                "UPDATE combs SET last_git_activity_at = ?1 WHERE id = ?2",
+                params![iso, id],
+            )
+            .map_err(|e| db_error(e.to_string()))?;
+            n += 1;
+        }
+        Ok(n)
+    })
+    .await
+    .map_err(|e| db_error(e.to_string()))??;
+
+    Ok(serde_json::json!({ "updated": count }))
 }
 #[tauri::command]
 fn comb_discard(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
@@ -4937,7 +6155,7 @@ async fn comb_merge_into_main(
                 // 5. Sucesso - atualizar status
                 let conn = state_clone.conn.lock().map_err(|_| db_error("db lock poisoned"))?;
                 conn.execute(
-                    "UPDATE combs SET status = 'applied' WHERE id = ?1",
+                    "UPDATE combs SET status = 'applied', last_git_activity_at = datetime('now') WHERE id = ?1",
                     params![comb_id_clone],
                 )
                 .map_err(|e| db_error(e.to_string()))?;
@@ -5098,7 +6316,7 @@ async fn comb_apply_patch(
                     .lock()
                     .map_err(|_| db_error("db lock poisoned"))?;
                 conn.execute(
-                    "UPDATE combs SET status = 'applied' WHERE id = ?1",
+                    "UPDATE combs SET status = 'applied', last_git_activity_at = datetime('now') WHERE id = ?1",
                     params![comb_id_clone],
                 )
                 .map_err(|e| db_error(e.to_string()))?;
@@ -5182,6 +6400,8 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
         .slave
         .spawn_command(cmd)
         .map_err(|e| db_error(e.to_string()))?;
+    #[cfg(windows)]
+    let windows_job = attach_windows_job_object(&child);
 
     let reader = pty_pair
         .master
@@ -5209,6 +6429,7 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
         .map(|s| s.to_string());
 
     let output_buffer = new_terminal_output_buffer();
+    let title_state = Arc::new(Mutex::new(None));
     if skip_scrollback_restore {
         if let Some(ref pid) = pane_id_opt {
             if let Ok(conn) = state.conn.lock() {
@@ -5233,6 +6454,7 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
         app.clone(),
         pty_id.clone(),
         pane_id_opt.clone(),
+        title_state.clone(),
         stop_flag.clone(),
         output_buffer.clone(),
         state.conn.clone(),
@@ -5258,9 +6480,12 @@ fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) ->
             pty_master: pty_pair.master,
             child,
             writer: Arc::new(Mutex::new(writer)),
+            #[cfg(windows)]
+            windows_job,
             mission_id: None,
             pane_id: pane_id_opt,
             pty_owner_key: pty_owner_key_opt,
+            title: title_state,
             cwd: cwd.to_string(),
             command: command.to_string(),
             args,
@@ -5293,6 +6518,525 @@ fn terminal_session_json(pty_id: &str, t: &mut ManagedTerminal) -> Value {
       "exitedAt": exited_at,
       "lastExitCode": exit_code
     })
+}
+
+#[derive(Debug, Clone)]
+struct PaneActivityContext {
+    project_id: String,
+    project_name: String,
+    workspace_name: Option<String>,
+    pane_id: String,
+    comb_id: String,
+    pane_type: Option<String>,
+    pane_title: Option<String>,
+    provider_id: Option<String>,
+    provider_type: Option<String>,
+    provider_name: Option<String>,
+}
+
+fn terminal_command_signature(command: &str, args: &[String]) -> String {
+    let mut parts = Vec::with_capacity(args.len() + 1);
+    parts.push(command.trim().to_string());
+    parts.extend(args.iter().map(|arg| arg.trim().to_string()));
+    parts.join(" ").to_lowercase()
+}
+
+fn command_basename(command: &str) -> String {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    Path::new(trimmed)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(trimmed)
+        .to_lowercase()
+}
+
+fn command_matches_any_source(
+    signature: &str,
+    basename: &str,
+    title: &str,
+    patterns: &[&str],
+) -> Option<&'static str> {
+    patterns.iter().find_map(|pattern| {
+        let pattern_lower = pattern.to_lowercase();
+        if basename == pattern_lower
+            || basename.contains(&pattern_lower)
+            || signature.contains(&pattern_lower)
+        {
+            Some("command")
+        } else if title.contains(&pattern_lower) {
+            Some("title")
+        } else {
+            None
+        }
+    })
+}
+
+fn detect_terminal_agent_kind(
+    command: &str,
+    args: &[String],
+    pane_type: Option<&str>,
+    provider_type: Option<&str>,
+    provider_name: Option<&str>,
+    title: Option<&str>,
+) -> Option<(String, String, String)> {
+    let signature = terminal_command_signature(command, args);
+    let basename = command_basename(command);
+    let title = title.unwrap_or("").to_lowercase();
+    let provider_type = provider_type.unwrap_or("").to_lowercase();
+    let provider_name = provider_name.unwrap_or("").to_lowercase();
+    let pane_type = pane_type.unwrap_or("").to_lowercase();
+
+    let classify = |kind: &str, label: &str, detected_by: &str| {
+        Some((kind.to_string(), label.to_string(), detected_by.to_string()))
+    };
+
+    let claude_source = command_matches_any_source(
+        &signature,
+        &basename,
+        &title,
+        &[
+            "claude",
+            "claude-code",
+            "@anthropic-ai/claude-code",
+            "anthropic-ai/claude-code",
+        ],
+    );
+    if claude_source.is_some() || provider_type == "claude-code" || provider_name.contains("claude")
+    {
+        return classify("claude", "Claude", claude_source.unwrap_or("provider"));
+    }
+
+    let codex_source = command_matches_any_source(
+        &signature,
+        &basename,
+        &title,
+        &["codex", "@openai/codex", "openai/codex"],
+    );
+    if codex_source.is_some() || provider_type == "codex" || provider_name.contains("codex") {
+        return classify("codex", "Codex", codex_source.unwrap_or("provider"));
+    }
+
+    let opencode_source = command_matches_any_source(
+        &signature,
+        &basename,
+        &title,
+        &["opencode", "open-code", "open code"],
+    );
+    if opencode_source.is_some()
+        || provider_name.contains("opencode")
+        || provider_name.contains("open code")
+    {
+        return classify(
+            "opencode",
+            "OpenCode",
+            opencode_source.unwrap_or("provider"),
+        );
+    }
+
+    let cursor_source =
+        command_matches_any_source(&signature, &basename, &title, &["cursor-agent", "cursor"]);
+    if cursor_source.is_some() || provider_type == "cursor" || provider_name.contains("cursor") {
+        return classify("cursor", "Cursor", cursor_source.unwrap_or("provider"));
+    }
+
+    let gemini_source =
+        command_matches_any_source(&signature, &basename, &title, &["gemini", "gemini-cli"]);
+    if gemini_source.is_some() || provider_type == "gemini" || provider_name.contains("gemini") {
+        return classify("gemini", "Gemini", gemini_source.unwrap_or("provider"));
+    }
+
+    let aider_source = command_matches_any_source(&signature, &basename, &title, &["aider"]);
+    if aider_source.is_some() || provider_name.contains("aider") {
+        return classify("aider", "Aider", aider_source.unwrap_or("provider"));
+    }
+
+    let continue_source = command_matches_any_source(&signature, &basename, &title, &["continue"]);
+    if continue_source.is_some() || provider_name.contains("continue") {
+        return classify(
+            "continue",
+            "Continue",
+            continue_source.unwrap_or("provider"),
+        );
+    }
+
+    if pane_type == "agent" {
+        let label = if !provider_name.is_empty() {
+            provider_name
+        } else {
+            "agent".to_string()
+        };
+        return classify("agent", &label, "pane-type");
+    }
+
+    None
+}
+
+fn normalize_terminal_title(raw: &str) -> Option<String> {
+    let stripped = strip_ansi_codes(raw);
+    let collapsed = stripped
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect::<String>();
+    let normalized = collapsed.split_whitespace().collect::<Vec<_>>().join(" ");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn update_terminal_title_from_bytes(
+    data: &[u8],
+    carry: &mut Vec<u8>,
+    title_state: &Arc<Mutex<Option<String>>>,
+) {
+    let mut bytes = Vec::with_capacity(carry.len() + data.len());
+    bytes.extend_from_slice(carry);
+    bytes.extend_from_slice(data);
+    carry.clear();
+
+    let mut i = 0usize;
+    let mut latest_title: Option<String> = None;
+    while i < bytes.len() {
+        if bytes[i] != 0x1b {
+            i += 1;
+            continue;
+        }
+        if i + 1 >= bytes.len() {
+            carry.extend_from_slice(&bytes[i..]);
+            break;
+        }
+        if bytes[i + 1] != b']' {
+            i += 1;
+            continue;
+        }
+
+        let seq_start = i;
+        i += 2;
+        let kind_start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            carry.extend_from_slice(&bytes[seq_start..]);
+            break;
+        }
+        if bytes[i] != b';' {
+            i = seq_start + 1;
+            continue;
+        }
+
+        let kind = std::str::from_utf8(&bytes[kind_start..i]).ok();
+        i += 1;
+        let payload_start = i;
+        let mut terminated_at: Option<usize> = None;
+        while i < bytes.len() {
+            if bytes[i] == 0x07 {
+                terminated_at = Some(i);
+                break;
+            }
+            if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                terminated_at = Some(i);
+                break;
+            }
+            i += 1;
+        }
+        let Some(term_idx) = terminated_at else {
+            carry.extend_from_slice(&bytes[seq_start..]);
+            break;
+        };
+
+        if matches!(kind, Some("0") | Some("2")) {
+            if let Ok(raw_title) = std::str::from_utf8(&bytes[payload_start..term_idx]) {
+                if let Some(title) = normalize_terminal_title(raw_title) {
+                    latest_title = Some(title);
+                }
+            }
+        }
+
+        i = if bytes[term_idx] == 0x1b {
+            term_idx + 2
+        } else {
+            term_idx + 1
+        };
+    }
+
+    if let Some(title) = latest_title {
+        if let Ok(mut guard) = title_state.lock() {
+            *guard = Some(title);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_terminal_title_collapses_whitespace_and_strips_controls() {
+        let title = normalize_terminal_title("  Claude\tCode  \u{1b}[31m- Dev \u{1b}[0m  ");
+        assert_eq!(title.as_deref(), Some("Claude Code - Dev"));
+    }
+
+    #[test]
+    fn parses_bel_terminated_osc_title_in_single_chunk() {
+        let title_state = Arc::new(Mutex::new(None));
+        let mut carry = Vec::new();
+        update_terminal_title_from_bytes(b"\x1b]2;Codex - project\x07", &mut carry, &title_state);
+
+        assert!(carry.is_empty());
+        assert_eq!(
+            title_state
+                .lock()
+                .ok()
+                .and_then(|guard| guard.clone())
+                .as_deref(),
+            Some("Codex - project")
+        );
+    }
+
+    #[test]
+    fn parses_st_terminated_osc_title_across_chunks() {
+        let title_state = Arc::new(Mutex::new(None));
+        let mut carry = Vec::new();
+
+        update_terminal_title_from_bytes(b"\x1b]0;Claude ", &mut carry, &title_state);
+        assert!(!carry.is_empty());
+        assert!(title_state
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+            .is_none());
+
+        update_terminal_title_from_bytes(b"Code\x1b\\", &mut carry, &title_state);
+        assert!(carry.is_empty());
+        assert_eq!(
+            title_state
+                .lock()
+                .ok()
+                .and_then(|guard| guard.clone())
+                .as_deref(),
+            Some("Claude Code")
+        );
+    }
+}
+
+fn waiting_excerpt_from_buffer(output_buffer: &Arc<Mutex<VecDeque<String>>>) -> Option<String> {
+    let buffer = output_buffer.lock().ok()?;
+    let tail: String = buffer
+        .iter()
+        .rev()
+        .take(5)
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let stripped = strip_ansi_codes(&tail);
+    if WAIT_PATTERN.is_match(&stripped) {
+        return buffer.iter().rev().find(|s| !s.trim().is_empty()).map(|s| {
+            let trimmed = strip_ansi_codes(s).trim().to_string();
+            const MAX_EXCERPT_CHARS: usize = 220;
+            if trimmed.chars().count() > MAX_EXCERPT_CHARS {
+                format!(
+                    "{}…",
+                    trimmed.chars().take(MAX_EXCERPT_CHARS).collect::<String>()
+                )
+            } else {
+                trimmed
+            }
+        });
+    }
+    None
+}
+
+fn collect_pane_activity_contexts(
+    state: &AppState,
+    project_id: &str,
+) -> Result<Vec<PaneActivityContext>, String> {
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT p.id, p.comb_id, p.type, p.title, p.provider_id, c.project_id, c.name, prj.name, pr.name, pr.type
+             FROM panes p
+             JOIN combs c ON c.id = p.comb_id
+             JOIN projects prj ON prj.id = c.project_id
+             LEFT JOIN providers pr ON pr.id = p.provider_id
+             WHERE c.project_id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![project_id], |row| {
+            Ok(PaneActivityContext {
+                pane_id: row.get::<_, String>(0)?,
+                comb_id: row.get::<_, String>(1)?,
+                pane_type: row.get::<_, Option<String>>(2)?,
+                pane_title: row.get::<_, Option<String>>(3)?,
+                provider_id: row.get::<_, Option<String>>(4)?,
+                project_id: row.get::<_, String>(5)?,
+                workspace_name: row.get::<_, Option<String>>(6)?,
+                project_name: row.get::<_, String>(7)?,
+                provider_name: row.get::<_, Option<String>>(8)?,
+                provider_type: row.get::<_, Option<String>>(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut contexts = Vec::new();
+    for row in rows {
+        contexts.push(row.map_err(|e| e.to_string())?);
+    }
+
+    Ok(contexts)
+}
+
+fn collect_project_agent_activity(state: &AppState, project_id: &str) -> Result<Value, String> {
+    let pane_contexts = collect_pane_activity_contexts(state, project_id)?;
+    let pane_context_by_id = pane_contexts
+        .into_iter()
+        .map(|ctx| (ctx.pane_id.clone(), ctx))
+        .collect::<HashMap<_, _>>();
+
+    let mut system = System::new_all();
+    system.refresh_all();
+
+    let mut running_by_comb: HashMap<String, i64> = HashMap::new();
+    let mut active_agents_by_comb: HashMap<String, i64> = HashMap::new();
+    let mut total_running = 0i64;
+    let mut working_agents = 0i64;
+    let mut waiting_agents = 0i64;
+    let mut active_agents: Vec<DetectedTerminalAgent> = Vec::new();
+
+    let mut terminals = state
+        .terminals
+        .lock()
+        .map_err(|_| "terminals lock poisoned".to_string())?;
+
+    for (pty_id, terminal) in terminals.iter_mut() {
+        let Some(pane_id) = terminal.pane_id.as_ref() else {
+            continue;
+        };
+        let Some(ctx) = pane_context_by_id.get(pane_id) else {
+            continue;
+        };
+        if ctx.project_id != project_id {
+            continue;
+        }
+
+        let is_running = terminal.child.try_wait().ok().flatten().is_none();
+        if !is_running {
+            continue;
+        }
+
+        total_running += 1;
+        *running_by_comb.entry(ctx.comb_id.clone()).or_insert(0) += 1;
+
+        let shell_pid = terminal.child.process_id();
+        let runtime_title = terminal.title.lock().ok().and_then(|guard| guard.clone());
+        let activity_title = runtime_title.clone().or_else(|| ctx.pane_title.clone());
+        let mut detected = detect_terminal_agent_kind(
+            &terminal.command,
+            &terminal.args,
+            ctx.pane_type.as_deref(),
+            ctx.provider_type.as_deref(),
+            ctx.provider_name.as_deref(),
+            activity_title.as_deref(),
+        );
+
+        if detected.is_none() {
+            if let Some(shell_pid) = shell_pid {
+                let shell_pid = Pid::from_u32(shell_pid);
+                let mut descendants: Vec<String> = Vec::new();
+                for process in system.processes().values() {
+                    if process.parent() == Some(shell_pid) {
+                        let name = process.name().to_string();
+                        let cmd = process
+                            .cmd()
+                            .iter()
+                            .map(|arg| arg.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        descendants.push(format!("{name} {cmd}"));
+                    }
+                }
+                for signature in &descendants {
+                    if let Some(next) = detect_terminal_agent_kind(
+                        signature,
+                        &[],
+                        ctx.pane_type.as_deref(),
+                        ctx.provider_type.as_deref(),
+                        ctx.provider_name.as_deref(),
+                        activity_title.as_deref(),
+                    ) {
+                        detected = Some(next);
+                        break;
+                    }
+                }
+            }
+        }
+
+        let Some((agent_kind, agent_label, detected_by)) = detected else {
+            continue;
+        };
+
+        let excerpt = waiting_excerpt_from_buffer(&terminal.output_buffer);
+        let status = if excerpt.is_some() {
+            waiting_agents += 1;
+            "waiting"
+        } else {
+            working_agents += 1;
+            "working"
+        };
+        *active_agents_by_comb
+            .entry(ctx.comb_id.clone())
+            .or_insert(0) += 1;
+
+        active_agents.push(DetectedTerminalAgent {
+            pty_id: pty_id.clone(),
+            pane_id: Some(ctx.pane_id.clone()),
+            comb_id: Some(ctx.comb_id.clone()),
+            project_id: ctx.project_id.clone(),
+            project_name: ctx.project_name.clone(),
+            workspace_name: ctx.workspace_name.clone(),
+            agent_kind,
+            agent_label,
+            status: status.to_string(),
+            cwd: terminal.cwd.clone(),
+            command: terminal.command.clone(),
+            args: terminal.args.clone(),
+            pid: shell_pid,
+            title: activity_title,
+            provider_id: ctx.provider_id.clone(),
+            provider_name: ctx.provider_name.clone(),
+            detected_by,
+            excerpt,
+            started_at: terminal.started_at.clone(),
+        });
+    }
+
+    active_agents.sort_by(|a, b| {
+        a.project_name
+            .cmp(&b.project_name)
+            .then_with(|| a.workspace_name.cmp(&b.workspace_name))
+            .then_with(|| a.agent_label.cmp(&b.agent_label))
+            .then_with(|| a.command.cmp(&b.command))
+    });
+
+    Ok(serde_json::json!({
+        "totalRunningPanes": total_running,
+        "runningPanesByCombId": running_by_comb,
+        "activeAgentsByCombId": active_agents_by_comb,
+        "workingAgents": working_agents,
+        "waitingAgents": waiting_agents,
+        "activeAgents": active_agents,
+    }))
 }
 
 /// Verifica se o terminal está aguardando input do usuário
@@ -5369,6 +7113,7 @@ fn spawn_terminal_reader_thread(
     app: AppHandle,
     pty_id: String,
     pane_id: Option<String>,
+    title_state: Arc<Mutex<Option<String>>>,
     stop_flag: Arc<AtomicBool>,
     output_buffer: Arc<Mutex<VecDeque<String>>>,
     conn: Arc<Mutex<Connection>>,
@@ -5384,6 +7129,7 @@ fn spawn_terminal_reader_thread(
         let last_persist = Arc::new(Mutex::new(
             Instant::now() - PANE_SCROLLBACK_PERSIST_INTERVAL,
         ));
+        let mut title_remainder: Vec<u8> = Vec::new();
 
         let read_thread = thread::spawn(move || {
             let mut buffer = [0u8; 8192];
@@ -5405,10 +7151,11 @@ fn spawn_terminal_reader_thread(
 
         let mut pending: Vec<u8> = Vec::new();
 
-        let flush_pending = |pending: &mut Vec<u8>| {
+        let mut flush_pending = |pending: &mut Vec<u8>| {
             if pending.is_empty() {
                 return;
             }
+            update_terminal_title_from_bytes(pending, &mut title_remainder, &title_state);
             let data = String::from_utf8_lossy(pending).to_string();
             pending.clear();
 
@@ -5439,6 +7186,7 @@ fn spawn_terminal_reader_thread(
                     .as_ref()
                     .map(|s| s.chars().take(64).collect::<String>())
                     .unwrap_or_default();
+                let activity_excerpt = excerpt.clone();
                 let notification_id = format!(
                     "{}:{}:{}",
                     pane_id.as_deref().unwrap_or_else(|| pty_id.as_str()),
@@ -5456,11 +7204,22 @@ fn spawn_terminal_reader_thread(
                     payload["paneId"] = serde_json::json!(pid);
                 }
 
-                if let Some(exc) = excerpt {
+                if let Some(ref exc) = excerpt {
                     payload["excerpt"] = serde_json::json!(exc);
                 }
 
                 let _ = app.emit("terminal-attention", payload);
+                let mut activity_payload = serde_json::json!({
+                    "ptyId": pty_id,
+                    "status": "waiting"
+                });
+                if let Some(ref pid) = pane_id {
+                    activity_payload["paneId"] = serde_json::json!(pid);
+                }
+                if let Some(exc) = activity_excerpt {
+                    activity_payload["excerpt"] = serde_json::json!(exc);
+                }
+                let _ = app.emit("terminal-activity", activity_payload);
             }
 
             let _ = app.emit(
@@ -5639,7 +7398,7 @@ fn terminal_resize(
     Ok(serde_json::json!({ "ok": false }))
 }
 
-/// Envia sinal ao **grupo de processos** ligado ao PTY (Unix: `kill(-pgid, …)`; Windows: Ctrl+C no stream ou `taskkill /T`).
+/// Envia sinal ao **grupo de processos** ligado ao PTY (Unix: `kill(-pgid, …)`; Windows: Ctrl+C no stream e Job Object para TERM/KILL).
 fn send_signal_to_managed_terminal(t: &ManagedTerminal, signal: &str) -> Result<(), String> {
     let Some(pid_u) = t.child.process_id() else {
         return Err("PID da sessão PTY indisponível".into());
@@ -5692,30 +7451,8 @@ fn send_signal_to_managed_terminal(t: &ManagedTerminal, signal: &str) -> Result<
                     .map_err(|e| format!("enviar Ctrl+C ao PTY: {e}"))?;
                 Ok(())
             }
-            "TERM" => {
-                let status = std::process::Command::new("taskkill")
-                    .args(["/PID", &pid_u.to_string(), "/T"])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .status()
-                    .map_err(|e| e.to_string())?;
-                if status.success() {
-                    Ok(())
-                } else {
-                    Err(format!("taskkill (TERM) falhou: {status}"))
-                }
-            }
-            "KILL" => {
-                let status = std::process::Command::new("taskkill")
-                    .args(["/PID", &pid_u.to_string(), "/T", "/F"])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .status()
-                    .map_err(|e| e.to_string())?;
-                if status.success() {
-                    Ok(())
-                } else {
-                    Err(format!("taskkill (KILL) falhou: {status}"))
-                }
-            }
+            "TERM" => terminate_managed_terminal_tree(t, false),
+            "KILL" => terminate_managed_terminal_tree(t, true),
             _ => Err(format!(
                 "Sinal não suportado: {signal} (use SIGINT, SIGTERM ou SIGKILL)"
             )),
@@ -5729,8 +7466,46 @@ fn send_signal_to_managed_terminal(t: &ManagedTerminal, signal: &str) -> Result<
     }
 }
 
+#[cfg(windows)]
+fn terminate_managed_terminal_tree(t: &ManagedTerminal, force: bool) -> Result<(), String> {
+    if let Some(job) = t.windows_job.as_ref() {
+        if job.terminate(if force { 1 } else { 0 }).is_ok() {
+            return Ok(());
+        }
+    }
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let pid_u = t
+        .child
+        .process_id()
+        .ok_or_else(|| "PID da sessão PTY indisponível".to_string())?;
+    let mut args = vec!["/PID".to_string(), pid_u.to_string(), "/T".to_string()];
+    if force {
+        args.push("/F".to_string());
+    }
+    let status = std::process::Command::new("taskkill")
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("taskkill falhou: {status}"))
+    }
+}
+
+#[cfg(not(windows))]
+fn terminate_managed_terminal_tree(_t: &ManagedTerminal, _force: bool) -> Result<(), String> {
+    Ok(())
+}
+
 #[tauri::command]
-fn terminal_send_signal(state: State<'_, AppState>, pty_id: String, signal: String) -> ApiResult<Value> {
+fn terminal_send_signal(
+    state: State<'_, AppState>,
+    pty_id: String,
+    signal: String,
+) -> ApiResult<Value> {
     let terminals = state
         .terminals
         .lock()
@@ -5754,6 +7529,7 @@ fn terminal_kill(state: State<'_, AppState>, app: AppHandle, pty_id: String) -> 
     if let Some(mut t) = terminals.remove(&pty_id) {
         persist_managed_terminal_buffer(&state, &t);
         t.stop_flag.store(true, Ordering::Relaxed);
+        let _ = terminate_managed_terminal_tree(&t, true);
         // On some OSs, closing the pty master will signal the child
         drop(t.pty_master);
         if let Some(reader_thread) = t.reader_thread.take() {
@@ -5790,6 +7566,7 @@ fn terminal_kill_by_mission_id(
         if let Some(mut t) = terminals.remove(&id) {
             persist_managed_terminal_buffer(&state, &t);
             t.stop_flag.store(true, Ordering::Relaxed);
+            let _ = terminate_managed_terminal_tree(&t, true);
             drop(t.pty_master);
             if let Some(reader_thread) = t.reader_thread.take() {
                 let _ = reader_thread.join();
@@ -5899,6 +7676,7 @@ fn terminal_kill_by_pane_id(
         if let Some(mut t) = terminals.remove(&id) {
             persist_managed_terminal_buffer(&state, &t);
             t.stop_flag.store(true, Ordering::Relaxed);
+            let _ = terminate_managed_terminal_tree(&t, true);
             drop(t.pty_master);
             if let Some(reader_thread) = t.reader_thread.take() {
                 let _ = reader_thread.join();
@@ -5962,57 +7740,7 @@ fn terminal_get_project_activity(
     state: State<'_, AppState>,
     project_id: String,
 ) -> ApiResult<Value> {
-    let pane_to_comb: HashMap<String, String> = {
-        let conn = state
-            .conn
-            .lock()
-            .map_err(|_| db_error("db lock poisoned"))?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT p.id, p.comb_id
-                 FROM panes p
-                 JOIN combs c ON c.id = p.comb_id
-                 WHERE c.project_id = ?1",
-            )
-            .map_err(|e| db_error(e.to_string()))?;
-        let rows = stmt
-            .query_map(params![project_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| db_error(e.to_string()))?;
-        let mut map = HashMap::new();
-        for item in rows {
-            let (pane_id, comb_id) = item.map_err(|e| db_error(e.to_string()))?;
-            map.insert(pane_id, comb_id);
-        }
-        map
-    };
-
-    let mut running_by_comb: HashMap<String, i64> = HashMap::new();
-    let mut total_running = 0i64;
-    let mut terminals = state
-        .terminals
-        .lock()
-        .map_err(|_| db_error("terminals lock poisoned"))?;
-
-    for terminal in terminals.values_mut() {
-        let Some(pane_id) = terminal.pane_id.as_ref() else {
-            continue;
-        };
-        let Some(comb_id) = pane_to_comb.get(pane_id) else {
-            continue;
-        };
-        let is_running = terminal.child.try_wait().ok().flatten().is_none();
-        if is_running {
-            total_running += 1;
-            *running_by_comb.entry(comb_id.clone()).or_insert(0) += 1;
-        }
-    }
-
-    Ok(serde_json::json!({
-      "totalRunningPanes": total_running,
-      "runningPanesByCombId": running_by_comb
-    }))
+    collect_project_agent_activity(&state, &project_id).map_err(|e| db_error(e))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -6020,6 +7748,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             app_get_version,
             app_check_for_updates,
@@ -6038,12 +7767,14 @@ pub fn run() {
             window_minimize,
             window_maximize,
             window_close,
+            window_focus,
             window_is_maximized,
             license_get_status,
             license_get_machine_id,
             license_activate,
             license_skip_activation,
             daemon_get_status,
+            daemon_health,
             daemon_list_tasks,
             daemon_list_processes,
             daemon_start_process,
@@ -6093,8 +7824,15 @@ pub fn run() {
             git_get_local_branches,
             git_get_review_diffs,
             review_get_diffs_bundle,
+            worktree_read_notes,
+            worktree_write_notes,
             repo_list_task_templates,
+            forge_fetch_issue,
+            forge_sync_pr_link,
+            forge_fetch_pr_review_comments,
+            comb_preview_worktree_naming,
             comb_ensure_worktree,
+            comb_refresh_git_activity,
             comb_discard,
             comb_check_unpushed,
             comb_merge_into_main,
