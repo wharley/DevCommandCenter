@@ -35,9 +35,11 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::{Pid, System};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_dialog::{DialogExt, FilePath, MessageDialogButtons, MessageDialogKind, MessageDialogResult};
-use tauri_plugin_updater::UpdaterExt;
+use tauri_plugin_dialog::{
+    DialogExt, FilePath, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
+};
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
 
 /// Schema SQLite compartilhado com `lib/database/schema.sql` (CREATE IF NOT EXISTS).
@@ -1356,15 +1358,26 @@ fn run_repo_setup_script(worktree_path: &str, script: &str) -> Result<(), String
     if detail.is_empty() {
         detail = format!(
             "exit code {}",
-            output.status.code().map(|c| c.to_string()).unwrap_or_else(|| "?".into())
+            output
+                .status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "?".into())
         );
     }
     Err(detail)
 }
 
 /// Reverte `git worktree add` + branch local após falha do setup (best-effort, alinhado a `comb_discard`).
-fn git_remove_worktree_and_branch_best_effort(project_path: &str, worktree_path: &str, branch: &str) {
-    let _ = run_git(project_path, &["worktree", "remove", "--force", worktree_path]);
+fn git_remove_worktree_and_branch_best_effort(
+    project_path: &str,
+    worktree_path: &str,
+    branch: &str,
+) {
+    let _ = run_git(
+        project_path,
+        &["worktree", "remove", "--force", worktree_path],
+    );
     let _ = run_git(project_path, &["branch", "-D", branch]);
 }
 
@@ -3323,10 +3336,7 @@ async fn dialog_show_message(app: AppHandle, options: Value) -> ApiResult<Value>
         .and_then(|t| t.as_str())
         .unwrap_or("")
         .to_string();
-    let detail = inner
-        .get("detail")
-        .and_then(|t| t.as_str())
-        .unwrap_or("");
+    let detail = inner.get("detail").and_then(|t| t.as_str()).unwrap_or("");
     let body = if detail.is_empty() {
         message_text
     } else {
@@ -3350,7 +3360,9 @@ async fn dialog_show_message(app: AppHandle, options: Value) -> ApiResult<Value>
     let buttons = match button_labels.len() {
         0 => MessageDialogButtons::Ok,
         1 => MessageDialogButtons::OkCustom(button_labels[0].clone()),
-        2 => MessageDialogButtons::OkCancelCustom(button_labels[0].clone(), button_labels[1].clone()),
+        2 => {
+            MessageDialogButtons::OkCancelCustom(button_labels[0].clone(), button_labels[1].clone())
+        }
         _ => MessageDialogButtons::YesNoCancelCustom(
             button_labels[0].clone(),
             button_labels[1].clone(),
@@ -3967,18 +3979,17 @@ async fn license_activate(state: State<'_, AppState>, email: String) -> ApiResul
             message: e.to_string(),
         })?;
     let status = response.status();
-    let body_text = response
-        .text()
-        .await
-        .map_err(|e| db_error(e.to_string()))?;
-    let parsed: Value =
-        serde_json::from_str(&body_text).unwrap_or_else(|_| serde_json::json!({}));
+    let body_text = response.text().await.map_err(|e| db_error(e.to_string()))?;
+    let parsed: Value = serde_json::from_str(&body_text).unwrap_or_else(|_| serde_json::json!({}));
     let ok_flag = parsed.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
     let server_msg = parsed
         .get("message")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    let token = parsed.get("token").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let token = parsed
+        .get("token")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     if !status.is_success() {
         return Ok(serde_json::json!({
@@ -5582,14 +5593,13 @@ async fn forge_fetch_issue(
             .conn
             .lock()
             .map_err(|_| db_error("db lock poisoned"))?;
-        conn
-            .query_row(
-                "SELECT p.path, p.git_remote_url FROM projects p WHERE p.id = ?1",
-                params![project_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()
-            .map_err(|e| db_error(e.to_string()))?
+        conn.query_row(
+            "SELECT p.path, p.git_remote_url FROM projects p WHERE p.id = ?1",
+            params![project_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| db_error(e.to_string()))?
     };
     let Some((project_path, git_remote_url)) = row else {
         return Err(ApiError {
@@ -5616,15 +5626,14 @@ async fn forge_sync_pr_link_run(
             .conn
             .lock()
             .map_err(|_| db_error("db lock poisoned"))?;
-        conn
-            .query_row(
-                "SELECT p.path, p.git_remote_url, c.branch FROM combs c \
+        conn.query_row(
+            "SELECT p.path, p.git_remote_url, c.branch FROM combs c \
                  JOIN projects p ON p.id = c.project_id WHERE c.id = ?1",
-                params![comb_id.clone()],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .optional()
-            .map_err(|e| db_error(e.to_string()))?
+            params![comb_id.clone()],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(|e| db_error(e.to_string()))?
     };
     let Some((project_path, git_remote_url, branch_opt)) = row else {
         return Err(ApiError {
@@ -5650,8 +5659,7 @@ async fn forge_sync_pr_link_run(
     .await
     {
         Ok(Some(v)) => {
-            let payload_str =
-                serde_json::to_string(&v).map_err(|e| db_error(e.to_string()))?;
+            let payload_str = serde_json::to_string(&v).map_err(|e| db_error(e.to_string()))?;
             {
                 let conn = state
                     .conn
@@ -5721,15 +5729,14 @@ async fn forge_fetch_pr_review_comments(
             .conn
             .lock()
             .map_err(|_| db_error("db lock poisoned"))?;
-        conn
-            .query_row(
-                "SELECT p.path, p.git_remote_url, c.forge_link FROM combs c \
+        conn.query_row(
+            "SELECT p.path, p.git_remote_url, c.forge_link FROM combs c \
                  JOIN projects p ON p.id = c.project_id WHERE c.id = ?1",
-                params![comb_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .optional()
-            .map_err(|e| db_error(e.to_string()))?
+            params![comb_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(|e| db_error(e.to_string()))?
     };
     let Some((project_path, git_remote_url, forge_link_raw)) = row else {
         return Err(ApiError {
@@ -5738,9 +5745,7 @@ async fn forge_fetch_pr_review_comments(
         });
     };
     let forge_parsed: Value = match forge_link_raw {
-        Some(s) if !s.trim().is_empty() => {
-            serde_json::from_str(&s).unwrap_or(Value::Null)
-        }
+        Some(s) if !s.trim().is_empty() => serde_json::from_str(&s).unwrap_or(Value::Null),
         _ => Value::Null,
     };
     if forge_parsed.is_null() || forge_parsed.get("number").is_none() {
@@ -5898,34 +5903,35 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
         SetupFailedAfterRollback(String),
     }
 
-    let step = tauri::async_runtime::spawn_blocking(move || -> Result<EnsureWorktreeStep, ApiError> {
-        let wt_parent = format!("{}/.dcc/worktrees", project_path_git);
-        let _ = std::fs::create_dir_all(&wt_parent);
-        run_git(
-            &project_path_git,
-            &[
-                "worktree",
-                "add",
-                &worktree_path_git,
-                "-b",
-                &branch_git,
-                &from_ref_git,
-            ],
-        )?;
-        if let Some(ref script) = setup_script {
-            if let Err(reason) = run_repo_setup_script(&worktree_path_git, script) {
-                git_remove_worktree_and_branch_best_effort(
-                    &project_path_git,
+    let step =
+        tauri::async_runtime::spawn_blocking(move || -> Result<EnsureWorktreeStep, ApiError> {
+            let wt_parent = format!("{}/.dcc/worktrees", project_path_git);
+            let _ = std::fs::create_dir_all(&wt_parent);
+            run_git(
+                &project_path_git,
+                &[
+                    "worktree",
+                    "add",
                     &worktree_path_git,
+                    "-b",
                     &branch_git,
-                );
-                return Ok(EnsureWorktreeStep::SetupFailedAfterRollback(reason));
+                    &from_ref_git,
+                ],
+            )?;
+            if let Some(ref script) = setup_script {
+                if let Err(reason) = run_repo_setup_script(&worktree_path_git, script) {
+                    git_remove_worktree_and_branch_best_effort(
+                        &project_path_git,
+                        &worktree_path_git,
+                        &branch_git,
+                    );
+                    return Ok(EnsureWorktreeStep::SetupFailedAfterRollback(reason));
+                }
             }
-        }
-        Ok(EnsureWorktreeStep::Ok)
-    })
-    .await
-    .map_err(|e| db_error(e.to_string()))??;
+            Ok(EnsureWorktreeStep::Ok)
+        })
+        .await
+        .map_err(|e| db_error(e.to_string()))??;
 
     if let EnsureWorktreeStep::SetupFailedAfterRollback(reason) = step {
         return Ok(serde_json::json!({
@@ -7500,6 +7506,29 @@ fn terminate_managed_terminal_tree(_t: &ManagedTerminal, _force: bool) -> Result
     Ok(())
 }
 
+fn finalize_managed_terminal_removal(
+    state: &AppState,
+    app: &AppHandle,
+    pty_id: String,
+    mut terminal: ManagedTerminal,
+    emit_exit_event: bool,
+) {
+    persist_managed_terminal_buffer(state, &terminal);
+    terminal.stop_flag.store(true, Ordering::Relaxed);
+    let _ = terminate_managed_terminal_tree(&terminal, true);
+    drop(terminal.pty_master);
+    // Não aguardamos o reader thread aqui. Se ele demorar a encerrar,
+    // o delete ficaria preso e a UI pareceria travada.
+    let _ = terminal.reader_thread.take();
+
+    if emit_exit_event {
+        let _ = app.emit(
+            "terminal-exit",
+            serde_json::json!({ "ptyId": pty_id, "code": -1 }),
+        );
+    }
+}
+
 #[tauri::command]
 fn terminal_send_signal(
     state: State<'_, AppState>,
@@ -7521,25 +7550,16 @@ fn terminal_send_signal(
 
 #[tauri::command]
 fn terminal_kill(state: State<'_, AppState>, app: AppHandle, pty_id: String) -> ApiResult<Value> {
-    let mut terminals = state
-        .terminals
-        .lock()
-        .map_err(|_| db_error("terminals lock poisoned"))?;
+    let terminal = {
+        let mut terminals = state
+            .terminals
+            .lock()
+            .map_err(|_| db_error("terminals lock poisoned"))?;
+        terminals.remove(&pty_id)
+    };
 
-    if let Some(mut t) = terminals.remove(&pty_id) {
-        persist_managed_terminal_buffer(&state, &t);
-        t.stop_flag.store(true, Ordering::Relaxed);
-        let _ = terminate_managed_terminal_tree(&t, true);
-        // On some OSs, closing the pty master will signal the child
-        drop(t.pty_master);
-        if let Some(reader_thread) = t.reader_thread.take() {
-            let _ = reader_thread.join();
-        }
-
-        let _ = app.emit(
-            "terminal-exit",
-            serde_json::json!({ "ptyId": pty_id, "code": -1 }),
-        );
+    if let Some(t) = terminal {
+        finalize_managed_terminal_removal(&state, &app, pty_id, t, true);
         return Ok(serde_json::json!({ "ok": true }));
     }
     Ok(serde_json::json!({ "ok": false }))
@@ -7551,30 +7571,28 @@ fn terminal_kill_by_mission_id(
     app: AppHandle,
     mission_id: String,
 ) -> ApiResult<Value> {
-    let mut terminals = state
-        .terminals
-        .lock()
-        .map_err(|_| db_error("terminals lock poisoned"))?;
-
-    let ids = terminals
-        .iter()
-        .filter(|(_, t)| t.mission_id.as_deref() == Some(mission_id.as_str()))
-        .map(|(id, _)| id.clone())
-        .collect::<Vec<_>>();
+    let ids = {
+        let terminals = state
+            .terminals
+            .lock()
+            .map_err(|_| db_error("terminals lock poisoned"))?;
+        terminals
+            .iter()
+            .filter(|(_, t)| t.mission_id.as_deref() == Some(mission_id.as_str()))
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>()
+    };
 
     for id in ids {
-        if let Some(mut t) = terminals.remove(&id) {
-            persist_managed_terminal_buffer(&state, &t);
-            t.stop_flag.store(true, Ordering::Relaxed);
-            let _ = terminate_managed_terminal_tree(&t, true);
-            drop(t.pty_master);
-            if let Some(reader_thread) = t.reader_thread.take() {
-                let _ = reader_thread.join();
-            }
-            let _ = app.emit(
-                "terminal-exit",
-                serde_json::json!({ "ptyId": id, "code": -1 }),
-            );
+        let terminal = {
+            let mut terminals = state
+                .terminals
+                .lock()
+                .map_err(|_| db_error("terminals lock poisoned"))?;
+            terminals.remove(&id)
+        };
+        if let Some(t) = terminal {
+            finalize_managed_terminal_removal(&state, &app, id, t, true);
         }
     }
     Ok(serde_json::json!({ "ok": true }))
@@ -7661,30 +7679,28 @@ fn terminal_kill_by_pane_id(
         );
     }
 
-    let mut terminals = state
-        .terminals
-        .lock()
-        .map_err(|_| db_error("terminals lock poisoned"))?;
-
-    let ids = terminals
-        .iter()
-        .filter(|(_, t)| t.pane_id.as_deref() == Some(pane_id.as_str()))
-        .map(|(id, _)| id.clone())
-        .collect::<Vec<_>>();
+    let ids = {
+        let terminals = state
+            .terminals
+            .lock()
+            .map_err(|_| db_error("terminals lock poisoned"))?;
+        terminals
+            .iter()
+            .filter(|(_, t)| t.pane_id.as_deref() == Some(pane_id.as_str()))
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>()
+    };
 
     for id in ids {
-        if let Some(mut t) = terminals.remove(&id) {
-            persist_managed_terminal_buffer(&state, &t);
-            t.stop_flag.store(true, Ordering::Relaxed);
-            let _ = terminate_managed_terminal_tree(&t, true);
-            drop(t.pty_master);
-            if let Some(reader_thread) = t.reader_thread.take() {
-                let _ = reader_thread.join();
-            }
-            let _ = app.emit(
-                "terminal-exit",
-                serde_json::json!({ "ptyId": id, "code": -1 }),
-            );
+        let terminal = {
+            let mut terminals = state
+                .terminals
+                .lock()
+                .map_err(|_| db_error("terminals lock poisoned"))?;
+            terminals.remove(&id)
+        };
+        if let Some(t) = terminal {
+            finalize_managed_terminal_removal(&state, &app, id, t, true);
         }
     }
     Ok(serde_json::json!({ "ok": true }))

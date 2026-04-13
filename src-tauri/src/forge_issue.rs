@@ -4,22 +4,20 @@
 //! Quando `gh` (GitHub CLI) ou `glab` (GitLab CLI) estão no `PATH` e autenticados, estes são
 //! tentados **antes** do REST — reutilizam a sessão do utilizador sem precisar de PAT na UI.
 
+use chrono::Utc;
 use lazy_static::lazy_static;
 use regex::Regex;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION};
 use serde_json::{json, Value};
 use std::process::Stdio;
 use std::time::Duration;
-use chrono::Utc;
 use tokio::process::Command;
 
 use crate::ApiError;
 
 lazy_static! {
-    static ref RE_GITHUB_ISSUE_URL: Regex = Regex::new(
-        r"(?i)^https?://([^/]+)/([^/]+)/([^/]+)/issues/(\d+)(?:[\s/?#].*)?$"
-    )
-    .unwrap();
+    static ref RE_GITHUB_ISSUE_URL: Regex =
+        Regex::new(r"(?i)^https?://([^/]+)/([^/]+)/([^/]+)/issues/(\d+)(?:[\s/?#].*)?$").unwrap();
     static ref RE_GITLAB_ISSUE_URL: Regex =
         Regex::new(r"(?i)^https?://([^/]+)/(.+)/-/issues/(\d+)(?:[\s/?#].*)?$").unwrap();
     static ref RE_SHORTHAND: Regex = Regex::new(r"^([^#\s]+)#(\d+)\s*$").unwrap();
@@ -206,7 +204,9 @@ fn parse_issue_input(input: &str) -> Result<ForgeTarget, ApiError> {
 
     Err(ApiError {
         code: "VALIDATION_ERROR",
-        message: "Formato não reconhecido. Cole o URL da issue (GitHub ou GitLab) ou owner/repo#123.".into(),
+        message:
+            "Formato não reconhecido. Cole o URL da issue (GitHub ou GitLab) ou owner/repo#123."
+                .into(),
     })
 }
 
@@ -267,15 +267,27 @@ fn github_token(explicit: Option<&str>) -> Option<String> {
     explicit
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("GITHUB_TOKEN").ok().filter(|s| !s.trim().is_empty()))
-        .or_else(|| std::env::var("GH_TOKEN").ok().filter(|s| !s.trim().is_empty()))
+        .or_else(|| {
+            std::env::var("GITHUB_TOKEN")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .or_else(|| {
+            std::env::var("GH_TOKEN")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
 }
 
 fn gitlab_token(explicit: Option<&str>) -> Option<String> {
     explicit
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("GITLAB_TOKEN").ok().filter(|s| !s.trim().is_empty()))
+        .or_else(|| {
+            std::env::var("GITLAB_TOKEN")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
         .or_else(|| {
             std::env::var("GITLAB_ACCESS_TOKEN")
                 .ok()
@@ -352,7 +364,9 @@ async fn http_github_issue(
     if v.get("pull_request").is_some() {
         return Err(ApiError {
             code: "VALIDATION_ERROR",
-            message: "Este número é um pull request no GitHub, não uma issue. Use o URL de uma issue.".into(),
+            message:
+                "Este número é um pull request no GitHub, não uma issue. Use o URL de uma issue."
+                    .into(),
         });
     }
 
@@ -432,7 +446,11 @@ fn truncate_body(s: &str, max: usize) -> String {
 }
 
 /// Executa um binário no `PATH` com `cwd` no repositório (para `gh`/`glab` lerem remotes e auth).
-async fn run_forge_cli_stdout(program: &str, project_path: &str, args: &[&str]) -> Result<Vec<u8>, String> {
+async fn run_forge_cli_stdout(
+    program: &str,
+    project_path: &str,
+    args: &[&str],
+) -> Result<Vec<u8>, String> {
     let output = Command::new(program)
         .current_dir(project_path)
         .args(args)
@@ -472,7 +490,9 @@ async fn github_number_is_pull_request_via_gh(
         "--json",
         "number",
     ];
-    run_forge_cli_stdout("gh", project_path, &args).await.is_ok()
+    run_forge_cli_stdout("gh", project_path, &args)
+        .await
+        .is_ok()
 }
 
 async fn fetch_github_issue_via_gh(
@@ -582,7 +602,9 @@ async fn resolve_gitlab_mr_via_glab(
         "-P",
         "20",
     ];
-    let out = run_forge_cli_stdout("glab", project_path, &args).await.ok()?;
+    let out = run_forge_cli_stdout("glab", project_path, &args)
+        .await
+        .ok()?;
     let arr: Vec<Value> = serde_json::from_slice(&out).ok()?;
     for m in arr {
         let src = m.get("source_branch").and_then(|x| x.as_str());
@@ -655,7 +677,9 @@ pub async fn fetch_issue_for_project(
             }
             let v = match fetch_github_issue_via_gh(project_path, &owner, &repo, number).await {
                 Ok(v) => v,
-                Err(_) => http_github_issue(&api_base, &owner, &repo, number, token_override).await?,
+                Err(_) => {
+                    http_github_issue(&api_base, &owner, &repo, number, token_override).await?
+                }
             };
             let title = v
                 .get("title")
@@ -694,7 +718,9 @@ pub async fn fetch_issue_for_project(
         } => {
             let v = match fetch_gitlab_issue_via_glab(project_path, &gl_project_path, iid).await {
                 Ok(v) => v,
-                Err(_) => http_gitlab_issue(&api_base, &gl_project_path, iid, token_override).await?,
+                Err(_) => {
+                    http_gitlab_issue(&api_base, &gl_project_path, iid, token_override).await?
+                }
             };
             let title = v
                 .get("title")
@@ -805,7 +831,11 @@ async fn http_github_list_open_pulls_for_head(
     let resp = client
         .get(&url)
         .headers(headers)
-        .query(&[("state", "open"), ("per_page", "20"), ("head", head.as_str())])
+        .query(&[
+            ("state", "open"),
+            ("per_page", "20"),
+            ("head", head.as_str()),
+        ])
         .header("User-Agent", "DevCommandCenter/forge-pr")
         .send()
         .await
@@ -943,7 +973,8 @@ pub async fn resolve_open_pr_mr_for_branch(
             if let Some(v) = resolve_github_pr_via_gh(project_path, &owner, &repo, b).await {
                 return Ok(Some(v));
             }
-            let pulls = http_github_list_open_pulls_for_head(&api_base, &owner, &repo, b, token).await?;
+            let pulls =
+                http_github_list_open_pulls_for_head(&api_base, &owner, &repo, b, token).await?;
             let pr = pick_github_pr_for_branch(pulls, b);
             let Some(p) = pr else {
                 return Ok(None);
@@ -976,9 +1007,7 @@ pub async fn resolve_open_pr_mr_for_branch(
             api_base,
             project_path: gl_project_path,
         } => {
-            if let Some(v) =
-                resolve_gitlab_mr_via_glab(project_path, &gl_project_path, b).await
-            {
+            if let Some(v) = resolve_gitlab_mr_via_glab(project_path, &gl_project_path, b).await {
                 return Ok(Some(v));
             }
             let mrs =
@@ -1015,7 +1044,11 @@ pub async fn resolve_open_pr_mr_for_branch(
 }
 
 fn normalize_github_review_comment(c: &Value) -> Value {
-    let path = c.get("path").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let path = c
+        .get("path")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
     let line = c
         .get("line")
         .and_then(|x| x.as_u64())
@@ -1025,7 +1058,11 @@ fn normalize_github_review_comment(c: &Value) -> Value {
                 .and_then(|x| x.as_u64())
                 .map(|x| x as u32)
         });
-    let body = c.get("body").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let body = c
+        .get("body")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
     let author = c
         .get("user")
         .and_then(|u| u.get("login"))
@@ -1042,10 +1079,7 @@ fn normalize_github_review_comment(c: &Value) -> Value {
         .and_then(|x| x.as_str())
         .unwrap_or("")
         .to_string();
-    let side = c
-        .get("side")
-        .and_then(|x| x.as_str())
-        .unwrap_or("RIGHT");
+    let side = c.get("side").and_then(|x| x.as_str()).unwrap_or("RIGHT");
     json!({
         "path": path,
         "line": line,
@@ -1063,10 +1097,7 @@ async fn github_pr_review_comments_via_gh(
     repo: &str,
     pull_number: u32,
 ) -> Result<Vec<Value>, String> {
-    let endpoint = format!(
-        "repos/{}/{}/pulls/{}/comments",
-        owner, repo, pull_number
-    );
+    let endpoint = format!("repos/{}/{}/pulls/{}/comments", owner, repo, pull_number);
     let out = run_forge_cli_stdout(
         "gh",
         project_path,
@@ -1159,10 +1190,7 @@ async fn gitlab_mr_discussions_via_glab(
     iid: u32,
 ) -> Result<Vec<Value>, String> {
     let enc = gl_project.replace('/', "%2F");
-    let path = format!(
-        "projects/{}/merge_requests/{}/discussions",
-        enc, iid
-    );
+    let path = format!("projects/{}/merge_requests/{}/discussions", enc, iid);
     let out = run_forge_cli_stdout("glab", project_path, &["api", path.as_str()]).await?;
     serde_json::from_slice(&out).map_err(|e| format!("JSON glab api: {e}"))
 }
@@ -1243,7 +1271,11 @@ fn collect_gitlab_inline_notes(discussions: &[Value]) -> Vec<Value> {
             if n.get("system").and_then(|x| x.as_bool()) == Some(true) {
                 continue;
             }
-            let body = n.get("body").and_then(|x| x.as_str()).unwrap_or("").to_string();
+            let body = n
+                .get("body")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
             if body.trim().is_empty() {
                 continue;
             }
@@ -1302,7 +1334,10 @@ pub async fn fetch_pr_review_comments(
     forge_link: &Value,
     token: Option<&str>,
 ) -> Result<Value, ApiError> {
-    let number = forge_link.get("number").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+    let number = forge_link
+        .get("number")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0) as u32;
     if number == 0 {
         return Ok(json!({
             "success": false,
@@ -1337,13 +1372,19 @@ pub async fn fetch_pr_review_comments(
             owner,
             repo,
         } => {
-            let raw = match github_pr_review_comments_via_gh(&project_path, &owner, &repo, number).await {
+            let raw = match github_pr_review_comments_via_gh(&project_path, &owner, &repo, number)
+                .await
+            {
                 Ok(v) => v,
                 Err(_) => {
-                    http_github_pull_review_comments(&api_base, &owner, &repo, number, token).await?
+                    http_github_pull_review_comments(&api_base, &owner, &repo, number, token)
+                        .await?
                 }
             };
-            let normalized: Vec<Value> = raw.iter().map(|c| normalize_github_review_comment(c)).collect();
+            let normalized: Vec<Value> = raw
+                .iter()
+                .map(|c| normalize_github_review_comment(c))
+                .collect();
             Ok(json!({
                 "success": true,
                 "forge": "github",
@@ -1354,12 +1395,13 @@ pub async fn fetch_pr_review_comments(
             api_base,
             project_path: gl_path,
         } => {
-            let discussions = match gitlab_mr_discussions_via_glab(&project_path, &gl_path, number).await {
-                Ok(v) => v,
-                Err(_) => {
-                    http_gitlab_mr_discussions_pages(&api_base, &gl_path, number, token).await?
-                }
-            };
+            let discussions =
+                match gitlab_mr_discussions_via_glab(&project_path, &gl_path, number).await {
+                    Ok(v) => v,
+                    Err(_) => {
+                        http_gitlab_mr_discussions_pages(&api_base, &gl_path, number, token).await?
+                    }
+                };
             let normalized = collect_gitlab_inline_notes(&discussions);
             Ok(json!({
                 "success": true,
