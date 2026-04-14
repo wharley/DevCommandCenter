@@ -65,6 +65,7 @@ import type {
   RepoTaskDefinition,
   RepoTaskTemplate,
   Provider,
+  UpdatePaneDTO,
 } from "@/lib/database/types";
 import type {
   DaemonDiffBundleItem,
@@ -138,6 +139,15 @@ function getPaneRuntimeCommand(pane: Pane, provider: Provider | null): string | 
 function getProjectConfigBranchPrefix(config: ProjectRepoConfig | null | undefined): string {
   return config?.branchPrefix?.trim() || "dcc";
 }
+
+type WorkspaceRemovalDialogState = {
+  combId: string;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  confirmVariant: "default" | "destructive";
+  isRemoving: boolean;
+};
 
 function AgentKindBadge({
   provider,
@@ -493,6 +503,8 @@ function NewAgentPaneDialog({
   preferredProviderId,
   onCreate,
   ensureCombWorktree,
+  prepareWorkspace,
+  updatePane,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -500,7 +512,9 @@ function NewAgentPaneDialog({
   providers: Provider[];
   preferredProviderId?: string | null;
   onCreate: (pane: Pane) => void;
-  ensureCombWorktree: () => Promise<boolean>;
+  ensureCombWorktree: (combId: string) => Promise<string | null>;
+  prepareWorkspace: (combId: string, task: () => Promise<void>) => Promise<void>;
+  updatePane: (paneId: string, data: UpdatePaneDTO) => Promise<void>;
 }) {
   const [providerId, setProviderId] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -522,16 +536,19 @@ function NewAgentPaneDialog({
   const handleCreate = async () => {
     setIsCreating(true);
     try {
-      const wtOk = await ensureCombWorktree();
-      if (!wtOk) return;
-      const pane = await create({
-        combId,
-        type: "agent",
-        providerId: providerId || undefined,
+      await prepareWorkspace(combId, async () => {
+        const worktreePath = await ensureCombWorktree(combId);
+        if (!worktreePath) return;
+        const pane = await create({
+          combId,
+          type: "agent",
+          providerId: providerId || undefined,
+        });
+        await updatePane(pane.id, { cwd: worktreePath });
+        onCreate(pane);
+        onOpenChange(false);
+        toast.success("Agent pane criado");
       });
-      onCreate(pane);
-      onOpenChange(false);
-      toast.success("Agent pane criado");
     } catch {
       toast.error("Falha ao criar pane");
     } finally {
@@ -763,6 +780,7 @@ const PaneCard = React.memo(function PaneCard({
   const handleRemove = useCallback(() => onRemovePane(pane.id), [onRemovePane, pane.id]);
   /** Sincroniza badge com sessão PTY no backend (reattach ao mudar de pane). */
   const [agentStatus, setAgentStatus] = useState<"running" | "exited" | null>(null);
+  const normalizedWorktreePath = worktreePath.trim();
 
   const handleAgentExit = useCallback(() => {
     setAgentStatus("exited");
@@ -835,17 +853,26 @@ const PaneCard = React.memo(function PaneCard({
             provedor ativo (Codex, Claude, Cursor, etc.).
           </p>
         ) : null}
-        <EmbeddedTerminal
-          cwd={worktreePath}
-          command={command}
-          args={args}
-          paneId={pane.id}
-          combId={combId}
-          projectId={projectId}
-          title={label}
-          onSessionActive={isAgent ? handleAgentSessionActive : undefined}
-          onExit={handleAgentExit}
-        />
+        {normalizedWorktreePath ? (
+          <EmbeddedTerminal
+            cwd={normalizedWorktreePath}
+            command={command}
+            args={args}
+            paneId={pane.id}
+            combId={combId}
+            projectId={projectId}
+            title={label}
+            onSessionActive={isAgent ? handleAgentSessionActive : undefined}
+            onExit={handleAgentExit}
+          />
+        ) : (
+          <div className="flex h-full min-h-0 items-center justify-center rounded-lg border border-dashed border-border bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
+            <div className="flex flex-col items-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <p>A preparar o workspace...</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -940,6 +967,8 @@ export default function CmuxWorkspacePage() {
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [attentionRecords, setAttentionRecords] = useState<TerminalAttentionRecord[]>([]);
   const [initializingBasePaneIds, setInitializingBasePaneIds] = useState<Set<string>>(new Set());
+  const [workspacePrepCombId, setWorkspacePrepCombId] = useState<string | null>(null);
+  const [workspaceRemovalDialog, setWorkspaceRemovalDialog] = useState<WorkspaceRemovalDialogState | null>(null);
   const [showShortcutHints, setShowShortcutHints] = useState(false);
   /** Feedback imediato na sidebar antes do commit pesado (xterm / área principal). */
   const [pointerSelectedCombId, setPointerSelectedCombId] = useState<string | null>(null);
@@ -1032,9 +1061,15 @@ export default function CmuxWorkspacePage() {
     () => (activeCombId ? (combs.find((c) => c.id === activeCombId) ?? null) : null),
     [activeCombId, combs],
   );
+  const activeCombIdRef = useRef(activeCombId);
+  const lastAutoSelectedProjectIdRef = useRef<string | null>(null);
+  const worktreePrepInFlightRef = useRef<string | null>(null);
   const activeCombWorktreeKey = activeComb?.worktreePath?.trim()
     ? `${activeComb.branch ?? ""}@${activeComb.worktreePath}`
     : "";
+  useEffect(() => {
+    activeCombIdRef.current = activeCombId;
+  }, [activeCombId]);
   useEffect(() => {
     if (!activeCombId || !activeCombWorktreeKey) return;
     const api = window.desktopAPI?.forge?.syncPrLink;
@@ -1336,16 +1371,20 @@ export default function CmuxWorkspacePage() {
   useEffect(() => {
     if (!selectedProjectId) {
       setActiveCombId(null);
+      lastAutoSelectedProjectIdRef.current = null;
       return;
     }
     if (activeCombId && combs.some((c) => c.id === activeCombId)) return;
     const stored = localStorage.getItem(`dcc:workspace:${selectedProjectId}:activeComb`);
     if (stored && combs.some((c) => c.id === stored)) {
       setActiveCombId(stored);
+      lastAutoSelectedProjectIdRef.current = selectedProjectId;
       return;
     }
+    if (lastAutoSelectedProjectIdRef.current === selectedProjectId) return;
     const firstProjectComb = combs.find((c) => c.projectId === selectedProjectId);
     setActiveCombId(firstProjectComb?.id ?? null);
+    lastAutoSelectedProjectIdRef.current = selectedProjectId;
   }, [combs, activeCombId, selectedProjectId]);
 
   useEffect(() => {
@@ -1423,26 +1462,57 @@ export default function CmuxWorkspacePage() {
     setTheme(nextTheme);
   }, [setTheme, theme]);
 
-  const ensureActiveCombWorktree = useCallback(async (): Promise<boolean> => {
-    if (!activeCombId) return false;
-    const comb = combsRef.current.find((c) => c.id === activeCombId);
-    if (!comb) return false;
-    if (comb.worktreePath) return true;
-    const api = window.desktopAPI?.comb?.ensureWorktree;
-    if (!api) return false;
-    try {
-      const result = await api(activeCombId);
-      if (result.success) {
-        await refreshCombs();
-        return true;
+  const ensureCombWorktree = useCallback(async (combId: string): Promise<string | null> => {
+    const prepare = async (): Promise<{ worktreePath: string | null; error: string | null }> => {
+      const comb = combsRef.current.find((c) => c.id === combId);
+      if (!comb) return { worktreePath: null, error: "Workspace indisponível." };
+      const currentPath = comb.worktreePath?.trim();
+      if (currentPath) return { worktreePath: currentPath, error: null };
+
+      const api = window.desktopAPI?.comb?.ensureWorktree;
+      if (!api) {
+        return { worktreePath: null, error: "Preparação de worktree indisponível nesta execução." };
       }
-      if (result.error) toast.error(`Worktree: ${result.error}`);
-      return false;
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Falha ao preparar worktree");
-      return false;
+
+      try {
+        const result = await api(combId);
+        if (result.success) {
+          await refreshCombs();
+          const refreshed = combsRef.current.find((c) => c.id === combId);
+          const worktreePath = (result.worktreePath ?? refreshed?.worktreePath ?? comb.worktreePath ?? "").trim();
+          return { worktreePath: worktreePath || null, error: null };
+        }
+        return { worktreePath: null, error: result.error ?? "Falha ao preparar worktree" };
+      } catch (e: unknown) {
+        return { worktreePath: null, error: e instanceof Error ? e.message : "Falha ao preparar worktree" };
+      }
+    };
+
+    const isStillTarget = () => activeCombIdRef.current === combId && combsRef.current.some((c) => c.id === combId);
+
+    const first = await prepare();
+    if (first.worktreePath) return first.worktreePath;
+    if (!isStillTarget()) return null;
+
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
+    if (!isStillTarget()) return null;
+
+    const second = await prepare();
+    if (second.worktreePath) return second.worktreePath;
+
+    toast.error(second.error ?? first.error ?? "Falha ao preparar worktree");
+    return null;
+  }, [refreshCombs]);
+
+  const prepareWorkspace = useCallback(async (combId: string, task: () => Promise<void>) => {
+    setWorkspacePrepCombId(combId);
+    try {
+      await task();
+    } finally {
+      setWorkspacePrepCombId((current) => (current === combId ? null : current));
     }
-  }, [activeCombId, refreshCombs]);
+  }, []);
+
   const handleSelectWorkspace = useCallback(
     (comb: Comb) => {
       navigateToComb(comb.id);
@@ -1475,15 +1545,25 @@ export default function CmuxWorkspacePage() {
   }, [activeCombId, pointerSelectedCombId]);
 
   const handleAddTerminal = async () => {
-    if (!activeCombId) return;
+    const combId = activeCombIdRef.current;
+    if (!combId) return;
+    if (worktreePrepInFlightRef.current === combId) return;
+    worktreePrepInFlightRef.current = combId;
     try {
-      const ok = await ensureActiveCombWorktree();
-      if (!ok) return;
-      const pane = await createPane({ combId: activeCombId, type: "term" });
-      await refreshPanes();
-      setActivePaneId(pane.id);
+      await prepareWorkspace(combId, async () => {
+        const worktreePath = await ensureCombWorktree(combId);
+        if (!worktreePath || activeCombIdRef.current !== combId) return;
+        const pane = await createPane({ combId, type: "term" });
+        await updatePane(pane.id, { cwd: worktreePath });
+        await refreshPanes();
+        setActivePaneId(pane.id);
+      });
     } catch {
       toast.error("Falha ao abrir terminal");
+    } finally {
+      if (worktreePrepInFlightRef.current === combId) {
+        worktreePrepInFlightRef.current = null;
+      }
     }
   };
 
@@ -1494,29 +1574,31 @@ export default function CmuxWorkspacePage() {
       cwdMode?: "project" | "worktree";
       description?: string | null;
     }) => {
-      if (!activeCombId) return;
+      const combId = activeCombIdRef.current;
+      if (!combId) return;
       const cwdMode = payload.cwdMode ?? "worktree";
       const projectPath = activeProject?.path?.trim() ?? "";
       let cwd = projectPath;
       if (cwdMode === "worktree") {
-        const ok = await ensureActiveCombWorktree();
-        if (!ok) return;
-        const comb = window.db?.combs?.findById
-          ? await window.db.combs.findById(activeCombId)
-          : combsRef.current.find((item) => item.id === activeCombId) ?? null;
-        cwd = (comb?.worktreePath ?? "").trim();
-        if (!cwd) {
+        let worktreePath: string | null = null;
+        await prepareWorkspace(combId, async () => {
+          worktreePath = await ensureCombWorktree(combId);
+        });
+        if (!worktreePath) {
           toast.error("Worktree indisponível para este workspace.");
           return;
         }
+        cwd = worktreePath;
       } else if (!projectPath) {
         toast.error("Caminho do projeto indisponível.");
         return;
       }
 
+      if (activeCombIdRef.current !== combId) return;
+
       try {
         const pane = await createPane({
-          combId: activeCombId,
+          combId,
           type: "term",
           title: payload.title,
           initialPrompt: payload.command,
@@ -1533,7 +1615,7 @@ export default function CmuxWorkspacePage() {
         toast.error(error instanceof Error ? error.message : `Falha ao iniciar ${payload.title}`);
       }
     },
-    [activeCombId, activeProject?.path, createPane, ensureActiveCombWorktree, refreshPanes, updatePane],
+    [activeProject?.path, createPane, ensureCombWorktree, refreshPanes, updatePane],
   );
 
   const runRepoTask = useCallback(
@@ -1639,51 +1721,66 @@ export default function CmuxWorkspacePage() {
 
   const handleRemoveWorkspace = async (combId: string) => {
     const dialogCopy = await getCombDiscardDialogCopy(combId);
-
-    const confirmed = await confirmDialog({
+    setWorkspaceRemovalDialog({
+      combId,
       title: dialogCopy.title,
       description: dialogCopy.description,
       confirmLabel: dialogCopy.confirmLabel,
-      cancelLabel: "Cancelar",
       confirmVariant: dialogCopy.confirmVariant,
+      isRemoving: false,
     });
-
-    if (!confirmed) return;
-
-    try {
-      const panesForComb = window.db?.panes?.findByComb
-        ? await window.db.panes.findByComb(combId)
-        : [];
-      for (const pane of panesForComb ?? []) {
-        if (!pane?.id) continue;
-        try {
-          await window.desktopAPI?.terminal?.killByPaneId?.(pane.id);
-        } catch {
-          /* ignore */
-        }
-      }
-    } catch {
-      /* ignore pane lookup errors */
-    }
-
-    if (window.desktopAPI?.comb?.discard) {
-      const result = await window.desktopAPI.comb.discard(combId);
-      if (!result.success && result.error) toast.error(result.error);
-    }
-    if (window.db?.combs) await window.db.combs.delete(combId);
-    try {
-      localStorage.removeItem(activePaneStorageKey(combId));
-    } catch {
-      /* ignore */
-    }
-    if (activeCombId === combId) setActiveCombId(null);
-    refreshCombs();
-    setAttentionRecords((prev) => prev.filter((item) => item.combId !== combId));
-    toast.success("Workspace removido");
   };
   const handleRemoveWorkspaceById = useCallback((combId: string) => {
     void handleRemoveWorkspace(combId);
   }, [handleRemoveWorkspace]);
+
+  const handleConfirmRemoveWorkspace = useCallback(async () => {
+    const dialog = workspaceRemovalDialog;
+    if (!dialog || dialog.isRemoving) return;
+    setWorkspaceRemovalDialog((current) => (current ? { ...current, isRemoving: true } : current));
+    const { combId } = dialog;
+
+    try {
+      try {
+        const panesForComb = window.db?.panes?.findByComb
+          ? await window.db.panes.findByComb(combId)
+          : [];
+        for (const pane of panesForComb ?? []) {
+          if (!pane?.id) continue;
+          try {
+            await window.desktopAPI?.terminal?.killByPaneId?.(pane.id);
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        /* ignore pane lookup errors */
+      }
+
+      if (window.desktopAPI?.comb?.discard) {
+        const result = await window.desktopAPI.comb.discard(combId);
+        if (!result.success && result.error) toast.error(result.error);
+      }
+      if (window.db?.combs) await window.db.combs.delete(combId);
+      try {
+        localStorage.removeItem(activePaneStorageKey(combId));
+      } catch {
+        /* ignore */
+      }
+      if (activeCombId === combId) {
+        setActiveCombId(null);
+        setActivePaneId(null);
+        lastAutoSelectedProjectIdRef.current = selectedProjectId ?? null;
+      }
+      refreshCombs();
+      setAttentionRecords((prev) => prev.filter((item) => item.combId !== combId));
+      toast.success("Workspace removido");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao remover workspace");
+    } finally {
+      setWorkspaceRemovalDialog(null);
+    }
+  }, [activeCombId, refreshCombs, selectedProjectId, workspaceRemovalDialog]);
   const handleRemovePaneById = useCallback((paneId: string) => {
     void handleRemovePane(paneId);
   }, [handleRemovePane]);
@@ -1799,6 +1896,8 @@ export default function CmuxWorkspacePage() {
     const mod = isMac ? (e: KeyboardEvent) => e.metaKey : (e: KeyboardEvent) => e.ctrlKey;
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+
       if (mod(event) && (event.key === "k" || event.key === "K")) {
         event.preventDefault();
         if (event.shiftKey) {
@@ -2574,7 +2673,7 @@ export default function CmuxWorkspacePage() {
         </div>
       </aside>
 
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden" data-workspace-main>
+      <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden" data-workspace-main>
         {showProviders ? (
           <div className="flex-1 overflow-auto mt-8">
             <SettingsPage />
@@ -2686,7 +2785,18 @@ export default function CmuxWorkspacePage() {
         </Tooltip>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-hidden">
+            <div className="relative min-h-0 flex-1 overflow-hidden">
+              {workspacePrepCombId === activeCombId ? (
+                <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/75 backdrop-blur-sm">
+                  <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-background/90 px-6 py-5 shadow-lg">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    <div className="text-center">
+                      <p className="text-sm font-medium">Preparando workspace</p>
+                      <p className="text-xs text-muted-foreground">A criar ou reidratar o worktree...</p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               {panesLoading ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
                   <Loader2 className="h-10 w-10 animate-spin text-muted-foreground/35" />
@@ -2843,13 +2953,54 @@ export default function CmuxWorkspacePage() {
           combId={activeCombId}
           providers={providers}
           preferredProviderId={activeRepoConfig?.defaultAgentProviderId ?? activeProject?.defaultProviderId ?? null}
-          ensureCombWorktree={ensureActiveCombWorktree}
+          ensureCombWorktree={ensureCombWorktree}
+          prepareWorkspace={prepareWorkspace}
+          updatePane={updatePane}
           onCreate={async (pane) => {
             await refreshPanes();
             setActivePaneId(pane.id);
           }}
         />
       ) : null}
+
+      <Dialog
+        open={workspaceRemovalDialog !== null}
+        onOpenChange={(open) => {
+          if (!open && !workspaceRemovalDialog?.isRemoving) {
+            setWorkspaceRemovalDialog(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{workspaceRemovalDialog?.title ?? "Remover workspace?"}</DialogTitle>
+            {workspaceRemovalDialog?.description ? (
+              <DialogDescription>{workspaceRemovalDialog.description}</DialogDescription>
+            ) : null}
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setWorkspaceRemovalDialog(null)}
+              disabled={workspaceRemovalDialog?.isRemoving}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant={workspaceRemovalDialog?.confirmVariant === "destructive" ? "destructive" : "default"}
+              onClick={() => void handleConfirmRemoveWorkspace()}
+              disabled={!workspaceRemovalDialog || workspaceRemovalDialog.isRemoving}
+            >
+              {workspaceRemovalDialog?.isRemoving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              {workspaceRemovalDialog?.isRemoving
+                ? "Removendo..."
+                : workspaceRemovalDialog?.confirmLabel ?? "Remover"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AddProjectDialog open={addProjectOpen} onOpenChange={setAddProjectOpen} />
 

@@ -1424,6 +1424,43 @@ fn git_remove_worktree_and_branch_best_effort(
     let _ = run_git(project_path, &["branch", "-D", branch]);
 }
 
+fn git_worktree_list_contains_path(project_path: &str, worktree_path: &str) -> bool {
+    let desired = Path::new(worktree_path);
+    let desired = fs::canonicalize(desired)
+        .unwrap_or_else(|_| desired.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+
+    let output = match Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(project_path)
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return false,
+    };
+
+    if !output.status.success() {
+        return false;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if let Some(raw_path) = line.strip_prefix("worktree ") {
+            let path = Path::new(raw_path.trim());
+            let path = fs::canonicalize(path)
+                .unwrap_or_else(|_| path.to_path_buf())
+                .to_string_lossy()
+                .to_string();
+            if path == desired {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 /// Branches locais (`refs/heads/`), ordenadas, sem duplicatas.
 fn git_local_branch_names(project_path: &str) -> ApiResult<Vec<String>> {
     let raw = run_git(
@@ -5936,6 +5973,26 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
         base_branch
     };
 
+    if git_worktree_list_contains_path(&project_path, &worktree_path) {
+        {
+            let conn = state
+                .conn
+                .lock()
+                .map_err(|_| db_error("db lock poisoned"))?;
+            conn.execute(
+                "UPDATE combs SET worktree_path = ?1, branch = ?2, last_git_activity_at = datetime('now') WHERE id = ?3",
+                params![worktree_path.clone(), branch.clone(), comb_id.clone()],
+            )
+            .map_err(|e| db_error(e.to_string()))?;
+        }
+        let _ = forge_sync_pr_link_run(state.inner().clone(), comb_id, None).await;
+        return Ok(serde_json::json!({
+            "success": true,
+            "worktreePath": worktree_path,
+            "worktreeBranch": branch
+        }));
+    }
+
     let project_path_git = project_path.clone();
     let worktree_path_git = worktree_path.clone();
     let branch_git = branch.clone();
@@ -5946,7 +6003,7 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
         SetupFailedAfterRollback(String),
     }
 
-    let step =
+    let step_result =
         tauri::async_runtime::spawn_blocking(move || -> Result<EnsureWorktreeStep, ApiError> {
             let wt_parent = format!("{}/.dcc/worktrees", project_path_git);
             let _ = std::fs::create_dir_all(&wt_parent);
@@ -5974,14 +6031,22 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
             Ok(EnsureWorktreeStep::Ok)
         })
         .await
-        .map_err(|e| db_error(e.to_string()))??;
+        .map_err(|e| db_error(e.to_string()))?;
 
-    if let EnsureWorktreeStep::SetupFailedAfterRollback(reason) = step {
-        return Ok(serde_json::json!({
-            "success": false,
-            "error": format!("O script de setup falhou; o worktree foi revertido.\n\n{reason}"),
-            "rolledBack": true
-        }));
+    match step_result {
+        Ok(EnsureWorktreeStep::SetupFailedAfterRollback(reason)) => {
+            return Ok(serde_json::json!({
+                "success": false,
+                "error": format!("O script de setup falhou; o worktree foi revertido.\n\n{reason}"),
+                "rolledBack": true
+            }));
+        }
+        Err(err) => {
+            if !git_worktree_list_contains_path(&project_path, &worktree_path) {
+                return Err(err);
+            }
+        }
+        Ok(EnsureWorktreeStep::Ok) => {}
     }
 
     {
