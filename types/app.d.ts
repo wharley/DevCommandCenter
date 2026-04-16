@@ -448,6 +448,13 @@ declare global {
           error?: string;
           applyFailed?: boolean;
         }>;
+        readNotes: (
+          worktreePath: string,
+        ) => Promise<{ success: boolean; content?: string; error?: string }>;
+        writeNotes: (
+          worktreePath: string,
+          content: string,
+        ) => Promise<{ success: boolean; error?: string }>;
       };
 
       comb: {

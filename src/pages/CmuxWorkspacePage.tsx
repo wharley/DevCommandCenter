@@ -54,6 +54,7 @@ import { ProjectRepoTomlDialog } from "@/components/dialogs/project-repo-toml-di
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { usePanes, useProjects, useProviders } from "@/hooks/use-data";
 import { useTheme } from "@/components/theme-provider";
+import { CombReviewPanel } from "@/components/review/comb-review-panel";
 import SettingsPage from "@/src/pages/SettingsPage";
 import { normalizeComb, normalizeCombs, normalizePanes } from "@/lib/database/normalize";
 import type {
@@ -65,6 +66,7 @@ import type {
   RepoTaskDefinition,
   RepoTaskTemplate,
   Provider,
+  UpdateCombDTO,
   UpdatePaneDTO,
 } from "@/lib/database/types";
 import type {
@@ -93,6 +95,14 @@ import { formatRelativeTimeFromNow } from "@/lib/format-relative-time";
 const CLI_PROVIDER_TYPES = ["codex", "claude-code", "gemini", "cursor"] as const;
 
 const activePaneStorageKey = (combId: string) => `dcc:workspace:${combId}:activePane`;
+const activeWorkspaceViewStorageKey = (combId: string) => `dcc:workspace:${combId}:mainView`;
+
+type WorkspaceMainView = "panes" | "review";
+type ReviewSummary = {
+  changedFiles: number;
+  insertions: number;
+  deletions: number;
+};
 
 function isCliProviderType(type: string): type is (typeof CLI_PROVIDER_TYPES)[number] {
   return CLI_PROVIDER_TYPES.includes(type as (typeof CLI_PROVIDER_TYPES)[number]);
@@ -600,6 +610,7 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
   projectName,
   attentionExcerpt,
   hasAttention,
+  reviewSummary,
   runningCount,
   agentCount,
   agentPreview,
@@ -613,6 +624,7 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
   projectName: string;
   attentionExcerpt: string | null;
   hasAttention: boolean;
+  reviewSummary?: ReviewSummary | null;
   runningCount: number;
   agentCount: number;
   agentPreview: DetectedTerminalAgent[];
@@ -703,6 +715,16 @@ const WorkspaceListItem = React.memo(function WorkspaceListItem({
           {runningCount > 0 ? (
             <Badge variant="outline" className="mt-1 h-5 border-sidebar-border px-1.5 text-[10px] text-sidebar-foreground/70">
               {runningCount} ativos
+            </Badge>
+          ) : null}
+          {reviewSummary && reviewSummary.changedFiles > 0 ? (
+            <Badge
+              variant="secondary"
+              className="mt-1 h-5 px-1.5 text-[10px]"
+              title="Quantidade de ficheiros alterados no review deste workspace"
+            >
+              Review · {reviewSummary.changedFiles} +{reviewSummary.insertions}
+              /-{reviewSummary.deletions}
             </Badge>
           ) : null}
           {agentCount > 0 ? (
@@ -965,6 +987,7 @@ export default function CmuxWorkspacePage() {
   const [daemonDiffBundle, setDaemonDiffBundle] = useState<DaemonDiffBundleItem[]>([]);
   const [daemonExplorerLoading, setDaemonExplorerLoading] = useState(false);
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceMainView>("panes");
   const [attentionRecords, setAttentionRecords] = useState<TerminalAttentionRecord[]>([]);
   const [initializingBasePaneIds, setInitializingBasePaneIds] = useState<Set<string>>(new Set());
   const [workspacePrepCombId, setWorkspacePrepCombId] = useState<string | null>(null);
@@ -1055,12 +1078,38 @@ export default function CmuxWorkspacePage() {
     await refreshCombs();
     return comb;
   }, [refreshCombs]);
+
+  const updateComb = useCallback(
+    async (combId: string, data: UpdateCombDTO) => {
+      if (!window.db?.combs) throw new Error("Combs indisponivel");
+      await window.db.combs.update(combId, data);
+      await refreshCombs();
+    },
+    [refreshCombs],
+  );
+
   const combsRef = useRef(combs);
   combsRef.current = combs;
   const activeComb = useMemo(
     () => (activeCombId ? (combs.find((c) => c.id === activeCombId) ?? null) : null),
     [activeCombId, combs],
   );
+  useEffect(() => {
+    if (!activeCombId || typeof window === "undefined") {
+      setWorkspaceView("panes");
+      return;
+    }
+    const stored = window.localStorage.getItem(activeWorkspaceViewStorageKey(activeCombId));
+    if (stored === "review" || stored === "panes") {
+      setWorkspaceView(stored);
+      return;
+    }
+    setWorkspaceView("panes");
+  }, [activeCombId]);
+  useEffect(() => {
+    if (!activeCombId || typeof window === "undefined") return;
+    window.localStorage.setItem(activeWorkspaceViewStorageKey(activeCombId), workspaceView);
+  }, [activeCombId, workspaceView]);
   const activeCombIdRef = useRef(activeCombId);
   const lastAutoSelectedProjectIdRef = useRef<string | null>(null);
   const worktreePrepInFlightRef = useRef<string | null>(null);
@@ -1205,6 +1254,23 @@ export default function CmuxWorkspacePage() {
     }
     return map;
   }, [activeProject?.id, daemonTasks]);
+  const reviewSummaryByWorktreePath = useMemo(() => {
+    const map = new Map<string, ReviewSummary>();
+    for (const item of daemonDiffBundle) {
+      const worktreePath = item.worktreePath?.trim();
+      if (!worktreePath) continue;
+      if (!item.success || !item.summary) {
+        map.set(worktreePath, { changedFiles: 0, insertions: 0, deletions: 0 });
+        continue;
+      }
+      map.set(worktreePath, {
+        changedFiles: item.summary.changedFiles ?? 0,
+        insertions: item.summary.insertions ?? 0,
+        deletions: item.summary.deletions ?? 0,
+      });
+    }
+    return map;
+  }, [daemonDiffBundle]);
 
   const isAttentionPaneInView = useCallback(
     (detail: { paneId: string; combId: string }) => {
@@ -1524,6 +1590,15 @@ export default function CmuxWorkspacePage() {
     [navigateToComb],
   );
 
+  const handleOpenReview = useCallback(() => {
+    if (!activeCombId) return;
+    setWorkspaceView("review");
+  }, [activeCombId]);
+
+  const handleOpenPanes = useCallback(() => {
+    setWorkspaceView("panes");
+  }, []);
+
   const handleWorkspacePointerDown = useCallback((comb: Comb) => {
     if (pointerPressClearTimeoutRef.current != null) {
       window.clearTimeout(pointerPressClearTimeoutRef.current);
@@ -1546,6 +1621,14 @@ export default function CmuxWorkspacePage() {
     }
     setPointerSelectedCombId(null);
   }, [activeCombId, pointerSelectedCombId]);
+
+  useEffect(() => {
+    const handleGoToPanes = () => setWorkspaceView("panes");
+    window.addEventListener("dcc:hive:goto-panes", handleGoToPanes);
+    return () => {
+      window.removeEventListener("dcc:hive:goto-panes", handleGoToPanes);
+    };
+  }, []);
 
   const handleAddTerminal = async () => {
     const combId = activeCombIdRef.current;
@@ -1959,6 +2042,11 @@ export default function CmuxWorkspacePage() {
           setRepoConfigOpen(true);
           return;
         }
+        if (key === "v") {
+          event.preventDefault();
+          handleOpenReview();
+          return;
+        }
         if (key === "i") {
           event.preventDefault();
           setAttentionOpen(true);
@@ -2046,6 +2134,7 @@ export default function CmuxWorkspacePage() {
     goWorktreeForward,
     handleAddTerminal,
     handleOpenBaseTerminal,
+    handleOpenReview,
     handleSetTheme,
     handleToggleTheme,
     markPaneAttentionAsRead,
@@ -2100,6 +2189,9 @@ export default function CmuxWorkspacePage() {
                   const projectName = projectNameById.get(comb.projectId) ?? "Projeto";
                   const runningCount = projectActivity.runningPanesByCombId[comb.id] ?? 0;
                   const agents = activeAgentsByCombId.get(comb.id) ?? [];
+                  const reviewSummary = comb.worktreePath?.trim()
+                    ? (reviewSummaryByWorktreePath.get(comb.worktreePath.trim()) ?? null)
+                    : null;
                   return (
                     <WorkspaceListItem
                       key={comb.id}
@@ -2107,6 +2199,7 @@ export default function CmuxWorkspacePage() {
                       isActive={isActive}
                       projectName={projectName}
                       hasAttention={!!attentionForComb}
+                      reviewSummary={reviewSummary}
                       runningCount={runningCount}
                       agentCount={agents.length}
                       agentPreview={agents.slice(0, 2)}
@@ -2738,12 +2831,44 @@ export default function CmuxWorkspacePage() {
                   </Tooltip>
                 </div>
                 <h3 className="truncate text-sm font-semibold">{activeComb.name}</h3>
-                <Badge variant="outline" className="gap-1">
-                  <GitBranch className="h-3 w-3" />
-                  {activeComb.branch ?? activeComb.baseBranch}
-                </Badge>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge variant="outline" className="gap-1">
+                    <GitBranch className="h-3 w-3" />
+                    {activeComb.branch ?? activeComb.baseBranch}
+                  </Badge>
+                  {activeComb.worktreePath?.trim() ? (
+                    <Badge
+                      variant="secondary"
+                      className="gap-1"
+                      title="Resumo do review deste workspace"
+                    >
+                      <GitPullRequest className="h-3 w-3" />
+                      {(() => {
+                        const summary = reviewSummaryByWorktreePath.get(activeComb.worktreePath!.trim());
+                        if (!summary || summary.changedFiles <= 0) return "Review";
+                        return `Review · ${summary.changedFiles} +${summary.insertions}/-${summary.deletions}`;
+                      })()}
+                    </Badge>
+                  ) : null}
+                </div>
               </div>
               <div className="flex items-center gap-2">
+                <Button
+                  variant={workspaceView === "panes" ? "default" : "outline"}
+                  size="sm"
+                  onClick={handleOpenPanes}
+                >
+                  <Terminal className="mr-1 h-3.5 w-3.5" />
+                  Panes
+                </Button>
+                <Button
+                  variant={workspaceView === "review" ? "default" : "outline"}
+                  size="sm"
+                  onClick={handleOpenReview}
+                >
+                  <GitPullRequest className="mr-1 h-3.5 w-3.5" />
+                  Review
+                </Button>
                 <Tooltip>
                   <TooltipTrigger asChild>
             <Button variant="outline" size="sm" onClick={handleOpenBaseTerminal}>
@@ -2800,74 +2925,87 @@ export default function CmuxWorkspacePage() {
                   </div>
                 </div>
               ) : null}
-              {panesLoading ? (
-                <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
-                  <Loader2 className="h-10 w-10 animate-spin text-muted-foreground/35" />
-                  <p className="text-sm text-muted-foreground">A abrir workspace…</p>
-                </div>
-              ) : visiblePanes.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
-                  <Terminal className="h-12 w-12 text-muted-foreground/30" />
-                  <p className="text-sm text-muted-foreground">Nenhum pane aberto neste workspace</p>
-                </div>
-              ) : (
-                <div className="flex h-full min-h-0 flex-col overflow-hidden p-1">
-                  <DragDropContext onDragEnd={handleDragEnd}>
-                    <Droppable droppableId="pane-tabs" direction="horizontal">
-                      {(provided) => (
-                        <div
-                          role="tablist"
-                          aria-label="Panes do workspace"
-                          className="mb-1 flex shrink-0 gap-1 overflow-x-auto"
-                          ref={provided.innerRef}
-                          {...provided.droppableProps}
-                        >
-                          {visiblePanes.map((pane, index) => {
-                            const provider = pane.providerId ? (providerById.get(pane.providerId) ?? null) : null;
-                            const label = pane.type === "agent" ? (pane.title ?? provider?.name ?? "Agent") : (pane.title ?? "Terminal");
-                            const selected = pane.id === activePane?.id;
-                            const hasUnreadAttention = hasUnreadAttentionByPaneId.has(pane.id);
-                            return (
-                              <Draggable key={pane.id} draggableId={pane.id} index={index}>
-                                {(provided, snapshot) => (
-                                  <div ref={provided.innerRef} {...provided.draggableProps}>
-                                    <PaneTab
-                                      pane={pane}
-                                      provider={provider}
-                                      selected={selected}
-                                      hasUnreadAttention={hasUnreadAttention}
-                                      label={label}
-                                      onSelect={handleSelectPaneTab}
-                                      onRemove={handleRemovePaneById}
-                                      onRename={handleRenamePane}
-                                      isDragging={snapshot.isDragging}
-                                      dragHandleProps={provided.dragHandleProps}
-                                    />
-                                  </div>
-                                )}
-                              </Draggable>
-                            );
-                          })}
-                          {provided.placeholder}
-                        </div>
-                      )}
-                    </Droppable>
-                  </DragDropContext>
-                  <div className="min-h-0 flex-1 overflow-hidden">
-                    {activePane ? (
-                      <PaneCard
-                        pane={activePane}
-                        worktreePath={activePane.cwd?.trim() || activeComb.worktreePath || ""}
-                        provider={activePane.providerId ? (providerById.get(activePane.providerId) ?? null) : null}
-                        combId={activeComb.id}
-                        projectId={activeComb.projectId}
-                        onPaneStatusChange={handlePaneStatusChange}
-                        onRemovePane={handleRemovePaneById}
-                      />
-                    ) : null}
+              <div className={workspaceView === "panes" ? "flex h-full min-h-0 flex-col overflow-hidden" : "hidden"}>
+                {panesLoading ? (
+                  <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
+                    <Loader2 className="h-10 w-10 animate-spin text-muted-foreground/35" />
+                    <p className="text-sm text-muted-foreground">A abrir workspace…</p>
                   </div>
-                </div>
-              )}
+                ) : visiblePanes.length === 0 ? (
+                  <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
+                    <Terminal className="h-12 w-12 text-muted-foreground/30" />
+                    <p className="text-sm text-muted-foreground">Nenhum pane aberto neste workspace</p>
+                  </div>
+                ) : (
+                  <div className="flex h-full min-h-0 flex-col overflow-hidden p-1">
+                    <DragDropContext onDragEnd={handleDragEnd}>
+                      <Droppable droppableId="pane-tabs" direction="horizontal">
+                        {(provided) => (
+                          <div
+                            role="tablist"
+                            aria-label="Panes do workspace"
+                            className="mb-1 flex shrink-0 gap-1 overflow-x-auto"
+                            ref={provided.innerRef}
+                            {...provided.droppableProps}
+                          >
+                            {visiblePanes.map((pane, index) => {
+                              const provider = pane.providerId ? (providerById.get(pane.providerId) ?? null) : null;
+                              const label = pane.type === "agent" ? (pane.title ?? provider?.name ?? "Agent") : (pane.title ?? "Terminal");
+                              const selected = pane.id === activePane?.id;
+                              const hasUnreadAttention = hasUnreadAttentionByPaneId.has(pane.id);
+                              return (
+                                <Draggable key={pane.id} draggableId={pane.id} index={index}>
+                                  {(provided, snapshot) => (
+                                    <div ref={provided.innerRef} {...provided.draggableProps}>
+                                      <PaneTab
+                                        pane={pane}
+                                        provider={provider}
+                                        selected={selected}
+                                        hasUnreadAttention={hasUnreadAttention}
+                                        label={label}
+                                        onSelect={handleSelectPaneTab}
+                                        onRemove={handleRemovePaneById}
+                                        onRename={handleRenamePane}
+                                        isDragging={snapshot.isDragging}
+                                        dragHandleProps={provided.dragHandleProps}
+                                      />
+                                    </div>
+                                  )}
+                                </Draggable>
+                              );
+                            })}
+                            {provided.placeholder}
+                          </div>
+                        )}
+                      </Droppable>
+                    </DragDropContext>
+                    <div className="min-h-0 flex-1 overflow-hidden">
+                      {activePane ? (
+                        <PaneCard
+                          pane={activePane}
+                          worktreePath={activePane.cwd?.trim() || activeComb.worktreePath || ""}
+                          provider={activePane.providerId ? (providerById.get(activePane.providerId) ?? null) : null}
+                          combId={activeComb.id}
+                          projectId={activeComb.projectId}
+                          onPaneStatusChange={handlePaneStatusChange}
+                          onRemovePane={handleRemovePaneById}
+                        />
+                      ) : null}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className={workspaceView === "review" ? "flex h-full min-h-0 flex-col overflow-hidden" : "hidden"}>
+                <CombReviewPanel
+                  comb={activeComb}
+                  mainProjectPath={activeProject?.path ?? ""}
+                  projects={sortedProjects}
+                  updateComb={updateComb}
+                  onAction={async () => {
+                    await refreshCombs();
+                  }}
+                />
+              </div>
             </div>
           </>
         ) : (
@@ -3047,6 +3185,7 @@ export default function CmuxWorkspacePage() {
         onOpenBaseTerminal={handleOpenBaseTerminal}
         onOpenWorkspaceTerminal={handleAddTerminal}
         onOpenNewAgent={() => setNewAgentOpen(true)}
+        onOpenReview={handleOpenReview}
         onOpenRepoConfig={() => setRepoConfigOpen(true)}
         onOpenNotifications={() => setAttentionOpen(true)}
         currentTheme={theme}

@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FolderGit2,
+  GitPullRequest,
   ListPlus,
   PanelLeftOpen,
   Monitor,
@@ -56,6 +57,7 @@ interface WorkspaceCommandPaletteProps {
   onOpenBaseTerminal: () => void;
   onOpenWorkspaceTerminal: () => void;
   onOpenNewAgent: () => void;
+  onOpenReview: () => void;
   onOpenRepoConfig: () => void;
   onOpenNotifications: () => void;
   currentTheme: "dark" | "light" | "system";
@@ -94,6 +96,7 @@ export function WorkspaceCommandPalette({
   onOpenBaseTerminal,
   onOpenWorkspaceTerminal,
   onOpenNewAgent,
+  onOpenReview,
   onOpenRepoConfig,
   onOpenNotifications,
   currentTheme,
@@ -165,6 +168,18 @@ export function WorkspaceCommandPalette({
             <Bot className="h-4 w-4" />
             Abrir agente CLI
             <CommandShortcut>⌘⇧A</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            value="review diff revisão"
+            disabled={!activeCombId}
+            onSelect={() => {
+              onOpenReview();
+              onOpenChange(false);
+            }}
+          >
+            <GitPullRequest className="h-4 w-4" />
+            Abrir review do workspace
+            <CommandShortcut>⌘⇧V</CommandShortcut>
           </CommandItem>
           <CommandItem
             value="terminal base"
