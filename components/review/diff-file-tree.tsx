@@ -166,7 +166,9 @@ export function DiffFileTree({
       <div
         className={cn(
           "flex shrink-0 flex-col border-border bg-muted/15 text-muted-foreground",
-          compact ? "w-36 border-b md:border-b-0 md:border-r" : "w-[13.5rem] border-r",
+          compact
+            ? "w-full border-b md:w-[15rem] xl:w-[17rem] md:border-b-0 md:border-r"
+            : "w-full border-b md:w-[16.5rem] xl:w-[19rem] md:border-b-0 md:border-r",
           className,
         )}
       >
@@ -179,7 +181,9 @@ export function DiffFileTree({
     <div
       className={cn(
         "flex min-h-0 shrink-0 flex-col border-border bg-muted/15",
-        compact ? "max-h-40 w-full border-b md:max-h-none md:w-[13rem] md:border-b-0 md:border-r" : "w-[13.5rem] border-r",
+        compact
+          ? "max-h-40 w-full border-b md:max-h-none md:w-[15rem] xl:w-[17rem] md:border-b-0 md:border-r"
+          : "w-full border-b md:w-[16.5rem] xl:w-[19rem] md:border-b-0 md:border-r",
         className,
       )}
     >

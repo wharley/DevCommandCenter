@@ -15,8 +15,11 @@ import {
   ChevronDown,
   Clock,
   FileCode,
+  Info,
   GitMerge,
   Loader2,
+  Maximize2,
+  Minimize2,
   Upload,
   X,
 } from "lucide-react";
@@ -49,12 +52,18 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 import { DiffFileTree } from "@/components/review/diff-file-tree";
 import { WorktreeNotesPanel } from "@/components/review/worktree-notes-panel";
 import { PrReviewCommentsPanel } from "@/components/review/pr-review-comments-panel";
 import { DiffCodeBlock } from "@/components/diff-code-block";
 import { CommitDialog } from "@/components/dialogs/commit-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { extractContextTokens } from "@/lib/review/extract-context-tokens";
 import type { GitStatus } from "@/types/app";
 import { toast } from "sonner";
@@ -186,6 +195,7 @@ export function RepoReviewSection({
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [applyCommitDialogOpen, setApplyCommitDialogOpen] = useState(false);
   const [applyCommitMessage, setApplyCommitMessage] = useState("");
+  const [flowHelpOpen, setFlowHelpOpen] = useState(false);
 
   const [mainRepoStatus, setMainRepoStatus] = useState<GitStatus | null>(null);
   const [mainRepoStatusLoading, setMainRepoStatusLoading] = useState(false);
@@ -193,6 +203,11 @@ export function RepoReviewSection({
   /** Estado do Git na worktree (commit/merge só fazem sentido com cópia limpa antes do merge). */
   const [worktreeRepoStatus, setWorktreeRepoStatus] =
     useState<GitStatus | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const isMobile = useIsMobile();
+  const sidebarPanelRef = useRef<React.ElementRef<typeof ResizablePanel> | null>(
+    null,
+  );
 
   const filePathsKey = useMemo(
     () => diffs.files.map((f) => f.path).sort().join("\0"),
@@ -253,6 +268,16 @@ export function RepoReviewSection({
       activeDiffFile ? extractContextTokens(activeDiffFile.diff) : [],
     [activeDiffFile],
   );
+
+  const toggleReviewSidebar = useCallback(() => {
+    const panel = sidebarPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) {
+      panel.expand();
+      return;
+    }
+    panel.collapse();
+  }, []);
 
   const addTrail = useCallback(
     (message: string) => {
@@ -816,53 +841,26 @@ export function RepoReviewSection({
           </div>
         </div>
 
-        <Alert className="border-primary/25 bg-primary/5 py-2">
-          <Check className="h-4 w-4 text-primary" />
-          <AlertTitle className="text-xs">Fluxo recomendado (sem terminal)</AlertTitle>
-          <AlertDescription className="text-xs leading-relaxed text-muted-foreground">
-            <ol className="mt-1 list-decimal space-y-1 pl-4">
-              <li>
-                <strong className="text-foreground">Worktree</strong> — Commit e depois
-                Push no branch da Missão (abaixo). Usa Pull se precisares de alinhar com
-                o remoto antes.
-              </li>
-              <li>
-                <strong className="text-foreground">Principal limpo</strong> — O
-                checkout na raiz do projeto (ex. <code className="text-[10px]">main</code>)
-                não pode ter alterações por commitar. Se editaste ficheiros aí ou usaste
-                &quot;Aplicar&quot; antes, resolve ou usa &quot;Descartar no
-                principal&quot; no alerta vermelho.
-              </li>
-              <li>
-                <strong className="text-foreground">Merge</strong> — Integra o branch
-                da Missão na branch de destino escolhida em cima.
-              </li>
-            </ol>
-            <p className="mt-2 font-mono text-[10px] break-all opacity-90">
-              Pasta da Missão (agentes): {worktreePath}
+        <div className="flex items-start justify-between gap-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Fluxo recomendado
             </p>
-          </AlertDescription>
-        </Alert>
-
-        <Collapsible className="rounded-md border border-border/80 bg-muted/15">
-          <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/30">
-            <span>Detalhes: merge vs patch</span>
-            <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-2 border-t border-border/60 px-3 pb-3 pt-0 text-xs text-muted-foreground">
-            <p className="mt-2 leading-relaxed">
-              <strong className="text-foreground">Merge</strong> é o caminho normal:
-              traz o branch inteiro da worktree para a branch de destino no repositório
-              principal (histórico preservado).
+            <p className="mt-1 text-xs leading-snug text-muted-foreground">
+              Commit e push na worktree, depois merge no principal limpo.
             </p>
-            <p className="leading-relaxed">
-              <strong className="text-foreground">Patch</strong> (&quot;Aplicar&quot;)
-              copia diffs para o checkout principal — útil em casos raros; sem commit
-              deixa o principal com ficheiros modificados (como{" "}
-              <code className="text-[10px]">git apply</code> manual).
-            </p>
-          </CollapsibleContent>
-        </Collapsible>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0 gap-1 whitespace-nowrap"
+            onClick={() => setFlowHelpOpen(true)}
+          >
+            <Info className="h-3.5 w-3.5" />
+            Detalhes
+          </Button>
+        </div>
 
         {mainRepoStatusLoading ? (
           <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -913,153 +911,231 @@ export function RepoReviewSection({
           </Alert>
         ) : null}
 
-        <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Passo 1 — Branch da Missão (worktree)
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={diffs.files.length === 0}
-              onClick={() => void handleDiscardWorktree()}
-            >
-              Descartar
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={diffs.files.length === 0}
-              onClick={() => setCommitDialogOpen(true)}
-            >
-              <FileCode className="mr-1 h-3 w-3" />
-              Commit…
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isPulling || !worktreePath}
-              onClick={() => void handlePull()}
-              title="Atualizar branch da Missão a partir do remoto (git pull)"
-            >
-              {isPulling ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              ) : (
-                <ArrowDownToLine className="mr-1 h-3 w-3" />
-              )}
-              Pull
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isPushing || !worktreePath}
-              onClick={() => void handlePush()}
-            >
-              {isPushing ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              ) : (
-                <Upload className="mr-1 h-3 w-3" />
-              )}
-              Push
-            </Button>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Passo 2 — Integrar no repositório principal
-          </p>
-          <p className="text-[11px] text-muted-foreground leading-snug">
-            Usa o merge para trazer o branch da Missão para{" "}
-            <span className="font-mono">{targetBranch || "…"}</span>. O principal tem
-            de estar limpo (sem alterações locais na raiz do projeto).
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              disabled={isMerging || mergeUiBlocked}
-              title={
-                !canMergeComb
-                  ? "Disponível só no target principal da Missão."
-                  : mainRepoDirty
-                    ? "Limpe alterações no repositório principal antes do merge (ou use Descartar no alerta acima)."
-                    : worktreeDirty
-                      ? "Faça commit ou descarte na worktree antes do merge."
-                      : undefined
-              }
-              onClick={handleMergeClick}
-            >
-              {isMerging ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              ) : (
-                <GitMerge className="mr-1 h-3 w-3" />
-              )}
-              Integrar branch (merge)…
-            </Button>
-          </div>
-
-          <Collapsible className="rounded-md border border-amber-500/25 bg-amber-500/5">
-            <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-amber-500/10">
-              <span>Alternativa avançada: patch no principal (não é merge)</span>
-              <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-2 border-t border-amber-500/20 px-3 pb-3 pt-1 text-xs text-muted-foreground">
-              <p className="leading-snug">
-                Isto aplica alterações diretamente no checkout do repositório principal
-                (pasta do Hive), não só na worktree. Só usa se souberes o que estás a
-                fazer; &quot;Aplicar&quot; sem commit deixa o principal com ficheiros
-                modificados.
+        <Collapsible
+          defaultOpen={false}
+          className="rounded-md border border-border/80 bg-muted/15"
+        >
+          <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/30">
+            <span>Ver passos detalhados e alternativas</span>
+            <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-4 border-t border-border/60 px-3 pb-3 pt-0">
+            <div className="space-y-2 pt-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Passo 1 — Branch da Missão (worktree)
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={
-                    isApplyingPatch ||
-                    !hasIncludedFiles ||
-                    diffs.files.length === 0 ||
-                    patchActionsBlocked
-                  }
-                  onClick={() => void runApplyPatch({ commit: false })}
+                  disabled={diffs.files.length === 0}
+                  onClick={() => void handleDiscardWorktree()}
                 >
-                  {isApplyingPatch ? (
-                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                  ) : null}
-                  Aplicar
+                  Descartar
                 </Button>
                 <Button
-                  variant="secondary"
+                  variant="outline"
                   size="sm"
-                  disabled={
-                    isApplyingPatch ||
-                    !hasIncludedFiles ||
-                    diffs.files.length === 0 ||
-                    patchActionsBlocked
-                  }
-                  onClick={() => setApplyCommitDialogOpen(true)}
+                  disabled={diffs.files.length === 0}
+                  onClick={() => setCommitDialogOpen(true)}
                 >
-                  Aplicar + Commit
+                  <FileCode className="mr-1 h-3 w-3" />
+                  Commit…
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isPulling || !worktreePath}
+                  onClick={() => void handlePull()}
+                  title="Atualizar branch da Missão a partir do remoto (git pull)"
+                >
+                  {isPulling ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <ArrowDownToLine className="mr-1 h-3 w-3" />
+                  )}
+                  Pull
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isPushing || !worktreePath}
+                  onClick={() => void handlePush()}
+                >
+                  {isPushing ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <Upload className="mr-1 h-3 w-3" />
+                  )}
+                  Push
                 </Button>
               </div>
-            </CollapsibleContent>
-          </Collapsible>
-        </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Passo 2 — Integrar no repositório principal
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                Usa o merge para trazer o branch da Missão para{" "}
+                <span className="font-mono">{targetBranch || "…"}</span>. O principal
+                tem de estar limpo (sem alterações locais na raiz do projeto).
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  disabled={isMerging || mergeUiBlocked}
+                  title={
+                    !canMergeComb
+                      ? "Disponível só no target principal da Missão."
+                      : mainRepoDirty
+                        ? "Limpe alterações no repositório principal antes do merge (ou use Descartar no alerta acima)."
+                        : worktreeDirty
+                          ? "Faça commit ou descarte na worktree antes do merge."
+                          : undefined
+                  }
+                  onClick={handleMergeClick}
+                >
+                  {isMerging ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <GitMerge className="mr-1 h-3 w-3" />
+                  )}
+                  Integrar branch (merge)…
+                </Button>
+              </div>
+
+              <Collapsible className="rounded-md border border-amber-500/25 bg-amber-500/5">
+                <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-amber-500/10">
+                  <span>Alternativa avançada: patch no principal (não é merge)</span>
+                  <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-2 border-t border-amber-500/20 px-3 pb-3 pt-1 text-xs text-muted-foreground">
+                  <p className="leading-snug">
+                    Isto aplica alterações diretamente no checkout do repositório
+                    principal (pasta do Hive), não só na worktree. Só usa se souberes o
+                    que estás a fazer; &quot;Aplicar&quot; sem commit deixa o principal
+                    com ficheiros modificados.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        isApplyingPatch ||
+                        !hasIncludedFiles ||
+                        diffs.files.length === 0 ||
+                        patchActionsBlocked
+                      }
+                      onClick={() => void runApplyPatch({ commit: false })}
+                    >
+                      {isApplyingPatch ? (
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      ) : null}
+                      Aplicar
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={
+                        isApplyingPatch ||
+                        !hasIncludedFiles ||
+                        diffs.files.length === 0 ||
+                        patchActionsBlocked
+                      }
+                      onClick={() => setApplyCommitDialogOpen(true)}
+                    >
+                      Aplicar + Commit
+                    </Button>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </div>
 
-      <div className="shrink-0 space-y-3 px-4">
-        <WorktreeNotesPanel
-          worktreePath={worktreePath}
-          idKey={storageKey}
-          compact={compact}
+      <ResizablePanelGroup
+        key={isMobile ? "review-vertical" : "review-horizontal"}
+        direction={isMobile ? "vertical" : "horizontal"}
+        className={cn(
+          "min-h-0 flex-1 px-4 pb-4",
+          compact ? "max-h-[min(70vh,560px)]" : "",
+        )}
+      >
+        <ResizablePanel
+          ref={sidebarPanelRef}
+          defaultSize={isMobile ? 36 : 30}
+          minSize={isMobile ? 20 : 24}
+          maxSize={isMobile ? 48 : 40}
+          collapsible
+          collapsedSize={0}
+          onCollapse={() => setSidebarCollapsed(true)}
+          onExpand={() => setSidebarCollapsed(false)}
+          className="min-h-0 overflow-hidden"
+        >
+          <div
+            className={cn(
+              "flex h-full min-h-0 flex-col gap-3",
+              isMobile ? "pb-3" : "pr-3",
+            )}
+          >
+            <WorktreeNotesPanel
+              worktreePath={worktreePath}
+              idKey={storageKey}
+              compact={false}
+            />
+            <PrReviewCommentsPanel
+              combId={combId}
+              enabled={Boolean(useCombWorktreeApis && combId)}
+              activeFilePath={activeDiffFile?.path ?? null}
+              idKey={storageKey}
+              compact={false}
+            />
+            <div
+              className={cn(
+                "shrink-0 rounded-md border border-border bg-muted/20",
+                compact ? "py-1.5" : "",
+              )}
+            >
+              <div className="px-3 py-2">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Trilha — {title}
+                </p>
+                <ScrollArea className={compact ? "h-16 pr-2" : "h-24 pr-2"}>
+                  <ul className="space-y-1.5 text-xs text-muted-foreground">
+                    {trail.length === 0 ? (
+                      <li className="italic opacity-70">
+                        Eventos de revisão aparecem aqui.
+                      </li>
+                    ) : (
+                      [...trail].reverse().map((e) => (
+                        <li key={e.id} className="leading-snug">
+                          <span className="font-mono text-[10px] opacity-70">
+                            {new Date(e.at).toLocaleTimeString()}
+                          </span>{" "}
+                          {e.message}
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </ScrollArea>
+              </div>
+            </div>
+          </div>
+        </ResizablePanel>
+
+        <ResizableHandle
+          withHandle
+          className="bg-border/70 data-[panel-group-direction=horizontal]:mx-2 data-[panel-group-direction=vertical]:my-2"
         />
-        <PrReviewCommentsPanel
-          combId={combId}
-          enabled={Boolean(useCombWorktreeApis && combId)}
-          activeFilePath={activeDiffFile?.path ?? null}
-          idKey={storageKey}
-          compact={compact}
-        />
-      </div>
+
+        <ResizablePanel
+          defaultSize={isMobile ? 64 : 70}
+          minSize={isMobile ? 52 : 60}
+          className="min-h-0 overflow-hidden"
+        >
+          <div className="flex h-full min-h-0 min-w-0 flex-col">
 
       <Dialog open={mergeDialogOpen} onOpenChange={setMergeDialogOpen}>
         <DialogContent className="sm:max-w-md">
@@ -1178,6 +1254,68 @@ export function RepoReviewSection({
         </DialogContent>
       </Dialog>
 
+      <Dialog open={flowHelpOpen} onOpenChange={setFlowHelpOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Fluxo de review e integração</DialogTitle>
+            <DialogDescription>
+              Este resumo detalha o caminho recomendado para usar a worktree como
+              área de decisão e manter o diff como foco principal.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh] pr-3">
+            <div className="space-y-4 py-2 text-sm">
+              <section className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Passo 1
+                </p>
+                <p className="mt-1 font-medium text-foreground">
+                  Worktree da Missão
+                </p>
+                <p className="mt-1 leading-relaxed text-muted-foreground">
+                  Faz commit e, se necessário, push do branch da Missão. Usa pull
+                  apenas para alinhar com o remoto antes de integrar.
+                </p>
+              </section>
+              <section className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Passo 2
+                </p>
+                <p className="mt-1 font-medium text-foreground">
+                  Repositório principal limpo
+                </p>
+                <p className="mt-1 leading-relaxed text-muted-foreground">
+                  O checkout principal precisa estar limpo. Se houver alterações
+                  locais, faz commit, stash ou descarta no principal antes do merge.
+                </p>
+              </section>
+              <section className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Integração
+                </p>
+                <p className="mt-1 leading-relaxed text-muted-foreground">
+                  O merge traz o branch inteiro da Missão para a branch de destino.
+                  O patch de &quot;Aplicar&quot; só deve ser usado em casos raros.
+                </p>
+              </section>
+              <section className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Pasta da Missão
+                </p>
+                <p className="mt-1 break-all font-mono text-[11px] text-foreground">
+                  {worktreePath}
+                </p>
+              </section>
+            </div>
+          </ScrollArea>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFlowHelpOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div
         className={cn(
           "flex min-h-0 flex-1 flex-col md:flex-row",
@@ -1192,7 +1330,7 @@ export function RepoReviewSection({
             compact={compact}
           />
         )}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-[1.2] flex-col">
           {diffs.loading ? null : diffs.error ? null : diffs.files.length === 0 ? null : (
             <div
               className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/20 px-2 py-1.5"
@@ -1254,8 +1392,8 @@ export function RepoReviewSection({
               </div>
             ) : (
               <div className="space-y-4 p-4">
-                <div className="scroll-mt-2 rounded-lg border border-border shadow-sm">
-                  <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+                <div className="overflow-hidden rounded-xl border border-border shadow-sm ring-1 ring-primary/5">
+                  <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b border-border/80 bg-background/95 px-3 py-2 backdrop-blur">
                     <Checkbox
                       checked={included[activeDiffFile.path] !== false}
                       onCheckedChange={(c) =>
@@ -1312,6 +1450,25 @@ export function RepoReviewSection({
                     <Badge variant="outline" className="shrink-0 text-[10px]">
                       {activeDiffFile.status}
                     </Badge>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="ml-auto gap-1 whitespace-nowrap"
+                      onClick={toggleReviewSidebar}
+                      title={
+                        sidebarCollapsed
+                          ? "Mostrar notas e comentários"
+                          : "Focar no diff e recolher a lateral"
+                      }
+                    >
+                      {sidebarCollapsed ? (
+                        <Minimize2 className="h-3.5 w-3.5" />
+                      ) : (
+                        <Maximize2 className="h-3.5 w-3.5" />
+                      )}
+                      {sidebarCollapsed ? "Mostrar lateral" : "Focar diff"}
+                    </Button>
                   </div>
                   {activeDiffTokens.length > 0 ? (
                     <div className="flex flex-wrap gap-1 border-b border-border/60 bg-muted/20 px-3 py-1.5">
@@ -1330,41 +1487,20 @@ export function RepoReviewSection({
                       ))}
                     </div>
                   ) : null}
-                  <DiffCodeBlock content={activeDiffFile.diff} />
+                  <DiffCodeBlock
+                    content={activeDiffFile.diff}
+                    maxHeightClassName="max-h-none"
+                    className="bg-background/40"
+                  />
                 </div>
               </div>
             )}
           </ScrollArea>
         </div>
-      </div>
-
-      <div
-        className={`shrink-0 border-t border-border bg-muted/20 ${compact ? "py-1.5" : ""}`}
-      >
-        <div className="px-3 py-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Trilha — {title}
-          </p>
-          <ScrollArea className={compact ? "h-16 pr-2" : "h-24 pr-2"}>
-            <ul className="space-y-1.5 text-xs text-muted-foreground">
-              {trail.length === 0 ? (
-                <li className="italic opacity-70">
-                  Eventos de revisão aparecem aqui.
-                </li>
-              ) : (
-                [...trail].reverse().map((e) => (
-                  <li key={e.id} className="leading-snug">
-                    <span className="font-mono text-[10px] opacity-70">
-                      {new Date(e.at).toLocaleTimeString()}
-                    </span>{" "}
-                    {e.message}
-                  </li>
-                ))
-              )}
-            </ul>
-          </ScrollArea>
+          </div>
         </div>
-      </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
 
       <CommitDialog
         open={commitDialogOpen}
