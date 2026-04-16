@@ -469,6 +469,7 @@ declare global {
           rolledBack?: boolean;
           worktreePath?: string;
           branch?: string;
+          warning?: string;
         }>;
         /** Atualiza última atividade Git por worktree (reflog/log/index) para combs do projeto. */
         refreshGitActivity: (projectId: string) => Promise<{ updated: number }>;

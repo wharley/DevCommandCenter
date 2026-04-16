@@ -1477,6 +1477,9 @@ export default function CmuxWorkspacePage() {
       try {
         const result = await api(combId);
         if (result.success) {
+          if (result.warning?.trim()) {
+            toast.info(result.warning);
+          }
           await refreshCombs();
           const refreshed = combsRef.current.find((c) => c.id === combId);
           const worktreePath = (result.worktreePath ?? refreshed?.worktreePath ?? comb.worktreePath ?? "").trim();

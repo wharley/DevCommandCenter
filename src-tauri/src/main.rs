@@ -1317,11 +1317,27 @@ fn git_worktree_last_activity_epoch(worktree: &str) -> Option<i64> {
     max_ts
 }
 
-fn stderr_mentions_missing_command(output: &std::process::Output) -> bool {
-    let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
-    let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
-    let combined = format!("{stderr}\n{stdout}");
-    combined.contains("command not found") || combined.contains("not found")
+fn setup_failure_mentions_missing_node_runtime(reason: &str) -> bool {
+    let reason = reason.to_lowercase();
+    let node_missing_patterns = [
+        "command not found: node",
+        "command not found: npm",
+        "command not found: pnpm",
+        "command not found: yarn",
+        "node: command not found",
+        "npm: command not found",
+        "pnpm: command not found",
+        "yarn: command not found",
+        "/usr/bin/env: node: no such file or directory",
+        "'node' is not recognized as an internal or external command",
+        "'npm' is not recognized as an internal or external command",
+        "'pnpm' is not recognized as an internal or external command",
+        "'yarn' is not recognized as an internal or external command",
+    ];
+
+    node_missing_patterns
+        .iter()
+        .any(|pattern| reason.contains(pattern))
 }
 
 /// Executa o script de setup do repositório no diretório do worktree.
@@ -1366,15 +1382,7 @@ fn run_repo_setup_script_unix(
             .current_dir(worktree_path)
             .output()
         {
-            Ok(output) => {
-                if output.status.success() {
-                    return Ok(output);
-                }
-                if stderr_mentions_missing_command(&output) {
-                    continue;
-                }
-                return Ok(output);
-            }
+            Ok(output) => return Ok(output),
             Err(err) => {
                 last_error = Some(err);
             }
@@ -5986,7 +5994,6 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
     } else {
         base_branch
     };
-
     if git_worktree_list_contains_path(&project_path, &worktree_path) {
         {
             let conn = state
@@ -6013,7 +6020,7 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
     let from_ref_git = from_ref.clone();
 
     enum EnsureWorktreeStep {
-        Ok,
+        Ok(Option<String>),
         SetupFailedAfterRollback(String),
     }
 
@@ -6034,6 +6041,12 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
             )?;
             if let Some(ref script) = setup_script {
                 if let Err(reason) = run_repo_setup_script(&worktree_path_git, script) {
+                    if setup_failure_mentions_missing_node_runtime(&reason) {
+                        return Ok(EnsureWorktreeStep::Ok(Some(
+                            "Node.js não encontrado. O workspace foi aberto, mas o setup automático não foi executado."
+                                .to_string(),
+                        )));
+                    }
                     git_remove_worktree_and_branch_best_effort(
                         &project_path_git,
                         &worktree_path_git,
@@ -6042,11 +6055,12 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
                     return Ok(EnsureWorktreeStep::SetupFailedAfterRollback(reason));
                 }
             }
-            Ok(EnsureWorktreeStep::Ok)
+            Ok(EnsureWorktreeStep::Ok(None))
         })
         .await
         .map_err(|e| db_error(e.to_string()))?;
 
+    let mut setup_warning: Option<String> = None;
     match step_result {
         Ok(EnsureWorktreeStep::SetupFailedAfterRollback(reason)) => {
             return Ok(serde_json::json!({
@@ -6055,12 +6069,14 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
                 "rolledBack": true
             }));
         }
+        Ok(EnsureWorktreeStep::Ok(warning)) => {
+            setup_warning = warning;
+        }
         Err(err) => {
             if !git_worktree_list_contains_path(&project_path, &worktree_path) {
                 return Err(err);
             }
         }
-        Ok(EnsureWorktreeStep::Ok) => {}
     }
 
     {
@@ -6078,7 +6094,8 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
     Ok(serde_json::json!({
         "success": true,
         "worktreePath": worktree_path,
-        "worktreeBranch": branch
+        "worktreeBranch": branch,
+        "warning": setup_warning
     }))
 }
 #[tauri::command]
