@@ -83,7 +83,7 @@ if (!isCompatible) {
   console.log(`  1. ${colors.bright}Se você tem nvm instalado:${colors.reset}`);
   console.log(`     ${colors.blue}./setup.sh${colors.reset}`);
   console.log("");
-  console.log(`  2. ${colors bright}OU execute manualmente:${colors.reset}`);
+  console.log(`  2. ${colors.bright}OU execute manualmente:${colors.reset}`);
   console.log(`     ${colors.blue}nvm use ${requiredVersion}${colors.reset}`);
   console.log(`     ${colors.blue}yarn install${colors.reset}`);
   console.log("");
