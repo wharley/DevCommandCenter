@@ -467,6 +467,22 @@ export function EmbeddedTerminal({
       fontSize: initialPrefs.fontSize,
       fontFamily: initialPrefs.fontFamily,
       theme: getXtermColorTheme(resolvedTheme, initialPrefs.useAppThemeColors),
+      windowOptions: {
+        // Desabilita queries automáticas de cores que causam caracteres estranhos
+        // quando o terminal ganha foco. OSC 52 (clipboard) continua funcionando
+        // pois é registrado manualmente via registerOscHandler
+        getWinSizePixels: false,
+        getCellSizePixels: false,
+        setWinPosition: false,
+        setWinSizePixels: false,
+        raiseWin: false,
+        lowerWin: false,
+        refreshWin: false,
+        setWinLines: false,
+        maximizeWin: false,
+        fullscreenWin: false,
+        restoreWin: false,
+      },
     });
 
     const fitAddon = new FitAddon();
@@ -492,6 +508,9 @@ export function EmbeddedTerminal({
     term.open(containerRef.current);
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
+
+    // Dá foco automático ao terminal para evitar necessidade de duplo clique
+    term.focus();
 
     const osc52Dispose = term.parser.registerOscHandler(52, (data) =>
       handleOsc52Payload(data, {

@@ -218,6 +218,7 @@ pub struct DaemonService {
     conn: Arc<Mutex<Connection>>,
     active_runs: Arc<Mutex<HashMap<String, RunningTask>>>,
     managed_processes: Arc<Mutex<HashMap<String, ManagedProcess>>>,
+    system: Arc<Mutex<System>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -802,8 +803,7 @@ fn process_key(project_id: &str, process_id: &str) -> String {
     format!("{project_id}:{process_id}")
 }
 
-fn collect_process_metrics(pid: u32) -> Option<(f64, f64)> {
-    let mut system = System::new();
+fn collect_process_metrics(system: &mut System, pid: u32) -> Option<(f64, f64)> {
     let sysinfo_pid = Pid::from_u32(pid);
 
     // Atualizar informações apenas do processo específico
@@ -822,9 +822,9 @@ fn collect_process_metrics(pid: u32) -> Option<(f64, f64)> {
     }
 }
 
-fn collect_daemon_health_snapshot() -> DaemonHealthSnapshot {
+fn collect_daemon_health_snapshot(system: &mut System) -> DaemonHealthSnapshot {
     let pid = std::process::id();
-    let (cpu_percent, memory_mb) = collect_process_metrics(pid).unwrap_or((0.0, 0.0));
+    let (cpu_percent, memory_mb) = collect_process_metrics(system, pid).unwrap_or((0.0, 0.0));
 
     DaemonHealthSnapshot {
         pid,
@@ -895,6 +895,7 @@ impl DaemonService {
             conn: Arc::new(Mutex::new(conn)),
             active_runs: Arc::new(Mutex::new(HashMap::new())),
             managed_processes: Arc::new(Mutex::new(HashMap::new())),
+            system: Arc::new(Mutex::new(System::new_all())),
         }))
     }
 
@@ -1247,6 +1248,12 @@ impl DaemonService {
         let mut to_restart = Vec::new();
         let mut metrics_updates = Vec::new();
 
+        // Obter lock do system para coleta de métricas
+        let mut system = self
+            .system
+            .lock()
+            .map_err(|_| "system lock poisoned".to_string())?;
+
         {
             let mut managed = self
                 .managed_processes
@@ -1273,7 +1280,7 @@ impl DaemonService {
                     ));
                 } else {
                     // Processo ainda está rodando - coletar métricas
-                    if let Some((cpu_percent, memory_mb)) = collect_process_metrics(pid) {
+                    if let Some((cpu_percent, memory_mb)) = collect_process_metrics(&mut system, pid) {
                         metrics_updates.push((
                             process.runtime.project_id.clone(),
                             process.runtime.process.id.clone(),
@@ -1513,7 +1520,13 @@ impl DaemonService {
     pub fn status(&self) -> Result<Value, String> {
         self.sweep_finished_tasks()?;
         self.sweep_managed_processes()?;
-        let health = collect_daemon_health_snapshot();
+        let health = {
+            let mut system = self
+                .system
+                .lock()
+                .map_err(|_| "system lock poisoned".to_string())?;
+            collect_daemon_health_snapshot(&mut system)
+        };
         let tasks = self.load_tasks()?;
         let mut total_tasks = 0i64;
         let mut enabled_tasks = 0i64;
@@ -1558,7 +1571,13 @@ impl DaemonService {
     }
 
     pub fn health(&self) -> Result<Value, String> {
-        let health = collect_daemon_health_snapshot();
+        let health = {
+            let mut system = self
+                .system
+                .lock()
+                .map_err(|_| "system lock poisoned".to_string())?;
+            collect_daemon_health_snapshot(&mut system)
+        };
         let last_tick_at = self
             .last_tick_at
             .lock()

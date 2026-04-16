@@ -12,9 +12,11 @@
     "vite": "node scripts/ensure-node.mjs && vite",
     "vite:build": "node scripts/ensure-node.mjs && vite build",
     "preview": "vite preview",
+    "setup": "bash setup.sh",
     "setup-worktree": "bash .devcommandcenter/setup-worktree.sh",
     "lint": "eslint .",
     "audit:tauri-stubs": "node scripts/audit-tauri-stubs.mjs",
+    "preinstall": "node scripts/check-node-version.mjs",
     "postinstall": "node scripts/patch-xterm-viewport.mjs"
   },
   "dependencies": {

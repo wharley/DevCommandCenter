@@ -497,6 +497,7 @@ struct DaemonState {
     started_at: String,
     last_tick_at: Arc<Mutex<Option<String>>>,
     running: Arc<AtomicBool>,
+    system: Arc<Mutex<System>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1633,9 +1634,8 @@ fn local_now_string() -> String {
     Local::now().to_rfc3339()
 }
 
-fn collect_daemon_health_snapshot() -> DaemonHealthSnapshot {
+fn collect_daemon_health_snapshot(system: &mut System) -> DaemonHealthSnapshot {
     let pid = std::process::id();
-    let mut system = System::new();
     let sysinfo_pid = Pid::from_u32(pid);
 
     system.refresh_process_specifics(sysinfo_pid, sysinfo::ProcessRefreshKind::new());
@@ -2060,7 +2060,14 @@ fn daemon_get_status_internal(state: &AppState) -> Result<Value, String> {
         .lock()
         .map_err(|_| "daemon lock poisoned".to_string())?
         .clone();
-    let health = collect_daemon_health_snapshot();
+    let health = {
+        let mut system = state
+            .daemon
+            .system
+            .lock()
+            .map_err(|_| "system lock poisoned".to_string())?;
+        collect_daemon_health_snapshot(&mut system)
+    };
 
     Ok(serde_json::json!({
         "mode": "in-process",
@@ -2084,7 +2091,14 @@ fn daemon_health_internal(state: &AppState) -> Result<Value, String> {
         .lock()
         .map_err(|_| "daemon lock poisoned".to_string())?
         .clone();
-    let health = collect_daemon_health_snapshot();
+    let health = {
+        let mut system = state
+            .daemon
+            .system
+            .lock()
+            .map_err(|_| "system lock poisoned".to_string())?;
+        collect_daemon_health_snapshot(&mut system)
+    };
 
     Ok(serde_json::json!({
         "ok": true,
@@ -8011,6 +8025,7 @@ pub fn run() {
                     started_at: local_now_string(),
                     last_tick_at: Arc::new(Mutex::new(None)),
                     running: Arc::new(AtomicBool::new(true)),
+                    system: Arc::new(Mutex::new(System::new_all())),
                 }),
                 daemon_endpoint: Arc::new(Mutex::new(None)),
             };
