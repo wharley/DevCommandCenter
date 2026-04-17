@@ -5339,6 +5339,156 @@ fn git_get_local_branches(project_path: String) -> ApiResult<Value> {
         branches.into_iter().map(Value::String).collect(),
     ))
 }
+
+#[tauri::command]
+fn git_get_status(project_path: String) -> ApiResult<Value> {
+    // Verifica se é repositório Git
+    let is_repo = std::path::Path::new(&project_path).join(".git").exists();
+
+    if !is_repo {
+        return Ok(serde_json::json!({
+            "isRepo": false,
+            "isDirty": false,
+            "staged": [],
+            "unstaged": [],
+            "untracked": []
+        }));
+    }
+
+    // Executa git status --porcelain
+    let status_output = match run_git(&project_path, &["status", "--porcelain"]) {
+        Ok(output) => output,
+        Err(_) => {
+            return Ok(serde_json::json!({
+                "isRepo": true,
+                "isDirty": false,
+                "staged": [],
+                "unstaged": [],
+                "untracked": []
+            }));
+        }
+    };
+
+    let mut staged = Vec::new();
+    let mut unstaged = Vec::new();
+    let mut untracked = Vec::new();
+
+    for line in status_output.lines() {
+        if line.len() < 4 {
+            continue;
+        }
+
+        let index_status = line.chars().nth(0).unwrap_or(' ');
+        let worktree_status = line.chars().nth(1).unwrap_or(' ');
+        let file_path = line[3..].trim().to_string();
+
+        // Untracked files
+        if line.starts_with("??") {
+            untracked.push(file_path);
+            continue;
+        }
+
+        // Staged changes (index status != ' ')
+        if index_status != ' ' && index_status != '?' {
+            staged.push(file_path.clone());
+        }
+
+        // Unstaged changes (worktree status != ' ')
+        if worktree_status != ' ' && worktree_status != '?' {
+            if !staged.contains(&file_path) {
+                unstaged.push(file_path);
+            }
+        }
+    }
+
+    let is_dirty = !staged.is_empty() || !unstaged.is_empty() || !untracked.is_empty();
+
+    Ok(serde_json::json!({
+        "isRepo": true,
+        "isDirty": is_dirty,
+        "staged": staged,
+        "unstaged": unstaged,
+        "untracked": untracked
+    }))
+}
+
+#[tauri::command]
+fn git_commit(
+    project_path: String,
+    message: String,
+    _files: Option<Vec<String>>,
+) -> ApiResult<Value> {
+    // git add -A
+    if let Err(e) = run_git(&project_path, &["add", "-A"]) {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": format!("Failed to stage files: {}", e.message)
+        }));
+    }
+
+    // git commit -m "message"
+    match run_git(&project_path, &["commit", "-m", &message]) {
+        Ok(_) => Ok(serde_json::json!({
+            "success": true
+        })),
+        Err(e) => {
+            // Check if error is because there's nothing to commit
+            if e.message.contains("nothing to commit") || e.message.contains("nothing added to commit") {
+                Ok(serde_json::json!({
+                    "success": false,
+                    "error": "Nothing to commit - working tree clean"
+                }))
+            } else {
+                Ok(serde_json::json!({
+                    "success": false,
+                    "error": format!("Commit failed: {}", e.message)
+                }))
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn git_push(project_path: String) -> ApiResult<Value> {
+    match run_git(&project_path, &["push"]) {
+        Ok(_) => Ok(serde_json::json!({
+            "success": true
+        })),
+        Err(e) => Ok(serde_json::json!({
+            "success": false,
+            "error": format!("Push failed: {}", e.message)
+        }))
+    }
+}
+
+#[tauri::command]
+fn git_pull(project_path: String) -> ApiResult<Value> {
+    match run_git(&project_path, &["pull"]) {
+        Ok(_) => Ok(serde_json::json!({
+            "success": true
+        })),
+        Err(e) => Ok(serde_json::json!({
+            "success": false,
+            "error": format!("Pull failed: {}", e.message)
+        }))
+    }
+}
+
+#[tauri::command]
+fn git_reset(project_path: String, git_ref: Option<String>) -> ApiResult<Value> {
+    let ref_target = git_ref.unwrap_or_else(|| "HEAD".to_string());
+
+    match run_git(&project_path, &["reset", "--hard", &ref_target]) {
+        Ok(_) => Ok(serde_json::json!({
+            "success": true
+        })),
+        Err(e) => Ok(serde_json::json!({
+            "success": false,
+            "error": format!("Reset failed: {}", e.message)
+        }))
+    }
+}
+
 #[tauri::command]
 fn git_get_review_diffs(worktree_path: String) -> ApiResult<Value> {
     match build_review_diffs_for_path(&worktree_path) {
@@ -6374,9 +6524,32 @@ async fn comb_apply_patch(
     state: State<'_, AppState>,
     comb_id: String,
     target_branch: String,
-    _options: Option<Value>,
+    options: Option<Value>,
 ) -> ApiResult<Value> {
     use std::fs;
+
+    // Parse options
+    let include_files: Option<Vec<String>> = options
+        .as_ref()
+        .and_then(|o| o.get("includeFiles"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        });
+
+    let should_commit = options
+        .as_ref()
+        .and_then(|o| o.get("commit"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let commit_message = options
+        .as_ref()
+        .and_then(|o| o.get("message"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     // 1. Buscar dados do comb
     let (project_path, worktree_path, base_branch) = {
@@ -6416,11 +6589,37 @@ async fn comb_apply_patch(
         // 3. Gerar patch file
         let patch_file = format!("/tmp/dcc-comb-{}.patch", comb_id_clone);
 
-        let patch_content =
+        // Gerar diff com ou sem filtro de arquivos
+        let patch_content = if let Some(ref files) = include_files {
+            if files.is_empty() {
+                return Ok(serde_json::json!({
+                    "success": false,
+                    "message": "No files selected to apply"
+                }));
+            }
+
+            // Criar array de argumentos dinamicamente
+            let mut args: Vec<&str> = vec!["diff", &base_branch, "HEAD", "--"];
+            let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
+            args.extend(file_refs);
+
+            run_git(&worktree_path, &args).map_err(|e| ApiError {
+                code: "GIT_ERROR",
+                message: format!("Failed to generate patch: {}", e.message),
+            })?
+        } else {
             run_git(&worktree_path, &["diff", &base_branch, "HEAD"]).map_err(|e| ApiError {
                 code: "GIT_ERROR",
                 message: format!("Failed to generate patch: {}", e.message),
-            })?;
+            })?
+        };
+
+        if patch_content.trim().is_empty() {
+            return Ok(serde_json::json!({
+                "success": false,
+                "message": "No changes to apply in selected files"
+            }));
+        }
 
         fs::write(&patch_file, &patch_content).map_err(|e| ApiError {
             code: "FILE_ERROR",
@@ -6455,7 +6654,28 @@ async fn comb_apply_patch(
 
         match apply_result {
             Ok(_) => {
-                // 8. Sucesso - atualizar status
+                // 8. Commit se solicitado
+                if should_commit {
+                    let msg = commit_message.unwrap_or_else(|| "Apply patch from worktree".to_string());
+
+                    // git add -A
+                    if let Err(e) = run_git(&project_path_clone, &["add", "-A"]) {
+                        return Ok(serde_json::json!({
+                            "success": false,
+                            "message": format!("Patch applied but failed to stage: {}", e.message)
+                        }));
+                    }
+
+                    // git commit
+                    if let Err(e) = run_git(&project_path_clone, &["commit", "-m", &msg]) {
+                        return Ok(serde_json::json!({
+                            "success": false,
+                            "message": format!("Patch applied but commit failed: {}", e.message)
+                        }));
+                    }
+                }
+
+                // 9. Sucesso - atualizar status
                 let conn = state_clone
                     .conn
                     .lock()
@@ -6468,7 +6688,11 @@ async fn comb_apply_patch(
 
                 Ok(serde_json::json!({
                     "success": true,
-                    "message": format!("Patch successfully applied to {}", target_branch)
+                    "message": if should_commit {
+                        format!("Patch successfully applied and committed to {}", target_branch)
+                    } else {
+                        format!("Patch successfully applied to {}", target_branch)
+                    }
                 }))
             }
             Err(e) => Ok(serde_json::json!({
@@ -7977,6 +8201,11 @@ pub fn run() {
             db_utils_get_size,
             git_get_current_branch,
             git_get_local_branches,
+            git_get_status,
+            git_commit,
+            git_push,
+            git_pull,
+            git_reset,
             git_get_review_diffs,
             review_get_diffs_bundle,
             worktree_read_notes,
