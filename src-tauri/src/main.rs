@@ -6497,6 +6497,188 @@ async fn comb_merge_into_main(
     .await
     .map_err(|e| db_error(e.to_string()))?
 }
+/// Verifica se o usuário tem permissões para fazer merge/push na branch de destino
+#[tauri::command]
+async fn comb_check_merge_permissions(
+    state: State<'_, AppState>,
+    comb_id: String,
+    target_branch: Option<String>,
+) -> ApiResult<Value> {
+    // 1. Buscar dados do comb e projeto
+    let (project_path, base_branch) = {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+
+        let row: Option<(String, Option<String>)> = conn
+            .query_row(
+                "SELECT p.path, c.base_branch
+                 FROM combs c JOIN projects p ON p.id = c.project_id
+                 WHERE c.id = ?1",
+                params![comb_id.clone()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| db_error(e.to_string()))?;
+
+        let Some((project_path, base_branch)) = row else {
+            return Err(db_error("Comb not found"));
+        };
+
+        (project_path, base_branch)
+    };
+
+    let target = target_branch
+        .or(base_branch)
+        .ok_or_else(|| db_error("No target branch specified and no base branch configured"))?;
+    let project_path_clone = project_path.clone();
+    let target_clone = target.clone();
+
+    // 2. Executar verificações em background
+    tauri::async_runtime::spawn_blocking(move || {
+        // Verificar se existe remote configurado
+        let remote_check = run_git(&project_path_clone, &["remote", "get-url", "origin"]);
+        if remote_check.is_err() {
+            return Ok(serde_json::json!({
+                "canMerge": true,
+                "reason": null,
+                "isProtected": false,
+                "requiresPR": false,
+                "isLocalOnly": true,
+                "warning": "Repositório não possui remote configurado. Merge será apenas local."
+            }));
+        }
+
+        // Verificar branch atual
+        let current_branch = run_git(&project_path_clone, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+
+        // Se já estamos na branch de destino, permitir merge
+        if current_branch == target_clone {
+            return Ok(serde_json::json!({
+                "canMerge": true,
+                "reason": null,
+                "isProtected": false,
+                "requiresPR": false,
+                "isLocalOnly": false
+            }));
+        }
+
+        // Tentar verificar permissões via dry-run push
+        // Primeiro, fazer fetch da branch de destino para ter referência atualizada
+        let _ = run_git(
+            &project_path_clone,
+            &["fetch", "origin", &format!("{}:{}", target_clone, target_clone)],
+        );
+
+        // Verificar se conseguimos fazer push (dry-run)
+        let push_check = Command::new("git")
+            .args(&["push", "--dry-run", "origin", &target_clone])
+            .current_dir(&project_path_clone)
+            .output();
+
+        match push_check {
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+                let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+                let combined = format!("{} {}", stderr, stdout);
+
+                // Verificar indicadores de falta de permissão
+                if combined.contains("permission") && combined.contains("denied")
+                    || combined.contains("protected branch")
+                    || combined.contains("required status checks")
+                    || combined.contains("required reviews")
+                    || combined.contains("cannot push")
+                    || combined.contains("forbidden")
+                    || combined.contains("403")
+                {
+                    return Ok(serde_json::json!({
+                        "canMerge": false,
+                        "reason": "Você não tem permissão para push nesta branch. A branch pode estar protegida ou você não tem acesso de escrita.",
+                        "isProtected": true,
+                        "requiresPR": true,
+                        "isLocalOnly": false
+                    }));
+                }
+
+                // Se não há nada para push, significa que temos permissão
+                if combined.contains("up-to-date") || combined.contains("everything up-to-date") {
+                    return Ok(serde_json::json!({
+                        "canMerge": true,
+                        "reason": null,
+                        "isProtected": false,
+                        "requiresPR": false,
+                        "isLocalOnly": false
+                    }));
+                }
+
+                // Se o comando foi bem-sucedido, assumimos que temos permissão
+                if output.status.success() {
+                    return Ok(serde_json::json!({
+                        "canMerge": true,
+                        "reason": null,
+                        "isProtected": false,
+                        "requiresPR": false,
+                        "isLocalOnly": false
+                    }));
+                }
+
+                // Caso contrário, verificar via gh CLI se disponível
+                let gh_check = Command::new("gh")
+                    .args(&["api", &format!("repos/{{owner}}/{{repo}}/branches/{}", target_clone), "--jq", ".protected"])
+                    .current_dir(&project_path_clone)
+                    .output();
+
+                if let Ok(gh_output) = gh_check {
+                    if gh_output.status.success() {
+                        let is_protected = String::from_utf8_lossy(&gh_output.stdout)
+                            .trim()
+                            .to_lowercase();
+
+                        if is_protected == "true" {
+                            return Ok(serde_json::json!({
+                                "canMerge": false,
+                                "reason": "Branch protegida. Crie um Pull Request para integrar suas alterações.",
+                                "isProtected": true,
+                                "requiresPR": true,
+                                "isLocalOnly": false
+                            }));
+                        }
+                    }
+                }
+
+                // Se chegou aqui, não conseguimos determinar com certeza
+                // Ser conservador e permitir, mas avisar
+                Ok(serde_json::json!({
+                    "canMerge": true,
+                    "reason": null,
+                    "isProtected": false,
+                    "requiresPR": false,
+                    "isLocalOnly": false,
+                    "warning": "Não foi possível verificar permissões completas. Prossiga com cautela."
+                }))
+            }
+            Err(_) => {
+                // Se falhou ao executar comando, assumir que pode tentar
+                // mas avisar
+                Ok(serde_json::json!({
+                    "canMerge": true,
+                    "reason": null,
+                    "isProtected": false,
+                    "requiresPR": false,
+                    "isLocalOnly": false,
+                    "warning": "Não foi possível verificar permissões. Prossiga com cautela."
+                }))
+            }
+        }
+    })
+    .await
+    .map_err(|e| db_error(format!("Task join error: {}", e)))?
+}
+
 #[tauri::command]
 fn comb_get_diffs(state: State<'_, AppState>, comb_id: String) -> ApiResult<Value> {
     let conn = state
@@ -7045,7 +7227,21 @@ fn detect_terminal_agent_kind(
 
 fn normalize_terminal_title(raw: &str) -> Option<String> {
     let stripped = strip_ansi_codes(raw);
-    let collapsed = stripped
+
+    // Remove OSC sequence residues (e.g., "11;rgb:1a1a/1a1a/1a1a")
+    // Pattern: digit(s) followed by semicolon and rgb/hex color data
+    let osc_cleaned = stripped
+        .split_whitespace()
+        .filter(|word| {
+            // Filter out OSC color code patterns like "11;rgb:..." or "10;#..."
+            !word.chars().next().map_or(false, |c| c.is_ascii_digit())
+                || !word.contains(';')
+                || (!word.contains("rgb:") && !word.contains('#'))
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let collapsed = osc_cleaned
         .chars()
         .map(|ch| if ch.is_control() { ' ' } else { ch })
         .collect::<String>();
@@ -7149,6 +7345,18 @@ mod tests {
     fn normalize_terminal_title_collapses_whitespace_and_strips_controls() {
         let title = normalize_terminal_title("  Claude\tCode  \u{1b}[31m- Dev \u{1b}[0m  ");
         assert_eq!(title.as_deref(), Some("Claude Code - Dev"));
+    }
+
+    #[test]
+    fn normalize_terminal_title_removes_osc_color_codes() {
+        let title = normalize_terminal_title("service-dashboard git:(main) 11;rgb:1a1a/1a1a/1a1a");
+        assert_eq!(title.as_deref(), Some("service-dashboard git:(main)"));
+    }
+
+    #[test]
+    fn normalize_terminal_title_removes_multiple_osc_patterns() {
+        let title = normalize_terminal_title("myapp 10;#ffffff 11;rgb:0000/0000/0000 test");
+        assert_eq!(title.as_deref(), Some("myapp test"));
     }
 
     #[test]
@@ -8220,6 +8428,7 @@ pub fn run() {
             comb_discard,
             comb_check_unpushed,
             comb_merge_into_main,
+            comb_check_merge_permissions,
             comb_get_diffs,
             comb_apply_patch,
             terminal_spawn,

@@ -64,6 +64,7 @@ import { DiffCodeBlock } from "@/components/diff-code-block";
 import { CommitDialog } from "@/components/dialogs/commit-dialog";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useMergePermissions } from "@/hooks/use-merge-permissions";
 import { extractContextTokens } from "@/lib/review/extract-context-tokens";
 import type { GitStatus } from "@/types/app";
 import { toast } from "sonner";
@@ -465,6 +466,15 @@ export function RepoReviewSection({
     useCombWorktreeApis && combId && window.desktopAPI?.comb?.mergeIntoMain,
   );
 
+  // Verificar permissões de merge/push na branch de destino
+  const mergePermissions = useMergePermissions(
+    useCombWorktreeApis && combId ? combId : null,
+    targetBranch,
+    {
+      enabled: canMergeComb, // Só verificar se o merge está habilitado
+    }
+  );
+
   const refreshMainRepoStatus = useCallback(async () => {
     if (!mainProjectPath?.trim() || !window.desktopAPI?.git?.getStatus) {
       setMainRepoStatus(null);
@@ -499,7 +509,8 @@ export function RepoReviewSection({
   const mergeUiBlocked =
     !canMergeComb ||
     mainRepoDirty ||
-    worktreeDirty;
+    worktreeDirty ||
+    !mergePermissions.canMerge;
 
   const mainDirtyFilePreview = useMemo(() => {
     if (!mainRepoStatus?.isDirty) return [];
@@ -981,6 +992,56 @@ export function RepoReviewSection({
                 <span className="font-mono">{targetBranch || "…"}</span>. O principal
                 tem de estar limpo (sem alterações locais na raiz do projeto).
               </p>
+
+              {mergePermissions.requiresPR && !mergePermissions.canMerge && (
+                <Alert className="border-blue-500/50 bg-blue-500/10">
+                  <Info className="h-4 w-4 text-blue-500" />
+                  <AlertTitle className="text-xs font-semibold">
+                    Branch Protegida - Pull Request Necessário
+                  </AlertTitle>
+                  <AlertDescription className="text-[11px] space-y-2">
+                    <p>
+                      {mergePermissions.reason || "Você não tem permissão para fazer merge direto nesta branch."}
+                    </p>
+                    <p className="font-medium">
+                      Para integrar suas alterações:
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1 ml-2">
+                      <li>Certifique-se de que fez commit e push das suas alterações</li>
+                      <li>Abra um Pull Request no GitHub/GitLab</li>
+                      <li>Aguarde aprovação e merge pelo responsável</li>
+                    </ol>
+                    {window.desktopAPI?.shell?.openExternal && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-2 h-7 text-xs border-blue-500/50 hover:bg-blue-500/20"
+                        onClick={() => {
+                          // Tentar abrir PR no GitHub/GitLab
+                          // TODO: Melhorar detecção de URL do repo
+                          toast.info("Abra o navegador e crie o Pull Request no seu repositório remoto.");
+                        }}
+                      >
+                        Como criar Pull Request
+                      </Button>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {mergePermissions.isLocalOnly && (
+                <Alert className="border-amber-500/50 bg-amber-500/10">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  <AlertTitle className="text-xs font-semibold">
+                    Repositório Apenas Local
+                  </AlertTitle>
+                  <AlertDescription className="text-[11px]">
+                    Este repositório não possui remote configurado. O merge será apenas local
+                    e não será sincronizado com nenhum servidor remoto.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   size="sm"
@@ -988,11 +1049,15 @@ export function RepoReviewSection({
                   title={
                     !canMergeComb
                       ? "Disponível só no target principal da Missão."
-                      : mainRepoDirty
-                        ? "Limpe alterações no repositório principal antes do merge (ou use Descartar no alerta acima)."
-                        : worktreeDirty
-                          ? "Faça commit ou descarte na worktree antes do merge."
-                          : undefined
+                      : !mergePermissions.canMerge && mergePermissions.reason
+                        ? mergePermissions.reason
+                        : mainRepoDirty
+                          ? "Limpe alterações no repositório principal antes do merge (ou use Descartar no alerta acima)."
+                          : worktreeDirty
+                            ? "Faça commit ou descarte na worktree antes do merge."
+                            : mergePermissions.warning
+                              ? mergePermissions.warning
+                              : undefined
                   }
                   onClick={handleMergeClick}
                 >

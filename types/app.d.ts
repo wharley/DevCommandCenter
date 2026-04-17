@@ -496,6 +496,17 @@ declare global {
           success: boolean;
           error?: string;
         }>;
+        checkMergePermissions: (
+          combId: string,
+          targetBranch?: string
+        ) => Promise<{
+          canMerge: boolean;
+          reason?: string | null;
+          isProtected: boolean;
+          requiresPR: boolean;
+          isLocalOnly: boolean;
+          warning?: string;
+        }>;
         getDiffs: (combId: string) => Promise<{
           success: boolean;
           error?: string;

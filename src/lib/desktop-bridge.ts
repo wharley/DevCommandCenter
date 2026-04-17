@@ -226,6 +226,15 @@ export function installDesktopBridge(): void {
       checkUnpushed: (combId) => call<{ hasUnpushed: boolean; count: number; commits: string[] }>("comb_check_unpushed", { combId }),
       mergeIntoMain: (combId, targetBranch) =>
         call("comb_merge_into_main", { combId, targetBranch }),
+      checkMergePermissions: (combId, targetBranch) =>
+        call<{
+          canMerge: boolean;
+          reason?: string | null;
+          isProtected: boolean;
+          requiresPR: boolean;
+          isLocalOnly: boolean;
+          warning?: string;
+        }>("comb_check_merge_permissions", { combId, targetBranch }),
       getDiffs: (combId) => call("comb_get_diffs", { combId }),
       applyPatch: (combId, targetBranch, options) =>
         call("comb_apply_patch", { combId, targetBranch, options }),

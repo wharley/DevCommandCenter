@@ -806,8 +806,10 @@ fn process_key(project_id: &str, process_id: &str) -> String {
 fn collect_process_metrics(system: &mut System, pid: u32) -> Option<(f64, f64)> {
     let sysinfo_pid = Pid::from_u32(pid);
 
-    // Atualizar informações apenas do processo específico
-    system.refresh_process_specifics(sysinfo_pid, ProcessRefreshKind::new());
+    // Atualizar informações do processo específico, incluindo CPU
+    // Nota: Para medições precisas de CPU, a sysinfo precisa de múltiplas amostragens.
+    // A primeira chamada inicializa o estado, as subsequentes retornam valores reais.
+    system.refresh_process_specifics(sysinfo_pid, ProcessRefreshKind::new().with_cpu().with_memory());
 
     if let Some(process) = system.process(sysinfo_pid) {
         // CPU em porcentagem
@@ -1254,6 +1256,10 @@ impl DaemonService {
             .lock()
             .map_err(|_| "system lock poisoned".to_string())?;
 
+        // Atualizar todos os processos para ter baseline de CPU
+        // Isso é necessário para que as medições de CPU sejam precisas
+        system.refresh_processes_specifics(ProcessRefreshKind::new().with_cpu());
+
         {
             let mut managed = self
                 .managed_processes
@@ -1525,6 +1531,8 @@ impl DaemonService {
                 .system
                 .lock()
                 .map_err(|_| "system lock poisoned".to_string())?;
+            // sweep_managed_processes já fez refresh, mas garantimos aqui também
+            system.refresh_processes_specifics(ProcessRefreshKind::new().with_cpu());
             collect_daemon_health_snapshot(&mut system)
         };
         let tasks = self.load_tasks()?;
@@ -1576,6 +1584,8 @@ impl DaemonService {
                 .system
                 .lock()
                 .map_err(|_| "system lock poisoned".to_string())?;
+            // Atualizar processos para ter baseline de CPU atualizada
+            system.refresh_processes_specifics(ProcessRefreshKind::new().with_cpu());
             collect_daemon_health_snapshot(&mut system)
         };
         let last_tick_at = self
