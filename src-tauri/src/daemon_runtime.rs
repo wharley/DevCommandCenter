@@ -262,6 +262,16 @@ fn open_connection(db_path: &Path) -> Result<Connection, String> {
     Ok(conn)
 }
 
+fn path_with_node_modules_bin(project_path: &str) -> String {
+    let bin_path = format!("{}/node_modules/.bin", project_path);
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    if current_path.is_empty() {
+        bin_path
+    } else {
+        format!("{}:{}", bin_path, current_path)
+    }
+}
+
 fn local_shell_command(command: &str) -> (String, Vec<String>) {
     if cfg!(windows) {
         (
@@ -269,10 +279,8 @@ fn local_shell_command(command: &str) -> (String, Vec<String>) {
             vec!["/C".to_string(), command.to_string()],
         )
     } else {
-        (
-            "sh".to_string(),
-            vec!["-lc".to_string(), command.to_string()],
-        )
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
+        (shell, vec!["-lc".to_string(), command.to_string()])
     }
 }
 
@@ -1018,6 +1026,7 @@ impl DaemonService {
         let mut command = Command::new(program);
         command.args(args);
         command.current_dir(&cwd);
+        command.env("PATH", path_with_node_modules_bin(&runtime.project_path));
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
 
@@ -1085,6 +1094,7 @@ impl DaemonService {
         let mut command = Command::new(program);
         command.args(args);
         command.current_dir(&cwd);
+        command.env("PATH", path_with_node_modules_bin(&runtime.project_path));
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
 
@@ -1456,6 +1466,7 @@ impl DaemonService {
         let mut command = Command::new(program);
         command.args(args);
         command.current_dir(&cwd);
+        command.env("PATH", path_with_node_modules_bin(&runtime.project_path));
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
 
