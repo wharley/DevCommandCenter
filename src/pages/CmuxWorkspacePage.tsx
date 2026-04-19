@@ -55,6 +55,13 @@ import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider
 import { usePanes, useProjects, useProviders } from "@/hooks/use-data";
 import { useTheme } from "@/components/theme-provider";
 import { CombReviewPanel } from "@/components/review/comb-review-panel";
+import { GitActionsPanel } from "@/components/review/git-actions-panel";
+import { CommitDialog } from "@/components/dialogs/commit-dialog";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 import SettingsPage from "@/src/pages/SettingsPage";
 import { normalizeComb, normalizeCombs, normalizePanes } from "@/lib/database/normalize";
 import type {
@@ -989,6 +996,21 @@ export default function CmuxWorkspacePage() {
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceMainView>("panes");
   const [attentionRecords, setAttentionRecords] = useState<TerminalAttentionRecord[]>([]);
+
+  // ── Git sidebar state ────────────────────────────────────────────
+  const [gitSidebarFiles, setGitSidebarFiles] = useState<Array<{
+    path: string; status: string; diff: string; insertions?: number; deletions?: number;
+  }>>([]);
+  const [gitSidebarLoading, setGitSidebarLoading] = useState(false);
+  const [gitSidebarIsPushing, setGitSidebarIsPushing] = useState(false);
+  const [gitSidebarIsPulling, setGitSidebarIsPulling] = useState(false);
+  const [gitSidebarIsMerging, setGitSidebarIsMerging] = useState(false);
+  const [gitSidebarCommitOpen, setGitSidebarCommitOpen] = useState(false);
+  const [gitSidebarMergeOpen, setGitSidebarMergeOpen] = useState(false);
+  const [gitSidebarWorktreeDirty, setGitSidebarWorktreeDirty] = useState(false);
+  const [gitSidebarMainDirty, setGitSidebarMainDirty] = useState(false);
+  const [gitSidebarTargetBranch, setGitSidebarTargetBranch] = useState("");
+  const [gitSidebarBranchList, setGitSidebarBranchList] = useState<string[]>([]);
   const [initializingBasePaneIds, setInitializingBasePaneIds] = useState<Set<string>>(new Set());
   const [workspacePrepCombId, setWorkspacePrepCombId] = useState<string | null>(null);
   const [workspaceRemovalDialog, setWorkspaceRemovalDialog] = useState<WorkspaceRemovalDialogState | null>(null);
@@ -1598,6 +1620,149 @@ export default function CmuxWorkspacePage() {
   const handleOpenPanes = useCallback(() => {
     setWorkspaceView("panes");
   }, []);
+
+  // ── Git sidebar logic ────────────────────────────────────────────
+  const activeCombWorktreePath = activeComb?.worktreePath?.trim() ?? "";
+  const activeCombMainPath = activeProject?.path ?? "";
+
+  const loadGitSidebarDiffs = useCallback(async (worktreePath: string) => {
+    if (!worktreePath || !window.desktopAPI?.git?.getReviewDiffs) return;
+    setGitSidebarLoading(true);
+    try {
+      const result = await window.desktopAPI.git.getReviewDiffs(worktreePath);
+      if (result.success) {
+        setGitSidebarFiles(result.files ?? []);
+      } else {
+        setGitSidebarFiles([]);
+      }
+    } catch {
+      setGitSidebarFiles([]);
+    } finally {
+      setGitSidebarLoading(false);
+    }
+  }, []);
+
+  const refreshGitSidebarStatus = useCallback(async (worktreePath: string, mainPath: string) => {
+    const git = window.desktopAPI?.git;
+    if (!git?.getStatus) return;
+    const [wt, main] = await Promise.allSettled([
+      worktreePath ? git.getStatus(worktreePath) : Promise.resolve(null),
+      mainPath ? git.getStatus(mainPath) : Promise.resolve(null),
+    ]);
+    setGitSidebarWorktreeDirty(wt.status === "fulfilled" && (wt.value?.isDirty ?? false));
+    setGitSidebarMainDirty(main.status === "fulfilled" && (main.value?.isDirty ?? false));
+  }, []);
+
+  useEffect(() => {
+    if (!activeCombWorktreePath) {
+      setGitSidebarFiles([]);
+      setGitSidebarBranchList([]);
+      setGitSidebarTargetBranch("");
+      return;
+    }
+    void loadGitSidebarDiffs(activeCombWorktreePath);
+    void refreshGitSidebarStatus(activeCombWorktreePath, activeCombMainPath);
+    const git = window.desktopAPI?.git;
+    if (!activeCombMainPath || !git?.getLocalBranches || !git?.getCurrentBranch) return;
+    Promise.all([git.getLocalBranches(activeCombMainPath), git.getCurrentBranch(activeCombMainPath)])
+      .then(([branches, current]) => {
+        const list = branches ?? [];
+        setGitSidebarBranchList(list);
+        setGitSidebarTargetBranch((prev) => prev || (current ?? "").trim() || list[0] || "main");
+      })
+      .catch(() => undefined);
+  }, [activeCombWorktreePath, activeCombMainPath, loadGitSidebarDiffs, refreshGitSidebarStatus]);
+
+  const handleGitSidebarCommit = useCallback(async (message: string) => {
+    if (!activeCombWorktreePath || !window.desktopAPI?.git?.commit) return;
+    const result = await window.desktopAPI.git.commit(activeCombWorktreePath, message);
+    if (result.success) {
+      toast.success("Commit realizado");
+      void loadGitSidebarDiffs(activeCombWorktreePath);
+      void refreshGitSidebarStatus(activeCombWorktreePath, activeCombMainPath);
+      await refreshCombs({ silent: true });
+    } else {
+      toast.error(result.error ?? "Falha no commit");
+      throw new Error(result.error ?? "Falha no commit");
+    }
+  }, [activeCombWorktreePath, activeCombMainPath, loadGitSidebarDiffs, refreshGitSidebarStatus, refreshCombs]);
+
+  const handleGitSidebarPush = useCallback(async () => {
+    if (!activeCombWorktreePath || !window.desktopAPI?.git?.push) return;
+    setGitSidebarIsPushing(true);
+    try {
+      const result = await window.desktopAPI.git.push(activeCombWorktreePath);
+      if (result?.success) {
+        toast.success("Push enviado");
+        void loadGitSidebarDiffs(activeCombWorktreePath);
+      } else {
+        toast.error(result?.error ?? "Falha ao fazer push");
+      }
+    } finally {
+      setGitSidebarIsPushing(false);
+    }
+  }, [activeCombWorktreePath, loadGitSidebarDiffs]);
+
+  const handleGitSidebarPull = useCallback(async () => {
+    if (!activeCombWorktreePath || !window.desktopAPI?.git?.pull) return;
+    setGitSidebarIsPulling(true);
+    try {
+      const result = await window.desktopAPI.git.pull(activeCombWorktreePath);
+      if (result?.success) {
+        toast.success("Pull concluído");
+        void loadGitSidebarDiffs(activeCombWorktreePath);
+        void refreshGitSidebarStatus(activeCombWorktreePath, activeCombMainPath);
+      } else {
+        toast.error(result?.error ?? "Falha ao fazer pull");
+      }
+    } finally {
+      setGitSidebarIsPulling(false);
+    }
+  }, [activeCombWorktreePath, activeCombMainPath, loadGitSidebarDiffs, refreshGitSidebarStatus]);
+
+  const handleGitSidebarDiscard = useCallback(async () => {
+    if (!activeCombWorktreePath || !window.desktopAPI?.git?.reset) return;
+    const ok = await confirmDialog({
+      title: "Descartar alterações locais?",
+      description: "Será executado git reset --hard neste worktree.",
+      confirmLabel: "Descartar",
+      cancelLabel: "Cancelar",
+    });
+    if (!ok) return;
+    const result = await window.desktopAPI.git.reset(activeCombWorktreePath, "HEAD");
+    if (result.success) {
+      toast.success("Alterações descartadas");
+      void loadGitSidebarDiffs(activeCombWorktreePath);
+      void refreshGitSidebarStatus(activeCombWorktreePath, activeCombMainPath);
+    } else {
+      toast.error(result.error ?? "Falha ao descartar");
+    }
+  }, [activeCombWorktreePath, activeCombMainPath, confirmDialog, loadGitSidebarDiffs, refreshGitSidebarStatus]);
+
+  const handleGitSidebarMerge = useCallback(async () => {
+    if (!activeComb?.id || !gitSidebarTargetBranch) return;
+    setGitSidebarIsMerging(true);
+    try {
+      const result = await window.desktopAPI?.comb?.mergeIntoMain(activeComb.id, gitSidebarTargetBranch);
+      if (result?.success) {
+        toast.success("Merge concluído");
+        setGitSidebarMergeOpen(false);
+        void loadGitSidebarDiffs(activeCombWorktreePath);
+        void refreshGitSidebarStatus(activeCombWorktreePath, activeCombMainPath);
+        await refreshCombs({ silent: true });
+      } else {
+        toast.error(result?.error ?? "Falha ao fazer merge");
+      }
+    } finally {
+      setGitSidebarIsMerging(false);
+    }
+  }, [activeComb, gitSidebarTargetBranch, activeCombWorktreePath, activeCombMainPath, loadGitSidebarDiffs, refreshGitSidebarStatus, refreshCombs]);
+
+  const canMergeGitSidebar = Boolean(
+    activeComb?.id && activeCombWorktreePath && window.desktopAPI?.comb?.mergeIntoMain,
+  );
+  const mergeGitSidebarBlocked =
+    !canMergeGitSidebar || gitSidebarWorktreeDirty || gitSidebarMainDirty || gitSidebarIsMerging;
 
   const handleWorkspacePointerDown = useCallback((comb: Comb) => {
     if (pointerPressClearTimeoutRef.current != null) {
@@ -2853,22 +3018,6 @@ export default function CmuxWorkspacePage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button
-                  variant={workspaceView === "panes" ? "default" : "outline"}
-                  size="sm"
-                  onClick={handleOpenPanes}
-                >
-                  <Terminal className="mr-1 h-3.5 w-3.5" />
-                  Panes
-                </Button>
-                <Button
-                  variant={workspaceView === "review" ? "default" : "outline"}
-                  size="sm"
-                  onClick={handleOpenReview}
-                >
-                  <GitPullRequest className="mr-1 h-3.5 w-3.5" />
-                  Review
-                </Button>
                 <Tooltip>
                   <TooltipTrigger asChild>
             <Button variant="outline" size="sm" onClick={handleOpenBaseTerminal}>
@@ -2925,7 +3074,9 @@ export default function CmuxWorkspacePage() {
                   </div>
                 </div>
               ) : null}
-              <div className={workspaceView === "panes" ? "flex h-full min-h-0 flex-col overflow-hidden" : "hidden"}>
+              <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
+                <ResizablePanel defaultSize={75} minSize={40} className="min-h-0 overflow-hidden">
+              <div className="flex h-full min-h-0 flex-col overflow-hidden">
                 {panesLoading ? (
                   <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
                     <Loader2 className="h-10 w-10 animate-spin text-muted-foreground/35" />
@@ -2995,17 +3146,81 @@ export default function CmuxWorkspacePage() {
                   </div>
                 )}
               </div>
-              <div className={workspaceView === "review" ? "flex h-full min-h-0 flex-col overflow-hidden" : "hidden"}>
-                <CombReviewPanel
-                  comb={activeComb}
-                  mainProjectPath={activeProject?.path ?? ""}
-                  projects={sortedProjects}
-                  updateComb={updateComb}
-                  onAction={async () => {
-                    await refreshCombs();
-                  }}
-                />
-              </div>
+                </ResizablePanel>
+
+                <ResizableHandle withHandle className="bg-border/70" />
+
+                {/* ── Git Actions sidebar (always visible) ── */}
+                <ResizablePanel
+                  defaultSize={25}
+                  minSize={18}
+                  maxSize={42}
+                  className="min-h-0 overflow-hidden"
+                >
+                  {activeCombWorktreePath ? (
+                    <GitActionsPanel
+                      files={gitSidebarLoading ? [] : gitSidebarFiles}
+                      fileFlags={{}}
+                      activeDiffPath={null}
+                      onFileSelect={() => void 0}
+                      isPushing={gitSidebarIsPushing}
+                      isPulling={gitSidebarIsPulling}
+                      isMerging={gitSidebarIsMerging}
+                      worktreeDirty={gitSidebarWorktreeDirty}
+                      mainRepoDirty={gitSidebarMainDirty}
+                      canMergeComb={canMergeGitSidebar}
+                      mergeUiBlocked={mergeGitSidebarBlocked}
+                      onCommit={() => setGitSidebarCommitOpen(true)}
+                      onPush={() => void handleGitSidebarPush()}
+                      onPull={() => void handleGitSidebarPull()}
+                      onDiscard={() => void handleGitSidebarDiscard()}
+                      onMerge={() => setGitSidebarMergeOpen(true)}
+                      targetBranch={gitSidebarTargetBranch}
+                      branchList={gitSidebarBranchList}
+                      onTargetBranchChange={setGitSidebarTargetBranch}
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center p-4">
+                      <p className="text-center text-xs text-muted-foreground">
+                        Seleciona um workspace para ver as alterações git.
+                      </p>
+                    </div>
+                  )}
+                </ResizablePanel>
+              </ResizablePanelGroup>
+
+              {/* CommitDialog + MergeDialog for sidebar */}
+              <CommitDialog
+                open={gitSidebarCommitOpen}
+                onOpenChange={setGitSidebarCommitOpen}
+                onCommit={handleGitSidebarCommit}
+                defaultMessage={activeComb ? `Changes from mission: ${activeComb.branch ?? activeComb.id}` : ""}
+                projectPath={activeCombWorktreePath}
+                status={null}
+              />
+              <Dialog open={gitSidebarMergeOpen} onOpenChange={setGitSidebarMergeOpen}>
+                <DialogContent className="sm:max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>Merge na branch de destino</DialogTitle>
+                    <DialogDescription>
+                      Integra o branch da Missão em{" "}
+                      <span className="font-mono">{gitSidebarTargetBranch || "…"}</span>.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setGitSidebarMergeOpen(false)}>
+                      Cancelar
+                    </Button>
+                    <Button
+                      onClick={() => void handleGitSidebarMerge()}
+                      disabled={gitSidebarIsMerging || mergeGitSidebarBlocked}
+                    >
+                      {gitSidebarIsMerging && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Merge
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </>
         ) : (
