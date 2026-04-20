@@ -98,6 +98,7 @@ import { useAppWindowTitle } from "@/hooks/use-app-window-title";
 import { useWorktreeNavigationHistory } from "@/hooks/use-worktree-navigation-history";
 import { PaneTab } from "@/components/pane-tab";
 import { formatRelativeTimeFromNow } from "@/lib/format-relative-time";
+import { DiffViewer } from "@/components/review/diff-viewer";
 
 const CLI_PROVIDER_TYPES = ["codex", "claude-code", "gemini", "cursor"] as const;
 
@@ -1002,6 +1003,8 @@ export default function CmuxWorkspacePage() {
     path: string; status: string; diff: string; insertions?: number; deletions?: number;
   }>>([]);
   const [gitSidebarLoading, setGitSidebarLoading] = useState(false);
+  const [activeDiffPath, setActiveDiffPath] = useState<string | null>(null);
+  const [diffTabActive, setDiffTabActive] = useState(false);
   const [gitSidebarIsPushing, setGitSidebarIsPushing] = useState(false);
   const [gitSidebarIsPulling, setGitSidebarIsPulling] = useState(false);
   const [gitSidebarIsMerging, setGitSidebarIsMerging] = useState(false);
@@ -3082,7 +3085,7 @@ export default function CmuxWorkspacePage() {
                     <Loader2 className="h-10 w-10 animate-spin text-muted-foreground/35" />
                     <p className="text-sm text-muted-foreground">A abrir workspace…</p>
                   </div>
-                ) : visiblePanes.length === 0 ? (
+                ) : visiblePanes.length === 0 && !activeDiffPath ? (
                   <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
                     <Terminal className="h-12 w-12 text-muted-foreground/30" />
                     <p className="text-sm text-muted-foreground">Nenhum pane aberto neste workspace</p>
@@ -3102,7 +3105,7 @@ export default function CmuxWorkspacePage() {
                             {visiblePanes.map((pane, index) => {
                               const provider = pane.providerId ? (providerById.get(pane.providerId) ?? null) : null;
                               const label = pane.type === "agent" ? (pane.title ?? provider?.name ?? "Agent") : (pane.title ?? "Terminal");
-                              const selected = pane.id === activePane?.id;
+                              const selected = pane.id === activePane?.id && !diffTabActive;
                               const hasUnreadAttention = hasUnreadAttentionByPaneId.has(pane.id);
                               return (
                                 <Draggable key={pane.id} draggableId={pane.id} index={index}>
@@ -3114,7 +3117,10 @@ export default function CmuxWorkspacePage() {
                                         selected={selected}
                                         hasUnreadAttention={hasUnreadAttention}
                                         label={label}
-                                        onSelect={handleSelectPaneTab}
+                                        onSelect={(id) => {
+                                          setDiffTabActive(false);
+                                          handleSelectPaneTab(id);
+                                        }}
                                         onRemove={handleRemovePaneById}
                                         onRename={handleRenamePane}
                                         isDragging={snapshot.isDragging}
@@ -3126,12 +3132,72 @@ export default function CmuxWorkspacePage() {
                               );
                             })}
                             {provided.placeholder}
+                            {/* Virtual diff tab */}
+                            {activeDiffPath && (() => {
+                              const diffFile = gitSidebarFiles.find(f => f.path === activeDiffPath);
+                              const diffBasename = activeDiffPath.split(/[/\\]/).pop() ?? activeDiffPath;
+                              return (
+                                <div
+                                  role="tab"
+                                  aria-selected={diffTabActive}
+                                  onClick={() => setDiffTabActive(true)}
+                                  className={`group flex min-w-[170px] max-w-[260px] cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 transition-all ${
+                                    diffTabActive
+                                      ? "border-primary bg-primary/10"
+                                      : "border-border bg-muted/30 hover:bg-muted/50"
+                                  }`}
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                    <line x1="9" y1="12" x2="15" y2="12"/>
+                                  </svg>
+                                  <span className="min-w-0 flex-1 truncate font-mono text-xs">{diffBasename}</span>
+                                  {diffFile && (
+                                    <span className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase ${
+                                      diffFile.status.charAt(0).toUpperCase() === "A" ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400" :
+                                      diffFile.status.charAt(0).toUpperCase() === "M" ? "bg-amber-500/20 text-amber-600 dark:text-amber-400" :
+                                      diffFile.status.charAt(0).toUpperCase() === "D" ? "bg-rose-500/20 text-rose-600 dark:text-rose-400" :
+                                      "bg-blue-500/20 text-blue-600 dark:text-blue-400"
+                                    }`}>
+                                      {diffFile.status.charAt(0).toUpperCase()}
+                                    </span>
+                                  )}
+                                  <button
+                                    className="ml-auto h-5 w-5 shrink-0 flex items-center justify-center rounded opacity-70 hover:opacity-100 hover:bg-muted"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveDiffPath(null);
+                                      setDiffTabActive(false);
+                                    }}
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <line x1="18" y1="6" x2="6" y2="18"/>
+                                      <line x1="6" y1="6" x2="18" y2="18"/>
+                                    </svg>
+                                  </button>
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
                       </Droppable>
                     </DragDropContext>
                     <div className="min-h-0 flex-1 overflow-hidden">
-                      {activePane ? (
+                      {diffTabActive && activeDiffPath ? (
+                        (() => {
+                          const diffFile = gitSidebarFiles.find(f => f.path === activeDiffPath);
+                          return diffFile ? (
+                            <DiffViewer
+                              file={diffFile}
+                              onClose={() => {
+                                setActiveDiffPath(null);
+                                setDiffTabActive(false);
+                              }}
+                            />
+                          ) : null;
+                        })()
+                      ) : activePane ? (
                         <PaneCard
                           pane={activePane}
                           worktreePath={activePane.cwd?.trim() || activeComb.worktreePath || ""}
@@ -3161,8 +3227,11 @@ export default function CmuxWorkspacePage() {
                     <GitActionsPanel
                       files={gitSidebarLoading ? [] : gitSidebarFiles}
                       fileFlags={{}}
-                      activeDiffPath={null}
-                      onFileSelect={() => void 0}
+                      activeDiffPath={activeDiffPath}
+                      onFileSelect={(path) => {
+                        setActiveDiffPath(path);
+                        setDiffTabActive(true);
+                      }}
                       isPushing={gitSidebarIsPushing}
                       isPulling={gitSidebarIsPulling}
                       isMerging={gitSidebarIsMerging}
