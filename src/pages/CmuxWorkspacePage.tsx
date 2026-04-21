@@ -3269,9 +3269,12 @@ export default function CmuxWorkspacePage() {
                       onTargetBranchChange={setGitSidebarTargetBranch}
                     />
                   ) : (
-                    <div className="flex h-full items-center justify-center p-4">
-                      <p className="text-center text-xs text-muted-foreground">
-                        Seleciona um workspace para ver as alterações git.
+                    <div className="flex h-full flex-col items-center justify-center gap-2 p-4">
+                      <p className="text-center text-xs font-medium text-muted-foreground">
+                        Git review não disponível
+                      </p>
+                      <p className="text-center text-xs text-muted-foreground/70">
+                        Use o <span className="font-semibold text-muted-foreground">Workspace Terminal</span> para ativar o git review com isolamento de worktree.
                       </p>
                     </div>
                   )}
