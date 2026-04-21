@@ -189,6 +189,8 @@ export function RepoReviewSection({
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [commitDialogStatus, setCommitDialogStatus] =
     useState<GitStatus | null>(null);
+  const [commitDialogStatusLoading, setCommitDialogStatusLoading] =
+    useState(false);
 
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [applyCommitDialogOpen, setApplyCommitDialogOpen] = useState(false);
@@ -780,14 +782,23 @@ export function RepoReviewSection({
   };
 
   useEffect(() => {
-    if (!commitDialogOpen || !worktreePath || !window.desktopAPI?.git) {
-      if (!commitDialogOpen) setCommitDialogStatus(null);
+    if (!commitDialogOpen) {
+      setCommitDialogStatus(null);
+      setCommitDialogStatusLoading(false);
       return;
     }
+    // Seed immediately with cached status so dialog never hangs
+    setCommitDialogStatus(worktreeRepoStatus);
+    if (!worktreePath || !window.desktopAPI?.git) return;
+    setCommitDialogStatusLoading(true);
     window.desktopAPI.git
       .getStatus(worktreePath)
       .then((s) => setCommitDialogStatus(s))
-      .catch(() => setCommitDialogStatus(null));
+      .catch(() => {
+        // Keep the cached status rather than resetting to null
+      })
+      .finally(() => setCommitDialogStatusLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commitDialogOpen, worktreePath]);
 
   useEffect(() => {
@@ -1682,11 +1693,8 @@ export function RepoReviewSection({
         onCommit={handleCommitWorktree}
         defaultMessage={`Changes from mission: ${missionName}`}
         projectPath={worktreePath}
-        status={
-          commitDialogOpen
-            ? (commitDialogStatus ?? worktreeRepoStatus)
-            : null
-        }
+        status={commitDialogOpen ? commitDialogStatus : null}
+        isLoading={commitDialogStatusLoading}
       />
     </div>
   );

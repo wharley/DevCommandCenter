@@ -81,6 +81,7 @@ import type {
   DaemonStatus,
   DaemonTaskStatus,
   DetectedTerminalAgent,
+  GitStatus,
 } from "@/types/app";
 import {
   useTerminalAttentionToasts,
@@ -1009,6 +1010,10 @@ export default function CmuxWorkspacePage() {
   const [gitSidebarIsPulling, setGitSidebarIsPulling] = useState(false);
   const [gitSidebarIsMerging, setGitSidebarIsMerging] = useState(false);
   const [gitSidebarCommitOpen, setGitSidebarCommitOpen] = useState(false);
+  const [gitSidebarCommitStatus, setGitSidebarCommitStatus] =
+    useState<GitStatus | null>(null);
+  const [gitSidebarCommitStatusLoading, setGitSidebarCommitStatusLoading] =
+    useState(false);
   const [gitSidebarMergeOpen, setGitSidebarMergeOpen] = useState(false);
   const [gitSidebarWorktreeDirty, setGitSidebarWorktreeDirty] = useState(false);
   const [gitSidebarMainDirty, setGitSidebarMainDirty] = useState(false);
@@ -1675,6 +1680,21 @@ export default function CmuxWorkspacePage() {
       })
       .catch(() => undefined);
   }, [activeCombWorktreePath, activeCombMainPath, loadGitSidebarDiffs, refreshGitSidebarStatus]);
+
+  useEffect(() => {
+    if (!gitSidebarCommitOpen) {
+      setGitSidebarCommitStatus(null);
+      setGitSidebarCommitStatusLoading(false);
+      return;
+    }
+    if (!activeCombWorktreePath || !window.desktopAPI?.git?.getStatus) return;
+    setGitSidebarCommitStatusLoading(true);
+    window.desktopAPI.git
+      .getStatus(activeCombWorktreePath)
+      .then((s) => setGitSidebarCommitStatus(s))
+      .catch(() => {})
+      .finally(() => setGitSidebarCommitStatusLoading(false));
+  }, [gitSidebarCommitOpen, activeCombWorktreePath]);
 
   const handleGitSidebarCommit = useCallback(async (message: string) => {
     if (!activeCombWorktreePath || !window.desktopAPI?.git?.commit) return;
@@ -3265,7 +3285,8 @@ export default function CmuxWorkspacePage() {
                 onCommit={handleGitSidebarCommit}
                 defaultMessage={activeComb ? `Changes from mission: ${activeComb.branch ?? activeComb.id}` : ""}
                 projectPath={activeCombWorktreePath}
-                status={null}
+                status={gitSidebarCommitStatus}
+                isLoading={gitSidebarCommitStatusLoading}
               />
               <Dialog open={gitSidebarMergeOpen} onOpenChange={setGitSidebarMergeOpen}>
                 <DialogContent className="sm:max-w-sm">
