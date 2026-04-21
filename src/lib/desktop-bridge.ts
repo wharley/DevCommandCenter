@@ -69,6 +69,7 @@ export function installDesktopBridge(): void {
       confirm: (message) => call<boolean>("dialog_confirm", { message }),
     },
     shell: {
+      getDefault: () => call<{ shell: string }>("shell_get_default"),
       openExternal: (url) => call<void>("shell_open_external", { url }),
       openPath: (path) => call<void>("shell_open_path", { path }),
       showItemInFolder: (path) => call<void>("shell_show_item_in_folder", { path }),

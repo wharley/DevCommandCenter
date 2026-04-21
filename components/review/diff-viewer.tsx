@@ -129,7 +129,7 @@ export function DiffViewer({ file, onClose }: DiffViewerProps) {
             <p className="text-xs">Sem diff disponível para este arquivo.</p>
           </div>
         ) : (
-          <pre className="min-w-0 p-3 font-mono text-xs leading-5">
+          <pre className="min-w-0 p-3 font-mono text-sm leading-5">
             {lines.map((line, i) => (
               <div
                 key={i}

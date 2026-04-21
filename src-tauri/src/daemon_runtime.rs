@@ -279,8 +279,10 @@ fn local_shell_command(command: &str) -> (String, Vec<String>) {
             vec!["/C".to_string(), command.to_string()],
         )
     } else {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
-        (shell, vec!["-lc".to_string(), command.to_string()])
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        // -i: interactive (garante leitura do ~/.zshrc com nvm/fnm/volta)
+        // -l: login shell (garante leitura do ~/.zprofile e /etc/profile)
+        (shell, vec!["-ilc".to_string(), command.to_string()])
     }
 }
 

@@ -364,7 +364,7 @@ function NewWorkspaceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Novo Workspace</DialogTitle>
           <DialogDescription>Cria uma sessão isolada para terminais e agents.</DialogDescription>
@@ -1480,7 +1480,9 @@ export default function CmuxWorkspacePage() {
     if (lastAutoSelectedProjectIdRef.current === selectedProjectId) return;
     const firstProjectComb = combs.find((c) => c.projectId === selectedProjectId);
     setActiveCombId(firstProjectComb?.id ?? null);
-    lastAutoSelectedProjectIdRef.current = selectedProjectId;
+    if (firstProjectComb) {
+      lastAutoSelectedProjectIdRef.current = selectedProjectId;
+    }
   }, [combs, activeCombId, selectedProjectId]);
 
   useEffect(() => {
@@ -1671,14 +1673,20 @@ export default function CmuxWorkspacePage() {
     void loadGitSidebarDiffs(activeCombWorktreePath);
     void refreshGitSidebarStatus(activeCombWorktreePath, activeCombMainPath);
     const git = window.desktopAPI?.git;
-    if (!activeCombMainPath || !git?.getLocalBranches || !git?.getCurrentBranch) return;
-    Promise.all([git.getLocalBranches(activeCombMainPath), git.getCurrentBranch(activeCombMainPath)])
-      .then(([branches, current]) => {
-        const list = branches ?? [];
-        setGitSidebarBranchList(list);
-        setGitSidebarTargetBranch((prev) => prev || (current ?? "").trim() || list[0] || "main");
-      })
-      .catch(() => undefined);
+    if (activeCombMainPath && git?.getLocalBranches && git?.getCurrentBranch) {
+      Promise.all([git.getLocalBranches(activeCombMainPath), git.getCurrentBranch(activeCombMainPath)])
+        .then(([branches, current]) => {
+          const list = branches ?? [];
+          setGitSidebarBranchList(list);
+          setGitSidebarTargetBranch((prev) => prev || (current ?? "").trim() || list[0] || "main");
+        })
+        .catch(() => undefined);
+    }
+    const timer = window.setInterval(() => {
+      void loadGitSidebarDiffs(activeCombWorktreePath);
+      void refreshGitSidebarStatus(activeCombWorktreePath, activeCombMainPath);
+    }, 15000);
+    return () => window.clearInterval(timer);
   }, [activeCombWorktreePath, activeCombMainPath, loadGitSidebarDiffs, refreshGitSidebarStatus]);
 
   useEffect(() => {

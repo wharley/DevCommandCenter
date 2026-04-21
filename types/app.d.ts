@@ -272,6 +272,7 @@ declare global {
       };
 
       shell: {
+        getDefault: () => Promise<{ shell: string }>;
         openExternal: (url: string) => Promise<void>;
         openPath: (path: string) => Promise<void>;
         showItemInFolder: (path: string) => Promise<void>;

@@ -2941,10 +2941,8 @@ fn shell_command_for_text(command: &str) -> (String, Vec<String>) {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        (
-            "/bin/sh".to_string(),
-            vec!["-lc".to_string(), command.to_string()],
-        )
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        (shell, vec!["-ilc".to_string(), command.to_string()])
     }
 }
 
@@ -3662,6 +3660,66 @@ fn try_cli_invocation(path: &Path) -> bool {
         }
     }
     false
+}
+
+/// Captura o PATH e variáveis essenciais do shell de login do usuário e aplica ao processo atual.
+/// Resolve o problema clássico de apps macOS GUI lançados pelo Finder/Dock receberem
+/// um PATH mínimo do launchd, sem nvm/fnm/volta/homebrew.
+#[cfg(not(windows))]
+fn bootstrap_shell_env() {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let (tx, rx) = std::sync::mpsc::channel();
+    let shell_clone = shell.clone();
+    thread::spawn(move || {
+        let result = Command::new(&shell_clone)
+            .args(["-ilc", "env"])
+            .output();
+        let _ = tx.send(result);
+    });
+
+    let output = match rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(Ok(out)) => out,
+        _ => {
+            eprintln!("[DCC] bootstrap_shell_env: timeout ou erro ao capturar env do shell");
+            return;
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut new_path: Option<String> = None;
+    let keys_to_apply = ["PATH", "NVM_DIR", "NVM_BIN", "FNM_DIR", "VOLTA_HOME", "PNPM_HOME"];
+
+    for line in stdout.lines() {
+        if let Some(idx) = line.find('=') {
+            let key = &line[..idx];
+            let val = &line[idx + 1..];
+            if key == "PATH" {
+                new_path = Some(val.to_string());
+            } else if keys_to_apply.contains(&key) {
+                std::env::set_var(key, val);
+            }
+        }
+    }
+
+    // PATH sempre é substituído pelo do shell para garantir acesso a node/yarn/etc.
+    if let Some(path) = new_path {
+        if !path.is_empty() {
+            std::env::set_var("PATH", &path);
+            eprintln!("[DCC] PATH atualizado via shell de login: {}", &path[..path.len().min(120)]);
+        }
+    }
+}
+
+#[tauri::command]
+fn shell_get_default() -> Value {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+        if cfg!(windows) {
+            "powershell".to_string()
+        } else {
+            "/bin/zsh".to_string()
+        }
+    });
+    serde_json::json!({ "shell": shell })
 }
 
 #[tauri::command]
@@ -8332,6 +8390,9 @@ fn terminal_get_project_activity(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(not(windows))]
+    bootstrap_shell_env();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -8344,6 +8405,7 @@ pub fn run() {
             dialog_select_directory,
             dialog_show_message,
             dialog_confirm,
+            shell_get_default,
             shell_open_external,
             shell_open_path,
             shell_show_item_in_folder,

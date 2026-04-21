@@ -119,10 +119,18 @@ export function EmbeddedTerminal({
   const [ptySessionId, setPtySessionId] = useState<string | null>(null);
   const argsKey = useMemo(() => JSON.stringify(args), [args]);
   const stableArgs = useMemo(() => args, [argsKey]);
-  const shellCommand = useMemo(() => {
+  const [shellCommand, setShellCommand] = useState<string>(() => {
     const fromEnv = (window as unknown as { __DCC_SHELL__?: string }).__DCC_SHELL__;
     if (fromEnv && fromEnv.trim()) return fromEnv;
     return window.desktopAPI?.platform === "win32" ? "powershell" : "/bin/zsh";
+  });
+
+  useEffect(() => {
+    void window.desktopAPI?.shell?.getDefault?.().then((result) => {
+      if (result?.shell && result.shell.trim()) {
+        setShellCommand(result.shell.trim());
+      }
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
