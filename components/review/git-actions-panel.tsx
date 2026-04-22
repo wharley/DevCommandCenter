@@ -309,7 +309,7 @@ export function GitActionsPanel({
                         role="button"
                         tabIndex={0}
                         className={cn(
-                          "flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors hover:bg-muted/40 cursor-pointer",
+                          "relative flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors hover:bg-muted/40 cursor-pointer",
                           isActive && "bg-primary/10",
                         )}
                         onClick={() => onFileSelect(f.path)}
@@ -336,7 +336,7 @@ export function GitActionsPanel({
                             </p>
                           )}
                         </div>
-                        <div className="shrink-0 flex items-center gap-0.5 font-mono text-[10px] tabular-nums">
+                        <div className="shrink-0 flex items-center gap-1 pr-2 font-mono text-[10px] tabular-nums">
                           {(f.insertions ?? 0) > 0 && (
                             <span className="text-emerald-600 dark:text-emerald-400">
                               +{f.insertions}
@@ -349,35 +349,6 @@ export function GitActionsPanel({
                           )}
                         </div>
                         <div className="shrink-0 flex items-center gap-0.5">
-                          {/* Ações por arquivo — visíveis no hover */}
-                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                            {onStageFile && f.status !== "staged" && (
-                              <button
-                                type="button"
-                                className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/15 transition-colors"
-                                title="Adicionar ao stage (git add)"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onStageFile(f.path);
-                                }}
-                              >
-                                <Plus className="h-3 w-3" />
-                              </button>
-                            )}
-                            {onDiscardFile && (
-                              <button
-                                type="button"
-                                className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-rose-500 hover:bg-rose-500/15 transition-colors"
-                                title={isUntracked ? "Remover arquivo (git clean)" : "Descartar alterações (git restore)"}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onDiscardFile(f.path, f.status);
-                                }}
-                              >
-                                <RotateCcw className="h-3 w-3" />
-                              </button>
-                            )}
-                          </div>
                           {/* Flag de revisão */}
                           <div className="shrink-0 opacity-60">
                             {flag === "ok" && (
@@ -391,6 +362,38 @@ export function GitActionsPanel({
                             )}
                           </div>
                         </div>
+                        {(onStageFile || onDiscardFile) && (
+                          <div className="pointer-events-none absolute right-1 top-1/2 z-10 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+                            <div className="pointer-events-auto flex items-center gap-0.5 rounded-md border border-border/70 bg-background/95 px-1 py-0.5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/85">
+                              {onStageFile && (
+                                <button
+                                  type="button"
+                                  className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/15 transition-colors"
+                                  title="Adicionar ao stage (git add)"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onStageFile(f.path);
+                                  }}
+                                >
+                                  <Plus className="h-3 w-3" />
+                                </button>
+                              )}
+                              {onDiscardFile && (
+                                <button
+                                  type="button"
+                                  className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-rose-500 hover:bg-rose-500/15 transition-colors"
+                                  title={isUntracked ? "Remover arquivo (git clean)" : "Descartar alterações (git restore)"}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDiscardFile(f.path, f.status);
+                                  }}
+                                >
+                                  <RotateCcw className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </li>
                   );

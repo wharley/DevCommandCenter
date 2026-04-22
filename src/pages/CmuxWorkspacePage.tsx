@@ -1770,6 +1770,40 @@ export default function CmuxWorkspacePage() {
     }
   }, [activeCombWorktreePath, activeCombMainPath, confirmDialog, loadGitSidebarDiffs, refreshGitSidebarStatus]);
 
+  const handleGitSidebarStageFile = useCallback(async (filePath: string) => {
+    if (!activeCombWorktreePath || !window.desktopAPI?.git?.stageFile) return;
+    const result = await window.desktopAPI.git.stageFile(activeCombWorktreePath, filePath);
+    if (result.success) {
+      toast.success(`Staged: ${filePath.split(/[/\\]/).pop()}`);
+      void loadGitSidebarDiffs(activeCombWorktreePath);
+      void refreshGitSidebarStatus(activeCombWorktreePath, activeCombMainPath);
+    } else {
+      toast.error(result.error ?? "Falha ao adicionar ao stage");
+    }
+  }, [activeCombWorktreePath, activeCombMainPath, loadGitSidebarDiffs, refreshGitSidebarStatus]);
+
+  const handleGitSidebarDiscardFile = useCallback(async (filePath: string, status: string) => {
+    if (!activeCombWorktreePath || !window.desktopAPI?.git?.discardFile) return;
+    const isUntracked = status === "untracked";
+    const ok = await confirmDialog({
+      title: isUntracked ? "Remover arquivo?" : "Descartar alterações?",
+      description: isUntracked
+        ? `O arquivo "${filePath}" será removido permanentemente (git clean). Esta ação não pode ser desfeita.`
+        : `As alterações em "${filePath}" serão descartadas (git restore). Esta ação não pode ser desfeita.`,
+      confirmLabel: isUntracked ? "Remover" : "Descartar",
+      cancelLabel: "Cancelar",
+    });
+    if (!ok) return;
+    const result = await window.desktopAPI.git.discardFile(activeCombWorktreePath, filePath, isUntracked);
+    if (result.success) {
+      toast.success(`Descartado: ${filePath.split(/[/\\]/).pop()}`);
+      void loadGitSidebarDiffs(activeCombWorktreePath);
+      void refreshGitSidebarStatus(activeCombWorktreePath, activeCombMainPath);
+    } else {
+      toast.error(result.error ?? "Falha ao descartar arquivo");
+    }
+  }, [activeCombWorktreePath, activeCombMainPath, confirmDialog, loadGitSidebarDiffs, refreshGitSidebarStatus]);
+
   const handleGitSidebarMerge = useCallback(async () => {
     if (!activeComb?.id || !gitSidebarTargetBranch) return;
     setGitSidebarIsMerging(true);
@@ -3253,7 +3287,7 @@ export default function CmuxWorkspacePage() {
                 >
                   {activeCombWorktreePath ? (
                     <GitActionsPanel
-                      files={gitSidebarLoading ? [] : gitSidebarFiles}
+                      files={gitSidebarFiles}
                       fileFlags={{}}
                       activeDiffPath={activeDiffPath}
                       onFileSelect={(path) => {
@@ -3275,6 +3309,8 @@ export default function CmuxWorkspacePage() {
                       targetBranch={gitSidebarTargetBranch}
                       branchList={gitSidebarBranchList}
                       onTargetBranchChange={setGitSidebarTargetBranch}
+                      onStageFile={(path) => void handleGitSidebarStageFile(path)}
+                      onDiscardFile={(path, status) => void handleGitSidebarDiscardFile(path, status)}
                     />
                   ) : (
                     <div className="flex h-full flex-col items-center justify-center gap-2 p-4">
