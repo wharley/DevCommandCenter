@@ -351,6 +351,10 @@ export function installDesktopBridge(): void {
       pull: (projectPath) => call("git_pull", { projectPath }),
       reset: (projectPath, ref) =>
         call("git_reset", { projectPath, gitRef: ref }),
+      stageFile: (projectPath, filePath) =>
+        call<{ success: boolean; error?: string }>("git_stage_file", { projectPath, filePath }),
+      discardFile: (projectPath, filePath, isUntracked) =>
+        call<{ success: boolean; error?: string }>("git_discard_file", { projectPath, filePath, isUntracked }),
       getWorktreeInfo: (projectPath) => call("git_get_worktree_info", { projectPath }),
       getReviewDiffs: (worktreePath) => call("git_get_review_diffs", { worktreePath }),
       applyWorktreePatch: (mainProjectPath, worktreePath, targetBranch, options) =>

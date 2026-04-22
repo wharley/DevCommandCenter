@@ -761,6 +761,42 @@ export function RepoReviewSection({
     }
   };
 
+  const handleStageFile = async (filePath: string) => {
+    if (!worktreePath || !window.desktopAPI?.git?.stageFile) return;
+    const result = await window.desktopAPI.git.stageFile(worktreePath, filePath);
+    if (result.success) {
+      toast.success(`Staged: ${filePath.split(/[/\\]/).pop()}`);
+      addTrail(`Stage: ${filePath}`);
+      await loadDiffs();
+      await refreshWorktreeRepoStatus();
+    } else {
+      toast.error(result.error ?? "Falha ao adicionar ao stage");
+    }
+  };
+
+  const handleDiscardFile = async (filePath: string, status: string) => {
+    if (!worktreePath || !window.desktopAPI?.git?.discardFile) return;
+    const isUntracked = status === "untracked";
+    const ok = await confirmDialog({
+      title: isUntracked ? "Remover arquivo?" : "Descartar alterações?",
+      description: isUntracked
+        ? `O arquivo "${filePath}" será removido permanentemente (git clean). Esta ação não pode ser desfeita.`
+        : `As alterações em "${filePath}" serão descartadas (git restore). Esta ação não pode ser desfeita.`,
+      confirmLabel: isUntracked ? "Remover" : "Descartar",
+      cancelLabel: "Cancelar",
+    });
+    if (!ok) return;
+    const result = await window.desktopAPI.git.discardFile(worktreePath, filePath, isUntracked);
+    if (result.success) {
+      toast.success(`Descartado: ${filePath.split(/[/\\]/).pop()}`);
+      addTrail(`Discard: ${filePath}`);
+      await loadDiffs();
+      await refreshWorktreeRepoStatus();
+    } else {
+      toast.error(result.error ?? "Falha ao descartar arquivo");
+    }
+  };
+
   const handleDiscardMainRepo = async () => {
     if (!mainProjectPath?.trim() || !window.desktopAPI?.git?.reset) return;
     const ok = await confirmDialog({
@@ -1682,6 +1718,8 @@ export function RepoReviewSection({
               targetBranch={targetBranch}
               branchList={branchList}
               onTargetBranchChange={setTargetBranch}
+              onStageFile={(path) => void handleStageFile(path)}
+              onDiscardFile={(path, status) => void handleDiscardFile(path, status)}
             />
           </ResizablePanel>
         </ResizablePanelGroup>

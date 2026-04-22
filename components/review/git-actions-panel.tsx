@@ -10,6 +10,8 @@ import {
   FileCode,
   GitMerge,
   Loader2,
+  Plus,
+  RotateCcw,
   Search,
   Trash2,
   Upload,
@@ -58,6 +60,8 @@ export type GitActionsPanelProps = {
   targetBranch: string;
   branchList: string[];
   onTargetBranchChange: (b: string) => void;
+  onStageFile?: (path: string) => void;
+  onDiscardFile?: (path: string, status: string) => void;
 };
 
 const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
@@ -107,6 +111,8 @@ export function GitActionsPanel({
   targetBranch,
   branchList,
   onTargetBranchChange,
+  onStageFile,
+  onDiscardFile,
 }: GitActionsPanelProps) {
   const [search, setSearch] = useState("");
 
@@ -296,15 +302,20 @@ export function GitActionsPanel({
                   const flag = fileFlags[f.path] ?? "ok";
                   const isActive = f.path === activeDiffPath;
                   const dir = fileDir(f.path);
+                  const isUntracked = f.status === "untracked";
                   return (
-                    <li key={f.path}>
-                      <button
-                        type="button"
+                    <li key={f.path} className="group">
+                      <div
+                        role="button"
+                        tabIndex={0}
                         className={cn(
-                          "flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors hover:bg-muted/40",
+                          "flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors hover:bg-muted/40 cursor-pointer",
                           isActive && "bg-primary/10",
                         )}
                         onClick={() => onFileSelect(f.path)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") onFileSelect(f.path);
+                        }}
                       >
                         <span
                           className={cn(
@@ -337,18 +348,50 @@ export function GitActionsPanel({
                             </span>
                           )}
                         </div>
-                        <div className="shrink-0 opacity-60">
-                          {flag === "ok" && (
-                            <Check className="h-3 w-3 text-emerald-500" />
-                          )}
-                          {flag === "later" && (
-                            <Clock className="h-3 w-3 text-amber-500" />
-                          )}
-                          {flag === "suspicious" && (
-                            <AlertTriangle className="h-3 w-3 text-rose-500" />
-                          )}
+                        <div className="shrink-0 flex items-center gap-0.5">
+                          {/* Ações por arquivo — visíveis no hover */}
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {onStageFile && f.status !== "staged" && (
+                              <button
+                                type="button"
+                                className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/15 transition-colors"
+                                title="Adicionar ao stage (git add)"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onStageFile(f.path);
+                                }}
+                              >
+                                <Plus className="h-3 w-3" />
+                              </button>
+                            )}
+                            {onDiscardFile && (
+                              <button
+                                type="button"
+                                className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-rose-500 hover:bg-rose-500/15 transition-colors"
+                                title={isUntracked ? "Remover arquivo (git clean)" : "Descartar alterações (git restore)"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDiscardFile(f.path, f.status);
+                                }}
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                          {/* Flag de revisão */}
+                          <div className="shrink-0 opacity-60">
+                            {flag === "ok" && (
+                              <Check className="h-3 w-3 text-emerald-500" />
+                            )}
+                            {flag === "later" && (
+                              <Clock className="h-3 w-3 text-amber-500" />
+                            )}
+                            {flag === "suspicious" && (
+                              <AlertTriangle className="h-3 w-3 text-rose-500" />
+                            )}
+                          </div>
                         </div>
-                      </button>
+                      </div>
                     </li>
                   );
                 })}

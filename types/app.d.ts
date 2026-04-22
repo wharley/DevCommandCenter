@@ -712,6 +712,15 @@ declare global {
           projectPath: string,
           ref?: "HEAD" | "HEAD~1"
         ) => Promise<{ success: boolean; error?: string }>;
+        stageFile: (
+          projectPath: string,
+          filePath: string
+        ) => Promise<{ success: boolean; error?: string }>;
+        discardFile: (
+          projectPath: string,
+          filePath: string,
+          isUntracked: boolean
+        ) => Promise<{ success: boolean; error?: string }>;
         getWorktreeInfo: (
           projectPath: string
         ) => Promise<{ isWorktree: boolean; worktreeRoot?: string }>;

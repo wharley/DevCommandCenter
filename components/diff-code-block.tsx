@@ -109,7 +109,17 @@ export function DiffCodeBlock({
     });
   };
 
+  const isEmpty = content.trim().length === 0;
+
   let hunkCursor = 0;
+
+  if (isEmpty) {
+    return (
+      <div className={cn("bg-background/30 px-4 py-6 text-center text-xs text-muted-foreground", className)}>
+        Sem conteúdo para exibir.
+      </div>
+    );
+  }
 
   return (
     <div
@@ -119,12 +129,11 @@ export function DiffCodeBlock({
         className,
       )}
     >
+      {hunkSections.length > 0 && (
       <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border/70 bg-background/95 px-3 py-2 backdrop-blur">
         <div className="flex min-w-0 items-center gap-2">
           <Badge variant="outline" className="shrink-0 text-[10px]">
-            {hunkSections.length > 0
-              ? `Hunk ${activeHunkIndex + 1}/${hunkSections.length}`
-              : "Sem hunks"}
+            {`Hunk ${activeHunkIndex + 1}/${hunkSections.length}`}
           </Badge>
           <span className="truncate text-[10px] text-muted-foreground">
             Navega entre blocos para comparar trechos críticos.
@@ -156,6 +165,7 @@ export function DiffCodeBlock({
           </Button>
         </div>
       </div>
+      )}
 
       <div className="w-max min-w-full font-mono text-xs leading-5 whitespace-pre">
         {sections.map((section) => {

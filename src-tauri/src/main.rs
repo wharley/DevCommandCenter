@@ -1225,6 +1225,22 @@ fn run_git(cwd: &str, args: &[&str]) -> ApiResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Like run_git but accepts exit code 1 as success (git diff --no-index exits 1 when differences found).
+fn run_git_diff(cwd: &str, args: &[&str]) -> ApiResult<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| db_error(e.to_string()))?;
+    let code = output.status.code().unwrap_or(2);
+    if code >= 2 {
+        return Err(db_error(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 /// Caminho do ficheiro `index` do repositório para um worktree (dir `.git` ou ficheiro `gitdir:`).
 fn resolve_git_index_path(worktree: &str) -> Option<PathBuf> {
     let wt = Path::new(worktree);
@@ -1549,12 +1565,18 @@ fn build_review_diffs_for_path(target_path: &str) -> ApiResult<Value> {
 
     for (git_status, path) in &files_meta {
         let is_untracked = git_status.contains('?');
+        let first_char = git_status.chars().next().unwrap_or(' ');
+        let is_staged_new = !is_untracked && first_char == 'A';
         let diff = if is_untracked {
-            run_git(
+            // git diff --no-index exits with code 1 when differences exist — use run_git_diff
+            run_git_diff(
                 target_path,
                 &["diff", "--binary", "--no-index", "--", "/dev/null", path],
             )
             .unwrap_or_default()
+        } else if is_staged_new {
+            // New file staged for commit: compare index to HEAD (not working tree to HEAD)
+            run_git(target_path, &["diff", "--cached", "HEAD", "--", path]).unwrap_or_default()
         } else {
             run_git(target_path, &["diff", "HEAD", "--", path]).unwrap_or_default()
         };
@@ -1563,7 +1585,7 @@ fn build_review_diffs_for_path(target_path: &str) -> ApiResult<Value> {
         deletions += del;
         let status = if is_untracked {
             "untracked"
-        } else if !git_status.is_empty() && git_status.chars().next().unwrap_or(' ') != ' ' {
+        } else if !git_status.is_empty() && first_char != ' ' {
             "staged"
         } else {
             "modified"
@@ -5548,6 +5570,35 @@ fn git_reset(project_path: String, git_ref: Option<String>) -> ApiResult<Value> 
 }
 
 #[tauri::command]
+fn git_stage_file(project_path: String, file_path: String) -> ApiResult<Value> {
+    match run_git(&project_path, &["add", "--", &file_path]) {
+        Ok(_) => Ok(serde_json::json!({ "success": true })),
+        Err(e) => Ok(serde_json::json!({
+            "success": false,
+            "error": format!("Stage failed: {}", e.message)
+        })),
+    }
+}
+
+#[tauri::command]
+fn git_discard_file(project_path: String, file_path: String, is_untracked: bool) -> ApiResult<Value> {
+    let result = if is_untracked {
+        run_git(&project_path, &["clean", "-f", "--", &file_path])
+    } else {
+        // Unstage first (no-op if not staged), then restore working tree to HEAD
+        let _ = run_git(&project_path, &["reset", "HEAD", "--", &file_path]);
+        run_git(&project_path, &["checkout", "HEAD", "--", &file_path])
+    };
+    match result {
+        Ok(_) => Ok(serde_json::json!({ "success": true })),
+        Err(e) => Ok(serde_json::json!({
+            "success": false,
+            "error": format!("Discard failed: {}", e.message)
+        })),
+    }
+}
+
+#[tauri::command]
 fn git_get_review_diffs(worktree_path: String) -> ApiResult<Value> {
     match build_review_diffs_for_path(&worktree_path) {
         Ok(v) => Ok(v),
@@ -8476,6 +8527,8 @@ pub fn run() {
             git_push,
             git_pull,
             git_reset,
+            git_stage_file,
+            git_discard_file,
             git_get_review_diffs,
             review_get_diffs_bundle,
             worktree_read_notes,
