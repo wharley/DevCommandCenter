@@ -28,6 +28,9 @@ import type {
   PaneSession,
   CreateCombDTO,
   UpdateCombDTO,
+  RepoTaskDefinition,
+  RepoTaskTemplate,
+  RepoTaskTriggerDefinition,
 } from "@/lib/database/types";
 import type { TerminalAttentionPayload } from "@/lib/terminal/attention-types";
 
@@ -109,6 +112,142 @@ export interface GitCommit {
   date: Date;
 }
 
+export interface DaemonTaskStatus {
+  projectId: string;
+  projectName: string;
+  taskId: string;
+  taskName: string;
+  command: string;
+  schedule: string;
+  cwdMode: "project" | "worktree";
+  enabled: boolean;
+  status: "idle" | "scheduled" | "running" | "waiting" | "completed" | "failed" | "disabled" | "skipped";
+  attached: boolean;
+  ptyId?: string | null;
+  paneId?: string | null;
+  combId?: string | null;
+  nextRunAt?: string | null;
+  lastRunAt?: string | null;
+  lastExitCode?: number | null;
+  lastError?: string | null;
+  lastOutputExcerpt?: string | null;
+  trigger?: RepoTaskTriggerDefinition | null;
+  updatedAt?: string | null;
+}
+
+export interface DaemonProcessStatus {
+  projectId: string;
+  projectName: string;
+  processId: string;
+  processName: string;
+  command: string;
+  cwdMode: "project" | "worktree";
+  autoRestart: boolean;
+  status: "stopped" | "starting" | "running" | "stopping" | "restarting" | "crashed" | "failed";
+  ptyId?: string | null;
+  paneId?: string | null;
+  combId?: string | null;
+  pid?: number | null;
+  exitCode?: number | null;
+  restartCount: number;
+  lastRestartAt?: string | null;
+  backoffSeconds: number;
+  cpuPercent: number;
+  memoryMb: number;
+  lastMetricsAt?: string | null;
+  lastError?: string | null;
+  lastOutputExcerpt?: string | null;
+  startedAt?: string | null;
+  stoppedAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface DaemonStatus {
+  mode: "in-process" | "sidecar";
+  running: boolean;
+  startedAt: string;
+  lastTickAt?: string | null;
+  pid?: number;
+  cpuPercent?: number;
+  memoryMb?: number;
+  lastMetricsAt?: string | null;
+  totalTasks: number;
+  runningTasks: number;
+  enabledTasks: number;
+}
+
+export interface DaemonDiffBundleItem {
+  worktreePath: string;
+  success: boolean;
+  error?: string;
+  files: Array<{ path: string; status: string; diff: string }>;
+  summary: {
+    changedFiles: number;
+    insertions: number;
+    deletions: number;
+  } | null;
+}
+
+export interface DetectedTerminalAgent {
+  ptyId: string;
+  paneId?: string | null;
+  combId?: string | null;
+  projectId: string;
+  projectName: string;
+  workspaceName?: string | null;
+  agentKind: string;
+  agentLabel: string;
+  status: "working" | "waiting";
+  cwd: string;
+  command: string;
+  args: string[];
+  pid?: number | null;
+  title?: string | null;
+  providerId?: string | null;
+  providerName?: string | null;
+  detectedBy: string;
+  excerpt?: string | null;
+  startedAt: string;
+}
+
+export interface TerminalProjectActivity {
+  totalRunningPanes: number;
+  runningPanesByCombId: Record<string, number>;
+  activeAgentsByCombId?: Record<string, number>;
+  workingAgents?: number;
+  waitingAgents?: number;
+  activeAgents?: DetectedTerminalAgent[];
+}
+
+export interface NativeNotificationAction {
+  id: string;
+  label: string;
+}
+
+export interface NativeNotificationPayload {
+  title: string;
+  body?: string;
+  icon?: string;
+  sound?: boolean | string;
+  notificationId?: string;
+  source?: string;
+  paneId?: string;
+  combId?: string;
+  projectId?: string;
+  actions?: NativeNotificationAction[];
+}
+
+export interface NativeNotificationActionEvent {
+  notificationId: string;
+  actionId: string;
+  title: string;
+  source?: string | null;
+  paneId?: string | null;
+  combId?: string | null;
+  projectId?: string | null;
+  body?: string | null;
+}
+
 declare global {
   interface Window {
     /**
@@ -133,6 +272,7 @@ declare global {
       };
 
       shell: {
+        getDefault: () => Promise<{ shell: string }>;
         openExternal: (url: string) => Promise<void>;
         openPath: (path: string) => Promise<void>;
         showItemInFolder: (path: string) => Promise<void>;
@@ -175,6 +315,11 @@ declare global {
           cols: number,
           rows: number
         ) => Promise<{ ok: boolean }>;
+        /** Envia sinal ao grupo de processos do PTY (SIGINT / SIGTERM / SIGKILL). */
+        sendSignal?: (
+          ptyId: string,
+          signal: "SIGINT" | "SIGTERM" | "SIGKILL"
+        ) => Promise<{ ok: boolean; error?: string }>;
         kill: (ptyId: string) => Promise<{ ok: boolean }>;
         killByMissionId: (missionId: string) => Promise<{ ok: boolean }>;
         getOrCreateForPane: (
@@ -192,19 +337,78 @@ declare global {
         killByPaneId: (paneId: string) => Promise<{ ok: boolean }>;
         /** Últimas linhas de output (reidratação ao remontar o xterm). */
         getBacklog?: (ptyId: string) => Promise<{ lines: string[] }>;
-        getProjectActivity: (projectId: string) => Promise<{
-          totalRunningPanes: number;
-          runningPanesByCombId: Record<string, number>;
-        }>;
+        /** Limpa scrollback persistido em SQLite + buffer Rust para o painel (comando "limpar scrollback"). */
+        clearPersistedScrollback?: (paneId: string) => Promise<{ ok: boolean }>;
+        saveTempImage?: (
+          imageData: number[],
+          extension: string
+        ) => Promise<{ path: string; filename: string }>;
+        showNotification?: (
+          payload: NativeNotificationPayload
+        ) => Promise<{ ok?: boolean; notificationId?: string } | void>;
+        getProjectActivity: (projectId: string) => Promise<TerminalProjectActivity>;
         onData: (
           callback: (ptyId: string, data: string) => void
         ) => () => void;
         onExit: (
           callback: (ptyId: string, code: number) => void
         ) => () => void;
+        onActivity?: (
+          callback: (payload: {
+            projectId?: string;
+            combId?: string;
+            paneId?: string;
+            ptyId?: string;
+            status?: "working" | "waiting" | "idle";
+            excerpt?: string | null;
+          }) => void
+        ) => () => void;
         onAttention: (
           callback: (payload: TerminalAttentionPayload) => void
         ) => () => void;
+      };
+
+      daemon?: {
+        getStatus: () => Promise<DaemonStatus>;
+        health: () => Promise<DaemonStatus>;
+        listTasks: () => Promise<DaemonTaskStatus[]>;
+        listProcesses: (projectId?: string | null) => Promise<DaemonProcessStatus[]>;
+        startProcess: (projectId: string, processId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          process?: DaemonProcessStatus | null;
+        }>;
+        stopProcess: (projectId: string, processId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          process?: DaemonProcessStatus | null;
+        }>;
+        restartProcess: (projectId: string, processId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          process?: DaemonProcessStatus | null;
+        }>;
+        listCombs: (projectId?: string | null) => Promise<Comb[]>;
+        listPanes: (projectId?: string | null, combId?: string | null) => Promise<Pane[]>;
+        getDiffsBundle: (
+          worktreePaths: string[],
+          combIds?: string[] | null
+        ) => Promise<DaemonDiffBundleItem[]>;
+        runTask: (projectId: string, taskId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          task?: DaemonTaskStatus | null;
+        }>;
+        attachTask: (projectId: string, taskId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          task?: DaemonTaskStatus | null;
+        }>;
+        detachTask: (projectId: string, taskId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          task?: DaemonTaskStatus | null;
+        }>;
       };
 
       worktree: {
@@ -245,18 +449,46 @@ declare global {
           error?: string;
           applyFailed?: boolean;
         }>;
+        readNotes: (
+          worktreePath: string,
+        ) => Promise<{ success: boolean; content?: string; error?: string }>;
+        writeNotes: (
+          worktreePath: string,
+          content: string,
+        ) => Promise<{ success: boolean; error?: string }>;
       };
 
       comb: {
+        /** Pré-visualização de branch/path sanitizados (sufixo hex é exemplo até criar o workspace). */
+        previewWorktreeNaming: (
+          projectId: string,
+          workspaceTitle: string
+        ) => Promise<{
+          branchPrefix: string;
+          slug: string;
+          idSuffixExample: string;
+          branch: string;
+          worktreePath: string;
+        }>;
         ensureWorktree: (combId: string) => Promise<{
           success: boolean;
           error?: string;
+          /** Presente quando o script de setup falhou e o worktree/branch foram revertidos */
+          rolledBack?: boolean;
           worktreePath?: string;
           branch?: string;
+          warning?: string;
         }>;
+        /** Atualiza última atividade Git por worktree (reflog/log/index) para combs do projeto. */
+        refreshGitActivity: (projectId: string) => Promise<{ updated: number }>;
         discard: (combId: string) => Promise<{
           success: boolean;
           error?: string;
+        }>;
+        checkUnpushed?: (combId: string) => Promise<{
+          hasUnpushed: boolean;
+          count: number;
+          commits: string[];
         }>;
         mergeIntoMain: (
           combId: string,
@@ -264,6 +496,17 @@ declare global {
         ) => Promise<{
           success: boolean;
           error?: string;
+        }>;
+        checkMergePermissions: (
+          combId: string,
+          targetBranch?: string
+        ) => Promise<{
+          canMerge: boolean;
+          reason?: string | null;
+          isProtected: boolean;
+          requiresPR: boolean;
+          isLocalOnly: boolean;
+          warning?: string;
         }>;
         getDiffs: (combId: string) => Promise<{
           success: boolean;
@@ -289,10 +532,74 @@ declare global {
         }>;
       };
 
+      repo?: {
+        listTaskTemplates: (projectPath: string) => Promise<RepoTaskTemplate[]>;
+      };
+
+      /** GitHub / GitLab issue → metadados para pré-preencher novo workspace (worktree). */
+      forge?: {
+        fetchIssue: (
+          projectId: string,
+          issueRef: string,
+          token?: string | null
+        ) => Promise<{
+          forge: "github" | "gitlab";
+          issueNumber: number;
+          title: string;
+          body: string;
+          webUrl: string;
+          suggestedWorkspaceName: string;
+          suggestedDescription: string;
+          owner?: string;
+          repo?: string;
+          projectPath?: string;
+        }>;
+        /** PR/MR aberto na mesma branch do worktree (persistido no comb). */
+        syncPrLink?: (
+          combId: string,
+          token?: string | null
+        ) => Promise<{
+          ok?: boolean;
+          linked?: boolean;
+          skipped?: boolean;
+          reason?: string;
+          forgeLink?: {
+            forge: "github" | "gitlab";
+            number: number;
+            url: string;
+            title?: string;
+            branch?: string;
+            syncedAt?: string;
+          } | null;
+          error?: string;
+        }>;
+        /** Comentários inline do PR/MR ligado ao comb (`forge_link`). GitHub: review comments; GitLab: notas com posição. */
+        fetchPrReviewComments?: (
+          combId: string,
+          token?: string | null
+        ) => Promise<{
+          success?: boolean;
+          skipped?: boolean;
+          reason?: string;
+          forge?: string;
+          error?: string;
+          comments?: Array<{
+            path: string;
+            line: number | null;
+            side: string;
+            body: string;
+            author: string;
+            url: string;
+            createdAt: string;
+          }>;
+        }>;
+      };
+
       window: {
         minimize: () => Promise<void>;
         maximize: () => Promise<void>;
         close: () => Promise<void>;
+        focus: () => Promise<void>;
         isMaximized: () => Promise<boolean>;
       };
 
@@ -301,6 +608,7 @@ declare global {
           activated: boolean;
           email?: string;
           activatedAt?: string;
+          tier?: string;
         }>;
         getMachineId: () => Promise<string>;
         activate: (email: string) => Promise<{
@@ -312,12 +620,19 @@ declare global {
 
       app: {
         getVersion: () => Promise<string>;
-        checkForUpdates: () => Promise<void>;
-        quitAndInstall: () => Promise<void>;
-        showNotification: (payload: {
-          title: string;
-          body?: string;
-        }) => Promise<void>;
+        checkForUpdates: () => Promise<{
+          available: boolean;
+          currentVersion: string;
+          version?: string;
+          date?: string;
+          body?: string | null;
+          checkError?: string;
+        }>;
+        quitAndInstall: () => Promise<{ success: boolean }>;
+        showNotification: (payload: NativeNotificationPayload) => Promise<{ ok?: boolean; notificationId?: string } | void>;
+        onNotificationAction: (
+          callback: (payload: NativeNotificationActionEvent) => void
+        ) => () => void;
         onUpdateStatus: (
           callback: (payload: {
             type: "available" | "not-available" | "downloaded" | "error";
@@ -397,13 +712,28 @@ declare global {
           projectPath: string,
           ref?: "HEAD" | "HEAD~1"
         ) => Promise<{ success: boolean; error?: string }>;
+        stageFile: (
+          projectPath: string,
+          filePath: string
+        ) => Promise<{ success: boolean; error?: string }>;
+        discardFile: (
+          projectPath: string,
+          filePath: string,
+          isUntracked: boolean
+        ) => Promise<{ success: boolean; error?: string }>;
         getWorktreeInfo: (
           projectPath: string
         ) => Promise<{ isWorktree: boolean; worktreeRoot?: string }>;
         getReviewDiffs: (worktreePath: string) => Promise<{
           success: boolean;
           error?: string;
-          files: Array<{ path: string; status: string; diff: string }>;
+          files: Array<{
+            path: string;
+            status: string;
+            diff: string;
+            insertions?: number;
+            deletions?: number;
+          }>;
           summary: {
             changedFiles: number;
             insertions: number;
@@ -432,7 +762,13 @@ declare global {
             worktreePath: string;
             success: boolean;
             error?: string;
-            files: Array<{ path: string; status: string; diff: string }>;
+            files: Array<{
+              path: string;
+              status: string;
+              diff: string;
+              insertions?: number;
+              deletions?: number;
+            }>;
             summary: {
               changedFiles: number;
               insertions: number;
@@ -440,6 +776,16 @@ declare global {
             } | null;
           }>
         >;
+      };
+
+      worktree: {
+        readNotes: (
+          worktreePath: string,
+        ) => Promise<{ success: boolean; content?: string; error?: string }>;
+        writeNotes: (
+          worktreePath: string,
+          content: string,
+        ) => Promise<{ success: boolean; error?: string }>;
       };
     };
 
@@ -469,6 +815,16 @@ declare global {
         findAll: () => Promise<Project[]>;
         findById: (id: string) => Promise<Project | undefined>;
         findByPath: (path: string) => Promise<Project | undefined>;
+        getRepoConfigToml: (id: string) => Promise<{
+          exists: boolean;
+          source: "disk" | "db" | "generated" | "missing";
+          path: string | null;
+          content: string;
+        }>;
+        saveRepoConfigToml: (
+          id: string,
+          content: string,
+        ) => Promise<{ success: boolean; path?: string; error?: string }>;
         search: (query: string) => Promise<Project[]>;
         create: (data: ProjectCreate) => Promise<Project>;
         update: (

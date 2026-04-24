@@ -5,7 +5,7 @@
   "identifier": "com.devcommandcenter.app",
   "build": {
     "beforeDevCommand": "node scripts/ensure-node.mjs && yarn vite",
-    "beforeBuildCommand": "yarn vite:build",
+    "beforeBuildCommand": "node scripts/build-sidecars.mjs && yarn vite:build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
@@ -24,9 +24,21 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc4QTA3NDg0NEY0MDQ4RDkKUldUWlNFQlBoSFNnZU5DUEZkMW1lcE8xYTlZcXArYWlua3p0dHB5WU91aXpoQjBSTFk4My80Wk4K",
+      "endpoints": [
+        "https://httpbin.org/status/204"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": [
+      "target/release/dcc",
+      "target/release/dccd"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

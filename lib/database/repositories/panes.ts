@@ -63,8 +63,13 @@ export const PanesRepository = {
     }
 
     if (type) {
-      conditions.push('type = ?');
-      values.push(type);
+      if (Array.isArray(type)) {
+        conditions.push(`type IN (${type.map(() => '?').join(', ')})`);
+        values.push(...type);
+      } else {
+        conditions.push('type = ?');
+        values.push(type);
+      }
     }
 
     const whereClause = conditions.length > 0

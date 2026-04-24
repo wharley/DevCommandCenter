@@ -10,6 +10,10 @@ Este documento define as métricas-chave (KPIs) do produto, como medi-las, e com
 
 **Princípio fundamental**: _"Decisões baseadas em dados > opiniões de engenheiro"_
 
+**Inventário de funcionalidades e completude por área** (não são KPIs de telemetria, mas métricas de roadmap): ver [`MELHORIAS_INSPIRADAS_ARBOR.md`](./MELHORIAS_INSPIRADAS_ARBOR.md) — secção **18. Checklist de Implementação** e tabela **Métricas de Completude por Área** no resumo executivo.
+
+**Última sincronização do inventário (roadmap)** — 2026-04-12: área **Stubs Tauri** (secção **16** do checklist em [`MELHORIAS_INSPIRADAS_ARBOR.md`](./MELHORIAS_INSPIRADAS_ARBOR.md)) a **100%** — comandos de atualização in-app (`tauri-plugin-updater`), diálogos nativos (`dialog_show_message` / `dialog_confirm`), `window_is_maximized`, e fluxo **licença/beta** em SQLite + API (`license_*`); auditoria `yarn audit:tauri-stubs` → **0** stubs em `main.rs`. Mantêm-se como referência: **Worktrees/Git** a 100%; **Issues/Forges** a 100% (incl. **`gh` / `glab`**); secção **7 (Diff/Revisão)** a 100% (abas de diff, notas `.dcc/notes.md`, comentários inline PR/MR). **Total global do checklist ~83%** (102 itens implementados no resumo desse documento, ver tabela *Métricas de Completude por Área*). Tabela de completude por área continua a ser a fonte para evolução do produto; este ficheiro (`METRICS.md`) permanece focado em KPIs e telemetria. **Candidatos futuros** (ainda não instrumentados): `forge_issue_loaded`, `workspace_created_from_issue`, `forge_pr_linked` / `forge_pr_sync` (sucesso ou `skipped` por falha de rede), `forge_via_cli` / `forge_via_rest` (para medir adoção do caminho CLI vs API), alinhados ao fluxo issue → workspace → revisão; em **revisão de diffs**, `review_diff_tab_opened` / `review_diff_tab_closed` / `review_diff_tab_switched` (com `openTabCount` opcional, sem paths completos por privacidade); para **notas**, `worktree_notes_saved` (boolean `createdDccDir` opcional, sem conteúdo); para **PR/MR**, `forge_pr_review_comments_loaded` (contagem de comentários, `forge` github|gitlab, sem texto do comentário), para medir uso da revisão colaborativa no DCC; opcionalmente **`app_update_check_completed`** (boolean `available`, sem versão remota se política de privacidade exigir) para medir uso de «Procurar atualizações» no desktop.
+
 ---
 
 ## KPIs Principais
@@ -568,4 +572,4 @@ analytics.track("code_reviewed", {
 
 ---
 
-_Última atualização: 2026-02-04_
+_Última atualização: 2026-04-12_ (inventário roadmap; secção 16 stubs Tauri fechados; total checklist ~83%; inventário detalhado em `MELHORIAS_INSPIRADAS_ARBOR.md`)

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-
-export interface TerminalProjectActivity {
-  totalRunningPanes: number;
-  runningPanesByCombId: Record<string, number>;
-}
+import type { TerminalProjectActivity } from "@/types/app";
 
 const emptyActivity: TerminalProjectActivity = {
   totalRunningPanes: 0,
   runningPanesByCombId: {},
+  activeAgentsByCombId: {},
+  workingAgents: 0,
+  waitingAgents: 0,
+  activeAgents: [],
 };
 
 /**
@@ -40,6 +40,15 @@ export function useTerminalProjectActivity(projectId: string | null) {
   useEffect(() => {
     if (!projectId || !window.desktopAPI?.terminal?.onExit) return;
     const off = window.desktopAPI.terminal.onExit(() => {
+      void refresh();
+    });
+    return off;
+  }, [projectId, refresh]);
+
+  useEffect(() => {
+    if (!projectId || !window.desktopAPI?.terminal?.onActivity) return;
+    const off = window.desktopAPI.terminal.onActivity((payload) => {
+      if (payload.projectId && payload.projectId !== projectId) return;
       void refresh();
     });
     return off;

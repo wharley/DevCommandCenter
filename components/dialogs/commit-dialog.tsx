@@ -29,6 +29,7 @@ interface CommitDialogProps {
   onCommit: (message: string) => Promise<void>;
   projectPath: string;
   status: GitStatus | null;
+  isLoading?: boolean;
   onPushComplete?: () => void;
 }
 
@@ -65,6 +66,7 @@ export function CommitDialog({
   onCommit,
   projectPath,
   status,
+  isLoading = false,
   onPushComplete,
 }: CommitDialogProps) {
   const [message, setMessage] = useState(defaultMessage);
@@ -306,13 +308,19 @@ export function CommitDialog({
                 </div>
               )}
 
-              {status === null && open && (
+              {isLoading && status === null && open && (
                 <p className="text-sm text-muted-foreground py-2 flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Carregando status do repositório…
                 </p>
               )}
-              {filesToCommit.length === 0 && status !== null && (
+              {!isLoading && status === null && open && (
+                <p className="text-sm text-destructive py-2 flex items-center gap-2">
+                  Não foi possível carregar o status do repositório. Verifique
+                  se o caminho é válido e tente novamente.
+                </p>
+              )}
+              {filesToCommit.length === 0 && status !== null && !isLoading && (
                 <p className="text-sm text-amber-600/90 dark:text-amber-400/90 py-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3">
                   Nenhuma alteração para commitar neste repositório. O botão
                   Commitar fica desativado até existirem alterações locais

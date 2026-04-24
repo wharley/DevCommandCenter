@@ -42,6 +42,118 @@ export interface ProviderConfig {
   [key: string]: unknown;
 }
 
+export type PermissionMode = "" | "plan" | "acceptEdits" | "bypass";
+
+export type MissionStatus =
+  | "created"
+  | "planning"
+  | "plan_generated"
+  | "generating_code"
+  | "code_ready"
+  | "applying"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface MissionPlan {
+  summary?: string;
+  steps?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface GeneratedCode {
+  summary?: string;
+  files?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface CodeSuggestion {
+  path: string;
+  content: string;
+  reason?: string;
+}
+
+export interface MissionLog {
+  id: string;
+  missionId: string;
+  type: string;
+  content: string;
+  metadata?: Record<string, unknown> | null;
+  createdAt: Date;
+}
+
+export interface Mission {
+  id: string;
+  projectId: string;
+  providerId?: string | null;
+  planProviderId?: string | null;
+  codeProviderId?: string | null;
+  title: string;
+  description: string;
+  status: MissionStatus;
+  missionType?: string | null;
+  plan?: MissionPlan | null;
+  generatedCode?: GeneratedCode | null;
+  context?: string | null;
+  preserveInstructions?: string | null;
+  errorMessage?: string | null;
+  codeGenerationAttempts?: number;
+  isCommitted?: boolean;
+  isPushed?: boolean;
+  pendingCommands?: PendingCommand[] | null;
+  worktreePath?: string | null;
+  worktreeBranch?: string | null;
+  startedAt?: Date | null;
+  completedAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface MissionWithDetails extends Mission {
+  logs?: MissionLog[];
+}
+
+export interface MissionLogStats {
+  total: number;
+  byLevel?: Record<string, number>;
+  [key: string]: unknown;
+}
+
+export interface MissionCreate {
+  projectId: string;
+  providerId?: string | null;
+  planProviderId?: string | null;
+  codeProviderId?: string | null;
+  title: string;
+  description: string;
+}
+
+export interface MissionUpdate {
+  title?: string;
+  description?: string;
+  providerId?: string | null;
+  planProviderId?: string | null;
+  codeProviderId?: string | null;
+  status?: MissionStatus;
+  plan?: MissionPlan | null;
+  generatedCode?: GeneratedCode | null;
+}
+
+export interface MissionLogCreate {
+  missionId: string;
+  type: string;
+  content: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface PendingCommand {
+  id: string;
+  command: string;
+  description?: string;
+  source: "plan" | "code" | "file";
+  confirmedAt: string | null;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -49,9 +161,65 @@ export interface Project {
   description?: string | null;
   defaultProviderId?: string | null;
   gitRemoteUrl?: string | null;
+  repoConfig?: ProjectRepoConfig | null;
   lastOpenedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface RepoProcessDefinition {
+  id: string;
+  name: string;
+  command: string;
+  description?: string | null;
+  cwdMode?: "project" | "worktree";
+  autoRestart?: boolean;
+}
+
+export interface RepoCommandPreset {
+  id: string;
+  name: string;
+  command: string;
+  description?: string | null;
+}
+
+export type RepoTaskTriggerWhen = "success" | "failure" | "complete";
+
+export interface RepoTaskTriggerDefinition {
+  when?: RepoTaskTriggerWhen;
+  prompt?: string | null;
+  providerId?: string | null;
+}
+
+export interface RepoTaskDefinition {
+  id: string;
+  name: string;
+  command: string;
+  schedule: string;
+  description?: string | null;
+  cwdMode?: "project" | "worktree";
+  enabled?: boolean;
+  trigger?: RepoTaskTriggerDefinition | null;
+}
+
+/** Template Markdown em `.dcc/tasks/*.md` (partilhável no repositório). */
+export interface RepoTaskTemplate {
+  id: string;
+  name: string;
+  /** Texto inicial do painel (comando shell ou prompt longo). */
+  command: string;
+  description?: string | null;
+  cwdMode: "project" | "worktree";
+}
+
+export interface ProjectRepoConfig {
+  branchPrefix?: string | null;
+  defaultAgentProviderId?: string | null;
+  setupCommand?: string | null;
+  teardownCommand?: string | null;
+  processes?: RepoProcessDefinition[];
+  presets?: RepoCommandPreset[];
+  tasks?: RepoTaskDefinition[];
 }
 
 // ============================================
@@ -77,6 +245,16 @@ export interface ReviewTarget {
   sourceCombId?: string | null;
 }
 
+/** PR/MR aberto detetado pela branch do worktree (persistido em `forge_link`). */
+export interface ForgePrLink {
+  forge: "github" | "gitlab";
+  number: number;
+  url: string;
+  title?: string;
+  branch?: string;
+  syncedAt?: string;
+}
+
 export interface Comb {
   id: string;
   projectId: string;
@@ -85,11 +263,14 @@ export interface Comb {
   baseBranch: string;
   branch?: string | null;
   worktreePath?: string | null;
+  /** Ligação automática a PR (GitHub) ou MR (GitLab) aberto na mesma branch. */
+  forgeLink?: ForgePrLink | null;
   reviewTargets?: ReviewTarget[] | null;
   status: CombStatus;
   isPinned?: boolean;
   pinnedAt?: Date | null;
   lastOpenedAt?: Date | null;
+  lastGitActivityAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -140,6 +321,7 @@ export interface CreateProjectDTO {
   description?: string;
   defaultProviderId?: string;
   gitRemoteUrl?: string;
+  repoConfig?: ProjectRepoConfig;
 }
 
 export interface UpdateProjectDTO {
@@ -147,6 +329,7 @@ export interface UpdateProjectDTO {
   description?: string;
   defaultProviderId?: string;
   gitRemoteUrl?: string;
+  repoConfig?: ProjectRepoConfig | null;
   lastOpenedAt?: Date;
 }
 
@@ -162,11 +345,13 @@ export interface UpdateCombDTO {
   description?: string | null;
   branch?: string | null;
   worktreePath?: string | null;
+  forgeLink?: ForgePrLink | null;
   reviewTargets?: ReviewTarget[] | null;
   status?: CombStatus;
   isPinned?: boolean;
   pinnedAt?: Date | null;
   lastOpenedAt?: Date;
+  lastGitActivityAt?: Date | null;
 }
 
 export interface CreatePaneDTO {
@@ -203,7 +388,51 @@ export interface CombsQueryOptions {
   orderDirection?: 'asc' | 'desc';
 }
 
+export interface ProjectsQueryOptions {
+  limit?: number;
+  offset?: number;
+  orderBy?: 'name' | 'lastOpenedAt' | 'createdAt';
+  orderDirection?: 'asc' | 'desc';
+}
+
+export interface PanesQueryOptions {
+  limit?: number;
+  offset?: number;
+  combId?: string;
+  type?: PaneType | PaneType[];
+  status?: PaneStatus | PaneStatus[];
+  orderBy?: 'layoutOrder' | 'createdAt' | 'updatedAt' | 'lastActivityAt';
+  orderDirection?: 'asc' | 'desc';
+}
+
+export interface PaneSession {
+  ptyId?: string;
+  cwd?: string;
+  command?: string;
+  args?: string[];
+  status?: 'running' | 'exited';
+  startedAt?: string;
+  exitedAt?: string | null;
+  lastExitCode?: number | null;
+  outputPreview?: string;
+}
+
+export interface MissionAgentSession extends PaneSession {
+  missionId?: string;
+}
+
+export interface ProjectStats {
+  totalWorkspaces: number;
+  appliedWorkspaces: number;
+  activeWorkspaces: number;
+  failedWorkspaces: number;
+}
+
 // Aliases para compatibilidade com tipos antigos
+export type ProviderCreate = CreateProviderDTO;
+export type ProviderUpdate = UpdateProviderDTO;
+export type ProjectCreate = CreateProjectDTO;
+export type ProjectUpdate = UpdateProjectDTO;
 export type CombCreate = CreateCombDTO;
 export type CombUpdate = UpdateCombDTO;
 export type PaneCreate = CreatePaneDTO;

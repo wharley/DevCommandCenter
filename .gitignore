@@ -25,6 +25,7 @@ yarn-error.log*
 
 # env files
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -35,6 +36,11 @@ next-env.d.ts
 
 # Rust / Tauri (Cargo build output)
 src-tauri/target
+src-tauri/database.sqlite
+src-tauri/database.sqlite-shm
+src-tauri/database.sqlite-wal
+src-tauri/daemon-runtime.json
 
 # macOS
 .DS_Store
+.cursor

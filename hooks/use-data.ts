@@ -7,7 +7,7 @@
  * - No Browser: usa o Zustand store (estado em memória, sem mock)
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAppStore } from "./use-app-store";
 import {
   normalizeProject,
@@ -147,6 +147,7 @@ export function useProjects() {
           ...data,
           defaultProviderId: data.defaultProviderId ?? null,
           gitRemoteUrl: data.gitRemoteUrl ?? null,
+          repoConfig: data.repoConfig ?? null,
           lastOpenedAt: null,
         });
         emitDataChange("projects");
@@ -463,25 +464,47 @@ export function usePanes(combId?: string) {
   const [panes, setPanes] = useState<Pane[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const refresh = useCallback(async () => {
+  const panesSeqRef = useRef(0);
+  const panesInFlightRef = useRef(0);
+
+  useLayoutEffect(() => {
+    panesSeqRef.current += 1;
+    panesInFlightRef.current = 0;
+    setPanes([]);
     setIsLoading(true);
+  }, [combId]);
+
+  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) {
+      panesInFlightRef.current += 1;
+      setIsLoading(true);
+    }
+    const mySeq = ++panesSeqRef.current;
     try {
       if (hasDesktopDb() && window.db?.panes && combId) {
         const data = await ipcCall(window.db.panes.findByComb(combId), "panes.findByComb");
+        if (mySeq !== panesSeqRef.current) return;
         setPanes(normalizePanes(data) as Pane[]);
       } else {
+        if (mySeq !== panesSeqRef.current) return;
         setPanes([]);
       }
     } catch (error) {
       console.error("[usePanes] refresh failed:", error);
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        panesInFlightRef.current -= 1;
+        if (panesInFlightRef.current === 0) setIsLoading(false);
+      }
     }
   }, [combId]);
 
   useEffect(() => {
-    refresh();
-    const unsubscribe = subscribeToDataChange("panes", refresh);
+    void refresh({ silent: false });
+    const unsubscribe = subscribeToDataChange("panes", () => {
+      void refresh({ silent: true });
+    });
     return unsubscribe;
   }, [refresh]);
 

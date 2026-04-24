@@ -2,6 +2,7 @@
 name = "dev-command-center-tauri"
 version = "0.1.0"
 edition = "2021"
+default-run = "dev-command-center-tauri"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -10,12 +11,35 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
+notify-rust = "4.14"
 tauri-plugin-dialog = "2"
 portable-pty = "0.8"
 regex = "1.10"
 lazy_static = "1.4"
+tauri-plugin-notification = "2"
+chrono = { version = "0.4", features = ["serde"] }
+sysinfo = "0.30"
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+flate2 = "1"
+libc = "0.2"
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+tauri-plugin-updater = "2"
+sha2 = "0.10"
+hex = "0.4"
+
+[[bin]]
+name = "dccd"
+path = "src/bin/dccd.rs"
+
+[[bin]]
+name = "dccd-http"
+path = "src/bin/dccd-http.rs"
 
 [features]
 default = []

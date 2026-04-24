@@ -3,6 +3,7 @@ import type {
   Comb,
   CombStatus,
   CreateCombDTO,
+  ForgePrLink,
   ReviewTarget,
   UpdateCombDTO,
   CombsQueryOptions,
@@ -16,11 +17,13 @@ interface CombRow {
   base_branch: string;
   branch: string | null;
   worktree_path: string | null;
+  forge_link: string | null;
   review_targets: string | null;
   status: string;
   is_pinned: number;
   pinned_at: string | null;
   last_opened_at: string | null;
+  last_git_activity_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -36,6 +39,19 @@ function parseReviewTargetsJson(raw: string | null | undefined): ReviewTarget[] 
   return null;
 }
 
+function parseForgeLinkJson(raw: string | null | undefined): ForgePrLink | null {
+  if (!raw?.trim()) return null;
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (v && typeof v === 'object' && 'url' in v && 'number' in v) {
+      return v as ForgePrLink;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 function rowToComb(row: CombRow): Comb {
   return {
     id: row.id,
@@ -45,11 +61,13 @@ function rowToComb(row: CombRow): Comb {
     baseBranch: row.base_branch,
     branch: row.branch ?? null,
     worktreePath: row.worktree_path ?? null,
+    forgeLink: parseForgeLinkJson(row.forge_link),
     reviewTargets: parseReviewTargetsJson(row.review_targets),
     status: row.status as CombStatus,
     isPinned: row.is_pinned === 1,
     pinnedAt: row.pinned_at ? new Date(row.pinned_at) : null,
     lastOpenedAt: row.last_opened_at ? new Date(row.last_opened_at) : null,
+    lastGitActivityAt: row.last_git_activity_at ? new Date(row.last_git_activity_at) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -174,6 +192,10 @@ export const CombsRepository = {
           : JSON.stringify(data.reviewTargets),
       );
     }
+    if (data.forgeLink !== undefined) {
+      updates.push('forge_link = ?');
+      values.push(data.forgeLink == null ? null : JSON.stringify(data.forgeLink));
+    }
     if (data.status !== undefined) {
       updates.push('status = ?');
       values.push(data.status);
@@ -189,6 +211,10 @@ export const CombsRepository = {
     if (data.lastOpenedAt !== undefined) {
       updates.push('last_opened_at = ?');
       values.push(data.lastOpenedAt.toISOString());
+    }
+    if (data.lastGitActivityAt !== undefined) {
+      updates.push('last_git_activity_at = ?');
+      values.push(data.lastGitActivityAt ? data.lastGitActivityAt.toISOString() : null);
     }
 
     if (updates.length === 0) return this.findById(id);

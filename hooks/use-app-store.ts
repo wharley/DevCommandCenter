@@ -96,6 +96,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   addProject: (projectData) => {
     const newProject: Project = {
       ...projectData,
+      repoConfig: projectData.repoConfig ?? null,
       id: generateId(),
       createdAt: new Date(),
       updatedAt: new Date(),

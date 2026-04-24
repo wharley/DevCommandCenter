@@ -4,7 +4,7 @@
 const DATE_KEYS: Record<string, string[]> = {
   project: ['lastOpenedAt', 'createdAt', 'updatedAt'],
   provider: ['createdAt', 'updatedAt'],
-  comb: ['lastOpenedAt', 'createdAt', 'updatedAt'],
+  comb: ['lastOpenedAt', 'lastGitActivityAt', 'createdAt', 'updatedAt'],
   pane: ['lastActivityAt', 'createdAt', 'updatedAt'],
 };
 
@@ -52,7 +52,16 @@ function normalizeDates<T extends Record<string, unknown>>(
 }
 
 export function normalizeProject(raw: Record<string, unknown>): Record<string, unknown> {
-  return normalizeDates(raw, DATE_KEYS.project);
+  const normalized = normalizeDates(raw, DATE_KEYS.project);
+  const repoConfig = normalized.repoConfig ?? normalized.repo_config;
+  if (typeof repoConfig === "string" && repoConfig.trim()) {
+    try {
+      normalized.repoConfig = JSON.parse(repoConfig) as unknown;
+    } catch {
+      /* ignore */
+    }
+  }
+  return normalized;
 }
 
 export function normalizeProvider(raw: Record<string, unknown>): Record<string, unknown> {
@@ -81,6 +90,14 @@ export function normalizeComb(raw: Record<string, unknown>): Record<string, unkn
   if (typeof rt === "string" && rt.trim()) {
     try {
       normalized.reviewTargets = JSON.parse(rt) as unknown;
+    } catch {
+      /* ignore */
+    }
+  }
+  const fl = normalized.forge_link ?? normalized.forgeLink;
+  if (typeof fl === "string" && fl.trim()) {
+    try {
+      normalized.forgeLink = JSON.parse(fl) as unknown;
     } catch {
       /* ignore */
     }

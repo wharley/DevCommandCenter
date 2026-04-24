@@ -24,6 +24,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty } from "@/components/ui/empty";
 import { AddProviderDialog } from "@/components/dialogs/add-provider-dialog";
@@ -32,10 +42,30 @@ import { useProviders } from "@/hooks/use-data";
 import type { Provider, ProviderType } from "@/lib/database/types";
 import {
   areNotificationsEnabled,
+  ensureOsNotificationPermission,
+  isTauriRuntime,
   setNotificationsEnabled,
 } from "@/lib/notifications";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import {
+  loadTerminalAppearance,
+  saveTerminalAppearance,
+  type TerminalAppearancePreferences,
+} from "@/lib/terminal/terminal-preferences";
+import {
+  loadTerminalOutputLagPreferences,
+  saveTerminalOutputLagPreferences,
+  type TerminalOutputLagPreferences,
+} from "@/lib/terminal/output-lag-preferences";
+
+const TERMINAL_FONT_PRESETS: { label: string; value: string }[] = [
+  { label: "Geist / sistema (padrão)", value: "var(--font-geist-mono, 'Menlo', 'Monaco', monospace)" },
+  { label: "Menlo / Monaco", value: "Menlo, Monaco, 'Courier New', monospace" },
+  { label: "JetBrains Mono", value: "'JetBrains Mono', Menlo, monospace" },
+  { label: "Fira Code", value: "'Fira Code', Menlo, monospace" },
+  { label: "SF Mono", value: "'SF Mono', Menlo, monospace" },
+];
 
 const providerTypeConfig: Record<
   ProviderType,
@@ -96,6 +126,12 @@ export default function SettingsPage() {
 
   const [appVersion, setAppVersion] = useState<string>("—");
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [terminalAppearance, setTerminalAppearance] = useState<TerminalAppearancePreferences>(() =>
+    loadTerminalAppearance(),
+  );
+  const [terminalOutputLag, setTerminalOutputLag] = useState<TerminalOutputLagPreferences>(() =>
+    loadTerminalOutputLagPreferences(),
+  );
   const gotUpdateEventRef = useRef(false);
   const hasAppUpdateAPI =
     typeof window !== "undefined" && !!window.desktopAPI?.app;
@@ -148,16 +184,20 @@ export default function SettingsPage() {
     gotUpdateEventRef.current = false;
     setCheckingUpdate(true);
     try {
-      await window.desktopAPI.app.checkForUpdates();
-      setTimeout(() => {
-        setCheckingUpdate((prev) => {
-          if (!prev) return prev;
-          if (!gotUpdateEventRef.current) {
-            toast.success("Você está na versão mais recente.");
-          }
-          return false;
-        });
-      }, 3000);
+      const result = await window.desktopAPI.app.checkForUpdates();
+      setCheckingUpdate(false);
+      if (result.checkError) {
+        toast.error(result.checkError);
+        return;
+      }
+      if (result.available && result.version) {
+        toast.info(
+          `Nova versão ${result.version} disponível. Use «Reiniciar e instalar» quando estiver pronto.`,
+          { duration: 6000 }
+        );
+        return;
+      }
+      toast.success("Você está na versão mais recente.");
     } catch {
       setCheckingUpdate(false);
       toast.error("Falha ao verificar atualização.");
@@ -176,7 +216,7 @@ export default function SettingsPage() {
           <div>
             <h1 className="text-lg font-semibold tracking-tight text-foreground">Providers</h1>
             <p className="text-xs text-muted-foreground">
-              Configuracao dos agentes e notificacoes essenciais
+              Configuração dos agentes e notificações essenciais
             </p>
           </div>
         </div>
@@ -381,14 +421,24 @@ export default function SettingsPage() {
               <div className="min-w-0">
                 <p className="text-sm font-medium">Notificações nativas</p>
                 <p className="text-[11px] text-muted-foreground">
-                  Avisos do sistema ao concluir etapas da missão
+                  Avisos do sistema quando um agente ou terminal precisa de atenção (outro workspace, janela em
+                  segundo plano, etc.). O toast dentro do app continua sempre.
                 </p>
               </div>
               <Switch
                 checked={notificationsEnabled}
-                onCheckedChange={(checked) => {
+                onCheckedChange={async (checked) => {
                   setNotificationsEnabled(checked);
                   setNotificationsEnabledState(checked);
+                  if (checked && isTauriRuntime()) {
+                    const granted = await ensureOsNotificationPermission();
+                    if (!granted) {
+                      toast.info(
+                        "Permita notificações para o Dev Command Center nas definições do sistema, se quiser banners fora da janela.",
+                        { duration: 7000 },
+                      );
+                    }
+                  }
                 }}
               />
             </div>
@@ -416,6 +466,220 @@ export default function SettingsPage() {
                 </Button>
               </div>
             )}
+          </section>
+
+          <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            <div className="border-b border-border px-4 py-3">
+              <p className="text-sm font-medium">Terminal embutido</p>
+              <p className="text-[11px] text-muted-foreground">
+                Aparência do xterm no workspace. Atalhos: Cmd+1–9 foco no pane,
+                Cmd+K abre a palette global, Cmd+Shift+K limpa scrollback,
+                Cmd+Plus/Cmd+Minus zoom, Cmd+0 reset do zoom (Ctrl no Windows/Linux).
+              </p>
+            </div>
+            <div className="space-y-4 px-4 py-3">
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+                <Label htmlFor="term-font-size">Tamanho da fonte</Label>
+                <Input
+                  id="term-font-size"
+                  type="number"
+                  min={8}
+                  max={32}
+                  value={terminalAppearance.fontSize}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isNaN(v)) return;
+                    const fontSize = Math.min(32, Math.max(8, v));
+                    const next = { ...terminalAppearance, fontSize };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                  className="max-w-[120px]"
+                />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+                <Label htmlFor="term-font-family">Fonte</Label>
+                <Select
+                  value={terminalAppearance.fontFamily}
+                  onValueChange={(value) => {
+                    const next = { ...terminalAppearance, fontFamily: value };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                >
+                  <SelectTrigger id="term-font-family" className="max-w-md">
+                    <SelectValue placeholder="Fonte" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TERMINAL_FONT_PRESETS.every((p) => p.value !== terminalAppearance.fontFamily) ? (
+                      <SelectItem value={terminalAppearance.fontFamily}>Valor guardado</SelectItem>
+                    ) : null}
+                    {TERMINAL_FONT_PRESETS.map((p) => (
+                      <SelectItem key={p.value} value={p.value}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Cores do tema do app</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Quando desligado, usa paleta escura fixa no terminal.
+                  </p>
+                </div>
+                <Switch
+                  checked={terminalAppearance.useAppThemeColors}
+                  onCheckedChange={(checked) => {
+                    const next = { ...terminalAppearance, useAppThemeColors: checked };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                />
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+                <Label htmlFor="scrollback">Scrollback</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="scrollback"
+                    type="number"
+                    min={100}
+                    max={50000}
+                    step={1000}
+                    value={terminalAppearance.scrollback}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isNaN(v)) return;
+                      const scrollback = Math.min(50000, Math.max(100, v));
+                      const next = { ...terminalAppearance, scrollback };
+                      setTerminalAppearance(next);
+                      saveTerminalAppearance(next);
+                    }}
+                    className="max-w-[140px]"
+                  />
+                  <p className="text-xs text-muted-foreground">linhas</p>
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+                <Label htmlFor="cursor-style">Estilo do cursor</Label>
+                <Select
+                  value={terminalAppearance.cursorStyle}
+                  onValueChange={(value: "block" | "underline" | "bar") => {
+                    const next = { ...terminalAppearance, cursorStyle: value };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                >
+                  <SelectTrigger id="cursor-style" className="max-w-[200px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="block">Bloco</SelectItem>
+                    <SelectItem value="underline">Sublinhado</SelectItem>
+                    <SelectItem value="bar">Barra</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+                <Label htmlFor="bell-style">Estilo do bell</Label>
+                <Select
+                  value={terminalAppearance.bellStyle}
+                  onValueChange={(value: "none" | "visual" | "sound" | "both") => {
+                    const next = { ...terminalAppearance, bellStyle: value };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                >
+                  <SelectTrigger id="bell-style" className="max-w-[200px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhum</SelectItem>
+                    <SelectItem value="visual">Visual (Flash)</SelectItem>
+                    <SelectItem value="sound">Som</SelectItem>
+                    <SelectItem value="both">Ambos</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Cursor piscante</p>
+                </div>
+                <Switch
+                  checked={terminalAppearance.cursorBlink}
+                  onCheckedChange={(checked) => {
+                    const next = { ...terminalAppearance, cursorBlink: checked };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Copiar ao selecionar</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Copia automaticamente o texto selecionado
+                  </p>
+                </div>
+                <Switch
+                  checked={terminalAppearance.copyOnSelect}
+                  onCheckedChange={(checked) => {
+                    const next = { ...terminalAppearance, copyOnSelect: checked };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Clique direito seleciona palavra</p>
+                </div>
+                <Switch
+                  checked={terminalAppearance.rightClickSelectsWord}
+                  onCheckedChange={(checked) => {
+                    const next = { ...terminalAppearance, rightClickSelectsWord: checked };
+                    setTerminalAppearance(next);
+                    saveTerminalAppearance(next);
+                  }}
+                />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-start">
+                <Label htmlFor="term-output-lag">Ligação lenta</Label>
+                <div className="space-y-2">
+                  <Slider
+                    id="term-output-lag"
+                    min={0.75}
+                    max={1.5}
+                    step={0.05}
+                    value={[terminalOutputLag.sensitivity]}
+                    onValueChange={(value) => {
+                      const sensitivity = value[0] ?? terminalOutputLag.sensitivity;
+                      const next = { sensitivity };
+                      setTerminalOutputLag(next);
+                      saveTerminalOutputLagPreferences(next);
+                    }}
+                    className="max-w-md"
+                  />
+                  <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                    <span>Menor = mais sensível; maior = mais tolerante a bursts.</span>
+                    <span className="tabular-nums font-medium text-foreground">
+                      {terminalOutputLag.sensitivity.toFixed(2)}x
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Métricas de throughput (dev):{" "}
+                <code className="rounded bg-muted px-1">localStorage.setItem(&apos;dcc.debugTerminalMetrics&apos;, &apos;1&apos;)</code>
+              </p>
+            </div>
           </section>
         </div>
       </div>

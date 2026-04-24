@@ -20,9 +20,19 @@ interface ProjectRow {
   description: string | null;
   default_provider_id: string | null;
   git_remote_url: string | null;
+  repo_config: string | null;
   last_opened_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+function parseRepoConfigJson(raw: string | null | undefined) {
+  if (!raw?.trim()) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 function rowToProject(row: ProjectRow): Project {
@@ -33,6 +43,7 @@ function rowToProject(row: ProjectRow): Project {
     description: row.description,
     defaultProviderId: row.default_provider_id,
     gitRemoteUrl: row.git_remote_url,
+    repoConfig: parseRepoConfigJson(row.repo_config),
     lastOpenedAt: row.last_opened_at ? new Date(row.last_opened_at) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -129,8 +140,8 @@ export const ProjectsRepository = {
     const id = generateId();
     
     const stmt = db.prepare(`
-      INSERT INTO projects (id, name, path, description, default_provider_id, git_remote_url)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO projects (id, name, path, description, default_provider_id, git_remote_url, repo_config)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
@@ -139,7 +150,8 @@ export const ProjectsRepository = {
       data.path,
       data.description || null,
       data.defaultProviderId || null,
-      data.gitRemoteUrl || null
+      data.gitRemoteUrl || null,
+      data.repoConfig ? JSON.stringify(data.repoConfig) : null
     );
     
     return this.findById(id)!;
@@ -174,6 +186,10 @@ export const ProjectsRepository = {
     if (data.gitRemoteUrl !== undefined) {
       updates.push('git_remote_url = ?');
       values.push(data.gitRemoteUrl);
+    }
+    if (data.repoConfig !== undefined) {
+      updates.push('repo_config = ?');
+      values.push(data.repoConfig ? JSON.stringify(data.repoConfig) : null);
     }
     
     if (updates.length === 0) {

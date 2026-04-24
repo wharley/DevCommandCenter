@@ -53,21 +53,75 @@ O fluxo ideal para um desenvolvedor sênior no DCC:
 ## 🏁 Começando
 
 ### Pré-requisitos
-- **Node.js 22+** e **Yarn v1**.
-- **Rust (stable)** para compilar o backend Tauri.
-- **Git** instalado (essencial para o gerenciamento de Worktrees).
+- **Node.js >= 18.18.0** (recomendado: **Node.js 22 LTS**)
+- **Yarn v1**
+- **Rust (stable)** para compilar o backend Tauri
+- **Git** instalado (essencial para o gerenciamento de Worktrees)
 
 ### Instalação e Execução
+
+#### Método Recomendado: Setup Automático
+
+Execute o script de setup que configura tudo automaticamente:
+
+```bash
+./setup.sh
+```
+
+Este script irá:
+- ✅ Detectar e usar automaticamente o Node.js 22 via nvm
+- ✅ Instalar todas as dependências
+- ✅ Configurar o ambiente (.env)
+- ✅ Preparar o projeto para desenvolvimento
+
+#### Método Manual
+
+Se você já tem Node.js 22+ instalado globalmente:
+
 ```bash
 yarn install
 yarn dev # Inicia o App Desktop (Tauri + Vite)
 ```
 
+#### ⚠️ Problemas com Versão do Node?
+
+Se você encontrar erros como:
+```
+error @aws-sdk/client-s3: The engine "node" is incompatible with this module
+```
+
+**Solução Rápida:**
+```bash
+# Se você usa nvm
+nvm use 22  # ou nvm use
+yarn install
+
+# Se não tem nvm instalado
+./setup.sh  # O script guiará você
+```
+
+📖 **Mais detalhes:** Veja [Troubleshooting: Versão do Node](docs/TROUBLESHOOTING-NODE.md)
+
+### Git worktrees e `.env`
+
+Arquivos `.env` **não** vão para o Git (`.gitignore`). Cada clone ou **worktree** é uma pasta nova: se algo que você roda no terminal espera variáveis em `.env`, copie ou vincule o arquivo.
+
+- **Modelo recomendado:** na raiz do repositório há `.devcommandcenter/config.json` com um script de setup. Rode na raiz do worktree:
+  ```bash
+  yarn setup-worktree
+  ```
+  O script, se possível, cria um **symlink** do `.env` do worktree onde está a branch `main`; se não achar, copia `.env.example` → `.env`.
+- **Manual:** `cp .env.example .env` ou `ln -s /caminho/absoluto/do/repo-principal/.env .env`
+
+O template versionado é **`.env.example`** (este arquivo sim é commitado).
+
 ---
 
 ## 📚 Documentação Detalhada
 
-- 📖 **[Guia de Produtividade & Fluxos](docs/GUIA_DE_PRODUTIVIDADE.md)** - Como extrair o máximo do DCC.
+- 📖 **[Guia de Produtividade & Fluxos](docs/GUIA_DE_PRODUTIVIDADE.md)** — Worktrees, panes, atenção e boas práticas.
+- 🧭 **[Guia de recursos e fluxos (DCC atual)](docs/GUIA_RECURSOS_E_FLUXOS_DCC.md)** — Como usar daemon, `.dcc.toml`, processos, tasks, palette, CLI/MCP e fluxos que combinam estes benefícios.
+- 🌲 **[Melhorias inspiradas no Arbor](docs/MELHORIAS_INSPIRADAS_ARBOR.md)** — Visão de produto, checklist de implementação e roadmap.
 - 🏗️ **[Arquitetura do Sistema](docs/ARCHITECTURE.md)** - Como o DCC funciona por baixo do capô.
 - 🛠️ **[Guia de Migração Tauri](docs/MIGRACAO_TAURI.md)** - Detalhes sobre a stack Rust/Tauri.
 

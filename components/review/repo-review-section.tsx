@@ -7,26 +7,27 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
   ArrowDownToLine,
   Check,
-  ChevronDown,
   Clock,
   FileCode,
   GitMerge,
   Loader2,
+  Maximize2,
+  Minimize2,
+  PanelRight,
+  PanelRightClose,
+  RefreshCw,
   Upload,
+  X,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -47,9 +48,20 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+import { DiffFileTree } from "@/components/review/diff-file-tree";
+import { WorktreeNotesPanel } from "@/components/review/worktree-notes-panel";
+import { PrReviewCommentsPanel } from "@/components/review/pr-review-comments-panel";
 import { DiffCodeBlock } from "@/components/diff-code-block";
 import { CommitDialog } from "@/components/dialogs/commit-dialog";
+import { GitActionsPanel } from "@/components/review/git-actions-panel";
 import { useConfirmDialog } from "@/components/providers/confirm-dialog-provider";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useMergePermissions } from "@/hooks/use-merge-permissions";
 import { extractContextTokens } from "@/lib/review/extract-context-tokens";
 import type { GitStatus } from "@/types/app";
 import { toast } from "sonner";
@@ -64,6 +76,14 @@ const reviewIncludedKey = (storageKey: string) =>
   `dcc-review-included-${storageKey}`;
 const reviewTrailKey = (storageKey: string) =>
   `dcc-review-trail-${storageKey}`;
+
+const MAX_DIFF_TABS = 16;
+
+function diffTabLabel(path: string): string {
+  const parts = path.split(/[/\\]/);
+  const base = parts[parts.length - 1] || path;
+  return base.length > 28 ? `${base.slice(0, 25)}…` : base;
+}
 
 function loadReviewJson<T>(key: string): T | null {
   if (typeof window === "undefined") return null;
@@ -134,13 +154,25 @@ export function RepoReviewSection({
   const [diffs, setDiffs] = useState<{
     loading: boolean;
     error?: string;
-    files: Array<{ path: string; status: string; diff: string }>;
+    files: Array<{
+      path: string;
+      status: string;
+      diff: string;
+      insertions?: number;
+      deletions?: number;
+    }>;
     summary: {
       changedFiles: number;
       insertions: number;
       deletions: number;
     } | null;
   }>({ loading: false, files: [], summary: null });
+
+  /** Separadores de diff por path (ordem = ordem dos separadores). */
+  const [diffOpenTabs, setDiffOpenTabs] = useState<string[]>([]);
+  const [activeDiffTabPath, setActiveDiffTabPath] = useState<string | null>(
+    null,
+  );
 
   const [fileFlags, setFileFlags] = useState<Record<string, ReviewFlag>>({});
   const [included, setIncluded] = useState<Record<string, boolean>>({});
@@ -157,10 +189,13 @@ export function RepoReviewSection({
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [commitDialogStatus, setCommitDialogStatus] =
     useState<GitStatus | null>(null);
+  const [commitDialogStatusLoading, setCommitDialogStatusLoading] =
+    useState(false);
 
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [applyCommitDialogOpen, setApplyCommitDialogOpen] = useState(false);
   const [applyCommitMessage, setApplyCommitMessage] = useState("");
+  const [flowHelpOpen, setFlowHelpOpen] = useState(false);
 
   const [mainRepoStatus, setMainRepoStatus] = useState<GitStatus | null>(null);
   const [mainRepoStatusLoading, setMainRepoStatusLoading] = useState(false);
@@ -168,11 +203,93 @@ export function RepoReviewSection({
   /** Estado do Git na worktree (commit/merge só fazem sentido com cópia limpa antes do merge). */
   const [worktreeRepoStatus, setWorktreeRepoStatus] =
     useState<GitStatus | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const isMobile = useIsMobile();
+  const sidebarPanelRef = useRef<React.ElementRef<typeof ResizablePanel> | null>(
+    null,
+  );
+  const rightPanelRef = useRef<React.ElementRef<typeof ResizablePanel> | null>(null);
 
   const filePathsKey = useMemo(
     () => diffs.files.map((f) => f.path).sort().join("\0"),
     [diffs.files],
   );
+
+  useEffect(() => {
+    const paths = filePathsKey ? filePathsKey.split("\0") : [];
+    const pathSet = new Set(paths);
+    setDiffOpenTabs((prevTabs) => {
+      const filtered = prevTabs.filter((p) => pathSet.has(p));
+      const nextTabs =
+        filtered.length === 0 && paths.length > 0 ? [paths[0]!] : filtered;
+      setActiveDiffTabPath((active) => {
+        if (nextTabs.length === 0) return null;
+        if (active && nextTabs.includes(active)) return active;
+        return nextTabs[0] ?? null;
+      });
+      return nextTabs;
+    });
+  }, [filePathsKey]);
+
+  const navigateToDiffFile = useCallback((path: string) => {
+    setDiffOpenTabs((prev) => {
+      if (prev.includes(path)) return prev;
+      const next = [...prev, path];
+      return next.slice(-MAX_DIFF_TABS);
+    });
+    setActiveDiffTabPath(path);
+  }, []);
+
+  const closeDiffTab = useCallback(
+    (path: string, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      e?.preventDefault();
+      setDiffOpenTabs((prev) => {
+        const idx = prev.indexOf(path);
+        const next = prev.filter((p) => p !== path);
+        setActiveDiffTabPath((active) => {
+          if (active !== path) return active;
+          if (next.length === 0) return null;
+          if (idx <= 0) return next[0] ?? null;
+          return next[Math.min(idx - 1, next.length - 1)] ?? next[0] ?? null;
+        });
+        return next;
+      });
+    },
+    [],
+  );
+
+  const activeDiffFile = useMemo(
+    () => diffs.files.find((f) => f.path === activeDiffTabPath),
+    [diffs.files, activeDiffTabPath],
+  );
+
+  const activeDiffTokens = useMemo(
+    () =>
+      activeDiffFile ? extractContextTokens(activeDiffFile.diff) : [],
+    [activeDiffFile],
+  );
+
+  const toggleReviewSidebar = useCallback(() => {
+    const panel = sidebarPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) {
+      panel.expand();
+      return;
+    }
+    panel.collapse();
+  }, []);
+
+  const toggleRightPanel = useCallback(() => {
+    const panel = rightPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) {
+      panel.expand();
+      return;
+    }
+    panel.collapse();
+  }, []);
 
   const addTrail = useCallback(
     (message: string) => {
@@ -360,6 +477,15 @@ export function RepoReviewSection({
     useCombWorktreeApis && combId && window.desktopAPI?.comb?.mergeIntoMain,
   );
 
+  // Verificar permissões de merge/push na branch de destino
+  const mergePermissions = useMergePermissions(
+    useCombWorktreeApis && combId ? combId : null,
+    targetBranch,
+    {
+      enabled: canMergeComb, // Só verificar se o merge está habilitado
+    }
+  );
+
   const refreshMainRepoStatus = useCallback(async () => {
     if (!mainProjectPath?.trim() || !window.desktopAPI?.git?.getStatus) {
       setMainRepoStatus(null);
@@ -394,7 +520,8 @@ export function RepoReviewSection({
   const mergeUiBlocked =
     !canMergeComb ||
     mainRepoDirty ||
-    worktreeDirty;
+    worktreeDirty ||
+    !mergePermissions.canMerge;
 
   const mainDirtyFilePreview = useMemo(() => {
     if (!mainRepoStatus?.isDirty) return [];
@@ -634,6 +761,42 @@ export function RepoReviewSection({
     }
   };
 
+  const handleStageFile = async (filePath: string) => {
+    if (!worktreePath || !window.desktopAPI?.git?.stageFile) return;
+    const result = await window.desktopAPI.git.stageFile(worktreePath, filePath);
+    if (result.success) {
+      toast.success(`Staged: ${filePath.split(/[/\\]/).pop()}`);
+      addTrail(`Stage: ${filePath}`);
+      await loadDiffs();
+      await refreshWorktreeRepoStatus();
+    } else {
+      toast.error(result.error ?? "Falha ao adicionar ao stage");
+    }
+  };
+
+  const handleDiscardFile = async (filePath: string, status: string) => {
+    if (!worktreePath || !window.desktopAPI?.git?.discardFile) return;
+    const isUntracked = status === "untracked";
+    const ok = await confirmDialog({
+      title: isUntracked ? "Remover arquivo?" : "Descartar alterações?",
+      description: isUntracked
+        ? `O arquivo "${filePath}" será removido permanentemente (git clean). Esta ação não pode ser desfeita.`
+        : `As alterações em "${filePath}" serão descartadas (git restore). Esta ação não pode ser desfeita.`,
+      confirmLabel: isUntracked ? "Remover" : "Descartar",
+      cancelLabel: "Cancelar",
+    });
+    if (!ok) return;
+    const result = await window.desktopAPI.git.discardFile(worktreePath, filePath, isUntracked);
+    if (result.success) {
+      toast.success(`Descartado: ${filePath.split(/[/\\]/).pop()}`);
+      addTrail(`Discard: ${filePath}`);
+      await loadDiffs();
+      await refreshWorktreeRepoStatus();
+    } else {
+      toast.error(result.error ?? "Falha ao descartar arquivo");
+    }
+  };
+
   const handleDiscardMainRepo = async () => {
     if (!mainProjectPath?.trim() || !window.desktopAPI?.git?.reset) return;
     const ok = await confirmDialog({
@@ -655,14 +818,23 @@ export function RepoReviewSection({
   };
 
   useEffect(() => {
-    if (!commitDialogOpen || !worktreePath || !window.desktopAPI?.git) {
-      if (!commitDialogOpen) setCommitDialogStatus(null);
+    if (!commitDialogOpen) {
+      setCommitDialogStatus(null);
+      setCommitDialogStatusLoading(false);
       return;
     }
+    // Seed immediately with cached status so dialog never hangs
+    setCommitDialogStatus(worktreeRepoStatus);
+    if (!worktreePath || !window.desktopAPI?.git) return;
+    setCommitDialogStatusLoading(true);
     window.desktopAPI.git
       .getStatus(worktreePath)
       .then((s) => setCommitDialogStatus(s))
-      .catch(() => setCommitDialogStatus(null));
+      .catch(() => {
+        // Keep the cached status rather than resetting to null
+      })
+      .finally(() => setCommitDialogStatusLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commitDialogOpen, worktreePath]);
 
   useEffect(() => {
@@ -685,111 +857,97 @@ export function RepoReviewSection({
         compact ? "" : "flex-1 min-h-0"
       }`}
     >
-      <div className="shrink-0 space-y-3 border-b border-border px-4 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
+      <div className="shrink-0 border-b border-border px-4 py-3 space-y-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1 space-y-0.5">
             <h4 className="text-sm font-semibold">{title}</h4>
             {subtitle ? (
               <p className="text-[11px] text-muted-foreground font-mono truncate max-w-[min(100%,480px)]">
                 {subtitle}
               </p>
             ) : null}
-            {diffs.summary && diffs.files.length > 0 && (
-              <p className="text-xs text-muted-foreground">
-                {diffs.files.length} arquivo(s): {summaryCounts.ok} OK,{" "}
-                {summaryCounts.later} rever depois, {summaryCounts.suspicious}{" "}
-                suspeito(s) · +{diffs.summary.insertions} −
-                {diffs.summary.deletions}
-              </p>
-            )}
-            {diffs.summary && diffs.files.length === 0 && !diffs.loading && (
-              <p className="text-xs text-muted-foreground">
-                Nenhuma alteração pendente
-              </p>
-            )}
           </div>
-          <div className="flex min-w-[200px] flex-col gap-1">
-            <Label className="text-[10px] uppercase text-muted-foreground">
-              Branch de destino (repo principal)
-            </Label>
-            {branchList.length > 0 ? (
-              <Select value={targetBranch} onValueChange={setTargetBranch}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branchList.map((br) => (
-                    <SelectItem key={br} value={br}>
-                      {br}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                className="h-8 text-xs"
-                placeholder="main"
-                value={targetBranch}
-                onChange={(e) => setTargetBranch(e.target.value)}
-              />
+          <div className="flex shrink-0 items-center gap-1">
+            {diffs.summary && diffs.files.length > 0 && (
+              <div className="hidden sm:flex items-center gap-1 font-mono text-[11px] mr-1">
+                <span className="text-emerald-600 dark:text-emerald-400">
+                  +{diffs.summary.insertions}
+                </span>
+                <span className="text-muted-foreground opacity-40">/</span>
+                <span className="text-rose-600 dark:text-rose-400">
+                  −{diffs.summary.deletions}
+                </span>
+              </div>
+            )}
+            {mainRepoStatusLoading && (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => void loadDiffs()}
+              title="Recarregar diffs"
+              disabled={diffs.loading}
+            >
+              {diffs.loading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+            </Button>
+            {!isMobile && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={toggleRightPanel}
+                title={
+                  rightPanelCollapsed
+                    ? "Mostrar painel de ações"
+                    : "Ocultar painel de ações"
+                }
+              >
+                {rightPanelCollapsed ? (
+                  <PanelRight className="h-3.5 w-3.5" />
+                ) : (
+                  <PanelRightClose className="h-3.5 w-3.5" />
+                )}
+              </Button>
             )}
           </div>
         </div>
 
-        <Alert className="border-primary/25 bg-primary/5 py-2">
-          <Check className="h-4 w-4 text-primary" />
-          <AlertTitle className="text-xs">Fluxo recomendado (sem terminal)</AlertTitle>
-          <AlertDescription className="text-xs leading-relaxed text-muted-foreground">
-            <ol className="mt-1 list-decimal space-y-1 pl-4">
-              <li>
-                <strong className="text-foreground">Worktree</strong> — Commit e depois
-                Push no branch da Missão (abaixo). Usa Pull se precisares de alinhar com
-                o remoto antes.
-              </li>
-              <li>
-                <strong className="text-foreground">Principal limpo</strong> — O
-                checkout na raiz do projeto (ex. <code className="text-[10px]">main</code>)
-                não pode ter alterações por commitar. Se editaste ficheiros aí ou usaste
-                &quot;Aplicar&quot; antes, resolve ou usa &quot;Descartar no
-                principal&quot; no alerta vermelho.
-              </li>
-              <li>
-                <strong className="text-foreground">Merge</strong> — Integra o branch
-                da Missão na branch de destino escolhida em cima.
-              </li>
-            </ol>
-            <p className="mt-2 font-mono text-[10px] break-all opacity-90">
-              Pasta da Missão (agentes): {worktreePath}
-            </p>
-          </AlertDescription>
-        </Alert>
-
-        <Collapsible className="rounded-md border border-border/80 bg-muted/15">
-          <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/30">
-            <span>Detalhes: merge vs patch</span>
-            <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-2 border-t border-border/60 px-3 pb-3 pt-0 text-xs text-muted-foreground">
-            <p className="mt-2 leading-relaxed">
-              <strong className="text-foreground">Merge</strong> é o caminho normal:
-              traz o branch inteiro da worktree para a branch de destino no repositório
-              principal (histórico preservado).
-            </p>
-            <p className="leading-relaxed">
-              <strong className="text-foreground">Patch</strong> (&quot;Aplicar&quot;)
-              copia diffs para o checkout principal — útil em casos raros; sem commit
-              deixa o principal com ficheiros modificados (como{" "}
-              <code className="text-[10px]">git apply</code> manual).
-            </p>
-          </CollapsibleContent>
-        </Collapsible>
-
-        {mainRepoStatusLoading ? (
-          <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" /> A ler estado do
-            repositório principal…
+        {diffs.summary && diffs.files.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {diffs.files.length} arquivo(s)
+            {" · "}
+            <span className="text-emerald-600 dark:text-emerald-400">
+              {summaryCounts.ok} ok
+            </span>
+            {summaryCounts.later > 0 && (
+              <>
+                {" · "}
+                <span className="text-amber-500">
+                  {summaryCounts.later} rever depois
+                </span>
+              </>
+            )}
+            {summaryCounts.suspicious > 0 && (
+              <>
+                {" · "}
+                <span className="text-rose-500">
+                  {summaryCounts.suspicious} suspeito(s)
+                </span>
+              </>
+            )}
           </p>
-        ) : null}
+        )}
+        {diffs.summary && diffs.files.length === 0 && !diffs.loading && (
+          <p className="text-xs text-muted-foreground">Nenhuma alteração pendente</p>
+        )}
 
         {mainRepoDirty ? (
           <Alert variant="destructive" className="py-2">
@@ -797,9 +955,8 @@ export function RepoReviewSection({
             <AlertTitle className="text-xs">Repositório principal com alterações pendentes</AlertTitle>
             <AlertDescription className="space-y-2 text-xs leading-snug">
               <p>
-                Patch e merge no principal estão bloqueados até commitares, stash ou
-                descartares nesse repositório (não na worktree). Isto evita o erro de
-                merge por ficheiros locais.
+                Patch e merge bloqueados até commitares, stash ou descartares nesse
+                repositório (não na worktree).
               </p>
               {mainDirtyFilePreview.length > 0 ? (
                 <span className="block font-mono text-[10px] text-destructive/95">
@@ -827,145 +984,73 @@ export function RepoReviewSection({
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle className="text-xs">Worktree com alterações por commitar</AlertTitle>
             <AlertDescription className="text-xs leading-snug">
-              O merge integra o branch já commitado, não o working tree. Faz commit ou
-              descarta na worktree antes de integrar no repositório principal.
+              O merge integra o branch já commitado. Faz commit ou descarta na worktree
+              antes de integrar no repositório principal.
             </AlertDescription>
           </Alert>
         ) : null}
 
-        <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Passo 1 — Branch da Missão (worktree)
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
+        {isMobile && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
             <Button
-              variant="outline"
               size="sm"
-              disabled={diffs.files.length === 0}
-              onClick={() => void handleDiscardWorktree()}
-            >
-              Descartar
-            </Button>
-            <Button
               variant="outline"
-              size="sm"
+              className="h-7 gap-1 text-xs"
               disabled={diffs.files.length === 0}
               onClick={() => setCommitDialogOpen(true)}
             >
-              <FileCode className="mr-1 h-3 w-3" />
+              <FileCode className="h-3 w-3" />
               Commit…
             </Button>
             <Button
-              variant="outline"
               size="sm"
-              disabled={isPulling || !worktreePath}
-              onClick={() => void handlePull()}
-              title="Atualizar branch da Missão a partir do remoto (git pull)"
-            >
-              {isPulling ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              ) : (
-                <ArrowDownToLine className="mr-1 h-3 w-3" />
-              )}
-              Pull
-            </Button>
-            <Button
               variant="outline"
-              size="sm"
-              disabled={isPushing || !worktreePath}
+              className="h-7 gap-1 text-xs"
+              disabled={isPushing || isPulling || isMerging}
               onClick={() => void handlePush()}
             >
               {isPushing ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
-                <Upload className="mr-1 h-3 w-3" />
+                <Upload className="h-3 w-3" />
               )}
               Push
             </Button>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Passo 2 — Integrar no repositório principal
-          </p>
-          <p className="text-[11px] text-muted-foreground leading-snug">
-            Usa o merge para trazer o branch da Missão para{" "}
-            <span className="font-mono">{targetBranch || "…"}</span>. O principal tem
-            de estar limpo (sem alterações locais na raiz do projeto).
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
-              disabled={isMerging || mergeUiBlocked}
-              title={
-                !canMergeComb
-                  ? "Disponível só no target principal da Missão."
-                  : mainRepoDirty
-                    ? "Limpe alterações no repositório principal antes do merge (ou use Descartar no alerta acima)."
-                    : worktreeDirty
-                      ? "Faça commit ou descarte na worktree antes do merge."
-                      : undefined
-              }
-              onClick={handleMergeClick}
+              variant="outline"
+              className="h-7 gap-1 text-xs"
+              disabled={isPushing || isPulling || isMerging}
+              onClick={() => void handlePull()}
             >
-              {isMerging ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              {isPulling ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
-                <GitMerge className="mr-1 h-3 w-3" />
+                <ArrowDownToLine className="h-3 w-3" />
               )}
-              Integrar branch (merge)…
+              Pull
             </Button>
+            {canMergeComb && (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-7 gap-1 text-xs"
+                disabled={mergeUiBlocked}
+                onClick={handleMergeClick}
+              >
+                {isMerging ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <GitMerge className="h-3 w-3" />
+                )}
+                Merge…
+              </Button>
+            )}
           </div>
-
-          <Collapsible className="rounded-md border border-amber-500/25 bg-amber-500/5">
-            <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-amber-500/10">
-              <span>Alternativa avançada: patch no principal (não é merge)</span>
-              <ChevronDown className="h-4 w-4 shrink-0 opacity-70" />
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-2 border-t border-amber-500/20 px-3 pb-3 pt-1 text-xs text-muted-foreground">
-              <p className="leading-snug">
-                Isto aplica alterações diretamente no checkout do repositório principal
-                (pasta do Hive), não só na worktree. Só usa se souberes o que estás a
-                fazer; &quot;Aplicar&quot; sem commit deixa o principal com ficheiros
-                modificados.
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={
-                    isApplyingPatch ||
-                    !hasIncludedFiles ||
-                    diffs.files.length === 0 ||
-                    patchActionsBlocked
-                  }
-                  onClick={() => void runApplyPatch({ commit: false })}
-                >
-                  {isApplyingPatch ? (
-                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                  ) : null}
-                  Aplicar
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={
-                    isApplyingPatch ||
-                    !hasIncludedFiles ||
-                    diffs.files.length === 0 ||
-                    patchActionsBlocked
-                  }
-                  onClick={() => setApplyCommitDialogOpen(true)}
-                >
-                  Aplicar + Commit
-                </Button>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-        </div>
+        )}
       </div>
 
+      {/* ── DIALOGS ────────────────────────────────────────────── */}
       <Dialog open={mergeDialogOpen} onOpenChange={setMergeDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -1083,122 +1168,562 @@ export function RepoReviewSection({
         </DialogContent>
       </Dialog>
 
-      <ScrollArea
-        className={
-          compact ? "max-h-[min(70vh,560px)]" : "min-h-0 flex-1"
-        }
-      >
-        {diffs.loading ? (
-          <div className="flex items-center justify-center p-8">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : diffs.error ? (
-          <div className="p-4 text-sm text-destructive">{diffs.error}</div>
-        ) : diffs.files.length === 0 ? (
-          <div className="p-8 text-center text-sm text-muted-foreground">
-            Nenhuma alteração detectada neste repositório.
-          </div>
-        ) : (
-          <div className="space-y-4 p-4">
-            {diffs.files.map((file) => {
-              const tokens = extractContextTokens(file.diff);
-              return (
-                <div key={file.path} className="rounded-lg border border-border">
-                  <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-                    <Checkbox
-                      checked={included[file.path] !== false}
-                      onCheckedChange={(c) =>
-                        setIncluded((prev) => ({
-                          ...prev,
-                          [file.path]: c === true,
-                        }))
-                      }
-                      aria-label={`Incluir ${file.path} no patch`}
-                    />
-                    <ToggleGroup
-                      type="single"
-                      value={fileFlags[file.path] ?? "ok"}
-                      onValueChange={(v) => {
-                        if (!v) return;
-                        setFileFlags((prev) => ({
-                          ...prev,
-                          [file.path]: v as ReviewFlag,
-                        }));
-                      }}
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                    >
-                      <ToggleGroupItem value="ok" aria-label="OK">
-                        <Check className="h-3.5 w-3.5 text-emerald-500" />
-                      </ToggleGroupItem>
-                      <ToggleGroupItem value="later" aria-label="Rever depois">
-                        <Clock className="h-3.5 w-3.5 text-amber-500" />
-                      </ToggleGroupItem>
-                      <ToggleGroupItem value="suspicious" aria-label="Suspeito">
-                        <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
-                      </ToggleGroupItem>
-                    </ToggleGroup>
-                    <FileCode className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate font-mono text-sm">
-                      {file.path}
-                    </span>
-                    <Badge variant="outline" className="shrink-0 text-[10px]">
-                      {file.status}
-                    </Badge>
-                  </div>
-                  {tokens.length > 0 ? (
-                    <div className="flex flex-wrap gap-1 border-b border-border/60 bg-muted/20 px-3 py-1.5">
-                      <span className="text-[10px] text-muted-foreground w-full">
-                        Contexto
-                      </span>
-                      {tokens.map((tok) => (
-                        <Badge
-                          key={tok}
-                          variant="secondary"
-                          className="text-[10px] font-mono max-w-[200px] truncate"
-                          title={tok}
-                        >
-                          {tok}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : null}
-                  <DiffCodeBlock content={file.diff} />
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </ScrollArea>
-
-      <div
-        className={`shrink-0 border-t border-border bg-muted/20 ${compact ? "py-1.5" : ""}`}
-      >
-        <div className="px-3 py-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Trilha — {title}
-          </p>
-          <ScrollArea className={compact ? "h-16 pr-2" : "h-24 pr-2"}>
-            <ul className="space-y-1.5 text-xs text-muted-foreground">
-              {trail.length === 0 ? (
-                <li className="italic opacity-70">
-                  Eventos de revisão aparecem aqui.
-                </li>
-              ) : (
-                [...trail].reverse().map((e) => (
-                  <li key={e.id} className="leading-snug">
-                    <span className="font-mono text-[10px] opacity-70">
-                      {new Date(e.at).toLocaleTimeString()}
-                    </span>{" "}
-                    {e.message}
-                  </li>
-                ))
-              )}
-            </ul>
+      <Dialog open={flowHelpOpen} onOpenChange={setFlowHelpOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Fluxo de review e integração</DialogTitle>
+            <DialogDescription>
+              Este resumo detalha o caminho recomendado para usar a worktree como
+              área de decisão e manter o diff como foco principal.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh] pr-3">
+            <div className="space-y-4 py-2 text-sm">
+              <section className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Passo 1
+                </p>
+                <p className="mt-1 font-medium text-foreground">Worktree da Missão</p>
+                <p className="mt-1 leading-relaxed text-muted-foreground">
+                  Faz commit e, se necessário, push do branch da Missão. Usa pull
+                  apenas para alinhar com o remoto antes de integrar.
+                </p>
+              </section>
+              <section className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Passo 2
+                </p>
+                <p className="mt-1 font-medium text-foreground">Repositório principal limpo</p>
+                <p className="mt-1 leading-relaxed text-muted-foreground">
+                  O checkout principal precisa estar limpo. Se houver alterações
+                  locais, faz commit, stash ou descarta no principal antes do merge.
+                </p>
+              </section>
+              <section className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Integração
+                </p>
+                <p className="mt-1 leading-relaxed text-muted-foreground">
+                  O merge traz o branch inteiro da Missão para a branch de destino.
+                </p>
+              </section>
+              <section className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Pasta da Missão
+                </p>
+                <p className="mt-1 break-all font-mono text-[11px] text-foreground">
+                  {worktreePath}
+                </p>
+              </section>
+            </div>
           </ScrollArea>
-        </div>
-      </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFlowHelpOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── PANELS ─────────────────────────────────────────────── */}
+      {isMobile ? (
+        /* Mobile: vertical 2-panel (unchanged behavior) */
+        <ResizablePanelGroup
+          direction="vertical"
+          className={cn(
+            "min-h-0 flex-1 px-4 pb-4",
+            compact ? "max-h-[min(70vh,560px)]" : "",
+          )}
+        >
+          <ResizablePanel
+            ref={sidebarPanelRef}
+            defaultSize={36}
+            minSize={20}
+            maxSize={48}
+            collapsible
+            collapsedSize={0}
+            onCollapse={() => setSidebarCollapsed(true)}
+            onExpand={() => setSidebarCollapsed(false)}
+            className="min-h-0 overflow-hidden"
+          >
+            <div className="flex h-full min-h-0 flex-col gap-3 pb-3">
+              <WorktreeNotesPanel
+                worktreePath={worktreePath}
+                idKey={storageKey}
+                compact={false}
+              />
+              <PrReviewCommentsPanel
+                combId={combId}
+                enabled={Boolean(useCombWorktreeApis && combId)}
+                activeFilePath={activeDiffFile?.path ?? null}
+                idKey={storageKey}
+                compact={false}
+              />
+              <div className="shrink-0 rounded-md border border-border bg-muted/20">
+                <div className="px-3 py-2">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Trilha — {title}
+                  </p>
+                  <ScrollArea className="h-16 pr-2">
+                    <ul className="space-y-1.5 text-xs text-muted-foreground">
+                      {trail.length === 0 ? (
+                        <li className="italic opacity-70">Eventos de revisão aparecem aqui.</li>
+                      ) : (
+                        [...trail].reverse().map((e) => (
+                          <li key={e.id} className="leading-snug">
+                            <span className="font-mono text-[10px] opacity-70">
+                              {new Date(e.at).toLocaleTimeString()}
+                            </span>{" "}
+                            {e.message}
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  </ScrollArea>
+                </div>
+              </div>
+            </div>
+          </ResizablePanel>
+          <ResizableHandle
+            withHandle
+            className="bg-border/70 my-2"
+          />
+          <ResizablePanel
+            defaultSize={64}
+            minSize={52}
+            className="min-h-0 overflow-hidden"
+          >
+            <div
+              className={cn(
+                "flex min-h-0 flex-1 flex-col",
+                compact ? "max-h-[min(70vh,560px)]" : "",
+              )}
+            >
+              {diffs.loading ? null : diffs.error ? null : diffs.files.length === 0 ? null : (
+                <DiffFileTree
+                  files={diffs.files}
+                  selectedPath={activeDiffTabPath}
+                  onFileSelect={navigateToDiffFile}
+                  compact={compact}
+                />
+              )}
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {diffs.loading ? null : diffs.error ? null : diffs.files.length === 0 ? null : (
+                  <div
+                    className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/20 px-2 py-1.5"
+                    role="tablist"
+                    aria-label="Separadores de diff"
+                  >
+                    {diffOpenTabs.map((tabPath) => {
+                      const active = tabPath === activeDiffTabPath;
+                      return (
+                        <div
+                          key={tabPath}
+                          role="tab"
+                          aria-selected={active}
+                          className={cn(
+                            "group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-0.5 rounded-md border px-2 py-1 text-left text-[11px] transition-colors",
+                            active
+                              ? "border-primary bg-primary/10 text-foreground"
+                              : "border-border/80 bg-muted/40 text-muted-foreground hover:bg-muted/70",
+                          )}
+                          onClick={() => setActiveDiffTabPath(tabPath)}
+                        >
+                          <span className="min-w-0 flex-1 truncate font-mono" title={tabPath}>
+                            {diffTabLabel(tabPath)}
+                          </span>
+                          <button
+                            type="button"
+                            className="shrink-0 rounded p-0.5 opacity-60 hover:bg-background/80 hover:opacity-100"
+                            aria-label={`Fechar diff ${tabPath}`}
+                            onClick={(e) => closeDiffTab(tabPath, e)}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <ScrollArea className="min-h-0 flex-1">
+                  {diffs.loading ? (
+                    <div className="flex items-center justify-center p-8">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : diffs.error ? (
+                    <div className="p-4 text-sm text-destructive">{diffs.error}</div>
+                  ) : diffs.files.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-muted-foreground">
+                      Nenhuma alteração detectada neste repositório.
+                    </div>
+                  ) : !activeDiffFile ? (
+                    <div className="p-6 text-center text-sm text-muted-foreground">
+                      Seleciona um ficheiro na árvore ou num separador.
+                    </div>
+                  ) : (
+                    <div className="space-y-4 p-4">
+                      <div className="overflow-hidden rounded-xl border border-border shadow-sm ring-1 ring-primary/5">
+                        <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b border-border/80 bg-background/95 px-3 py-2 backdrop-blur">
+                          <Checkbox
+                            checked={included[activeDiffFile.path] !== false}
+                            onCheckedChange={(c) =>
+                              setIncluded((prev) => ({
+                                ...prev,
+                                [activeDiffFile.path]: c === true,
+                              }))
+                            }
+                            aria-label={`Incluir ${activeDiffFile.path} no patch`}
+                          />
+                          <ToggleGroup
+                            type="single"
+                            value={fileFlags[activeDiffFile.path] ?? "ok"}
+                            onValueChange={(v) => {
+                              if (!v) return;
+                              setFileFlags((prev) => ({
+                                ...prev,
+                                [activeDiffFile.path]: v as ReviewFlag,
+                              }));
+                            }}
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0"
+                          >
+                            <ToggleGroupItem value="ok" aria-label="OK">
+                              <Check className="h-3.5 w-3.5 text-emerald-500" />
+                            </ToggleGroupItem>
+                            <ToggleGroupItem value="later" aria-label="Rever depois">
+                              <Clock className="h-3.5 w-3.5 text-amber-500" />
+                            </ToggleGroupItem>
+                            <ToggleGroupItem value="suspicious" aria-label="Suspeito">
+                              <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
+                            </ToggleGroupItem>
+                          </ToggleGroup>
+                          <FileCode className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate font-mono text-sm">
+                            {activeDiffFile.path}
+                          </span>
+                          {(activeDiffFile.insertions ?? 0) > 0 ||
+                          (activeDiffFile.deletions ?? 0) > 0 ? (
+                            <span
+                              className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground"
+                              title="Inserções / remoções (diff)"
+                            >
+                              <span className="text-emerald-600 dark:text-emerald-400">
+                                +{activeDiffFile.insertions ?? 0}
+                              </span>
+                              <span className="mx-0.5 opacity-40">/</span>
+                              <span className="text-rose-600 dark:text-rose-400">
+                                −{activeDiffFile.deletions ?? 0}
+                              </span>
+                            </span>
+                          ) : null}
+                          <Badge variant="outline" className="shrink-0 text-[10px]">
+                            {activeDiffFile.status}
+                          </Badge>
+                        </div>
+                        {activeDiffTokens.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 border-b border-border/60 bg-muted/20 px-3 py-1.5">
+                            <span className="text-[10px] text-muted-foreground w-full">
+                              Contexto
+                            </span>
+                            {activeDiffTokens.map((tok) => (
+                              <Badge
+                                key={tok}
+                                variant="secondary"
+                                className="text-[10px] font-mono max-w-[200px] truncate"
+                                title={tok}
+                              >
+                                {tok}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : null}
+                        <DiffCodeBlock
+                          content={activeDiffFile.diff}
+                          maxHeightClassName="max-h-none"
+                          className="bg-background/40"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </ScrollArea>
+              </div>
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        /* Desktop: horizontal 3-panel */
+        <ResizablePanelGroup
+          direction="horizontal"
+          className={cn(
+            "min-h-0 flex-1 px-4 pb-4",
+            compact ? "max-h-[min(70vh,560px)]" : "",
+          )}
+        >
+          {/* Left: Notes / PR Comments / Trail */}
+          <ResizablePanel
+            ref={sidebarPanelRef}
+            defaultSize={22}
+            minSize={16}
+            maxSize={32}
+            collapsible
+            collapsedSize={0}
+            onCollapse={() => setSidebarCollapsed(true)}
+            onExpand={() => setSidebarCollapsed(false)}
+            className="min-h-0 overflow-hidden"
+          >
+            <div className="flex h-full min-h-0 flex-col gap-3 pr-3">
+              <WorktreeNotesPanel
+                worktreePath={worktreePath}
+                idKey={storageKey}
+                compact={false}
+              />
+              <PrReviewCommentsPanel
+                combId={combId}
+                enabled={Boolean(useCombWorktreeApis && combId)}
+                activeFilePath={activeDiffFile?.path ?? null}
+                idKey={storageKey}
+                compact={false}
+              />
+              <div className="shrink-0 rounded-md border border-border bg-muted/20">
+                <div className="px-3 py-2">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Trilha — {title}
+                  </p>
+                  <ScrollArea className="h-24 pr-2">
+                    <ul className="space-y-1.5 text-xs text-muted-foreground">
+                      {trail.length === 0 ? (
+                        <li className="italic opacity-70">Eventos de revisão aparecem aqui.</li>
+                      ) : (
+                        [...trail].reverse().map((e) => (
+                          <li key={e.id} className="leading-snug">
+                            <span className="font-mono text-[10px] opacity-70">
+                              {new Date(e.at).toLocaleTimeString()}
+                            </span>{" "}
+                            {e.message}
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  </ScrollArea>
+                </div>
+              </div>
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle className="bg-border/70 mx-2" />
+
+          {/* Center: Diff viewer */}
+          <ResizablePanel
+            defaultSize={55}
+            minSize={35}
+            className="min-h-0 overflow-hidden"
+          >
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
+              {diffs.loading ? null : diffs.error ? null : diffs.files.length === 0 ? null : (
+                <div
+                  className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/20 px-2 py-1.5"
+                  role="tablist"
+                  aria-label="Separadores de diff"
+                >
+                  {diffOpenTabs.map((tabPath) => {
+                    const active = tabPath === activeDiffTabPath;
+                    return (
+                      <div
+                        key={tabPath}
+                        role="tab"
+                        aria-selected={active}
+                        className={cn(
+                          "group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-0.5 rounded-md border px-2 py-1 text-left text-[11px] transition-colors",
+                          active
+                            ? "border-primary bg-primary/10 text-foreground"
+                            : "border-border/80 bg-muted/40 text-muted-foreground hover:bg-muted/70",
+                        )}
+                        onClick={() => setActiveDiffTabPath(tabPath)}
+                      >
+                        <span
+                          className="min-w-0 flex-1 truncate font-mono"
+                          title={tabPath}
+                        >
+                          {diffTabLabel(tabPath)}
+                        </span>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded p-0.5 opacity-60 hover:bg-background/80 hover:opacity-100"
+                          aria-label={`Fechar diff ${tabPath}`}
+                          onClick={(e) => closeDiffTab(tabPath, e)}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <ScrollArea className="min-h-0 flex-1">
+                {diffs.loading ? (
+                  <div className="flex items-center justify-center p-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : diffs.error ? (
+                  <div className="p-4 text-sm text-destructive">{diffs.error}</div>
+                ) : diffs.files.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-muted-foreground">
+                    Nenhuma alteração detectada neste repositório.
+                  </div>
+                ) : !activeDiffFile ? (
+                  <div className="p-6 text-center text-sm text-muted-foreground">
+                    Seleciona um ficheiro na árvore ou num separador.
+                  </div>
+                ) : (
+                  <div className="space-y-4 p-4">
+                    <div className="overflow-hidden rounded-xl border border-border shadow-sm ring-1 ring-primary/5">
+                      <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b border-border/80 bg-background/95 px-3 py-2 backdrop-blur">
+                        <Checkbox
+                          checked={included[activeDiffFile.path] !== false}
+                          onCheckedChange={(c) =>
+                            setIncluded((prev) => ({
+                              ...prev,
+                              [activeDiffFile.path]: c === true,
+                            }))
+                          }
+                          aria-label={`Incluir ${activeDiffFile.path} no patch`}
+                        />
+                        <ToggleGroup
+                          type="single"
+                          value={fileFlags[activeDiffFile.path] ?? "ok"}
+                          onValueChange={(v) => {
+                            if (!v) return;
+                            setFileFlags((prev) => ({
+                              ...prev,
+                              [activeDiffFile.path]: v as ReviewFlag,
+                            }));
+                          }}
+                          variant="outline"
+                          size="sm"
+                          className="shrink-0"
+                        >
+                          <ToggleGroupItem value="ok" aria-label="OK">
+                            <Check className="h-3.5 w-3.5 text-emerald-500" />
+                          </ToggleGroupItem>
+                          <ToggleGroupItem value="later" aria-label="Rever depois">
+                            <Clock className="h-3.5 w-3.5 text-amber-500" />
+                          </ToggleGroupItem>
+                          <ToggleGroupItem value="suspicious" aria-label="Suspeito">
+                            <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
+                          </ToggleGroupItem>
+                        </ToggleGroup>
+                        <FileCode className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate font-mono text-sm">
+                          {activeDiffFile.path}
+                        </span>
+                        {(activeDiffFile.insertions ?? 0) > 0 ||
+                        (activeDiffFile.deletions ?? 0) > 0 ? (
+                          <span
+                            className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground"
+                            title="Inserções / remoções (diff)"
+                          >
+                            <span className="text-emerald-600 dark:text-emerald-400">
+                              +{activeDiffFile.insertions ?? 0}
+                            </span>
+                            <span className="mx-0.5 opacity-40">/</span>
+                            <span className="text-rose-600 dark:text-rose-400">
+                              −{activeDiffFile.deletions ?? 0}
+                            </span>
+                          </span>
+                        ) : null}
+                        <Badge variant="outline" className="shrink-0 text-[10px]">
+                          {activeDiffFile.status}
+                        </Badge>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="ml-auto gap-1 whitespace-nowrap"
+                          onClick={toggleReviewSidebar}
+                          title={
+                            sidebarCollapsed
+                              ? "Mostrar notas e comentários"
+                              : "Focar no diff e recolher a lateral"
+                          }
+                        >
+                          {sidebarCollapsed ? (
+                            <Minimize2 className="h-3.5 w-3.5" />
+                          ) : (
+                            <Maximize2 className="h-3.5 w-3.5" />
+                          )}
+                          {sidebarCollapsed ? "Mostrar lateral" : "Focar diff"}
+                        </Button>
+                      </div>
+                      {activeDiffTokens.length > 0 ? (
+                        <div className="flex flex-wrap gap-1 border-b border-border/60 bg-muted/20 px-3 py-1.5">
+                          <span className="text-[10px] text-muted-foreground w-full">
+                            Contexto
+                          </span>
+                          {activeDiffTokens.map((tok) => (
+                            <Badge
+                              key={tok}
+                              variant="secondary"
+                              className="text-[10px] font-mono max-w-[200px] truncate"
+                              title={tok}
+                            >
+                              {tok}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : null}
+                      <DiffCodeBlock
+                        content={activeDiffFile.diff}
+                        maxHeightClassName="max-h-none"
+                        className="bg-background/40"
+                      />
+                    </div>
+                  </div>
+                )}
+              </ScrollArea>
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle className="bg-border/70 mx-2" />
+
+          {/* Right: Git Actions Panel */}
+          <ResizablePanel
+            ref={rightPanelRef}
+            defaultSize={23}
+            minSize={18}
+            maxSize={38}
+            collapsible
+            collapsedSize={0}
+            onCollapse={() => setRightPanelCollapsed(true)}
+            onExpand={() => setRightPanelCollapsed(false)}
+            className="min-h-0 overflow-hidden"
+          >
+            <GitActionsPanel
+              files={diffs.files}
+              fileFlags={fileFlags}
+              activeDiffPath={activeDiffTabPath}
+              onFileSelect={navigateToDiffFile}
+              isPushing={isPushing}
+              isPulling={isPulling}
+              isMerging={isMerging}
+              worktreeDirty={worktreeDirty}
+              mainRepoDirty={mainRepoDirty}
+              canMergeComb={canMergeComb}
+              mergeUiBlocked={mergeUiBlocked}
+              onCommit={() => setCommitDialogOpen(true)}
+              onPush={() => void handlePush()}
+              onPull={() => void handlePull()}
+              onDiscard={() => void handleDiscardWorktree()}
+              onMerge={handleMergeClick}
+              targetBranch={targetBranch}
+              branchList={branchList}
+              onTargetBranchChange={setTargetBranch}
+              onStageFile={(path) => void handleStageFile(path)}
+              onDiscardFile={(path, status) => void handleDiscardFile(path, status)}
+            />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
 
       <CommitDialog
         open={commitDialogOpen}
@@ -1206,11 +1731,8 @@ export function RepoReviewSection({
         onCommit={handleCommitWorktree}
         defaultMessage={`Changes from mission: ${missionName}`}
         projectPath={worktreePath}
-        status={
-          commitDialogOpen
-            ? (commitDialogStatus ?? worktreeRepoStatus)
-            : null
-        }
+        status={commitDialogOpen ? commitDialogStatus : null}
+        isLoading={commitDialogStatusLoading}
       />
     </div>
   );
