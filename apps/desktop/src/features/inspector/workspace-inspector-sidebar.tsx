@@ -1,20 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
-import {
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-	type MouseEvent as ReactMouseEvent,
-} from "react";
+import { useCallback, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { BranchToolbar } from "@/components/BranchToolbar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { SessionEventFeed } from "@/features/sessions/session-event-feed";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workbench";
-import { ProviderCatalogCard } from "@/features/providers/provider-catalog-card";
 import { InspectorChangesSection } from "./inspector-changes-section";
 import { GitSectionHeader } from "./git-section-header";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
@@ -27,7 +17,8 @@ import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-wor
 import { EmptyState } from "@/features/panel";
 import { cn } from "@/lib/utils";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
 
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
@@ -44,15 +35,76 @@ type WorkspaceInspectorSidebarProps = {
 };
 
 const MIN_SECTION_HEIGHT = 128;
-const MAX_SECTION_HEIGHT = 320;
-const INITIAL_CHANGES_HEIGHT = 168;
-const INITIAL_ACTIONS_HEIGHT = 208;
+const MAX_SECTION_HEIGHT = 360;
+const INITIAL_CHANGES_HEIGHT = 200;
 
-type ResizeTarget = "changes" | "actions";
-type TabsKey = "setup" | "run" | "terminal";
+type InspectorTab = "activity" | "context";
 
-function clamp(value: number, min: number, max: number) {
-	return Math.min(max, Math.max(min, value));
+function DetailRow({ label, children }: { label: string; children: ReactNode }) {
+	return (
+		<div className="flex gap-3 border-b border-border/35 py-2 text-[11px] leading-snug last:border-b-0">
+			<span className="w-[76px] shrink-0 font-medium uppercase tracking-[0.06em] text-muted-foreground">
+				{label}
+			</span>
+			<div className="min-w-0 flex-1 font-mono text-[11.5px] text-foreground">{children}</div>
+		</div>
+	);
+}
+
+function ProviderCatalogDense({ catalog }: { catalog: ProviderCatalog | null }) {
+	const providers = catalog?.providers ?? [];
+
+	if (providers.length === 0) {
+		return (
+			<p className="rounded-md border border-dashed border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
+				No providers registered in the catalog yet.
+			</p>
+		);
+	}
+
+	return (
+		<div className="divide-y divide-border/45 rounded-md border border-border/50 bg-muted/10">
+			{providers.map((provider) => (
+				<div key={provider.id} className="px-2.5 py-2">
+					<div className="flex flex-wrap items-start justify-between gap-2">
+						<span className="text-[11.5px] font-medium leading-tight">{provider.label}</span>
+						<span className="max-w-[min(100%,220px)] text-right text-[10px] text-muted-foreground">
+							{provider.description}
+						</span>
+					</div>
+					<div className="mt-1.5 flex flex-wrap gap-1">
+						<Badge variant={provider.stable ? "success" : "outline"} className="text-[10px] font-normal">
+							{provider.stable ? "stable" : "experimental"}
+						</Badge>
+						<Badge variant={summarizeProviderHealth(provider.health).variant} className="text-[10px] font-normal">
+							{summarizeProviderHealth(provider.health).label}
+						</Badge>
+						{getProviderChips(provider)
+							.filter(
+								(chip) =>
+									chip.label !== "stable" &&
+									chip.label !== "experimental" &&
+									chip.label !== summarizeProviderHealth(provider.health).label,
+							)
+							.map((chip) => (
+								<Badge key={`${provider.id}-${chip.label}`} variant={chip.variant} className="text-[10px] font-normal">
+									{chip.label}
+								</Badge>
+							))}
+						{provider.models.map((model) => (
+							<Badge
+								key={`${provider.id}-${model.id}`}
+								variant={model.recommended ? "success" : "outline"}
+								className="text-[10px] font-normal"
+							>
+								{model.label}
+							</Badge>
+						))}
+					</div>
+				</div>
+			))}
+		</div>
+	);
 }
 
 function gitSectionHeaderHighlightClass(mode: ReturnType<typeof resolveCommitMode>) {
@@ -92,8 +144,7 @@ function ResizeHandle({
 }
 
 /**
- * Right rail: inspector-first chrome with git context, session actions, and tabs.
- * Terminal remains in the main workbench bottom drawer.
+ * Right rail: Git (clone Helmor) + session activity / context integrated from App props — no placeholder cards.
  */
 export function WorkspaceInspectorSidebar({
 	providerCatalog,
@@ -161,57 +212,25 @@ export function WorkspaceInspectorSidebar({
 	}, [commitMode, queryClient, workspacePath]);
 
 	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
-	const [actionsHeight, setActionsHeight] = useState(INITIAL_ACTIONS_HEIGHT);
-	const [activeTab, setActiveTab] = useState<TabsKey>("setup");
-	const [isTabsHovered, setIsTabsHovered] = useState(false);
-	const [isTabsZoomed, setIsTabsZoomed] = useState(false);
-	const dragRef = useRef<{
-		target: ResizeTarget;
-		startY: number;
-		startHeight: number;
-	} | null>(null);
+	const [inspectorTab, setInspectorTab] = useState<InspectorTab>("activity");
 
-	useEffect(() => {
-		if (!isTabsHovered) {
-			setIsTabsZoomed(false);
-			return;
-		}
-
-		const timeout = window.setTimeout(() => setIsTabsZoomed(true), 300);
-		return () => window.clearTimeout(timeout);
-	}, [isTabsHovered]);
-
-	useEffect(() => {
-		const onPointerMove = (event: MouseEvent) => {
-			const drag = dragRef.current;
-			if (!drag) {
-				return;
-			}
-
-			const delta = event.clientY - drag.startY;
-			if (drag.target === "changes") {
-				setChangesHeight(clamp(drag.startHeight + delta, MIN_SECTION_HEIGHT, MAX_SECTION_HEIGHT));
-			} else {
-				setActionsHeight(clamp(drag.startHeight + delta, MIN_SECTION_HEIGHT, MAX_SECTION_HEIGHT));
-			}
+	function handleResizeGitSectionStart(event: ReactMouseEvent<HTMLButtonElement>) {
+		event.preventDefault();
+		const startY = event.clientY;
+		const startHeight = changesHeight;
+		const onMove = (moveEvent: MouseEvent) => {
+			const delta = moveEvent.clientY - startY;
+			setChangesHeight(
+				Math.min(MAX_SECTION_HEIGHT, Math.max(MIN_SECTION_HEIGHT, startHeight + delta)),
+			);
 		};
-
-		const onPointerUp = () => {
-			dragRef.current = null;
-			window.removeEventListener("mousemove", onPointerMove);
-			window.removeEventListener("mouseup", onPointerUp);
+		const onUp = () => {
+			window.removeEventListener("mousemove", onMove);
+			window.removeEventListener("mouseup", onUp);
 		};
-
-		if (dragRef.current) {
-			window.addEventListener("mousemove", onPointerMove);
-			window.addEventListener("mouseup", onPointerUp);
-		}
-
-		return () => {
-			window.removeEventListener("mousemove", onPointerMove);
-			window.removeEventListener("mouseup", onPointerUp);
-		};
-	}, [changesHeight, actionsHeight]);
+		window.addEventListener("mousemove", onMove);
+		window.addEventListener("mouseup", onUp);
+	}
 
 	if (!hasWorkspace) {
 		return (
@@ -219,19 +238,18 @@ export function WorkspaceInspectorSidebar({
 				<div className="flex min-h-0 flex-1 items-center justify-center px-4 py-6">
 					<EmptyState
 						title="No workspace selected"
-						description="Open or create a workspace to inspect git state, provider context, and session activity."
+						description="Open or create a workspace to inspect git state and session activity."
 					/>
 				</div>
 			</div>
 		);
 	}
 
+	const activityCount = sessionEvents.length;
+	const catalogCount = providerCatalog?.providers.length ?? 0;
+
 	return (
-		<div
-			className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground"
-			data-dcc-inspector-root
-			data-tabs-zoomed={isTabsZoomed ? "true" : undefined}
-		>
+		<div className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground" data-dcc-inspector-root>
 			<section
 				className={cn(
 					"flex shrink-0 flex-col overflow-hidden border-b border-border/60",
@@ -264,192 +282,134 @@ export function WorkspaceInspectorSidebar({
 				</div>
 			</section>
 
-			<ResizeHandle
-				label="Resize changes section"
-				onMouseDown={(event) => {
-					event.preventDefault();
-					dragRef.current = {
-						target: "changes",
-						startY: event.clientY,
-						startHeight: changesHeight,
-					};
-				}}
-			/>
+			<ResizeHandle label="Resize Git section" onMouseDown={handleResizeGitSectionStart} />
 
-			<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border/60">
-				<div className="flex items-center justify-between gap-3 border-b border-border/40 px-3 py-2">
-					<div>
-						<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-							Actions
-						</p>
-						<p className="text-[13px] font-medium leading-tight text-foreground">
-							Provider and session state
-						</p>
-					</div>
-					<Badge variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
-						{providerCatalog?.providers.length ?? 0} providers
-					</Badge>
-				</div>
-
-				<div className="dcc-inspector-sidebar__body flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
-					<ProviderCatalogCard catalog={providerCatalog} />
-					<Card className="dcc-session-state-card border-border">
-						<div className="flex items-center justify-between border-b border-border/40 px-4 py-3">
-							<h3 className="text-sm font-medium">Session state</h3>
-							<Badge variant="outline">{sessionSnapshot?.lastTurnState ?? "pending"}</Badge>
-						</div>
-						<CardContent className="dcc-runtime-feed__content pt-0">
-							{sessionSnapshot ? (
-								<div className="dcc-runtime-feed__list">
-									<div className="dcc-runtime-feed__row">
-										<strong>Projection</strong>
-										<small>
-											turns {sessionSnapshot.turnCount} · checkpoints{" "}
-											{sessionSnapshot.checkpointCount}
-										</small>
-									</div>
-									<div className="dcc-runtime-feed__row">
-										<strong>Provider</strong>
-										<small>{sessionSnapshot.providerId}</small>
-									</div>
-									<div className="dcc-runtime-feed__row">
-										<strong>Last turn</strong>
-										<small>{sessionSnapshot.lastTurnPrompt ?? "No turn yet"}</small>
-									</div>
-								</div>
-							) : (
-								<p className="dcc-card__description text-muted-foreground">
-									No active session. Start one from the composer.
-								</p>
-							)}
-						</CardContent>
-					</Card>
-				</div>
-			</section>
-
-			<ResizeHandle
-				label="Resize actions section"
-				onMouseDown={(event) => {
-					event.preventDefault();
-					dragRef.current = {
-						target: "actions",
-						startY: event.clientY,
-						startHeight: actionsHeight,
-					};
-				}}
-			/>
-
-			<section className="flex min-h-0 flex-1 flex-col overflow-hidden">
-				<div className="flex items-center justify-between gap-3 border-b border-border/40 px-3 py-2">
-					<div>
-						<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-							Tabs
-						</p>
-						<p className="text-[13px] font-medium leading-tight text-foreground">
-							Setup, run, and terminal context
-						</p>
-					</div>
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-xs"
-						aria-label="Add terminal tab"
-						title="Add terminal tab"
-						onClick={() => {
-							// Placeholder for the future terminal add flow.
-						}}
-						className="text-muted-foreground hover:text-foreground"
-					>
-						<Plus className="size-4" strokeWidth={2} aria-hidden />
-					</Button>
-				</div>
-
+			<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-border/40">
 				<Tabs
-					value={activeTab}
+					value={inspectorTab}
 					onValueChange={(value) => {
-						if (value === "setup" || value === "run" || value === "terminal") {
-							setActiveTab(value);
+						if (value === "activity" || value === "context") {
+							setInspectorTab(value);
 						}
 					}}
 					className="flex min-h-0 flex-1 flex-col gap-0"
 				>
-					<div className="flex items-center justify-between border-b border-border/40 bg-muted/20 px-2">
-						<TabsList variant="line" className="h-8 flex-1 justify-start gap-0 border-0 bg-transparent p-0">
-							<TabsTrigger value="setup" className="h-8 rounded-none px-3 text-[12px]">
-								Setup
+					<div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/40 px-3 py-2">
+						<div className="min-w-0">
+							<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+								Session
+							</p>
+							<p className="truncate text-[13px] font-medium leading-tight text-foreground">
+								Activity and workspace context
+							</p>
+						</div>
+						<Badge variant="outline" className="h-6 shrink-0 px-2 text-[10px] font-normal">
+							{activityCount} events
+						</Badge>
+					</div>
+
+					<div className="shrink-0 border-b border-border/40 bg-muted/15 px-2">
+						<TabsList variant="line" className="h-9 w-full justify-start gap-0 border-0 bg-transparent p-0">
+							<TabsTrigger value="activity" className="h-9 rounded-none px-3 text-[12px]">
+								Activity
 							</TabsTrigger>
-							<TabsTrigger value="run" className="h-8 rounded-none px-3 text-[12px]">
-								Run
-							</TabsTrigger>
-							<TabsTrigger value="terminal" className="h-8 rounded-none px-3 text-[12px]">
-								Terminal 1
+							<TabsTrigger value="context" className="h-9 rounded-none px-3 text-[12px]">
+								Context
+								{catalogCount > 0 ? (
+									<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
+										({catalogCount})
+									</span>
+								) : null}
 							</TabsTrigger>
 						</TabsList>
-						<div className="px-2 text-[11px] text-muted-foreground">Hover to zoom</div>
 					</div>
 
-					<div
-						className={cn(
-							"relative min-h-0 flex-1 overflow-hidden bg-sidebar transition-[transform,box-shadow] duration-400 ease-[cubic-bezier(0.32,0.72,0,1)]",
-							isTabsZoomed && "z-50 shadow-[0_30px_60px_-20px_rgba(0,0,0,0.35)]",
-						)}
-						style={{
-							transformOrigin: "top right",
-							transform: isTabsZoomed ? "scale(2)" : "scale(1)",
-						}}
-						onMouseEnter={() => setIsTabsHovered(true)}
-						onMouseLeave={() => setIsTabsHovered(false)}
+					<TabsContent
+						value="activity"
+						className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
 					>
-						<div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
-							{activeTab === "setup" ? (
-								<div className="grid gap-3">
-									<Card className="border-border/60">
-										<CardContent className="space-y-2 p-4">
-											<p className="text-[12px] font-medium text-foreground">Workspace setup</p>
-											<p className="text-[12px] leading-relaxed text-muted-foreground">
-												The current workspace is ready for the setup and run tabs to surface the active thread state.
-											</p>
-										</CardContent>
-									</Card>
-									<Card className="border-border/60">
-										<CardContent className="space-y-2 p-4">
-											<p className="text-[12px] font-medium text-foreground">Branch context</p>
-											<p className="text-[12px] leading-relaxed text-muted-foreground">
-												{workspaceBranch || "No branch available"} · {workspacePath ?? "Workspace path unavailable"}
-											</p>
-										</CardContent>
-									</Card>
-								</div>
-							) : null}
+						<SessionEventFeed events={sessionEvents} compact />
+					</TabsContent>
 
-							{activeTab === "run" ? (
-								<div className="min-h-0 flex-1">
-									<SessionEventFeed events={sessionEvents} compact />
+					<TabsContent
+						value="context"
+						className="mt-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
+					>
+						<div className="space-y-4">
+							<div>
+								<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+									Workspace
+								</p>
+								<div className="rounded-md border border-border/50 bg-muted/10 px-2">
+									<DetailRow label="Name">{workspaceName ?? "—"}</DetailRow>
+									<DetailRow label="Id">{workspaceId ?? "—"}</DetailRow>
+									<DetailRow label="Branch">{workspaceBranch ?? "—"}</DetailRow>
+									<DetailRow label="Path">
+										<span title={workspacePath ?? undefined}>{workspacePath ?? "—"}</span>
+									</DetailRow>
 								</div>
-							) : null}
+							</div>
 
-							{activeTab === "terminal" ? (
-								<div className="grid min-h-0 flex-1 gap-3">
-									<Card className="border-border/60">
-										<CardContent className="space-y-2 p-4">
-											<p className="text-[12px] font-medium text-foreground">Terminal tab</p>
-											<p className="text-[12px] leading-relaxed text-muted-foreground">
-												Terminal instances live in the workbench drawer for now. This tab keeps the inspector contract in place for the future split.
-											</p>
-										</CardContent>
-									</Card>
-									<Card className="border-border/60">
-										<CardContent className="space-y-2 p-4">
-											<p className="text-[12px] font-medium text-foreground">Live state</p>
-											<p className="text-[12px] leading-relaxed text-muted-foreground">
-												Session {sessionId ?? "not started"} · {sessionState}
-											</p>
-										</CardContent>
-									</Card>
+							<div>
+								<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+									Composer selection
+								</p>
+								<div className="rounded-md border border-border/50 bg-muted/10 px-2">
+									<DetailRow label="Provider">{selectedProviderLabel ?? "—"}</DetailRow>
+									<DetailRow label="Model">{selectedModelLabel ?? "—"}</DetailRow>
 								</div>
-							) : null}
+							</div>
+
+							<div>
+								<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+									Session runtime
+								</p>
+								<div className="rounded-md border border-border/50 bg-muted/10 px-2">
+									<DetailRow label="State">
+										<span className="inline-flex items-center gap-2">
+											{sessionState}
+											{sessionId ? (
+												<Badge variant="outline" className="font-mono text-[10px] font-normal">
+													{sessionId.length > 14 ? `${sessionId.slice(0, 12)}…` : sessionId}
+												</Badge>
+											) : null}
+										</span>
+									</DetailRow>
+									{sessionSnapshot ? (
+										<>
+											<DetailRow label="Turns">{String(sessionSnapshot.turnCount)}</DetailRow>
+											<DetailRow label="Checkpoints">{String(sessionSnapshot.checkpointCount)}</DetailRow>
+											<DetailRow label="Last turn">
+												{sessionSnapshot.lastTurnPrompt ?? "—"}
+											</DetailRow>
+											<DetailRow label="Provider id">{sessionSnapshot.providerId}</DetailRow>
+										</>
+									) : (
+										<DetailRow label="Session">No active session — start one from the composer.</DetailRow>
+									)}
+								</div>
+							</div>
+
+							<div>
+								<div className="mb-2 flex items-center justify-between gap-2">
+									<p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+										Provider catalog
+									</p>
+									{catalogCount > 0 ? (
+										<Badge variant="secondary" className="h-5 text-[10px] font-normal">
+											{catalogCount} registered
+										</Badge>
+									) : null}
+								</div>
+								<ProviderCatalogDense catalog={providerCatalog} />
+							</div>
+
+							<p className="text-[10px] leading-relaxed text-muted-foreground">
+								Terminal sessions stay in the workbench drawer at the bottom of the layout — they are not
+								mirrored here so the inspector stays focused on Git and session signals.
+							</p>
 						</div>
-					</div>
+					</TabsContent>
 				</Tabs>
 			</section>
 		</div>
