@@ -684,7 +684,7 @@ export default function App() {
 
 							<aside
 								aria-label="Inspector sidebar"
-								className="relative h-full shrink-0 overflow-hidden bg-sidebar has-[[data-tabs-zoomed=true]]:overflow-visible"
+								className="relative h-full shrink-0 overflow-hidden bg-sidebar"
 								style={{ width: `${inspectorWidth}px` }}
 							>
 								<WorkspaceInspectorSidebar

@@ -1,11 +1,13 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import {
+	useCallback,
 	useEffect,
-	useMemo,
 	useRef,
 	useState,
 	type MouseEvent as ReactMouseEvent,
 } from "react";
+import { toast } from "sonner";
 import { BranchToolbar } from "@/components/BranchToolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,8 +15,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SessionEventFeed } from "@/features/sessions/session-event-feed";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workbench";
 import { ProviderCatalogCard } from "@/features/providers/provider-catalog-card";
-import { WorkspaceCommitButton } from "@/features/commit";
+import { InspectorChangesSection } from "./inspector-changes-section";
+import { GitSectionHeader } from "./git-section-header";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
+import {
+	workspaceGhPrViewWeb,
+	workspaceGitCommitPush,
+	workspaceGitPush,
+} from "@/lib/workspace-api";
+import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { EmptyState } from "@/features/panel";
 import { cn } from "@/lib/utils";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
@@ -108,6 +117,49 @@ export function WorkspaceInspectorSidebar({
 			: null;
 	const commitMode = resolveCommitMode(workspaceBranch ?? "");
 	const headerToneClass = gitSectionHeaderHighlightClass(commitMode);
+	const queryClient = useQueryClient();
+	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
+
+	const handleInspectorCommit = useCallback(async () => {
+		const root = workspacePath?.trim();
+		if (!root) {
+			toast.error("No workspace path");
+			throw new Error("No workspace path");
+		}
+
+		switch (commitMode) {
+			case "merged":
+			case "closed":
+				return;
+			case "push":
+				await workspaceGitPush({ workspaceRoot: root });
+				toast.success("Pushed");
+				break;
+			case "open-pr":
+				await workspaceGhPrViewWeb({ workspaceRoot: root });
+				toast.success("Opened PR in browser");
+				break;
+			default: {
+				const message = window.prompt("Commit message", "dcc: checkpoint");
+				if (message === null) {
+					return;
+				}
+				const trimmed = message.trim();
+				if (!trimmed) {
+					toast.error("Commit message required");
+					throw new Error("Commit message required");
+				}
+				await workspaceGitCommitPush({ workspaceRoot: root, message: trimmed });
+				toast.success("Committed and pushed");
+				break;
+			}
+		}
+
+		await queryClient.invalidateQueries({
+			queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+		});
+	}, [commitMode, queryClient, workspacePath]);
+
 	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
 	const [actionsHeight, setActionsHeight] = useState(INITIAL_ACTIONS_HEIGHT);
 	const [activeTab, setActiveTab] = useState<TabsKey>("setup");
@@ -161,15 +213,6 @@ export function WorkspaceInspectorSidebar({
 		};
 	}, [changesHeight, actionsHeight]);
 
-	const workspaceSummary = useMemo(
-		() => [
-			{ label: "Workspace id", value: workspaceId ?? "" },
-			{ label: "Provider", value: selectedProviderLabel ?? "Unknown provider" },
-			{ label: "Runtime", value: sessionState },
-		],
-		[sessionState, selectedProviderLabel, workspaceId],
-	);
-
 	if (!hasWorkspace) {
 		return (
 			<div className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground">
@@ -196,46 +239,28 @@ export function WorkspaceInspectorSidebar({
 				)}
 				style={{ height: `${changesHeight}px` }}
 			>
-				<div className={cn("relative flex items-center justify-between gap-3 px-3 py-2", "border-b border-border/40")}>
-					<div className="min-w-0">
-						<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-							Git
-						</p>
-						<p
-							className="truncate text-[13px] font-medium leading-tight"
-							title={workspaceName ?? undefined}
-						>
-							{workspaceName ?? "Workspace"}
-						</p>
-					</div>
-					<div className="flex shrink-0 items-center gap-2">
-						<Badge variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
-							{commitMode}
-						</Badge>
-						<WorkspaceCommitButton mode={commitMode} />
-					</div>
-					<div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[linear-gradient(90deg,transparent,color-mix(in_oklch,var(--foreground)_28%,transparent),transparent)] bg-[length:200%_100%] motion-safe:animate-shine" />
-				</div>
+				<GitSectionHeader
+					workspaceDisplayName={workspaceName ?? "Workspace"}
+					commitMode={commitMode}
+					isRefreshing={gitStatusQuery.isFetching && !gitStatusQuery.isPending}
+					onCommit={handleInspectorCommit}
+				/>
 
-				<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3">
+				<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 pb-3 pt-2">
+					<div className="shrink-0">
 						<BranchToolbar branch={workspaceBranch ?? ""} workspacePath={workspacePath} />
-					<div className="grid gap-2 sm:grid-cols-3">
-						{workspaceSummary.map((item) => (
-							<Card key={item.label} className="border-border/60 shadow-none">
-								<CardContent className="p-3">
-									<p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
-										{item.label}
-									</p>
-									<p className="mt-1 truncate text-[13px] text-foreground">{item.value}</p>
-								</CardContent>
-							</Card>
-						))}
 					</div>
 					{pathLine ? (
-						<p className="truncate text-[11px] text-muted-foreground" title={workspacePath ?? undefined}>
+						<p
+							className="shrink-0 truncate text-[11px] text-muted-foreground"
+							title={workspacePath ?? undefined}
+						>
 							{pathLine}
 						</p>
 					) : null}
+					<div className="flex min-h-0 min-w-0 flex-1 flex-col">
+						<InspectorChangesSection workspaceRoot={workspacePath} />
+					</div>
 				</div>
 			</section>
 

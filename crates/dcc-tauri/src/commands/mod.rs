@@ -18,4 +18,12 @@ pub use workspace_commands::{
 	list_git_tracked_files,
 	list_local_branches,
 	list_workspaces,
+	workspace_gh_pr_create_fill,
+	workspace_gh_pr_view_web,
+	workspace_git_commit_push,
+	workspace_git_discard_file,
+	workspace_git_push,
+	workspace_git_stage_file,
+	workspace_git_status,
+	workspace_git_unstage_file,
 };

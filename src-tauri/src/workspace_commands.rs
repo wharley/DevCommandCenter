@@ -12,6 +12,11 @@ use dcc_tauri::{
 		ListLocalBranchesInput,
 		ListLocalBranchesOutput,
 		ListWorkspacesOutput,
+		WorkspaceGitCommitPushInput,
+		WorkspaceGitPathInput,
+		WorkspaceGitPushInput,
+		WorkspaceGitStatusInput,
+		WorkspaceGitStatusOutput,
 	},
 	state::WorkspaceCommandState,
 };
@@ -60,4 +65,48 @@ pub async fn list_child_directories(
 	input: ListChildDirectoriesInput,
 ) -> Result<ListChildDirectoriesOutput, String> {
 	dcc_tauri::commands::workspace_commands::list_child_directories(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_status(
+	input: WorkspaceGitStatusInput,
+) -> Result<WorkspaceGitStatusOutput, String> {
+	dcc_tauri::commands::workspace_commands::workspace_git_status(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_stage_file(input: WorkspaceGitPathInput) -> Result<(), String> {
+	dcc_tauri::commands::workspace_commands::workspace_git_stage_file(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_unstage_file(input: WorkspaceGitPathInput) -> Result<(), String> {
+	dcc_tauri::commands::workspace_commands::workspace_git_unstage_file(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_discard_file(input: WorkspaceGitPathInput) -> Result<(), String> {
+	dcc_tauri::commands::workspace_commands::workspace_git_discard_file(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_commit_push(
+	input: WorkspaceGitCommitPushInput,
+) -> Result<(), String> {
+	dcc_tauri::commands::workspace_commands::workspace_git_commit_push(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_push(input: WorkspaceGitPushInput) -> Result<(), String> {
+	dcc_tauri::commands::workspace_commands::workspace_git_push(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_gh_pr_view_web(input: WorkspaceGitPushInput) -> Result<(), String> {
+	dcc_tauri::commands::workspace_commands::workspace_gh_pr_view_web(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_gh_pr_create_fill(input: WorkspaceGitPushInput) -> Result<(), String> {
+	dcc_tauri::commands::workspace_commands::workspace_gh_pr_create_fill(input).await
 }

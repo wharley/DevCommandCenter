@@ -12,6 +12,11 @@ import type {
 	ListLocalBranchesInput,
 	ListLocalBranchesOutput,
 	ListWorkspacesOutput,
+	WorkspaceGitCommitPushInput,
+	WorkspaceGitPathInput,
+	WorkspaceGitPushInput,
+	WorkspaceGitStatusInput,
+	WorkspaceGitStatusOutput,
 } from "@dcc/contracts";
 
 export function createWorkspaceForRepo(input: CreateWorkspaceForRepoInput) {
@@ -46,4 +51,38 @@ export function listChildDirectories(input: ListChildDirectoriesInput) {
 	return invoke<ListChildDirectoriesOutput>(WORKSPACE_METHODS.listChildDirectories, {
 		input,
 	});
+}
+
+export function workspaceGitStatus(input: WorkspaceGitStatusInput) {
+	return invoke<WorkspaceGitStatusOutput>(WORKSPACE_METHODS.workspaceGitStatus, {
+		input,
+	});
+}
+
+export function workspaceGitStageFile(input: WorkspaceGitPathInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGitStageFile, { input });
+}
+
+export function workspaceGitUnstageFile(input: WorkspaceGitPathInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGitUnstageFile, { input });
+}
+
+export function workspaceGitDiscardFile(input: WorkspaceGitPathInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGitDiscardFile, { input });
+}
+
+export function workspaceGitCommitPush(input: WorkspaceGitCommitPushInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGitCommitPush, { input });
+}
+
+export function workspaceGitPush(input: WorkspaceGitPushInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGitPush, { input });
+}
+
+export function workspaceGhPrViewWeb(input: WorkspaceGitPushInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGhPrViewWeb, { input });
+}
+
+export function workspaceGhPrCreateFill(input: WorkspaceGitPushInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGhPrCreateFill, { input });
 }

@@ -23,6 +23,8 @@ use std::{env, fs, path::PathBuf};
 		CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
 		ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
 		ListLocalBranchesInput, ListLocalBranchesOutput, ListWorkspacesOutput,
+		WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput, WorkspaceGitPathInput,
+		WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
 	},
 };
 use serde::{Deserialize, Serialize};
@@ -32,13 +34,21 @@ use tauri_specta::Builder;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-struct WorkspaceMethods {
+	struct WorkspaceMethods {
 	create_workspace_for_repo: String,
 	create_workspace_from_url: String,
 	list_local_branches: String,
 	list_git_tracked_files: String,
 	list_child_directories: String,
 	list_workspaces: String,
+	workspace_gh_pr_create_fill: String,
+	workspace_gh_pr_view_web: String,
+	workspace_git_commit_push: String,
+	workspace_git_discard_file: String,
+	workspace_git_push: String,
+	workspace_git_stage_file: String,
+	workspace_git_status: String,
+	workspace_git_unstage_file: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -96,6 +106,12 @@ fn main() {
 		.typ::<ListChildDirectoriesInput>()
 		.typ::<ListChildDirectoriesOutput>()
 		.typ::<ListWorkspacesOutput>()
+		.typ::<WorkspaceGitStatusInput>()
+		.typ::<WorkspaceGitStatusOutput>()
+		.typ::<WorkspaceGitChangeEntry>()
+		.typ::<WorkspaceGitPathInput>()
+		.typ::<WorkspaceGitCommitPushInput>()
+		.typ::<WorkspaceGitPushInput>()
 		.typ::<ListProvidersOutput>()
 		.typ::<StartThreadInput>()
 		.typ::<StartThreadOutput>()
@@ -115,6 +131,14 @@ fn main() {
 				list_git_tracked_files: "list_git_tracked_files".to_string(),
 				list_child_directories: "list_child_directories".to_string(),
 				list_workspaces: "list_workspaces".to_string(),
+				workspace_gh_pr_create_fill: "workspace_gh_pr_create_fill".to_string(),
+				workspace_gh_pr_view_web: "workspace_gh_pr_view_web".to_string(),
+				workspace_git_commit_push: "workspace_git_commit_push".to_string(),
+				workspace_git_discard_file: "workspace_git_discard_file".to_string(),
+				workspace_git_push: "workspace_git_push".to_string(),
+				workspace_git_stage_file: "workspace_git_stage_file".to_string(),
+				workspace_git_status: "workspace_git_status".to_string(),
+				workspace_git_unstage_file: "workspace_git_unstage_file".to_string(),
 			},
 		);
 
