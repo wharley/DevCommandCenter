@@ -9,6 +9,8 @@ export type DccRuntimeSessionSnapshot = {
 	state: string;
 	turnCount: number;
 	checkpointCount: number;
+	/** Matches core session projection — non-null while a turn is in flight. */
+	activeTurnId: string | null;
 	lastTurnPrompt?: string | null;
 	lastTurnState?: string | null;
 };

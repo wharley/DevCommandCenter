@@ -97,6 +97,7 @@ export function WorkspacePanel({
 					isGitRepo={isGitRepo}
 					pathCaption={pathCaption}
 					sessionSnapshot={sessionSnapshot}
+					pendingPrompt={pendingPrompt}
 					terminalAvailable={terminalAvailable}
 					terminalOpen={terminalOpen}
 					onToggleTerminal={onToggleTerminal}
@@ -134,6 +135,7 @@ export function WorkspacePanel({
 						selectedProviderId={selectedProviderId}
 						selectedModelId={selectedModelId}
 						sessionSnapshot={sessionSnapshot}
+						pendingPrompt={pendingPrompt}
 						workspacePath={workspacePath}
 						workspaceBranch={workspaceBranch}
 						onSelectProvider={onSelectProvider}

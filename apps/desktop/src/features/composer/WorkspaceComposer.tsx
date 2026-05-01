@@ -24,6 +24,7 @@ import { pathBasename } from "@/lib/path-basename";
 import { cn } from "@/lib/utils";
 import type { ProviderCatalog } from "@dcc/contracts";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
+import { canAbortRun } from "@/features/sessions/session-chrome-state";
 import { ContextBar } from "./ContextBar";
 import { ComposerProviderModelMenu } from "./ComposerProviderModelMenu";
 import { ContextUsageRing } from "./ContextUsageRing";
@@ -76,6 +77,7 @@ type WorkspaceComposerProps = {
 	selectedProviderId: string | null;
 	selectedModelId: string | null;
 	sessionSnapshot: RuntimeSessionSnapshot | null;
+	pendingPrompt: string | null;
 	workspacePath: string | null;
 	workspaceBranch: string | null;
 	onSelectProvider: (providerId: string) => void;
@@ -91,6 +93,7 @@ export function WorkspaceComposer({
 	selectedProviderId,
 	selectedModelId,
 	sessionSnapshot,
+	pendingPrompt,
 	workspacePath,
 	workspaceBranch,
 	onSelectProvider,
@@ -193,6 +196,9 @@ export function WorkspaceComposer({
 	const turnCount = sessionSnapshot?.turnCount ?? 0;
 	const checkpointCount = sessionSnapshot?.checkpointCount ?? 0;
 	const contextUsageValue = Math.min(100, turnCount * 12 + checkpointCount * 8);
+
+	const canStopRun =
+		canAbortRun(sessionSnapshot, pendingPrompt) || isSubmitting;
 
 	const submitEnabled = isComposerSubmitEnabled({
 		disabled: toolbarDisabled,
@@ -405,14 +411,14 @@ export function WorkspaceComposer({
 							className="shrink-0"
 						/>
 					) : null}
-					{isSubmitting ? (
+					{canStopRun ? (
 						<div className="ml-1.5 flex items-center gap-1.5">
 							<Button
 								type="button"
 								variant="destructive"
 								size="icon"
 								aria-label="Stop"
-								disabled={toolbarDisabled}
+								disabled={toolbarDisabled || !canStopRun}
 								className="rounded-[9px]"
 								onClick={onAbortSession}
 							>

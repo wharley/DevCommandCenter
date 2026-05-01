@@ -1,4 +1,4 @@
-import { Command, TerminalSquare } from "lucide-react";
+import { CircleStop, Command, RefreshCw, TerminalSquare } from "lucide-react";
 import { memo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,10 @@ import {
 import { AppUpdateButton } from "@/features/updater";
 import type { AppUpdateInfo } from "@/features/updater";
 import type { DccRuntimeSessionSnapshot } from "./workbench-types";
+import {
+	canAbortRun,
+	canResumeSession,
+} from "./session-chrome-state";
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
@@ -18,6 +22,7 @@ export type DccWorkbenchChatHeaderProps = {
 	isGitRepo: boolean;
 	pathCaption: string | null;
 	sessionSnapshot: DccRuntimeSessionSnapshot | null;
+	pendingPrompt: string | null;
 	terminalAvailable: boolean;
 	terminalOpen: boolean;
 	onToggleTerminal: () => void;
@@ -29,7 +34,7 @@ export type DccWorkbenchChatHeaderProps = {
 	onInstallUpdate: () => void;
 };
 
-/** Chat column top bar — same layout affordances as the reference desktop/chat header (titles + badges + toolbar cluster). */
+/** Chat column top bar — compact toolbar cloned from reference shells: titles left, icon cluster right. */
 
 export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	threadTitle,
@@ -38,6 +43,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	isGitRepo,
 	pathCaption,
 	sessionSnapshot,
+	pendingPrompt,
 	terminalAvailable,
 	terminalOpen,
 	onToggleTerminal,
@@ -49,6 +55,8 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	onInstallUpdate,
 }: DccWorkbenchChatHeaderProps) {
 	const showProjectBadge = Boolean(projectBadgeLabel);
+	const resumeOk = canResumeSession(sessionSnapshot);
+	const abortOk = canAbortRun(sessionSnapshot, pendingPrompt);
 
 	return (
 		<div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
@@ -80,31 +88,59 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 					</span>
 				) : null}
 			</div>
-			<div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
-				<div className="hidden items-center gap-1 tabular-nums text-[11px] text-muted-foreground sm:flex">
-					<span>{sessionSnapshot?.state ?? "idle"}</span>
+			<div className="flex shrink-0 items-center justify-end gap-1.5 @3xl/header-actions:gap-2">
+				<div className="hidden max-w-[5.5rem] items-center gap-1 truncate tabular-nums text-[11px] text-muted-foreground sm:flex">
+					<span className="truncate">{sessionSnapshot?.state ?? "idle"}</span>
 				</div>
-				<div className="hidden items-center gap-1 lg:flex">
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className="h-8 px-2.5 text-xs font-normal"
-						onClick={onResumeSession}
-						disabled={!sessionSnapshot}
-					>
-						Resume
-					</Button>
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className="h-8 px-2.5 text-xs font-normal"
-						onClick={onAbortSession}
-						disabled={!sessionSnapshot}
-					>
-						Abort
-					</Button>
+				<div
+					className="flex items-center gap-0.5 rounded-md border border-border/50 bg-muted/25 p-0.5"
+					role="toolbar"
+					aria-label="Session controls"
+				>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								className="h-7 w-7 shrink-0 [&_svg]:size-3.5"
+								aria-label="Resume session"
+								onClick={onResumeSession}
+								disabled={!sessionSnapshot || !resumeOk}
+							>
+								<RefreshCw strokeWidth={2} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">
+							{!sessionSnapshot
+								? "Start or select a session first"
+								: resumeOk
+									? "Resume session"
+									: "Already active"}
+						</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								className="h-7 w-7 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive [&_svg]:size-3.5"
+								aria-label="Abort run"
+								onClick={onAbortSession}
+								disabled={!sessionSnapshot || !abortOk}
+							>
+								<CircleStop className="size-3.5" strokeWidth={2} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">
+							{!sessionSnapshot
+								? "Start or select a session first"
+								: abortOk
+									? "Abort run"
+									: "No turn in progress"}
+						</TooltipContent>
+					</Tooltip>
 				</div>
 				<AppUpdateButton
 					update={updateInfo}
@@ -142,26 +178,18 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						<Button
 							type="button"
 							variant="ghost"
-							size="sm"
-							className="hidden gap-1.5 text-muted-foreground hover:text-foreground sm:inline-flex"
+							size="icon"
+							className="size-8 shrink-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
+							aria-label="Command palette"
 							onClick={onOpenCommandPalette}
 						>
-							<Command className="size-3.5" />
-							<span className="text-xs">Workspaces</span>
+							<Command strokeWidth={2} />
 						</Button>
 					</TooltipTrigger>
-					<TooltipContent side="bottom">Command palette (⌘K)</TooltipContent>
+					<TooltipContent side="bottom">
+						Command palette — switch workspace, search (⌘K)
+					</TooltipContent>
 				</Tooltip>
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon"
-					className="inline-flex size-8 shrink-0 sm:hidden"
-					aria-label="Open command palette"
-					onClick={onOpenCommandPalette}
-				>
-					<Command className="size-3.5" />
-				</Button>
 			</div>
 		</div>
 	);

@@ -56,6 +56,10 @@ import {
 } from "./features/providers/provider-selection.logic";
 import type { ComposerSubmittedTurn } from "./features/composer/composer-turn";
 import { workspaceToSummary } from "./features/workspaces/use-workspaces";
+import {
+	canAbortRun,
+	canResumeSession,
+} from "./features/sessions/session-chrome-state";
 
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 
@@ -318,6 +322,46 @@ export default function App() {
 		setPendingPrompt(null);
 	}, [selectedWorkspace?.id]);
 
+	/** Keep `activeTurnId` in sync with live stream (turn finished / new turn / abort) after the send returns. */
+	useEffect(() => {
+		const last = sessionEvents[sessionEvents.length - 1];
+		if (!last) {
+			return;
+		}
+
+		setSessionSnapshot((prev) => {
+			if (!prev) {
+				return prev;
+			}
+			const sid = prev.sessionId;
+
+			if ("sessionTurnCompleted" in last && last.sessionTurnCompleted?.session_id === sid) {
+				return { ...prev, activeTurnId: null, lastTurnState: "completed" };
+			}
+			if ("sessionTurnAborted" in last && last.sessionTurnAborted?.session_id === sid) {
+				return { ...prev, activeTurnId: null, lastTurnState: "aborted" };
+			}
+			if ("sessionAborted" in last && last.sessionAborted?.session_id === sid) {
+				return { ...prev, state: "aborted", activeTurnId: null };
+			}
+			if ("sessionResumed" in last && last.sessionResumed?.session_id === sid) {
+				return { ...prev, state: "active" };
+			}
+			if ("sessionTurnStarted" in last && last.sessionTurnStarted?.session_id === sid) {
+				const started = last.sessionTurnStarted;
+				return {
+					...prev,
+					activeTurnId: started?.turn_id ?? null,
+					lastTurnState: "running",
+				};
+			}
+			if ("sessionCompleted" in last && last.sessionCompleted?.session_id === sid) {
+				return { ...prev, state: "completed", activeTurnId: null };
+			}
+			return prev;
+		});
+	}, [sessionEvents]);
+
 	const handleStartSession = useCallback(async () => {
 		if (!selectedProvider || !selectedWorkspace) {
 			return;
@@ -340,6 +384,7 @@ export default function App() {
 			state: result.projection.state,
 			turnCount: result.projection.turnCount,
 			checkpointCount: result.projection.checkpointCount,
+			activeTurnId: result.projection.activeTurnId ?? null,
 		});
 	}, [selectedModel, selectedProvider, selectedWorkspace]);
 
@@ -374,6 +419,7 @@ export default function App() {
 					state: started.projection.state,
 					turnCount: started.projection.turnCount,
 					checkpointCount: started.projection.checkpointCount,
+					activeTurnId: started.projection.activeTurnId ?? null,
 				};
 				setSessionSnapshot(currentSession);
 			}
@@ -399,6 +445,7 @@ export default function App() {
 				state: result.projection.state,
 				turnCount: result.projection.turnCount,
 				checkpointCount: result.projection.checkpointCount,
+				activeTurnId: result.projection.activeTurnId ?? null,
 				lastTurnPrompt: result.turn.content,
 				lastTurnState: result.turn.state,
 			});
@@ -435,7 +482,7 @@ export default function App() {
 	);
 
 	const handleResumeSession = useCallback(async () => {
-		if (!sessionSnapshot) {
+		if (!sessionSnapshot || !canResumeSession(sessionSnapshot)) {
 			return;
 		}
 
@@ -447,13 +494,14 @@ export default function App() {
 						state: result.projection.state,
 						turnCount: result.projection.turnCount,
 						checkpointCount: result.projection.checkpointCount,
+						activeTurnId: result.projection.activeTurnId ?? null,
 					}
 				: current,
 		);
 	}, [sessionSnapshot]);
 
 	const handleAbortSession = useCallback(async () => {
-		if (!sessionSnapshot) {
+		if (!sessionSnapshot || !canAbortRun(sessionSnapshot, pendingPrompt)) {
 			return;
 		}
 
@@ -468,10 +516,11 @@ export default function App() {
 						state: result.projection.state,
 						turnCount: result.projection.turnCount,
 						checkpointCount: result.projection.checkpointCount,
+						activeTurnId: result.projection.activeTurnId ?? null,
 					}
 				: current,
 		);
-	}, [sessionSnapshot]);
+	}, [pendingPrompt, sessionSnapshot]);
 
 	const handleCompleteOnboarding = useCallback(() => {
 		try {
