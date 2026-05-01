@@ -54,6 +54,7 @@ import {
 	resolveSelectedModelId,
 	setSessionComposerSelection,
 } from "./features/providers/provider-selection.logic";
+import type { ComposerSubmittedTurn } from "./features/composer/composer-turn";
 import { workspaceToSummary } from "./features/workspaces/use-workspaces";
 
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
@@ -342,8 +343,8 @@ export default function App() {
 		});
 	}, [selectedModel, selectedProvider, selectedWorkspace]);
 
-	const handleSubmitPrompt = useCallback(async (prompt: string) => {
-		const trimmedPrompt = prompt.trim();
+	const handleSubmitPrompt = useCallback(async (turn: ComposerSubmittedTurn) => {
+		const trimmedPrompt = turn.rawPrompt.trim();
 		if (trimmedPrompt.length === 0) {
 			return;
 		}
@@ -384,6 +385,9 @@ export default function App() {
 				prompt: trimmedPrompt,
 				providerId: selectedProvider?.id ?? null,
 				model: selectedModel?.id ?? null,
+				planMode: turn.envelope.planMode,
+				effort: turn.envelope.effort,
+				fastMode: turn.envelope.fastMode,
 			});
 
 			setSessionSnapshot({

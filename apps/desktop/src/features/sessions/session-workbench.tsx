@@ -3,6 +3,7 @@ import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { WorkspaceTerminalDrawer } from "@/features/terminal";
 import { WorkspacePanel } from "@/features/panel";
 import type { AppUpdateInfo } from "@/features/updater";
+import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import type { RuntimeSessionSnapshot } from "./workbench-types";
 
 export type { RuntimeSessionSnapshot } from "./workbench-types";
@@ -23,7 +24,7 @@ type SessionWorkbenchProps = {
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
 	onStartSession: () => void;
-	onSubmitPrompt: (prompt: string) => Promise<void>;
+	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	onOpenCommandPalette: () => void;

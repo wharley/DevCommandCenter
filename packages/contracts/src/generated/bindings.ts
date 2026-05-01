@@ -211,11 +211,17 @@ export type ResumeSessionOutput = {
 
 export type SendTurnInput = {
 	sessionId: SessionId,
+	// Raw composer text for timeline / Turn records (not what stdin receives — see Tauri `compose_wire_prompt`).
 	prompt: string,
 	// When set, replaces the session provider before this turn (same workspace session).
 	providerId?: string | null,
 	// When set, replaces the session model before this turn.
 	model?: string | null,
+	// Plan-before-edit style directives (Helmor plan-style).
+	planMode?: boolean | null,
+	// `low` | `balanced` | `high`
+	effort?: string | null,
+	fastMode?: boolean | null,
 };
 
 export type SendTurnOutput = {

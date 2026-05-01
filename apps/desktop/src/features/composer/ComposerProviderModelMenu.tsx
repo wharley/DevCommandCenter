@@ -83,12 +83,10 @@ export function ComposerProviderModelMenu({
 		return null;
 	}, [providers, selectedModelId]);
 
-	const triggerLabel =
-		selectedProvider && selectedModel
-			? `${selectedProvider.label} · ${selectedModel.label}`
-			: (selectedModel?.label ??
-				selectedModelId ??
-				"Select model");
+	const triggerTitle =
+		selectedModel && selectedProvider
+			? `${selectedModel.label} — ${selectedProvider.label}`
+			: (selectedModel?.label ?? selectedModelId ?? "Select model");
 
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
@@ -97,15 +95,37 @@ export function ComposerProviderModelMenu({
 					type="button"
 					disabled={disabled || providers.length === 0}
 					data-composer-model-picker="true"
+					title={triggerTitle}
+					aria-label={triggerTitle}
 					className={cn(
-						`flex min-w-0 max-w-[min(100%,14rem)] items-center gap-1.5 text-muted-foreground ${composerToolbarTriggerClassName}`,
+						`flex min-w-0 max-w-[min(100%,20rem)] items-center gap-1.5 text-muted-foreground ${composerToolbarTriggerClassName}`,
 						disabled &&
 							"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
 					)}
 				>
-					<Sparkles className="size-[13px] shrink-0" strokeWidth={1.8} />
-					<span className="min-w-0 truncate text-left">{triggerLabel}</span>
-					<ChevronDown className="size-3 shrink-0 opacity-40" strokeWidth={2} />
+					<Sparkles
+						className="mt-0.5 size-[13px] shrink-0 self-start"
+						strokeWidth={1.8}
+					/>
+					<div className="min-w-0 flex-1 text-left">
+						{selectedModel ? (
+							<>
+								<div className="truncate text-[13px] font-medium leading-tight text-foreground">
+									{selectedModel.label}
+								</div>
+								{selectedProvider ? (
+									<div className="truncate text-[11px] leading-tight text-muted-foreground/90">
+										{selectedProvider.label}
+									</div>
+								) : null}
+							</>
+						) : (
+							<span className="block truncate text-[13px] text-muted-foreground">
+								{selectedModelId ?? "Select model"}
+							</span>
+						)}
+					</div>
+					<ChevronDown className="size-3 shrink-0 self-center opacity-40" strokeWidth={2} />
 				</button>
 			</PopoverTrigger>
 			<PopoverContent

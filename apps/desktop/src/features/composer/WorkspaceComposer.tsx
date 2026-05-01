@@ -59,6 +59,7 @@ import { PasteImagePlugin } from "./editor/plugins/PasteImagePlugin";
 import { SlashCommandPlugin } from "./editor/plugins/slash-command-plugin";
 import { SubmitPlugin } from "./editor/plugins/SubmitPlugin";
 import { workspaceChildDirsQueryOptions } from "./workspace-child-dirs-query";
+import type { ComposerSubmittedTurn } from "./composer-turn";
 
 const DCC_EFFORT_LEVELS = [
 	{ id: "low" as const, label: "Low", icon: "low" as const },
@@ -79,7 +80,7 @@ type WorkspaceComposerProps = {
 	workspaceBranch: string | null;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
-	onSubmitPrompt: (prompt: string) => Promise<void>;
+	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onAbortSession: () => void;
 };
 
@@ -108,6 +109,20 @@ export function WorkspaceComposer({
 	);
 	const composerDraftKey = useMemo(() => getComposerDraftKey(draftKey), [draftKey]);
 	const composerRootRef = useRef<HTMLDivElement | null>(null);
+
+	const submitFromComposer = useCallback(
+		async (rawPrompt: string) => {
+			await onSubmitPrompt({
+				rawPrompt,
+				envelope: {
+					planMode: isPlanMode,
+					effort,
+					fastMode: isFastMode,
+				},
+			});
+		},
+		[effort, isFastMode, isPlanMode, onSubmitPrompt],
+	);
 
 	const lexicalInitialConfig = useMemo(
 		() => ({
@@ -268,7 +283,7 @@ export function WorkspaceComposer({
 					draftKey={composerDraftKey}
 					isDisabled={submitDisabledForPlugin}
 					onSubmittingChange={setIsSubmitting}
-					onSubmit={onSubmitPrompt}
+					onSubmit={submitFromComposer}
 					registerSubmit={setSubmitAction}
 				/>
 				<AutoResizePlugin />

@@ -7,6 +7,7 @@ import { ConversationLaunchState } from "./ConversationLaunchState";
 import { projectWorkspaceMessages } from "./thread-projection";
 import { AssistantMessage, SystemMessage, UserMessage } from "./message-components";
 import { EmptyState } from "./EmptyState";
+import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 
 type ActiveThreadViewportProps = {
 	historyEvents: SessionEventRecord[];
@@ -21,7 +22,7 @@ type ActiveThreadViewportProps = {
 	sessionId: string | null;
 	pendingPrompt: string | null;
 	onStartSession: () => void;
-	onSubmitPrompt: (prompt: string) => Promise<void>;
+	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 };
 
 export function ActiveThreadViewport({

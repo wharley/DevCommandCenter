@@ -1,5 +1,9 @@
 import { ArrowRight, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+	composerTurnFromRaw,
+	type ComposerSubmittedTurn,
+} from "@/features/composer/composer-turn";
 
 const SUGGESTED_PROMPTS = [
 	"Summarize what this workspace already contains.",
@@ -12,7 +16,7 @@ type ConversationLaunchStateProps = {
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
 	onStartSession: () => void;
-	onSubmitPrompt: (prompt: string) => Promise<void>;
+	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 };
 
 export function ConversationLaunchState({
@@ -74,7 +78,7 @@ export function ConversationLaunchState({
 							variant="outline"
 							className="h-auto justify-start rounded-2xl border-border/60 px-4 py-3 text-left"
 							onClick={() => {
-								void onSubmitPrompt(prompt);
+								void onSubmitPrompt(composerTurnFromRaw(prompt));
 							}}
 						>
 							<div className="flex min-w-0 items-center gap-2">

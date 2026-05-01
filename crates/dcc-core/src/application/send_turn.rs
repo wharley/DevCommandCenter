@@ -15,6 +15,7 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 pub struct SendTurnInput {
 	pub session_id: SessionId,
+	/// Raw composer text for timeline / Turn records (not what stdin receives — see Tauri `compose_wire_prompt`).
 	pub prompt: String,
 	/// When set, replaces the session provider before this turn (same workspace session).
 	#[serde(default)]
@@ -22,6 +23,14 @@ pub struct SendTurnInput {
 	/// When set, replaces the session model before this turn.
 	#[serde(default)]
 	pub model: Option<String>,
+	/// Plan-before-edit style directives (Helmor plan-style).
+	#[serde(default)]
+	pub plan_mode: Option<bool>,
+	/// `low` | `balanced` | `high`
+	#[serde(default)]
+	pub effort: Option<String>,
+	#[serde(default)]
+	pub fast_mode: Option<bool>,
 }
 
 /// Merge UI selection into session fields (Helmor-style per-turn model routing).
@@ -284,6 +293,9 @@ mod tests {
 				prompt: "hello".to_string(),
 				provider_id: None,
 				model: None,
+				plan_mode: None,
+				effort: None,
+				fast_mode: None,
 			},
 		))
 		.expect("send_turn should succeed");

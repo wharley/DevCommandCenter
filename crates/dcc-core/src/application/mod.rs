@@ -2,6 +2,7 @@ pub mod create_workspace_from_url;
 pub mod create_workspace_for_repo;
 pub mod abort_run;
 pub mod resume_session;
+pub mod agent_turn_prompt;
 pub mod send_turn;
 pub mod start_thread;
 
@@ -12,6 +13,7 @@ pub use create_workspace_for_repo::{
 };
 pub use abort_run::{abort_run, AbortRunInput, AbortRunOutput};
 pub use resume_session::{resume_session, ResumeSessionInput, ResumeSessionOutput};
+pub use agent_turn_prompt::compose_wire_prompt;
 pub use send_turn::{
 	merge_send_turn_session_selection, send_turn, send_turn_selection_differs_from_session,
 	SendTurnInput, SendTurnOutput,

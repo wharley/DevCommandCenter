@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
 import { WorkspaceComposer } from "@/features/composer";
 import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
+import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 
 type WorkspacePanelProps = {
 	workspaceId: string;
@@ -23,7 +24,7 @@ type WorkspacePanelProps = {
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
 	onStartSession: () => void;
-	onSubmitPrompt: (prompt: string) => Promise<void>;
+	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	onOpenCommandPalette: () => void;
