@@ -35,6 +35,7 @@ yarn-error.log*
 next-env.d.ts
 
 # Rust / Tauri (Cargo build output)
+/target
 src-tauri/target
 src-tauri/database.sqlite
 src-tauri/database.sqlite-shm

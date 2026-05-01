@@ -62,7 +62,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import SettingsPage from "@/src/pages/SettingsPage";
+import SettingsPage from "@/legacy/pages/SettingsPage";
 import { normalizeComb, normalizeCombs, normalizePanes } from "@/lib/database/normalize";
 import type {
   Comb,

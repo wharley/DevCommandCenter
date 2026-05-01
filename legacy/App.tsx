@@ -2,7 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ConfirmDialogProvider } from "@/components/providers/confirm-dialog-provider";
 import { Toaster } from "@/components/ui/sonner";
-import CmuxWorkspacePage from "@/src/pages/CmuxWorkspacePage";
+import CmuxWorkspacePage from "@/legacy/pages/CmuxWorkspacePage";
 
 function AppContent() {
   return (

@@ -2,13 +2,20 @@
   "name": "dev-command-center",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "engines": {
     "node": ">=18.18.0"
   },
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
+    "build:contracts": "yarn workspace @dcc/contracts build",
+    "build:desktop": "yarn workspace @dcc/desktop build",
     "build:sidecars": "node scripts/build-sidecars.mjs",
+    "dev:desktop": "yarn workspace @dcc/desktop dev",
     "vite": "node scripts/ensure-node.mjs && vite",
     "vite:build": "node scripts/ensure-node.mjs && vite build",
     "preview": "vite preview",
@@ -100,6 +107,7 @@
     "tsx": "^4.19.0",
     "tw-animate-css": "1.3.3",
     "typescript": "^5",
+    "turbo": "^2.3.3",
     "vite": "^6.0.0"
   }
 }

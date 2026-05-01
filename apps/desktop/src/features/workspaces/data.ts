@@ -1,0 +1,34 @@
+import type { WorkspaceSummary, WorkspaceTone } from "./types";
+
+export const demoWorkspaces: WorkspaceSummary[] = [
+	{ id: "ws_01", name: "Alpha", status: "ready", branch: "main" },
+	{
+		id: "ws_02",
+		name: "Core Refactor",
+		status: "setup_pending",
+		branch: "feat/core",
+	},
+	{
+		id: "ws_03",
+		name: "Provider Swap",
+		status: "initializing",
+		branch: "feat/providers",
+	},
+	{
+		id: "ws_04",
+		name: "Session Replay",
+		status: "ready",
+		branch: "feat/sessions",
+	},
+];
+
+export function getWorkspaceTone(status: WorkspaceSummary["status"]): WorkspaceTone {
+	switch (status) {
+		case "ready":
+			return "success";
+		case "setup_pending":
+			return "warn";
+		default:
+			return "secondary";
+	}
+}
