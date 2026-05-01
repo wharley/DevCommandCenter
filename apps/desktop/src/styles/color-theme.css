@@ -340,6 +340,28 @@ a {
 	gap: 0.75rem;
 }
 
+.dcc-workspace-list__groups {
+	display: grid;
+	gap: 0.9rem;
+}
+
+.dcc-workspace-group {
+	display: grid;
+	gap: 0.45rem;
+}
+
+.dcc-workspace-group__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding: 0 0.15rem;
+	color: var(--dcc-text-muted);
+	font-size: 0.73rem;
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+}
+
 .dcc-workspace-card,
 .dcc-card {
 	border: 1px solid var(--dcc-shell-border);
@@ -364,6 +386,7 @@ a {
 		border-color 160ms ease,
 		background 160ms ease;
 	cursor: pointer;
+	min-height: 5rem;
 }
 
 .dcc-workspace-card:hover,
@@ -458,39 +481,187 @@ a {
 	align-items: stretch;
 }
 
+.dcc-runtime-workbench__main {
+	min-width: 0;
+	display: grid;
+	gap: 0.9rem;
+}
+
 .dcc-runtime-workbench__main,
 .dcc-runtime-workbench__rail > * {
 	min-width: 0;
 }
 
-.dcc-runtime-workbench__content {
-	display: grid;
-	gap: 1rem;
-	min-height: 0;
-}
-
 .dcc-runtime-workbench__header {
-	gap: 0.75rem;
-}
-
-.dcc-runtime-workbench__hero {
 	display: flex;
 	align-items: flex-start;
 	justify-content: space-between;
 	gap: 1rem;
+	padding: 0.1rem 0 0.2rem;
+}
+
+.dcc-runtime-workbench__eyebrow {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	margin-bottom: 0.2rem;
+	font-size: 0.72rem;
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+	color: var(--dcc-text-muted);
+}
+
+.dcc-runtime-workbench__hero {
+	display: grid;
+	gap: 0.45rem;
+	min-width: 0;
+}
+
+.dcc-runtime-workbench__hero-row {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 1rem;
+	min-width: 0;
+}
+
+.dcc-runtime-workbench__hero-copy {
+	display: grid;
+	gap: 0.45rem;
+	min-width: 0;
+}
+
+.dcc-runtime-workbench__hero-copy h3 {
+	margin: 0;
+}
+
+.dcc-runtime-workbench__hero-title-row {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.6rem;
+	min-width: 0;
+}
+
+.dcc-runtime-workbench__hero-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.45rem;
+}
+
+.dcc-runtime-workbench__hero-path {
+	margin: 0;
+	color: var(--dcc-text-soft);
+	font-size: 0.82rem;
+	line-height: 1.45;
+	word-break: break-word;
 }
 
 .dcc-runtime-workbench__hero-status {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.5rem;
-	justify-content: flex-end;
+	justify-content: flex-start;
 }
 
-.dcc-runtime-workbench__header-chips {
+.dcc-runtime-workbench__header-actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.5rem;
+	align-items: center;
+	justify-content: flex-end;
+}
+
+.dcc-runtime-workbench__conversation-shell {
+	display: grid;
+	gap: 0.9rem;
+	min-width: 0;
+}
+
+.dcc-runtime-workbench__presence-strip {
+	display: grid;
+	gap: 0.8rem;
+	padding: 0.95rem 1rem;
+	border: 1px solid var(--dcc-shell-border);
+	border-radius: calc(var(--dcc-radius-lg) - 2px);
+	background:
+		linear-gradient(
+			180deg,
+			color-mix(in oklab, var(--dcc-surface-2) 84%, transparent),
+			color-mix(in oklab, var(--dcc-surface) 92%, transparent)
+		);
+}
+
+.dcc-runtime-workbench__session-tabs {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.1rem 0 0.1rem;
+	border-bottom: 1px solid color-mix(in oklab, var(--dcc-shell-border) 85%, transparent);
+}
+
+.dcc-runtime-workbench__session-tab {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	padding: 0.55rem 0.9rem;
+	background: transparent;
+	color: var(--dcc-text-muted);
+	font-size: 0.84rem;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+	cursor: pointer;
+	transition:
+		background 160ms ease,
+		color 160ms ease,
+		border-color 160ms ease;
+}
+
+.dcc-runtime-workbench__session-tab:hover {
+	color: var(--dcc-text);
+	background: color-mix(in oklab, var(--dcc-surface-2) 58%, transparent);
+}
+
+.dcc-runtime-workbench__session-tab[data-active="true"] {
+	color: var(--dcc-text);
+	background: color-mix(in oklab, var(--dcc-surface-2) 86%, transparent);
+	border-color: var(--dcc-shell-border);
+	box-shadow: inset 0 1px 0 color-mix(in oklab, white 4%, transparent);
+}
+
+.dcc-runtime-workbench__presence-meta {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 0.75rem;
+}
+
+.dcc-runtime-workbench__presence-item {
+	display: grid;
+	gap: 0.2rem;
+	min-width: 0;
+}
+
+.dcc-runtime-workbench__presence-item span {
+	font-size: 0.72rem;
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+	color: var(--dcc-text-muted);
+}
+
+.dcc-runtime-workbench__presence-item strong {
+	font-size: 0.98rem;
+	line-height: 1.2;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.dcc-runtime-workbench__provider-strip {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.45rem;
 }
 
 .dcc-runtime-workbench__toolbar {
@@ -580,16 +751,8 @@ a {
 	min-height: 320px;
 	display: flex;
 	flex-direction: column;
-}
-
-.dcc-session-timeline {
-	position: relative;
-	display: grid;
-	gap: 0.75rem;
-	min-height: 100%;
-	padding: 1rem;
-	border-radius: var(--dcc-radius-lg);
 	border: 1px solid var(--dcc-shell-border);
+	border-radius: var(--dcc-radius-lg);
 	background:
 		radial-gradient(
 			circle at top,
@@ -600,17 +763,34 @@ a {
 			180deg,
 			color-mix(in oklab, var(--dcc-surface-2) 78%, transparent),
 			color-mix(in oklab, var(--dcc-surface) 94%, transparent)
-		);
+	);
+	padding: 1rem;
+}
+
+.dcc-runtime-workbench__timeline-shell--conversation {
+	min-height: 380px;
+}
+
+.dcc-session-timeline {
+	position: relative;
+	display: grid;
+	gap: 0.75rem;
+	min-height: 100%;
+	padding: 0;
 }
 
 .dcc-session-timeline__header {
 	align-items: flex-start;
 }
 
+.dcc-session-timeline__header .dcc-card__description {
+	max-width: 42rem;
+}
+
 .dcc-session-timeline__content {
 	display: grid;
 	gap: 0.75rem;
-	max-height: 520px;
+	max-height: 540px;
 	overflow: auto;
 	padding-right: 0.35rem;
 }
@@ -630,10 +810,42 @@ a {
 	display: grid;
 	align-content: center;
 	min-height: 240px;
-	padding: 1rem;
+	padding: 1.1rem;
 	border-radius: var(--dcc-radius-md);
-	border: 1px dashed var(--dcc-shell-border);
-	background: color-mix(in oklab, var(--dcc-surface-2) 72%, transparent);
+	border: 1px solid color-mix(in oklab, var(--dcc-shell-border) 86%, transparent);
+	background:
+		linear-gradient(
+			180deg,
+			color-mix(in oklab, var(--dcc-surface-2) 72%, transparent),
+			color-mix(in oklab, var(--dcc-surface) 94%, transparent)
+		);
+}
+
+.dcc-session-thread-empty__stack {
+	display: grid;
+	gap: 0.6rem;
+	width: min(100%, 36rem);
+	margin-inline: auto;
+}
+
+.dcc-session-thread-empty__bubble {
+	max-width: 88%;
+	padding: 0.85rem 1rem;
+	border-radius: 16px;
+	font-size: 0.92rem;
+	line-height: 1.55;
+}
+
+.dcc-session-thread-empty__bubble--user {
+	margin-left: auto;
+	background: color-mix(in oklab, var(--dcc-accent) 18%, var(--dcc-surface-2));
+	border: 1px solid color-mix(in oklab, var(--dcc-accent) 28%, var(--dcc-shell-border));
+}
+
+.dcc-session-thread-empty__bubble--assistant {
+	margin-right: auto;
+	background: color-mix(in oklab, var(--dcc-surface-2) 94%, transparent);
+	border: 1px solid var(--dcc-shell-border);
 }
 
 .dcc-session-timeline__scroll {
@@ -659,7 +871,7 @@ a {
 	display: grid;
 	gap: 0.7rem;
 	padding: 1rem;
-	border-radius: var(--dcc-radius-lg);
+	border-radius: calc(var(--dcc-radius-lg) - 2px);
 	border: 1px solid var(--dcc-shell-border);
 	background:
 		linear-gradient(
@@ -674,6 +886,17 @@ a {
 	align-items: flex-end;
 	justify-content: space-between;
 	gap: 1rem;
+}
+
+.dcc-runtime-workbench__composer-top .dcc-card__description {
+	margin: 0.2rem 0 0;
+	max-width: 44rem;
+}
+
+.dcc-runtime-workbench__composer textarea,
+.dcc-runtime-workbench__composer-input {
+	min-height: 168px;
+	resize: vertical;
 }
 
 .dcc-runtime-workbench__composer-footer {
@@ -701,6 +924,10 @@ a {
 	display: grid;
 	gap: 0.9rem;
 	align-content: start;
+}
+
+.dcc-runtime-workbench__rail > * {
+	min-width: 0;
 }
 
 .dcc-session-summary {
@@ -743,6 +970,20 @@ a {
 	gap: 0.75rem;
 }
 
+.dcc-runtime-feed {
+	background:
+		radial-gradient(
+			circle at top left,
+			color-mix(in oklab, var(--dcc-accent) 10%, transparent),
+			transparent 40%
+		),
+		linear-gradient(
+			180deg,
+			color-mix(in oklab, var(--dcc-surface-2) 84%, transparent),
+			color-mix(in oklab, var(--dcc-surface) 92%, transparent)
+		);
+}
+
 .dcc-provider-catalog__summary {
 	display: flex;
 	flex-wrap: wrap;
@@ -780,6 +1021,55 @@ a {
 }
 
 .dcc-runtime-feed__row small {
+	color: var(--dcc-text-muted);
+	line-height: 1.45;
+}
+
+.dcc-session-event {
+	display: grid;
+	gap: 0.45rem;
+	padding: 0.9rem;
+	border-radius: calc(var(--dcc-radius-md) - 2px);
+	border-left: 3px solid color-mix(in oklab, var(--dcc-border-strong) 70%, transparent);
+	background:
+		linear-gradient(
+			180deg,
+			color-mix(in oklab, var(--dcc-surface-2) 78%, transparent),
+			color-mix(in oklab, var(--dcc-surface) 94%, transparent)
+		);
+}
+
+.dcc-session-event[data-tone="success"] {
+	border-left-color: color-mix(in oklab, var(--dcc-success) 80%, transparent);
+}
+
+.dcc-session-event[data-tone="warn"] {
+	border-left-color: color-mix(in oklab, var(--dcc-warn) 80%, transparent);
+}
+
+.dcc-session-event[data-tone="secondary"] {
+	border-left-color: color-mix(in oklab, var(--dcc-accent-2) 70%, transparent);
+}
+
+.dcc-session-event[data-tone="outline"] {
+	border-left-color: color-mix(in oklab, var(--dcc-border-strong) 70%, transparent);
+}
+
+.dcc-session-event__header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.55rem;
+}
+
+.dcc-session-event__copy {
+	margin: 0;
+	color: var(--dcc-text-muted);
+	line-height: 1.55;
+	word-break: break-word;
+}
+
+.dcc-session-event__header small {
 	color: var(--dcc-text-muted);
 	line-height: 1.45;
 }
@@ -828,28 +1118,28 @@ a {
 	}
 
 	.dcc-runtime-workbench__hero,
-	.dcc-runtime-workbench__toolbar,
-	.dcc-runtime-workbench__composer-top {
+	.dcc-runtime-workbench__hero-row,
+	.dcc-runtime-workbench__composer-top,
+	.dcc-runtime-workbench__presence-strip {
 		align-items: stretch;
 		flex-direction: column;
-	}
-
-	.dcc-runtime-workbench__toolbar-actions {
-		justify-content: flex-start;
 	}
 
 	.dcc-runtime-workbench__hero-status {
 		justify-content: flex-start;
 	}
 
-	.dcc-runtime-workbench__context-panel,
+	.dcc-runtime-workbench__session-tabs {
+		flex-wrap: wrap;
+	}
+
 	.dcc-runtime-workbench__composer-footer {
 		align-items: stretch;
 		flex-direction: column;
 	}
 
-	.dcc-runtime-workbench__context-panel-actions {
-		justify-content: flex-start;
+	.dcc-runtime-workbench__presence-meta {
+		grid-template-columns: 1fr 1fr;
 	}
 
 	.dcc-runtime-workbench__composer-actions {
@@ -877,6 +1167,14 @@ a {
 	border-radius: var(--dcc-radius-md);
 	border: 1px dashed var(--dcc-shell-border);
 	background: color-mix(in oklab, var(--dcc-surface-3) 72%, transparent);
+}
+
+.dcc-terminal__header-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+	justify-content: flex-end;
 }
 
 .dcc-terminal__surface {

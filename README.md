@@ -80,7 +80,9 @@ Se você já tem Node.js 22+ instalado globalmente:
 
 ```bash
 yarn install
-yarn dev # Inicia o App Desktop (Tauri + Vite)
+yarn dev # Inicia o App Desktop nativo (Tauri + Vite)
+# ou
+yarn dev:desktop # Abre apenas o shell novo em Vite
 ```
 
 #### ⚠️ Problemas com Versão do Node?

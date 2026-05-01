@@ -1,30 +1,4 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
-import {
-	ArrowUpRight,
-	Command,
-	Settings2,
-	Sparkles,
-} from "lucide-react";
-import { Badge } from "./components/ui/badge";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from "./components/ui/card";
-import { Button } from "./components/ui/button";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
-} from "./components/ui/dropdown-menu";
-import { Label } from "./components/ui/label";
-import { Separator } from "./components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { SIDEBAR_RESIZE_HIT_AREA } from "./shell/layout";
 import { useShellPanels } from "./shell/use-panels";
 import { useZoom } from "./shell/use-zoom";
@@ -75,7 +49,6 @@ export default function App() {
 	} = useWorkspacesPanel();
 	const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 	const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
-	const [activeTab, setActiveTab] = useState("overview");
 	const { events: sessionEvents } = useSessionEventFeed();
 	const [providerCatalog, setProviderCatalog] = useState<ProviderCatalog | null>(
 		null,
@@ -89,6 +62,8 @@ export default function App() {
 	const [sessionSnapshot, setSessionSnapshot] =
 		useState<RuntimeSessionSnapshot | null>(null);
 	const providerChoices = providerCatalog?.providers ?? [];
+	const selectedWorkspacePath =
+		selectedWorkspace.worktreePath ?? selectedWorkspace.rootPath ?? null;
 	const selectedProvider = useMemo(
 		() =>
 			providerChoices.find((provider) => provider.id === selectedProviderId) ??
@@ -152,7 +127,6 @@ export default function App() {
 			turnCount: result.projection.turnCount,
 			checkpointCount: result.projection.checkpointCount,
 		});
-		setActiveTab("runtime");
 	}, [selectedProvider, selectedWorkspace.id, selectedWorkspace.name, selectedWorkspace.projectId]);
 
 	const handleSendTurn = useCallback(async () => {
@@ -179,7 +153,6 @@ export default function App() {
 				checkpointCount: started.projection.checkpointCount,
 			};
 			setSessionSnapshot(currentSession);
-			setActiveTab("runtime");
 		}
 
 		const result = await sendTurn({
@@ -199,7 +172,6 @@ export default function App() {
 			lastTurnState: result.turn.state,
 		});
 		setSessionDraft("");
-		setActiveTab("runtime");
 	}, [
 		selectedProvider,
 		selectedWorkspace.id,
@@ -304,73 +276,7 @@ export default function App() {
 				<div className="dcc-shell__divider-hit" />
 			</div>
 
-			<main className="dcc-main">
-				<header className="dcc-topbar">
-					<div className="dcc-topbar__title">
-						<div className="dcc-topbar__meta">
-							<Badge>
-								<Sparkles />
-								Phase 1 shell
-							</Badge>
-							<Badge variant="outline">Tauri + Rust</Badge>
-							<Badge variant="outline">
-								{selectedProvider ? selectedProvider.label : "No provider"}
-							</Badge>
-						</div>
-						<h2>Helmor shell density, t3code boundaries, Rust runtime.</h2>
-						<p className="dcc-card__description">
-							The new shell is the primary path now. The runtime surface is
-							being shaped around workspace, provider, and session as the
-							first-class units.
-						</p>
-					</div>
-					<div className="dcc-topbar__actions">
-						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button type="button" variant="secondary">
-									<Settings2 />
-									Actions
-								</Button>
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end">
-								<DropdownMenuItem>Open settings</DropdownMenuItem>
-								<DropdownMenuItem>Rebuild contracts</DropdownMenuItem>
-								<DropdownMenuSeparator />
-							<DropdownMenuItem>Open logs</DropdownMenuItem>
-						</DropdownMenuContent>
-						</DropdownMenu>
-						<Button
-							type="button"
-							onClick={() => setIsCommandPaletteOpen(true)}
-						>
-							<Command />
-							Cmd+K
-						</Button>
-					</div>
-				</header>
-				<div className="dcc-topbar__context">
-					<div className="dcc-topbar__context-group">
-						<div className="dcc-topbar__context-item">
-							<span>Workspace</span>
-							<strong>{selectedWorkspace.name}</strong>
-						</div>
-						<div className="dcc-topbar__context-item">
-							<span>Branch</span>
-							<strong>{selectedWorkspace.branch}</strong>
-						</div>
-						<div className="dcc-topbar__context-item">
-							<span>Provider</span>
-							<strong>{selectedProvider?.label ?? "None"}</strong>
-						</div>
-						<div className="dcc-topbar__context-item">
-							<span>Session</span>
-							<strong>{sessionSnapshot?.state ?? "idle"}</strong>
-						</div>
-					</div>
-					<Badge variant={sessionSnapshot ? "success" : "outline"}>
-						{sessionSnapshot ? `${sessionSnapshot.turnCount} turns active` : "Ready"}
-					</Badge>
-				</div>
+		<main className="dcc-main">
 				<WorkspaceCommandPalette
 					open={isCommandPaletteOpen}
 					onOpenChange={setIsCommandPaletteOpen}
@@ -384,115 +290,26 @@ export default function App() {
 					onCreateWorkspace={createWorkspace}
 					isSubmitting={isCreatingWorkspace}
 				/>
-
-				<Separator />
-
-				<Tabs value={activeTab} onValueChange={setActiveTab}>
-					<div className="dcc-tabs-bar">
-						<TabsList variant="line">
-							<TabsTrigger value="overview">Overview</TabsTrigger>
-							<TabsTrigger value="runtime">Runtime</TabsTrigger>
-						</TabsList>
-					</div>
-
-					<TabsContent value="overview">
-						<section className="dcc-section-grid">
-							<Card className="dcc-card--hero">
-								<CardHeader>
-									<div>
-										<Label>Status</Label>
-										<CardTitle>New shell online</CardTitle>
-									</div>
-									<Badge variant="success">Ready</Badge>
-								</CardHeader>
-								<CardContent>
-									<CardDescription>
-										The shell is now the primary path: workspace selection lives
-										left, session control lives center, and runtime context stays
-										visible without taking over the screen.
-									</CardDescription>
-									<div className="dcc-card__stat-row">
-										<div className="dcc-stat">
-											<span>Workspace</span>
-											<strong>{selectedWorkspace.id}</strong>
-										</div>
-										<div className="dcc-stat">
-											<span>Branch</span>
-											<strong>{selectedWorkspace.branch}</strong>
-										</div>
-										<div className="dcc-stat">
-											<span>Provider</span>
-											<strong>{selectedProvider?.label ?? "Unknown"}</strong>
-										</div>
-									</div>
-								</CardContent>
-							</Card>
-
-							<Card>
-								<CardHeader>
-									<div>
-										<Label>Contracts</Label>
-										<CardTitle>Contract-first shell</CardTitle>
-									</div>
-								</CardHeader>
-								<CardContent>
-									<CardDescription>
-										Generated bindings will replace handwritten bridge code and
-										keep the frontend in sync with the Rust domain.
-									</CardDescription>
-								</CardContent>
-								<CardFooter>
-									<Button type="button" variant="ghost">
-										<ArrowUpRight />
-										View bindings
-									</Button>
-								</CardFooter>
-							</Card>
-
-							<Card>
-								<CardHeader>
-									<div>
-										<Label>Rust core</Label>
-										<CardTitle>Boundary first</CardTitle>
-									</div>
-								</CardHeader>
-								<CardContent>
-									<CardDescription>
-										Domain, ports, and use cases stay isolated from Tauri, with
-										the bridge limited to commands and events.
-									</CardDescription>
-								</CardContent>
-								<CardFooter>
-									<Button type="button" variant="ghost">
-										<ArrowUpRight />
-										Inspect crates
-									</Button>
-								</CardFooter>
-							</Card>
-						</section>
-					</TabsContent>
-
-					<TabsContent value="runtime">
-						<SessionWorkbench
-							workspaceName={selectedWorkspace.name}
-							workspaceBranch={selectedWorkspace.branch}
-							selectedProviderLabel={selectedProvider?.label ?? null}
-							selectedProviderId={selectedProviderId}
-							providerChoices={providerChoices}
-							providerCatalog={providerCatalog}
-							sessionSnapshot={sessionSnapshot}
-							sessionEvents={sessionEvents}
-							sessionDraft={sessionDraft}
-							onSessionDraftChange={setSessionDraft}
-							onSelectProvider={setSelectedProviderId}
-							onStartSession={handleStartSession}
-							onSendTurn={handleSendTurn}
-							onResumeSession={handleResumeSession}
-							onAbortSession={handleAbortSession}
-							onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-						/>
-					</TabsContent>
-				</Tabs>
+				<SessionWorkbench
+					workspaceId={selectedWorkspace.id}
+					workspaceName={selectedWorkspace.name}
+					workspaceBranch={selectedWorkspace.branch}
+					workspacePath={selectedWorkspacePath}
+					selectedProviderLabel={selectedProvider?.label ?? null}
+					selectedProviderId={selectedProviderId}
+					providerChoices={providerChoices}
+					providerCatalog={providerCatalog}
+					sessionSnapshot={sessionSnapshot}
+					sessionEvents={sessionEvents}
+					sessionDraft={sessionDraft}
+					onSessionDraftChange={setSessionDraft}
+					onSelectProvider={setSelectedProviderId}
+					onStartSession={handleStartSession}
+					onSendTurn={handleSendTurn}
+					onResumeSession={handleResumeSession}
+					onAbortSession={handleAbortSession}
+					onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+				/>
 			</main>
 		</div>
 	);

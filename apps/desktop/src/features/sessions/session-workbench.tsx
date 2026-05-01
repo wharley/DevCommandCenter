@@ -22,8 +22,10 @@ export type RuntimeSessionSnapshot = {
 };
 
 type SessionWorkbenchProps = {
+	workspaceId: string;
 	workspaceName: string;
 	workspaceBranch: string;
+	workspacePath: string | null;
 	selectedProviderLabel: string | null;
 	selectedProviderId: string | null;
 	providerChoices: ProviderCatalog["providers"];
@@ -41,8 +43,10 @@ type SessionWorkbenchProps = {
 };
 
 export function SessionWorkbench({
+	workspaceId,
 	workspaceName,
 	workspaceBranch,
+	workspacePath,
 	selectedProviderLabel,
 	selectedProviderId,
 	providerChoices,
@@ -60,61 +64,93 @@ export function SessionWorkbench({
 }: SessionWorkbenchProps) {
 	return (
 		<section className="dcc-runtime-workbench">
-			<Card className="dcc-runtime-workbench__main">
-				<CardHeader className="dcc-runtime-workbench__header">
+			<div className="dcc-runtime-workbench__main">
+				<header className="dcc-runtime-workbench__header">
 					<div className="dcc-runtime-workbench__hero">
-						<div>
-							<Label>Session</Label>
-							<CardTitle>Workspace cockpit</CardTitle>
-							<CardDescription>
-								{workspaceName} · {workspaceBranch}
-							</CardDescription>
-						</div>
-						<div className="dcc-runtime-workbench__hero-status">
-							<Badge variant={sessionSnapshot ? "success" : "outline"}>
-								{sessionSnapshot ? sessionSnapshot.state : "idle"}
-							</Badge>
-							<Badge variant="outline">
-								{selectedProviderLabel ?? "Select provider"}
-							</Badge>
+						<span className="dcc-runtime-workbench__eyebrow">
+							Conversation shell
+						</span>
+						<div className="dcc-runtime-workbench__hero-row">
+							<div className="dcc-runtime-workbench__hero-copy">
+								<div className="dcc-runtime-workbench__hero-title-row">
+									<CardTitle>{workspaceName}</CardTitle>
+									<Badge variant={sessionSnapshot ? "success" : "outline"}>
+										{sessionSnapshot ? sessionSnapshot.state : "idle"}
+									</Badge>
+								</div>
+								<div className="dcc-runtime-workbench__hero-chips">
+									<Badge variant="outline">{workspaceBranch}</Badge>
+									<Badge variant="outline">
+										{selectedProviderLabel ?? "Select provider"}
+									</Badge>
+								</div>
+								<p className="dcc-runtime-workbench__hero-path">
+									{workspacePath ?? "Workspace path pending"}
+								</p>
+							</div>
+							<div className="dcc-runtime-workbench__header-actions">
+								<Button
+									type="button"
+									variant="secondary"
+									onClick={onResumeSession}
+									disabled={!sessionSnapshot}
+								>
+									Resume
+								</Button>
+								<Button
+									type="button"
+									variant="secondary"
+									onClick={onAbortSession}
+									disabled={!sessionSnapshot}
+								>
+									Abort
+								</Button>
+								<Button
+									type="button"
+									variant="ghost"
+									onClick={onOpenCommandPalette}
+								>
+									<Command />
+									Workspaces
+								</Button>
+							</div>
 						</div>
 					</div>
-					<div className="dcc-runtime-workbench__header-chips">
-						<Badge variant="outline">Workspace {sessionSnapshot?.workspaceId ?? "pending"}</Badge>
-						<Badge variant="outline">Provider {selectedProviderLabel ?? "Select one"}</Badge>
-						<Badge variant="outline">Turns {sessionSnapshot?.turnCount ?? 0}</Badge>
-						<Badge variant="outline">Checkpoints {sessionSnapshot?.checkpointCount ?? 0}</Badge>
-					</div>
-				</CardHeader>
+				</header>
 
-				<CardContent className="dcc-runtime-workbench__content">
-					<div className="dcc-runtime-workbench__toolbar">
-						<div className="dcc-runtime-workbench__toolbar-meta">
-							<span>Runtime surface</span>
-							<strong>{sessionSnapshot?.sessionId ?? "No session started"}</strong>
+				<div className="dcc-runtime-workbench__session-tabs" role="tablist" aria-label="Runtime areas">
+					<button type="button" className="dcc-runtime-workbench__session-tab" data-active="true">
+						Conversation
+					</button>
+					<button type="button" className="dcc-runtime-workbench__session-tab">
+						Terminal
+					</button>
+					<button type="button" className="dcc-runtime-workbench__session-tab">
+						Inspector
+					</button>
+				</div>
+
+				<div className="dcc-runtime-workbench__conversation-shell">
+					<div className="dcc-runtime-workbench__presence-strip">
+						<div className="dcc-runtime-workbench__presence-meta">
+							<div className="dcc-runtime-workbench__presence-item">
+								<span>Workspace</span>
+								<strong>{sessionSnapshot?.workspaceId ?? "pending"}</strong>
+							</div>
+							<div className="dcc-runtime-workbench__presence-item">
+								<span>Turns</span>
+								<strong>{sessionSnapshot?.turnCount ?? 0}</strong>
+							</div>
+							<div className="dcc-runtime-workbench__presence-item">
+								<span>Checkpoints</span>
+								<strong>{sessionSnapshot?.checkpointCount ?? 0}</strong>
+							</div>
+							<div className="dcc-runtime-workbench__presence-item">
+								<span>Session</span>
+								<strong>{sessionSnapshot?.sessionId ?? "not started"}</strong>
+							</div>
 						</div>
-						<div className="dcc-runtime-workbench__toolbar-actions">
-							<Button type="button" variant="secondary" onClick={onResumeSession} disabled={!sessionSnapshot}>
-								Resume
-							</Button>
-							<Button type="button" variant="secondary" onClick={onAbortSession} disabled={!sessionSnapshot}>
-								Abort
-							</Button>
-							<Button type="button" variant="ghost" onClick={onOpenCommandPalette}>
-								<Command />
-								Workspaces
-							</Button>
-						</div>
-					</div>
-					<div className="dcc-runtime-workbench__context-panel">
-						<div className="dcc-runtime-workbench__context-panel-meta">
-							<span>Provider</span>
-							<strong>{selectedProviderLabel ?? "Select a provider"}</strong>
-							<small>
-								{sessionSnapshot?.providerId ?? "No provider bound yet"}
-							</small>
-						</div>
-						<div className="dcc-runtime-workbench__context-panel-actions">
+						<div className="dcc-runtime-workbench__provider-strip">
 							{providerChoices.map((provider) => (
 								<Button
 									key={provider.id}
@@ -129,7 +165,7 @@ export function SessionWorkbench({
 						</div>
 					</div>
 
-					<div className="dcc-runtime-workbench__timeline-shell">
+					<div className="dcc-runtime-workbench__timeline-shell dcc-runtime-workbench__timeline-shell--conversation">
 						<SessionEventFeed events={sessionEvents} compact />
 					</div>
 
@@ -138,9 +174,12 @@ export function SessionWorkbench({
 							<div>
 								<Label htmlFor="dcc-session-draft">Prompt</Label>
 								<CardDescription>
-									Send the next turn into the current provider session.
+									Send the next turn into the active provider session.
 								</CardDescription>
 							</div>
+							<Badge variant="outline">
+								{sessionSnapshot?.sessionId ?? "No session"}
+							</Badge>
 						</div>
 						<Textarea
 							id="dcc-session-draft"
@@ -152,22 +191,16 @@ export function SessionWorkbench({
 						<div className="dcc-runtime-workbench__composer-footer">
 							<div className="dcc-runtime-workbench__composer-meta">
 								<Badge variant="outline">
-									{sessionSnapshot?.sessionId ?? "No session"}
-								</Badge>
-								<Badge variant="outline">
 									{sessionSnapshot?.state ?? "idle"}
 								</Badge>
 								<Badge variant="outline">
 									{sessionSnapshot?.turnCount ?? 0} turns
 								</Badge>
+								<Badge variant="outline">
+									{workspacePath ?? "workspace path pending"}
+								</Badge>
 							</div>
 							<div className="dcc-runtime-workbench__composer-actions">
-								<Button type="button" variant="secondary" onClick={onResumeSession} disabled={!sessionSnapshot}>
-									Resume
-								</Button>
-								<Button type="button" variant="secondary" onClick={onAbortSession} disabled={!sessionSnapshot}>
-									Abort
-								</Button>
 								<Button type="button" onClick={onStartSession} variant="secondary">
 									Start session
 								</Button>
@@ -178,8 +211,8 @@ export function SessionWorkbench({
 							</div>
 						</div>
 					</div>
-				</CardContent>
-			</Card>
+				</div>
+			</div>
 
 			<div className="dcc-runtime-workbench__rail">
 				<ProviderCatalogCard catalog={providerCatalog} />
@@ -222,8 +255,10 @@ export function SessionWorkbench({
 					</CardContent>
 				</Card>
 				<TerminalPanel
+					workspaceId={workspaceId}
 					workspaceName={workspaceName}
 					workspaceBranch={workspaceBranch}
+					workspacePath={workspacePath}
 					providerLabel={selectedProviderLabel}
 					sessionState={sessionSnapshot?.state ?? "idle"}
 					sessionId={sessionSnapshot?.sessionId ?? null}

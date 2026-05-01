@@ -79,6 +79,24 @@ function createHttpLinkProvider(terminal: Terminal): ILinkProvider {
 	};
 }
 
+let terminalFitSuspendCount = 0;
+const terminalRefitListeners = new Set<() => void>();
+
+export function suspendTerminalFit(): () => void {
+	terminalFitSuspendCount++;
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		terminalFitSuspendCount--;
+		if (terminalFitSuspendCount === 0) {
+			for (const listener of terminalRefitListeners) {
+				listener();
+			}
+		}
+	};
+}
+
 function resolveTerminalTheme(): ITheme {
 	const s = getComputedStyle(document.documentElement);
 	const v = (name: string) => s.getPropertyValue(`--terminal-${name}`).trim();
@@ -145,11 +163,23 @@ function TerminalOutputImpl({
 		terminal.open(container);
 		terminal.element?.style.setProperty("padding", padding);
 
+		const refitListener = () => {
+			requestAnimationFrame(() => {
+				try {
+					fit.fit();
+				} catch {
+					// Detached container during resize transition.
+				}
+			});
+		};
+		terminalRefitListeners.add(refitListener);
+
 		const linkProviderDisposable = detectLinks
 			? terminal.registerLinkProvider(createHttpLinkProvider(terminal))
 			: null;
 
 		const fitNow = () => {
+			if (terminalFitSuspendCount > 0) return;
 			requestAnimationFrame(() => {
 				try {
 					fit.fit();
@@ -204,6 +234,7 @@ function TerminalOutputImpl({
 			linkProviderDisposable?.dispose();
 			themeObserver.disconnect();
 			resizeObserver.disconnect();
+			terminalRefitListeners.delete(refitListener);
 			terminal.dispose();
 			if (terminalRef) {
 				terminalRef.current = null;

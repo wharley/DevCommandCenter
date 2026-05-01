@@ -20,6 +20,22 @@ function eventLabel(event: CoreEvent): string {
 	return "event";
 }
 
+function eventTone(event: CoreEvent): "outline" | "secondary" | "success" | "warn" {
+	if ("sessionCompleted" in event || "workspaceReady" in event) {
+		return "success";
+	}
+	if ("sessionAborted" in event || "sessionTurnAborted" in event) {
+		return "warn";
+	}
+	if ("sessionCheckpointCreated" in event) {
+		return "warn";
+	}
+	if ("sessionStarted" in event || "sessionResumed" in event) {
+		return "secondary";
+	}
+	return "outline";
+}
+
 function eventPayloadSummary(event: CoreEvent): string {
 	const sessionStarted = "sessionStarted" in event ? event.sessionStarted : null;
 	if (sessionStarted) {
@@ -127,18 +143,33 @@ export function SessionEventFeed({
 		<>
 			{events.length === 0 ? (
 				<div className="dcc-session-thread-empty">
-					<p className="dcc-card__description">
-						No session events yet. Start a thread to see the Tauri listen bridge
-						in action.
-					</p>
+					<div className="dcc-session-thread-empty__stack">
+						<div className="dcc-session-thread-empty__bubble dcc-session-thread-empty__bubble--user">
+							Ask this workspace to make a change.
+						</div>
+						<div className="dcc-session-thread-empty__bubble dcc-session-thread-empty__bubble--assistant">
+							Start a session to see provider events, tool calls, and
+							checkpoints stream into the thread.
+						</div>
+						<Badge variant="outline">Ready to begin</Badge>
+					</div>
 				</div>
 			) : (
 				<ul className="dcc-runtime-feed__list">
 					{events.map((event, index) => (
 						<li key={`${eventLabel(event)}-${index}`}>
-							<div className="dcc-runtime-feed__row">
-								<strong>{eventLabel(event)}</strong>
-								<small>{eventPayloadSummary(event)}</small>
+							<div
+								className="dcc-runtime-feed__row dcc-session-event"
+								data-tone={eventTone(event)}
+							>
+								<div className="dcc-session-event__header">
+									<Badge variant={eventTone(event)}>
+										{eventLabel(event)}
+									</Badge>
+								</div>
+								<p className="dcc-session-event__copy">
+									{eventPayloadSummary(event)}
+								</p>
 							</div>
 						</li>
 					))}
@@ -152,9 +183,10 @@ export function SessionEventFeed({
 			<div className="dcc-session-timeline">
 				<div className="dcc-card__meta-row dcc-session-timeline__header">
 					<div>
-						<CardTitle>Session events</CardTitle>
+						<CardTitle>Session timeline</CardTitle>
 						<p className="dcc-card__description">
-							Live stream from the Tauri listen bridge.
+							Live stream from the Tauri listen bridge, ordered like a chat
+							thread.
 						</p>
 					</div>
 					<Badge variant="outline">{events.length} recent</Badge>

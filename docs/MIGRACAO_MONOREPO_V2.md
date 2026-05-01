@@ -13,6 +13,16 @@ A meta é **migrar o DCC para uma arquitetura em monorepo em camadas**, com:
 
 > **Tese arquitetural**: T3 Code é referência de **organização de sistema** (monorepo, contracts, event model, separação UI/lógica). Helmor é referência de **forma de produto desktop** (shell Tauri, UX de workbench, feature folders). Rust é o **motor operacional** (processos, git, sessions, providers). Tauri é apenas a **borda** (commands + events). Nada do Electron de t3code (preload IPC, electron-updater, lifecycle main-process) é portado.
 
+## Ordem de referência para UX/UI
+
+Antes de alterar qualquer tela do DCC, seguir esta ordem:
+
+1. Ler a tela real do Helmor em `../helmor-main/src/App.tsx`, `../helmor-main/src/features/conversation/`, `../helmor-main/src/features/panel/` e `../helmor-main/src/features/onboarding/mockup/`.
+2. Ler a organização do t3code em `../t3code-main/apps/web/src/components/`, com foco em `AppSidebarLayout.tsx`, `Sidebar.tsx`, `ChatView.tsx`, `ChatHeader.tsx`, `ChatComposer.tsx` e `MessagesTimeline.tsx`.
+3. Usar o DCC atual apenas como ponto de integração técnica. A forma da tela deve seguir o Helmor; a organização de feature folders e boundaries deve seguir o t3code.
+4. Não tratar a UI atual do DCC como referência visual. Ela pode servir de base de integração, mas não de produto.
+5. Quando houver dúvida de layout, preferir o shell do Helmor, e quando houver dúvida de estrutura, preferir a separação por features do t3code.
+
 ---
 
 ## Princípios não-negociáveis
@@ -316,7 +326,8 @@ Objetivo: criar a nova espinha dorsal sem quebrar o app atual, mantendo `src/` v
 - Concluído: UX pass 3 do shell/runtime com provider strip, footer de composer e CTA primária de envio mais evidente.
 - Concluído: UX pass 4 do shell/runtime com cabeçalho mais compacto e contexto de provider reduzido ao essencial.
 - Concluído: visual polish final do shell/runtime com topbar contextual, rail de providers mais informativo e hierarquia visual mais clara.
-- Em andamento: Fase 4 iniciada com o terminal scaffold Helmor-style integrado ao runtime, mantendo 0a concluída em compile, 0b fechada no boot principal, Fase 1 fechada e Fase 2 validada no core.
+- Concluído: shell principal sem `Overview`/`Runtime` tabbed shell, agora entrando direto no runtime workbench para ficar mais próximo do Helmor.
+- Em andamento: Fase 4 alinhada ao shell do Helmor com navegação agrupada à esquerda, workbench central e inspector à direita; o terminal já está integrado ao runtime com xterm, fit suspension, ações de foco/limpeza e bridge PTY Tauri conectada, mantendo 0a concluída em compile, 0b fechada no boot principal, Fase 1 fechada e Fase 2 validada no core.
 
 **Objetivo das Fases 1-3**
 
@@ -385,7 +396,8 @@ Trazer o melhor do Helmor na forma de shell/UX e o melhor do t3code na forma de 
 
 **Status da Fase 4**
 
-- Em andamento: `terminal` começou como surface scaffold integrada ao workbench do runtime, seguindo o padrão xterm do Helmor antes da ponte PTY real.
+- Em andamento: `terminal` passou a ser uma surface conectada ao workbench do runtime, com xterm, fit suspension e bridge PTY Tauri para input, resize e output, seguindo a estrutura do Helmor.
+- Em andamento: o PTY agora fica associado ao `workspaceId`, então fechar e reabrir o painel reatacha a mesma sessão de terminal em vez de subir um shell novo.
 
 **Fase 5 — Sunset legacy + fechamento**
 1. Remover `legacy/` quando a paridade funcional estiver fechada.

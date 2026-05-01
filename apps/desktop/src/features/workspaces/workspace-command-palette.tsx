@@ -40,7 +40,7 @@ export function WorkspaceCommandPalette({
 		<CommandDialog
 			open={open}
 			onOpenChange={onOpenChange}
-			title="Workspace palette"
+			title="Workspace switcher"
 			description="Search and switch workspaces."
 		>
 			<CommandInput placeholder="Search workspaces..." />

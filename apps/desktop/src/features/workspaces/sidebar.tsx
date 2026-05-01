@@ -36,6 +36,29 @@ export function WorkspacesSidebar({
 	showArchived,
 	workspaces,
 }: WorkspacesSidebarProps) {
+	const groupedWorkspaces = [
+		{
+			label: "Done",
+			statuses: ["ready"] as const,
+			items: workspaces.filter((workspace) => workspace.status === "ready"),
+		},
+		{
+			label: "In review",
+			statuses: ["setup_pending"] as const,
+			items: workspaces.filter((workspace) => workspace.status === "setup_pending"),
+		},
+		{
+			label: "In progress",
+			statuses: ["initializing"] as const,
+			items: workspaces.filter((workspace) => workspace.status === "initializing"),
+		},
+		{
+			label: "Archived",
+			statuses: ["archived"] as const,
+			items: workspaces.filter((workspace) => workspace.status === "archived"),
+		},
+	].filter((group) => group.items.length > 0);
+
 	return (
 		<>
 			<div className="dcc-sidebar__header">
@@ -43,7 +66,7 @@ export function WorkspacesSidebar({
 					<div className="dcc-brand__mark" aria-hidden="true" />
 					<div>
 						<p className="dcc-eyebrow">Dev Command Center</p>
-						<h1>Workspace-first agent cockpit</h1>
+						<h1>Workspace shell</h1>
 					</div>
 				</div>
 				<Tooltip>
@@ -70,24 +93,34 @@ export function WorkspacesSidebar({
 					onChange={(event) => onFilterChange(event.target.value)}
 				/>
 				<ScrollArea className="dcc-workspace-list">
-					{workspaces.map((workspace) => (
-						<button
-							key={workspace.id}
-							className="dcc-workspace-card"
-							type="button"
-							data-active={workspace.id === selectedWorkspaceId}
-							onClick={() => onSelectWorkspace(workspace.id)}
-						>
-							<div className="dcc-card__header">
-								<strong>{workspace.name}</strong>
-								<Badge variant={getWorkspaceTone(workspace.status)}>
-									{workspace.status}
-								</Badge>
-							</div>
-							<span>{workspace.branch}</span>
-							<small>{workspace.id}</small>
-						</button>
-					))}
+					<div className="dcc-workspace-list__groups">
+						{groupedWorkspaces.map((group) => (
+							<section key={group.label} className="dcc-workspace-group">
+								<div className="dcc-workspace-group__header">
+									<span>{group.label}</span>
+									<Badge variant="outline">{group.items.length}</Badge>
+								</div>
+								{group.items.map((workspace) => (
+									<button
+										key={workspace.id}
+										className="dcc-workspace-card"
+										type="button"
+										data-active={workspace.id === selectedWorkspaceId}
+										onClick={() => onSelectWorkspace(workspace.id)}
+									>
+										<div className="dcc-card__header">
+											<strong>{workspace.name}</strong>
+											<Badge variant={getWorkspaceTone(workspace.status)}>
+												{workspace.status}
+											</Badge>
+										</div>
+										<span>{workspace.branch}</span>
+										<small>{workspace.id}</small>
+									</button>
+								))}
+							</section>
+						))}
+					</div>
 				</ScrollArea>
 			</div>
 
@@ -113,7 +146,7 @@ export function WorkspacesSidebar({
 				<Button type="button" className="dcc-sidebar__cta" onClick={onCreateWorkspace}>
 					New workspace
 				</Button>
-				<Badge variant="outline">Helmor shell</Badge>
+				<Badge variant="outline">Helmor layout</Badge>
 			</div>
 		</>
 	);

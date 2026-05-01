@@ -51,13 +51,13 @@ export function ProviderCatalogCard({
 		<Card className="dcc-runtime-feed">
 			<CardHeader>
 				<div className="dcc-card__meta-row">
-					<CardTitle>Providers</CardTitle>
+					<CardTitle>Provider catalog</CardTitle>
 					<Badge variant="outline">
 						{stableCount}/{providers.length} stable
 					</Badge>
 				</div>
 				<CardDescription>
-					Runtime capability snapshot for the active shell.
+					Runtime capability snapshot for the active shell and selected provider.
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="dcc-runtime-feed__content">

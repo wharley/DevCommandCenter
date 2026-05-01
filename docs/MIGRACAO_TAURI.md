@@ -24,7 +24,8 @@ Objetivos da migração: **menor footprint**, **stack alinhada (Rust no core)**,
 - **Bridge no frontend:** `src/lib/desktop-bridge.ts` — função `installDesktopBridge()` (antes `installTauriElectronCompat`), expõe APIs compatíveis com o antigo preload.
 - **Globais tipados:** `types/app.d.ts` — `window.desktopAPI` e `window.db` (não usamos mais o nome “electron” nos tipos globais).
 - **Scripts npm/yarn:**
-  - `yarn dev` → **`tauri dev`** (sobe o Vite e abre o app; ver `src-tauri/tauri.conf.json`: `beforeDevCommand`).
+  - `yarn dev` → **`yarn dev:tauri`** (sobe o Vite e abre o app nativo; ver `src-tauri/tauri.conf.json`: `beforeDevCommand`).
+  - `yarn dev:desktop` → shell novo em Vite, útil para inspecionar a UI sem a janela nativa.
   - `yarn build` → **`tauri build`** (frontend `vite:build` + compilação Rust).
   - `yarn vite` / `yarn vite:build` → só o frontend (útil para UI sem shell nativo; **sem** DB/Git/terminal reais).
 
