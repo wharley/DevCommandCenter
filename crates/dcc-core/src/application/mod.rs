@@ -13,7 +13,7 @@ pub use create_workspace_for_repo::{
 };
 pub use abort_run::{abort_run, AbortRunInput, AbortRunOutput};
 pub use resume_session::{resume_session, ResumeSessionInput, ResumeSessionOutput};
-pub use agent_turn_prompt::compose_wire_prompt;
+pub use agent_turn_prompt::{compose_wire_prompt, compose_wire_prompt_for_provider};
 pub use send_turn::{
 	merge_send_turn_session_selection, send_turn, send_turn_selection_differs_from_session,
 	SendTurnInput, SendTurnOutput,

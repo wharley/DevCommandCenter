@@ -562,6 +562,36 @@ struct SessionRuntime {
 	events_tx: broadcast::Sender<ProviderEvent>,
 }
 
+/// Namespaced env for stdin-only CLI adapters (no undocumented vendor-specific vars).
+fn apply_cli_spawn_environment(
+	command: &mut Command,
+	provider_registry_id: &str,
+	cfg: &SessionConfig,
+) {
+	command.env("DCC_PROVIDER_ID", provider_registry_id);
+	command.env("DCC_WORKSPACE_ID", &cfg.workspace_id.0);
+	command.env("DCC_SESSION_ID", &cfg.session_id.0);
+	if let Some(ref m) = cfg.model {
+		command.env("DCC_MODEL", m);
+	}
+	match provider_registry_id {
+		"claude_code" => {
+			command.env("DCC_AGENT_RUNTIME", "claude_code");
+		}
+		"codex" => {
+			command.env("DCC_AGENT_RUNTIME", "codex");
+		}
+		"gemini" => {
+			command.env("DCC_AGENT_RUNTIME", "gemini");
+		}
+		"cursor" => {
+			command.env("DCC_AGENT_RUNTIME", "cursor");
+			command.env("DCC_CURSOR_ADAPTER", "experimental");
+		}
+		_ => {}
+	}
+}
+
 impl CliProviderAdapter {
 	pub fn new(
 		id: impl Into<String>,
@@ -598,6 +628,7 @@ impl CliProviderAdapter {
 
 	async fn start_runtime(&self, cfg: SessionConfig) -> Result<SessionHandle> {
 		let mut command = self.interactive_command();
+		apply_cli_spawn_environment(&mut command, &self.id.0, &cfg);
 		let mut child = command.spawn().map_err(|error| {
 			CoreError::Provider(format!("failed to spawn {}: {}", self.binary, error))
 		})?;

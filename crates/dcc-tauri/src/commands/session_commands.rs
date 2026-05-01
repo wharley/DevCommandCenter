@@ -3,7 +3,7 @@ use tauri::{AppHandle, State};
 use dcc_core::{
 	application::{
 		abort_run as run_abort_run,
-		compose_wire_prompt,
+		compose_wire_prompt_for_provider,
 		resume_session as run_resume_session,
 		send_turn as run_send_turn, send_turn_selection_differs_from_session,
 		start_thread as run_start_thread, AbortRunInput, AbortRunOutput, ResumeSessionInput,
@@ -45,15 +45,20 @@ pub async fn send_turn(
 		}
 	}
 
-	let wire_prompt = compose_wire_prompt(
-		&input.prompt,
-		input.plan_mode,
-		input.effort.as_deref(),
-		input.fast_mode,
-	);
+	let prompt_for_wire = input.prompt.clone();
+	let plan_mode = input.plan_mode;
+	let effort = input.effort.clone();
+	let fast_mode = input.fast_mode;
 	let output = run_send_turn(&*state, &*state, &*state, input)
 		.await
 		.map_err(|error| error.to_string())?;
+	let wire_prompt = compose_wire_prompt_for_provider(
+		&output.session.provider_id,
+		&prompt_for_wire,
+		plan_mode,
+		effort.as_deref(),
+		fast_mode,
+	);
 	state
 		.attach_provider_session(&output.session)
 		.await
