@@ -1,11 +1,11 @@
-import { ArrowUpRight, Command, Settings2 } from "lucide-react";
+import { ArrowUpRight, Command } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { ProviderCatalogCard } from "@/features/providers/provider-catalog-card";
+import { TerminalPanel } from "@/features/terminal";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { SessionEventFeed } from "./session-event-feed";
 
@@ -104,9 +104,28 @@ export function SessionWorkbench({
 								<Command />
 								Workspaces
 							</Button>
-							<Button type="button" onClick={onStartSession}>
-								Start session
-							</Button>
+						</div>
+					</div>
+					<div className="dcc-runtime-workbench__context-panel">
+						<div className="dcc-runtime-workbench__context-panel-meta">
+							<span>Provider</span>
+							<strong>{selectedProviderLabel ?? "Select a provider"}</strong>
+							<small>
+								{sessionSnapshot?.providerId ?? "No provider bound yet"}
+							</small>
+						</div>
+						<div className="dcc-runtime-workbench__context-panel-actions">
+							{providerChoices.map((provider) => (
+								<Button
+									key={provider.id}
+									type="button"
+									variant={provider.id === selectedProviderId ? "default" : "secondary"}
+									size="sm"
+									onClick={() => onSelectProvider(provider.id)}
+								>
+									{provider.label}
+								</Button>
+							))}
 						</div>
 					</div>
 
@@ -122,10 +141,6 @@ export function SessionWorkbench({
 									Send the next turn into the current provider session.
 								</CardDescription>
 							</div>
-							<Button type="button" variant="outline" onClick={onSendTurn}>
-								<ArrowUpRight />
-								Send turn
-							</Button>
 						</div>
 						<Textarea
 							id="dcc-session-draft"
@@ -134,6 +149,34 @@ export function SessionWorkbench({
 							onChange={(event) => onSessionDraftChange(event.target.value)}
 							placeholder="Describe the workspace change or agent task here..."
 						/>
+						<div className="dcc-runtime-workbench__composer-footer">
+							<div className="dcc-runtime-workbench__composer-meta">
+								<Badge variant="outline">
+									{sessionSnapshot?.sessionId ?? "No session"}
+								</Badge>
+								<Badge variant="outline">
+									{sessionSnapshot?.state ?? "idle"}
+								</Badge>
+								<Badge variant="outline">
+									{sessionSnapshot?.turnCount ?? 0} turns
+								</Badge>
+							</div>
+							<div className="dcc-runtime-workbench__composer-actions">
+								<Button type="button" variant="secondary" onClick={onResumeSession} disabled={!sessionSnapshot}>
+									Resume
+								</Button>
+								<Button type="button" variant="secondary" onClick={onAbortSession} disabled={!sessionSnapshot}>
+									Abort
+								</Button>
+								<Button type="button" onClick={onStartSession} variant="secondary">
+									Start session
+								</Button>
+								<Button type="button" onClick={onSendTurn}>
+									<ArrowUpRight />
+									Send turn
+								</Button>
+							</div>
+						</div>
 					</div>
 				</CardContent>
 			</Card>
@@ -178,38 +221,13 @@ export function SessionWorkbench({
 						)}
 					</CardContent>
 				</Card>
-				<Card className="dcc-session-actions-card">
-					<CardHeader>
-						<div className="dcc-card__meta-row">
-							<CardTitle>Providers</CardTitle>
-							<Badge variant="outline">{providerChoices.length} available</Badge>
-						</div>
-					</CardHeader>
-					<CardContent className="dcc-session-actions-card__content">
-						<div className="dcc-provider-pills">
-							{providerChoices.map((provider) => (
-								<Button
-									key={provider.id}
-									type="button"
-									variant={provider.id === selectedProviderId ? "default" : "secondary"}
-									onClick={() => onSelectProvider(provider.id)}
-								>
-									{provider.label}
-								</Button>
-							))}
-						</div>
-						<Separator />
-						<p className="dcc-card__description">
-							{selectedProviderLabel
-								? `${selectedProviderLabel} is the active provider for the next turn.`
-								: "Select a provider before starting a session."}
-						</p>
-						<Button type="button" variant="ghost" onClick={onOpenCommandPalette}>
-							<Settings2 />
-							Open workspace command palette
-						</Button>
-					</CardContent>
-				</Card>
+				<TerminalPanel
+					workspaceName={workspaceName}
+					workspaceBranch={workspaceBranch}
+					providerLabel={selectedProviderLabel}
+					sessionState={sessionSnapshot?.state ?? "idle"}
+					sessionId={sessionSnapshot?.sessionId ?? null}
+				/>
 			</div>
 		</section>
 	);

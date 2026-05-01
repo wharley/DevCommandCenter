@@ -19,6 +19,26 @@
 	--dcc-radius-md: 16px;
 	--dcc-radius-sm: 12px;
 	--dcc-shell-border: color-mix(in oklab, var(--dcc-border) 70%, transparent);
+	--terminal-background: var(--dcc-surface);
+	--terminal-foreground: var(--dcc-text);
+	--terminal-cursor: var(--dcc-text);
+	--terminal-selection: color-mix(in oklab, var(--dcc-accent) 16%, transparent);
+	--terminal-black: oklch(0.26 0 0);
+	--terminal-red: var(--dcc-danger);
+	--terminal-green: oklch(0.5 0.15 155);
+	--terminal-yellow: oklch(0.53 0.14 75);
+	--terminal-blue: var(--dcc-accent);
+	--terminal-magenta: oklch(0.52 0.17 315);
+	--terminal-cyan: var(--dcc-accent-2);
+	--terminal-white: oklch(0.87 0 0);
+	--terminal-bright-black: oklch(0.556 0 0);
+	--terminal-bright-red: oklch(0.6 0.2 22);
+	--terminal-bright-green: oklch(0.55 0.14 150);
+	--terminal-bright-yellow: oklch(0.58 0.12 75);
+	--terminal-bright-blue: oklch(0.55 0.14 255);
+	--terminal-bright-magenta: oklch(0.57 0.15 310);
+	--terminal-bright-cyan: oklch(0.55 0.09 192);
+	--terminal-bright-white: oklch(0.95 0 0);
 }
 
 .dark {
@@ -38,6 +58,26 @@
 	--dcc-warn: oklch(0.81 0.13 78);
 	--dcc-danger: oklch(0.71 0.18 25);
 	--dcc-shadow: 0 28px 110px color-mix(in oklab, black 60%, transparent);
+	--terminal-background: var(--dcc-surface);
+	--terminal-foreground: var(--dcc-text);
+	--terminal-cursor: var(--dcc-text);
+	--terminal-selection: color-mix(in oklab, var(--dcc-accent) 24%, transparent);
+	--terminal-black: oklch(0.21 0 0);
+	--terminal-red: var(--dcc-danger);
+	--terminal-green: oklch(0.72 0.14 155);
+	--terminal-yellow: oklch(0.82 0.13 85);
+	--terminal-blue: var(--dcc-accent);
+	--terminal-magenta: oklch(0.72 0.14 310);
+	--terminal-cyan: var(--dcc-accent-2);
+	--terminal-white: oklch(0.87 0 0);
+	--terminal-bright-black: oklch(0.5 0 0);
+	--terminal-bright-red: oklch(0.78 0.15 18);
+	--terminal-bright-green: oklch(0.78 0.12 150);
+	--terminal-bright-yellow: oklch(0.88 0.11 85);
+	--terminal-bright-blue: oklch(0.78 0.11 250);
+	--terminal-bright-magenta: oklch(0.78 0.12 310);
+	--terminal-bright-cyan: oklch(0.84 0.07 192);
+	--terminal-bright-white: oklch(0.985 0 0);
 }
 
 html,
@@ -235,6 +275,59 @@ a {
 	line-height: 1.1;
 }
 
+.dcc-topbar__context {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 0.95rem 1rem;
+	border: 1px solid var(--dcc-shell-border);
+	border-radius: var(--dcc-radius-lg);
+	background:
+		radial-gradient(
+			circle at top left,
+			color-mix(in oklab, var(--dcc-accent) 10%, transparent),
+			transparent 40%
+		),
+		linear-gradient(
+			180deg,
+			color-mix(in oklab, var(--dcc-surface-2) 82%, transparent),
+			color-mix(in oklab, var(--dcc-surface) 94%, transparent)
+		);
+	box-shadow: var(--dcc-shadow);
+}
+
+.dcc-topbar__context-group {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 0.75rem;
+	flex: 1;
+}
+
+.dcc-topbar__context-item {
+	display: grid;
+	gap: 0.18rem;
+	padding-right: 0.75rem;
+	border-right: 1px solid var(--dcc-shell-border);
+}
+
+.dcc-topbar__context-item:last-child {
+	border-right: 0;
+	padding-right: 0;
+}
+
+.dcc-topbar__context-item span {
+	font-size: 0.72rem;
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+	color: var(--dcc-text-muted);
+}
+
+.dcc-topbar__context-item strong {
+	font-size: 0.96rem;
+	line-height: 1.2;
+}
+
 .dcc-workspace-list {
 	max-height: 18rem;
 }
@@ -306,7 +399,11 @@ a {
 			180deg,
 			color-mix(in oklab, var(--dcc-surface-2) 90%, transparent),
 			color-mix(in oklab, var(--dcc-surface) 92%, transparent)
-		);
+	);
+}
+
+.dcc-card--hero .dcc-card__stat-row {
+	padding-top: 0.25rem;
 }
 
 .dcc-card__header {
@@ -435,6 +532,50 @@ a {
 	justify-content: flex-end;
 }
 
+.dcc-runtime-workbench__context-panel {
+	display: grid;
+	grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+	gap: 1rem;
+	align-items: center;
+	padding: 0.9rem 1rem;
+	border: 1px solid var(--dcc-shell-border);
+	border-radius: var(--dcc-radius-md);
+	background:
+		linear-gradient(
+			180deg,
+			color-mix(in oklab, var(--dcc-surface-2) 82%, transparent),
+			color-mix(in oklab, var(--dcc-surface) 94%, transparent)
+		);
+}
+
+.dcc-runtime-workbench__context-panel-meta {
+	display: grid;
+	gap: 0.2rem;
+}
+
+.dcc-runtime-workbench__context-panel-meta span {
+	font-size: 0.72rem;
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+	color: var(--dcc-text-muted);
+}
+
+.dcc-runtime-workbench__context-panel-meta strong {
+	font-size: 1rem;
+}
+
+.dcc-runtime-workbench__context-panel-meta small {
+	color: var(--dcc-text-soft);
+	font-size: 0.8rem;
+}
+
+.dcc-runtime-workbench__context-panel-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	justify-content: flex-end;
+}
+
 .dcc-runtime-workbench__timeline-shell {
 	min-height: 320px;
 	display: flex;
@@ -535,6 +676,27 @@ a {
 	gap: 1rem;
 }
 
+.dcc-runtime-workbench__composer-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	padding-top: 0.25rem;
+}
+
+.dcc-runtime-workbench__composer-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.45rem;
+}
+
+.dcc-runtime-workbench__composer-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	justify-content: flex-end;
+}
+
 .dcc-runtime-workbench__rail {
 	display: grid;
 	gap: 0.9rem;
@@ -576,44 +738,16 @@ a {
 		);
 }
 
-.dcc-session-actions-card {
-	background:
-		linear-gradient(
-			180deg,
-			color-mix(in oklab, var(--dcc-surface-2) 84%, transparent),
-			color-mix(in oklab, var(--dcc-surface) 94%, transparent)
-		);
-}
-
-.dcc-session-actions-card__content {
-	display: grid;
-	gap: 0.9rem;
-}
-
-.dcc-session-actions-card__content .dcc-provider-pills {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-}
-
-.dcc-session-actions-card__content .dcc-button {
-	justify-content: center;
-}
-
-.dcc-session-actions-card__content .dcc-card__description {
-	margin: 0;
-}
-
-.dcc-session-actions-card__content .dcc-button--ghost {
-	justify-content: flex-start;
-}
-
-.dcc-session-actions-card__content .dcc-button--ghost svg {
-	flex-shrink: 0;
-}
-
 .dcc-runtime-feed__content {
 	display: grid;
 	gap: 0.75rem;
+}
+
+.dcc-provider-catalog__summary {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.45rem;
+	padding: 0.25rem 0 0.15rem;
 }
 
 .dcc-runtime-feed__list {
@@ -672,6 +806,27 @@ a {
 		grid-template-columns: 1fr;
 	}
 
+	.dcc-topbar__context {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.dcc-topbar__context-group {
+		grid-template-columns: 1fr;
+	}
+
+	.dcc-topbar__context-item {
+		border-right: 0;
+		padding-right: 0;
+		padding-bottom: 0.4rem;
+		border-bottom: 1px solid var(--dcc-shell-border);
+	}
+
+	.dcc-topbar__context-item:last-child {
+		padding-bottom: 0;
+		border-bottom: 0;
+	}
+
 	.dcc-runtime-workbench__hero,
 	.dcc-runtime-workbench__toolbar,
 	.dcc-runtime-workbench__composer-top {
@@ -684,6 +839,20 @@ a {
 	}
 
 	.dcc-runtime-workbench__hero-status {
+		justify-content: flex-start;
+	}
+
+	.dcc-runtime-workbench__context-panel,
+	.dcc-runtime-workbench__composer-footer {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.dcc-runtime-workbench__context-panel-actions {
+		justify-content: flex-start;
+	}
+
+	.dcc-runtime-workbench__composer-actions {
 		justify-content: flex-start;
 	}
 }
@@ -702,13 +871,37 @@ a {
 	flex: 1;
 	display: flex;
 	flex-direction: column;
-	justify-content: space-between;
 	gap: 1rem;
 	min-height: 200px;
 	padding: 1rem;
 	border-radius: var(--dcc-radius-md);
 	border: 1px dashed var(--dcc-shell-border);
 	background: color-mix(in oklab, var(--dcc-surface-3) 72%, transparent);
+}
+
+.dcc-terminal__surface {
+	flex: 1;
+	min-height: 320px;
+	border-radius: calc(var(--dcc-radius-md) - 2px);
+	border: 1px solid color-mix(in oklab, var(--dcc-shell-border) 90%, transparent);
+	background: var(--terminal-background);
+	box-shadow: inset 0 1px 0 color-mix(in oklab, white 6%, transparent);
+	overflow: hidden;
+}
+
+.dcc-terminal__note {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	color: var(--dcc-text-muted);
+	font-size: 0.82rem;
+	line-height: 1.45;
+}
+
+.dcc-terminal__note strong {
+	color: var(--dcc-text);
+	font-weight: 600;
 }
 
 .dcc-composer {

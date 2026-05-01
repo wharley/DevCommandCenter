@@ -1,5 +1,11 @@
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
 import type { ProviderCatalog } from "@dcc/contracts";
 
 function healthSummary(health: ProviderCatalog["providers"][number]["health"]) {
@@ -30,6 +36,16 @@ export function ProviderCatalogCard({
 }) {
 	const providers = catalog?.providers ?? [];
 	const stableCount = providers.filter((provider) => provider.stable).length;
+	const streamingCount = providers.filter(
+		(provider) => provider.capabilities.streaming,
+	).length;
+	const toolsCount = providers.filter(
+		(provider) => provider.capabilities.tools,
+	).length;
+	const mcpCount = providers.filter((provider) => provider.capabilities.mcp).length;
+	const resumableCount = providers.filter(
+		(provider) => provider.capabilities.resumable,
+	).length;
 
 	return (
 		<Card className="dcc-runtime-feed">
@@ -40,8 +56,17 @@ export function ProviderCatalogCard({
 						{stableCount}/{providers.length} stable
 					</Badge>
 				</div>
+				<CardDescription>
+					Runtime capability snapshot for the active shell.
+				</CardDescription>
 			</CardHeader>
 			<CardContent className="dcc-runtime-feed__content">
+				<div className="dcc-provider-catalog__summary">
+					<Badge variant="outline">{streamingCount} streaming</Badge>
+					<Badge variant="outline">{toolsCount} tools</Badge>
+					<Badge variant="outline">{mcpCount} mcp</Badge>
+					<Badge variant="outline">{resumableCount} resumable</Badge>
+				</div>
 				{providers.length === 0 ? (
 					<p className="dcc-card__description">
 						No providers available.

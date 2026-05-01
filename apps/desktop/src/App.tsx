@@ -336,8 +336,8 @@ export default function App() {
 								<DropdownMenuItem>Open settings</DropdownMenuItem>
 								<DropdownMenuItem>Rebuild contracts</DropdownMenuItem>
 								<DropdownMenuSeparator />
-								<DropdownMenuItem>Open logs</DropdownMenuItem>
-							</DropdownMenuContent>
+							<DropdownMenuItem>Open logs</DropdownMenuItem>
+						</DropdownMenuContent>
 						</DropdownMenu>
 						<Button
 							type="button"
@@ -348,6 +348,29 @@ export default function App() {
 						</Button>
 					</div>
 				</header>
+				<div className="dcc-topbar__context">
+					<div className="dcc-topbar__context-group">
+						<div className="dcc-topbar__context-item">
+							<span>Workspace</span>
+							<strong>{selectedWorkspace.name}</strong>
+						</div>
+						<div className="dcc-topbar__context-item">
+							<span>Branch</span>
+							<strong>{selectedWorkspace.branch}</strong>
+						</div>
+						<div className="dcc-topbar__context-item">
+							<span>Provider</span>
+							<strong>{selectedProvider?.label ?? "None"}</strong>
+						</div>
+						<div className="dcc-topbar__context-item">
+							<span>Session</span>
+							<strong>{sessionSnapshot?.state ?? "idle"}</strong>
+						</div>
+					</div>
+					<Badge variant={sessionSnapshot ? "success" : "outline"}>
+						{sessionSnapshot ? `${sessionSnapshot.turnCount} turns active` : "Ready"}
+					</Badge>
+				</div>
 				<WorkspaceCommandPalette
 					open={isCommandPaletteOpen}
 					onOpenChange={setIsCommandPaletteOpen}
@@ -384,9 +407,9 @@ export default function App() {
 								</CardHeader>
 								<CardContent>
 									<CardDescription>
-										This shell now acts like a workspace cockpit: the left rail
-										selects the workspace, the center controls the session, and
-										the right side exposes runtime state.
+										The shell is now the primary path: workspace selection lives
+										left, session control lives center, and runtime context stays
+										visible without taking over the screen.
 									</CardDescription>
 									<div className="dcc-card__stat-row">
 										<div className="dcc-stat">

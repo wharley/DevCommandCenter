@@ -309,10 +309,14 @@ Objetivo: criar a nova espinha dorsal sem quebrar o app atual, mantendo `src/` v
 - Concluído: `yarn build:contracts` passa no pacote `@dcc/contracts`.
 - Concluído: Fase 1 shell + UI primitiva, com base visual, primitives e feature folders já portados.
 - Em andamento: Fase 2 já tem o fluxo de criar workspace ligado do shell ao Rust e o contrato agora é gerado por `build.rs` via `tauri-specta`.
-- Em aberto: smoke test manual runtime do fluxo completo de criação de workspace no app.
 - Fora do escopo de 0b: providers e adapters Rust de verdade, que entram nas Fases 2 e 3.
 - Concluído: Fase 3 fechada com `dcc-core::domain::session`, event log, provider runtime bridge, stream de eventos e cockpit de sessão no shell.
-- Pausa atual: Fase 3 concluída; o próximo foco é UX para aproximar ainda mais o shell do Helmor, com 0a concluída em compile, 0b fechada no boot principal, Fase 1 fechada e Fase 2 validada no core.
+- Concluído: UX pass 1 do shell/runtime para aproximar ainda mais o comportamento visual do Helmor sem mexer no core.
+- Concluído: UX pass 2 do shell/runtime com thread temporal, auto-scroll e affordance de latest event no estilo Helmor.
+- Concluído: UX pass 3 do shell/runtime com provider strip, footer de composer e CTA primária de envio mais evidente.
+- Concluído: UX pass 4 do shell/runtime com cabeçalho mais compacto e contexto de provider reduzido ao essencial.
+- Concluído: visual polish final do shell/runtime com topbar contextual, rail de providers mais informativo e hierarquia visual mais clara.
+- Em andamento: Fase 4 iniciada com o terminal scaffold Helmor-style integrado ao runtime, mantendo 0a concluída em compile, 0b fechada no boot principal, Fase 1 fechada e Fase 2 validada no core.
 
 **Objetivo das Fases 1-3**
 
@@ -373,13 +377,15 @@ Trazer o melhor do Helmor na forma de shell/UX e o melhor do t3code na forma de 
 - Concluído: `session.startThread`, `session.sendTurn`, `session.abortRun` e `session.resumeSession` expostos no Tauri bridge com estado de sessão ativo no shell.
 - Concluído: o runtime shell ganhou um workbench de sessão/composer mais próximo do Helmor, com thread timeline, provider selection e resumo de projection.
 - Concluído: protocolos runtime específicos podem evoluir depois, mas a Fase 3 já está fechada com o bridge CLI genérico e o fluxo funcional ponta a ponta.
-- Em andamento: UX pass 1 do shell/runtime para aproximar ainda mais o comportamento visual do Helmor sem mexer no core.
-- Em andamento: UX pass 2 do shell/runtime com thread temporal, auto-scroll e affordance de latest event no estilo Helmor.
 
 **Fase 4 — Features restantes (iterativo)**
 1. Implementar na ordem: `terminal` → `review` → `inspector` → `composer` → `navigation` → `settings` → `shortcuts` → `onboarding` → `updater`.
 2. Manter cada feature pequena, com container + view + tests.
 3. Só extrair mais crate/package se houver consumidor real ou dor concreta.
+
+**Status da Fase 4**
+
+- Em andamento: `terminal` começou como surface scaffold integrada ao workbench do runtime, seguindo o padrão xterm do Helmor antes da ponte PTY real.
 
 **Fase 5 — Sunset legacy + fechamento**
 1. Remover `legacy/` quando a paridade funcional estiver fechada.
