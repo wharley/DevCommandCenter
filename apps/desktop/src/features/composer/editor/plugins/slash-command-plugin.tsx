@@ -1,0 +1,247 @@
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import {
+	LexicalTypeaheadMenuPlugin,
+	MenuOption,
+	useBasicTypeaheadTriggerMatch,
+} from "@lexical/react/LexicalTypeaheadMenuPlugin";
+import type { LexicalEditor, TextNode } from "lexical";
+import { Loader2, RefreshCw } from "lucide-react";
+import {
+	type ReactNode,
+	type RefObject,
+	useCallback,
+	useMemo,
+	useState,
+} from "react";
+import { createPortal } from "react-dom";
+import { Button } from "@/components/ui/button";
+import {
+	Command,
+	CommandGroup,
+	CommandItem,
+	CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
+import type { SlashCommandEntry } from "../../default-slash-commands";
+
+class SlashCommandOption extends MenuOption {
+	readonly entry: SlashCommandEntry;
+	constructor(entry: SlashCommandEntry) {
+		super(entry.name);
+		this.entry = entry;
+	}
+}
+
+function dedupeByName(
+	commands: readonly SlashCommandEntry[],
+): readonly SlashCommandEntry[] {
+	const seen = new Set<string>();
+	const out: SlashCommandEntry[] = [];
+	for (const cmd of commands) {
+		if (seen.has(cmd.name)) {
+			continue;
+		}
+		seen.add(cmd.name);
+		out.push(cmd);
+	}
+	return out;
+}
+
+function filterCommands(
+	commands: readonly SlashCommandEntry[],
+	query: string,
+): readonly SlashCommandEntry[] {
+	if (!query) {
+		return commands;
+	}
+	const q = query.toLowerCase();
+	const prefix: SlashCommandEntry[] = [];
+	const substring: SlashCommandEntry[] = [];
+	for (const cmd of commands) {
+		const name = cmd.name.toLowerCase();
+		if (name.startsWith(q)) {
+			prefix.push(cmd);
+		} else if (name.includes(q)) {
+			substring.push(cmd);
+		}
+	}
+	return [...prefix, ...substring];
+}
+
+export function SlashCommandPlugin({
+	commands,
+	isLoading = false,
+	isError = false,
+	onRetry,
+	popupAnchorRef,
+	clientActionHandlers,
+}: {
+	commands: readonly SlashCommandEntry[];
+	isLoading?: boolean;
+	isError?: boolean;
+	onRetry?: () => void;
+	popupAnchorRef?: RefObject<HTMLElement | null>;
+	clientActionHandlers?: Record<
+		string,
+		(editor: LexicalEditor, nodeToReplace: TextNode | null) => void
+	>;
+}) {
+	const [editor] = useLexicalComposerContext();
+	const [query, setQuery] = useState<string | null>(null);
+
+	const deduped = useMemo(() => dedupeByName(commands), [commands]);
+
+	const options = useMemo(() => {
+		const filtered = filterCommands(deduped, query ?? "");
+		return filtered.map((cmd) => new SlashCommandOption(cmd));
+	}, [deduped, query]);
+
+	const triggerFn = useBasicTypeaheadTriggerMatch("/", {
+		minLength: 0,
+	});
+
+	const onSelectOption = useCallback(
+		(
+			selected: SlashCommandOption,
+			nodeToReplace: TextNode | null,
+			closeMenu: () => void,
+		) => {
+			const isClientAction = selected.entry.source === "client-action";
+			if (isClientAction) {
+				closeMenu();
+				clientActionHandlers?.[selected.entry.name]?.(editor, nodeToReplace);
+				return;
+			}
+			editor.update(() => {
+				if (nodeToReplace) {
+					const replacement = `/${selected.entry.name} `;
+					nodeToReplace.setTextContent(replacement);
+					nodeToReplace.select(replacement.length, replacement.length);
+				}
+				closeMenu();
+			});
+		},
+		[clientActionHandlers, editor],
+	);
+
+	return (
+		<LexicalTypeaheadMenuPlugin<SlashCommandOption>
+			triggerFn={triggerFn}
+			onQueryChange={setQuery}
+			onSelectOption={onSelectOption}
+			options={options}
+			anchorClassName="slash-command-anchor"
+			menuRenderFn={(anchorElementRef, menuProps) => {
+				const {
+					selectedIndex,
+					selectOptionAndCleanUp,
+					setHighlightedIndex,
+				} = menuProps;
+				const portalTarget =
+					popupAnchorRef?.current ?? anchorElementRef.current;
+				if (!portalTarget) {
+					return null;
+				}
+
+				const hasOptions = options.length > 0;
+				const queryActive = (query ?? "").length > 0;
+
+				let stateRow: ReactNode = null;
+				if (!hasOptions) {
+					if (isLoading) {
+						stateRow = (
+							<div className="flex items-center gap-2 px-3 py-2 text-[13px] text-muted-foreground">
+								<Loader2 className="size-3.5 shrink-0 animate-spin" />
+								<span>Loading commands…</span>
+							</div>
+						);
+					} else if (isError) {
+						stateRow = (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								onPointerDown={(event) => event.preventDefault()}
+								onClick={() => onRetry?.()}
+								className="h-auto w-full justify-start gap-2 px-3 py-2 text-left text-[13px] text-muted-foreground hover:text-foreground"
+							>
+								<RefreshCw
+									data-icon="inline-start"
+									className="size-3.5 shrink-0"
+								/>
+								<span>Failed to load commands · click to retry</span>
+							</Button>
+						);
+					} else if (queryActive) {
+						stateRow = (
+							<div className="px-3 py-2 text-[13px] text-muted-foreground">
+								No matches
+							</div>
+						);
+					} else {
+						stateRow = (
+							<div className="px-3 py-2 text-[13px] text-muted-foreground">
+								No commands available
+							</div>
+						);
+					}
+				}
+
+				const highlightValue = options[selectedIndex ?? 0]?.entry.name ?? "";
+
+				return createPortal(
+					<div
+						data-typeahead-popup="slash"
+						className="pointer-events-auto absolute bottom-full left-0 isolate z-[9999] mb-2 w-[min(640px,calc(100vw-2rem))]"
+					>
+						<Command
+							value={highlightValue}
+							shouldFilter={false}
+							className="rounded-xl border border-border/60 bg-background text-foreground shadow-2xl ring-1 ring-black/5"
+						>
+							<CommandList className="max-h-72">
+								{stateRow}
+								{hasOptions ? (
+									<CommandGroup heading="Commands">
+										{options.map((opt, index) => {
+											const cmd = opt.entry;
+											const isSelected = index === selectedIndex;
+											return (
+												<CommandItem
+													key={opt.key}
+													value={cmd.name}
+													ref={(el) => opt.setRefElement(el)}
+													onSelect={() => selectOptionAndCleanUp(opt)}
+													onMouseEnter={() => setHighlightedIndex(index)}
+													onPointerDown={(event) => event.preventDefault()}
+													className={cn(
+														"min-w-0 rounded-lg px-2.5 py-2 text-[13px]",
+														isSelected && "bg-muted text-foreground",
+													)}
+												>
+													<span className="shrink-0 text-muted-foreground">
+														/
+													</span>
+													<span className="min-w-0 shrink-0 truncate font-medium">
+														{cmd.name}
+													</span>
+													<span
+														className="min-w-0 flex-1 truncate whitespace-nowrap text-xs text-muted-foreground"
+														title={cmd.description}
+													>
+														{cmd.description}
+													</span>
+												</CommandItem>
+											);
+										})}
+									</CommandGroup>
+								) : null}
+							</CommandList>
+						</Command>
+					</div>,
+					portalTarget,
+				);
+			}}
+		/>
+	);
+}

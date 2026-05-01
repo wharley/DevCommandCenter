@@ -1,7 +1,44 @@
 import { invoke } from "@tauri-apps/api/core";
 import { PROVIDER_METHODS } from "@dcc/contracts";
-import type { ListProvidersOutput } from "@dcc/contracts";
+import type { ListProvidersOutput, ProviderCatalog } from "@dcc/contracts";
+import { FALLBACK_PROVIDER_CATALOG } from "./fallback-provider-catalog";
 
-export function listProviders() {
-	return invoke<ListProvidersOutput>(PROVIDER_METHODS.listProviders);
+function isTauriRuntime(): boolean {
+	return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function coerceProviderId(id: unknown): string {
+	if (typeof id === "string") {
+		return id;
+	}
+	if (id !== null && typeof id === "object") {
+		const record = id as Record<PropertyKey, unknown>;
+		if ("0" in record) {
+			return String(record["0"] ?? "");
+		}
+	}
+	return String(id ?? "");
+}
+
+export function normalizeProviderCatalog(catalog: ProviderCatalog): ProviderCatalog {
+	return {
+		providers: catalog.providers.map((provider) => ({
+			...provider,
+			id: coerceProviderId(provider.id),
+		})),
+	};
+}
+
+/** Loads provider catalog from Tauri; falls back to bundled descriptors when IPC is unavailable or fails. */
+export async function listProviders(): Promise<ListProvidersOutput> {
+	if (!isTauriRuntime()) {
+		return { catalog: FALLBACK_PROVIDER_CATALOG };
+	}
+	try {
+		const raw = await invoke<ListProvidersOutput>(PROVIDER_METHODS.listProviders);
+		return { catalog: normalizeProviderCatalog(raw.catalog) };
+	} catch (error) {
+		console.warn("[dcc] list_providers failed, using bundled catalog", error);
+		return { catalog: FALLBACK_PROVIDER_CATALOG };
+	}
 }

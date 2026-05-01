@@ -3,7 +3,8 @@ import type { EditorState } from "lexical";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { clearDraft, loadDraft, saveDraft } from "../../draftStorage";
-import { readEditorText, setEditorText } from "../../editorOps";
+import { setEditorText } from "../../editorOps";
+import { $extractComposerPrompt } from "../extract-composer-prompt";
 
 export function DraftPersistencePlugin({
 	draftKey,
@@ -18,7 +19,7 @@ export function DraftPersistencePlugin({
 	}, [draftKey, editor]);
 
 	const handleChange = (editorState: EditorState) => {
-		const value = readEditorText(editorState);
+		const value = editorState.read(() => $extractComposerPrompt());
 		if (value.trim().length === 0) {
 			clearDraft(draftKey);
 			return;

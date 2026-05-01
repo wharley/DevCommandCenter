@@ -90,9 +90,16 @@ function DropdownMenuSeparator({
 	);
 }
 
+function DropdownMenuGroup({
+	...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Group>) {
+	return <DropdownMenuPrimitive.Group {...props} />;
+}
+
 export {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuLabel,
 	DropdownMenuSeparator,

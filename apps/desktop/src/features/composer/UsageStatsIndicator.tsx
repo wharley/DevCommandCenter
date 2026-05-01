@@ -1,28 +1,34 @@
-import { Badge } from "@/components/ui/badge";
-import { ContextUsageRing } from "./ContextUsageRing";
+import { cn } from "@/lib/utils";
 
+/**
+ * DCC session counters (from Rust snapshot) in the same slot as helmor’s rate-limit
+ * UsageStatsIndicator — compact row so the footer matches the reference layout.
+ */
 export function UsageStatsIndicator({
 	turnCount,
 	checkpointCount,
 	disabled,
+	className,
 }: {
 	turnCount: number;
 	checkpointCount: number;
 	disabled?: boolean;
+	className?: string;
 }) {
-	const usage = Math.min(100, turnCount * 12 + checkpointCount * 8);
+	if (disabled) {
+		return null;
+	}
 
 	return (
-		<div className="flex items-center gap-2">
-			<ContextUsageRing value={disabled ? 0 : usage} />
-			<div className="flex flex-col gap-0.5">
-				<Badge variant="outline" className="h-6 px-2 text-[11px] font-normal">
-					{turnCount} turns
-				</Badge>
-				<Badge variant="outline" className="h-6 px-2 text-[11px] font-normal">
-					{checkpointCount} checkpoints
-				</Badge>
-			</div>
+		<div
+			className={cn(
+				"hidden items-center gap-1.5 text-[11px] tabular-nums text-muted-foreground sm:flex",
+				className,
+			)}
+		>
+			<span>{turnCount} turns</span>
+			<span className="text-border/80">·</span>
+			<span>{checkpointCount} checkpoints</span>
 		</div>
 	);
 }

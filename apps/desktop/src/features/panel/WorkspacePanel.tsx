@@ -85,9 +85,8 @@ export function WorkspacePanel({
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
 			<header
 				className={[
-					"border-b border-border pb-2 pt-2 sm:pb-3 sm:pt-3",
-					"pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)]",
-					"sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]",
+					"border-b border-border/60 px-4 py-3",
+					"pl-[calc(env(safe-area-inset-left)+1rem)] pr-[calc(env(safe-area-inset-right)+1rem)]",
 				].join(" ")}
 			>
 				<DccWorkbenchChatHeader
@@ -138,9 +137,7 @@ export function WorkspacePanel({
 						workspaceBranch={workspaceBranch}
 						onSelectProvider={onSelectProvider}
 						onSelectModel={onSelectModel}
-						onStartSession={onStartSession}
 						onSubmitPrompt={onSubmitPrompt}
-						onResumeSession={onResumeSession}
 						onAbortSession={onAbortSession}
 					/>
 				</div>

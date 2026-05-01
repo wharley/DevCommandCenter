@@ -36,6 +36,7 @@ import {
 } from "./features/sessions/session-workbench";
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
+import { FALLBACK_PROVIDER_CATALOG } from "./lib/fallback-provider-catalog";
 import { listProviders } from "./lib/provider-api";
 import { listWorkspaces } from "./lib/workspace-api";
 import {
@@ -44,15 +45,14 @@ import {
 	sendTurn,
 	startThread,
 } from "./lib/session-api";
-import type {
-	ProviderCatalog,
-} from "@dcc/contracts";
 import { useAppearance } from "./components/theme-provider";
 import {
 	SELECTED_PROVIDER_STORAGE_KEY,
 	SELECTED_MODEL_STORAGE_KEY,
+	getSessionComposerSelection,
 	resolveSelectedProviderId,
 	resolveSelectedModelId,
+	setSessionComposerSelection,
 } from "./features/providers/provider-selection.logic";
 import { workspaceToSummary } from "./features/workspaces/use-workspaces";
 
@@ -165,9 +165,14 @@ export default function App() {
 	});
 	const [isShortcutSheetOpen, setIsShortcutSheetOpen] = useState(false);
 	const { events: sessionEvents } = useSessionEventFeed();
-	const [providerCatalog, setProviderCatalog] = useState<ProviderCatalog | null>(
-		null,
-	);
+	const providersQuery = useQuery({
+		queryKey: ["providers", "catalog"],
+		queryFn: listProviders,
+		staleTime: 300_000,
+		placeholderData: () => ({ catalog: FALLBACK_PROVIDER_CATALOG }),
+	});
+	const providerCatalog =
+		providersQuery.data?.catalog ?? FALLBACK_PROVIDER_CATALOG;
 	const [selectedProviderId, setSelectedProviderId] = useState<string | null>(() => {
 		if (typeof window === "undefined") {
 			return null;
@@ -191,7 +196,7 @@ export default function App() {
 		isInstalling: isInstallingUpdate,
 		installUpdate,
 	} = useAppUpdate();
-	const providerChoices = providerCatalog?.providers ?? [];
+	const providerChoices = providerCatalog.providers;
 	const selectedWorkspacePath =
 		selectedWorkspace?.worktreePath ?? selectedWorkspace?.rootPath ?? null;
 	const selectedProvider = useMemo(
@@ -210,19 +215,6 @@ export default function App() {
 		[selectedModelId, selectedProvider],
 	);
 	useDockUnreadBadge(allWorkspaces);
-
-	useEffect(() => {
-		let disposed = false;
-		void listProviders().then((result) => {
-			if (!disposed) {
-				setProviderCatalog(result.catalog);
-			}
-		});
-
-		return () => {
-			disposed = true;
-		};
-	}, []);
 
 	useEffect(() => {
 		if (providerChoices.length === 0) {
@@ -270,6 +262,55 @@ export default function App() {
 
 		window.localStorage.removeItem(SELECTED_MODEL_STORAGE_KEY);
 	}, [selectedModelId]);
+
+	/** Helmor-style: restore provider/model for this session, else follow backend snapshot. */
+	useEffect(() => {
+		if (providerChoices.length === 0) {
+			return;
+		}
+		const sessionId = sessionSnapshot?.sessionId;
+		if (!sessionId) {
+			return;
+		}
+
+		const stored = getSessionComposerSelection(sessionId);
+		if (stored) {
+			const provider = providerChoices.find((p) => p.id === stored.providerId);
+			const model = provider?.models.find((m) => m.id === stored.modelId);
+			if (provider && model) {
+				setSelectedProviderId(stored.providerId);
+				setSelectedModelId(stored.modelId);
+				return;
+			}
+		}
+
+		const sp = sessionSnapshot.providerId;
+		const sm = sessionSnapshot.model;
+		if (sp && sm) {
+			const provider = providerChoices.find((p) => p.id === sp);
+			const model = provider?.models.find((m) => m.id === sm);
+			if (provider && model) {
+				setSelectedProviderId(sp);
+				setSelectedModelId(sm);
+			}
+		}
+	}, [
+		providerChoices,
+		sessionSnapshot?.sessionId,
+		sessionSnapshot?.providerId,
+		sessionSnapshot?.model,
+	]);
+
+	useEffect(() => {
+		const sessionId = sessionSnapshot?.sessionId;
+		if (!sessionId || !selectedProviderId || !selectedModelId) {
+			return;
+		}
+		setSessionComposerSelection(sessionId, {
+			providerId: selectedProviderId,
+			modelId: selectedModelId,
+		});
+	}, [sessionSnapshot?.sessionId, selectedProviderId, selectedModelId]);
 
 	useEffect(() => {
 		setSessionSnapshot(null);
@@ -341,6 +382,8 @@ export default function App() {
 			const result = await sendTurn({
 				sessionId: currentSession.sessionId,
 				prompt: trimmedPrompt,
+				providerId: selectedProvider?.id ?? null,
+				model: selectedModel?.id ?? null,
 			});
 
 			setSessionSnapshot({
@@ -376,9 +419,15 @@ export default function App() {
 
 	const handleSelectModel = useCallback(
 		(modelId: string) => {
+			const owning = providerChoices.find((provider) =>
+				provider.models.some((model) => model.id === modelId),
+			);
+			if (owning) {
+				setSelectedProviderId(owning.id);
+			}
 			setSelectedModelId(modelId);
 		},
-		[],
+		[providerChoices],
 	);
 
 	const handleResumeSession = useCallback(async () => {

@@ -14,6 +14,8 @@ pub use session_commands::{
 pub use workspace_commands::{
 	create_workspace_for_repo,
 	create_workspace_from_url,
+	list_child_directories,
+	list_git_tracked_files,
 	list_local_branches,
 	list_workspaces,
 };

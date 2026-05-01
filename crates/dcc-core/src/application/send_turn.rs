@@ -16,6 +16,46 @@ use crate::{
 pub struct SendTurnInput {
 	pub session_id: SessionId,
 	pub prompt: String,
+	/// When set, replaces the session provider before this turn (same workspace session).
+	#[serde(default)]
+	pub provider_id: Option<String>,
+	/// When set, replaces the session model before this turn.
+	#[serde(default)]
+	pub model: Option<String>,
+}
+
+/// Merge UI selection into session fields (Helmor-style per-turn model routing).
+pub fn merge_send_turn_session_selection(
+	session: &Session,
+	input: &SendTurnInput,
+) -> (String, Option<String>) {
+	let merged_provider = input
+		.provider_id
+		.as_ref()
+		.map(|p| p.trim())
+		.filter(|p| !p.is_empty())
+		.map(str::to_owned)
+		.unwrap_or_else(|| session.provider_id.clone());
+	let merged_model = match input.model.as_ref() {
+		None => session.model.clone(),
+		Some(m) => {
+			let t = m.trim();
+			if t.is_empty() {
+				None
+			} else {
+				Some(t.to_owned())
+			}
+		}
+	};
+	(merged_provider, merged_model)
+}
+
+pub fn send_turn_selection_differs_from_session(
+	session: &Session,
+	input: &SendTurnInput,
+) -> bool {
+	let (p, m) = merge_send_turn_session_selection(session, input);
+	p != session.provider_id || m != session.model
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -45,6 +85,14 @@ where
 		.get_session(&input.session_id)
 		.await?
 		.ok_or_else(|| crate::CoreError::Repository("session not found".to_string()))?;
+
+	let (merged_provider, merged_model) = merge_send_turn_session_selection(&session, &input);
+	if merged_provider != session.provider_id || merged_model != session.model {
+		session.provider_id = merged_provider;
+		session.model = merged_model;
+		session.updated_at = now_iso();
+		sessions.save_session(&session).await?;
+	}
 
 	if session.state != SessionState::Active {
 		return Err(crate::CoreError::InvalidInput(
@@ -234,6 +282,8 @@ mod tests {
 			SendTurnInput {
 				session_id: session_id.clone(),
 				prompt: "hello".to_string(),
+				provider_id: None,
+				model: None,
 			},
 		))
 		.expect("send_turn should succeed");

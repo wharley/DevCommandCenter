@@ -5,8 +5,10 @@ export function getComposerDraftKey(workspaceId: string) {
 	return `dcc.workspace.composer.draft.${workspaceId}`;
 }
 
-export type ComposerDecision =
+/** Matches `docs/UX_UI_BLUEPRINT.md` §15.4 and helmor `submitEnabled` / send vs steer. */
+export type ComposerSendDecision =
 	| { kind: "send" }
+	| { kind: "steer" }
 	| { kind: "blocked"; reason: "empty" | "disabled" | "queued" };
 
 export function canSendPrompt({
@@ -29,16 +31,38 @@ export function decideSend({
 	hasContent: boolean;
 	sending: boolean;
 	disabled: boolean;
-}): ComposerDecision {
+}): ComposerSendDecision {
 	if (disabled) {
 		return { kind: "blocked", reason: "disabled" };
 	}
-
 	if (!hasContent) {
 		return { kind: "blocked", reason: "empty" };
 	}
+	if (sending) {
+		return { kind: "steer" };
+	}
+	return { kind: "send" };
+}
 
-	return sending ? { kind: "blocked", reason: "queued" } : { kind: "send" };
+/** Shared gate for Send, Steer, and ⌘Enter — helmor `submitEnabled`. */
+export function isComposerSubmitEnabled({
+	disabled,
+	hasProvider,
+	hasContent,
+}: {
+	disabled: boolean;
+	hasProvider: boolean;
+	hasContent: boolean;
+}) {
+	return !disabled && hasProvider && hasContent;
+}
+
+export function isSendDisabled(submitEnabled: boolean, sending: boolean) {
+	return !submitEnabled || sending;
+}
+
+export function isSteerDisabled(submitEnabled: boolean, sending: boolean) {
+	return !submitEnabled || !sending;
 }
 
 export type ComposerContextDirectory = {

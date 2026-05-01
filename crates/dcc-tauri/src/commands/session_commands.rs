@@ -3,9 +3,9 @@ use tauri::{AppHandle, State};
 use dcc_core::{
 	application::{
 		abort_run as run_abort_run, resume_session as run_resume_session,
-		send_turn as run_send_turn, start_thread as run_start_thread, AbortRunInput,
-		AbortRunOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput,
-		SendTurnOutput, StartThreadInput, StartThreadOutput,
+		send_turn as run_send_turn, send_turn_selection_differs_from_session,
+		start_thread as run_start_thread, AbortRunInput, AbortRunOutput, ResumeSessionInput,
+		ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
 	},
 	domain::session::SessionEventRecord,
 	ports::SessionEventRepo,
@@ -34,6 +34,15 @@ pub async fn send_turn(
 	_app: AppHandle,
 	input: SendTurnInput,
 ) -> Result<SendTurnOutput, String> {
+	if let Some(session) = state
+		.peek_session(&input.session_id)
+		.map_err(|error| error.to_string())?
+	{
+		if send_turn_selection_differs_from_session(&session, &input) {
+			let _ = state.cancel_provider_session(&input.session_id).await;
+		}
+	}
+
 	let prompt = input.prompt.clone();
 	let output = run_send_turn(&*state, &*state, &*state, input)
 		.await

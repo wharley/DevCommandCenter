@@ -4,6 +4,7 @@ use specta::Type;
 use super::session::SessionId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(transparent)]
 pub struct ProviderId(pub String);
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

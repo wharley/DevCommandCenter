@@ -17,11 +17,12 @@ use std::{env, fs, path::PathBuf};
 	},
 	ports::events::CoreEvent,
 };
-use dcc_tauri::commands::{
+	use dcc_tauri::commands::{
 	provider_commands::ListProvidersOutput,
 	workspace_commands::{
-		CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListLocalBranchesInput,
-		ListLocalBranchesOutput, ListWorkspacesOutput,
+		CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
+		ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
+		ListLocalBranchesInput, ListLocalBranchesOutput, ListWorkspacesOutput,
 	},
 };
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,8 @@ struct WorkspaceMethods {
 	create_workspace_for_repo: String,
 	create_workspace_from_url: String,
 	list_local_branches: String,
+	list_git_tracked_files: String,
+	list_child_directories: String,
 	list_workspaces: String,
 }
 
@@ -88,6 +91,10 @@ fn main() {
 		.typ::<CreateWorkspaceFromUrlOutput>()
 		.typ::<ListLocalBranchesInput>()
 		.typ::<ListLocalBranchesOutput>()
+		.typ::<ListGitTrackedFilesInput>()
+		.typ::<ListGitTrackedFilesOutput>()
+		.typ::<ListChildDirectoriesInput>()
+		.typ::<ListChildDirectoriesOutput>()
 		.typ::<ListWorkspacesOutput>()
 		.typ::<ListProvidersOutput>()
 		.typ::<StartThreadInput>()
@@ -105,6 +112,8 @@ fn main() {
 				create_workspace_for_repo: "create_workspace_for_repo".to_string(),
 				create_workspace_from_url: "create_workspace_from_url".to_string(),
 				list_local_branches: "list_local_branches".to_string(),
+				list_git_tracked_files: "list_git_tracked_files".to_string(),
+				list_child_directories: "list_child_directories".to_string(),
 				list_workspaces: "list_workspaces".to_string(),
 			},
 		);

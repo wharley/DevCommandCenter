@@ -1,0 +1,167 @@
+import { useEffect, useMemo, useState } from "react";
+import { CheckIcon, ChevronDown, Sparkles } from "lucide-react";
+import type { ProviderCatalog } from "@dcc/contracts";
+import {
+	Command,
+	CommandEmpty,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
+} from "@/components/ui/command";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { composerToolbarTriggerClassName } from "./WorkspaceComposer.logic";
+
+export const DCC_OPEN_MODEL_PICKER_EVENT = "dcc:open-model-picker";
+
+type ComposerProviderModelMenuProps = {
+	providers: ProviderCatalog["providers"];
+	selectedProviderId: string | null;
+	selectedModelId: string | null;
+	onSelectProvider: (providerId: string) => void;
+	onSelectModel: (modelId: string) => void;
+	disabled?: boolean;
+};
+
+/**
+ * t3code-style Popover + cmdk search + Helmorian grouped headings (`ModelPickerContent` pattern).
+ * Shortcut listeners use {@link DCC_OPEN_MODEL_PICKER_EVENT} (Helmor: `helmor:open-model-picker`).
+ */
+export function ComposerProviderModelMenu({
+	providers,
+	selectedProviderId,
+	selectedModelId,
+	onSelectProvider,
+	onSelectModel,
+	disabled = false,
+}: ComposerProviderModelMenuProps) {
+	const [open, setOpen] = useState(false);
+
+	useEffect(() => {
+		const openPicker = () => {
+			if (!disabled && providers.length > 0) {
+				setOpen(true);
+			}
+		};
+		window.addEventListener(DCC_OPEN_MODEL_PICKER_EVENT, openPicker);
+		return () =>
+			window.removeEventListener(DCC_OPEN_MODEL_PICKER_EVENT, openPicker);
+	}, [disabled, providers.length]);
+
+	const owningProviderForModel = useMemo(() => {
+		if (!selectedModelId) {
+			return null;
+		}
+		for (const provider of providers) {
+			if (provider.models.some((model) => model.id === selectedModelId)) {
+				return provider;
+			}
+		}
+		return null;
+	}, [providers, selectedModelId]);
+
+	const selectedProvider =
+		owningProviderForModel ??
+		providers.find((provider) => provider.id === selectedProviderId) ??
+		providers[0] ??
+		null;
+	const selectedModel = useMemo(() => {
+		if (!selectedModelId) {
+			return null;
+		}
+		for (const p of providers) {
+			const m = p.models.find((model) => model.id === selectedModelId);
+			if (m) {
+				return m;
+			}
+		}
+		return null;
+	}, [providers, selectedModelId]);
+
+	const triggerLabel =
+		selectedProvider && selectedModel
+			? `${selectedProvider.label} · ${selectedModel.label}`
+			: (selectedModel?.label ??
+				selectedModelId ??
+				"Select model");
+
+	return (
+		<Popover open={open} onOpenChange={setOpen}>
+			<PopoverTrigger asChild>
+				<button
+					type="button"
+					disabled={disabled || providers.length === 0}
+					data-composer-model-picker="true"
+					className={cn(
+						`flex min-w-0 max-w-[min(100%,14rem)] items-center gap-1.5 text-muted-foreground ${composerToolbarTriggerClassName}`,
+						disabled &&
+							"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
+					)}
+				>
+					<Sparkles className="size-[13px] shrink-0" strokeWidth={1.8} />
+					<span className="min-w-0 truncate text-left">{triggerLabel}</span>
+					<ChevronDown className="size-3 shrink-0 opacity-40" strokeWidth={2} />
+				</button>
+			</PopoverTrigger>
+			<PopoverContent
+				side="top"
+				align="start"
+				sideOffset={4}
+				className="w-[min(22rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] p-0"
+				onCloseAutoFocus={(event) => event.preventDefault()}
+			>
+				<Command className="rounded-lg border-0 shadow-none">
+					<CommandInput placeholder="Search models…" className="h-9" />
+					<CommandList>
+						<CommandEmpty>No model found.</CommandEmpty>
+						{providers.map((provider) => (
+							<CommandGroup key={provider.id} heading={provider.label}>
+								{provider.models.map((model) => {
+									const isActive =
+										provider.id === selectedProvider?.id &&
+										model.id === selectedModelId;
+									const searchBlob = `${provider.label} ${model.label} ${model.id} ${model.description}`;
+									return (
+										<CommandItem
+											key={`${provider.id}-${model.id}`}
+											value={searchBlob}
+											disabled={disabled}
+											onSelect={() => {
+												if (provider.id !== selectedProviderId) {
+													onSelectProvider(provider.id);
+												}
+												onSelectModel(model.id);
+												setOpen(false);
+											}}
+											className="[&>svg:last-child]:hidden flex items-center gap-2 font-mono text-[13px] tabular-nums"
+										>
+											<Sparkles
+												className="size-4 shrink-0 text-muted-foreground"
+												strokeWidth={1.6}
+											/>
+											<span className="min-w-0 flex-1 truncate">{model.label}</span>
+											{isActive ? (
+												<CheckIcon
+													className="size-4 shrink-0 text-foreground"
+													strokeWidth={2}
+													aria-hidden
+												/>
+											) : (
+												<span className="size-4 shrink-0" aria-hidden />
+											)}
+										</CommandItem>
+									);
+								})}
+							</CommandGroup>
+						))}
+					</CommandList>
+				</Command>
+			</PopoverContent>
+		</Popover>
+	);
+}

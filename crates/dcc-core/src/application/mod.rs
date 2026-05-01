@@ -12,5 +12,8 @@ pub use create_workspace_for_repo::{
 };
 pub use abort_run::{abort_run, AbortRunInput, AbortRunOutput};
 pub use resume_session::{resume_session, ResumeSessionInput, ResumeSessionOutput};
-pub use send_turn::{send_turn, SendTurnInput, SendTurnOutput};
+pub use send_turn::{
+	merge_send_turn_session_selection, send_turn, send_turn_selection_differs_from_session,
+	SendTurnInput, SendTurnOutput,
+};
 pub use start_thread::{start_thread, StartThreadInput, StartThreadOutput};

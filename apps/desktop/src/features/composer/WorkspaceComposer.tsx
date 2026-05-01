@@ -1,44 +1,72 @@
-import { useEffect, useMemo, useState } from "react";
-import { ArrowUp, ArrowUpRight, Square } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowUp, ChevronDown, ClipboardList, Square, Zap } from "lucide-react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuGroup,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { pathBasename } from "@/lib/path-basename";
 import { cn } from "@/lib/utils";
 import type { ProviderCatalog } from "@dcc/contracts";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import { ContextBar } from "./ContextBar";
+import { ComposerProviderModelMenu } from "./ComposerProviderModelMenu";
+import { ContextUsageRing } from "./ContextUsageRing";
+import { EffortBrainIcon } from "./EffortBrainIcon";
+import { UsageStatsIndicator } from "./UsageStatsIndicator";
+import { ComposerButton } from "./ComposerButton";
 import {
 	buildComposerContextDirectories,
-	canSendPrompt,
-	decideSend,
+	composerToolbarTriggerClassName,
 	getComposerDraftKey,
+	isComposerSubmitEnabled,
+	isSendDisabled,
+	isSteerDisabled,
 } from "./WorkspaceComposer.logic";
-import { FastModeLottieIcon } from "./FastModeLottieIcon";
+import { DEFAULT_SLASH_COMMANDS } from "./default-slash-commands";
+import {
+	AddDirTypeaheadPlugin,
+	type AddDirPickEntry,
+} from "./editor/add-dir/add-dir-typeahead-plugin";
+import { $insertAddDirTrigger } from "./editor/add-dir/insert";
+import { AddDirTriggerNode } from "./editor/add-dir/trigger-node";
+import { FileBadgeNode } from "./editor/file-badge-node";
+import { ImageBadgeNode } from "./editor/image-badge-node";
+import { PastedSnippetBadgeNode } from "./editor/pasted-snippet-badge-node";
 import { AutoResizePlugin } from "./editor/plugins/AutoResizePlugin";
 import { DraftPersistencePlugin } from "./editor/plugins/DraftPersistencePlugin";
+import { CompositionGuardPlugin } from "./editor/plugins/CompositionGuardPlugin";
+import { DropFilePlugin } from "./editor/plugins/drop-file-plugin";
 import { EditablePlugin } from "./editor/plugins/EditablePlugin";
+import { FileMentionPlugin } from "./editor/plugins/file-mention-plugin";
 import { HasContentPlugin } from "./editor/plugins/HasContentPlugin";
+import { PasteImagePlugin } from "./editor/plugins/PasteImagePlugin";
+import { SlashCommandPlugin } from "./editor/plugins/slash-command-plugin";
 import { SubmitPlugin } from "./editor/plugins/SubmitPlugin";
-import { UsageStatsIndicator } from "./UsageStatsIndicator";
-import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
+import { workspaceChildDirsQueryOptions } from "./workspace-child-dirs-query";
 
-const initialConfig = {
-	namespace: "WorkspaceComposer",
-	editable: true,
-	onError(error: Error) {
-		throw error;
-	},
-	nodes: [],
-	theme: {
-		paragraph: "min-h-[1.25rem]",
-	},
-};
+const DCC_EFFORT_LEVELS = [
+	{ id: "low" as const, label: "Low", icon: "low" as const },
+	{ id: "balanced" as const, label: "Balanced", icon: "medium" as const },
+	{ id: "high" as const, label: "High", icon: "high" as const },
+];
+
+type EffortId = (typeof DCC_EFFORT_LEVELS)[number]["id"];
 
 type WorkspaceComposerProps = {
 	draftKey: string;
@@ -51,9 +79,7 @@ type WorkspaceComposerProps = {
 	workspaceBranch: string | null;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
-	onStartSession: () => void;
 	onSubmitPrompt: (prompt: string) => Promise<void>;
-	onResumeSession: () => void;
 	onAbortSession: () => void;
 };
 
@@ -68,33 +94,106 @@ export function WorkspaceComposer({
 	workspaceBranch,
 	onSelectProvider,
 	onSelectModel,
-	onStartSession,
 	onSubmitPrompt,
-	onResumeSession,
 	onAbortSession,
 }: WorkspaceComposerProps) {
 	const [hasContent, setHasContent] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [submitAction, setSubmitAction] = useState<(() => void) | null>(null);
 	const [isFastMode, setIsFastMode] = useState(true);
-	const [effort, setEffort] = useState<"low" | "balanced" | "high">("balanced");
+	const [effort, setEffort] = useState<EffortId>("balanced");
 	const [isPlanMode, setIsPlanMode] = useState(false);
 	const [contextDirectories, setContextDirectories] = useState(() =>
 		buildComposerContextDirectories({ workspacePath, workspaceBranch }),
 	);
 	const composerDraftKey = useMemo(() => getComposerDraftKey(draftKey), [draftKey]);
-	const inputDisabled = disabled || isSubmitting;
+	const composerRootRef = useRef<HTMLDivElement | null>(null);
+
+	const lexicalInitialConfig = useMemo(
+		() => ({
+			namespace: "WorkspaceComposer",
+			editable: true,
+			onError(error: Error) {
+				throw error;
+			},
+			nodes: [
+				AddDirTriggerNode,
+				FileBadgeNode,
+				ImageBadgeNode,
+				PastedSnippetBadgeNode,
+			],
+			theme: {
+				paragraph: "min-h-[1.25rem]",
+			},
+		}),
+		[],
+	);
+
+	const childDirsQuery = useQuery(workspaceChildDirsQueryOptions(workspacePath));
+
+	const appendContextDirectory = useCallback((dirPath: string) => {
+		setContextDirectories((prev) => {
+			if (prev.some((d) => d.path === dirPath)) {
+				return prev;
+			}
+			return [
+				...prev,
+				{
+					id: `ctx-${dirPath}`,
+					label: pathBasename(dirPath) || dirPath,
+					path: dirPath,
+				},
+			];
+		});
+	}, []);
+
+	const handleAddDirPick = useCallback(
+		(entry: AddDirPickEntry) => {
+			void (async () => {
+				if (entry.kind === "browse") {
+					const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
+					const selected = await openDialog({
+						directory: true,
+						multiple: false,
+						title: "Add directory to context",
+					});
+					const pickedPath = Array.isArray(selected)
+						? selected[0] ?? ""
+						: selected ?? "";
+					if (pickedPath) {
+						appendContextDirectory(pickedPath);
+					}
+					return;
+				}
+				appendContextDirectory(entry.candidate.absolutePath);
+			})();
+		},
+		[appendContextDirectory],
+	);
+
+	const inputDisabled = disabled;
+	const toolbarDisabled = disabled;
 	const hasProvider = Boolean(selectedProviderId);
-	const canSubmit = canSendPrompt({
-		disabled: inputDisabled || !hasProvider,
+	const sessionId = sessionSnapshot?.sessionId ?? null;
+	const turnCount = sessionSnapshot?.turnCount ?? 0;
+	const checkpointCount = sessionSnapshot?.checkpointCount ?? 0;
+	const contextUsageValue = Math.min(100, turnCount * 12 + checkpointCount * 8);
+
+	const submitEnabled = isComposerSubmitEnabled({
+		disabled: toolbarDisabled,
+		hasProvider,
 		hasContent,
-		isSubmitting,
 	});
-	const sendDecision = decideSend({
-		hasContent,
-		sending: isSubmitting,
-		disabled: inputDisabled || !hasProvider,
-	});
+	const sendDisabled = isSendDisabled(submitEnabled, isSubmitting);
+	const steerDisabled = isSteerDisabled(submitEnabled, isSubmitting);
+	const submitDisabledForPlugin = !submitEnabled;
+
+	const planActive = isPlanMode;
+	const placeholder = planActive
+		? "Describe what to change, then click Request Changes"
+		: "Ask to make changes, @mention files, run /commands";
+
+	const effortLabel = DCC_EFFORT_LEVELS.find((e) => e.id === effort)?.label ?? effort;
 
 	useEffect(() => {
 		setContextDirectories(
@@ -104,6 +203,7 @@ export function WorkspaceComposer({
 
 	return (
 		<div
+			ref={composerRootRef}
 			aria-label="Workspace composer"
 			data-focus-scope="composer"
 			className={cn(
@@ -122,75 +222,14 @@ export function WorkspaceComposer({
 				}}
 			/>
 
-			<ProviderSelectionPanel
-				title="Provider"
-				description="Choose the runtime engine for this workspace."
-				providers={providerChoices}
-				selectedProviderId={selectedProviderId}
-				selectedModelId={selectedModelId}
-				onSelectProvider={onSelectProvider}
-				onSelectModel={onSelectModel}
-				compact
-				className="mb-2.5"
-			/>
-
-			<div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
-				<div className="flex flex-wrap items-center gap-1.5">
-					<Button
-						type="button"
-						variant={isFastMode ? "default" : "outline"}
-						size="sm"
-						className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px]"
-						onClick={() => setIsFastMode((current) => !current)}
-					>
-						<FastModeLottieIcon />
-						Fast
-					</Button>
-					<ToggleGroup
-						type="single"
-						value={effort}
-						onValueChange={(value) => {
-							if (value === "low" || value === "balanced" || value === "high") {
-								setEffort(value);
-							}
-						}}
-						className="gap-1"
-					>
-						{([
-							["low", "Low"],
-							["balanced", "Balanced"],
-							["high", "High"],
-						] as const).map(([value, label]) => (
-							<ToggleGroupItem
-								key={value}
-								value={value}
-								className="h-8 rounded-[9px] border border-border/60 px-2.5 text-[12px]"
-							>
-								{label}
-							</ToggleGroupItem>
-						))}
-					</ToggleGroup>
-					<Button
-						type="button"
-						variant={isPlanMode ? "default" : "outline"}
-						size="sm"
-						className="h-8 rounded-[9px] px-2.5 text-[12px]"
-						onClick={() => setIsPlanMode((current) => !current)}
-					>
-						Plan
-					</Button>
-				</div>
-				<div className="text-[11px] text-muted-foreground">
-					{isFastMode ? "fast" : "normal"} · {effort} · {isPlanMode ? "plan" : "chat"}
-				</div>
-			</div>
-
-			<LexicalComposer initialConfig={initialConfig}>
+			<LexicalComposer initialConfig={lexicalInitialConfig}>
 				<div className="relative">
 					<PlainTextPlugin
 						contentEditable={
 							<ContentEditable
 								id="workspace-input"
+								aria-label="Workspace input"
+								aria-multiline
 								className={cn(
 									"composer-editor min-h-[64px] max-h-[240px] resize-none overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-[14px] leading-5 tracking-[-0.01em] text-foreground outline-none",
 								)}
@@ -198,19 +237,36 @@ export function WorkspaceComposer({
 						}
 						placeholder={
 							<div className="pointer-events-none absolute left-0 top-0 text-[14px] leading-5 tracking-[-0.01em] text-muted-foreground/70">
-								Ask to make changes, @mention files, run /commands
+								{placeholder}
 							</div>
 						}
 						ErrorBoundary={LexicalErrorBoundary}
 					/>
-					<div className="pointer-events-none absolute right-0 top-0 hidden text-[11px] text-muted-foreground/60 sm:block">
-						⌘Enter to send
-					</div>
 				</div>
 				<HistoryPlugin />
+				<SlashCommandPlugin
+					commands={DEFAULT_SLASH_COMMANDS}
+					popupAnchorRef={composerRootRef}
+					clientActionHandlers={{
+						"add-dir": $insertAddDirTrigger,
+					}}
+				/>
+				<AddDirTypeaheadPlugin
+					candidates={childDirsQuery.data ?? []}
+					linkedDirectoryPaths={contextDirectories.map((d) => d.path)}
+					onPick={handleAddDirPick}
+					popupAnchorRef={composerRootRef}
+				/>
+				<FileMentionPlugin
+					workspaceRootPath={workspacePath}
+					popupAnchorRef={composerRootRef}
+				/>
+				<DropFilePlugin workspaceRootPath={workspacePath} />
+				<CompositionGuardPlugin />
+				<PasteImagePlugin workspaceRootPath={workspacePath} />
 				<SubmitPlugin
 					draftKey={composerDraftKey}
-					isDisabled={!canSubmit}
+					isDisabled={submitDisabledForPlugin}
 					onSubmittingChange={setIsSubmitting}
 					onSubmit={onSubmitPrompt}
 					registerSubmit={setSubmitAction}
@@ -222,111 +278,166 @@ export function WorkspaceComposer({
 			</LexicalComposer>
 
 			<div className="mt-2.5 flex items-end justify-between gap-3">
-				<div className="flex flex-wrap items-center gap-2">
-					{sessionSnapshot ? (
-						<Badge variant="outline" className="h-7 px-2 text-[11px] font-normal">
-							{sessionSnapshot.state}
-						</Badge>
-					) : (
-						<Badge variant="outline" className="h-7 px-2 text-[11px] font-normal">
-							idle
-						</Badge>
-					)}
-					<Button
+				<div className="flex min-w-0 flex-wrap items-center gap-2">
+					<ComposerProviderModelMenu
+						providers={providerChoices}
+						selectedProviderId={selectedProviderId}
+						selectedModelId={selectedModelId}
+						onSelectProvider={onSelectProvider}
+						onSelectModel={onSelectModel}
+						disabled={toolbarDisabled}
+					/>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<ComposerButton
+								type="button"
+								aria-label="Fast mode"
+								disabled={toolbarDisabled}
+								className={cn(
+									"relative h-7 px-1.5",
+									isFastMode
+										? "text-amber-500 hover:bg-amber-500/10 hover:text-amber-500"
+										: "text-muted-foreground",
+									toolbarDisabled &&
+										"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
+								)}
+								onClick={() => setIsFastMode((c) => !c)}
+							>
+								<span className="relative block size-[14px]">
+									<Zap
+										className={cn(
+											"absolute inset-0 z-0 size-[14px]",
+											!isFastMode && "opacity-55",
+										)}
+										strokeWidth={1.8}
+									/>
+								</span>
+							</ComposerButton>
+						</TooltipTrigger>
+						<TooltipContent side="top" sideOffset={4}>
+							<span>Fast mode{isFastMode ? " (on)" : ""}</span>
+						</TooltipContent>
+					</Tooltip>
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							type="button"
+							disabled={toolbarDisabled}
+							className={cn(
+								`flex h-7 items-center gap-0.5 text-muted-foreground ${composerToolbarTriggerClassName}`,
+								toolbarDisabled &&
+									"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
+							)}
+						>
+							<span className="capitalize">{effortLabel}</span>
+							<ChevronDown
+								className="size-3 text-muted-foreground/40"
+								strokeWidth={2}
+							/>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent
+							side="top"
+							align="start"
+							sideOffset={4}
+							className="min-w-[11rem]"
+						>
+							<DropdownMenuGroup>
+								<DropdownMenuLabel>Effort</DropdownMenuLabel>
+								{DCC_EFFORT_LEVELS.map((entry) => (
+									<DropdownMenuItem
+										key={entry.id}
+										disabled={toolbarDisabled}
+										className="flex items-center justify-between gap-3"
+										onClick={() => setEffort(entry.id)}
+									>
+										<div className="flex items-center gap-2.5">
+											<EffortBrainIcon level={entry.icon} />
+											<span>{entry.label}</span>
+										</div>
+										{entry.id === effort ? (
+											<span className="text-[11px] text-foreground">✓</span>
+										) : null}
+									</DropdownMenuItem>
+								))}
+							</DropdownMenuGroup>
+						</DropdownMenuContent>
+					</DropdownMenu>
+					<ComposerButton
 						type="button"
-						variant="outline"
-						size="sm"
-						className="h-8 px-2.5 text-xs font-normal"
-						onClick={onStartSession}
-						disabled={!selectedProviderId}
+						aria-label="Plan mode"
+						disabled={toolbarDisabled}
+						className={cn(
+							"h-7 gap-1 px-1.5 text-[11px]",
+							isPlanMode
+								? "text-[color:var(--plan)] hover:text-[color:var(--plan)]"
+								: "text-muted-foreground/70 hover:text-muted-foreground/70",
+						)}
+						onClick={() => setIsPlanMode((c) => !c)}
 					>
-						Start session
-					</Button>
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className="h-8 px-2.5 text-xs font-normal"
-						onClick={onResumeSession}
-						disabled={!sessionSnapshot}
-					>
-						Resume
-					</Button>
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className="h-8 px-2.5 text-xs font-normal"
-						onClick={onAbortSession}
-						disabled={!sessionSnapshot}
-					>
-						Abort
-					</Button>
+						<ClipboardList className="size-[13px]" strokeWidth={1.8} />
+						<span>Plan</span>
+					</ComposerButton>
 				</div>
 
-				<div className="flex items-center gap-2">
+				<div className="flex shrink-0 items-center gap-1">
 					<UsageStatsIndicator
-						turnCount={sessionSnapshot?.turnCount ?? 0}
-						checkpointCount={sessionSnapshot?.checkpointCount ?? 0}
+						turnCount={turnCount}
+						checkpointCount={checkpointCount}
 						disabled={!sessionSnapshot}
 					/>
-					<div className="flex items-center gap-1">
+					{sessionId ? (
+						<ContextUsageRing
+							value={contextUsageValue}
+							className="shrink-0"
+						/>
+					) : null}
+					{isSubmitting ? (
+						<div className="ml-1.5 flex items-center gap-1.5">
+							<Button
+								type="button"
+								variant="destructive"
+								size="icon"
+								aria-label="Stop"
+								disabled={toolbarDisabled}
+								className="rounded-[9px]"
+								onClick={onAbortSession}
+							>
+								<Square className="size-3 fill-current" strokeWidth={0} />
+							</Button>
+							{hasContent ? (
+								<Button
+									type="button"
+									variant="outline"
+									size="icon"
+									aria-label="Steer"
+									disabled={steerDisabled}
+									className="rounded-[9px]"
+									onClick={() => {
+										if (submitAction) {
+											submitAction();
+										}
+									}}
+								>
+									<ArrowUp className="size-[15px]" strokeWidth={2.2} />
+								</Button>
+							) : null}
+						</div>
+					) : (
 						<Button
 							type="button"
 							variant="outline"
 							size="icon"
-							className="ml-1.5 rounded-[9px]"
-							disabled={sendDecision.kind !== "send"}
+							aria-label="Send"
+							disabled={sendDisabled}
 							onClick={() => {
 								if (submitAction) {
 									submitAction();
 								}
 							}}
+							className="ml-1.5 rounded-[9px]"
 						>
-							<ArrowUp className="size-[15px]" />
+							<ArrowUp className="size-[15px]" strokeWidth={2.2} />
 						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="icon"
-							className="rounded-[9px]"
-							disabled={!sessionSnapshot}
-							onClick={onStartSession}
-							aria-label="Steer session"
-						>
-							<ArrowUpRight className="size-[15px]" />
-						</Button>
-						<Button
-							type="button"
-							variant="destructive"
-							size="icon"
-							className="rounded-[9px]"
-							disabled={!sessionSnapshot || isSubmitting}
-							onClick={onAbortSession}
-						>
-							<Square className="size-3 fill-current" />
-						</Button>
-						<div className="hidden items-center gap-1 sm:flex">
-							<Button
-								type="button"
-								variant="default"
-								size="icon"
-								className="rounded-[9px]"
-								disabled={sendDecision.kind !== "send"}
-								onClick={async () => {
-									if (submitAction) {
-										submitAction();
-									}
-								}}
-							>
-								{isSubmitting ? (
-									<DccThinkingIndicator size={15} />
-								) : (
-									<ArrowUp className="size-[15px]" />
-								)}
-							</Button>
-						</div>
-					</div>
+					)}
 				</div>
 			</div>
 		</div>

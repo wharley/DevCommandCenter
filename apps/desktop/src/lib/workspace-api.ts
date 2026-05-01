@@ -5,6 +5,10 @@ import type {
 	CreateWorkspaceForRepoOutput,
 	CreateWorkspaceFromUrlInput,
 	CreateWorkspaceFromUrlOutput,
+	ListChildDirectoriesInput,
+	ListChildDirectoriesOutput,
+	ListGitTrackedFilesInput,
+	ListGitTrackedFilesOutput,
 	ListLocalBranchesInput,
 	ListLocalBranchesOutput,
 	ListWorkspacesOutput,
@@ -30,4 +34,16 @@ export function listLocalBranches(input: ListLocalBranchesInput) {
 
 export function listWorkspaces() {
 	return invoke<ListWorkspacesOutput>(WORKSPACE_METHODS.listWorkspaces);
+}
+
+export function listGitTrackedFiles(input: ListGitTrackedFilesInput) {
+	return invoke<ListGitTrackedFilesOutput>(WORKSPACE_METHODS.listGitTrackedFiles, {
+		input,
+	});
+}
+
+export function listChildDirectories(input: ListChildDirectoriesInput) {
+	return invoke<ListChildDirectoriesOutput>(WORKSPACE_METHODS.listChildDirectories, {
+		input,
+	});
 }

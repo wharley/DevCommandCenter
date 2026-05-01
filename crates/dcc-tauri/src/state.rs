@@ -80,6 +80,14 @@ impl SessionCommandState {
 		Ok(store.provider_sessions.get(session_id).cloned())
 	}
 
+	pub(crate) fn peek_session(
+		&self,
+		session_id: &SessionId,
+	) -> Result<Option<Session>> {
+		let store = self.lock_store()?;
+		Ok(store.sessions.get(session_id).cloned())
+	}
+
 	async fn append_session_event(
 		&self,
 		session_id: &SessionId,

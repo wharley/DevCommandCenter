@@ -5,6 +5,10 @@ use dcc_tauri::{
 	commands::workspace_commands::{
 		CreateWorkspaceForRepoOutput,
 		CreateWorkspaceFromUrlOutput,
+		ListChildDirectoriesInput,
+		ListChildDirectoriesOutput,
+		ListGitTrackedFilesInput,
+		ListGitTrackedFilesOutput,
 		ListLocalBranchesInput,
 		ListLocalBranchesOutput,
 		ListWorkspacesOutput,
@@ -42,4 +46,18 @@ pub async fn list_local_branches(
 	input: ListLocalBranchesInput,
 ) -> Result<ListLocalBranchesOutput, String> {
 	dcc_tauri::commands::workspace_commands::list_local_branches(input).await
+}
+
+#[tauri::command]
+pub async fn list_git_tracked_files(
+	input: ListGitTrackedFilesInput,
+) -> Result<ListGitTrackedFilesOutput, String> {
+	dcc_tauri::commands::workspace_commands::list_git_tracked_files(input).await
+}
+
+#[tauri::command]
+pub async fn list_child_directories(
+	input: ListChildDirectoriesInput,
+) -> Result<ListChildDirectoriesOutput, String> {
+	dcc_tauri::commands::workspace_commands::list_child_directories(input).await
 }

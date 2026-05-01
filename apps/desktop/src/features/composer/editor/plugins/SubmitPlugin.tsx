@@ -6,7 +6,7 @@ import {
 } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { clearDraft } from "../../draftStorage";
-import { readEditorText, setEditorText } from "../../editorOps";
+import { readComposerPrompt, setEditorText } from "../../editorOps";
 
 export function SubmitPlugin({
 	draftKey,
@@ -62,7 +62,7 @@ async function submitFromEditor(
 	onSubmittingChange: (isSubmitting: boolean) => void,
 	onSubmit: (value: string) => Promise<void>,
 ) {
-	const prompt = readEditorText(editor.getEditorState()).trim();
+	const prompt = readComposerPrompt(editor).trim();
 	if (prompt.length === 0) {
 		return;
 	}

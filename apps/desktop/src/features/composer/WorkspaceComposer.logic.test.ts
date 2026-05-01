@@ -4,6 +4,9 @@ import {
 	canSendPrompt,
 	decideSend,
 	getComposerDraftKey,
+	isComposerSubmitEnabled,
+	isSendDisabled,
+	isSteerDisabled,
 } from "./WorkspaceComposer.logic";
 
 describe("WorkspaceComposer.logic", () => {
@@ -21,6 +24,24 @@ describe("WorkspaceComposer.logic", () => {
 		expect(
 			decideSend({ hasContent: true, sending: false, disabled: false }),
 		).toEqual({ kind: "send" });
+	});
+
+	it("decides steer when streaming and content is present", () => {
+		expect(
+			decideSend({ hasContent: true, sending: true, disabled: false }),
+		).toEqual({ kind: "steer" });
+	});
+
+	it("gates send vs steer with helmor-style helpers", () => {
+		const ok = isComposerSubmitEnabled({
+			disabled: false,
+			hasProvider: true,
+			hasContent: true,
+		});
+		expect(isSendDisabled(ok, false)).toBe(false);
+		expect(isSendDisabled(ok, true)).toBe(true);
+		expect(isSteerDisabled(ok, false)).toBe(true);
+		expect(isSteerDisabled(ok, true)).toBe(false);
 	});
 
 	it("reports context directories for workspace path and branch", () => {

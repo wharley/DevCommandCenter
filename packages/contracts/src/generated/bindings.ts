@@ -6,7 +6,7 @@ export const PROVIDER_METHODS = {"listProviders":"list_providers"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","listThreadEvents":"list_thread_events","resumeSession":"resume_session","sendTurn":"send_turn","startThread":"start_thread"} as const;
 
-export const WORKSPACE_METHODS = {"createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","listLocalBranches":"list_local_branches","listWorkspaces":"list_workspaces"} as const;
+export const WORKSPACE_METHODS = {"createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listWorkspaces":"list_workspaces"} as const;
 
 /* Types */
 export type AbortRunInput = {
@@ -143,6 +143,22 @@ export type HealthStatus = "Healthy" | ({ Degraded: {
 	reason: string,
 } }) & { Degraded?: never };
 
+export type ListChildDirectoriesInput = {
+	path: string,
+};
+
+export type ListChildDirectoriesOutput = {
+	paths: string[],
+};
+
+export type ListGitTrackedFilesInput = {
+	workspaceRoot: string,
+};
+
+export type ListGitTrackedFilesOutput = {
+	paths: string[],
+};
+
 export type ListLocalBranchesInput = {
 	workspaceRoot: string,
 };
@@ -196,6 +212,10 @@ export type ResumeSessionOutput = {
 export type SendTurnInput = {
 	sessionId: SessionId,
 	prompt: string,
+	// When set, replaces the session provider before this turn (same workspace session).
+	providerId?: string | null,
+	// When set, replaces the session model before this turn.
+	model?: string | null,
 };
 
 export type SendTurnOutput = {
