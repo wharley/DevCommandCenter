@@ -601,6 +601,7 @@ export default function App() {
 						aria-label="Workspace panel"
 						className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
 					>
+						{/* Keep z-index below workspace viewport so header/toolbar clicks reach buttons (Tauri drag region steals first click when on top). */}
 						<div
 							aria-label="Workspace panel drag region"
 							data-tauri-drag-region
@@ -608,7 +609,7 @@ export default function App() {
 						/>
 						<div
 							aria-label="Workspace viewport"
-							className="flex min-h-0 flex-1 flex-col bg-background"
+							className="relative z-20 flex min-h-0 flex-1 flex-col bg-background"
 						>
 							<WorkspaceCommandPalette
 								open={isCommandPaletteOpen}
