@@ -69,13 +69,13 @@ function CommandInput({
 		<div data-slot="command-input-wrapper" className="p-1">
 			<div
 				className={cn(
-					"flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border border-input/30 bg-input/30 px-2 transition-colors outline-none",
+					"flex h-8 items-center gap-1 rounded-lg border border-input/30 bg-input/30 px-2.5 shadow-none transition-colors outline-none",
 					"has-[[data-slot=command-input]:focus-visible]:border-ring",
 					"has-[[data-slot=command-input]:focus-visible]:ring-3",
 					"has-[[data-slot=command-input]:focus-visible]:ring-ring/50",
-					"dark:bg-input/30",
 				)}
 			>
+				<SearchIcon className="size-4 shrink-0 opacity-50" aria-hidden />
 				<CommandPrimitive.Input
 					data-slot="command-input"
 					className={cn(
@@ -84,7 +84,6 @@ function CommandInput({
 					)}
 					{...props}
 				/>
-				<SearchIcon className="size-4 shrink-0 opacity-50" aria-hidden />
 			</div>
 		</div>
 	);
@@ -98,7 +97,7 @@ function CommandList({
 		<CommandPrimitive.List
 			data-slot="command-list"
 			className={cn(
-				"max-h-72 scroll-py-1 overflow-x-hidden overflow-y-auto outline-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]",
+				"no-scrollbar max-h-72 scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
 				className,
 			)}
 			{...props}
@@ -157,12 +156,8 @@ function CommandItem({
 		<CommandPrimitive.Item
 			data-slot="command-item"
 			className={cn(
-				"group/command-item relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none",
-				"in-data-[slot=dialog-content]:rounded-lg!",
-				"data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50",
-				"data-selected:bg-muted data-selected:text-foreground",
+				"group/command-item relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm data-[selected=true]:bg-muted data-[selected=true]:text-foreground",
 				"[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-				"data-selected:*:[svg]:text-foreground",
 				className,
 			)}
 			{...props}

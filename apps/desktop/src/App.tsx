@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useState,
+	type KeyboardEventHandler,
+	type MouseEventHandler,
+} from "react";
+import { Toaster } from "sonner";
 import { cn } from "@/lib/utils";
 import {
 	MAX_INSPECTOR_WIDTH,
@@ -7,7 +15,7 @@ import {
 	MIN_SIDEBAR_WIDTH,
 	SIDEBAR_RESIZE_HIT_AREA,
 } from "./shell/layout";
-import { useShellPanels } from "./shell/use-panels";
+import { useShellPanels } from "./shell/hooks/useShellPanels";
 import { useZoom } from "./shell/use-zoom";
 import {
 	WorkspacesSidebar,
@@ -31,6 +39,61 @@ import {
 import type {
 	ProviderCatalog,
 } from "@dcc/contracts";
+import { useAppearance } from "./components/theme-provider";
+
+function ResizeSeparator({
+	side,
+	widthAt,
+	ariaLabel,
+	ariaMin,
+	ariaMax,
+	ariaNow,
+	isActive,
+	onMouseDown,
+	onKeyDown,
+}: {
+	side: "left" | "right";
+	widthAt: number;
+	ariaLabel: string;
+	ariaMin: number;
+	ariaMax: number;
+	ariaNow: number;
+	isActive: boolean;
+	onMouseDown: MouseEventHandler<HTMLDivElement>;
+	onKeyDown: KeyboardEventHandler<HTMLDivElement>;
+}) {
+	return (
+		<div
+			role="separator"
+			tabIndex={0}
+			aria-label={ariaLabel}
+			aria-orientation="vertical"
+			aria-valuemin={ariaMin}
+			aria-valuemax={ariaMax}
+			aria-valuenow={ariaNow}
+			onMouseDown={onMouseDown}
+			onKeyDown={onKeyDown}
+			className="group absolute inset-y-0 z-30 cursor-ew-resize touch-none outline-none transition-[width,background-color,box-shadow]"
+			style={{
+				[side === "left" ? "left" : "right"]:
+					side === "left"
+						? `${Math.max(0, widthAt - SIDEBAR_RESIZE_HIT_AREA / 2)}px`
+						: `${Math.max(0, widthAt - SIDEBAR_RESIZE_HIT_AREA)}px`,
+				width: `${SIDEBAR_RESIZE_HIT_AREA}px`,
+			}}
+		>
+			<span
+				aria-hidden="true"
+				className={cn(
+					"pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2",
+					isActive
+						? "w-[2px] bg-foreground/80 shadow-[0_0_12px_rgba(0,0,0,0.12)] dark:shadow-[0_0_12px_rgba(255,255,255,0.16)]"
+						: "w-px bg-border group-hover:w-[2px] group-hover:bg-muted-foreground/75 group-focus-visible:w-[2px] group-focus-visible:bg-muted-foreground/75",
+				)}
+			/>
+		</div>
+	);
+}
 
 export default function App() {
 	useZoom(1);
@@ -39,6 +102,7 @@ export default function App() {
 		handleResizeKeyDown,
 		handleResizeStart,
 		inspectorWidth,
+		inspectorCollapsed,
 		isInspectorResizing,
 		isSidebarResizing,
 		sidebarCollapsed,
@@ -48,12 +112,10 @@ export default function App() {
 	const {
 		allWorkspaces,
 		createWorkspace,
-		filter,
 		filteredWorkspaces,
 		isCreatingWorkspace,
 		selectedWorkspace,
 		selectedWorkspaceId,
-		setFilter,
 		setSelectedWorkspaceId,
 	} = useWorkspacesPanel();
 	const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -65,11 +127,9 @@ export default function App() {
 	const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
 		null,
 	);
-	const [sessionDraft, setSessionDraft] = useState(
-		"Describe the change you want in this workspace. The Rust core and Tauri bridge stay the boundary.",
-	);
 	const [sessionSnapshot, setSessionSnapshot] =
 		useState<RuntimeSessionSnapshot | null>(null);
+	const { theme } = useAppearance();
 	const providerChoices = providerCatalog?.providers ?? [];
 	const selectedWorkspacePath =
 		selectedWorkspace.worktreePath ?? selectedWorkspace.rootPath ?? null;
@@ -110,9 +170,6 @@ export default function App() {
 
 	useEffect(() => {
 		setSessionSnapshot(null);
-		setSessionDraft(
-			"Describe the change you want in this workspace. The Rust core and Tauri bridge stay the boundary.",
-		);
 	}, [selectedWorkspace.id]);
 
 	const handleStartSession = useCallback(async () => {
@@ -138,7 +195,12 @@ export default function App() {
 		});
 	}, [selectedProvider, selectedWorkspace.id, selectedWorkspace.name, selectedWorkspace.projectId]);
 
-	const handleSendTurn = useCallback(async () => {
+	const handleSubmitPrompt = useCallback(async (prompt: string) => {
+		const trimmedPrompt = prompt.trim();
+		if (trimmedPrompt.length === 0) {
+			return;
+		}
+
 		let currentSession = sessionSnapshot;
 		if (!currentSession) {
 			if (!selectedProvider) {
@@ -166,7 +228,7 @@ export default function App() {
 
 		const result = await sendTurn({
 			sessionId: currentSession.sessionId,
-			prompt: sessionDraft.trim(),
+			prompt: trimmedPrompt,
 		});
 
 		setSessionSnapshot({
@@ -180,13 +242,11 @@ export default function App() {
 			lastTurnPrompt: result.turn.content,
 			lastTurnState: result.turn.state,
 		});
-		setSessionDraft("");
 	}, [
 		selectedProvider,
 		selectedWorkspace.id,
 		selectedWorkspace.name,
 		selectedWorkspace.projectId,
-		sessionDraft,
 		sessionSnapshot,
 	]);
 
@@ -196,7 +256,7 @@ export default function App() {
 		}
 
 		const result = await resumeSession({ sessionId: sessionSnapshot.sessionId });
-		setSessionSnapshot((current) =>
+		setSessionSnapshot((current: RuntimeSessionSnapshot | null) =>
 			current
 				? {
 						...current,
@@ -217,7 +277,7 @@ export default function App() {
 			sessionId: sessionSnapshot.sessionId,
 			reason: "Stopped from shell",
 		});
-		setSessionSnapshot((current) =>
+		setSessionSnapshot((current: RuntimeSessionSnapshot | null) =>
 			current
 				? {
 						...current,
@@ -252,141 +312,123 @@ export default function App() {
 	const sidebarRailWidth = sidebarCollapsed ? 76 : sidebarWidth;
 
 	return (
-		<main className="relative h-screen overflow-hidden bg-background font-sans text-foreground antialiased">
-			<div className="dcc-app-shell relative flex h-full min-h-0 min-w-0 bg-background">
-				<aside
-					className="dcc-sidebar dcc-workbench-rail relative flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar"
-					style={{ width: `${sidebarRailWidth}px` }}
-					aria-label="Workspace sidebar"
-				>
-					<WorkspacesSidebar
-						collapsed={sidebarCollapsed}
-						filter={filter}
-						isCreatingWorkspace={isCreatingWorkspace}
-						onFilterChange={setFilter}
-						onSelectWorkspace={setSelectedWorkspaceId}
-						onCreateWorkspace={() => setIsCreateWorkspaceOpen(true)}
-						onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
-						selectedWorkspaceId={selectedWorkspaceId}
-						workspaces={filteredWorkspaces}
-					/>
-				</aside>
-
-				<div
-					role="separator"
-					tabIndex={0}
-					aria-label="Resize sidebar"
-					aria-orientation="vertical"
-					aria-valuemin={MIN_SIDEBAR_WIDTH}
-					aria-valuemax={MAX_SIDEBAR_WIDTH}
-					aria-valuenow={sidebarWidth}
-					onMouseDown={handleResizeStart("sidebar")}
-					onKeyDown={handleResizeKeyDown("sidebar")}
-					className="group absolute inset-y-0 z-30 cursor-ew-resize touch-none outline-none"
-					style={{
-						left: `${sidebarRailWidth - SIDEBAR_RESIZE_HIT_AREA / 2}px`,
-						width: `${SIDEBAR_RESIZE_HIT_AREA}px`,
-					}}
-				>
-					<span
-						aria-hidden="true"
-						className={cn(
-							"pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 transition-[width,background-color,box-shadow]",
-							isSidebarResizing
-								? "w-[2px] bg-foreground/80 shadow-[0_0_12px_rgba(0,0,0,0.12)] dark:shadow-[0_0_12px_rgba(255,255,255,0.16)]"
-								: "w-px bg-border group-hover:w-[2px] group-hover:bg-muted-foreground/75 group-focus-visible:w-[2px] group-focus-visible:bg-muted-foreground/75",
-						)}
-					/>
-				</div>
-
-				<section
-					className="dcc-main dcc-main--workbench relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
-					aria-label="Workspace panel"
-				>
-					<div
-						className="flex min-h-0 min-w-0 flex-1 flex-col bg-background"
-						aria-label="Workspace viewport"
+		<>
+			<main
+				aria-label="Application shell"
+				className="relative h-screen overflow-hidden bg-background font-sans text-foreground antialiased"
+			>
+				<div className="relative flex h-full min-h-0 bg-background">
+					<aside
+						aria-label="Workspace sidebar"
+						data-dcc-sidebar-root
+						className="relative flex h-full shrink-0 flex-col overflow-hidden bg-sidebar"
+						style={{ width: `${sidebarRailWidth}px` }}
 					>
-						<WorkspaceCommandPalette
-							open={isCommandPaletteOpen}
-							onOpenChange={setIsCommandPaletteOpen}
-							workspaces={allWorkspaces}
-							selectedWorkspaceId={selectedWorkspace.id}
+						<WorkspacesSidebar
+							collapsed={sidebarCollapsed}
+							isCreatingWorkspace={isCreatingWorkspace}
 							onSelectWorkspace={setSelectedWorkspaceId}
+							onCreateWorkspace={() => setIsCreateWorkspaceOpen(true)}
+							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+							selectedWorkspaceId={selectedWorkspaceId}
+							workspaces={filteredWorkspaces}
 						/>
-						<CreateWorkspaceDialog
-							open={isCreateWorkspaceOpen}
-							onOpenChange={setIsCreateWorkspaceOpen}
-							onCreateWorkspace={createWorkspace}
-							isSubmitting={isCreatingWorkspace}
-						/>
-						<SessionWorkbench
-							workspaceId={selectedWorkspace.id}
-							workspaceName={selectedWorkspace.name}
-							workspaceBranch={selectedWorkspace.branch}
-							workspacePath={selectedWorkspacePath}
-							selectedProviderLabel={selectedProvider?.label ?? null}
-							selectedProviderId={selectedProviderId}
-							providerChoices={providerChoices}
-							sessionSnapshot={sessionSnapshot}
-							sessionEvents={sessionEvents}
-							sessionDraft={sessionDraft}
-							onSessionDraftChange={setSessionDraft}
-							onSelectProvider={setSelectedProviderId}
-							onStartSession={handleStartSession}
-							onSendTurn={handleSendTurn}
-							onResumeSession={handleResumeSession}
-							onAbortSession={handleAbortSession}
-							onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-						/>
-					</div>
-				</section>
+					</aside>
 
-				<div
-					role="separator"
-					tabIndex={0}
-					aria-label="Resize inspector sidebar"
-					aria-orientation="vertical"
-					aria-valuemin={MIN_INSPECTOR_WIDTH}
-					aria-valuemax={MAX_INSPECTOR_WIDTH}
-					aria-valuenow={inspectorWidth}
-					onMouseDown={handleResizeStart("inspector")}
-					onKeyDown={handleResizeKeyDown("inspector")}
-					className="group absolute inset-y-0 z-30 cursor-ew-resize touch-none outline-none"
-					style={{
-						right: `${Math.max(0, inspectorWidth - SIDEBAR_RESIZE_HIT_AREA)}px`,
-						width: `${SIDEBAR_RESIZE_HIT_AREA}px`,
-					}}
-				>
-					<span
-						aria-hidden="true"
-						className={cn(
-							"pointer-events-none absolute inset-y-0 left-0 transition-[width,background-color,box-shadow]",
-							isInspectorResizing
-								? "w-[2px] bg-transparent shadow-none"
-								: "w-px bg-border group-hover:w-[2px] group-hover:bg-muted-foreground/75 group-focus-visible:w-[2px] group-focus-visible:bg-muted-foreground/75",
-						)}
+					<ResizeSeparator
+						side="left"
+						widthAt={sidebarRailWidth}
+						ariaLabel="Resize sidebar"
+						ariaMin={MIN_SIDEBAR_WIDTH}
+						ariaMax={MAX_SIDEBAR_WIDTH}
+						ariaNow={sidebarWidth}
+						isActive={isSidebarResizing}
+						onMouseDown={handleResizeStart("sidebar")}
+						onKeyDown={handleResizeKeyDown("sidebar")}
 					/>
+
+					<section
+						aria-label="Workspace panel"
+						className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
+					>
+						<div
+							aria-label="Workspace panel drag region"
+							data-tauri-drag-region
+							className="absolute inset-x-0 top-0 z-10 h-9 bg-transparent"
+						/>
+						<div
+							aria-label="Workspace viewport"
+							className="flex min-h-0 flex-1 flex-col bg-background"
+						>
+							<WorkspaceCommandPalette
+								open={isCommandPaletteOpen}
+								onOpenChange={setIsCommandPaletteOpen}
+								workspaces={allWorkspaces}
+								selectedWorkspaceId={selectedWorkspace.id}
+								onSelectWorkspace={setSelectedWorkspaceId}
+							/>
+							<CreateWorkspaceDialog
+								open={isCreateWorkspaceOpen}
+								onOpenChange={setIsCreateWorkspaceOpen}
+								onCreateWorkspace={createWorkspace}
+								isSubmitting={isCreatingWorkspace}
+							/>
+							<SessionWorkbench
+								workspaceId={selectedWorkspace.id}
+								workspaceName={selectedWorkspace.name}
+								workspaceBranch={selectedWorkspace.branch}
+								workspacePath={selectedWorkspacePath}
+								selectedProviderLabel={selectedProvider?.label ?? null}
+								selectedProviderId={selectedProviderId}
+								providerChoices={providerChoices}
+								sessionSnapshot={sessionSnapshot}
+								sessionEvents={sessionEvents}
+								onSelectProvider={setSelectedProviderId}
+								onStartSession={handleStartSession}
+								onSubmitPrompt={handleSubmitPrompt}
+								onResumeSession={handleResumeSession}
+								onAbortSession={handleAbortSession}
+								onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+							/>
+						</div>
+					</section>
+
+					{!inspectorCollapsed && (
+						<>
+							<ResizeSeparator
+								side="right"
+								widthAt={inspectorWidth}
+								ariaLabel="Resize inspector sidebar"
+								ariaMin={MIN_INSPECTOR_WIDTH}
+								ariaMax={MAX_INSPECTOR_WIDTH}
+								ariaNow={inspectorWidth}
+								isActive={isInspectorResizing}
+								onMouseDown={handleResizeStart("inspector")}
+								onKeyDown={handleResizeKeyDown("inspector")}
+							/>
+
+							<aside
+								aria-label="Inspector sidebar"
+								className="relative h-full shrink-0 overflow-hidden bg-sidebar has-[[data-tabs-zoomed=true]]:overflow-visible"
+								style={{ width: `${inspectorWidth}px` }}
+							>
+								<WorkspaceInspectorSidebar
+									providerCatalog={providerCatalog}
+									sessionSnapshot={sessionSnapshot}
+									workspaceId={selectedWorkspace.id}
+									workspaceName={selectedWorkspace.name}
+									workspaceBranch={selectedWorkspace.branch}
+									workspacePath={selectedWorkspacePath}
+									selectedProviderLabel={selectedProvider?.label ?? null}
+									sessionState={sessionSnapshot?.state ?? "idle"}
+									sessionId={sessionSnapshot?.sessionId ?? null}
+								/>
+							</aside>
+						</>
+					)}
 				</div>
-
-				<aside
-					className="dcc-inspector-aside relative h-full shrink-0 overflow-hidden border-l border-border bg-sidebar"
-					style={{ width: `${inspectorWidth}px` }}
-					aria-label="Inspector sidebar"
-				>
-					<WorkspaceInspectorSidebar
-						providerCatalog={providerCatalog}
-						sessionSnapshot={sessionSnapshot}
-						workspaceId={selectedWorkspace.id}
-						workspaceName={selectedWorkspace.name}
-						workspaceBranch={selectedWorkspace.branch}
-						workspacePath={selectedWorkspacePath}
-						selectedProviderLabel={selectedProvider?.label ?? null}
-						sessionState={sessionSnapshot?.state ?? "idle"}
-						sessionId={sessionSnapshot?.sessionId ?? null}
-					/>
-				</aside>
-			</div>
-		</main>
+			</main>
+			<Toaster theme={theme} position="bottom-right" visibleToasts={6} />
+		</>
 	);
 }

@@ -8,9 +8,16 @@ import {
 import {
 	clampInspectorWidth,
 	clampSidebarWidth,
+	getInitialCollapsed,
 	getInitialInspectorWidth,
 	getInitialSidebarWidth,
+	MAX_INSPECTOR_WIDTH,
+	MAX_SIDEBAR_WIDTH,
+	MIN_INSPECTOR_WIDTH,
+	MIN_SIDEBAR_WIDTH,
+	INSPECTOR_COLLAPSED_STORAGE_KEY,
 	INSPECTOR_WIDTH_STORAGE_KEY,
+	SIDEBAR_COLLAPSED_STORAGE_KEY,
 	SIDEBAR_RESIZE_STEP,
 	SIDEBAR_WIDTH_STORAGE_KEY,
 } from "./layout";
@@ -23,37 +30,56 @@ type ResizeState = {
 	target: ResizeTarget;
 };
 
-function persistWidth(storageKey: string, width: number) {
+function persistValue(storageKey: string, value: string) {
 	try {
-		window.localStorage.setItem(storageKey, String(width));
+		window.localStorage.setItem(storageKey, value);
 	} catch (error) {
 		console.error(`[dcc] failed to persist "${storageKey}"`, error);
 	}
 }
 
+function clampTargetWidth(target: ResizeTarget, width: number) {
+	return target === "sidebar"
+		? clampSidebarWidth(width)
+		: clampInspectorWidth(width);
+}
+
 export function useShellPanels() {
 	const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
-	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+	const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+		getInitialCollapsed(SIDEBAR_COLLAPSED_STORAGE_KEY, false),
+	);
 	const [inspectorWidth, setInspectorWidth] = useState(() =>
 		getInitialInspectorWidth(),
+	);
+	const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
+		getInitialCollapsed(INSPECTOR_COLLAPSED_STORAGE_KEY, false),
 	);
 	const [resizeState, setResizeState] = useState<ResizeState | null>(null);
 
 	useEffect(() => {
-		persistWidth(SIDEBAR_WIDTH_STORAGE_KEY, sidebarWidth);
+		persistValue(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
 	}, [sidebarWidth]);
 
 	useEffect(() => {
-		persistWidth(INSPECTOR_WIDTH_STORAGE_KEY, inspectorWidth);
+		persistValue(INSPECTOR_WIDTH_STORAGE_KEY, String(inspectorWidth));
 	}, [inspectorWidth]);
+
+	useEffect(() => {
+		persistValue(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+	}, [sidebarCollapsed]);
+
+	useEffect(() => {
+		persistValue(INSPECTOR_COLLAPSED_STORAGE_KEY, String(inspectorCollapsed));
+	}, [inspectorCollapsed]);
 
 	useEffect(() => {
 		if (!resizeState) {
 			return;
 		}
 
-		let pendingWidth: number | null = null;
 		let rafId: number | null = null;
+		let pendingWidth: number | null = null;
 
 		const flush = () => {
 			rafId = null;
@@ -78,10 +104,7 @@ export function useShellPanels() {
 					? resizeState.size + deltaX
 					: resizeState.size - deltaX;
 
-			pendingWidth =
-				resizeState.target === "sidebar"
-					? clampSidebarWidth(nextRawWidth)
-					: clampInspectorWidth(nextRawWidth);
+			pendingWidth = clampTargetWidth(resizeState.target, nextRawWidth);
 
 			if (rafId === null) {
 				rafId = window.requestAnimationFrame(flush);
@@ -92,6 +115,7 @@ export function useShellPanels() {
 			if (rafId !== null) {
 				window.cancelAnimationFrame(rafId);
 			}
+
 			flush();
 			setResizeState(null);
 		};
@@ -109,6 +133,7 @@ export function useShellPanels() {
 			if (rafId !== null) {
 				window.cancelAnimationFrame(rafId);
 			}
+
 			document.body.style.cursor = previousCursor;
 			document.body.style.userSelect = previousUserSelect;
 			window.removeEventListener("mousemove", handleMouseMove);
@@ -130,31 +155,51 @@ export function useShellPanels() {
 
 	const handleResizeKeyDown = useCallback(
 		(target: ResizeTarget) => (event: KeyboardEvent<HTMLDivElement>) => {
-			if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
-				return;
+			const currentWidth =
+				target === "sidebar" ? sidebarWidth : inspectorWidth;
+
+			let nextWidth = currentWidth;
+			switch (event.key) {
+				case "ArrowLeft":
+					nextWidth = currentWidth - SIDEBAR_RESIZE_STEP;
+					break;
+				case "ArrowRight":
+					nextWidth = currentWidth + SIDEBAR_RESIZE_STEP;
+					break;
+				case "Home":
+					nextWidth =
+						target === "sidebar" ? MIN_SIDEBAR_WIDTH : MIN_INSPECTOR_WIDTH;
+					break;
+				case "End":
+					nextWidth =
+						target === "sidebar" ? MAX_SIDEBAR_WIDTH : MAX_INSPECTOR_WIDTH;
+					break;
+				default:
+					return;
 			}
 
 			event.preventDefault();
-			const delta = event.key === "ArrowRight" ? SIDEBAR_RESIZE_STEP : -SIDEBAR_RESIZE_STEP;
-
+			const clamped = clampTargetWidth(target, nextWidth);
 			if (target === "sidebar") {
-				setSidebarWidth((currentWidth) => clampSidebarWidth(currentWidth + delta));
+				setSidebarWidth(clamped);
 				return;
 			}
 
-			setInspectorWidth((currentWidth) => clampInspectorWidth(currentWidth - delta));
+			setInspectorWidth(clamped);
 		},
-		[],
+		[inspectorWidth, sidebarWidth],
 	);
 
 	return {
 		handleResizeKeyDown,
 		handleResizeStart,
+		inspectorCollapsed,
 		inspectorWidth,
 		isInspectorResizing: resizeState?.target === "inspector",
 		isSidebarResizing: resizeState?.target === "sidebar",
 		sidebarCollapsed,
 		sidebarWidth,
+		setInspectorCollapsed,
 		setInspectorWidth,
 		setSidebarCollapsed,
 		setSidebarWidth,

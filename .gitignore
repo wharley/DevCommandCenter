@@ -11,7 +11,8 @@ node_modules/
 /build
 /dist-electron
 /.electron
-/dist
+# dist/ matches any apps/desktop/dist, packages/*/dist, etc. (/dist matched only repo root)
+dist/
 /release
 
 # Bundled Node binary (downloaded by scripts/download-node-binary.cjs before electron:build)

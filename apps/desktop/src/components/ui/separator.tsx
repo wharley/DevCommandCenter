@@ -12,7 +12,10 @@ function Separator({
 		<SeparatorPrimitive.Root
 			decorative={decorative}
 			orientation={orientation}
-			className={cn("dcc-separator", className)}
+			className={cn(
+				orientation === "horizontal" ? "h-px w-full bg-border" : "w-px self-stretch bg-border",
+				className,
+			)}
 			{...props}
 		/>
 	);

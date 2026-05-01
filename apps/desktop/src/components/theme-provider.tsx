@@ -25,13 +25,27 @@ type ThemeProviderProps = {
 	defaultTheme?: DccTheme;
 };
 
-function readStoredTheme(fallback: DccTheme): DccTheme {
+function readStoredTheme(fallback?: DccTheme): DccTheme | null {
 	if (typeof window === "undefined") {
-		return fallback;
+		return fallback ?? null;
 	}
 
 	const stored = window.localStorage.getItem(DCC_THEME_STORAGE_KEY);
-	return stored === "light" || stored === "dark" ? stored : fallback;
+	if (stored === "light" || stored === "dark") {
+		return stored;
+	}
+
+	return fallback ?? null;
+}
+
+function getSystemTheme(): DccTheme {
+	if (typeof window === "undefined") {
+		return "dark";
+	}
+
+	return window.matchMedia("(prefers-color-scheme: dark)").matches
+		? "dark"
+		: "light";
 }
 
 export function applyDccThemeClass(theme: DccTheme) {
@@ -66,10 +80,11 @@ export function useAppearance(): AppearanceContextValue {
 
 export function ThemeProvider({
 	children,
-	defaultTheme = "dark",
+	defaultTheme,
 }: ThemeProviderProps) {
 	const [theme, setThemeState] = useState<DccTheme>(() => {
-		const initial = readStoredTheme(defaultTheme);
+		const initial =
+			readStoredTheme(defaultTheme) ?? getSystemTheme();
 		applyDccThemeClass(initial);
 		return initial;
 	});

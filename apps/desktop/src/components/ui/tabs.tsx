@@ -19,12 +19,12 @@ function Tabs({
 }
 
 const tabsListVariants = cva(
-	"group/tabs-list inline-flex w-fit items-center justify-center rounded-[16px] p-1 text-[var(--dcc-text-muted)]",
+	"inline-flex w-fit items-center justify-center",
 	{
 		variants: {
 			variant: {
-				default: "bg-[color-mix(in_oklab,var(--dcc-surface-2)_80%,transparent)]",
-				line: "gap-1 bg-transparent p-0",
+				default: "rounded-lg bg-muted p-1",
+				line: "border-b bg-transparent",
 			},
 		},
 		defaultVariants: {
@@ -57,7 +57,7 @@ function TabsTrigger({
 		<TabsPrimitive.Trigger
 			data-slot="tabs-trigger"
 			className={cn(
-				"relative inline-flex h-8 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[12px] border border-transparent px-3 text-sm font-medium whitespace-nowrap text-[var(--dcc-text-muted)] transition-all hover:text-[var(--dcc-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--dcc-accent)_45%,transparent)] disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-[var(--dcc-text)] data-[state=active]:shadow-sm",
+				"relative inline-flex h-[calc(100%-1px)] flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium text-muted-foreground transition-all hover:text-foreground data-[state=active]:bg-background data-[state=active]:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50",
 				className,
 			)}
 			{...props}

@@ -29,7 +29,7 @@ function PopoverContent({
 				align={align}
 				sideOffset={sideOffset}
 				className={cn(
-					"z-50 flex w-72 origin-[var(--radix-popover-content-transform-origin)] flex-col gap-2 rounded-[20px] border border-border/80 bg-[color-mix(in_oklab,var(--dcc-surface-2)_92%,transparent)] p-3 text-sm text-[var(--dcc-text)] shadow-[0_24px_80px_color-mix(in_oklab,black_32%,transparent)] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+					"z-50 flex w-72 origin-(--radix-popover-content-transform-origin) flex-col gap-2.5 rounded-lg bg-popover p-2.5 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
 					className,
 				)}
 				{...props}

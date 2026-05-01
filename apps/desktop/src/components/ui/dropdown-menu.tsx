@@ -1,5 +1,6 @@
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 function DropdownMenu({
@@ -23,20 +24,40 @@ function DropdownMenuContent({
 		<DropdownMenuPrimitive.Portal>
 			<DropdownMenuPrimitive.Content
 				sideOffset={sideOffset}
-				className={cn("dcc-dropdown-menu-content", className)}
+				className={cn(
+					"z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-24 origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+					className,
+				)}
 				{...props}
 			/>
 		</DropdownMenuPrimitive.Portal>
 	);
 }
 
+const dropdownMenuItemVariants = cva(
+	"group/dropdown-menu-item relative flex cursor-pointer items-center rounded-md px-1.5 outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+	{
+		variants: {
+			size: {
+				default: "gap-1.5 py-1 text-sm",
+				sm: "gap-1 py-1 text-xs",
+			},
+		},
+		defaultVariants: {
+			size: "default",
+		},
+	},
+);
+
 function DropdownMenuItem({
 	className,
+	size = "default",
 	...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Item>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Item> &
+	VariantProps<typeof dropdownMenuItemVariants>) {
 	return (
 		<DropdownMenuPrimitive.Item
-			className={cn("dcc-dropdown-menu-item", className)}
+			className={cn(dropdownMenuItemVariants({ size }), className)}
 			{...props}
 		/>
 	);
@@ -48,7 +69,10 @@ function DropdownMenuLabel({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Label>) {
 	return (
 		<DropdownMenuPrimitive.Label
-			className={cn("dcc-dropdown-menu-label", className)}
+			className={cn(
+				"px-1.5 py-1 text-[11px] font-medium tracking-[0.06em] uppercase text-muted-foreground",
+				className,
+			)}
 			{...props}
 		/>
 	);
@@ -60,7 +84,7 @@ function DropdownMenuSeparator({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Separator>) {
 	return (
 		<DropdownMenuPrimitive.Separator
-			className={cn("dcc-dropdown-menu-separator", className)}
+			className={cn("-mx-1 my-1 h-px bg-border", className)}
 			{...props}
 		/>
 	);

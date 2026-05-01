@@ -11,3 +11,5 @@ export type DccRuntimeSessionSnapshot = {
 	lastTurnPrompt?: string | null;
 	lastTurnState?: string | null;
 };
+
+export type RuntimeSessionSnapshot = DccRuntimeSessionSnapshot;

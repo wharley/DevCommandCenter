@@ -1299,6 +1299,20 @@ Goal: every existing DCC feature still works, but the shell looks like helmor.
 
 **Phase 1 done = the shell visually matches helmor's silhouette: same widths, same borders, same colors, same typography. The middle panel can still be the current `SessionWorkbench`.**
 
+**Phase 1 status as of 2026-05-01: done.** The following work is already in place in `apps/desktop`:
+
+Implemented:
+
+- `app.css` / `color-theme.css` wiring from `main.tsx`.
+- `shell/layout.ts` and `shell/use-panels.ts` contract.
+- Shell skeleton in `App.tsx` with resize separators and `Toaster`.
+- Splash screen hook/component.
+- Base UI primitives needed by the current shell.
+- Sidebar header actions, repo picker popover, collapsed rail controls, and row styling.
+- `apps/desktop/package.json` dependencies aligned with the Phase-1 Radix / utility set.
+
+The GitHub status menu in the sidebar footer is now treated as a later chrome/account integration item, not a Phase 1 blocker. It can land with Phase 3 or any future account pass without reopening Phase 1.
+
 ### Phase 2 — Composer + conversation
 
 1. Install: `lexical`, `@lexical/react`, `streamdown`, `@streamdown/code`.
@@ -1309,7 +1323,22 @@ Goal: every existing DCC feature still works, but the shell looks like helmor.
 6. Build `tool-call.tsx`, `reasoning.tsx` collapsibles for assistant tool/thinking display.
 7. Replace existing send UI in `SessionWorkbench` with the new composer.
 
-**Phase 2 done = sending a message uses the new composer; replies render with markdown + tool calls + reasoning.**
+**Phase 2 status as of 2026-05-01: in progress.** The new composer/panel scaffold is in place in `apps/desktop`, but Phase 2 is not closed yet.
+
+Implemented:
+
+- `features/panel/` scaffold with the new thread viewport and message components.
+- `features/composer/` scaffold with a Lexical-based editor, draft persistence, auto-resize, and submit handling.
+- `streamdown`-based assistant rendering plus code block / link wrappers.
+- `SessionWorkbench` now delegates the send surface to the new composer flow.
+
+Still pending to close Phase 2:
+
+- Finish the remaining composer affordances from §7.4/§7.6 that are not yet wired.
+- Expand the thread projection to match the final assistant/tool/reasoning structure when the backend emits richer payloads.
+- Remove any remaining legacy session-send surface once the new panel is the only path we want to keep.
+
+Do **not** start Phase 3 until the remaining Phase 2 items are explicitly acknowledged as complete or waived.
 
 ### Phase 3 — Inspector + chrome polish
 
@@ -1319,6 +1348,7 @@ Goal: every existing DCC feature still works, but the shell looks like helmor.
 4. Polish the command palette (§9) — sections, keyboard nav, "actions" group.
 5. Branch toolbar / picker (`components/BranchToolbar.tsx`) integrated into the inspector or middle-pane header.
 6. Settings dialog (§10) with at least: Appearance, Model, Account.
+7. Sidebar footer GitHub status menu when the account integration is available.
 
 **Phase 3 done = inspector matches helmor's three-tier panel; commit button reflects PR state; settings dialog opens from sidebar footer.**
 
@@ -1394,3 +1424,7 @@ End of blueprint. Updates to this document should be made as PRs against `evolut
 ## Changelog
 
 - 2026-05-01 — initial draft (Phases 1–4 planned, no code yet).
+- 2026-05-01 — Phase 1 completed in `apps/desktop`: `app.css`, `color-theme.css`, shell layout/resizing, helmor-style primitives, workspace sidebar chrome, splash screen, `Toaster` wiring, sidebar repo picker/header actions, and package dependency alignment. The GitHub footer menu is deferred to Phase 3 / account integration.
+- 2026-05-01 — Phase 1 follow-up: removed the legacy sidebar filter, added row hover actions, tightened the left rail toward the blueprint layout, and revalidated the desktop build/typecheck.
+- 2026-05-01 — Phase 1 follow-up: removed the collapsed-rail new-workspace shortcut, tightened group header / badge spacing, and revalidated the desktop build/typecheck again.
+- 2026-05-01 — Phase 2 started in `apps/desktop`: added the new panel/composer scaffold, Lexical draft editor, streamdown-backed assistant renderer, and wired the send flow through the new composer surface. Phase 2 remains open for the remaining composer and thread-polish items.

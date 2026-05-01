@@ -1,44 +1,6 @@
-/* Tailwind utilities for the desktop shell (layout, spacing, colors). */
-@import "tailwindcss";
-
-/* Class-based dark (same pattern as desktop reference shells using shadcn + Tailwind v4). */
-@custom-variant dark (&:is(.dark *));
-
-@source "../**/*.{tsx,ts}";
-
 @import "./dcc-shell-tokens.css";
 
 @import "./dcc-status-tokens.css";
-
-/* Tailwind v4 theme bridge — maps design tokens to utility classes (bg-background, etc.). */
-@theme inline {
-	--color-background: var(--background);
-	--color-foreground: var(--foreground);
-	--color-card: var(--card);
-	--color-card-foreground: var(--card-foreground);
-	--color-border: var(--border);
-	--color-muted: var(--muted);
-	--color-muted-foreground: var(--muted-foreground);
-	--color-accent: var(--accent);
-	--color-accent-foreground: var(--accent-foreground);
-	--color-primary: var(--primary);
-	--color-primary-foreground: var(--primary-foreground);
-	--color-secondary: var(--secondary);
-	--color-secondary-foreground: var(--secondary-foreground);
-	--color-destructive: var(--destructive);
-	--color-popover: var(--popover);
-	--color-popover-foreground: var(--popover-foreground);
-	--color-input: var(--input);
-	--color-ring: var(--ring);
-	--color-sidebar: var(--sidebar);
-	--color-sidebar-foreground: var(--sidebar-foreground);
-	--color-success: var(--success);
-	--color-warning: var(--warning);
-	--color-info: var(--info);
-	--radius-sm: calc(var(--radius) - 4px);
-	--radius-md: calc(var(--radius) - 2px);
-	--radius-lg: var(--radius);
-}
 
 /*
  * Legacy `--dcc-*` aliases → shell tokens + semantic status tokens above.

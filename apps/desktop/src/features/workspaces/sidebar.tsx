@@ -3,7 +3,7 @@ import {
 	Archive,
 	Check,
 	ChevronRight,
-	LoaderCircle,
+	FolderPlus,
 	Moon,
 	PanelLeft,
 	PanelRight,
@@ -23,6 +23,15 @@ import {
 import { useAppearance } from "../../components/theme-provider";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import { CommandPopoverContent } from "../../components/ui/command-popover";
+import {
+	CommandEmpty,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
+	CommandSeparator,
+} from "../../components/ui/command";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -31,8 +40,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
-import { Input } from "../../components/ui/input";
-import { Label } from "../../components/ui/label";
+import { Popover, PopoverTrigger } from "../../components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { WorkspaceSummary } from "./types";
@@ -72,6 +80,10 @@ const BOTTOM_PADDING = 8;
 
 function getGroupGapSize(previousHasRows: boolean, nextHasRows: boolean) {
 	return previousHasRows && nextHasRows ? GROUP_GAP : EMPTY_GROUP_GAP;
+}
+
+function TrafficLightSpacer({ width }: { width: number }) {
+	return <div aria-hidden className="shrink-0" style={{ width }} />;
 }
 
 function RailSettingsMenu({
@@ -133,11 +145,83 @@ function RailSettingsMenu({
 	);
 }
 
+function WorkspaceRepoPicker({
+	workspaces,
+	onCreateWorkspace,
+}: {
+	workspaces: WorkspaceSummary[];
+	onCreateWorkspace: () => void;
+}) {
+	const [open, setOpen] = useState(false);
+
+	return (
+		<Popover open={open} onOpenChange={setOpen}>
+			<PopoverTrigger asChild>
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-xs"
+					aria-label="Open repository picker"
+					className="text-muted-foreground hover:text-foreground"
+				>
+					<Plus className="size-4" strokeWidth={2.2} />
+				</Button>
+			</PopoverTrigger>
+			<CommandPopoverContent
+				align="end"
+				side="bottom"
+				sideOffset={8}
+				className="w-80"
+			>
+				<CommandInput placeholder="Search repositories..." />
+				<CommandList>
+					<CommandEmpty>No repository found.</CommandEmpty>
+					<CommandGroup heading="Recent repos">
+						{workspaces.map((workspace) => (
+							<CommandItem
+								key={workspace.id}
+								value={`${workspace.name} ${workspace.branch} ${workspace.rootPath ?? ""}`}
+								onSelect={() => {
+									setOpen(false);
+								}}
+							>
+								<strong className="truncate">{workspace.name}</strong>
+								<span className="truncate text-[var(--dcc-text-muted)]">
+									{workspace.branch}
+								</span>
+							</CommandItem>
+						))}
+					</CommandGroup>
+					<CommandSeparator />
+					<CommandGroup heading="Actions">
+						<CommandItem
+							value="create workspace"
+							onSelect={() => {
+								setOpen(false);
+								onCreateWorkspace();
+							}}
+						>
+							Open repo picker
+						</CommandItem>
+						<CommandItem
+							value="clone from url"
+							onSelect={() => {
+								setOpen(false);
+								onCreateWorkspace();
+							}}
+						>
+							Clone from URL
+						</CommandItem>
+					</CommandGroup>
+				</CommandList>
+			</CommandPopoverContent>
+		</Popover>
+	);
+}
+
 type WorkspacesSidebarProps = {
 	collapsed: boolean;
-	filter: string;
 	isCreatingWorkspace?: boolean;
-	onFilterChange: (value: string) => void;
 	onSelectWorkspace: (workspaceId: string) => void;
 	onCreateWorkspace: () => void;
 	onToggleCollapsed: () => void;
@@ -147,9 +231,7 @@ type WorkspacesSidebarProps = {
 
 export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	collapsed,
-	filter,
 	isCreatingWorkspace = false,
-	onFilterChange,
 	onSelectWorkspace,
 	onCreateWorkspace,
 	onToggleCollapsed,
@@ -360,9 +442,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					<button
 						type="button"
 						className={cn(
-							"group/trigger flex w-full select-none items-center justify-between rounded-lg px-2 text-[13px] font-semibold tracking-[-0.01em] text-foreground hover:bg-accent/60",
-							"py-1",
-							item.canCollapse ? "cursor-pointer" : "cursor-default",
+							"group/trigger flex w-full cursor-pointer select-none items-center justify-between rounded-lg px-2 py-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground hover:bg-accent/60",
 						)}
 						data-empty-group={isEmptyGroup ? "true" : "false"}
 						disabled={!item.canCollapse}
@@ -385,7 +465,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							<span className="relative flex h-5 min-w-5 items-center justify-center">
 								<Badge
 									variant="secondary"
-									className="h-4 min-w-[16px] justify-center rounded-full px-1 text-[9.5px] leading-none transition-opacity group-hover/trigger:opacity-0"
+									className="h-4 min-w-[16px] justify-center rounded-full px-1 text-[9.5px]"
 								>
 									{item.rowCount}
 								</Badge>
@@ -468,26 +548,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 				<div className="flex shrink-0 flex-col items-center gap-1 pb-2">
 					<RailSettingsMenu menuAlign="center" contentSide="right" />
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-xs"
-								onClick={onCreateWorkspace}
-								disabled={isCreatingWorkspace}
-								aria-label="New workspace"
-								className="text-muted-foreground hover:text-foreground"
-							>
-								{isCreatingWorkspace ? (
-									<LoaderCircle className="size-4 animate-spin" strokeWidth={2} />
-								) : (
-									<Plus className="size-4" strokeWidth={2.2} />
-								)}
-							</Button>
-						</TooltipTrigger>
-						<TooltipContent side="right">New workspace</TooltipContent>
-					</Tooltip>
 				</div>
 			</div>
 		);
@@ -495,10 +555,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 	return (
 		<div className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
-			<div
-				data-slot="window-safe-top"
-				className="flex h-9 shrink-0 items-center pr-3 pl-2"
-			>
+			<div data-slot="window-safe-top" className="flex h-9 shrink-0 items-center pr-3">
+				<TrafficLightSpacer width={94} />
 				<div data-tauri-drag-region className="h-full flex-1" />
 				<Tooltip>
 					<TooltipTrigger asChild>
@@ -521,60 +579,55 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				<h2 className="text-[14px] font-medium tracking-[-0.01em] text-muted-foreground">
 					Workspaces
 				</h2>
-
-				<Tooltip>
-					<TooltipTrigger asChild>
-						<Button
-							type="button"
-							aria-label="New workspace"
-							variant="ghost"
-							size="icon-xs"
-							disabled={isCreatingWorkspace}
-							onClick={onCreateWorkspace}
-							className={cn(
-								"text-muted-foreground hover:text-foreground",
-								isCreatingWorkspace && "cursor-not-allowed opacity-60",
-							)}
-						>
-							{isCreatingWorkspace ? (
-								<LoaderCircle className="size-4 animate-spin" strokeWidth={2.1} />
-							) : (
-								<Plus className="size-4" strokeWidth={2.4} />
-							)}
-						</Button>
-					</TooltipTrigger>
-					<TooltipContent
-						side="bottom"
-						align="end"
-						sideOffset={6}
-						className="max-w-[240px] text-center text-[12px] leading-tight shadow-md"
-					>
-						Create workspace
-					</TooltipContent>
-				</Tooltip>
-			</div>
-
-			<div className="mt-2 px-3">
-				<Label htmlFor="dcc-workspace-filter" className="sr-only">
-					Filter workspaces
-				</Label>
-				<Input
-					id="dcc-workspace-filter"
-					placeholder="Filter by name or branch…"
-					value={filter}
-					onChange={(event) => onFilterChange(event.target.value)}
-					className="h-8 text-[13px]"
-				/>
+				<div className="flex items-center gap-1 text-muted-foreground">
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								aria-label="Open project menu"
+								className="text-muted-foreground hover:text-foreground"
+							>
+								<FolderPlus className="size-4" strokeWidth={1.9} aria-hidden />
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" sideOffset={6} className="min-w-44">
+							<DropdownMenuItem
+								className="gap-2 text-[13px]"
+								onSelect={(event) => {
+									event.preventDefault();
+									onCreateWorkspace();
+								}}
+							>
+								Open project
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								className="gap-2 text-[13px]"
+								onSelect={(event) => {
+									event.preventDefault();
+									onCreateWorkspace();
+								}}
+							>
+								Clone from URL
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+					<WorkspaceRepoPicker
+						workspaces={workspaces}
+						onCreateWorkspace={onCreateWorkspace}
+					/>
+				</div>
 			</div>
 
 			<div
 				ref={scrollContainerRef}
 				data-slot="workspace-groups-scroll"
-				className="scrollbar-stable relative mt-2 min-h-0 flex-1 overflow-y-auto pr-2 pl-2 [scrollbar-width:thin]"
+				className="min-h-0 flex-1 overflow-hidden"
 			>
 				{activeGroups.length === 0 && archivedRows.length === 0 ? (
 					<p className="px-3 py-8 text-center text-[13px] text-muted-foreground">
-						No workspaces match the filter.
+						No workspaces yet.
 					</p>
 				) : (
 					<div
@@ -603,7 +656,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				)}
 			</div>
 
-			<div className="flex shrink-0 items-center justify-start gap-1 border-t border-border/60 px-3 pb-3 pt-2">
+			<div className="flex shrink-0 items-center justify-start gap-1 px-3 pb-3 pt-1">
 				<RailSettingsMenu />
 			</div>
 		</div>

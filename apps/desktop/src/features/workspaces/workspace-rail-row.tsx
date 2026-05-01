@@ -1,7 +1,7 @@
 import { cva } from "class-variance-authority";
-import { GitBranch } from "lucide-react";
+import { ArchiveRestore, GitBranch, Trash2 } from "lucide-react";
 import { memo } from "react";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { WorkspaceSummary } from "./types";
 import {
@@ -51,28 +51,6 @@ function WorkspaceRailAvatar({
 	);
 }
 
-function LifecycleChip({ status }: { status: WorkspaceSummary["status"] }) {
-	if (status === "archived") {
-		return null;
-	}
-	const label =
-		status === "ready"
-			? "Ready"
-			: status === "setup_pending"
-				? "Review"
-				: status === "initializing"
-					? "Running"
-					: null;
-	if (!label) {
-		return null;
-	}
-	return (
-		<Badge variant="outline" className="h-3.5 min-w-0 px-1 text-[9px] font-normal leading-none">
-			<span className="truncate">{label}</span>
-		</Badge>
-	);
-}
-
 export const WorkspaceRailRowItem = memo(
 	function WorkspaceRailRowItem({
 		workspace,
@@ -85,7 +63,7 @@ export const WorkspaceRailRowItem = memo(
 			: workspace.name;
 
 		return (
-			<div className="pl-2">
+			<div className="px-[2px]">
 				<div
 					role="button"
 					tabIndex={0}
@@ -127,8 +105,33 @@ export const WorkspaceRailRowItem = memo(
 							>
 								{displayTitle}
 							</span>
-							<LifecycleChip status={workspace.status} />
 						</div>
+					</div>
+					<div className="group/actions flex shrink-0 items-center gap-0.5 pr-2.5 opacity-0 transition-opacity group-hover/dccRailRow:opacity-100 group-focus-within/dccRailRow:opacity-100">
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-xs"
+							aria-label="Archive workspace"
+							className="text-muted-foreground/60 hover:text-foreground"
+							onClick={(event) => {
+								event.stopPropagation();
+							}}
+						>
+							<ArchiveRestore className="size-3.5" strokeWidth={2} aria-hidden />
+						</Button>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-xs"
+							aria-label="Delete workspace"
+							className="text-muted-foreground/60 hover:text-foreground"
+							onClick={(event) => {
+								event.stopPropagation();
+							}}
+						>
+							<Trash2 className="size-3.5" strokeWidth={2} aria-hidden />
+						</Button>
 					</div>
 				</div>
 			</div>

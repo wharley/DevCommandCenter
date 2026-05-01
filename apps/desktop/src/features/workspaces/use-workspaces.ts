@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { demoWorkspaces } from "./data";
 import type { WorkspaceSummary } from "./types";
 import { createWorkspaceForRepo } from "../../lib/workspace-api";
@@ -28,25 +28,13 @@ function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
 }
 
 export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = demoWorkspaces) {
-	const [filter, setFilter] = useState("");
 	const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
 		workspaces[1]?.id ?? workspaces[0]?.id ?? "",
 	);
 	const [workspaceList, setWorkspaceList] = useState<WorkspaceSummary[]>(workspaces);
 	const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
 
-	const filteredWorkspaces = useMemo(
-		() => {
-			const normalizedFilter = filter.toLowerCase();
-
-			return workspaceList.filter((workspace) =>
-				`${workspace.name} ${workspace.branch} ${workspace.id}`
-					.toLowerCase()
-					.includes(normalizedFilter),
-			);
-		},
-		[filter, workspaceList],
-	);
+	const filteredWorkspaces = workspaceList;
 
 	const selectedWorkspace =
 		filteredWorkspaces.find((workspace) => workspace.id === selectedWorkspaceId) ??
@@ -70,11 +58,9 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = demoWorkspac
 		allWorkspaces: workspaceList,
 		createWorkspace,
 		isCreatingWorkspace,
-		filter,
 		filteredWorkspaces,
 		selectedWorkspace,
 		selectedWorkspaceId,
-		setFilter,
 		setSelectedWorkspaceId,
 	};
 }
