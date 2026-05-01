@@ -25,10 +25,20 @@ pub struct Capabilities {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ProviderModelDescriptor {
+	pub id: String,
+	pub label: String,
+	pub description: String,
+	pub recommended: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderDescriptor {
 	pub id: ProviderId,
 	pub label: String,
 	pub description: String,
+	pub models: Vec<ProviderModelDescriptor>,
 	pub capabilities: Capabilities,
 	pub health: HealthStatus,
 	pub stable: bool,
@@ -44,6 +54,27 @@ pub struct ProviderCatalog {
 pub enum ProviderEvent {
 	Started { at: String },
 	TextDelta { content: String },
+	ReasoningStarted {
+		id: String,
+		label: Option<String>,
+		at: String,
+	},
+	ReasoningDelta { id: String, content: String },
+	ReasoningCompleted { id: String, at: String },
+	ToolCallStarted {
+		id: String,
+		action: String,
+		command: Option<String>,
+		file: Option<String>,
+		at: String,
+	},
+	ToolCallDelta { id: String, content: String },
+	ToolCallCompleted { id: String, at: String },
+	ToolCallFailed {
+		id: String,
+		reason: Option<String>,
+		at: String,
+	},
 	Completed { at: String },
 	Failed { message: String, at: String },
 }

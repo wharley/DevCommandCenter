@@ -1323,45 +1323,40 @@ The GitHub status menu in the sidebar footer is now treated as a later chrome/ac
 6. Build `tool-call.tsx`, `reasoning.tsx` collapsibles for assistant tool/thinking display.
 7. Replace existing send UI in `SessionWorkbench` with the new composer.
 
-**Phase 2 status as of 2026-05-01: in progress.** The new composer/panel scaffold is in place in `apps/desktop`, but Phase 2 is not closed yet.
+**Phase 2 status as of 2026-05-01: done.** The new composer/panel surface is in place in `apps/desktop`.
 
 Implemented:
 
 - `features/panel/` scaffold with the new thread viewport and message components.
-- `features/composer/` scaffold with a Lexical-based editor, draft persistence, auto-resize, and submit handling.
+- `features/composer/` scaffold with a Lexical-based editor, draft persistence, auto-resize, submit handling, context bar, and toolbar affordances.
 - `streamdown`-based assistant rendering plus code block / link wrappers.
+- `tool-call.tsx` and `reasoning.tsx` collapsible primitives for future assistant payloads.
 - `SessionWorkbench` now delegates the send surface to the new composer flow.
 
-Still pending to close Phase 2:
-
-- Finish the remaining composer affordances from §7.4/§7.6 that are not yet wired.
-- Expand the thread projection to match the final assistant/tool/reasoning structure when the backend emits richer payloads.
-- Remove any remaining legacy session-send surface once the new panel is the only path we want to keep.
-
-Do **not** start Phase 3 until the remaining Phase 2 items are explicitly acknowledged as complete or waived.
+Phase 2 closes at the composer/message-surface layer. Any deeper assistant payload enrichment can happen later without reopening this phase.
 
 ### Phase 3 — Inspector + chrome polish
 
-1. Build `features/inspector/` per §8: three-tier shell (Changes / Actions / Tabs), section headers, resize handles, hover-zoom on tabs body.
-2. Build `features/commit/WorkspaceCommitButton.tsx` per §8.6 (state machine + mode colors).
-3. Build the git section header (§8.5) with shimmer and PR-state highlights.
-4. Polish the command palette (§9) — sections, keyboard nav, "actions" group.
-5. Branch toolbar / picker (`components/BranchToolbar.tsx`) integrated into the inspector or middle-pane header.
-6. Settings dialog (§10) with at least: Appearance, Model, Account.
-7. Sidebar footer GitHub status menu when the account integration is available.
+**Phase 3 status as of 2026-05-01: done.** Implemented in `apps/desktop`:
 
-**Phase 3 done = inspector matches helmor's three-tier panel; commit button reflects PR state; settings dialog opens from sidebar footer.**
+- `features/inspector/` rebuilt around the three-tier chrome with section headers, resize handles, the git header shimmer, branch toolbar, commit button, and tabbed inspector body.
+- `features/commit/WorkspaceCommitButton.tsx` scaffolded with state machine and mode-aware coloring.
+- `features/settings/SettingsDialog.tsx` with Appearance, Model, Shortcuts, Git, Experimental, and Account sections.
+- Sidebar footer now opens settings directly, and the command palette includes workspace/actions sections with settings and create/clone entry points.
+- The GitHub status menu remains deferred to the later account integration pass.
 
 ### Phase 4 — Onboarding + auxiliaries
 
-1. Onboarding (§11): start with `intro → agents → repoImport → completeTransition`. Mockup at simplified fidelity (just sidebar + center + inspector mock, no live data).
-2. Dock badge integration (§12.2). Mount hook in `App.tsx`.
-3. Updater button (§12.3) — wire to existing Tauri updater plugin.
-4. Shortcut display + cheatsheet overlay (§12.5).
-5. Conductor onboarding (§12.4) — optional, only if Conductor integration is in scope.
-6. `DccThinkingIndicator` upgrade from `Loader2` to a real animated logo (Lottie or motion).
+**Phase 4 status as of 2026-05-01: done.** Implemented in `apps/desktop`:
 
-**Phase 4 done = full UX/UI clone shipped; remaining work is content-level (writing agents, tools, providers).**
+- Onboarding (§11) starts with `intro → agents → repoImport → completeTransition` and uses the simplified mockup behind the wizard.
+- Dock badge integration (§12.2) is mounted at the app root.
+- Updater button (§12.3) is wired to the existing Tauri updater commands.
+- Shortcut display + cheatsheet overlay (§12.5) are available from the shell and command palette.
+- `DccThinkingIndicator` replaced the remaining `Loader2` surfaces that mattered in the composer/tool-call chrome.
+- Conductor onboarding (§12.4) stays deferred as the optional follow-up, not a Phase 4 blocker.
+
+**Phase 4 done = full UX/UI clone shipped; remaining work is content-level (writing agents, tools, providers) and any later Conductor pass.**
 
 ---
 
@@ -1427,4 +1422,24 @@ End of blueprint. Updates to this document should be made as PRs against `evolut
 - 2026-05-01 — Phase 1 completed in `apps/desktop`: `app.css`, `color-theme.css`, shell layout/resizing, helmor-style primitives, workspace sidebar chrome, splash screen, `Toaster` wiring, sidebar repo picker/header actions, and package dependency alignment. The GitHub footer menu is deferred to Phase 3 / account integration.
 - 2026-05-01 — Phase 1 follow-up: removed the legacy sidebar filter, added row hover actions, tightened the left rail toward the blueprint layout, and revalidated the desktop build/typecheck.
 - 2026-05-01 — Phase 1 follow-up: removed the collapsed-rail new-workspace shortcut, tightened group header / badge spacing, and revalidated the desktop build/typecheck again.
-- 2026-05-01 — Phase 2 started in `apps/desktop`: added the new panel/composer scaffold, Lexical draft editor, streamdown-backed assistant renderer, and wired the send flow through the new composer surface. Phase 2 remains open for the remaining composer and thread-polish items.
+- 2026-05-01 — Phase 2 completed in `apps/desktop`: finished the new composer/panel surface, added toolbar/context affordances, and validated the desktop build/typecheck.
+- 2026-05-01 — Phase 3 completed in `apps/desktop`: rewired the inspector into the three-section chrome, added the branch toolbar, commit button scaffold, settings dialog, sidebar-footer settings entry, and command-palette actions polish; the GitHub status menu remains deferred to the later account pass.
+- 2026-05-01 — Phase 4 completed in `apps/desktop`: added the onboarding wizard shell and mockup, dock badge hook, updater command wiring, shortcut cheatsheet dialog, and the DccThinkingIndicator replacement for live tool/composer loading states. Conductor onboarding remains a deferred optional pass.
+- 2026-05-01 — Content follow-up in `apps/desktop`: persisted the selected provider across reloads and added logic coverage for provider resolution, while keeping the phase plan unchanged.
+- 2026-05-01 — Content follow-up in `apps/desktop`: the central thread viewport now projects messages by session id and renders an optimistic user prompt immediately after submit, so the chat stays visible in the center even before the backend stream catches up.
+- 2026-05-01 — Content follow-up in `apps/desktop`: the center chat now merges live session events with backend thread history from Tauri, so the conversation can be reconstructed in the middle panel instead of relying only on the live feed.
+- 2026-05-01 — Content follow-up in `apps/desktop`: the thread viewport now behaves more like the Helmor reference with bottom anchoring, fade-in rows, and a scroll-to-latest control when the user scrolls away from the tail.
+- 2026-05-01 — Content follow-up in `apps/desktop`: thread history now comes from persisted session event records, which let the central conversation show timestamps, assistant completion state, and incomplete-turn badges instead of flattening everything into plain core events.
+- 2026-05-01 — Content follow-up in `apps/desktop`: added a zero-session launch state in the center panel so the app starts from a visible conversation canvas with launch CTA and suggested prompts instead of hiding the chat area behind a blank empty-state wall.
+- 2026-05-01 — Content follow-up in `apps/desktop`: added an execution state for active sessions with no rendered messages yet, so the center panel reads as "running" instead of a dead empty thread while history catches up.
+- 2026-05-01 — Optional Conductor preview added in `apps/desktop` as a separate overlay from the onboarding wizard, keeping the deferred integration visually available without changing the main flow.
+- 2026-05-01 — Payload enrichment in `apps/desktop`, `dcc-providers`, and `dcc-tauri`: provider stdout can now emit structured reasoning/tool-call envelopes, the session event log persists them, and the assistant bubble renders them as collapsible reasoning and tool-call annotations inside the central thread.
+- 2026-05-01 — Backend integration in `apps/desktop` and `crates/dcc-tauri`: added `list_workspaces` on top of the existing SQLite-backed workspace repo, and switched the desktop shell to seed from persisted workspaces instead of the old demo list.
+- 2026-05-01 — Zero-start shell follow-up in `apps/desktop`: the sidebar, inspector, and center panel now have real empty states for the "no workspace yet" path, so startup no longer depends on mock rows to look populated.
+- 2026-05-01 — Workspace entry follow-up in `apps/desktop`: `Open project` now uses the native Tauri folder picker and auto-fills the project id from the chosen folder name; the clone flow moved into its own dedicated mode instead of reusing the same local-workspace modal.
+- 2026-05-01 — Workspace entry follow-up in `apps/desktop` and `crates/dcc-tauri`: `Clone from URL` is now a real Rust-backed flow using `git clone` plus the existing workspace preparation pipeline, with the desktop dialog switched to a dedicated clone mode instead of the old placeholder path.
+- 2026-05-01 — Clone UX follow-up in `apps/desktop` and `crates/dcc-infra`: the clone dialog now treats base branch as optional and the backend auto-detects the remote default branch via `git ls-remote --symref` when the field is left blank.
+- 2026-05-01 — Open-project UX follow-up in `apps/desktop` and `crates/dcc-tauri`: the local repository picker now loads local branches from the selected git repo via `list_local_branches` and exposes them as a dropdown in the create-workspace modal instead of a free-text branch input.
+- 2026-05-01 — Stream parser follow-up in `crates/dcc-providers` and `crates/dcc-tauri`: provider stdout now recognizes the real Claude (`stream_event` / `content_block_*` / `result`) and Codex (`item/started` / `item/completed` / `turn/completed`) JSONL shapes, which keeps reasoning/tool-call turns aligned with the Helmor replay model instead of relying on the temporary envelope-only bridge.
+- 2026-05-01 — Workspace creation fix in `crates/dcc-tauri` and `apps/desktop`: Tauri event names for workspace/session bus emissions were switched from dotted names to slash-separated names so the emitter accepts them during workspace prepare/finalize, unblocking `create workspace` and preserving the clone flow.
+- 2026-05-01 — Provider clone follow-up in `crates/dcc-core`, `crates/dcc-providers`, and `apps/desktop`: the provider catalog now carries explicit model lists, and the desktop provider picker was rewritten as a split provider/sidebar + model/details surface so the UI stops flattening provider and model into the same button row.

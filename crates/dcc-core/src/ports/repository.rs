@@ -14,6 +14,7 @@ use crate::{
 pub trait WorkspaceRepo: Send + Sync {
 	async fn save_workspace(&self, workspace: &Workspace) -> Result<()>;
 	async fn get_workspace(&self, id: &WorkspaceId) -> Result<Option<Workspace>>;
+	async fn list_workspaces(&self) -> Result<Vec<Workspace>>;
 }
 
 #[async_trait]

@@ -1,8 +1,14 @@
 use tauri::{AppHandle, State};
 
-use dcc_core::application::CreateWorkspaceForRepoInput;
+use dcc_core::application::{CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput};
 use dcc_tauri::{
-	commands::workspace_commands::CreateWorkspaceForRepoOutput,
+	commands::workspace_commands::{
+		CreateWorkspaceForRepoOutput,
+		CreateWorkspaceFromUrlOutput,
+		ListLocalBranchesInput,
+		ListLocalBranchesOutput,
+		ListWorkspacesOutput,
+	},
 	state::WorkspaceCommandState,
 };
 
@@ -13,4 +19,27 @@ pub async fn create_workspace_for_repo(
 	input: CreateWorkspaceForRepoInput,
 ) -> Result<CreateWorkspaceForRepoOutput, String> {
 	dcc_tauri::commands::workspace_commands::create_workspace_for_repo(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn create_workspace_from_url(
+	state: State<'_, WorkspaceCommandState>,
+	app: AppHandle,
+	input: CreateWorkspaceFromUrlInput,
+) -> Result<CreateWorkspaceFromUrlOutput, String> {
+	dcc_tauri::commands::workspace_commands::create_workspace_from_url(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn list_workspaces(
+	state: State<'_, WorkspaceCommandState>,
+) -> Result<ListWorkspacesOutput, String> {
+	dcc_tauri::commands::workspace_commands::list_workspaces(state).await
+}
+
+#[tauri::command]
+pub async fn list_local_branches(
+	input: ListLocalBranchesInput,
+) -> Result<ListLocalBranchesOutput, String> {
+	dcc_tauri::commands::workspace_commands::list_local_branches(input).await
 }

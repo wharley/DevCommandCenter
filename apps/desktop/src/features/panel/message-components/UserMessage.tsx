@@ -1,21 +1,30 @@
 import { Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { MessageTimestamp } from "./message-metadata";
 
 export function UserMessage({
 	content,
 	label,
+	createdAt,
 }: {
 	content: string;
 	label: string;
+	createdAt?: string;
 }) {
 	return (
-		<div data-message-role="user" className="conversation-fade-in group/user flex min-w-0 justify-end">
+		<div
+			data-message-role="user"
+			className="conversation-thread-enter conversation-fade-in group/user flex min-w-0 justify-end"
+		>
 			<div className="relative flex max-w-[75%] min-w-0 flex-col items-end pb-5">
 				<div className="conversation-body-text w-full overflow-hidden rounded-md bg-accent/55 px-3 py-2 leading-7">
 					<p className="whitespace-pre-wrap break-words text-[13px] text-foreground">
 						{content}
 					</p>
+				</div>
+				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
+					<MessageTimestamp createdAt={createdAt} />
 				</div>
 				<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/user:pointer-events-auto group-hover/user:opacity-100 group-focus-within/user:pointer-events-auto group-focus-within/user:opacity-100">
 					<Button

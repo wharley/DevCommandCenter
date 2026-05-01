@@ -22,6 +22,7 @@ pub struct StartThreadInput {
 	pub workspace_id: WorkspaceId,
 	pub project_id: ProjectId,
 	pub provider_id: String,
+	pub model: Option<String>,
 	pub title: Option<String>,
 }
 
@@ -68,6 +69,7 @@ where
 		project_id: input.project_id.clone(),
 		workspace_id: input.workspace_id.clone(),
 		provider_id: input.provider_id.clone(),
+		model: input.model.clone(),
 		state: SessionState::Active,
 		created_at: now.clone(),
 		updated_at: now.clone(),
@@ -93,6 +95,7 @@ where
 			workspace_id: input.workspace_id.clone(),
 			project_id: input.project_id.clone(),
 			provider_id: input.provider_id.clone(),
+			model: input.model.clone(),
 		},
 	};
 	session_events.append_event(&started_event).await?;
@@ -102,6 +105,7 @@ where
 			workspace_id: input.workspace_id.0.clone(),
 			project_id: input.project_id.0.clone(),
 			provider_id: input.provider_id.clone(),
+			model: input.model,
 		})
 		.await?;
 
@@ -232,6 +236,7 @@ mod tests {
 				workspace_id: WorkspaceId("workspace-1".to_string()),
 				project_id: ProjectId("project-1".to_string()),
 				provider_id: "codex".to_string(),
+				model: Some("gpt-5-codex".to_string()),
 				title: Some("Launch session".to_string()),
 			},
 		))
@@ -239,6 +244,7 @@ mod tests {
 
 		assert_eq!(output.session.state, SessionState::Active);
 		assert_eq!(output.session.workspace_id.0, "workspace-1");
+		assert_eq!(output.session.model.as_deref(), Some("gpt-5-codex"));
 		assert_eq!(output.thread.session_id.as_ref().map(|id| id.0.as_str()), Some(output.session.id.0.as_str()));
 		assert_eq!(output.thread.title, "Launch session");
 		assert_eq!(output.projection.state, SessionState::Active);

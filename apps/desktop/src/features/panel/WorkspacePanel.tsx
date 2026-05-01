@@ -1,9 +1,11 @@
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
-import type { ProviderCatalog } from "@dcc/contracts";
-import type { CoreEvent } from "@dcc/contracts";
+import type { ProviderCatalog, CoreEvent } from "@dcc/contracts";
+import type { AppUpdateInfo } from "@/features/updater";
+import { useQuery } from "@tanstack/react-query";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
 import { WorkspaceComposer } from "@/features/composer";
+import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
 
 type WorkspacePanelProps = {
 	workspaceId: string;
@@ -11,16 +13,23 @@ type WorkspacePanelProps = {
 	workspaceBranch: string;
 	workspacePath: string | null;
 	selectedProviderLabel: string | null;
+	selectedModelLabel: string | null;
 	selectedProviderId: string | null;
+	selectedModelId: string | null;
 	providerChoices: ProviderCatalog["providers"];
 	sessionSnapshot: RuntimeSessionSnapshot | null;
 	sessionEvents: CoreEvent[];
+	pendingPrompt: string | null;
 	onSelectProvider: (providerId: string) => void;
+	onSelectModel: (modelId: string) => void;
 	onStartSession: () => void;
 	onSubmitPrompt: (prompt: string) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	onOpenCommandPalette: () => void;
+	updateInfo: AppUpdateInfo;
+	isInstallingUpdate: boolean;
+	onInstallUpdate: () => void;
 	terminalAvailable: boolean;
 	terminalOpen: boolean;
 	onToggleTerminal: () => void;
@@ -32,28 +41,44 @@ export function WorkspacePanel({
 	workspaceBranch,
 	workspacePath,
 	selectedProviderLabel,
+	selectedModelLabel,
 	selectedProviderId,
+	selectedModelId,
 	providerChoices,
 	sessionSnapshot,
 	sessionEvents,
+	pendingPrompt,
 	onSelectProvider,
+	onSelectModel,
 	onStartSession,
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
 	onOpenCommandPalette,
+	updateInfo,
+	isInstallingUpdate,
+	onInstallUpdate,
 	terminalAvailable,
 	terminalOpen,
 	onToggleTerminal,
 }: WorkspacePanelProps) {
+	const sessionId = sessionSnapshot?.sessionId ?? null;
+	const threadHistoryQuery = useQuery(
+		sessionThreadHistoryQueryOptions(sessionId),
+	);
 	const pathCaption =
 		workspacePath && workspacePath.length > 0
 			? workspacePath.length > 52
 				? `…${workspacePath.slice(-51)}`
 				: workspacePath
 			: null;
-	const hasLoaded = Boolean(sessionSnapshot || sessionEvents.length > 0);
-	const hasEmptyThread = !sessionSnapshot && sessionEvents.length === 0;
+	const historyEvents = threadHistoryQuery.data ?? [];
+	const hasLoaded = sessionSnapshot
+		? Boolean(threadHistoryQuery.isFetched || sessionEvents.length > 0)
+		: true;
+	const hasEmptyThread = !sessionSnapshot;
+	const sessionState = sessionSnapshot?.state ?? null;
+	const lastTurnState = sessionSnapshot?.lastTurnState ?? null;
 	const isGitRepo = Boolean(workspaceBranch) || Boolean(workspacePath);
 
 	return (
@@ -68,6 +93,7 @@ export function WorkspacePanel({
 				<DccWorkbenchChatHeader
 					threadTitle={workspaceName}
 					projectBadgeLabel={workspaceBranch || null}
+					modelBadgeLabel={selectedModelLabel}
 					isGitRepo={isGitRepo}
 					pathCaption={pathCaption}
 					sessionSnapshot={sessionSnapshot}
@@ -77,14 +103,27 @@ export function WorkspacePanel({
 					onOpenCommandPalette={onOpenCommandPalette}
 					onResumeSession={onResumeSession}
 					onAbortSession={onAbortSession}
+					updateInfo={updateInfo}
+					isInstallingUpdate={isInstallingUpdate}
+					onInstallUpdate={onInstallUpdate}
 				/>
 			</header>
 
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 				<ActiveThreadViewport
-					events={sessionEvents}
+					historyEvents={historyEvents}
+					liveEvents={sessionEvents}
 					hasLoaded={hasLoaded}
 					isEmpty={hasEmptyThread}
+					workspaceName={workspaceName}
+					selectedProviderLabel={selectedProviderLabel}
+					selectedModelLabel={selectedModelLabel}
+					sessionState={sessionState}
+					lastTurnState={lastTurnState}
+					sessionId={sessionId}
+					pendingPrompt={pendingPrompt}
+					onStartSession={onStartSession}
+					onSubmitPrompt={onSubmitPrompt}
 				/>
 
 				<div className="border-t border-border/60 px-3 pb-3 pt-3 sm:px-4">
@@ -93,9 +132,12 @@ export function WorkspacePanel({
 						disabled={false}
 						providerChoices={providerChoices}
 						selectedProviderId={selectedProviderId}
-						selectedProviderLabel={selectedProviderLabel}
+						selectedModelId={selectedModelId}
 						sessionSnapshot={sessionSnapshot}
+						workspacePath={workspacePath}
+						workspaceBranch={workspaceBranch}
 						onSelectProvider={onSelectProvider}
+						onSelectModel={onSelectModel}
 						onStartSession={onStartSession}
 						onSubmitPrompt={onSubmitPrompt}
 						onResumeSession={onResumeSession}

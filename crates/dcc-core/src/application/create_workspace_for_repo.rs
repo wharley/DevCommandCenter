@@ -141,6 +141,8 @@ mod tests {
 	use async_trait::async_trait;
 	use std::sync::{Arc, Mutex};
 
+	use crate::ports::ClonedRepository;
+
 	#[derive(Clone, Default)]
 	struct FakeWorkspaceRepo {
 		saved: Arc<Mutex<Vec<Workspace>>>,
@@ -166,6 +168,14 @@ mod tests {
 				.cloned();
 			Ok(found)
 		}
+
+		async fn list_workspaces(&self) -> Result<Vec<Workspace>> {
+			Ok(self
+				.saved
+				.lock()
+				.expect("saved workspaces lock poisoned")
+				.clone())
+		}
 	}
 
 	#[derive(Clone)]
@@ -175,6 +185,19 @@ mod tests {
 
 	#[async_trait]
 	impl GitOps for FakeGitOps {
+		async fn clone_repository(
+			&self,
+			_repository_url: &str,
+			_destination_path: &str,
+			base_branch: &str,
+		) -> Result<ClonedRepository> {
+			Ok(ClonedRepository {
+				path: "/tmp/dcc-clone".to_string(),
+				branch: base_branch.to_string(),
+				created_at: "2026-05-01T12:00:00Z".to_string(),
+			})
+		}
+
 		async fn prepare_worktree(
 			&self,
 			_workspace_root: &str,

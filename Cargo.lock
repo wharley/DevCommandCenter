@@ -797,6 +797,8 @@ dependencies = [
  "chrono",
  "dcc-core",
  "futures",
+ "serde",
+ "serde_json",
  "tokio",
  "uuid",
 ]
@@ -806,6 +808,7 @@ name = "dcc-tauri"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "dcc-core",
  "dcc-infra",
  "dcc-providers",
@@ -816,6 +819,7 @@ dependencies = [
  "tauri-specta",
  "thiserror 2.0.18",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

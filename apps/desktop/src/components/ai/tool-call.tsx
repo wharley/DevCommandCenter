@@ -1,6 +1,7 @@
 import type * as React from "react";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { useState } from "react";
+import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
 import { cn } from "@/lib/utils";
 
 export function ToolCall({
@@ -43,7 +44,7 @@ export function ToolCall({
 					</code>
 				) : null}
 				{isLive ? (
-					<Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />
+					<DccThinkingIndicator size={12} />
 				) : isError ? (
 					<AlertCircle className="size-3 shrink-0 text-destructive" aria-hidden />
 				) : null}

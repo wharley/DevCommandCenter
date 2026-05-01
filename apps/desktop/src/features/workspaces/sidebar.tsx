@@ -1,15 +1,12 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	Archive,
-	Check,
 	ChevronRight,
 	FolderPlus,
-	Moon,
 	PanelLeft,
 	PanelRight,
 	Plus,
 	Settings2,
-	SunMedium,
 } from "lucide-react";
 import {
 	memo,
@@ -20,7 +17,6 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useAppearance } from "../../components/theme-provider";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { CommandPopoverContent } from "../../components/ui/command-popover";
@@ -36,8 +32,6 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
 import { Popover, PopoverTrigger } from "../../components/ui/popover";
@@ -86,71 +80,14 @@ function TrafficLightSpacer({ width }: { width: number }) {
 	return <div aria-hidden className="shrink-0" style={{ width }} />;
 }
 
-function RailSettingsMenu({
-	menuAlign = "start",
-	contentSide = "top",
-}: {
-	menuAlign?: "start" | "center";
-	contentSide?: "top" | "right";
-}) {
-	const { theme, setTheme } = useAppearance();
-
-	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger asChild>
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon-xs"
-					className="text-muted-foreground hover:text-foreground"
-					aria-label="Settings"
-				>
-					<Settings2 className="size-4" strokeWidth={1.85} aria-hidden />
-				</Button>
-			</DropdownMenuTrigger>
-			<DropdownMenuContent
-				align={menuAlign}
-				side={contentSide}
-				sideOffset={6}
-				className="min-w-44"
-			>
-				<DropdownMenuLabel className="text-[12px] font-medium">Appearance</DropdownMenuLabel>
-				<DropdownMenuSeparator />
-				<DropdownMenuItem
-					className="gap-2 text-[13px]"
-					onClick={() => {
-						setTheme("dark");
-					}}
-				>
-					<Moon className="size-4 shrink-0 opacity-80" strokeWidth={1.8} aria-hidden />
-					<span className="flex-1">Dark</span>
-					{theme === "dark" ? (
-						<Check className="size-4 shrink-0 opacity-70" strokeWidth={2} aria-hidden />
-					) : null}
-				</DropdownMenuItem>
-				<DropdownMenuItem
-					className="gap-2 text-[13px]"
-					onClick={() => {
-						setTheme("light");
-					}}
-				>
-					<SunMedium className="size-4 shrink-0 opacity-80" strokeWidth={1.8} aria-hidden />
-					<span className="flex-1">Light</span>
-					{theme === "light" ? (
-						<Check className="size-4 shrink-0 opacity-70" strokeWidth={2} aria-hidden />
-					) : null}
-				</DropdownMenuItem>
-			</DropdownMenuContent>
-		</DropdownMenu>
-	);
-}
-
 function WorkspaceRepoPicker({
 	workspaces,
 	onCreateWorkspace,
+	onCloneWorkspace,
 }: {
 	workspaces: WorkspaceSummary[];
 	onCreateWorkspace: () => void;
+	onCloneWorkspace: () => void;
 }) {
 	const [open, setOpen] = useState(false);
 
@@ -193,26 +130,26 @@ function WorkspaceRepoPicker({
 						))}
 					</CommandGroup>
 					<CommandSeparator />
-					<CommandGroup heading="Actions">
-						<CommandItem
-							value="create workspace"
-							onSelect={() => {
-								setOpen(false);
-								onCreateWorkspace();
-							}}
-						>
-							Open repo picker
-						</CommandItem>
-						<CommandItem
-							value="clone from url"
-							onSelect={() => {
-								setOpen(false);
-								onCreateWorkspace();
-							}}
-						>
-							Clone from URL
-						</CommandItem>
-					</CommandGroup>
+						<CommandGroup heading="Actions">
+							<CommandItem
+								value="create workspace"
+								onSelect={() => {
+									setOpen(false);
+									onCreateWorkspace();
+								}}
+							>
+								Open repo picker
+							</CommandItem>
+							<CommandItem
+								value="clone from url"
+								onSelect={() => {
+									setOpen(false);
+									onCloneWorkspace();
+								}}
+							>
+								Clone from URL
+							</CommandItem>
+						</CommandGroup>
 				</CommandList>
 			</CommandPopoverContent>
 		</Popover>
@@ -224,8 +161,10 @@ type WorkspacesSidebarProps = {
 	isCreatingWorkspace?: boolean;
 	onSelectWorkspace: (workspaceId: string) => void;
 	onCreateWorkspace: () => void;
+	onCloneWorkspace: () => void;
+	onOpenSettings: () => void;
 	onToggleCollapsed: () => void;
-	selectedWorkspaceId: string;
+	selectedWorkspaceId: string | null;
 	workspaces: WorkspaceSummary[];
 };
 
@@ -234,6 +173,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	isCreatingWorkspace = false,
 	onSelectWorkspace,
 	onCreateWorkspace,
+	onCloneWorkspace,
+	onOpenSettings,
 	onToggleCollapsed,
 	selectedWorkspaceId,
 	workspaces,
@@ -514,40 +455,89 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				</Tooltip>
 
 				<div className="scrollbar-stable min-h-0 w-full flex-1 overflow-y-auto px-1 [scrollbar-width:thin]">
-					<div className="flex flex-col items-center gap-1">
-						{workspaces.map((workspace) => {
-							const label = workspace.branch
-								? humanizeWorkspaceBranchLabel(workspace.branch)
-								: workspace.name;
-							const initials = initialsFromWorkspaceLabel(workspace.name || label);
-							const selected = workspace.id === selectedWorkspaceId;
-							return (
-								<Tooltip key={workspace.id}>
-									<TooltipTrigger asChild>
-										<button
-											type="button"
-											aria-current={selected ? "location" : undefined}
-											aria-label={`Open workspace ${label}`}
-											onClick={() => onSelectWorkspace(workspace.id)}
-											className={cn(
-												"flex size-9 shrink-0 items-center justify-center rounded-lg text-[10px] font-semibold uppercase ring-1 transition-colors",
-												selected
-													? "workspace-row-selected text-foreground ring-border"
-													: "bg-accent/35 text-muted-foreground ring-transparent hover:bg-accent/60 hover:text-foreground",
-											)}
-										>
-											{initials}
-										</button>
-									</TooltipTrigger>
-									<TooltipContent side="right">{label}</TooltipContent>
-								</Tooltip>
-							);
-						})}
-					</div>
+					{workspaces.length > 0 ? (
+						<div className="flex flex-col items-center gap-1">
+							{workspaces.map((workspace) => {
+								const label = workspace.branch
+									? humanizeWorkspaceBranchLabel(workspace.branch)
+									: workspace.name;
+								const initials = initialsFromWorkspaceLabel(workspace.name || label);
+								const selected = workspace.id === selectedWorkspaceId;
+								return (
+									<Tooltip key={workspace.id}>
+										<TooltipTrigger asChild>
+											<button
+												type="button"
+												aria-current={selected ? "location" : undefined}
+												aria-label={`Open workspace ${label}`}
+												onClick={() => onSelectWorkspace(workspace.id)}
+												className={cn(
+													"flex size-9 shrink-0 items-center justify-center rounded-lg text-[10px] font-semibold uppercase ring-1 transition-colors",
+													selected
+														? "workspace-row-selected text-foreground ring-border"
+														: "bg-accent/35 text-muted-foreground ring-transparent hover:bg-accent/60 hover:text-foreground",
+												)}
+											>
+												{initials}
+											</button>
+										</TooltipTrigger>
+										<TooltipContent side="right">{label}</TooltipContent>
+									</Tooltip>
+								);
+							})}
+						</div>
+					) : (
+						<div className="flex h-full min-h-full flex-col items-center justify-center gap-2 px-1 text-center">
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										aria-label="Open project"
+										className="text-muted-foreground hover:text-foreground"
+										onClick={onCreateWorkspace}
+									>
+										<FolderPlus className="size-4" strokeWidth={1.9} aria-hidden />
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="right">Open project</TooltipContent>
+							</Tooltip>
+							<Tooltip>
+								<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								aria-label="Clone from URL"
+								className="text-muted-foreground hover:text-foreground"
+								onClick={onCloneWorkspace}
+							>
+								<Plus className="size-4" strokeWidth={2.1} aria-hidden />
+							</Button>
+								</TooltipTrigger>
+								<TooltipContent side="right">Clone from URL</TooltipContent>
+							</Tooltip>
+						</div>
+					)}
 				</div>
 
 				<div className="flex shrink-0 flex-col items-center gap-1 pb-2">
-					<RailSettingsMenu menuAlign="center" contentSide="right" />
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								className="text-muted-foreground hover:text-foreground"
+								aria-label="Open settings"
+								onClick={onOpenSettings}
+							>
+								<Settings2 className="size-4" strokeWidth={1.85} aria-hidden />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="right">Open settings</TooltipContent>
+					</Tooltip>
 				</div>
 			</div>
 		);
@@ -606,7 +596,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								className="gap-2 text-[13px]"
 								onSelect={(event) => {
 									event.preventDefault();
-									onCreateWorkspace();
+									onCloneWorkspace();
 								}}
 							>
 								Clone from URL
@@ -616,6 +606,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					<WorkspaceRepoPicker
 						workspaces={workspaces}
 						onCreateWorkspace={onCreateWorkspace}
+						onCloneWorkspace={onCloneWorkspace}
 					/>
 				</div>
 			</div>
@@ -626,9 +617,38 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				className="min-h-0 flex-1 overflow-hidden"
 			>
 				{activeGroups.length === 0 && archivedRows.length === 0 ? (
-					<p className="px-3 py-8 text-center text-[13px] text-muted-foreground">
-						No workspaces yet.
-					</p>
+					<div className="flex h-full min-h-full flex-col items-center justify-center px-4 py-8 text-center">
+						<div className="mb-3 flex size-11 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-muted-foreground">
+							<FolderPlus className="size-5" strokeWidth={1.9} aria-hidden />
+						</div>
+						<h3 className="text-[15px] font-medium tracking-[-0.01em] text-foreground">
+							No workspaces yet
+						</h3>
+						<p className="mt-2 max-w-[18rem] text-[13px] leading-6 text-muted-foreground">
+							Open a project or clone from URL to start from zero.
+						</p>
+						<div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+							<Button
+								type="button"
+								size="sm"
+								className="gap-1.5"
+								onClick={onCreateWorkspace}
+							>
+								<FolderPlus className="size-3.5" strokeWidth={2} aria-hidden />
+								Open project
+							</Button>
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								className="gap-1.5"
+								onClick={onCloneWorkspace}
+							>
+								<Plus className="size-3.5" strokeWidth={2} aria-hidden />
+								Clone from URL
+							</Button>
+						</div>
+					</div>
 				) : (
 					<div
 						style={{
@@ -657,7 +677,22 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			</div>
 
 			<div className="flex shrink-0 items-center justify-start gap-1 px-3 pb-3 pt-1">
-				<RailSettingsMenu />
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							className="gap-1.5 text-muted-foreground hover:text-foreground"
+							aria-label="Open settings"
+							onClick={onOpenSettings}
+						>
+							<Settings2 className="size-4" strokeWidth={1.85} aria-hidden />
+							<span className="text-xs font-medium">Settings</span>
+						</Button>
+					</TooltipTrigger>
+					<TooltipContent side="top">Open settings</TooltipContent>
+				</Tooltip>
 			</div>
 		</div>
 	);

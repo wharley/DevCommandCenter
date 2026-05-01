@@ -6,6 +6,7 @@ import {
 	type KeyboardEventHandler,
 	type MouseEventHandler,
 } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -24,12 +25,19 @@ import {
 	useWorkspacesPanel,
 } from "./features/workspaces";
 import { WorkspaceInspectorSidebar } from "./features/inspector";
+import { SettingsDialog } from "./features/settings";
+import { OnboardingWizard } from "./features/onboarding";
+import { ShortcutCheatsheetDialog } from "./features/shortcuts";
+import { useDockUnreadBadge } from "./features/dock-badge/useDockUnreadBadge";
+import { useAppUpdate } from "./features/updater";
 import {
 	SessionWorkbench,
 	type RuntimeSessionSnapshot,
 } from "./features/sessions/session-workbench";
+import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
 import { listProviders } from "./lib/provider-api";
+import { listWorkspaces } from "./lib/workspace-api";
 import {
 	abortRun,
 	resumeSession,
@@ -40,6 +48,15 @@ import type {
 	ProviderCatalog,
 } from "@dcc/contracts";
 import { useAppearance } from "./components/theme-provider";
+import {
+	SELECTED_PROVIDER_STORAGE_KEY,
+	SELECTED_MODEL_STORAGE_KEY,
+	resolveSelectedProviderId,
+	resolveSelectedModelId,
+} from "./features/providers/provider-selection.logic";
+import { workspaceToSummary } from "./features/workspaces/use-workspaces";
+
+const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 
 function ResizeSeparator({
 	side,
@@ -109,30 +126,74 @@ export default function App() {
 		sidebarWidth,
 		setSidebarCollapsed,
 	} = useShellPanels();
+	const workspacesQuery = useQuery({
+		queryKey: ["workspaces"],
+		queryFn: async () => {
+			const result = await listWorkspaces();
+			return result.workspaces.map(workspaceToSummary);
+		},
+		staleTime: 60_000,
+		refetchOnWindowFocus: false,
+	});
+	const workspacesFromBackend = workspacesQuery.data ?? [];
 	const {
 		allWorkspaces,
 		createWorkspace,
+		cloneWorkspaceFromUrl,
 		filteredWorkspaces,
 		isCreatingWorkspace,
 		selectedWorkspace,
 		selectedWorkspaceId,
 		setSelectedWorkspaceId,
-	} = useWorkspacesPanel();
+	} = useWorkspacesPanel(workspacesFromBackend);
 	const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 	const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
+	const [workspaceCreationMode, setWorkspaceCreationMode] = useState<"open" | "clone">(
+		"open",
+	);
+	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+	const [isOnboardingOpen, setIsOnboardingOpen] = useState(() => {
+		if (typeof window === "undefined") {
+			return false;
+		}
+
+		if (window.location.search.includes("onboarding=1")) {
+			return true;
+		}
+
+		return window.localStorage.getItem(ONBOARDING_COMPLETE_KEY) !== "true";
+	});
+	const [isShortcutSheetOpen, setIsShortcutSheetOpen] = useState(false);
 	const { events: sessionEvents } = useSessionEventFeed();
 	const [providerCatalog, setProviderCatalog] = useState<ProviderCatalog | null>(
 		null,
 	);
-	const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
-		null,
-	);
+	const [selectedProviderId, setSelectedProviderId] = useState<string | null>(() => {
+		if (typeof window === "undefined") {
+			return null;
+		}
+
+		return window.localStorage.getItem(SELECTED_PROVIDER_STORAGE_KEY);
+	});
+	const [selectedModelId, setSelectedModelId] = useState<string | null>(() => {
+		if (typeof window === "undefined") {
+			return null;
+		}
+
+		return window.localStorage.getItem(SELECTED_MODEL_STORAGE_KEY);
+	});
 	const [sessionSnapshot, setSessionSnapshot] =
 		useState<RuntimeSessionSnapshot | null>(null);
-	const { theme } = useAppearance();
+	const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+	const { theme, setTheme } = useAppearance();
+	const {
+		update: appUpdateInfo,
+		isInstalling: isInstallingUpdate,
+		installUpdate,
+	} = useAppUpdate();
 	const providerChoices = providerCatalog?.providers ?? [];
 	const selectedWorkspacePath =
-		selectedWorkspace.worktreePath ?? selectedWorkspace.rootPath ?? null;
+		selectedWorkspace?.worktreePath ?? selectedWorkspace?.rootPath ?? null;
 	const selectedProvider = useMemo(
 		() =>
 			providerChoices.find((provider) => provider.id === selectedProviderId) ??
@@ -140,6 +201,15 @@ export default function App() {
 			null,
 		[providerChoices, selectedProviderId],
 	);
+	const selectedModel = useMemo(
+		() =>
+			selectedProvider?.models.find((model) => model.id === selectedModelId) ??
+			selectedProvider?.models.find((model) => model.recommended) ??
+			selectedProvider?.models[0] ??
+			null,
+		[selectedModelId, selectedProvider],
+	);
+	useDockUnreadBadge(allWorkspaces);
 
 	useEffect(() => {
 		let disposed = false;
@@ -160,20 +230,54 @@ export default function App() {
 		}
 
 		setSelectedProviderId((current) => {
-			if (current && providerChoices.some((provider) => provider.id === current)) {
-				return current;
-			}
-
-			return providerChoices.find((provider) => provider.stable)?.id ?? providerChoices[0].id;
+			return resolveSelectedProviderId(providerChoices, current);
 		});
 	}, [providerChoices]);
 
 	useEffect(() => {
+		if (selectedProvider) {
+			setSelectedModelId((current) =>
+				resolveSelectedModelId(selectedProvider, current),
+			);
+		}
+	}, [selectedProvider]);
+
+	useEffect(() => {
+		if (typeof window === "undefined") {
+			return;
+		}
+
+		if (selectedProviderId) {
+			window.localStorage.setItem(
+				SELECTED_PROVIDER_STORAGE_KEY,
+				selectedProviderId,
+			);
+			return;
+		}
+
+		window.localStorage.removeItem(SELECTED_PROVIDER_STORAGE_KEY);
+	}, [selectedProviderId]);
+
+	useEffect(() => {
+		if (typeof window === "undefined") {
+			return;
+		}
+
+		if (selectedModelId) {
+			window.localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, selectedModelId);
+			return;
+		}
+
+		window.localStorage.removeItem(SELECTED_MODEL_STORAGE_KEY);
+	}, [selectedModelId]);
+
+	useEffect(() => {
 		setSessionSnapshot(null);
-	}, [selectedWorkspace.id]);
+		setPendingPrompt(null);
+	}, [selectedWorkspace?.id]);
 
 	const handleStartSession = useCallback(async () => {
-		if (!selectedProvider) {
+		if (!selectedProvider || !selectedWorkspace) {
 			return;
 		}
 
@@ -181,6 +285,7 @@ export default function App() {
 			workspaceId: selectedWorkspace.id,
 			projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
 			providerId: selectedProvider.id,
+			model: selectedModel?.id ?? null,
 			title: `${selectedWorkspace.name} session`,
 		});
 
@@ -189,11 +294,12 @@ export default function App() {
 			projectId: result.session.projectId,
 			workspaceId: result.session.workspaceId,
 			providerId: result.session.providerId,
+			model: result.session.model,
 			state: result.projection.state,
 			turnCount: result.projection.turnCount,
 			checkpointCount: result.projection.checkpointCount,
 		});
-	}, [selectedProvider, selectedWorkspace.id, selectedWorkspace.name, selectedWorkspace.projectId]);
+	}, [selectedModel, selectedProvider, selectedWorkspace]);
 
 	const handleSubmitPrompt = useCallback(async (prompt: string) => {
 		const trimmedPrompt = prompt.trim();
@@ -202,53 +308,78 @@ export default function App() {
 		}
 
 		let currentSession = sessionSnapshot;
-		if (!currentSession) {
-			if (!selectedProvider) {
-				return;
+
+		try {
+			if (!currentSession) {
+				if (!selectedProvider || !selectedWorkspace) {
+					return;
+				}
+
+				const started = await startThread({
+					workspaceId: selectedWorkspace.id,
+					projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
+					providerId: selectedProvider.id,
+					model: selectedModel?.id ?? null,
+					title: `${selectedWorkspace.name} session`,
+				});
+
+				currentSession = {
+					sessionId: started.session.id,
+					projectId: started.session.projectId,
+					workspaceId: started.session.workspaceId,
+					providerId: started.session.providerId,
+					model: started.session.model,
+					state: started.projection.state,
+					turnCount: started.projection.turnCount,
+					checkpointCount: started.projection.checkpointCount,
+				};
+				setSessionSnapshot(currentSession);
 			}
 
-			const started = await startThread({
-				workspaceId: selectedWorkspace.id,
-				projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
-				providerId: selectedProvider.id,
-				title: `${selectedWorkspace.name} session`,
+			setPendingPrompt(trimmedPrompt);
+
+			const result = await sendTurn({
+				sessionId: currentSession.sessionId,
+				prompt: trimmedPrompt,
 			});
 
-			currentSession = {
-				sessionId: started.session.id,
-				projectId: started.session.projectId,
-				workspaceId: started.session.workspaceId,
-				providerId: started.session.providerId,
-				state: started.projection.state,
-				turnCount: started.projection.turnCount,
-				checkpointCount: started.projection.checkpointCount,
-			};
-			setSessionSnapshot(currentSession);
+			setSessionSnapshot({
+				sessionId: result.session.id,
+				projectId: result.session.projectId,
+				workspaceId: result.session.workspaceId,
+				providerId: result.session.providerId,
+				model: result.session.model,
+				state: result.projection.state,
+				turnCount: result.projection.turnCount,
+				checkpointCount: result.projection.checkpointCount,
+				lastTurnPrompt: result.turn.content,
+				lastTurnState: result.turn.state,
+			});
+		} finally {
+			setPendingPrompt(null);
 		}
-
-		const result = await sendTurn({
-			sessionId: currentSession.sessionId,
-			prompt: trimmedPrompt,
-		});
-
-		setSessionSnapshot({
-			sessionId: result.session.id,
-			projectId: result.session.projectId,
-			workspaceId: result.session.workspaceId,
-			providerId: result.session.providerId,
-			state: result.projection.state,
-			turnCount: result.projection.turnCount,
-			checkpointCount: result.projection.checkpointCount,
-			lastTurnPrompt: result.turn.content,
-			lastTurnState: result.turn.state,
-		});
 	}, [
+		selectedModel,
 		selectedProvider,
-		selectedWorkspace.id,
-		selectedWorkspace.name,
-		selectedWorkspace.projectId,
+		selectedWorkspace,
 		sessionSnapshot,
 	]);
+
+	const handleSelectProvider = useCallback(
+		(providerId: string) => {
+			setSelectedProviderId(providerId);
+			const provider = providerChoices.find((candidate) => candidate.id === providerId);
+			setSelectedModelId(resolveSelectedModelId(provider ?? null, null));
+		},
+		[providerChoices],
+	);
+
+	const handleSelectModel = useCallback(
+		(modelId: string) => {
+			setSelectedModelId(modelId);
+		},
+		[],
+	);
 
 	const handleResumeSession = useCallback(async () => {
 		if (!sessionSnapshot) {
@@ -289,6 +420,20 @@ export default function App() {
 		);
 	}, [sessionSnapshot]);
 
+	const handleCompleteOnboarding = useCallback(() => {
+		try {
+			window.localStorage.setItem(ONBOARDING_COMPLETE_KEY, "true");
+		} catch {
+			/* localStorage unavailable */
+		}
+		setIsOnboardingOpen(false);
+	}, []);
+
+	const openWorkspaceDialog = useCallback((mode: "open" | "clone") => {
+		setWorkspaceCreationMode(mode);
+		setIsCreateWorkspaceOpen(true);
+	}, []);
+
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
 			const isShortcut =
@@ -310,6 +455,7 @@ export default function App() {
 	}, []);
 
 	const sidebarRailWidth = sidebarCollapsed ? 76 : sidebarWidth;
+	const hasWorkspace = Boolean(selectedWorkspace);
 
 	return (
 		<>
@@ -328,7 +474,9 @@ export default function App() {
 							collapsed={sidebarCollapsed}
 							isCreatingWorkspace={isCreatingWorkspace}
 							onSelectWorkspace={setSelectedWorkspaceId}
-							onCreateWorkspace={() => setIsCreateWorkspaceOpen(true)}
+							onCreateWorkspace={() => openWorkspaceDialog("open")}
+							onCloneWorkspace={() => openWorkspaceDialog("clone")}
+							onOpenSettings={() => setIsSettingsOpen(true)}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
 							selectedWorkspaceId={selectedWorkspaceId}
 							workspaces={filteredWorkspaces}
@@ -364,32 +512,56 @@ export default function App() {
 								open={isCommandPaletteOpen}
 								onOpenChange={setIsCommandPaletteOpen}
 								workspaces={allWorkspaces}
-								selectedWorkspaceId={selectedWorkspace.id}
+								selectedWorkspaceId={selectedWorkspaceId}
 								onSelectWorkspace={setSelectedWorkspaceId}
+								onCreateWorkspace={() => openWorkspaceDialog("open")}
+								onCloneWorkspace={() => openWorkspaceDialog("clone")}
+								onOpenSettings={() => setIsSettingsOpen(true)}
+								onOpenOnboarding={() => setIsOnboardingOpen(true)}
+								onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
 							/>
 							<CreateWorkspaceDialog
 								open={isCreateWorkspaceOpen}
+								mode={workspaceCreationMode}
 								onOpenChange={setIsCreateWorkspaceOpen}
 								onCreateWorkspace={createWorkspace}
+								onCloneWorkspace={cloneWorkspaceFromUrl}
 								isSubmitting={isCreatingWorkspace}
 							/>
-							<SessionWorkbench
-								workspaceId={selectedWorkspace.id}
-								workspaceName={selectedWorkspace.name}
-								workspaceBranch={selectedWorkspace.branch}
-								workspacePath={selectedWorkspacePath}
-								selectedProviderLabel={selectedProvider?.label ?? null}
-								selectedProviderId={selectedProviderId}
-								providerChoices={providerChoices}
-								sessionSnapshot={sessionSnapshot}
-								sessionEvents={sessionEvents}
-								onSelectProvider={setSelectedProviderId}
-								onStartSession={handleStartSession}
-								onSubmitPrompt={handleSubmitPrompt}
-								onResumeSession={handleResumeSession}
-								onAbortSession={handleAbortSession}
-								onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-							/>
+							{hasWorkspace && selectedWorkspace ? (
+								<SessionWorkbench
+									workspaceId={selectedWorkspace.id}
+									workspaceName={selectedWorkspace.name}
+									workspaceBranch={selectedWorkspace.branch}
+									workspacePath={selectedWorkspacePath}
+									selectedProviderLabel={selectedProvider?.label ?? null}
+									selectedModelLabel={selectedModel?.label ?? null}
+									selectedProviderId={selectedProviderId}
+									selectedModelId={selectedModelId}
+									providerChoices={providerChoices}
+									sessionSnapshot={sessionSnapshot}
+									sessionEvents={sessionEvents}
+									pendingPrompt={pendingPrompt}
+									onSelectProvider={handleSelectProvider}
+									onSelectModel={handleSelectModel}
+									onStartSession={handleStartSession}
+									onSubmitPrompt={handleSubmitPrompt}
+									onResumeSession={handleResumeSession}
+									onAbortSession={handleAbortSession}
+									onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+									updateInfo={appUpdateInfo}
+									isInstallingUpdate={isInstallingUpdate}
+									onInstallUpdate={installUpdate}
+								/>
+							) : (
+								<WorkspaceBootstrapState
+									selectedProviderLabel={selectedProvider?.label ?? null}
+									selectedModelLabel={selectedModel?.label ?? null}
+									onCreateWorkspace={() => openWorkspaceDialog("open")}
+									onCloneWorkspace={() => openWorkspaceDialog("clone")}
+									onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+								/>
+							)}
 						</div>
 					</section>
 
@@ -415,11 +587,13 @@ export default function App() {
 								<WorkspaceInspectorSidebar
 									providerCatalog={providerCatalog}
 									sessionSnapshot={sessionSnapshot}
-									workspaceId={selectedWorkspace.id}
-									workspaceName={selectedWorkspace.name}
-									workspaceBranch={selectedWorkspace.branch}
+									sessionEvents={sessionEvents}
+									workspaceId={selectedWorkspace?.id ?? null}
+									workspaceName={selectedWorkspace?.name ?? null}
+									workspaceBranch={selectedWorkspace?.branch ?? null}
 									workspacePath={selectedWorkspacePath}
 									selectedProviderLabel={selectedProvider?.label ?? null}
+									selectedModelLabel={selectedModel?.label ?? null}
 									sessionState={sessionSnapshot?.state ?? "idle"}
 									sessionId={sessionSnapshot?.sessionId ?? null}
 								/>
@@ -428,6 +602,26 @@ export default function App() {
 					)}
 				</div>
 			</main>
+				<SettingsDialog
+					open={isSettingsOpen}
+					onOpenChange={setIsSettingsOpen}
+					theme={theme}
+					onThemeChange={setTheme}
+					providerCatalog={providerCatalog}
+					selectedProviderId={selectedProviderId}
+					selectedModelId={selectedModelId}
+					onSelectProvider={handleSelectProvider}
+					onSelectModel={handleSelectModel}
+				/>
+			<ShortcutCheatsheetDialog
+				open={isShortcutSheetOpen}
+				onOpenChange={setIsShortcutSheetOpen}
+			/>
+			<OnboardingWizard
+				open={isOnboardingOpen}
+				onOpenChange={setIsOnboardingOpen}
+				onComplete={handleCompleteOnboarding}
+			/>
 			<Toaster theme={theme} position="bottom-right" visibleToasts={6} />
 		</>
 	);

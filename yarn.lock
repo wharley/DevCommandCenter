@@ -2057,7 +2057,7 @@
   resolved "https://registry.yarnpkg.com/@tanstack/virtual-core/-/virtual-core-3.14.0.tgz#c8839d0d702b8af47c0e57d4ab72fc3ba8bbf3da"
   integrity sha512-JLANqGy/D6k4Ujmh8Tr25lGimuOXNiaVyXaCAZS0W+1390sADdGnyUdSWNIfd49gebtIxGMij4IktRVzrdr12Q==
 
-"@tauri-apps/api@^2.11.0":
+"@tauri-apps/api@^2.10.1", "@tauri-apps/api@^2.11.0":
   version "2.11.0"
   resolved "https://registry.yarnpkg.com/@tauri-apps/api/-/api-2.11.0.tgz#00fb69996010178a5153798d4a84f6fe3a1e1182"
   integrity sha512-7CinYODhky9lmO23xHnUFv0Xt43fbtWMyxZcLcRBlFkcgXKuEirBvHpmtJ89YMhyeGcq20Wuc47Fa4XjyniywA==
@@ -2138,6 +2138,13 @@
     "@tauri-apps/cli-win32-arm64-msvc" "2.11.0"
     "@tauri-apps/cli-win32-ia32-msvc" "2.11.0"
     "@tauri-apps/cli-win32-x64-msvc" "2.11.0"
+
+"@tauri-apps/plugin-dialog@^2.7.0":
+  version "2.7.0"
+  resolved "https://registry.yarnpkg.com/@tauri-apps/plugin-dialog/-/plugin-dialog-2.7.0.tgz#b510ecd42d9900725eaf51f42ec98523c40d29b4"
+  integrity sha512-4nS/hfGMGCXiAS3LtVjH9AgsSAPJeG/7R+q8agTFqytjnMa4Zq95Bq8WzVDkckpanX+yyRHXnRtrKXkANKDHvw==
+  dependencies:
+    "@tauri-apps/api" "^2.10.1"
 
 "@tauri-apps/plugin-notification@^2.3.3":
   version "2.3.3"

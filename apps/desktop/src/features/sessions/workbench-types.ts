@@ -5,6 +5,7 @@ export type DccRuntimeSessionSnapshot = {
 	projectId: string;
 	workspaceId: string;
 	providerId: string;
+	model: string | null;
 	state: string;
 	turnCount: number;
 	checkpointCount: number;

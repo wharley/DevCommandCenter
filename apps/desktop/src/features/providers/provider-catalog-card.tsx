@@ -7,27 +7,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import type { ProviderCatalog } from "@dcc/contracts";
-
-function healthSummary(health: ProviderCatalog["providers"][number]["health"]) {
-	if (health === "Healthy") {
-		return { label: "healthy", variant: "success" as const };
-	}
-	if (health && typeof health === "object") {
-		if ("Degraded" in health) {
-			return {
-				label: health.Degraded?.reason ?? "degraded",
-				variant: "outline" as const,
-			};
-		}
-		if ("Unhealthy" in health) {
-			return {
-				label: health.Unhealthy?.reason ?? "unhealthy",
-				variant: "outline" as const,
-			};
-		}
-	}
-	return { label: "unknown", variant: "outline" as const };
-}
+import { getProviderChips, summarizeProviderHealth } from "./provider-display";
 
 export function ProviderCatalogCard({
 	catalog,
@@ -73,21 +53,24 @@ export function ProviderCatalogCard({
 								<Badge variant={provider.stable ? "success" : "outline"}>
 									{provider.stable ? "stable" : "experimental"}
 								</Badge>
-								<Badge variant={healthSummary(provider.health).variant}>
-									{healthSummary(provider.health).label}
+								<Badge variant={summarizeProviderHealth(provider.health).variant}>
+									{summarizeProviderHealth(provider.health).label}
 								</Badge>
-								{provider.capabilities.streaming ? (
-									<Badge variant="outline">streaming</Badge>
-								) : null}
-								{provider.capabilities.tools ? (
-									<Badge variant="outline">tools</Badge>
-								) : null}
-								{provider.capabilities.mcp ? (
-									<Badge variant="outline">mcp</Badge>
-								) : null}
-								{provider.capabilities.resumable ? (
-									<Badge variant="outline">resumable</Badge>
-								) : null}
+								{getProviderChips(provider)
+									.filter((chip) => chip.label !== "stable" && chip.label !== "experimental" && chip.label !== summarizeProviderHealth(provider.health).label)
+									.map((chip) => (
+										<Badge key={`${provider.id}-${chip.label}`} variant={chip.variant}>
+											{chip.label}
+										</Badge>
+									))}
+								{provider.models.map((model) => (
+									<Badge
+										key={`${provider.id}-${model.id}`}
+										variant={model.recommended ? "success" : "outline"}
+									>
+										{model.label}
+									</Badge>
+								))}
 							</div>
 						</li>
 					))}

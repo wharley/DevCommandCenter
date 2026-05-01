@@ -11,6 +11,13 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionResumed" in event) return "session.resumed";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
 	if ("sessionTurnDelta" in event) return "session.turn.delta";
+	if ("sessionTurnReasoningStarted" in event) return "session.turn.reasoning.started";
+	if ("sessionTurnReasoningDelta" in event) return "session.turn.reasoning.delta";
+	if ("sessionTurnReasoningCompleted" in event) return "session.turn.reasoning.completed";
+	if ("sessionTurnToolCallStarted" in event) return "session.turn.tool-call.started";
+	if ("sessionTurnToolCallDelta" in event) return "session.turn.tool-call.delta";
+	if ("sessionTurnToolCallCompleted" in event) return "session.turn.tool-call.completed";
+	if ("sessionTurnToolCallFailed" in event) return "session.turn.tool-call.failed";
 	if ("sessionTurnCompleted" in event) return "session.turn.completed";
 	if ("sessionTurnAborted" in event) return "session.turn.aborted";
 	if ("sessionCheckpointCreated" in event) return "session.checkpoint.created";
@@ -53,6 +60,39 @@ function eventPayloadSummary(event: CoreEvent): string {
 				? `${sessionTurnDelta.content.slice(0, 60)}…`
 				: sessionTurnDelta.content;
 		return `${sessionTurnDelta.session_id} · ${preview}`;
+	}
+	const sessionTurnReasoningStarted =
+		"sessionTurnReasoningStarted" in event ? event.sessionTurnReasoningStarted : null;
+	if (sessionTurnReasoningStarted) {
+		return `${sessionTurnReasoningStarted.session_id} · ${sessionTurnReasoningStarted.label ?? sessionTurnReasoningStarted.reasoning_id}`;
+	}
+	const sessionTurnReasoningDelta =
+		"sessionTurnReasoningDelta" in event ? event.sessionTurnReasoningDelta : null;
+	if (sessionTurnReasoningDelta) {
+		const preview =
+			sessionTurnReasoningDelta.content.length > 60
+				? `${sessionTurnReasoningDelta.content.slice(0, 60)}…`
+				: sessionTurnReasoningDelta.content;
+		return `${sessionTurnReasoningDelta.session_id} · ${preview}`;
+	}
+	const sessionTurnToolCallStarted =
+		"sessionTurnToolCallStarted" in event ? event.sessionTurnToolCallStarted : null;
+	if (sessionTurnToolCallStarted) {
+		return `${sessionTurnToolCallStarted.session_id} · ${sessionTurnToolCallStarted.action}`;
+	}
+	const sessionTurnToolCallDelta =
+		"sessionTurnToolCallDelta" in event ? event.sessionTurnToolCallDelta : null;
+	if (sessionTurnToolCallDelta) {
+		const preview =
+			sessionTurnToolCallDelta.content.length > 60
+				? `${sessionTurnToolCallDelta.content.slice(0, 60)}…`
+				: sessionTurnToolCallDelta.content;
+		return `${sessionTurnToolCallDelta.session_id} · ${preview}`;
+	}
+	const sessionTurnToolCallFailed =
+		"sessionTurnToolCallFailed" in event ? event.sessionTurnToolCallFailed : null;
+	if (sessionTurnToolCallFailed) {
+		return `${sessionTurnToolCallFailed.session_id} · ${sessionTurnToolCallFailed.reason ?? "tool call failed"}`;
 	}
 	const sessionTurnAborted =
 		"sessionTurnAborted" in event ? event.sessionTurnAborted : null;

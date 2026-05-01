@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use dcc_core::{
 	domain::{
@@ -70,6 +70,38 @@ impl SqliteWorkspaceRepo {
 			WorkspaceState::Archived => "archived",
 		}
 	}
+
+	fn workspace_from_row(row: &Row<'_>) -> rusqlite::Result<Workspace> {
+		let state = row.get::<_, String>(6)?;
+		let state = match state.as_str() {
+			"initializing" => WorkspaceState::Initializing,
+			"setup_pending" => WorkspaceState::SetupPending,
+			"ready" => WorkspaceState::Ready,
+			"archived" => WorkspaceState::Archived,
+			other => {
+				return Err(rusqlite::Error::FromSqlConversionFailure(
+					6,
+					rusqlite::types::Type::Text,
+					Box::new(std::io::Error::new(
+						std::io::ErrorKind::InvalidData,
+						format!("unknown workspace state: {other}"),
+					)),
+				))
+			}
+		};
+
+		Ok(Workspace {
+			id: WorkspaceId(row.get::<_, String>(0)?),
+			project_id: ProjectId(row.get::<_, String>(1)?),
+			name: row.get::<_, Option<String>>(2)?,
+			root_path: row.get::<_, String>(3)?,
+			base_branch: row.get::<_, String>(4)?,
+			worktree_path: row.get::<_, Option<String>>(5)?,
+			state,
+			created_at: row.get::<_, String>(7)?,
+			updated_at: row.get::<_, String>(8)?,
+		})
+	}
 }
 
 #[async_trait]
@@ -127,40 +159,38 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
 				 WHERE id = ?1
 				"#,
 				params![id.0.clone()],
-				|row| {
-					let state = row.get::<_, String>(6)?;
-					let state = match state.as_str() {
-						"initializing" => WorkspaceState::Initializing,
-						"setup_pending" => WorkspaceState::SetupPending,
-						"ready" => WorkspaceState::Ready,
-						"archived" => WorkspaceState::Archived,
-						other => {
-							return Err(rusqlite::Error::FromSqlConversionFailure(
-								6,
-								rusqlite::types::Type::Text,
-								Box::new(std::io::Error::new(
-									std::io::ErrorKind::InvalidData,
-									format!("unknown workspace state: {other}"),
-								)),
-							))
-						}
-					};
-					Ok(Workspace {
-						id: WorkspaceId(row.get::<_, String>(0)?),
-						project_id: ProjectId(row.get::<_, String>(1)?),
-						name: row.get::<_, Option<String>>(2)?,
-						root_path: row.get::<_, String>(3)?,
-						base_branch: row.get::<_, String>(4)?,
-						worktree_path: row.get::<_, Option<String>>(5)?,
-						state,
-						created_at: row.get::<_, String>(7)?,
-						updated_at: row.get::<_, String>(8)?,
-					})
-				},
+				Self::workspace_from_row,
 			)
 			.optional()
 			.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
 
 		Ok(workspace)
+	}
+
+	async fn list_workspaces(&self) -> Result<Vec<Workspace>> {
+		let conn = self
+			.conn
+			.lock()
+			.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+		let mut stmt = conn
+			.prepare(
+				r#"
+				SELECT id, project_id, name, root_path, base_branch, worktree_path,
+				       state, created_at, updated_at
+				  FROM dcc_workspaces
+				 ORDER BY updated_at DESC, created_at DESC
+				"#,
+			)
+			.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+		let rows = stmt
+			.query_map([], Self::workspace_from_row)
+			.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+
+		let mut workspaces = Vec::new();
+		for row in rows {
+			workspaces.push(row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?);
+		}
+
+		Ok(workspaces)
 	}
 }

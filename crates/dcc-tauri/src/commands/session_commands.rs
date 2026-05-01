@@ -7,6 +7,8 @@ use dcc_core::{
 		AbortRunOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput,
 		SendTurnOutput, StartThreadInput, StartThreadOutput,
 	},
+	domain::session::SessionEventRecord,
+	ports::SessionEventRepo,
 };
 
 use crate::state::SessionCommandState;
@@ -80,4 +82,16 @@ pub async fn resume_session(
 		eprintln!("[DCC] provider session attach failed: {}", error);
 	}
 	Ok(output)
+}
+
+#[tauri::command]
+pub async fn list_thread_events(
+	state: State<'_, SessionCommandState>,
+	_app: AppHandle,
+	session_id: String,
+) -> Result<Vec<SessionEventRecord>, String> {
+	let session_id = dcc_core::domain::session::SessionId(session_id);
+	SessionEventRepo::list_events_by_session(&*state, &session_id)
+		.await
+		.map_err(|error| error.to_string())
 }

@@ -1,23 +1,52 @@
+import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CoreEvent } from "@dcc/contracts";
+import type { CoreEvent, SessionEventRecord } from "@dcc/contracts";
+import { Button } from "@/components/ui/button";
+import { ConversationExecutionState } from "./ConversationExecutionState";
+import { ConversationLaunchState } from "./ConversationLaunchState";
 import { projectWorkspaceMessages } from "./thread-projection";
 import { AssistantMessage, SystemMessage, UserMessage } from "./message-components";
 import { EmptyState } from "./EmptyState";
 
 type ActiveThreadViewportProps = {
-	events: CoreEvent[];
+	historyEvents: SessionEventRecord[];
+	liveEvents: CoreEvent[];
 	hasLoaded: boolean;
 	isEmpty: boolean;
+	workspaceName: string;
+	selectedProviderLabel: string | null;
+	selectedModelLabel: string | null;
+	sessionState: string | null;
+	lastTurnState: string | null;
+	sessionId: string | null;
+	pendingPrompt: string | null;
+	onStartSession: () => void;
+	onSubmitPrompt: (prompt: string) => Promise<void>;
 };
 
 export function ActiveThreadViewport({
-	events,
+	historyEvents,
+	liveEvents,
 	hasLoaded,
 	isEmpty,
+	workspaceName,
+	selectedProviderLabel,
+	selectedModelLabel,
+	sessionState,
+	lastTurnState,
+	sessionId,
+	pendingPrompt,
+	onStartSession,
+	onSubmitPrompt,
 }: ActiveThreadViewportProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const [stickToBottom, setStickToBottom] = useState(true);
-	const messages = useMemo(() => projectWorkspaceMessages(events), [events]);
+	const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+	const messages = useMemo(
+		() => projectWorkspaceMessages(historyEvents, liveEvents, sessionId, pendingPrompt),
+		[historyEvents, liveEvents, pendingPrompt, sessionId],
+	);
+	const latestMessageKey = messages[messages.length - 1]?.id ?? "empty";
 
 	useEffect(() => {
 		const container = scrollRef.current;
@@ -26,7 +55,8 @@ export function ActiveThreadViewport({
 		}
 
 		container.scrollTop = container.scrollHeight;
-	}, [messages.length, stickToBottom]);
+		setShowScrollToLatest(false);
+	}, [latestMessageKey, stickToBottom]);
 
 	useEffect(() => {
 		const container = scrollRef.current;
@@ -37,7 +67,9 @@ export function ActiveThreadViewport({
 		const updateStickiness = () => {
 			const remaining =
 				container.scrollHeight - container.scrollTop - container.clientHeight;
-			setStickToBottom(remaining < 40);
+			const anchored = remaining < 40;
+			setStickToBottom(anchored);
+			setShowScrollToLatest(!anchored && container.scrollHeight > container.clientHeight);
 		};
 
 		updateStickiness();
@@ -49,12 +81,43 @@ export function ActiveThreadViewport({
 		};
 	}, []);
 
-	if (!hasLoaded || isEmpty) {
+	if (!hasLoaded) {
 		return (
-			<EmptyState
-				title="No active session"
-				description="Start a session from the composer to render the thread viewport here."
-			/>
+			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+				<EmptyState
+					title="Loading conversation"
+					description="Preparing the thread history for this workspace."
+				/>
+			</div>
+		);
+	}
+
+	if (isEmpty) {
+		if (sessionState === "active" || lastTurnState === "running") {
+			return (
+				<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+					<ConversationExecutionState
+						workspaceName={workspaceName}
+						selectedProviderLabel={selectedProviderLabel}
+						selectedModelLabel={selectedModelLabel}
+						sessionState={sessionState}
+						lastTurnState={lastTurnState}
+						pendingPrompt={pendingPrompt}
+					/>
+				</div>
+			);
+		}
+
+		return (
+			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+				<ConversationLaunchState
+					workspaceName={workspaceName}
+					selectedProviderLabel={selectedProviderLabel}
+					selectedModelLabel={selectedModelLabel}
+					onStartSession={onStartSession}
+					onSubmitPrompt={onSubmitPrompt}
+				/>
+			</div>
 		);
 	}
 
@@ -62,9 +125,9 @@ export function ActiveThreadViewport({
 		<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
 			<div
 				ref={scrollRef}
-				className="conversation-scrollbar-fade-in relative flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-5 py-4"
+				className="dcc-conversation-scroll-viewport conversation-scrollbar-fade-in relative flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-5 py-4"
 			>
-				<div className="flex min-h-full flex-1 flex-col gap-4">
+				<div className="flex min-h-full flex-1 flex-col justify-end gap-4">
 					{messages.length === 0 ? (
 						<EmptyState
 							title="Session loaded"
@@ -78,29 +141,58 @@ export function ActiveThreadViewport({
 										key={message.id}
 										label={message.label}
 										content={message.content}
+										createdAt={message.createdAt}
 									/>
 								);
 							}
 							if (message.role === "assistant") {
 								return (
-									<AssistantMessage
+										<AssistantMessage
 										key={message.id}
 										content={message.content}
 										streaming={message.streaming}
+										createdAt={message.createdAt}
+										status={message.status}
+										annotations={message.annotations}
 									/>
 								);
 							}
-								return (
-									<SystemMessage
-										key={message.id}
-										label={message.label}
-										content={message.content}
-									/>
-								);
+							return (
+								<SystemMessage
+									key={message.id}
+									label={message.label}
+									content={message.content}
+									createdAt={message.createdAt}
+								/>
+							);
 						})
 					)}
+					<div className="h-10 shrink-0" aria-hidden />
 				</div>
 			</div>
+			{showScrollToLatest ? (
+				<div className="pointer-events-none absolute inset-x-0 bottom-1 z-30 flex justify-center py-1.5">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="conversation-scroll-button pointer-events-auto"
+						onClick={() => {
+							const container = scrollRef.current;
+							if (!container) {
+								return;
+							}
+							container.scrollTo({
+								top: container.scrollHeight,
+								behavior: "smooth",
+							});
+						}}
+					>
+						<ChevronDown className="size-3.5" strokeWidth={2} />
+						Scroll to bottom
+					</Button>
+				</div>
+			) : null}
 		</div>
 	);
 }

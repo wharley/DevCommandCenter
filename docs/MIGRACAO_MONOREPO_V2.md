@@ -458,7 +458,7 @@ Trazer **paridade ou melhoria real** relativamente aos referenciais: shell/UX/co
 - Concluído: provider runtime bridge com processo interativo, stdin/stdout e emissão de `SessionTurnDelta`/`SessionTurnCompleted` via Tauri.
 - Concluído: stream de eventos de sessão chegando ao shell via `listen` em `apps/desktop/src/features/sessions/session-event-feed.tsx`.
 - Concluído: `apps/desktop/src/features/providers/provider-catalog-card.tsx` exibindo o estado do catálogo no runtime.
-- Concluído: `session.startThread`, `session.sendTurn`, `session.abortRun` e `session.resumeSession` expostos no Tauri bridge com estado de sessão ativo no shell.
+- Concluído: `start_thread`, `send_turn`, `abort_run` e `resume_session` expostos no Tauri bridge com estado de sessão ativo no shell.
 - Concluído: o runtime shell ganhou um workbench de sessão/composer mais próximo do Helmor, com thread timeline, provider selection e resumo de projection.
 - Concluído: protocolos runtime específicos podem evoluir depois, mas a Fase 3 já está fechada com o bridge CLI genérico e o fluxo funcional ponta a ponta.
 

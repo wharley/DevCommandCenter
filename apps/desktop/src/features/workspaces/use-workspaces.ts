@@ -1,10 +1,13 @@
-import { useCallback, useState } from "react";
-import { demoWorkspaces } from "./data";
+import { useCallback, useEffect, useState } from "react";
 import type { WorkspaceSummary } from "./types";
-import { createWorkspaceForRepo } from "../../lib/workspace-api";
-import type { CreateWorkspaceForRepoInput, Workspace } from "@dcc/contracts";
+import { createWorkspaceForRepo, createWorkspaceFromUrl } from "../../lib/workspace-api";
+import type {
+	CreateWorkspaceForRepoInput,
+	CreateWorkspaceFromUrlInput,
+	Workspace,
+} from "@dcc/contracts";
 
-function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
+export function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
 	const status =
 		workspace.state === "ready"
 			? "ready"
@@ -27,19 +30,26 @@ function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
 	};
 }
 
-export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = demoWorkspaces) {
-	const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
-		workspaces[1]?.id ?? workspaces[0]?.id ?? "",
+export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
+	const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
+		workspaces[0]?.id ?? null,
 	);
 	const [workspaceList, setWorkspaceList] = useState<WorkspaceSummary[]>(workspaces);
 	const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
 
+	useEffect(() => {
+		if (workspaces.length === 0) {
+			return;
+		}
+
+		setWorkspaceList((current) => (current.length === 0 ? workspaces : current));
+		setSelectedWorkspaceId((current) => current ?? workspaces[0]?.id ?? null);
+	}, [workspaces]);
+
 	const filteredWorkspaces = workspaceList;
 
 	const selectedWorkspace =
-		filteredWorkspaces.find((workspace) => workspace.id === selectedWorkspaceId) ??
-		filteredWorkspaces[0] ??
-		workspaceList[0];
+		filteredWorkspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null;
 
 	const createWorkspace = useCallback(async (input: CreateWorkspaceForRepoInput) => {
 		setIsCreatingWorkspace(true);
@@ -54,9 +64,23 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = demoWorkspac
 		}
 	}, []);
 
+	const cloneWorkspaceFromUrl = useCallback(async (input: CreateWorkspaceFromUrlInput) => {
+		setIsCreatingWorkspace(true);
+		try {
+			const result = await createWorkspaceFromUrl(input);
+			const summary = workspaceToSummary(result.workspace);
+			setWorkspaceList((current) => [summary, ...current]);
+			setSelectedWorkspaceId(summary.id);
+			return summary;
+		} finally {
+			setIsCreatingWorkspace(false);
+		}
+	}, []);
+
 	return {
 		allWorkspaces: workspaceList,
 		createWorkspace,
+		cloneWorkspaceFromUrl,
 		isCreatingWorkspace,
 		filteredWorkspaces,
 		selectedWorkspace,

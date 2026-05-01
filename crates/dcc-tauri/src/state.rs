@@ -5,15 +5,17 @@ use std::{
 };
 
 use async_trait::async_trait;
+use chrono::Utc;
 use futures::StreamExt;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex as AsyncMutex;
+use uuid::Uuid;
 
 use dcc_core::{
 	domain::{
 		project::{Project, ProjectId},
 		provider::{ProviderEvent, SessionHandle},
-		session::{Session, SessionEventRecord, SessionId},
+		session::{Session, SessionEventKind, SessionEventRecord, SessionId, TurnId},
 		thread::{Thread, ThreadId},
 		workspace::{Workspace, WorkspaceId},
 	},
@@ -78,6 +80,36 @@ impl SessionCommandState {
 		Ok(store.provider_sessions.get(session_id).cloned())
 	}
 
+	async fn append_session_event(
+		&self,
+		session_id: &SessionId,
+		kind: SessionEventKind,
+	) -> Result<SessionEventRecord> {
+		let mut store = self.lock_store()?;
+		let events = store.events.entry(session_id.clone()).or_default();
+		let sequence = events.last().map(|event| event.sequence + 1).unwrap_or(1);
+		let record = SessionEventRecord {
+			event_id: Uuid::new_v4().to_string(),
+			session_id: session_id.clone(),
+			sequence,
+			occurred_at: Utc::now().to_rfc3339(),
+			kind,
+		};
+		events.push(record.clone());
+		Ok(record)
+	}
+
+	async fn append_and_publish_session_event(
+		&self,
+		session_id: &SessionId,
+		kind: SessionEventKind,
+		core_event: dcc_core::ports::events::CoreEvent,
+	) -> Result<()> {
+		self.append_session_event(session_id, kind).await?;
+		self.publish(core_event).await?;
+		Ok(())
+	}
+
 	pub(crate) async fn attach_provider_session(&self, session: &Session) -> Result<()> {
 		if self.provider_binding(&session.id)?.is_some() {
 			return Ok(());
@@ -94,7 +126,7 @@ impl SessionCommandState {
 			.prepare_session(SessionConfig {
 				workspace_id: session.workspace_id.clone(),
 				session_id: session.id.clone(),
-				model: None,
+				model: session.model.clone(),
 			})
 			.await?;
 
@@ -133,11 +165,171 @@ impl SessionCommandState {
 						let turn_id = binding.current_turn_id.lock().await.clone();
 						if let Some(turn_id) = turn_id {
 							let _ = state
-								.publish(dcc_core::ports::events::CoreEvent::SessionTurnDelta {
-									session_id: session_id.0.clone(),
-									turn_id,
-									content,
-								})
+								.append_and_publish_session_event(
+									&session_id,
+									SessionEventKind::TurnDelta {
+										turn_id: TurnId(turn_id.clone()),
+										content: content.clone(),
+									},
+									dcc_core::ports::events::CoreEvent::SessionTurnDelta {
+										session_id: session_id.0.clone(),
+										turn_id,
+										content,
+									},
+								)
+								.await;
+						}
+					}
+					Ok(ProviderEvent::ReasoningStarted { id, label, .. }) => {
+						let turn_id = binding.current_turn_id.lock().await.clone();
+						if let Some(turn_id) = turn_id {
+							let _ = state
+								.append_and_publish_session_event(
+									&session_id,
+									SessionEventKind::TurnReasoningStarted {
+										turn_id: TurnId(turn_id.clone()),
+										reasoning_id: id.clone(),
+										label: label.clone(),
+									},
+									dcc_core::ports::events::CoreEvent::SessionTurnReasoningStarted {
+										session_id: session_id.0.clone(),
+										turn_id,
+										reasoning_id: id,
+										label,
+									},
+								)
+								.await;
+						}
+					}
+					Ok(ProviderEvent::ReasoningDelta { id, content }) => {
+						let turn_id = binding.current_turn_id.lock().await.clone();
+						if let Some(turn_id) = turn_id {
+							let _ = state
+								.append_and_publish_session_event(
+									&session_id,
+									SessionEventKind::TurnReasoningDelta {
+										turn_id: TurnId(turn_id.clone()),
+										reasoning_id: id.clone(),
+										content: content.clone(),
+									},
+									dcc_core::ports::events::CoreEvent::SessionTurnReasoningDelta {
+										session_id: session_id.0.clone(),
+										turn_id,
+										reasoning_id: id,
+										content,
+									},
+								)
+								.await;
+						}
+					}
+					Ok(ProviderEvent::ReasoningCompleted { id, .. }) => {
+						let turn_id = binding.current_turn_id.lock().await.clone();
+						if let Some(turn_id) = turn_id {
+							let _ = state
+								.append_and_publish_session_event(
+									&session_id,
+									SessionEventKind::TurnReasoningCompleted {
+										turn_id: TurnId(turn_id.clone()),
+										reasoning_id: id.clone(),
+									},
+									dcc_core::ports::events::CoreEvent::SessionTurnReasoningCompleted {
+										session_id: session_id.0.clone(),
+										turn_id,
+										reasoning_id: id,
+									},
+								)
+								.await;
+						}
+					}
+					Ok(ProviderEvent::ToolCallStarted {
+						id,
+						action,
+						command,
+						file,
+						..
+					}) => {
+						let turn_id = binding.current_turn_id.lock().await.clone();
+						if let Some(turn_id) = turn_id {
+							let _ = state
+								.append_and_publish_session_event(
+									&session_id,
+									SessionEventKind::TurnToolCallStarted {
+										turn_id: TurnId(turn_id.clone()),
+										tool_call_id: id.clone(),
+										action: action.clone(),
+										command: command.clone(),
+										file: file.clone(),
+									},
+									dcc_core::ports::events::CoreEvent::SessionTurnToolCallStarted {
+										session_id: session_id.0.clone(),
+										turn_id,
+										tool_call_id: id,
+										action,
+										command,
+										file,
+									},
+								)
+								.await;
+						}
+					}
+					Ok(ProviderEvent::ToolCallDelta { id, content }) => {
+						let turn_id = binding.current_turn_id.lock().await.clone();
+						if let Some(turn_id) = turn_id {
+							let _ = state
+								.append_and_publish_session_event(
+									&session_id,
+									SessionEventKind::TurnToolCallDelta {
+										turn_id: TurnId(turn_id.clone()),
+										tool_call_id: id.clone(),
+										content: content.clone(),
+									},
+									dcc_core::ports::events::CoreEvent::SessionTurnToolCallDelta {
+										session_id: session_id.0.clone(),
+										turn_id,
+										tool_call_id: id,
+										content,
+									},
+								)
+								.await;
+						}
+					}
+					Ok(ProviderEvent::ToolCallCompleted { id, .. }) => {
+						let turn_id = binding.current_turn_id.lock().await.clone();
+						if let Some(turn_id) = turn_id {
+							let _ = state
+								.append_and_publish_session_event(
+									&session_id,
+									SessionEventKind::TurnToolCallCompleted {
+										turn_id: TurnId(turn_id.clone()),
+										tool_call_id: id.clone(),
+									},
+									dcc_core::ports::events::CoreEvent::SessionTurnToolCallCompleted {
+										session_id: session_id.0.clone(),
+										turn_id,
+										tool_call_id: id,
+									},
+								)
+								.await;
+						}
+					}
+					Ok(ProviderEvent::ToolCallFailed { id, reason, .. }) => {
+						let turn_id = binding.current_turn_id.lock().await.clone();
+						if let Some(turn_id) = turn_id {
+							let _ = state
+								.append_and_publish_session_event(
+									&session_id,
+									SessionEventKind::TurnToolCallFailed {
+										turn_id: TurnId(turn_id.clone()),
+										tool_call_id: id.clone(),
+										reason: reason.clone(),
+									},
+									dcc_core::ports::events::CoreEvent::SessionTurnToolCallFailed {
+										session_id: session_id.0.clone(),
+										turn_id,
+										tool_call_id: id,
+										reason,
+									},
+								)
 								.await;
 						}
 					}
@@ -145,10 +337,16 @@ impl SessionCommandState {
 						let turn_id = binding.current_turn_id.lock().await.take();
 						if let Some(turn_id) = turn_id {
 							let _ = state
-								.publish(dcc_core::ports::events::CoreEvent::SessionTurnCompleted {
-									session_id: session_id.0.clone(),
-									turn_id,
-								})
+								.append_and_publish_session_event(
+									&session_id,
+									SessionEventKind::TurnCompleted {
+										turn_id: TurnId(turn_id.clone()),
+									},
+									dcc_core::ports::events::CoreEvent::SessionTurnCompleted {
+										session_id: session_id.0.clone(),
+										turn_id,
+									},
+								)
 								.await;
 						}
 					}
@@ -156,23 +354,38 @@ impl SessionCommandState {
 						let turn_id = binding.current_turn_id.lock().await.take();
 						if let Some(turn_id) = turn_id {
 							let _ = state
-								.publish(dcc_core::ports::events::CoreEvent::SessionTurnAborted {
-									session_id: session_id.0.clone(),
-									turn_id,
-									reason: Some(message),
-								})
+								.append_and_publish_session_event(
+									&session_id,
+									SessionEventKind::TurnAborted {
+										turn_id: TurnId(turn_id.clone()),
+										reason: Some(message.clone()),
+									},
+									dcc_core::ports::events::CoreEvent::SessionTurnAborted {
+										session_id: session_id.0.clone(),
+										turn_id,
+										reason: Some(message),
+									},
+								)
 								.await;
 						}
 					}
 					Err(error) => {
 						let turn_id = binding.current_turn_id.lock().await.take();
 						if let Some(turn_id) = turn_id {
+							let reason = error.to_string();
 							let _ = state
-								.publish(dcc_core::ports::events::CoreEvent::SessionTurnAborted {
-									session_id: session_id.0.clone(),
-									turn_id,
-									reason: Some(error.to_string()),
-								})
+								.append_and_publish_session_event(
+									&session_id,
+									SessionEventKind::TurnAborted {
+										turn_id: TurnId(turn_id.clone()),
+										reason: Some(reason.clone()),
+									},
+									dcc_core::ports::events::CoreEvent::SessionTurnAborted {
+										session_id: session_id.0.clone(),
+										turn_id,
+										reason: Some(reason),
+									},
+								)
 								.await;
 						}
 					}
@@ -244,6 +457,10 @@ impl WorkspaceRepo for SessionCommandState {
 
 	async fn get_workspace(&self, _id: &WorkspaceId) -> Result<Option<Workspace>> {
 		Ok(None)
+	}
+
+	async fn list_workspaces(&self) -> Result<Vec<Workspace>> {
+		Ok(Vec::new())
 	}
 }
 

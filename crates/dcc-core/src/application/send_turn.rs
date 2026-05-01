@@ -203,6 +203,7 @@ mod tests {
 				project_id: crate::domain::project::ProjectId("project-1".to_string()),
 				workspace_id: crate::domain::workspace::WorkspaceId("workspace-1".to_string()),
 				provider_id: "codex".to_string(),
+				model: Some("gpt-5-codex".to_string()),
 				state: SessionState::Active,
 				created_at: "2026-05-01T12:00:00Z".to_string(),
 				updated_at: "2026-05-01T12:00:00Z".to_string(),
@@ -222,6 +223,7 @@ mod tests {
 					),
 					project_id: crate::domain::project::ProjectId("project-1".to_string()),
 					provider_id: "codex".to_string(),
+					model: Some("gpt-5-codex".to_string()),
 				},
 			});
 

@@ -57,6 +57,7 @@ pub struct Session {
 	pub project_id: ProjectId,
 	pub workspace_id: WorkspaceId,
 	pub provider_id: String,
+	pub model: Option<String>,
 	pub state: SessionState,
 	pub created_at: String,
 	pub updated_at: String,
@@ -72,11 +73,66 @@ pub enum SessionEventKind {
 		project_id: ProjectId,
 		#[serde(rename = "providerId")]
 		provider_id: String,
+		model: Option<String>,
 	},
 	TurnStarted {
 		#[serde(rename = "turnId")]
 		turn_id: TurnId,
 		prompt: String,
+	},
+	TurnDelta {
+		#[serde(rename = "turnId")]
+		turn_id: TurnId,
+		content: String,
+	},
+	TurnReasoningStarted {
+		#[serde(rename = "turnId")]
+		turn_id: TurnId,
+		#[serde(rename = "reasoningId")]
+		reasoning_id: String,
+		label: Option<String>,
+	},
+	TurnReasoningDelta {
+		#[serde(rename = "turnId")]
+		turn_id: TurnId,
+		#[serde(rename = "reasoningId")]
+		reasoning_id: String,
+		content: String,
+	},
+	TurnReasoningCompleted {
+		#[serde(rename = "turnId")]
+		turn_id: TurnId,
+		#[serde(rename = "reasoningId")]
+		reasoning_id: String,
+	},
+	TurnToolCallStarted {
+		#[serde(rename = "turnId")]
+		turn_id: TurnId,
+		#[serde(rename = "toolCallId")]
+		tool_call_id: String,
+		action: String,
+		command: Option<String>,
+		file: Option<String>,
+	},
+	TurnToolCallDelta {
+		#[serde(rename = "turnId")]
+		turn_id: TurnId,
+		#[serde(rename = "toolCallId")]
+		tool_call_id: String,
+		content: String,
+	},
+	TurnToolCallCompleted {
+		#[serde(rename = "turnId")]
+		turn_id: TurnId,
+		#[serde(rename = "toolCallId")]
+		tool_call_id: String,
+	},
+	TurnToolCallFailed {
+		#[serde(rename = "turnId")]
+		turn_id: TurnId,
+		#[serde(rename = "toolCallId")]
+		tool_call_id: String,
+		reason: Option<String>,
 	},
 	TurnCompleted {
 		#[serde(rename = "turnId")]
@@ -116,6 +172,7 @@ pub struct SessionProjection {
 	pub project_id: ProjectId,
 	pub workspace_id: WorkspaceId,
 	pub provider_id: String,
+	pub model: Option<String>,
 	pub state: SessionState,
 	pub active_turn_id: Option<TurnId>,
 	pub turn_count: u32,
@@ -130,6 +187,7 @@ impl SessionProjection {
 		project_id: ProjectId,
 		workspace_id: WorkspaceId,
 		provider_id: String,
+		model: Option<String>,
 		occurred_at: String,
 	) -> Self {
 		Self {
@@ -137,6 +195,7 @@ impl SessionProjection {
 			project_id,
 			workspace_id,
 			provider_id,
+			model,
 			state: SessionState::Draft,
 			active_turn_id: None,
 			turn_count: 0,
@@ -154,16 +213,26 @@ impl SessionProjection {
 				workspace_id,
 				project_id,
 				provider_id,
+				model,
 			} => {
 				self.workspace_id = workspace_id.clone();
 				self.project_id = project_id.clone();
 				self.provider_id = provider_id.clone();
+				self.model = model.clone();
 				self.state = SessionState::Active;
 			}
 			SessionEventKind::TurnStarted { turn_id, .. } => {
 				self.state = SessionState::Active;
 				self.active_turn_id = Some(turn_id.clone());
 			}
+			SessionEventKind::TurnDelta { .. }
+			| SessionEventKind::TurnReasoningStarted { .. }
+			| SessionEventKind::TurnReasoningDelta { .. }
+			| SessionEventKind::TurnReasoningCompleted { .. }
+			| SessionEventKind::TurnToolCallStarted { .. }
+			| SessionEventKind::TurnToolCallDelta { .. }
+			| SessionEventKind::TurnToolCallCompleted { .. }
+			| SessionEventKind::TurnToolCallFailed { .. } => {}
 			SessionEventKind::TurnCompleted { turn_id } => {
 				self.turn_count = self.turn_count.saturating_add(1);
 				if self.active_turn_id.as_ref() == Some(turn_id) {
@@ -199,11 +268,13 @@ impl SessionProjection {
 				workspace_id,
 				project_id,
 				provider_id,
+				model,
 			} => Self::new(
 				first.session_id.clone(),
 				project_id.clone(),
 				workspace_id.clone(),
 				provider_id.clone(),
+				model.clone(),
 				first.occurred_at.clone(),
 			),
 			_ => Self::new(
@@ -211,6 +282,7 @@ impl SessionProjection {
 				ProjectId(String::new()),
 				WorkspaceId(String::new()),
 				String::new(),
+				None,
 				first.occurred_at.clone(),
 			),
 		};
@@ -247,6 +319,7 @@ mod tests {
 					workspace_id: WorkspaceId("workspace-1".to_string()),
 					project_id: ProjectId("project-1".to_string()),
 					provider_id: "codex".to_string(),
+					model: Some("gpt-5-codex".to_string()),
 				},
 			),
 			event(
@@ -306,6 +379,7 @@ mod tests {
 					workspace_id: WorkspaceId("workspace-1".to_string()),
 					project_id: ProjectId("project-1".to_string()),
 					provider_id: "codex".to_string(),
+					model: Some("gpt-5-codex".to_string()),
 				},
 			),
 			event(

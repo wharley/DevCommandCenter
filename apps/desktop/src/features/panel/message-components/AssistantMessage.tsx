@@ -1,6 +1,18 @@
 import { Suspense } from "react";
+import { AlertCircle, Copy } from "lucide-react";
+import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
+import { Button } from "@/components/ui/button";
 import { LazyStreamdown } from "@/components/streamdown-loader";
 import { cn } from "@/lib/utils";
+import { Reasoning } from "@/components/ai/reasoning";
+import { ToolCall } from "@/components/ai/tool-call";
+import { MessageTimestamp } from "./message-metadata";
+import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
+
+type AssistantStatus = {
+	type: "incomplete";
+	reason?: string;
+};
 
 function AssistantTextFallback({ text }: { text: string }) {
 	return (
@@ -15,13 +27,76 @@ function AssistantTextFallback({ text }: { text: string }) {
 export function AssistantMessage({
 	content,
 	streaming,
+	createdAt,
+	status,
+	annotations,
 }: {
 	content: string;
 	streaming?: boolean;
+	createdAt?: string;
+	status?: AssistantStatus;
+	annotations?: WorkspaceMessageAnnotation[];
 }) {
 	return (
-		<div data-message-role="assistant" className="conversation-fade-in flex min-w-0 justify-start">
+		<div
+			data-message-role="assistant"
+			className="conversation-thread-enter conversation-fade-in group/assistant flex min-w-0 justify-start"
+		>
 			<div className="relative flex min-w-0 max-w-[75%] flex-col pb-5">
+				{annotations?.length ? (
+					<div className="mb-2 flex flex-col gap-2">
+						{annotations.map((annotation) => {
+							if (annotation.type === "reasoning") {
+								return (
+									<Reasoning
+										key={`reasoning-${annotation.id}`}
+										label={annotation.label ?? "Thinking"}
+										defaultOpen={Boolean(annotation.streaming)}
+									>
+										<div className="flex items-center gap-1.5">
+											{annotation.content.trim().length > 0 ? (
+												<span className="whitespace-pre-wrap">{annotation.content}</span>
+											) : annotation.streaming ? (
+												<>
+													<DccThinkingIndicator size={12} />
+													<span>Thinking</span>
+												</>
+											) : (
+												<span className="text-muted-foreground/70">No reasoning captured.</span>
+											)}
+										</div>
+									</Reasoning>
+								);
+							}
+
+							return (
+								<ToolCall
+									key={`tool-call-${annotation.id}`}
+									action={annotation.action}
+									command={annotation.command}
+									file={annotation.file}
+									isLive={Boolean(annotation.streaming)}
+									isError={annotation.status?.type === "failed"}
+								>
+									<div className="flex items-center gap-1.5">
+										{annotation.content.trim().length > 0 ? (
+											<span className="whitespace-pre-wrap">{annotation.content}</span>
+										) : annotation.streaming ? (
+											<>
+												<DccThinkingIndicator size={12} />
+												<span>Running</span>
+											</>
+										) : annotation.status?.type === "failed" ? (
+											<span>{annotation.status.reason ?? "Tool call failed"}</span>
+										) : (
+											<span className="text-muted-foreground/70">No output captured.</span>
+										)}
+									</div>
+								</ToolCall>
+							);
+						})}
+					</div>
+				) : null}
 				<div className={cn("assistant-markdown-scale max-w-none break-words text-foreground")}>
 					<Suspense fallback={<AssistantTextFallback text={content} />}>
 						<LazyStreamdown
@@ -39,6 +114,36 @@ export function AssistantMessage({
 							{content}
 						</LazyStreamdown>
 					</Suspense>
+				</div>
+				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
+					<MessageTimestamp createdAt={createdAt} />
+					{status?.type === "incomplete" ? (
+						<span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1.5 py-0.5 text-destructive">
+							<AlertCircle className="size-3" aria-hidden />
+							<span>{status.reason ?? "Incomplete"}</span>
+						</span>
+					) : null}
+				</div>
+				<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/assistant:pointer-events-auto group-hover/assistant:opacity-100 group-focus-within/assistant:pointer-events-auto group-focus-within/assistant:opacity-100">
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-xs"
+						aria-label="Copy assistant message"
+						className={cn(
+							"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
+							"bg-transparent hover:bg-transparent",
+						)}
+						onClick={async () => {
+							try {
+								await navigator.clipboard.writeText(content);
+							} catch {
+								// Clipboard availability varies across desktop shells; ignore gracefully.
+							}
+						}}
+					>
+						<Copy className="size-3.5" aria-hidden />
+					</Button>
 				</div>
 			</div>
 		</div>

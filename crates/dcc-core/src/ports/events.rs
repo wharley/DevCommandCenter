@@ -22,6 +22,7 @@ pub enum CoreEvent {
 		workspace_id: String,
 		project_id: String,
 		provider_id: String,
+		model: Option<String>,
 	},
 	SessionCompleted {
 		session_id: String,
@@ -42,6 +43,48 @@ pub enum CoreEvent {
 		session_id: String,
 		turn_id: String,
 		content: String,
+	},
+	SessionTurnReasoningStarted {
+		session_id: String,
+		turn_id: String,
+		reasoning_id: String,
+		label: Option<String>,
+	},
+	SessionTurnReasoningDelta {
+		session_id: String,
+		turn_id: String,
+		reasoning_id: String,
+		content: String,
+	},
+	SessionTurnReasoningCompleted {
+		session_id: String,
+		turn_id: String,
+		reasoning_id: String,
+	},
+	SessionTurnToolCallStarted {
+		session_id: String,
+		turn_id: String,
+		tool_call_id: String,
+		action: String,
+		command: Option<String>,
+		file: Option<String>,
+	},
+	SessionTurnToolCallDelta {
+		session_id: String,
+		turn_id: String,
+		tool_call_id: String,
+		content: String,
+	},
+	SessionTurnToolCallCompleted {
+		session_id: String,
+		turn_id: String,
+		tool_call_id: String,
+	},
+	SessionTurnToolCallFailed {
+		session_id: String,
+		turn_id: String,
+		tool_call_id: String,
+		reason: Option<String>,
 	},
 	SessionTurnCompleted {
 		session_id: String,

@@ -10,9 +10,11 @@ dcc-core = { path = "../dcc-core" }
 dcc-infra = { path = "../dcc-infra" }
 dcc-providers = { path = "../dcc-providers" }
 futures = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 specta = { version = "2.0.0-rc.24", features = ["derive"] }
 tauri = { version = "2", features = [] }
 tauri-specta = { version = "2.0.0-rc.24", features = ["typescript"] }
 thiserror = "2"
 tokio = { version = "1", features = ["rt", "sync"] }
+uuid = { version = "1", features = ["v4"] }

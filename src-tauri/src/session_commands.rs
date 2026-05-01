@@ -4,6 +4,7 @@ use dcc_core::application::{
 	AbortRunInput, AbortRunOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput,
 	SendTurnOutput, StartThreadInput, StartThreadOutput,
 };
+use dcc_core::domain::session::SessionEventRecord;
 use dcc_tauri::{
 	commands::session_commands as session_command_impl,
 	state::SessionCommandState,
@@ -43,4 +44,13 @@ pub async fn resume_session(
 	input: ResumeSessionInput,
 ) -> Result<ResumeSessionOutput, String> {
 	session_command_impl::resume_session(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn list_thread_events(
+	state: State<'_, SessionCommandState>,
+	app: AppHandle,
+	session_id: String,
+) -> Result<Vec<SessionEventRecord>, String> {
+	session_command_impl::list_thread_events(state, app, session_id).await
 }

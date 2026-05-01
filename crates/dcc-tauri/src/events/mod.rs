@@ -3,26 +3,47 @@ use tauri::{AppHandle, Emitter};
 
 use dcc_core::{ports::events::CoreEvent, CoreError, Result};
 
-pub const PHASE_0A_EVENT_PREFIX: &str = "dcc.phase-0a";
-pub const WORKSPACE_EVENT_PREFIX: &str = "dcc.workspace";
-pub const SESSION_EVENT_PREFIX: &str = "dcc.session";
+pub const PHASE_0A_EVENT_PREFIX: &str = "dcc/phase-0a";
+pub const WORKSPACE_EVENT_PREFIX: &str = "dcc/workspace";
+pub const SESSION_EVENT_PREFIX: &str = "dcc/session";
 
 pub(crate) fn core_event_name(event: &CoreEvent) -> String {
 	match event {
-		CoreEvent::WorkspacePrepared { .. } => format!("{WORKSPACE_EVENT_PREFIX}.prepared"),
-		CoreEvent::WorkspaceReady { .. } => format!("{WORKSPACE_EVENT_PREFIX}.ready"),
-		CoreEvent::SessionStarted { .. } => format!("{SESSION_EVENT_PREFIX}.started"),
-		CoreEvent::SessionCompleted { .. } => format!("{SESSION_EVENT_PREFIX}.completed"),
-		CoreEvent::SessionAborted { .. } => format!("{SESSION_EVENT_PREFIX}.aborted"),
-		CoreEvent::SessionResumed { .. } => format!("{SESSION_EVENT_PREFIX}.resumed"),
-		CoreEvent::SessionTurnStarted { .. } => format!("{SESSION_EVENT_PREFIX}.turn.started"),
-		CoreEvent::SessionTurnDelta { .. } => format!("{SESSION_EVENT_PREFIX}.turn.delta"),
-		CoreEvent::SessionTurnCompleted { .. } => {
-			format!("{SESSION_EVENT_PREFIX}.turn.completed")
+		CoreEvent::WorkspacePrepared { .. } => format!("{WORKSPACE_EVENT_PREFIX}/prepared"),
+		CoreEvent::WorkspaceReady { .. } => format!("{WORKSPACE_EVENT_PREFIX}/ready"),
+		CoreEvent::SessionStarted { .. } => format!("{SESSION_EVENT_PREFIX}/started"),
+		CoreEvent::SessionCompleted { .. } => format!("{SESSION_EVENT_PREFIX}/completed"),
+		CoreEvent::SessionAborted { .. } => format!("{SESSION_EVENT_PREFIX}/aborted"),
+		CoreEvent::SessionResumed { .. } => format!("{SESSION_EVENT_PREFIX}/resumed"),
+		CoreEvent::SessionTurnStarted { .. } => format!("{SESSION_EVENT_PREFIX}/turn/started"),
+		CoreEvent::SessionTurnDelta { .. } => format!("{SESSION_EVENT_PREFIX}/turn/delta"),
+		CoreEvent::SessionTurnReasoningStarted { .. } => {
+			format!("{SESSION_EVENT_PREFIX}/turn/reasoning/started")
 		}
-		CoreEvent::SessionTurnAborted { .. } => format!("{SESSION_EVENT_PREFIX}.turn.aborted"),
+		CoreEvent::SessionTurnReasoningDelta { .. } => {
+			format!("{SESSION_EVENT_PREFIX}/turn/reasoning/delta")
+		}
+		CoreEvent::SessionTurnReasoningCompleted { .. } => {
+			format!("{SESSION_EVENT_PREFIX}/turn/reasoning/completed")
+		}
+		CoreEvent::SessionTurnToolCallStarted { .. } => {
+			format!("{SESSION_EVENT_PREFIX}/turn/tool-call/started")
+		}
+		CoreEvent::SessionTurnToolCallDelta { .. } => {
+			format!("{SESSION_EVENT_PREFIX}/turn/tool-call/delta")
+		}
+		CoreEvent::SessionTurnToolCallCompleted { .. } => {
+			format!("{SESSION_EVENT_PREFIX}/turn/tool-call/completed")
+		}
+		CoreEvent::SessionTurnToolCallFailed { .. } => {
+			format!("{SESSION_EVENT_PREFIX}/turn/tool-call/failed")
+		}
+		CoreEvent::SessionTurnCompleted { .. } => {
+			format!("{SESSION_EVENT_PREFIX}/turn/completed")
+		}
+		CoreEvent::SessionTurnAborted { .. } => format!("{SESSION_EVENT_PREFIX}/turn/aborted"),
 		CoreEvent::SessionCheckpointCreated { .. } => {
-			format!("{SESSION_EVENT_PREFIX}.checkpoint.created")
+			format!("{SESSION_EVENT_PREFIX}/checkpoint/created")
 		}
 	}
 }
@@ -52,5 +73,24 @@ impl dcc_core::ports::EventBus for TauriEventBus {
 			.map_err(|error| CoreError::EventBus(error.to_string()))?;
 
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn workspace_event_names_do_not_use_dots() {
+		let event = CoreEvent::WorkspacePrepared {
+			workspace_id: "workspace-1".to_string(),
+			project_id: "project-1".to_string(),
+			worktree_path: "/tmp/project".to_string(),
+		};
+
+		let name = core_event_name(&event);
+
+		assert_eq!(name, "dcc/workspace/prepared");
+		assert!(!name.contains('.'));
 	}
 }

@@ -1,9 +1,11 @@
+pub mod create_workspace_from_url;
 pub mod create_workspace_for_repo;
 pub mod abort_run;
 pub mod resume_session;
 pub mod send_turn;
 pub mod start_thread;
 
+pub use create_workspace_from_url::{create_workspace_from_url, CreateWorkspaceFromUrlInput};
 pub use create_workspace_for_repo::{
 	create_workspace_for_repo, finalize_workspace_for_repo, prepare_workspace_for_repo,
 	CreateWorkspaceForRepoInput, FinalizedWorkspace, PreparedWorkspace,

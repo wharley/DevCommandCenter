@@ -7,11 +7,14 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { AppUpdateButton } from "@/features/updater";
+import type { AppUpdateInfo } from "@/features/updater";
 import type { DccRuntimeSessionSnapshot } from "./workbench-types";
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
 	projectBadgeLabel: string | null;
+	modelBadgeLabel: string | null;
 	isGitRepo: boolean;
 	pathCaption: string | null;
 	sessionSnapshot: DccRuntimeSessionSnapshot | null;
@@ -21,6 +24,9 @@ export type DccWorkbenchChatHeaderProps = {
 	onOpenCommandPalette: () => void;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
+	updateInfo: AppUpdateInfo;
+	isInstallingUpdate: boolean;
+	onInstallUpdate: () => void;
 };
 
 /** Chat column top bar — same layout affordances as the reference desktop/chat header (titles + badges + toolbar cluster). */
@@ -28,6 +34,7 @@ export type DccWorkbenchChatHeaderProps = {
 export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	threadTitle,
 	projectBadgeLabel,
+	modelBadgeLabel,
 	isGitRepo,
 	pathCaption,
 	sessionSnapshot,
@@ -37,6 +44,9 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	onOpenCommandPalette,
 	onResumeSession,
 	onAbortSession,
+	updateInfo,
+	isInstallingUpdate,
+	onInstallUpdate,
 }: DccWorkbenchChatHeaderProps) {
 	const showProjectBadge = Boolean(projectBadgeLabel);
 
@@ -52,6 +62,11 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 				{showProjectBadge ? (
 					<Badge variant="outline" className="min-w-0 shrink overflow-hidden">
 						<span className="min-w-0 truncate">{projectBadgeLabel}</span>
+					</Badge>
+				) : null}
+				{modelBadgeLabel ? (
+					<Badge variant="secondary" className="min-w-0 shrink overflow-hidden">
+						<span className="min-w-0 truncate">{modelBadgeLabel}</span>
 					</Badge>
 				) : null}
 				{showProjectBadge && !isGitRepo ? (
@@ -91,6 +106,11 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						Abort
 					</Button>
 				</div>
+				<AppUpdateButton
+					update={updateInfo}
+					installing={isInstallingUpdate}
+					onInstallNow={onInstallUpdate}
+				/>
 				<Tooltip>
 					<TooltipTrigger asChild>
 						<Button

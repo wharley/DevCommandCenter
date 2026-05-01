@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { SESSION_METHODS } from "@dcc/contracts";
-import type { CoreEvent } from "@dcc/contracts";
+import type { CoreEvent, SessionEventRecord } from "@dcc/contracts";
 import type {
 	AbortRunInput,
 	AbortRunOutput,
@@ -29,16 +29,22 @@ export function resumeSession(input: ResumeSessionInput) {
 	return invoke<ResumeSessionOutput>(SESSION_METHODS.resumeSession, { input });
 }
 
+export function loadSessionThreadEvents(sessionId: string) {
+	return invoke<SessionEventRecord[]>(SESSION_METHODS.listThreadEvents, {
+		sessionId,
+	});
+}
+
 const SESSION_EVENT_NAMES = [
-	"dcc.session.started",
-	"dcc.session.completed",
-	"dcc.session.aborted",
-	"dcc.session.resumed",
-	"dcc.session.turn.started",
-	"dcc.session.turn.delta",
-	"dcc.session.turn.completed",
-	"dcc.session.turn.aborted",
-	"dcc.session.checkpoint.created",
+	"dcc/session/started",
+	"dcc/session/completed",
+	"dcc/session/aborted",
+	"dcc/session/resumed",
+	"dcc/session/turn/started",
+	"dcc/session/turn/delta",
+	"dcc/session/turn/completed",
+	"dcc/session/turn/aborted",
+	"dcc/session/checkpoint/created",
 ] as const;
 
 export async function listenSessionEvents(

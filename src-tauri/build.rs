@@ -2,8 +2,9 @@ use std::{env, fs, path::PathBuf};
 
 	use dcc_core::{
 	application::{
-		AbortRunInput, AbortRunOutput, CreateWorkspaceForRepoInput, ResumeSessionInput,
-		ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
+		AbortRunInput, AbortRunOutput, CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput,
+		ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput,
+		StartThreadOutput,
 	},
 		domain::{
 			project::ProjectId,
@@ -18,7 +19,10 @@ use std::{env, fs, path::PathBuf};
 };
 use dcc_tauri::commands::{
 	provider_commands::ListProvidersOutput,
-	workspace_commands::CreateWorkspaceForRepoOutput,
+	workspace_commands::{
+		CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListLocalBranchesInput,
+		ListLocalBranchesOutput, ListWorkspacesOutput,
+	},
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -29,6 +33,9 @@ use tauri_specta::Builder;
 #[serde(rename_all = "camelCase")]
 struct WorkspaceMethods {
 	create_workspace_for_repo: String,
+	create_workspace_from_url: String,
+	list_local_branches: String,
+	list_workspaces: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -38,6 +45,7 @@ struct SessionMethods {
 	send_turn: String,
 	abort_run: String,
 	resume_session: String,
+	list_thread_events: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -76,6 +84,11 @@ fn main() {
 		.typ::<SessionProjection>()
 		.typ::<CreateWorkspaceForRepoInput>()
 		.typ::<CreateWorkspaceForRepoOutput>()
+		.typ::<CreateWorkspaceFromUrlInput>()
+		.typ::<CreateWorkspaceFromUrlOutput>()
+		.typ::<ListLocalBranchesInput>()
+		.typ::<ListLocalBranchesOutput>()
+		.typ::<ListWorkspacesOutput>()
 		.typ::<ListProvidersOutput>()
 		.typ::<StartThreadInput>()
 		.typ::<StartThreadOutput>()
@@ -89,24 +102,28 @@ fn main() {
 		.constant(
 			"WORKSPACE_METHODS",
 			WorkspaceMethods {
-				create_workspace_for_repo: "workspace.createForRepo".to_string(),
+				create_workspace_for_repo: "create_workspace_for_repo".to_string(),
+				create_workspace_from_url: "create_workspace_from_url".to_string(),
+				list_local_branches: "list_local_branches".to_string(),
+				list_workspaces: "list_workspaces".to_string(),
 			},
 		);
 
 	let builder = builder.constant(
 		"SESSION_METHODS",
 		SessionMethods {
-			start_thread: "session.startThread".to_string(),
-			send_turn: "session.sendTurn".to_string(),
-			abort_run: "session.abortRun".to_string(),
-			resume_session: "session.resumeSession".to_string(),
+			start_thread: "start_thread".to_string(),
+			send_turn: "send_turn".to_string(),
+			abort_run: "abort_run".to_string(),
+			resume_session: "resume_session".to_string(),
+			list_thread_events: "list_thread_events".to_string(),
 		},
 	);
 
 	let builder = builder.constant(
 		"PROVIDER_METHODS",
 		ProviderMethods {
-			list_providers: "provider.listProviders".to_string(),
+			list_providers: "list_providers".to_string(),
 		},
 	);
 

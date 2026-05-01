@@ -29,6 +29,7 @@ export const dccQueryKeys = {
 	shell: ["shell"] as const,
 	workspaces: ["workspaces"] as const,
 	sessions: ["sessions"] as const,
+	sessionThreads: (sessionId: string) => ["sessionThreads", sessionId] as const,
 } as const;
 
 export function createDccQueryClient() {
@@ -66,6 +67,7 @@ export function createDccQueryClient() {
 		void listen("dcc:core-event", () => {
 			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.workspaces });
 			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.sessions });
+			void queryClient.invalidateQueries({ queryKey: ["sessionThreads"] });
 		});
 	});
 

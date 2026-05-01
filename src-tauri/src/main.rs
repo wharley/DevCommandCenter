@@ -43,7 +43,12 @@ use tauri_plugin_dialog::{
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
-use workspace_commands::create_workspace_for_repo;
+use workspace_commands::{
+	create_workspace_for_repo,
+	create_workspace_from_url,
+	list_local_branches,
+	list_workspaces,
+};
 use dcc_tauri::state::{SessionCommandState, WorkspaceCommandState};
 
 /// Schema SQLite compartilhado com `lib/database/schema.sql` (CREATE IF NOT EXISTS).
@@ -8566,10 +8571,14 @@ pub fn run() {
             terminal_get_project_activity,
             terminal_save_temp_image,
             create_workspace_for_repo,
+            create_workspace_from_url,
+            list_local_branches,
+            list_workspaces,
             session_commands::start_thread,
             session_commands::send_turn,
             session_commands::abort_run,
-            session_commands::resume_session
+            session_commands::resume_session,
+            session_commands::list_thread_events
         ])
         .setup(|app| {
             let app_data_dir = app

@@ -5,6 +5,7 @@ export interface WorkspaceSummary {
 	name: string;
 	branch: string;
 	status: WorkspaceStatus;
+	unreadSessionCount?: number;
 	projectId?: string | null;
 	rootPath?: string | null;
 	worktreePath?: string | null;
