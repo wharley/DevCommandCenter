@@ -12,6 +12,8 @@ import type {
 	ListLocalBranchesInput,
 	ListLocalBranchesOutput,
 	ListWorkspacesOutput,
+	WorkspaceGitBranchDiffInput,
+	WorkspaceGitBranchDiffOutput,
 	WorkspaceGitCommitPushInput,
 	WorkspaceGitPathInput,
 	WorkspaceGitPushInput,
@@ -85,4 +87,10 @@ export function workspaceGhPrViewWeb(input: WorkspaceGitPushInput) {
 
 export function workspaceGhPrCreateFill(input: WorkspaceGitPushInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceGhPrCreateFill, { input });
+}
+
+export function workspaceGitBranchDiff(input: WorkspaceGitBranchDiffInput) {
+	return invoke<WorkspaceGitBranchDiffOutput>(WORKSPACE_METHODS.workspaceGitBranchDiff, {
+		input,
+	});
 }

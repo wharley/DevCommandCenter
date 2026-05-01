@@ -618,6 +618,146 @@ pub async fn list_git_tracked_files(
 	Ok(ListGitTrackedFilesOutput { paths })
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitBranchDiffInput {
+    pub workspace_root: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitBranchDiffOutput {
+    pub changes: Vec<WorkspaceGitChangeEntry>,
+    pub base_branch: Option<String>,
+}
+
+/// Returns files changed on HEAD vs the upstream/base branch (`git diff <base>...HEAD`).
+/// Falls back through: @{upstream} → origin/HEAD → origin/main → origin/master.
+#[tauri::command]
+pub async fn workspace_git_branch_diff(
+    input: WorkspaceGitBranchDiffInput,
+) -> Result<WorkspaceGitBranchDiffOutput, String> {
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+
+    // Resolve base ref: try upstream, then common origin branches.
+    let base = resolve_branch_diff_base(root);
+
+    let changes = match base {
+        Some(ref b) => compute_branch_diff(root, b)?,
+        None => vec![],
+    };
+
+    Ok(WorkspaceGitBranchDiffOutput {
+        changes,
+        base_branch: base,
+    })
+}
+
+fn resolve_branch_diff_base(root: &str) -> Option<String> {
+    // 1. Try @{upstream}
+    let upstream = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--abbrev-ref", "@{upstream}"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if s.is_empty() { None } else { Some(s) }
+        });
+    if upstream.is_some() {
+        return upstream;
+    }
+
+    // 2. Try common origin branches
+    for candidate in &["origin/HEAD", "origin/main", "origin/master", "origin/develop"] {
+        let ok = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["rev-parse", "--verify", candidate])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if ok {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+fn compute_branch_diff(
+    root: &str,
+    base: &str,
+) -> Result<Vec<WorkspaceGitChangeEntry>, String> {
+    let range = format!("{base}...HEAD");
+
+    // name-status
+    let ns_out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["diff", "--name-status", &range])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !ns_out.status.success() {
+        return Err(git_output_err("git diff --name-status", &ns_out.stderr));
+    }
+    let ns_text = String::from_utf8_lossy(&ns_out.stdout);
+
+    // numstat
+    let stat_map = {
+        let stat_out = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["diff", "--numstat", &range])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if stat_out.status.success() {
+            parse_numstat_tab_lines(&String::from_utf8_lossy(&stat_out.stdout))
+        } else {
+            HashMap::new()
+        }
+    };
+
+    let mut entries = Vec::new();
+    for line in ns_text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.splitn(2, '\t');
+        let status_raw = parts.next().unwrap_or("").trim();
+        let path_part = parts.next().unwrap_or("").trim();
+        if path_part.is_empty() {
+            continue;
+        }
+        // Handle rename: "R100\told_path\tnew_path"
+        let path = if status_raw.starts_with('R') || status_raw.starts_with('C') {
+            path_part.split('\t').last().unwrap_or(path_part).trim().to_string()
+        } else {
+            path_part.to_string()
+        };
+        let status = status_raw.chars().next().unwrap_or('M').to_string();
+        let (insertions, deletions) = stat_map.get(&path).copied().unwrap_or((0, 0));
+        let name = Path::new(&path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+        entries.push(WorkspaceGitChangeEntry {
+            path: normalize_git_relative_path(&path),
+            name,
+            absolute_path: join_workspace_path(root, &path),
+            status,
+            insertions,
+            deletions,
+        });
+    }
+    Ok(entries)
+}
+
 /// Immediate child directories of `path` (absolute paths), sorted.
 #[tauri::command]
 pub async fn list_child_directories(

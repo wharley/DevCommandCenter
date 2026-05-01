@@ -7,14 +7,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-js";
 import {
 	ChevronRight,
+	CloudIcon,
+	LaptopIcon,
 	List as ListIcon,
 	ListTree,
+	LoaderCircleIcon,
 	MinusIcon,
 	PlusIcon,
 	Undo2Icon,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AnimatedShinyText } from "@/components/ui/animated-shiny-text";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NumberTicker } from "@/components/ui/number-ticker";
@@ -27,8 +31,9 @@ import {
 } from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
+import { useWorkspaceGitBranchDiff, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./use-workspace-git-branch-diff";
 
-export { WORKSPACE_GIT_STATUS_QUERY_KEY };
+export { WORKSPACE_GIT_STATUS_QUERY_KEY, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY };
 
 const STATUS_BADGE_CLASS: Record<string, string> = {
 	M: "text-yellow-600 dark:text-yellow-500",
@@ -139,14 +144,16 @@ function ChangeRow({
 	runGit,
 	treeIndentPx = 0,
 	fileIconSrc,
+	flashingPaths = new Set(),
 }: {
 	entry: WorkspaceGitChangeEntry;
-	group: "staged" | "unstaged";
+	group: "staged" | "unstaged" | "committed";
 	workspaceRoot: string;
 	gitBusy: boolean;
 	runGit: (fn: () => Promise<void>) => Promise<void>;
 	treeIndentPx?: number;
 	fileIconSrc?: string;
+	flashingPaths?: Set<string>;
 }) {
 	const folder = dirname(entry.path);
 	const input = { workspaceRoot, relativePath: entry.path };
@@ -160,7 +167,7 @@ function ChangeRow({
 		>
 			<img src={iconSrc} alt="" className="size-3.5 shrink-0" />
 			<span className="min-w-0 max-w-[40%] truncate font-medium text-foreground sm:max-w-[52%]">
-				{entry.name}
+				<ShinyFlash active={flashingPaths.has(entry.path)}>{entry.name}</ShinyFlash>
 			</span>
 			<span
 				className={cn(
@@ -210,7 +217,7 @@ function ChangeRow({
 						<MinusIcon className="size-3.5" strokeWidth={2} />
 					</RowIconButton>
 				</span>
-			) : (
+			) : group === "unstaged" ? (
 				<span className="ml-auto hidden items-center gap-0.5 group-hover/row:inline-flex">
 					<RowIconButton
 						aria-label="Discard file changes"
@@ -237,7 +244,7 @@ function ChangeRow({
 						<PlusIcon className="size-3.5" strokeWidth={2} />
 					</RowIconButton>
 				</span>
-			)}
+			) : null}
 		</div>
 	);
 }
@@ -248,12 +255,14 @@ function ChangesTreeView({
 	workspaceRoot,
 	gitBusy,
 	runGit,
+	flashingPaths = new Set(),
 }: {
 	entries: WorkspaceGitChangeEntry[];
-	group: "staged" | "unstaged";
+	group: "staged" | "unstaged" | "committed";
 	workspaceRoot: string;
 	gitBusy: boolean;
 	runGit: (fn: () => Promise<void>) => Promise<void>;
+	flashingPaths?: Set<string>;
 }) {
 	const tree = useMemo(() => buildTree(entries), [entries]);
 	const [expanded, setExpanded] = useState<Set<string>>(() => new Set(collectFolderPaths(tree)));
@@ -281,6 +290,7 @@ function ChangesTreeView({
 				workspaceRoot={workspaceRoot}
 				gitBusy={gitBusy}
 				runGit={runGit}
+				flashingPaths={flashingPaths}
 			/>
 		</div>
 	);
@@ -295,15 +305,17 @@ function TreeNodeList({
 	workspaceRoot,
 	gitBusy,
 	runGit,
+	flashingPaths = new Set(),
 }: {
 	nodes: Map<string, TreeNode>;
 	expanded: Set<string>;
 	onToggle: (path: string) => void;
 	depth: number;
-	group: "staged" | "unstaged";
+	group: "staged" | "unstaged" | "committed";
 	workspaceRoot: string;
 	gitBusy: boolean;
 	runGit: (fn: () => Promise<void>) => Promise<void>;
+	flashingPaths?: Set<string>;
 }) {
 	const sorted = [...nodes.values()].sort((left, right) => {
 		const leftIsFolder = left.children.size > 0 && !left.file;
@@ -360,6 +372,7 @@ function TreeNodeList({
 									workspaceRoot={workspaceRoot}
 									gitBusy={gitBusy}
 									runGit={runGit}
+									flashingPaths={flashingPaths}
 								/>
 							) : null}
 						</div>
@@ -381,10 +394,126 @@ function TreeNodeList({
 						runGit={runGit}
 						treeIndentPx={depth * 12 + 22}
 						fileIconSrc={getMaterialFileIcon(node.name)}
+						flashingPaths={flashingPaths}
 					/>
 				);
 			})}
 		</>
+	);
+}
+
+function ShinyFlash({ active, children }: { active: boolean; children: React.ReactNode }) {
+	const [shimmer, setShimmer] = useState(false);
+	const counterRef = useRef(0);
+
+	useEffect(() => {
+		if (!active) return;
+		counterRef.current += 1;
+		setShimmer(true);
+		const id = window.setTimeout(() => setShimmer(false), 3000);
+		return () => window.clearTimeout(id);
+	}, [active]);
+
+	if (!shimmer) return <span className="truncate">{children}</span>;
+
+	return (
+		<AnimatedShinyText
+			key={counterRef.current}
+			shimmerWidth={60}
+			className="!mx-0 !max-w-none truncate !text-neutral-500/80 ![animation-duration:1s] ![animation-iteration-count:3] ![animation-name:shiny-text-continuous] ![animation-timing-function:ease-in-out] dark:!text-neutral-500/80 dark:via-white via-black"
+		>
+			{children}
+		</AnimatedShinyText>
+	);
+}
+
+function BranchDiffSection({
+	workspaceRoot,
+	gitBusy,
+}: {
+	workspaceRoot: string;
+	gitBusy: boolean;
+}) {
+	const [open, setOpen] = useState(true);
+	const [treeView, setTreeView] = useState(true);
+	const query = useWorkspaceGitBranchDiff(workspaceRoot);
+	const prevDataRef = useRef(query.data?.changes);
+	const [flashingPaths, setFlashingPaths] = useState<Set<string>>(new Set());
+
+	useEffect(() => {
+		const prev = prevDataRef.current;
+		const curr = query.data?.changes;
+		prevDataRef.current = curr;
+		if (!prev || !curr) return;
+		const prevPaths = new Set(prev.map((e) => e.path));
+		const newPaths = curr.filter((e) => !prevPaths.has(e.path)).map((e) => e.path);
+		if (newPaths.length === 0) return;
+		setFlashingPaths(new Set(newPaths));
+		const id = window.setTimeout(() => setFlashingPaths(new Set()), 3100);
+		return () => window.clearTimeout(id);
+	}, [query.data?.changes]);
+
+	const changes = query.data?.changes ?? [];
+	const baseBranch = query.data?.baseBranch ?? null;
+	const loading = query.isPending;
+
+	if (!loading && changes.length === 0) return null;
+
+	return (
+		<div className="border-b border-border/40 last:border-b-0">
+			<div className="group/header flex w-full items-center gap-1 py-1 pl-1 pr-2 text-[11.5px] font-semibold tracking-[-0.01em] text-muted-foreground">
+				<Button
+					type="button"
+					variant="ghost"
+					size="xs"
+					onClick={() => setOpen((v) => !v)}
+					aria-expanded={open}
+					className="h-auto min-w-0 flex-1 justify-start gap-1 rounded-none px-0 text-left hover:bg-transparent hover:text-foreground dark:hover:bg-transparent aria-expanded:bg-transparent aria-expanded:text-foreground"
+				>
+					<ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} strokeWidth={2} aria-hidden />
+					<CloudIcon className="size-3 shrink-0 text-muted-foreground" strokeWidth={2} />
+					<span className="truncate">Remote{baseBranch ? ` ← ${baseBranch.replace("origin/", "")}` : ""}</span>
+				</Button>
+				<RowIconButton
+					aria-label={treeView ? "Switch to list view" : "Switch to tree view"}
+					onClick={() => setTreeView((v) => !v)}
+					className="text-transparent hover:bg-transparent group-hover/header:text-muted-foreground group-hover/header:hover:text-foreground"
+				>
+					{treeView ? <ListIcon className="size-3.5" strokeWidth={2} /> : <ListTree className="size-3.5" strokeWidth={2} />}
+				</RowIconButton>
+				<Badge variant="secondary" className="h-4 min-w-[16px] justify-center rounded-full px-1 text-[9.5px] font-semibold">
+					{loading ? <LoaderCircleIcon className="size-2.5 animate-spin" /> : changes.length}
+				</Badge>
+			</div>
+			{open && (
+				<div className={cn("pb-2 pl-1 transition-opacity duration-150", loading && "pointer-events-none opacity-40")}>
+					{treeView ? (
+						<ChangesTreeView
+							entries={changes}
+							group="committed"
+							workspaceRoot={workspaceRoot}
+							gitBusy={gitBusy}
+							runGit={async () => {}}
+							flashingPaths={flashingPaths}
+						/>
+					) : (
+						<div className="pb-2 pl-1">
+							{changes.map((e) => (
+								<ChangeRow
+									key={`remote-${e.path}-${e.status}`}
+									entry={e}
+									group="committed"
+									workspaceRoot={workspaceRoot}
+									gitBusy={gitBusy}
+									runGit={async () => {}}
+									flashingPaths={flashingPaths}
+								/>
+							))}
+						</div>
+					)}
+				</div>
+			)}
+		</div>
 	);
 }
 
@@ -426,6 +555,7 @@ function ChangesGroup({
 	treeView,
 	onToggleTreeView,
 	showViewToggle,
+	icon,
 }: {
 	label: string;
 	count: number;
@@ -442,6 +572,7 @@ function ChangesGroup({
 	treeView: boolean;
 	onToggleTreeView: () => void;
 	showViewToggle: boolean;
+	icon?: React.ReactNode;
 }) {
 	return (
 		<div className="border-b border-border/40 last:border-b-0">
@@ -459,6 +590,7 @@ function ChangesGroup({
 						strokeWidth={2}
 						aria-hidden
 					/>
+					{icon}
 					<span className="truncate">{label}</span>
 				</Button>
 				{entries.length > 0 ? (
@@ -638,6 +770,7 @@ export function InspectorChangesSection({ workspaceRoot }: InspectorChangesSecti
 						treeView={changesTreeView}
 						onToggleTreeView={() => setChangesTreeView((v) => !v)}
 						showViewToggle={data.staged.length === 0}
+						icon={<LaptopIcon className="size-3 shrink-0 text-muted-foreground" strokeWidth={2} />}
 					/>
 				) : null}
 				{!hasAny ? (
@@ -645,6 +778,9 @@ export function InspectorChangesSection({ workspaceRoot }: InspectorChangesSecti
 						No changes on this branch.
 					</div>
 				) : null}
+				{Boolean(root) && (
+					<BranchDiffSection workspaceRoot={root} gitBusy={gitBusy} />
+				)}
 			</div>
 		</ScrollArea>
 	);

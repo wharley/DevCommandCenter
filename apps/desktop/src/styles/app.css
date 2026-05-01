@@ -81,6 +81,12 @@
 	}
 }
 
+@keyframes shiny-text-continuous {
+	0%   { background-position: calc(-100% - var(--shiny-width)) 0; }
+	50%  { background-position: calc(100% + var(--shiny-width)) 0; }
+	100% { background-position: calc(-100% - var(--shiny-width)) 0; }
+}
+
 @keyframes conversation-scrollbar-fade-in {
 	from {
 		opacity: 0;

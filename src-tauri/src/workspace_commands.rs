@@ -12,6 +12,8 @@ use dcc_tauri::{
 		ListLocalBranchesInput,
 		ListLocalBranchesOutput,
 		ListWorkspacesOutput,
+		WorkspaceGitBranchDiffInput,
+		WorkspaceGitBranchDiffOutput,
 		WorkspaceGitCommitPushInput,
 		WorkspaceGitPathInput,
 		WorkspaceGitPushInput,
@@ -109,4 +111,11 @@ pub async fn workspace_gh_pr_view_web(input: WorkspaceGitPushInput) -> Result<()
 #[tauri::command]
 pub async fn workspace_gh_pr_create_fill(input: WorkspaceGitPushInput) -> Result<(), String> {
 	dcc_tauri::commands::workspace_commands::workspace_gh_pr_create_fill(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_branch_diff(
+	input: WorkspaceGitBranchDiffInput,
+) -> Result<WorkspaceGitBranchDiffOutput, String> {
+	dcc_tauri::commands::workspace_commands::workspace_git_branch_diff(input).await
 }

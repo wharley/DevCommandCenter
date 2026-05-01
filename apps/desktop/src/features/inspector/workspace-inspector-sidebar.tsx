@@ -15,7 +15,6 @@ import {
 } from "@/lib/workspace-api";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { EmptyState } from "@/features/panel";
-import { cn } from "@/lib/utils";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
@@ -107,23 +106,6 @@ function ProviderCatalogDense({ catalog }: { catalog: ProviderCatalog | null }) 
 	);
 }
 
-function gitSectionHeaderHighlightClass(mode: ReturnType<typeof resolveCommitMode>) {
-	switch (mode) {
-		case "fix":
-		case "closed":
-			return "bg-[var(--workspace-pr-closed-header-bg)]";
-		case "resolve-conflicts":
-			return "bg-[var(--workspace-pr-conflicts-header-bg)]";
-		case "merge":
-		case "open-pr":
-			return "bg-[var(--workspace-pr-open-header-bg)]";
-		case "merged":
-			return "bg-[var(--workspace-pr-merged-header-bg)]";
-		default:
-			return "bg-muted/25";
-	}
-}
-
 function ResizeHandle({
 	label,
 	onMouseDown,
@@ -167,7 +149,6 @@ export function WorkspaceInspectorSidebar({
 				: workspacePath
 			: null;
 	const commitMode = resolveCommitMode(workspaceBranch ?? "");
-	const headerToneClass = gitSectionHeaderHighlightClass(commitMode);
 	const queryClient = useQueryClient();
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
 
@@ -251,14 +232,10 @@ export function WorkspaceInspectorSidebar({
 	return (
 		<div className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground" data-dcc-inspector-root>
 			<section
-				className={cn(
-					"flex shrink-0 flex-col overflow-hidden border-b border-border/60",
-					headerToneClass,
-				)}
+				className="flex shrink-0 flex-col overflow-hidden border-b border-border/60"
 				style={{ height: `${changesHeight}px` }}
 			>
 				<GitSectionHeader
-					workspaceDisplayName={workspaceName ?? "Workspace"}
 					commitMode={commitMode}
 					isRefreshing={gitStatusQuery.isFetching && !gitStatusQuery.isPending}
 					onCommit={handleInspectorCommit}
