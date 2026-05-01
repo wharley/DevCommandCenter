@@ -15,13 +15,54 @@ A meta é **migrar o DCC para uma arquitetura em monorepo em camadas**, com:
 
 ## Ordem de referência para UX/UI
 
+**Meta declarada**: o resultado no DCC deve ser **igual ou superior** ao melhor dos referenciais (**Helmor** + **t3code**) nas dimensões que cada um cobre melhor — **sem “aproximação por conveniência”** e sem inventar padrões que não existem em nenhum dos dois (a menos que sejam upgrades óbvios e documentados aqui).
+
 Antes de alterar qualquer tela do DCC, seguir esta ordem:
 
-1. Ler a tela real do Helmor em `../helmor-main/src/App.tsx`, `../helmor-main/src/features/conversation/`, `../helmor-main/src/features/panel/` e `../helmor-main/src/features/onboarding/mockup/`.
-2. Ler a organização do t3code em `../t3code-main/apps/web/src/components/`, com foco em `AppSidebarLayout.tsx`, `Sidebar.tsx`, `ChatView.tsx`, `ChatHeader.tsx`, `ChatComposer.tsx` e `MessagesTimeline.tsx`.
-3. Usar o DCC atual apenas como ponto de integração técnica. A forma da tela deve seguir o Helmor; a organização de feature folders e boundaries deve seguir o t3code.
-4. Não tratar a UI atual do DCC como referência visual. Ela pode servir de base de integração, mas não de produto.
-5. Quando houver dúvida de layout, preferir o shell do Helmor, e quando houver dúvida de estrutura, preferir a separação por features do t3code.
+1. Ler a tela real do Helmor em `../helmor-main/src/App.tsx`, `../helmor-main/src/features/conversation/`, `../helmor-main/src/features/panel/` e `../helmor-main/src/features/inspector/` (`InspectorTabsSection`: Setup / Run / **terminais** como sub‑abas dentro do inspector, não “Context vs Terminal” genérico).
+2. Ler o t3code em `../t3code-main/apps/web/src/components/`: `AppSidebarLayout.tsx`, `Sidebar.tsx`, `ChatView.tsx`, **`ChatHeader.tsx`** (toggle do terminal no header), **`ThreadTerminalDrawer.tsx`** (gaveta inferior no fluxo da conversa), `ChatComposer.tsx`, `MessagesTimeline.tsx`.
+3. Usar o DCC atual apenas como **ponto de integração técnica** (Tauri/Rust/contracts). Produto/visual: **combinar explicitamente**: shell workbench central + sidebar (Helmor) **e** lista/chat header + terminal em **drawer** na coluna principal (t3).
+4. Não tratar a UI legada interna do DCC como referência de produto; só não regredir integrações que já funcionam.
+
+### Onde vai o terminal (não negociável na intenção de produto)
+
+| Referência | Onde o terminal mora na UI |
+|------------|----------------------------|
+| **Helmor** | Dentro da **calha inspector** direita, na faixa unificada de abas (Run / terminals como instâncias), com resize/hover comportamento próprio (`InspectorTabsSection`). |
+| **t3code** | **Gaveta inferior** na área principal do chat, acionada pelo **toggle no header** (`ChatHeader` + `PersistentThreadTerminalDrawer` / `ThreadTerminalDrawer`). **Não** é um par “Context \| Terminal” no painel lateral. |
+
+**No DCC (decisão alinhada ao usuário)**:
+
+- Inspector direito = **contexto contínuo** (providers, estado de sessão, metadados) — modelo **inspector Helmor**.
+- Terminal = **drawer inferior na coluna do workbench** + **toggle no header** do runtime — modelo **t3**.  
+- É proibido reintroduzir abas artificiais tipo “Context / Terminal” só no inspector **como substituto** do drawer do t3; isso não bate com nenhum dos dois produtos citados pelo time.
+
+### Sidebar esquerda: Helmor vs t3code — análise de produto (PM + mercado dev)
+
+Não existe resposta “Helmor ou t3” no absoluto: são **dois modelos mentais** sobre **o que a lista da esquerda representa**.
+
+| Dimensão | **Helmor** (`features/navigation/`, `WorkspacesSidebar`) | **t3code** (`Sidebar.tsx`, threads sob projetos) |
+|----------|--------------------------------------------------------|--------------------------------------------------|
+| **Unidade primária** | **Workspace** como “cartão de trabalho” com **estado de fluxo** (ex.: feito, em envio, precisa de interação, arquivado). | **Projeto (cwd/repo)** → **threads** (conversas/linhas de execução). |
+| **Organização** | **Grupos por estágio do pipeline** (kanban leve na vertical): separa o que já fechou do que está ativo do que exige input humano. | **Agrupamento por repositório / path / “separate”**, ordenação por data, DnD, multi‑ambiente; muitos **tokens de estado na linha** (PR, terminal, erro, unread). |
+| **Força principal** | **Clareza de workflow** quando “entrega” é um workspace: revisar algo “Done” enquanto outro está “Sending” fica **visível na própria estrutura**, sem depender só de filtros mentais do usuário. | **Throughput diário**: pular entre conversas dentro do mesmo repo, abrir nova thread, atalhos e densidade próximos de **IDE + backlog de chats**. |
+| **Mercado típico** | Equipes/fluxos onde **pull request**, revisão e “estado oficial” do trabalho importam tanto quanto o chat. Equipes mais **product-led** sobre “fatias de trabalho” nomeadas. | **Builders** que vivem em **múltiplas sessões paralelas** (experimentos, hotfix, refactor) sob os mesmos diretórios; mentalidade **orientada a histórico de conversação**, menos a “pastas por fase”. |
+| **Limite típico** | Se só existir “lista por fase”, perde‑se granularidade quando o utilizador trabalha sobretudo por **sessão/agent run** dentro do mesmo workspace; exige modelo de dados rico nos workspaces. | Se não houver estado de ciclo forte, trabalhos “para rever” podem **enterrar‑se cronologicamente**; depende mais de pinning, filtros ou pills na linha. |
+
+**Interpretação pragmática (o que a literatura e tooling dev costumam reforçar):**
+
+- Um dev **individual** (“meu próprio trabalho técnico, múltiplas tasks em paralelo”) tende a alinhar com **lista densa tipo t3**: velocidade para localizar uma thread/repo e continuar onde parou — alinhado com o uso intenso de **Copilot Chat, Cursor chats, Warp worktrees**.
+- Fluxos onde **humanos diferentes** integram trabalho ao longo do tempo (**review, QA, stakeholder**) beneficiam‑se mais de **buckets tipo Helmor**, porque comunicam progresso por **bucket** só de olhar a sidebar (“isto está em espera de mim”).
+- **Rever enquanto outro corre** não é propriedade exclusiva do Helmor: **também existe no t3** via **várias threads** (uma em review, outra a correr agente); a diferença é **semiologia**. No Helmor o paralelismo aparece mais como **estados diferentes no mesmo objeto (workspace)**; no t3, mais como **objetos (threads)** lado a lado.
+
+**Decisão para o documento — paridade conscientemente escolhida (baseline sugerido para o DCC):**
+
+1. **Default de navegação e “feel” lista:** seguir mais de perto o **t3** — **lista escaneável, agrupável por projeto/repo**, forte suporte a **múltiplas sessões/threads por contexto**. Isto casa com **rotina típica de dev** mencionada pelo utilizador‑product owner.
+2. **Semântica pipeline Helmor onde o domínio DCC já tiver equivalência:** manter ou **portar badges / secções opcionais** para estados como *pronto para review*, *aguardando input*, *arquivado*, **sem obrigar** a sidebar inteira a ser só “pipeline por workspaces” como no Helmor, se isso regressar velocidade típica t3.
+
+Isto equivale a dizer na doc: **“Paridade UX com os referenciais não é copiar apenas um lado; para a rail esquerda, o alvo declarado é o modelo **t3** como espinha, com **semiologia/chips de ciclo tipo Helmor** onde fizer sentido no modelo `workspace/session`.”** Alterações ao baseline exigem **decisão explícita aqui**, não apenas preferência verbal em PR.
+
+Implementação de referência a releer antes de código fechado: `helmor-main/src/features/navigation/index.tsx`, `helmor-main/src/features/navigation/shared.tsx` (grupos e tons “Done” etc.), `t3code-main/apps/web/src/components/Sidebar.tsx` e `Sidebar.logic.tsx`.
 
 ---
 
@@ -331,7 +372,7 @@ Objetivo: criar a nova espinha dorsal sem quebrar o app atual, mantendo `src/` v
 
 **Objetivo das Fases 1-3**
 
-Trazer o melhor do Helmor na forma de shell/UX e o melhor do t3code na forma de contratos, boundaries e fluxo de eventos, mas com Tauri + Rust como motor e fronteira do sistema.
+Trazer **paridade ou melhoria real** relativamente aos referenciais: shell/UX/colocação de surfaces (Helmor + t3) e contratos/boundaries/eventos (t3), com Tauri + Rust como motor e fronteira do sistema. “Parecer parecido” sem cobrir os mesmos affordances conta como **não atendido**.
 
 **Fase 1 — Shell + UI primitiva (concluída)**
 1. Copiar `components/ui/*` (shadcn) para `apps/desktop/src/components/ui/`.
@@ -396,8 +437,8 @@ Trazer o melhor do Helmor na forma de shell/UX e o melhor do t3code na forma de 
 
 **Status da Fase 4**
 
-- Em andamento: `terminal` passou a ser uma surface conectada ao workbench do runtime, com xterm, fit suspension e bridge PTY Tauri para input, resize e output, seguindo a estrutura do Helmor.
-- Em andamento: o PTY agora fica associado ao `workspaceId`, então fechar e reabrir o painel reatacha a mesma sessão de terminal em vez de subir um shell novo.
+- Em andamento: `terminal` usa **PTY por `workspaceId`**, xterm, fit suspension, bridge Tauri; **surface primária = drawer inferior no workbench** (padrão t3 `ThreadTerminalDrawer`) com toggle no header do runtime — **não** painel lateral “Context \| Terminal”.
+- Inspirado na **calha de terminais do Helmor** para persistência/multi‑instância no futuro; hoje DCC garante reuso do PTY ao fechar/abrir o drawer.
 
 **Fase 5 — Sunset legacy + fechamento**
 1. Remover `legacy/` quando a paridade funcional estiver fechada.

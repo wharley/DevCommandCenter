@@ -1,11 +1,17 @@
-import { ArrowUpRight, Command } from "lucide-react";
+import { useState } from "react";
+import { ArrowUpRight, Command, TerminalSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
-import { ProviderCatalogCard } from "@/features/providers/provider-catalog-card";
-import { TerminalPanel } from "@/features/terminal";
+import { WorkspaceTerminalDrawer } from "@/features/terminal";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { SessionEventFeed } from "./session-event-feed";
 
@@ -29,7 +35,6 @@ type SessionWorkbenchProps = {
 	selectedProviderLabel: string | null;
 	selectedProviderId: string | null;
 	providerChoices: ProviderCatalog["providers"];
-	providerCatalog: ProviderCatalog | null;
 	sessionSnapshot: RuntimeSessionSnapshot | null;
 	sessionEvents: CoreEvent[];
 	sessionDraft: string;
@@ -42,6 +47,16 @@ type SessionWorkbenchProps = {
 	onOpenCommandPalette: () => void;
 };
 
+function shortPath(path: string | null, max = 48) {
+	if (!path) {
+		return null;
+	}
+	if (path.length <= max) {
+		return path;
+	}
+	return `…${path.slice(-(max - 1))}`;
+}
+
 export function SessionWorkbench({
 	workspaceId,
 	workspaceName,
@@ -50,7 +65,6 @@ export function SessionWorkbench({
 	selectedProviderLabel,
 	selectedProviderId,
 	providerChoices,
-	providerCatalog,
 	sessionSnapshot,
 	sessionEvents,
 	sessionDraft,
@@ -62,206 +76,209 @@ export function SessionWorkbench({
 	onAbortSession,
 	onOpenCommandPalette,
 }: SessionWorkbenchProps) {
-	return (
-		<section className="dcc-runtime-workbench">
-			<div className="dcc-runtime-workbench__main">
-				<header className="dcc-runtime-workbench__header">
-					<div className="dcc-runtime-workbench__hero">
-						<span className="dcc-runtime-workbench__eyebrow">
-							Conversation shell
-						</span>
-						<div className="dcc-runtime-workbench__hero-row">
-							<div className="dcc-runtime-workbench__hero-copy">
-								<div className="dcc-runtime-workbench__hero-title-row">
-									<CardTitle>{workspaceName}</CardTitle>
-									<Badge variant={sessionSnapshot ? "success" : "outline"}>
-										{sessionSnapshot ? sessionSnapshot.state : "idle"}
-									</Badge>
-								</div>
-								<div className="dcc-runtime-workbench__hero-chips">
-									<Badge variant="outline">{workspaceBranch}</Badge>
-									<Badge variant="outline">
-										{selectedProviderLabel ?? "Select provider"}
-									</Badge>
-								</div>
-								<p className="dcc-runtime-workbench__hero-path">
-									{workspacePath ?? "Workspace path pending"}
-								</p>
-							</div>
-							<div className="dcc-runtime-workbench__header-actions">
-								<Button
-									type="button"
-									variant="secondary"
-									onClick={onResumeSession}
-									disabled={!sessionSnapshot}
-								>
-									Resume
-								</Button>
-								<Button
-									type="button"
-									variant="secondary"
-									onClick={onAbortSession}
-									disabled={!sessionSnapshot}
-								>
-									Abort
-								</Button>
-								<Button
-									type="button"
-									variant="ghost"
-									onClick={onOpenCommandPalette}
-								>
-									<Command />
-									Workspaces
-								</Button>
-							</div>
-						</div>
-					</div>
-				</header>
+	const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
+	const pathShort = shortPath(workspacePath);
+	const terminalAvailable = Boolean(workspacePath);
+	const sessionState = sessionSnapshot?.state ?? "idle";
+	const sessionId = sessionSnapshot?.sessionId ?? null;
+	const headline =
+		workspaceBranch && pathShort
+			? `${workspaceBranch} · ${pathShort}`
+			: workspaceBranch || pathShort || "Workspace";
 
-				<div className="dcc-runtime-workbench__session-tabs" role="tablist" aria-label="Runtime areas">
-					<button type="button" className="dcc-runtime-workbench__session-tab" data-active="true">
-						Conversation
-					</button>
-					<button type="button" className="dcc-runtime-workbench__session-tab">
-						Terminal
-					</button>
-					<button type="button" className="dcc-runtime-workbench__session-tab">
-						Inspector
-					</button>
+	return (
+		<section className="dcc-runtime-workbench dcc-runtime-workbench--session flex min-h-0 flex-1 flex-col">
+			{/* Compact primary bar (t3code ChatHeader) + session actions */}
+			<header className="dcc-runtime-workbench__header shrink-0 gap-3 pb-3">
+				<div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
+					<h2
+						className="m-0 min-w-0 shrink truncate text-sm font-medium tracking-tight text-foreground"
+						title={workspaceName}
+					>
+						{workspaceName}
+					</h2>
+					{workspaceBranch ? (
+						<Badge variant="outline" className="hidden shrink-0 sm:inline-flex">
+							<span className="max-w-[9rem] truncate font-normal">{workspaceBranch}</span>
+						</Badge>
+					) : null}
+					{pathShort ? (
+						<span
+							className="hidden max-w-[14rem] truncate text-[11px] text-muted-foreground md:inline"
+							title={workspacePath ?? undefined}
+						>
+							{pathShort}
+						</span>
+					) : null}
+				</div>
+				<div className="dcc-runtime-workbench__header-actions">
+					{sessionSnapshot ? (
+						<Badge variant="success" className="font-normal">
+							{sessionSnapshot.state}
+						</Badge>
+					) : (
+						<Badge variant="outline" className="font-normal">
+							idle
+						</Badge>
+					)}
+					<Button
+						type="button"
+						variant="secondary"
+						size="sm"
+						onClick={onResumeSession}
+						disabled={!sessionSnapshot}
+					>
+						Resume
+					</Button>
+					<Button
+						type="button"
+						variant="secondary"
+						size="sm"
+						onClick={onAbortSession}
+						disabled={!sessionSnapshot}
+					>
+						Abort
+					</Button>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant={terminalDrawerOpen ? "secondary" : "outline"}
+								size="icon"
+								className="size-8 shrink-0"
+								aria-label={
+									terminalDrawerOpen
+										? "Hide terminal drawer"
+										: "Show terminal drawer"
+								}
+								disabled={!terminalAvailable}
+								aria-pressed={terminalDrawerOpen}
+								onClick={() => setTerminalDrawerOpen((current) => !current)}
+							>
+								<TerminalSquare className="size-3.5" />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">
+							{!terminalAvailable
+								? "Terminal needs a workspace path."
+								: terminalDrawerOpen
+									? "Hide terminal drawer (Esc)"
+									: "Toggle terminal drawer"}
+						</TooltipContent>
+					</Tooltip>
+					<Button
+						type="button"
+						variant="ghost"
+						size="sm"
+						onClick={onOpenCommandPalette}
+						className="gap-1.5 text-muted-foreground hover:text-foreground"
+					>
+						<Command className="size-3.5" />
+						<span className="hidden sm:inline">Workspaces</span>
+					</Button>
+				</div>
+			</header>
+
+			<p className="m-0 hidden pb-3 text-[12px] leading-snug text-muted-foreground sm:block">
+				{headline}
+			</p>
+
+			<Separator className="shrink-0 bg-border opacity-70" />
+
+			{/* Helmor-style contextual toolbar + provider pills (t3 secondary row) */}
+			<div className="dcc-runtime-workbench__toolbar dcc-runtime-workbench__toolbar--providers mt-4 shrink-0">
+				<div className="dcc-runtime-workbench__toolbar-meta min-w-0">
+					<span>Runtime</span>
+					<strong>Providers</strong>
+				</div>
+				<div className="dcc-runtime-workbench__toolbar-actions min-w-0 flex-1">
+					<div className="dcc-runtime-workbench__provider-strip">
+						{providerChoices.map((provider) => (
+							<Button
+								key={provider.id}
+								type="button"
+								variant={provider.id === selectedProviderId ? "default" : "outline"}
+								size="sm"
+								className="h-8 rounded-full px-3 text-[12px] font-medium"
+								onClick={() => onSelectProvider(provider.id)}
+							>
+								{provider.label}
+							</Button>
+						))}
+					</div>
+					{providerChoices.length === 0 ? (
+						<span className="self-center text-[12px] text-muted-foreground">
+							No providers configured.
+						</span>
+					) : selectedProviderLabel ? (
+						<span className="self-center whitespace-nowrap text-[12px] text-muted-foreground">
+							Active · {selectedProviderLabel}
+						</span>
+					) : null}
+				</div>
+			</div>
+
+			<div className="flex min-h-0 flex-1 flex-col gap-4 pt-4">
+				<div
+					className="dcc-runtime-workbench__timeline-shell dcc-runtime-workbench__timeline-shell--conversation dcc-runtime-workbench__timeline-shell--fill flex min-h-0 min-w-0 flex-1 flex-col"
+					aria-label="Session activity timeline"
+				>
+					<SessionEventFeed events={sessionEvents} compact />
 				</div>
 
-				<div className="dcc-runtime-workbench__conversation-shell">
-					<div className="dcc-runtime-workbench__presence-strip">
-						<div className="dcc-runtime-workbench__presence-meta">
-							<div className="dcc-runtime-workbench__presence-item">
-								<span>Workspace</span>
-								<strong>{sessionSnapshot?.workspaceId ?? "pending"}</strong>
-							</div>
-							<div className="dcc-runtime-workbench__presence-item">
-								<span>Turns</span>
-								<strong>{sessionSnapshot?.turnCount ?? 0}</strong>
-							</div>
-							<div className="dcc-runtime-workbench__presence-item">
-								<span>Checkpoints</span>
-								<strong>{sessionSnapshot?.checkpointCount ?? 0}</strong>
-							</div>
-							<div className="dcc-runtime-workbench__presence-item">
-								<span>Session</span>
-								<strong>{sessionSnapshot?.sessionId ?? "not started"}</strong>
-							</div>
-						</div>
-						<div className="dcc-runtime-workbench__provider-strip">
-							{providerChoices.map((provider) => (
-								<Button
-									key={provider.id}
-									type="button"
-									variant={provider.id === selectedProviderId ? "default" : "secondary"}
-									size="sm"
-									onClick={() => onSelectProvider(provider.id)}
-								>
-									{provider.label}
-								</Button>
-							))}
-						</div>
+				<div className="dcc-runtime-workbench__composer shrink-0">
+				<div className="dcc-runtime-workbench__composer-top">
+					<div>
+						<Label htmlFor="dcc-session-draft" className="text-[13px] font-medium">
+							Message
+						</Label>
+						<CardDescription className="mt-0.5 max-w-[44rem] text-[12px]">
+							Next turn runs on the Dev Command Center session bridge for the selected
+							provider.
+						</CardDescription>
 					</div>
-
-					<div className="dcc-runtime-workbench__timeline-shell dcc-runtime-workbench__timeline-shell--conversation">
-						<SessionEventFeed events={sessionEvents} compact />
+				</div>
+				<Textarea
+					id="dcc-session-draft"
+					rows={4}
+					value={sessionDraft}
+					onChange={(event) => onSessionDraftChange(event.target.value)}
+					placeholder="Ask for a change, @mention paths, or describe the task…"
+					className="w-full resize-y border-border bg-background/80 text-[13px]"
+				/>
+				<div className="dcc-runtime-workbench__composer-footer">
+					<div className="dcc-runtime-workbench__composer-meta">
+						{sessionSnapshot?.sessionId ? (
+							<span className="text-[11px] tabular-nums text-muted-foreground">
+								{sessionSnapshot.turnCount} turns · {sessionSnapshot.checkpointCount}{" "}
+								checkpoints
+							</span>
+						) : (
+							<span className="text-[11px] text-muted-foreground">No active session</span>
+						)}
 					</div>
-
-					<div className="dcc-runtime-workbench__composer">
-						<div className="dcc-runtime-workbench__composer-top">
-							<div>
-								<Label htmlFor="dcc-session-draft">Prompt</Label>
-								<CardDescription>
-									Send the next turn into the active provider session.
-								</CardDescription>
-							</div>
-							<Badge variant="outline">
-								{sessionSnapshot?.sessionId ?? "No session"}
-							</Badge>
-						</div>
-						<Textarea
-							id="dcc-session-draft"
-							rows={7}
-							value={sessionDraft}
-							onChange={(event) => onSessionDraftChange(event.target.value)}
-							placeholder="Describe the workspace change or agent task here..."
-						/>
-						<div className="dcc-runtime-workbench__composer-footer">
-							<div className="dcc-runtime-workbench__composer-meta">
-								<Badge variant="outline">
-									{sessionSnapshot?.state ?? "idle"}
-								</Badge>
-								<Badge variant="outline">
-									{sessionSnapshot?.turnCount ?? 0} turns
-								</Badge>
-								<Badge variant="outline">
-									{workspacePath ?? "workspace path pending"}
-								</Badge>
-							</div>
-							<div className="dcc-runtime-workbench__composer-actions">
-								<Button type="button" onClick={onStartSession} variant="secondary">
-									Start session
-								</Button>
-								<Button type="button" onClick={onSendTurn}>
-									<ArrowUpRight />
-									Send turn
-								</Button>
-							</div>
-						</div>
+					<div className="dcc-runtime-workbench__composer-actions">
+						<Button type="button" onClick={onStartSession} variant="secondary" size="sm">
+							Start session
+						</Button>
+						<Button type="button" onClick={onSendTurn} size="sm" className="gap-1.5">
+							<ArrowUpRight className="size-4" />
+							Send
+						</Button>
 					</div>
 				</div>
 			</div>
 
-			<div className="dcc-runtime-workbench__rail">
-				<ProviderCatalogCard catalog={providerCatalog} />
-				<Card className="dcc-session-state-card">
-					<CardHeader>
-						<div className="dcc-card__meta-row">
-							<CardTitle>Session state</CardTitle>
-							<Badge variant="outline">
-								{sessionSnapshot?.lastTurnState ?? "pending"}
-							</Badge>
-						</div>
-					</CardHeader>
-					<CardContent className="dcc-runtime-feed__content">
-						{sessionSnapshot ? (
-							<div className="dcc-runtime-feed__list">
-								<div className="dcc-runtime-feed__row">
-									<strong>Projection</strong>
-									<small>
-										turns {sessionSnapshot.turnCount} · checkpoints{" "}
-										{sessionSnapshot.checkpointCount}
-									</small>
-								</div>
-								<div className="dcc-runtime-feed__row">
-									<strong>Provider</strong>
-									<small>{sessionSnapshot.providerId}</small>
-								</div>
-								<div className="dcc-runtime-feed__row">
-									<strong>Last turn</strong>
-									<small>
-										{sessionSnapshot.lastTurnPrompt ?? "No turn yet"}
-									</small>
-								</div>
-							</div>
-						) : (
-							<p className="dcc-card__description">
-								No session started yet. Start one to see the shell and Rust core
-								move together.
-							</p>
-						)}
-					</CardContent>
-				</Card>
-				<TerminalPanel
+				<WorkspaceTerminalDrawer
+					open={terminalDrawerOpen}
+					onOpenChange={setTerminalDrawerOpen}
 					workspaceId={workspaceId}
 					workspaceName={workspaceName}
 					workspaceBranch={workspaceBranch}
 					workspacePath={workspacePath}
 					providerLabel={selectedProviderLabel}
-					sessionState={sessionSnapshot?.state ?? "idle"}
-					sessionId={sessionSnapshot?.sessionId ?? null}
+					sessionState={sessionState}
+					sessionId={sessionId}
 				/>
 			</div>
 		</section>

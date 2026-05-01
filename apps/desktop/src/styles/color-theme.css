@@ -1,83 +1,62 @@
-:root {
-	color-scheme: light;
-	--dcc-bg: oklch(0.98 0.01 250);
-	--dcc-surface: oklch(0.96 0.012 250);
-	--dcc-surface-2: oklch(0.93 0.015 250);
-	--dcc-surface-3: oklch(0.89 0.016 250);
-	--dcc-border: oklch(0.86 0.018 250);
-	--dcc-border-strong: oklch(0.77 0.02 250);
-	--dcc-text: oklch(0.21 0.03 255);
-	--dcc-text-muted: oklch(0.47 0.03 255);
-	--dcc-text-soft: oklch(0.58 0.03 255);
-	--dcc-accent: oklch(0.58 0.16 255);
-	--dcc-accent-2: oklch(0.72 0.12 214);
-	--dcc-success: oklch(0.68 0.16 150);
-	--dcc-warn: oklch(0.72 0.16 70);
-	--dcc-danger: oklch(0.62 0.2 25);
-	--dcc-shadow: 0 24px 90px color-mix(in oklab, black 14%, transparent);
-	--dcc-radius-lg: 24px;
-	--dcc-radius-md: 16px;
-	--dcc-radius-sm: 12px;
-	--dcc-shell-border: color-mix(in oklab, var(--dcc-border) 70%, transparent);
-	--terminal-background: var(--dcc-surface);
-	--terminal-foreground: var(--dcc-text);
-	--terminal-cursor: var(--dcc-text);
-	--terminal-selection: color-mix(in oklab, var(--dcc-accent) 16%, transparent);
-	--terminal-black: oklch(0.26 0 0);
-	--terminal-red: var(--dcc-danger);
-	--terminal-green: oklch(0.5 0.15 155);
-	--terminal-yellow: oklch(0.53 0.14 75);
-	--terminal-blue: var(--dcc-accent);
-	--terminal-magenta: oklch(0.52 0.17 315);
-	--terminal-cyan: var(--dcc-accent-2);
-	--terminal-white: oklch(0.87 0 0);
-	--terminal-bright-black: oklch(0.556 0 0);
-	--terminal-bright-red: oklch(0.6 0.2 22);
-	--terminal-bright-green: oklch(0.55 0.14 150);
-	--terminal-bright-yellow: oklch(0.58 0.12 75);
-	--terminal-bright-blue: oklch(0.55 0.14 255);
-	--terminal-bright-magenta: oklch(0.57 0.15 310);
-	--terminal-bright-cyan: oklch(0.55 0.09 192);
-	--terminal-bright-white: oklch(0.95 0 0);
+/* Tailwind utilities for the desktop shell (layout, spacing, colors). */
+@import "tailwindcss";
+@source "../**/*.{tsx,ts}";
+
+@import "./dcc-shell-tokens.css";
+
+@import "./dcc-status-tokens.css";
+
+/* Tailwind v4 theme bridge — maps design tokens to utility classes (bg-background, etc.). */
+@theme inline {
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-border: var(--border);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-destructive: var(--destructive);
+	--color-sidebar: var(--sidebar);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-success: var(--success);
+	--color-warning: var(--warning);
+	--color-info: var(--info);
+	--radius-sm: calc(var(--radius) - 4px);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-lg: var(--radius);
 }
 
-.dark {
-	color-scheme: dark;
-	--dcc-bg: oklch(0.15 0.02 255);
-	--dcc-surface: oklch(0.2 0.02 255);
-	--dcc-surface-2: oklch(0.23 0.02 255);
-	--dcc-surface-3: oklch(0.27 0.025 255);
-	--dcc-border: oklch(0.32 0.02 255);
-	--dcc-border-strong: oklch(0.4 0.02 255);
-	--dcc-text: oklch(0.96 0.01 255);
-	--dcc-text-muted: oklch(0.72 0.02 255);
-	--dcc-text-soft: oklch(0.58 0.02 255);
-	--dcc-accent: oklch(0.72 0.14 232);
-	--dcc-accent-2: oklch(0.8 0.12 172);
-	--dcc-success: oklch(0.76 0.15 150);
-	--dcc-warn: oklch(0.81 0.13 78);
-	--dcc-danger: oklch(0.71 0.18 25);
-	--dcc-shadow: 0 28px 110px color-mix(in oklab, black 60%, transparent);
-	--terminal-background: var(--dcc-surface);
-	--terminal-foreground: var(--dcc-text);
-	--terminal-cursor: var(--dcc-text);
-	--terminal-selection: color-mix(in oklab, var(--dcc-accent) 24%, transparent);
-	--terminal-black: oklch(0.21 0 0);
-	--terminal-red: var(--dcc-danger);
-	--terminal-green: oklch(0.72 0.14 155);
-	--terminal-yellow: oklch(0.82 0.13 85);
-	--terminal-blue: var(--dcc-accent);
-	--terminal-magenta: oklch(0.72 0.14 310);
-	--terminal-cyan: var(--dcc-accent-2);
-	--terminal-white: oklch(0.87 0 0);
-	--terminal-bright-black: oklch(0.5 0 0);
-	--terminal-bright-red: oklch(0.78 0.15 18);
-	--terminal-bright-green: oklch(0.78 0.12 150);
-	--terminal-bright-yellow: oklch(0.88 0.11 85);
-	--terminal-bright-blue: oklch(0.78 0.11 250);
-	--terminal-bright-magenta: oklch(0.78 0.12 310);
-	--terminal-bright-cyan: oklch(0.84 0.07 192);
-	--terminal-bright-white: oklch(0.985 0 0);
+/*
+ * Legacy `--dcc-*` aliases → shell tokens + semantic status tokens above.
+ * Keeps existing `.dcc-*` rules stable while the UI moves toward token parity.
+ */
+:root {
+	--dcc-bg: var(--background);
+	--dcc-surface: var(--card);
+	--dcc-surface-2: var(--muted);
+	--dcc-surface-3: color-mix(in oklch, var(--muted) 86%, var(--foreground));
+	--dcc-border: var(--border);
+	--dcc-border-strong: color-mix(in oklch, var(--border) 75%, var(--foreground));
+	--dcc-text: var(--foreground);
+	--dcc-text-muted: var(--muted-foreground);
+	--dcc-text-soft: color-mix(in oklch, var(--muted-foreground) 90%, var(--foreground));
+	--dcc-accent: var(--sidebar-primary);
+	--dcc-accent-2: var(--chart-2);
+	--dcc-success: var(--success);
+	--dcc-warn: var(--warning);
+	--dcc-danger: var(--destructive);
+	--dcc-info: var(--info);
+	--dcc-shadow: 0 24px 90px color-mix(in oklab, black 20%, transparent);
+	--dcc-radius-lg: calc(var(--radius) * 2);
+	--dcc-radius-md: var(--radius);
+	--dcc-radius-sm: calc(var(--radius) * 0.75);
+	--dcc-shell-border: var(--border);
 }
 
 html,
@@ -131,7 +110,12 @@ a {
 .dcc-shell {
 	min-height: 100vh;
 	display: grid;
-	grid-template-columns: var(--dcc-sidebar-width) auto minmax(0, 1fr);
+	grid-template-columns:
+		var(--dcc-sidebar-width)
+		auto
+		minmax(0, 1fr)
+		auto
+		var(--dcc-inspector-width, 360px);
 	position: relative;
 	isolation: isolate;
 	background:
@@ -178,14 +162,10 @@ a {
 	flex-direction: column;
 	gap: 1rem;
 	padding: 1.25rem;
-	border-right: 1px solid var(--dcc-shell-border);
-	background:
-		linear-gradient(
-			180deg,
-			color-mix(in oklab, var(--dcc-surface) 78%, transparent),
-			transparent
-		),
-		color-mix(in oklab, var(--dcc-surface) 72%, transparent);
+	border-right: 1px solid var(--sidebar-border, var(--dcc-shell-border));
+	color: var(--sidebar-foreground, var(--dcc-text));
+	/* t3 AppSidebarLayout: solid card-toned rail; Helmor tokens via --sidebar */
+	background: var(--sidebar);
 }
 
 .dcc-sidebar__header,
@@ -237,11 +217,45 @@ a {
 
 .dcc-main {
 	min-width: 0;
+	min-height: 0;
+	flex: 1;
 	padding: 1.5rem;
 	display: flex;
 	flex-direction: column;
 	gap: 1rem;
 	overflow: auto;
+}
+
+.dcc-inspector-aside {
+	min-width: 0;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	border-left: 1px solid var(--dcc-shell-border);
+	background:
+		linear-gradient(
+			180deg,
+			color-mix(in oklab, var(--dcc-surface) 78%, transparent),
+			transparent
+		),
+		color-mix(in oklab, var(--dcc-surface) 72%, transparent);
+}
+
+.dcc-inspector-sidebar__body {
+	flex: 1 1 auto;
+}
+
+.dcc-inspector-sidebar__terminal-slot .dcc-terminal {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+}
+
+.dcc-inspector-sidebar__terminal-slot .dcc-terminal__viewport {
+	flex: 1;
+	min-height: 0;
 }
 
 .dcc-eyebrow {
@@ -389,16 +403,21 @@ a {
 	min-height: 5rem;
 }
 
-.dcc-workspace-card:hover,
+.dcc-workspace-card:hover {
+	transform: translateY(-1px);
+	border-color: color-mix(in oklab, var(--sidebar-primary, var(--dcc-accent)) 32%, var(--border));
+	background: color-mix(
+		in oklab,
+		var(--sidebar-accent, var(--dcc-surface-2)) 88%,
+		var(--sidebar-primary, var(--dcc-accent))
+	);
+}
+
 .dcc-workspace-card[data-active="true"] {
 	transform: translateY(-1px);
-	border-color: color-mix(in oklab, var(--dcc-accent) 38%, var(--dcc-border));
-	background:
-		linear-gradient(
-			180deg,
-			color-mix(in oklab, var(--dcc-accent) 12%, var(--dcc-surface-2)),
-			color-mix(in oklab, var(--dcc-surface) 90%, transparent)
-		);
+	border-color: color-mix(in oklab, var(--sidebar-ring, var(--dcc-accent)) 45%, var(--border));
+	background: var(--workspace-sidebar-selected-bg);
+	box-shadow: 0 0 0 1px color-mix(in oklab, var(--sidebar-ring) 35%, transparent);
 }
 
 .dcc-workspace-card strong {
@@ -475,10 +494,11 @@ a {
 }
 
 .dcc-runtime-workbench {
-	display: grid;
-	grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.85fr);
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
 	gap: 0.9rem;
-	align-items: stretch;
 }
 
 .dcc-runtime-workbench__main {
@@ -487,8 +507,7 @@ a {
 	gap: 0.9rem;
 }
 
-.dcc-runtime-workbench__main,
-.dcc-runtime-workbench__rail > * {
+.dcc-runtime-workbench__main {
 	min-width: 0;
 }
 
@@ -592,45 +611,6 @@ a {
 		);
 }
 
-.dcc-runtime-workbench__session-tabs {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	padding: 0.1rem 0 0.1rem;
-	border-bottom: 1px solid color-mix(in oklab, var(--dcc-shell-border) 85%, transparent);
-}
-
-.dcc-runtime-workbench__session-tab {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	border: 1px solid transparent;
-	border-radius: 999px;
-	padding: 0.55rem 0.9rem;
-	background: transparent;
-	color: var(--dcc-text-muted);
-	font-size: 0.84rem;
-	font-weight: 600;
-	letter-spacing: 0.01em;
-	cursor: pointer;
-	transition:
-		background 160ms ease,
-		color 160ms ease,
-		border-color 160ms ease;
-}
-
-.dcc-runtime-workbench__session-tab:hover {
-	color: var(--dcc-text);
-	background: color-mix(in oklab, var(--dcc-surface-2) 58%, transparent);
-}
-
-.dcc-runtime-workbench__session-tab[data-active="true"] {
-	color: var(--dcc-text);
-	background: color-mix(in oklab, var(--dcc-surface-2) 86%, transparent);
-	border-color: var(--dcc-shell-border);
-	box-shadow: inset 0 1px 0 color-mix(in oklab, white 4%, transparent);
-}
-
 .dcc-runtime-workbench__presence-meta {
 	display: grid;
 	grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -701,6 +681,48 @@ a {
 	flex-wrap: wrap;
 	gap: 0.5rem;
 	justify-content: flex-end;
+	align-items: center;
+}
+
+.dcc-runtime-workbench__toolbar--providers {
+	flex-wrap: wrap;
+	align-items: flex-start;
+	row-gap: 0.65rem;
+}
+
+.dcc-runtime-workbench__toolbar--providers .dcc-runtime-workbench__toolbar-actions {
+	flex: 1;
+	min-width: min(100%, 12rem);
+	justify-content: flex-end;
+	column-gap: 0.65rem;
+}
+
+.dcc-runtime-workbench--session {
+	gap: 0;
+	min-height: 0;
+}
+
+.dcc-runtime-workbench--session .dcc-runtime-workbench__header {
+	align-items: center;
+}
+
+.dcc-runtime-workbench__timeline-shell--fill {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.dcc-runtime-workbench__timeline-shell--fill .dcc-session-timeline {
+	flex: 1;
+	min-height: 0;
+}
+
+.dcc-runtime-workbench__timeline-shell--fill .dcc-session-timeline__content {
+	flex: 1;
+	min-height: 0;
+	max-height: none;
 }
 
 .dcc-runtime-workbench__context-panel {
@@ -920,16 +942,6 @@ a {
 	justify-content: flex-end;
 }
 
-.dcc-runtime-workbench__rail {
-	display: grid;
-	gap: 0.9rem;
-	align-content: start;
-}
-
-.dcc-runtime-workbench__rail > * {
-	min-width: 0;
-}
-
 .dcc-session-summary {
 	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1085,11 +1097,6 @@ a {
 	grid-template-columns: 1.25fr 0.95fr;
 }
 
-@media (max-width: 1180px) {
-	.dcc-runtime-workbench {
-		grid-template-columns: 1fr;
-	}
-}
 
 @media (max-width: 960px) {
 	.dcc-session-summary {
@@ -1127,10 +1134,6 @@ a {
 
 	.dcc-runtime-workbench__hero-status {
 		justify-content: flex-start;
-	}
-
-	.dcc-runtime-workbench__session-tabs {
-		flex-wrap: wrap;
 	}
 
 	.dcc-runtime-workbench__composer-footer {
@@ -1214,6 +1217,12 @@ a {
 	display: flex;
 	align-items: stretch;
 	justify-content: center;
+}
+
+.dcc-shell__divider--active .dcc-shell__divider-hit {
+	width: 3px;
+	background: color-mix(in oklab, var(--dcc-accent) 35%, var(--dcc-border));
+	box-shadow: 0 0 12px color-mix(in oklab, var(--dcc-accent) 28%, transparent);
 }
 
 .dcc-shell__divider-hit {
@@ -1512,6 +1521,14 @@ a {
 	.dcc-sidebar {
 		border-right: 0;
 		border-bottom: 1px solid var(--dcc-shell-border);
+		width: 100% !important;
+	}
+
+	.dcc-inspector-aside {
+		width: 100% !important;
+		min-height: 12rem;
+		border-left: 0;
+		border-top: 1px solid var(--dcc-shell-border);
 	}
 
 	.dcc-shell__divider {

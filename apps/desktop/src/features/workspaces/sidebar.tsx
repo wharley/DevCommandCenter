@@ -4,6 +4,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { ScrollArea } from "../../components/ui/scroll-area";
+import { Separator } from "../../components/ui/separator";
 import { Switch } from "../../components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { getWorkspaceTone } from "./data";
@@ -18,7 +19,6 @@ type WorkspacesSidebarProps = {
 	onCreateWorkspace: () => void;
 	onToggleCollapsed: () => void;
 	selectedWorkspaceId: string;
-	sidebarWidth: number;
 	showArchived: boolean;
 	workspaces: WorkspaceSummary[];
 };
@@ -32,7 +32,6 @@ export function WorkspacesSidebar({
 	onCreateWorkspace,
 	onToggleCollapsed,
 	selectedWorkspaceId,
-	sidebarWidth,
 	showArchived,
 	workspaces,
 }: WorkspacesSidebarProps) {
@@ -66,7 +65,7 @@ export function WorkspacesSidebar({
 					<div className="dcc-brand__mark" aria-hidden="true" />
 					<div>
 						<p className="dcc-eyebrow">Dev Command Center</p>
-						<h1>Workspace shell</h1>
+						<h1>Workspaces</h1>
 					</div>
 				</div>
 				<Tooltip>
@@ -84,6 +83,8 @@ export function WorkspacesSidebar({
 					<TooltipContent>Toggle sidebar</TooltipContent>
 				</Tooltip>
 			</div>
+
+			<Separator className="shrink-0 bg-border/80" />
 
 			<div className="dcc-sidebar__section">
 				<Label>Workspaces</Label>
@@ -125,28 +126,19 @@ export function WorkspacesSidebar({
 			</div>
 
 			<div className="dcc-sidebar__section">
-				<Label>Layout</Label>
-				<div className="dcc-slider-row">
-					<span>Sidebar width</span>
-					<input type="range" min="240" max="520" value={sidebarWidth} readOnly />
-				</div>
-				<div className="dcc-slider-row dcc-switch-row">
+				<div className="dcc-switch-row">
 					<div className="dcc-switch-row__label">
 						<span>Show archived</span>
-						<small>Keep old workspaces visible in the list.</small>
+						<small>Include archived workspaces in the list.</small>
 					</div>
 					<Switch checked={showArchived} onCheckedChange={onShowArchivedChange} />
 				</div>
-				<p className="dcc-sidebar__hint">
-					Drag the divider or use arrow keys while it is focused.
-				</p>
 			</div>
 
 			<div className="dcc-sidebar__footer">
 				<Button type="button" className="dcc-sidebar__cta" onClick={onCreateWorkspace}>
 					New workspace
 				</Button>
-				<Badge variant="outline">Helmor layout</Badge>
 			</div>
 		</>
 	);

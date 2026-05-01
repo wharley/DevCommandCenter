@@ -142,18 +142,9 @@ export function SessionEventFeed({
 	const content = (
 		<>
 			{events.length === 0 ? (
-				<div className="dcc-session-thread-empty">
-					<div className="dcc-session-thread-empty__stack">
-						<div className="dcc-session-thread-empty__bubble dcc-session-thread-empty__bubble--user">
-							Ask this workspace to make a change.
-						</div>
-						<div className="dcc-session-thread-empty__bubble dcc-session-thread-empty__bubble--assistant">
-							Start a session to see provider events, tool calls, and
-							checkpoints stream into the thread.
-						</div>
-						<Badge variant="outline">Ready to begin</Badge>
-					</div>
-				</div>
+				<p className="m-0 px-2 py-10 text-center text-[13px] leading-relaxed [color:var(--conversation-body-foreground)]">
+					No activity yet. Start a session and send a message — events appear here.
+				</p>
 			) : (
 				<ul className="dcc-runtime-feed__list">
 					{events.map((event, index) => (
@@ -163,7 +154,7 @@ export function SessionEventFeed({
 								data-tone={eventTone(event)}
 							>
 								<div className="dcc-session-event__header">
-									<Badge variant={eventTone(event)}>
+									<Badge variant={eventTone(event)} className="font-normal">
 										{eventLabel(event)}
 									</Badge>
 								</div>
@@ -180,18 +171,18 @@ export function SessionEventFeed({
 
 	if (compact) {
 		return (
-			<div className="dcc-session-timeline">
-				<div className="dcc-card__meta-row dcc-session-timeline__header">
-					<div>
-						<CardTitle>Session timeline</CardTitle>
-						<p className="dcc-card__description">
-							Live stream from the Tauri listen bridge, ordered like a chat
-							thread.
-						</p>
-					</div>
-					<Badge variant="outline">{events.length} recent</Badge>
+			<div className="dcc-session-timeline flex min-h-0 flex-1 flex-col">
+				<div className="mb-2 flex shrink-0 items-center justify-between gap-2 px-0.5">
+					<span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--dcc-text-soft)]">
+						Activity
+					</span>
+					{events.length > 0 ? (
+						<span className="text-[11px] tabular-nums text-[var(--dcc-text-soft)]">
+							{events.length}
+						</span>
+					) : null}
 				</div>
-				<div ref={scrollRef} className="dcc-session-timeline__content">
+				<div ref={scrollRef} className="dcc-session-timeline__content min-h-0 flex-1">
 					<div className="dcc-session-timeline__surface">{content}</div>
 				</div>
 				<Button
@@ -220,7 +211,7 @@ export function SessionEventFeed({
 			<CardHeader>
 				<div className="dcc-card__meta-row">
 					<CardTitle>Session events</CardTitle>
-					<Badge variant="outline">{events.length} recent</Badge>
+					<Badge variant="outline">{events.length}</Badge>
 				</div>
 			</CardHeader>
 			<CardContent className="dcc-runtime-feed__content">{content}</CardContent>

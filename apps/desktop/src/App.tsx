@@ -8,6 +8,7 @@ import {
 	CreateWorkspaceDialog,
 	useWorkspacesPanel,
 } from "./features/workspaces";
+import { WorkspaceInspectorSidebar } from "./features/inspector";
 import {
 	SessionWorkbench,
 	type RuntimeSessionSnapshot,
@@ -30,6 +31,9 @@ export default function App() {
 	const {
 		handleResizeKeyDown,
 		handleResizeStart,
+		inspectorWidth,
+		isInspectorResizing,
+		isSidebarResizing,
 		sidebarCollapsed,
 		sidebarWidth,
 		setSidebarCollapsed,
@@ -57,7 +61,7 @@ export default function App() {
 		null,
 	);
 	const [sessionDraft, setSessionDraft] = useState(
-		"Bring the Helmor shell density into Dev Command Center, but keep the Tauri + Rust boundary clean.",
+		"Describe the change you want in this workspace. The Rust core and Tauri bridge stay the boundary.",
 	);
 	const [sessionSnapshot, setSessionSnapshot] =
 		useState<RuntimeSessionSnapshot | null>(null);
@@ -102,7 +106,7 @@ export default function App() {
 	useEffect(() => {
 		setSessionSnapshot(null);
 		setSessionDraft(
-			"Bring the Helmor shell density into Dev Command Center, but keep the Tauri + Rust boundary clean.",
+			"Describe the change you want in this workspace. The Rust core and Tauri bridge stay the boundary.",
 		);
 	}, [selectedWorkspace.id]);
 
@@ -243,6 +247,7 @@ export default function App() {
 	const visibleWidth = sidebarCollapsed ? 76 : sidebarWidth;
 	const shellStyle = {
 		"--dcc-sidebar-width": `${visibleWidth}px`,
+		"--dcc-inspector-width": `${inspectorWidth}px`,
 	} as CSSProperties;
 
 	return (
@@ -257,14 +262,13 @@ export default function App() {
 					onCreateWorkspace={() => setIsCreateWorkspaceOpen(true)}
 					onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
 					selectedWorkspaceId={selectedWorkspaceId}
-					sidebarWidth={visibleWidth}
 					showArchived={showArchived}
 					workspaces={filteredWorkspaces}
 				/>
 			</aside>
 
 			<div
-				className="dcc-shell__divider"
+				className={`dcc-shell__divider${isSidebarResizing ? " dcc-shell__divider--active" : ""}`}
 				role="separator"
 				aria-orientation="vertical"
 				aria-label="Resize sidebar"
@@ -276,7 +280,7 @@ export default function App() {
 				<div className="dcc-shell__divider-hit" />
 			</div>
 
-		<main className="dcc-main">
+			<main className="dcc-main">
 				<WorkspaceCommandPalette
 					open={isCommandPaletteOpen}
 					onOpenChange={setIsCommandPaletteOpen}
@@ -298,7 +302,6 @@ export default function App() {
 					selectedProviderLabel={selectedProvider?.label ?? null}
 					selectedProviderId={selectedProviderId}
 					providerChoices={providerChoices}
-					providerCatalog={providerCatalog}
 					sessionSnapshot={sessionSnapshot}
 					sessionEvents={sessionEvents}
 					sessionDraft={sessionDraft}
@@ -311,6 +314,37 @@ export default function App() {
 					onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
 				/>
 			</main>
+
+			<div
+				className={`dcc-shell__divider${isInspectorResizing ? " dcc-shell__divider--active" : ""}`}
+				role="separator"
+				aria-orientation="vertical"
+				aria-label="Resize inspector"
+				tabIndex={0}
+				style={{ width: `${SIDEBAR_RESIZE_HIT_AREA}px` }}
+				onMouseDown={handleResizeStart("inspector")}
+				onKeyDown={handleResizeKeyDown("inspector")}
+			>
+				<div className="dcc-shell__divider-hit" />
+			</div>
+
+			<aside
+				className="dcc-inspector-aside"
+				style={{ width: "var(--dcc-inspector-width)" }}
+				aria-label="Inspector sidebar"
+			>
+				<WorkspaceInspectorSidebar
+					providerCatalog={providerCatalog}
+					sessionSnapshot={sessionSnapshot}
+					workspaceId={selectedWorkspace.id}
+					workspaceName={selectedWorkspace.name}
+					workspaceBranch={selectedWorkspace.branch}
+					workspacePath={selectedWorkspacePath}
+					selectedProviderLabel={selectedProvider?.label ?? null}
+					sessionState={sessionSnapshot?.state ?? "idle"}
+					sessionId={sessionSnapshot?.sessionId ?? null}
+				/>
+			</aside>
 		</div>
 	);
 }

@@ -33,6 +33,8 @@ type TerminalPanelProps = {
 	providerLabel: string | null;
 	sessionState: string;
 	sessionId: string | null;
+	/** `drawer`: compact chrome for bottom workbench drawer (t3 ThreadTerminalDrawer style). */
+	variant?: "card" | "drawer";
 };
 
 export function TerminalPanel({
@@ -43,6 +45,7 @@ export function TerminalPanel({
 	providerLabel,
 	sessionState,
 	sessionId,
+	variant = "card",
 }: TerminalPanelProps) {
 	const terminalRef = useRef<TerminalHandle | null>(null);
 	const pendingWritesRef = useRef<string[]>([]);
@@ -241,41 +244,64 @@ export function TerminalPanel({
 		[workspaceId],
 	);
 
+	if (variant === "drawer") {
+		return (
+			<div className="dcc-terminal dcc-terminal--drawer flex min-h-0 flex-1 flex-col">
+				<div className="dcc-terminal__toolbar flex flex-wrap items-center justify-between gap-2 border-b border-border/70 pb-2 pt-0.5">
+					<div className="flex min-w-0 flex-wrap gap-2">
+						<Badge variant={terminalSnapshot?.status === "running" ? "success" : "outline"}>
+							{terminalSnapshot?.status ?? "idle"}
+						</Badge>
+						<Badge variant="outline">{sessionId ? "Linked session" : "No session"}</Badge>
+						<Badge variant="outline" className="max-w-[10rem] truncate font-mono text-[11px]">
+							{terminalSnapshot?.ptyId ?? "PTY"}
+						</Badge>
+					</div>
+					<div className="flex flex-wrap gap-1.5">
+						<Button type="button" variant="secondary" size="sm" onClick={handleFocusTerminal}>
+							Focus
+						</Button>
+						<Button type="button" variant="secondary" size="sm" onClick={handleClearTerminal}>
+							Clear
+						</Button>
+					</div>
+				</div>
+				<div className="dcc-terminal__viewport flex min-h-0 flex-1 flex-col pt-2">
+					<TerminalOutput
+						terminalRef={terminalRef}
+						className="dcc-terminal__surface min-h-[11rem] flex-1"
+						detectLinks
+						onData={handleTerminalData}
+						onResize={handleTerminalResize}
+					/>
+					<p className="m-0 pt-2 text-[10px] leading-snug text-muted-foreground">
+						Cwd · {workspacePath ?? "missing path"}
+					</p>
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<Card className="dcc-terminal">
 			<CardHeader>
 				<div className="dcc-card__meta-row">
 					<div>
-						<CardTitle>Workspace terminal</CardTitle>
+						<CardTitle className="text-sm font-medium">Terminal</CardTitle>
 						<CardDescription>
-							Helmor-style xterm shell remembered per workspace and connected to
-							the Tauri PTY runtime.
+							PTY per workspace; panel hide keeps the same shell (Tauri bridge).
 						</CardDescription>
 					</div>
 					<div className="dcc-terminal__header-actions">
 						<Badge variant={terminalSnapshot?.status === "running" ? "success" : "outline"}>
 							{terminalSnapshot?.status ?? "idle"}
 						</Badge>
-						<Badge variant="outline">
-							{sessionId ?? "No session"}
-						</Badge>
-						<Badge variant="outline">
-							{terminalSnapshot?.ptyId ?? "No PTY"}
-						</Badge>
-						<Button
-							type="button"
-							variant="secondary"
-							size="sm"
-							onClick={handleFocusTerminal}
-						>
+						<Badge variant="outline">{sessionId ?? "No session"}</Badge>
+						<Badge variant="outline">{terminalSnapshot?.ptyId ?? "No PTY"}</Badge>
+						<Button type="button" variant="secondary" size="sm" onClick={handleFocusTerminal}>
 							Focus
 						</Button>
-						<Button
-							type="button"
-							variant="secondary"
-							size="sm"
-							onClick={handleClearTerminal}
-						>
+						<Button type="button" variant="secondary" size="sm" onClick={handleClearTerminal}>
 							Clear
 						</Button>
 					</div>
@@ -291,12 +317,10 @@ export function TerminalPanel({
 				/>
 				<div className="dcc-terminal__note">
 					<span>
-						<strong>Remembered workspace PTY.</strong> Closing the panel does
-						not kill the shell; reopening reattaches to the same runtime.
+						<strong>Remembered workspace PTY.</strong> Closing the panel does not kill the
+						shell; reopening reattaches to the same runtime.
 					</span>
-					<Badge variant="outline">
-						{workspacePath ?? "Workspace path pending"}
-					</Badge>
+					<Badge variant="outline">{workspacePath ?? "Workspace path pending"}</Badge>
 				</div>
 			</CardContent>
 		</Card>

@@ -35,74 +35,63 @@ export function ProviderCatalogCard({
 	catalog: ProviderCatalog | null;
 }) {
 	const providers = catalog?.providers ?? [];
+
+	if (providers.length === 0) {
+		return (
+			<Card className="dcc-runtime-feed border-[var(--dcc-shell-border)]">
+				<CardHeader className="pb-2">
+					<CardTitle className="text-sm font-medium">Providers</CardTitle>
+					<CardDescription className="text-[12px] text-[var(--dcc-text-muted)]">
+						None registered yet. When the Rust runtime exposes CLIs, they list here.
+					</CardDescription>
+				</CardHeader>
+			</Card>
+		);
+	}
+
 	const stableCount = providers.filter((provider) => provider.stable).length;
-	const streamingCount = providers.filter(
-		(provider) => provider.capabilities.streaming,
-	).length;
-	const toolsCount = providers.filter(
-		(provider) => provider.capabilities.tools,
-	).length;
-	const mcpCount = providers.filter((provider) => provider.capabilities.mcp).length;
-	const resumableCount = providers.filter(
-		(provider) => provider.capabilities.resumable,
-	).length;
 
 	return (
-		<Card className="dcc-runtime-feed">
-			<CardHeader>
+		<Card className="dcc-runtime-feed border-[var(--dcc-shell-border)]">
+			<CardHeader className="pb-2">
 				<div className="dcc-card__meta-row">
-					<CardTitle>Provider catalog</CardTitle>
-					<Badge variant="outline">
+					<CardTitle className="text-sm font-medium">Providers</CardTitle>
+					<Badge variant="outline" className="font-normal">
 						{stableCount}/{providers.length} stable
 					</Badge>
 				</div>
-				<CardDescription>
-					Runtime capability snapshot for the active shell and selected provider.
-				</CardDescription>
 			</CardHeader>
-			<CardContent className="dcc-runtime-feed__content">
-				<div className="dcc-provider-catalog__summary">
-					<Badge variant="outline">{streamingCount} streaming</Badge>
-					<Badge variant="outline">{toolsCount} tools</Badge>
-					<Badge variant="outline">{mcpCount} mcp</Badge>
-					<Badge variant="outline">{resumableCount} resumable</Badge>
-				</div>
-				{providers.length === 0 ? (
-					<p className="dcc-card__description">
-						No providers available.
-					</p>
-				) : (
-					<ul className="dcc-runtime-feed__list">
-						{providers.map((provider) => (
-							<li key={provider.id}>
-								<div className="dcc-runtime-feed__row">
-									<strong>{provider.label}</strong>
-									<small>{provider.description}</small>
-								</div>
-								<div className="dcc-runtime-feed__chips">
-									<Badge variant={provider.stable ? "success" : "outline"}>
-										{provider.stable ? "stable" : "experimental"}
-									</Badge>
-									<Badge variant={healthSummary(provider.health).variant}>
-										{healthSummary(provider.health).label}
-									</Badge>
-									{provider.capabilities.streaming ? (
-										<Badge variant="outline">streaming</Badge>
-									) : null}
-									{provider.capabilities.tools ? (
-										<Badge variant="outline">tools</Badge>
-									) : null}
-									{provider.capabilities.mcp ? (
-										<Badge variant="outline">mcp</Badge>
-									) : null}
-									{provider.capabilities.resumable ? (
-										<Badge variant="outline">resumable</Badge>
-									) : null}
-								</div>
-							</li>
-						))}
-					</ul>
-				)}
+			<CardContent className="dcc-runtime-feed__content pt-0">
+				<ul className="dcc-runtime-feed__list">
+					{providers.map((provider) => (
+						<li key={provider.id}>
+							<div className="dcc-runtime-feed__row">
+								<strong>{provider.label}</strong>
+								<small>{provider.description}</small>
+							</div>
+							<div className="dcc-runtime-feed__chips">
+								<Badge variant={provider.stable ? "success" : "outline"}>
+									{provider.stable ? "stable" : "experimental"}
+								</Badge>
+								<Badge variant={healthSummary(provider.health).variant}>
+									{healthSummary(provider.health).label}
+								</Badge>
+								{provider.capabilities.streaming ? (
+									<Badge variant="outline">streaming</Badge>
+								) : null}
+								{provider.capabilities.tools ? (
+									<Badge variant="outline">tools</Badge>
+								) : null}
+								{provider.capabilities.mcp ? (
+									<Badge variant="outline">mcp</Badge>
+								) : null}
+								{provider.capabilities.resumable ? (
+									<Badge variant="outline">resumable</Badge>
+								) : null}
+							</div>
+						</li>
+					))}
+				</ul>
 			</CardContent>
 		</Card>
 	);

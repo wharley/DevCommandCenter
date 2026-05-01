@@ -1,0 +1,25 @@
+/*
+ * DCC semantic status tokens — info, success, warning, destructive foreground pairings.
+ * Additive layer on shell tokens; oklch values tuned for clear contrast on light/dark chrome.
+ */
+:root {
+	--destructive-foreground: oklch(0.45 0.19 27);
+	--info: oklch(0.58 0.2 250);
+	--info-foreground: oklch(0.42 0.15 250);
+	--success: oklch(0.62 0.17 165);
+	--success-foreground: oklch(0.38 0.12 165);
+	--warning: oklch(0.78 0.16 85);
+	--warning-foreground: oklch(0.38 0.1 75);
+	--app-chrome-background: var(--background);
+}
+
+.dark {
+	--destructive-foreground: oklch(0.78 0.12 25);
+	--info: oklch(0.58 0.18 250);
+	--info-foreground: oklch(0.82 0.08 250);
+	--success: oklch(0.62 0.16 165);
+	--success-foreground: oklch(0.84 0.1 165);
+	--warning: oklch(0.78 0.14 85);
+	--warning-foreground: oklch(0.86 0.12 85);
+	--app-chrome-background: var(--background);
+}
