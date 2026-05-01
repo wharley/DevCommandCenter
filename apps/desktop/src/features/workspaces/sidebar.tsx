@@ -1,145 +1,611 @@
-import { PanelLeft, PanelRight } from "lucide-react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+	Archive,
+	Check,
+	ChevronRight,
+	LoaderCircle,
+	Moon,
+	PanelLeft,
+	PanelRight,
+	Plus,
+	Settings2,
+	SunMedium,
+} from "lucide-react";
+import {
+	memo,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
+import { useAppearance } from "../../components/theme-provider";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
-import { ScrollArea } from "../../components/ui/scroll-area";
-import { Separator } from "../../components/ui/separator";
-import { Switch } from "../../components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
-import { getWorkspaceTone } from "./data";
+import { cn } from "@/lib/utils";
 import type { WorkspaceSummary } from "./types";
+import {
+	createInitialRailSectionState,
+	readStoredRailSectionState,
+	writeStoredRailSectionState,
+} from "./workspace-rail-open-state";
+import { projectWorkspaceRailGroups } from "./workspace-rail-projection";
+import {
+	ARCHIVED_SECTION_ID,
+	findSelectedRailSectionId,
+	humanizeWorkspaceBranchLabel,
+	initialsFromWorkspaceLabel,
+	ProjectGroupGlyph,
+} from "./workspace-rail-shared";
+import { WorkspaceRailRowItem } from "./workspace-rail-row";
+
+type VirtualItem =
+	| {
+			kind: "group-header";
+			groupId: string;
+			label: string;
+			rowCount: number;
+			canCollapse: boolean;
+			headerVariant: "project" | "archived";
+	  }
+	| { kind: "row"; groupId: string; workspace: WorkspaceSummary }
+	| { kind: "group-gap"; size: number }
+	| { kind: "bottom-padding" };
+
+const HEADER_HEIGHT = 34;
+const ROW_HEIGHT = 32;
+const GROUP_GAP = 8;
+const EMPTY_GROUP_GAP = 8;
+const BOTTOM_PADDING = 8;
+
+function getGroupGapSize(previousHasRows: boolean, nextHasRows: boolean) {
+	return previousHasRows && nextHasRows ? GROUP_GAP : EMPTY_GROUP_GAP;
+}
+
+function RailSettingsMenu({
+	menuAlign = "start",
+	contentSide = "top",
+}: {
+	menuAlign?: "start" | "center";
+	contentSide?: "top" | "right";
+}) {
+	const { theme, setTheme } = useAppearance();
+
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger asChild>
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-xs"
+					className="text-muted-foreground hover:text-foreground"
+					aria-label="Settings"
+				>
+					<Settings2 className="size-4" strokeWidth={1.85} aria-hidden />
+				</Button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent
+				align={menuAlign}
+				side={contentSide}
+				sideOffset={6}
+				className="min-w-44"
+			>
+				<DropdownMenuLabel className="text-[12px] font-medium">Appearance</DropdownMenuLabel>
+				<DropdownMenuSeparator />
+				<DropdownMenuItem
+					className="gap-2 text-[13px]"
+					onClick={() => {
+						setTheme("dark");
+					}}
+				>
+					<Moon className="size-4 shrink-0 opacity-80" strokeWidth={1.8} aria-hidden />
+					<span className="flex-1">Dark</span>
+					{theme === "dark" ? (
+						<Check className="size-4 shrink-0 opacity-70" strokeWidth={2} aria-hidden />
+					) : null}
+				</DropdownMenuItem>
+				<DropdownMenuItem
+					className="gap-2 text-[13px]"
+					onClick={() => {
+						setTheme("light");
+					}}
+				>
+					<SunMedium className="size-4 shrink-0 opacity-80" strokeWidth={1.8} aria-hidden />
+					<span className="flex-1">Light</span>
+					{theme === "light" ? (
+						<Check className="size-4 shrink-0 opacity-70" strokeWidth={2} aria-hidden />
+					) : null}
+				</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
 
 type WorkspacesSidebarProps = {
 	collapsed: boolean;
 	filter: string;
+	isCreatingWorkspace?: boolean;
 	onFilterChange: (value: string) => void;
 	onSelectWorkspace: (workspaceId: string) => void;
-	onShowArchivedChange: (value: boolean) => void;
 	onCreateWorkspace: () => void;
 	onToggleCollapsed: () => void;
 	selectedWorkspaceId: string;
-	showArchived: boolean;
 	workspaces: WorkspaceSummary[];
 };
 
-export function WorkspacesSidebar({
+export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	collapsed,
 	filter,
+	isCreatingWorkspace = false,
 	onFilterChange,
 	onSelectWorkspace,
-	onShowArchivedChange,
 	onCreateWorkspace,
 	onToggleCollapsed,
 	selectedWorkspaceId,
-	showArchived,
 	workspaces,
 }: WorkspacesSidebarProps) {
-	const groupedWorkspaces = [
-		{
-			label: "Done",
-			statuses: ["ready"] as const,
-			items: workspaces.filter((workspace) => workspace.status === "ready"),
-		},
-		{
-			label: "In review",
-			statuses: ["setup_pending"] as const,
-			items: workspaces.filter((workspace) => workspace.status === "setup_pending"),
-		},
-		{
-			label: "In progress",
-			statuses: ["initializing"] as const,
-			items: workspaces.filter((workspace) => workspace.status === "initializing"),
-		},
-		{
-			label: "Archived",
-			statuses: ["archived"] as const,
-			items: workspaces.filter((workspace) => workspace.status === "archived"),
-		},
-	].filter((group) => group.items.length > 0);
+	const scrollContainerRef = useRef<HTMLDivElement>(null);
+	const { activeGroups, archivedRows } = useMemo(
+		() => projectWorkspaceRailGroups(workspaces),
+		[workspaces],
+	);
 
-	return (
-		<>
-			<div className="dcc-sidebar__header">
-				<div className="dcc-brand">
-					<div className="dcc-brand__mark" aria-hidden="true" />
-					<div>
-						<p className="dcc-eyebrow">Dev Command Center</p>
-						<h1>Workspaces</h1>
-					</div>
-				</div>
+	const [sectionOpenState, setSectionOpenState] = useState(() => ({
+		...createInitialRailSectionState(activeGroups),
+		...readStoredRailSectionState(),
+	}));
+
+	useEffect(() => {
+		setSectionOpenState((current) => {
+			const next: Record<string, boolean> = {};
+			let changed = false;
+
+			for (const group of activeGroups) {
+				const nextValue = current[group.id] ?? true;
+				next[group.id] = nextValue;
+				if (current[group.id] !== nextValue) {
+					changed = true;
+				}
+			}
+
+			const archivedValue = current[ARCHIVED_SECTION_ID] ?? false;
+			next[ARCHIVED_SECTION_ID] = archivedValue;
+			if (current[ARCHIVED_SECTION_ID] !== archivedValue) {
+				changed = true;
+			}
+
+			if (Object.keys(current).length !== Object.keys(next).length) {
+				changed = true;
+			}
+
+			return changed ? next : current;
+		});
+	}, [activeGroups, archivedRows]);
+
+	useEffect(() => {
+		writeStoredRailSectionState(sectionOpenState);
+	}, [sectionOpenState]);
+
+	const lastAutoExpandedIdRef = useRef<string | null>(null);
+	useEffect(() => {
+		if (!selectedWorkspaceId || selectedWorkspaceId === lastAutoExpandedIdRef.current) {
+			return;
+		}
+
+		const selectedSectionId = findSelectedRailSectionId(
+			selectedWorkspaceId,
+			activeGroups,
+			archivedRows,
+		);
+
+		if (!selectedSectionId) {
+			return;
+		}
+
+		lastAutoExpandedIdRef.current = selectedWorkspaceId;
+		setSectionOpenState((current) =>
+			current[selectedSectionId] ? current : { ...current, [selectedSectionId]: true },
+		);
+	}, [activeGroups, archivedRows, selectedWorkspaceId]);
+
+	const flatItems = useMemo(() => {
+		const items: VirtualItem[] = [];
+		const visibleGroups = activeGroups.filter((g) => g.rows.length > 0);
+
+		for (let gi = 0; gi < visibleGroups.length; gi++) {
+			const group = visibleGroups[gi]!;
+			if (gi > 0) {
+				const previousGroup = visibleGroups[gi - 1]!;
+				items.push({
+					kind: "group-gap",
+					size: getGroupGapSize(
+						previousGroup.rows.length > 0,
+						group.rows.length > 0,
+					),
+				});
+			}
+
+			const canCollapse = group.rows.length > 0;
+			items.push({
+				kind: "group-header",
+				groupId: group.id,
+				label: group.label,
+				rowCount: group.rows.length,
+				canCollapse,
+				headerVariant: "project",
+			});
+
+			if (sectionOpenState[group.id] !== false && group.rows.length > 0) {
+				for (const row of group.rows) {
+					items.push({
+						kind: "row",
+						groupId: group.id,
+						workspace: row,
+					});
+				}
+			}
+		}
+
+		const previousGroup = visibleGroups.at(-1);
+		items.push({
+			kind: "group-gap",
+			size: getGroupGapSize(
+				(previousGroup?.rows.length ?? 0) > 0,
+				archivedRows.length > 0,
+			),
+		});
+		items.push({
+			kind: "group-header",
+			groupId: ARCHIVED_SECTION_ID,
+			label: "Archived",
+			rowCount: archivedRows.length,
+			canCollapse: archivedRows.length > 0,
+			headerVariant: "archived",
+		});
+
+		if (sectionOpenState[ARCHIVED_SECTION_ID] && archivedRows.length > 0) {
+			for (const row of archivedRows) {
+				items.push({
+					kind: "row",
+					groupId: ARCHIVED_SECTION_ID,
+					workspace: row,
+				});
+			}
+		}
+
+		items.push({ kind: "bottom-padding" });
+		return items;
+	}, [activeGroups, archivedRows, sectionOpenState]);
+
+	const virtualizer = useVirtualizer({
+		count: flatItems.length,
+		getScrollElement: () => scrollContainerRef.current,
+		estimateSize: (index) => {
+			const item = flatItems[index]!;
+			switch (item.kind) {
+				case "group-header":
+					return HEADER_HEIGHT;
+				case "row":
+					return ROW_HEIGHT;
+				case "group-gap":
+					return item.size;
+				case "bottom-padding":
+					return BOTTOM_PADDING;
+			}
+		},
+		getItemKey: (index) => {
+			const item = flatItems[index]!;
+			switch (item.kind) {
+				case "group-header":
+					return `header-${item.groupId}`;
+				case "row":
+					return `row-${item.groupId}-${item.workspace.id}`;
+				case "group-gap":
+					return `gap-${index}`;
+				case "bottom-padding":
+					return "bottom-padding";
+			}
+		},
+		overscan: 12,
+	});
+
+	useLayoutEffect(() => {
+		if (!selectedWorkspaceId) {
+			return;
+		}
+
+		const targetIndex = flatItems.findIndex(
+			(item) => item.kind === "row" && item.workspace.id === selectedWorkspaceId,
+		);
+		if (targetIndex === -1) {
+			return;
+		}
+
+		virtualizer.scrollToIndex(targetIndex, { align: "auto" });
+	}, [selectedWorkspaceId, sectionOpenState, flatItems, virtualizer]);
+
+	const toggleSection = useCallback((groupId: string) => {
+		setSectionOpenState((current) => ({
+			...current,
+			[groupId]: !current[groupId],
+		}));
+	}, []);
+
+	const renderItem = useCallback(
+		(item: VirtualItem) => {
+			if (item.kind === "group-gap" || item.kind === "bottom-padding") {
+				return null;
+			}
+
+			if (item.kind === "group-header") {
+				const isOpen =
+					item.groupId === ARCHIVED_SECTION_ID
+						? (sectionOpenState[item.groupId] ?? false)
+						: (sectionOpenState[item.groupId] ?? true);
+				const isEmptyGroup = item.rowCount === 0;
+
+				return (
+					<button
+						type="button"
+						className={cn(
+							"group/trigger flex w-full select-none items-center justify-between rounded-lg px-2 text-[13px] font-semibold tracking-[-0.01em] text-foreground hover:bg-accent/60",
+							"py-1",
+							item.canCollapse ? "cursor-pointer" : "cursor-default",
+						)}
+						data-empty-group={isEmptyGroup ? "true" : "false"}
+						disabled={!item.canCollapse}
+						onClick={() => toggleSection(item.groupId)}
+					>
+						<span className="flex min-w-0 items-center gap-2">
+							{item.headerVariant === "archived" ? (
+								<Archive
+									className="size-[14px] shrink-0 text-[var(--workspace-sidebar-status-backlog)]"
+									strokeWidth={1.9}
+									aria-hidden
+								/>
+							) : (
+								<ProjectGroupGlyph />
+							)}
+							<span className="truncate">{item.label}</span>
+						</span>
+
+						{item.rowCount > 0 ? (
+							<span className="relative flex h-5 min-w-5 items-center justify-center">
+								<Badge
+									variant="secondary"
+									className="h-4 min-w-[16px] justify-center rounded-full px-1 text-[9.5px] leading-none transition-opacity group-hover/trigger:opacity-0"
+								>
+									{item.rowCount}
+								</Badge>
+								<ChevronRight
+									className={cn(
+										"absolute left-1/2 top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 text-muted-foreground opacity-0 transition-all group-hover/trigger:opacity-100",
+										isOpen && "rotate-90",
+									)}
+									strokeWidth={2}
+									aria-hidden
+								/>
+							</span>
+						) : null}
+					</button>
+				);
+			}
+
+			return (
+				<WorkspaceRailRowItem
+					workspace={item.workspace}
+					selected={selectedWorkspaceId === item.workspace.id}
+					onSelect={onSelectWorkspace}
+				/>
+			);
+		},
+		[sectionOpenState, selectedWorkspaceId, toggleSection, onSelectWorkspace],
+	);
+
+	if (collapsed) {
+		return (
+			<div className="flex h-full min-h-0 flex-col items-center gap-2 overflow-hidden py-2">
 				<Tooltip>
 					<TooltipTrigger asChild>
 						<Button
 							type="button"
 							variant="ghost"
-							size="icon"
+							size="icon-xs"
 							onClick={onToggleCollapsed}
-							aria-label="Toggle sidebar"
+							aria-label="Expand sidebar"
+							className="text-muted-foreground hover:text-foreground"
 						>
-							{collapsed ? <PanelRight /> : <PanelLeft />}
+							<PanelRight className="size-4" strokeWidth={1.8} />
 						</Button>
 					</TooltipTrigger>
-					<TooltipContent>Toggle sidebar</TooltipContent>
+					<TooltipContent side="right">Expand sidebar</TooltipContent>
+				</Tooltip>
+
+				<div className="scrollbar-stable min-h-0 w-full flex-1 overflow-y-auto px-1 [scrollbar-width:thin]">
+					<div className="flex flex-col items-center gap-1">
+						{workspaces.map((workspace) => {
+							const label = workspace.branch
+								? humanizeWorkspaceBranchLabel(workspace.branch)
+								: workspace.name;
+							const initials = initialsFromWorkspaceLabel(workspace.name || label);
+							const selected = workspace.id === selectedWorkspaceId;
+							return (
+								<Tooltip key={workspace.id}>
+									<TooltipTrigger asChild>
+										<button
+											type="button"
+											aria-current={selected ? "location" : undefined}
+											aria-label={`Open workspace ${label}`}
+											onClick={() => onSelectWorkspace(workspace.id)}
+											className={cn(
+												"flex size-9 shrink-0 items-center justify-center rounded-lg text-[10px] font-semibold uppercase ring-1 transition-colors",
+												selected
+													? "workspace-row-selected text-foreground ring-border"
+													: "bg-accent/35 text-muted-foreground ring-transparent hover:bg-accent/60 hover:text-foreground",
+											)}
+										>
+											{initials}
+										</button>
+									</TooltipTrigger>
+									<TooltipContent side="right">{label}</TooltipContent>
+								</Tooltip>
+							);
+						})}
+					</div>
+				</div>
+
+				<div className="flex shrink-0 flex-col items-center gap-1 pb-2">
+					<RailSettingsMenu menuAlign="center" contentSide="right" />
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								onClick={onCreateWorkspace}
+								disabled={isCreatingWorkspace}
+								aria-label="New workspace"
+								className="text-muted-foreground hover:text-foreground"
+							>
+								{isCreatingWorkspace ? (
+									<LoaderCircle className="size-4 animate-spin" strokeWidth={2} />
+								) : (
+									<Plus className="size-4" strokeWidth={2.2} />
+								)}
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="right">New workspace</TooltipContent>
+					</Tooltip>
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
+			<div
+				data-slot="window-safe-top"
+				className="flex h-9 shrink-0 items-center pr-3 pl-2"
+			>
+				<div data-tauri-drag-region className="h-full flex-1" />
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<Button
+							type="button"
+							aria-label="Collapse sidebar"
+							variant="ghost"
+							size="icon-xs"
+							onClick={onToggleCollapsed}
+							className="text-muted-foreground hover:text-foreground"
+						>
+							<PanelLeft className="size-4" strokeWidth={1.8} />
+						</Button>
+					</TooltipTrigger>
+					<TooltipContent side="bottom">Collapse sidebar</TooltipContent>
 				</Tooltip>
 			</div>
 
-			<Separator className="shrink-0 bg-border/80" />
+			<div className="flex items-center justify-between px-3">
+				<h2 className="text-[14px] font-medium tracking-[-0.01em] text-muted-foreground">
+					Workspaces
+				</h2>
 
-			<div className="dcc-sidebar__section">
-				<Label>Workspaces</Label>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<Button
+							type="button"
+							aria-label="New workspace"
+							variant="ghost"
+							size="icon-xs"
+							disabled={isCreatingWorkspace}
+							onClick={onCreateWorkspace}
+							className={cn(
+								"text-muted-foreground hover:text-foreground",
+								isCreatingWorkspace && "cursor-not-allowed opacity-60",
+							)}
+						>
+							{isCreatingWorkspace ? (
+								<LoaderCircle className="size-4 animate-spin" strokeWidth={2.1} />
+							) : (
+								<Plus className="size-4" strokeWidth={2.4} />
+							)}
+						</Button>
+					</TooltipTrigger>
+					<TooltipContent
+						side="bottom"
+						align="end"
+						sideOffset={6}
+						className="max-w-[240px] text-center text-[12px] leading-tight shadow-md"
+					>
+						Create workspace
+					</TooltipContent>
+				</Tooltip>
+			</div>
+
+			<div className="mt-2 px-3">
+				<Label htmlFor="dcc-workspace-filter" className="sr-only">
+					Filter workspaces
+				</Label>
 				<Input
-					placeholder="Filter workspaces"
+					id="dcc-workspace-filter"
+					placeholder="Filter by name or branch…"
 					value={filter}
 					onChange={(event) => onFilterChange(event.target.value)}
+					className="h-8 text-[13px]"
 				/>
-				<ScrollArea className="dcc-workspace-list">
-					<div className="dcc-workspace-list__groups">
-						{groupedWorkspaces.map((group) => (
-							<section key={group.label} className="dcc-workspace-group">
-								<div className="dcc-workspace-group__header">
-									<span>{group.label}</span>
-									<Badge variant="outline">{group.items.length}</Badge>
-								</div>
-								{group.items.map((workspace) => (
-									<button
-										key={workspace.id}
-										className="dcc-workspace-card"
-										type="button"
-										data-active={workspace.id === selectedWorkspaceId}
-										onClick={() => onSelectWorkspace(workspace.id)}
-									>
-										<div className="dcc-card__header">
-											<strong>{workspace.name}</strong>
-											<Badge variant={getWorkspaceTone(workspace.status)}>
-												{workspace.status}
-											</Badge>
-										</div>
-										<span>{workspace.branch}</span>
-										<small>{workspace.id}</small>
-									</button>
-								))}
-							</section>
+			</div>
+
+			<div
+				ref={scrollContainerRef}
+				data-slot="workspace-groups-scroll"
+				className="scrollbar-stable relative mt-2 min-h-0 flex-1 overflow-y-auto pr-2 pl-2 [scrollbar-width:thin]"
+			>
+				{activeGroups.length === 0 && archivedRows.length === 0 ? (
+					<p className="px-3 py-8 text-center text-[13px] text-muted-foreground">
+						No workspaces match the filter.
+					</p>
+				) : (
+					<div
+						style={{
+							height: `${virtualizer.getTotalSize()}px`,
+							width: "100%",
+							position: "relative",
+						}}
+					>
+						{virtualizer.getVirtualItems().map((vItem) => (
+							<div
+								key={vItem.key}
+								style={{
+									position: "absolute",
+									top: 0,
+									left: 0,
+									width: "100%",
+									height: `${vItem.size}px`,
+									transform: `translateY(${vItem.start}px)`,
+								}}
+							>
+								{renderItem(flatItems[vItem.index]!)}
+							</div>
 						))}
 					</div>
-				</ScrollArea>
+				)}
 			</div>
 
-			<div className="dcc-sidebar__section">
-				<div className="dcc-switch-row">
-					<div className="dcc-switch-row__label">
-						<span>Show archived</span>
-						<small>Include archived workspaces in the list.</small>
-					</div>
-					<Switch checked={showArchived} onCheckedChange={onShowArchivedChange} />
-				</div>
+			<div className="flex shrink-0 items-center justify-start gap-1 border-t border-border/60 px-3 pb-3 pt-2">
+				<RailSettingsMenu />
 			</div>
-
-			<div className="dcc-sidebar__footer">
-				<Button type="button" className="dcc-sidebar__cta" onClick={onCreateWorkspace}>
-					New workspace
-				</Button>
-			</div>
-		</>
+		</div>
 	);
-}
+});

@@ -1,5 +1,9 @@
 /* Tailwind utilities for the desktop shell (layout, spacing, colors). */
 @import "tailwindcss";
+
+/* Class-based dark (same pattern as desktop reference shells using shadcn + Tailwind v4). */
+@custom-variant dark (&:is(.dark *));
+
 @source "../**/*.{tsx,ts}";
 
 @import "./dcc-shell-tokens.css";
@@ -22,6 +26,10 @@
 	--color-secondary: var(--secondary);
 	--color-secondary-foreground: var(--secondary-foreground);
 	--color-destructive: var(--destructive);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
 	--color-sidebar: var(--sidebar);
 	--color-sidebar-foreground: var(--sidebar-foreground);
 	--color-success: var(--success);
@@ -72,24 +80,9 @@ body,
 body {
 	margin: 0;
 	overflow: hidden;
-	background:
-		radial-gradient(
-			circle at top left,
-			color-mix(in oklab, var(--dcc-accent) 20%, transparent),
-			transparent 38%
-		),
-		radial-gradient(
-			circle at top right,
-			color-mix(in oklab, var(--dcc-accent-2) 14%, transparent),
-			transparent 36%
-		),
-		linear-gradient(
-			180deg,
-			color-mix(in oklab, var(--dcc-surface) 20%, transparent),
-			transparent 42%
-		),
-		var(--dcc-bg);
-	color: var(--dcc-text);
+	/* Helmor-style flat app chrome — tokens still drive accents inside panels */
+	background-color: var(--background);
+	color: var(--foreground);
 	font-family: "Geist Variable", "Geist", sans-serif;
 }
 
@@ -107,54 +100,9 @@ a {
 	color: inherit;
 }
 
-.dcc-shell {
+/* Flex shell (Helmor-style): three columns + absolute resize hit targets — see App.tsx `.dcc-app-shell` */
+.dcc-app-shell {
 	min-height: 100vh;
-	display: grid;
-	grid-template-columns:
-		var(--dcc-sidebar-width)
-		auto
-		minmax(0, 1fr)
-		auto
-		var(--dcc-inspector-width, 360px);
-	position: relative;
-	isolation: isolate;
-	background:
-		linear-gradient(
-			180deg,
-			color-mix(in oklab, var(--dcc-surface) 72%, transparent),
-			transparent
-		),
-		var(--dcc-bg);
-}
-
-.dcc-shell::before,
-.dcc-shell::after {
-	content: "";
-	position: absolute;
-	width: 28rem;
-	height: 28rem;
-	border-radius: 999px;
-	pointer-events: none;
-	filter: blur(20px);
-	opacity: 0.45;
-	z-index: -1;
-}
-
-.dcc-shell::before {
-	top: -10rem;
-	right: -8rem;
-	background: color-mix(in oklab, var(--dcc-accent-2) 28%, transparent);
-}
-
-.dcc-shell::after {
-	bottom: -12rem;
-	left: -10rem;
-	background: color-mix(in oklab, var(--dcc-accent) 30%, transparent);
-}
-
-.dcc-sidebar,
-.dcc-main {
-	backdrop-filter: blur(20px);
 }
 
 .dcc-sidebar {
@@ -162,10 +110,19 @@ a {
 	flex-direction: column;
 	gap: 1rem;
 	padding: 1.25rem;
-	border-right: 1px solid var(--sidebar-border, var(--dcc-shell-border));
 	color: var(--sidebar-foreground, var(--dcc-text));
-	/* t3 AppSidebarLayout: solid card-toned rail; Helmor tokens via --sidebar */
 	background: var(--sidebar);
+}
+
+.dcc-sidebar.dcc-workbench-rail {
+	gap: 0;
+	padding: 0;
+	min-height: 0;
+}
+
+.workspace-row-selected {
+	background: var(--workspace-sidebar-selected-bg);
+	color: var(--sidebar-foreground);
 }
 
 .dcc-sidebar__header,
@@ -226,20 +183,21 @@ a {
 	overflow: auto;
 }
 
+/* T3-style workbench column: header → timeline → composer, edge-to-edge (no outer padding) */
+.dcc-main--workbench {
+	padding: 0;
+	gap: 0;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+}
+
 .dcc-inspector-aside {
 	min-width: 0;
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
-	border-left: 1px solid var(--dcc-shell-border);
-	background:
-		linear-gradient(
-			180deg,
-			color-mix(in oklab, var(--dcc-surface) 78%, transparent),
-			transparent
-		),
-		color-mix(in oklab, var(--dcc-surface) 72%, transparent);
 }
 
 .dcc-inspector-sidebar__body {
@@ -916,8 +874,9 @@ a {
 }
 
 .dcc-runtime-workbench__composer textarea,
-.dcc-runtime-workbench__composer-input {
-	min-height: 168px;
+.dcc-runtime-workbench__composer-input,
+.dcc-runtime-workbench__composer .dcc-runtime-workbench__composer-field {
+	min-height: 120px;
 	resize: vertical;
 }
 
@@ -1210,34 +1169,6 @@ a {
 	gap: 0.75rem;
 }
 
-.dcc-shell__divider {
-	position: relative;
-	z-index: 2;
-	cursor: ew-resize;
-	display: flex;
-	align-items: stretch;
-	justify-content: center;
-}
-
-.dcc-shell__divider--active .dcc-shell__divider-hit {
-	width: 3px;
-	background: color-mix(in oklab, var(--dcc-accent) 35%, var(--dcc-border));
-	box-shadow: 0 0 12px color-mix(in oklab, var(--dcc-accent) 28%, transparent);
-}
-
-.dcc-shell__divider-hit {
-	width: 2px;
-	margin: 0 auto;
-	background:
-		linear-gradient(
-			180deg,
-			transparent,
-			color-mix(in oklab, var(--dcc-border) 80%, transparent),
-			transparent
-		);
-	border-radius: 999px;
-}
-
 .dcc-button {
 	display: inline-flex;
 	align-items: center;
@@ -1514,28 +1445,49 @@ a {
 }
 
 @media (max-width: 1100px) {
-	.dcc-shell {
-		grid-template-columns: minmax(0, 1fr);
+	.dcc-app-shell {
+		flex-direction: column;
 	}
 
-	.dcc-sidebar {
-		border-right: 0;
-		border-bottom: 1px solid var(--dcc-shell-border);
-		width: 100% !important;
-	}
-
-	.dcc-inspector-aside {
+	.dcc-app-shell > aside {
 		width: 100% !important;
 		min-height: 12rem;
-		border-left: 0;
-		border-top: 1px solid var(--dcc-shell-border);
 	}
 
-	.dcc-shell__divider {
+	.dcc-app-shell > aside.dcc-sidebar {
+		border-right: 0;
+		border-bottom: 1px solid var(--border);
+	}
+
+	.dcc-app-shell > aside.dcc-inspector-aside {
+		border-left: 0;
+		border-top: 1px solid var(--border);
+	}
+
+	.dcc-app-shell > [role="separator"] {
 		display: none;
 	}
 
 	.dcc-dual-grid {
 		grid-template-columns: 1fr;
 	}
+}
+
+/* Central workbench: session tab strip + provider scroller — same interaction model as desktop reference shells */
+
+.scrollbar-none {
+	scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+	display: none;
+}
+
+.group\/tab:hover .tab-content-fade {
+	-webkit-mask-image: linear-gradient(to left, transparent 1.2rem, black 2rem);
+	mask-image: linear-gradient(to left, transparent 1.2rem, black 2rem);
+}
+
+.dcc-conversation-scroll-viewport {
+	overflow-anchor: none;
 }

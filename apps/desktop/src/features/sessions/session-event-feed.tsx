@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { CoreEvent } from "@dcc/contracts";
 
@@ -139,69 +138,67 @@ export function SessionEventFeed({
 		};
 	}, [compact, latestEventKey]);
 
-	const content = (
-		<>
-			{events.length === 0 ? (
-				<p className="m-0 px-2 py-10 text-center text-[13px] leading-relaxed [color:var(--conversation-body-foreground)]">
-					No activity yet. Start a session and send a message — events appear here.
+	const timelineRows =
+		events.length === 0 ? (
+			<div className="flex min-h-full flex-1 items-center justify-center px-8">
+				<p className="m-0 max-w-md text-center text-[13px] leading-relaxed text-muted-foreground">
+					No messages yet — start a session and send something. Session events appear in this
+					timeline.
 				</p>
-			) : (
-				<ul className="dcc-runtime-feed__list">
-					{events.map((event, index) => (
-						<li key={`${eventLabel(event)}-${index}`}>
-							<div
-								className="dcc-runtime-feed__row dcc-session-event"
-								data-tone={eventTone(event)}
-							>
-								<div className="dcc-session-event__header">
-									<Badge variant={eventTone(event)} className="font-normal">
-										{eventLabel(event)}
-									</Badge>
-								</div>
-								<p className="dcc-session-event__copy">
-									{eventPayloadSummary(event)}
-								</p>
+			</div>
+		) : (
+			<ul className="m-0 list-none p-0">
+				{events.map((event, index) => (
+					<li
+						key={`${eventLabel(event)}-${index}`}
+						className="flow-root px-5 pb-1.5 [content-visibility:auto]"
+					>
+						<div className="dcc-runtime-feed__row dcc-session-event" data-tone={eventTone(event)}>
+							<div className="dcc-session-event__header">
+								<Badge variant={eventTone(event)} className="font-normal">
+									{eventLabel(event)}
+								</Badge>
 							</div>
-						</li>
-					))}
-				</ul>
-			)}
-		</>
-	);
+							<p className="dcc-session-event__copy text-[13px] leading-snug">
+								{eventPayloadSummary(event)}
+							</p>
+						</div>
+					</li>
+				))}
+			</ul>
+		);
 
 	if (compact) {
 		return (
-			<div className="dcc-session-timeline flex min-h-0 flex-1 flex-col">
-				<div className="mb-2 flex shrink-0 items-center justify-between gap-2 px-0.5">
-					<span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--dcc-text-soft)]">
-						Activity
-					</span>
-					{events.length > 0 ? (
-						<span className="text-[11px] tabular-nums text-[var(--dcc-text-soft)]">
-							{events.length}
-						</span>
-					) : null}
-				</div>
-				<div ref={scrollRef} className="dcc-session-timeline__content min-h-0 flex-1">
-					<div className="dcc-session-timeline__surface">{content}</div>
-				</div>
-				<Button
-					type="button"
-					variant="secondary"
-					size="icon-sm"
-					className={`dcc-session-timeline__scroll ${showScrollToLatest ? "is-visible" : ""}`}
-					onClick={() => {
-						const container = scrollRef.current;
-						if (!container) return;
-						container.scrollTo({
-							top: container.scrollHeight,
-							behavior: "smooth",
-						});
-					}}
-					aria-label="Scroll to latest event"
+			<div className="dcc-conversation-scroll-area relative min-h-0 flex-1 overflow-hidden">
+				<div
+					ref={scrollRef}
+					className="dcc-conversation-scroll-viewport h-full w-full overflow-x-hidden overflow-y-auto overscroll-none"
 				>
-					<ArrowDown />
-				</Button>
+					<div className="flex min-h-full min-w-0 flex-col">
+						<div className="h-6 shrink-0" aria-hidden />
+						{timelineRows}
+					</div>
+				</div>
+				{showScrollToLatest ? (
+					<div className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
+						<button
+							type="button"
+							onClick={() => {
+								const container = scrollRef.current;
+								if (!container) return;
+								container.scrollTo({
+									top: container.scrollHeight,
+									behavior: "smooth",
+								});
+							}}
+							className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
+						>
+							<ChevronDown className="size-3.5" strokeWidth={2} />
+							Scroll to bottom
+						</button>
+					</div>
+				) : null}
 			</div>
 		);
 	}
@@ -214,7 +211,7 @@ export function SessionEventFeed({
 					<Badge variant="outline">{events.length}</Badge>
 				</div>
 			</CardHeader>
-			<CardContent className="dcc-runtime-feed__content">{content}</CardContent>
+			<CardContent className="dcc-runtime-feed__content">{timelineRows}</CardContent>
 		</Card>
 	);
 }

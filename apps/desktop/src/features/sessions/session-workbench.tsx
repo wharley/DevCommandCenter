@@ -1,31 +1,17 @@
 import { useState } from "react";
-import { ArrowUpRight, Command, TerminalSquare } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import { WorkspaceTerminalDrawer } from "@/features/terminal";
+import { cn } from "@/lib/utils";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
+import { DccWorkbenchChatHeader } from "./dcc-workbench-chat-header";
 import { SessionEventFeed } from "./session-event-feed";
+import type { DccRuntimeSessionSnapshot } from "./workbench-types";
 
-export type RuntimeSessionSnapshot = {
-	sessionId: string;
-	projectId: string;
-	workspaceId: string;
-	providerId: string;
-	state: string;
-	turnCount: number;
-	checkpointCount: number;
-	lastTurnPrompt?: string | null;
-	lastTurnState?: string | null;
-};
+export type RuntimeSessionSnapshot = DccRuntimeSessionSnapshot;
 
 type SessionWorkbenchProps = {
 	workspaceId: string;
@@ -47,7 +33,7 @@ type SessionWorkbenchProps = {
 	onOpenCommandPalette: () => void;
 };
 
-function shortPath(path: string | null, max = 48) {
+function shortPath(path: string | null, max = 52) {
 	if (!path) {
 		return null;
 	}
@@ -77,197 +63,188 @@ export function SessionWorkbench({
 	onOpenCommandPalette,
 }: SessionWorkbenchProps) {
 	const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
-	const pathShort = shortPath(workspacePath);
+	const pathCaption = shortPath(workspacePath);
 	const terminalAvailable = Boolean(workspacePath);
 	const sessionState = sessionSnapshot?.state ?? "idle";
 	const sessionId = sessionSnapshot?.sessionId ?? null;
-	const headline =
-		workspaceBranch && pathShort
-			? `${workspaceBranch} · ${pathShort}`
-			: workspaceBranch || pathShort || "Workspace";
+	const isGitRepo = Boolean(workspaceBranch) || Boolean(workspacePath);
+
+	const threadTitle = workspaceName;
+	const projectBadgeLabel = workspaceBranch || null;
 
 	return (
-		<section className="dcc-runtime-workbench dcc-runtime-workbench--session flex min-h-0 flex-1 flex-col">
-			{/* Compact primary bar (t3code ChatHeader) + session actions */}
-			<header className="dcc-runtime-workbench__header shrink-0 gap-3 pb-3">
-				<div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
-					<h2
-						className="m-0 min-w-0 shrink truncate text-sm font-medium tracking-tight text-foreground"
-						title={workspaceName}
-					>
-						{workspaceName}
-					</h2>
-					{workspaceBranch ? (
-						<Badge variant="outline" className="hidden shrink-0 sm:inline-flex">
-							<span className="max-w-[9rem] truncate font-normal">{workspaceBranch}</span>
-						</Badge>
-					) : null}
-					{pathShort ? (
-						<span
-							className="hidden max-w-[14rem] truncate text-[11px] text-muted-foreground md:inline"
-							title={workspacePath ?? undefined}
-						>
-							{pathShort}
-						</span>
-					) : null}
-				</div>
-				<div className="dcc-runtime-workbench__header-actions">
-					{sessionSnapshot ? (
-						<Badge variant="success" className="font-normal">
-							{sessionSnapshot.state}
-						</Badge>
-					) : (
-						<Badge variant="outline" className="font-normal">
-							idle
-						</Badge>
-					)}
-					<Button
-						type="button"
-						variant="secondary"
-						size="sm"
-						onClick={onResumeSession}
-						disabled={!sessionSnapshot}
-					>
-						Resume
-					</Button>
-					<Button
-						type="button"
-						variant="secondary"
-						size="sm"
-						onClick={onAbortSession}
-						disabled={!sessionSnapshot}
-					>
-						Abort
-					</Button>
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<Button
-								type="button"
-								variant={terminalDrawerOpen ? "secondary" : "outline"}
-								size="icon"
-								className="size-8 shrink-0"
-								aria-label={
-									terminalDrawerOpen
-										? "Hide terminal drawer"
-										: "Show terminal drawer"
-								}
-								disabled={!terminalAvailable}
-								aria-pressed={terminalDrawerOpen}
-								onClick={() => setTerminalDrawerOpen((current) => !current)}
-							>
-								<TerminalSquare className="size-3.5" />
-							</Button>
-						</TooltipTrigger>
-						<TooltipContent side="bottom">
-							{!terminalAvailable
-								? "Terminal needs a workspace path."
-								: terminalDrawerOpen
-									? "Hide terminal drawer (Esc)"
-									: "Toggle terminal drawer"}
-						</TooltipContent>
-					</Tooltip>
-					<Button
-						type="button"
-						variant="ghost"
-						size="sm"
-						onClick={onOpenCommandPalette}
-						className="gap-1.5 text-muted-foreground hover:text-foreground"
-					>
-						<Command className="size-3.5" />
-						<span className="hidden sm:inline">Workspaces</span>
-					</Button>
-				</div>
+		<div className="@container/header-actions flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+			<header
+				className={cn(
+					"border-b border-border pb-2 pt-2 sm:pb-3 sm:pt-3",
+					"pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)]",
+					"sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]",
+				)}
+			>
+				<DccWorkbenchChatHeader
+					threadTitle={threadTitle}
+					projectBadgeLabel={projectBadgeLabel}
+					isGitRepo={isGitRepo}
+					pathCaption={pathCaption}
+					sessionSnapshot={sessionSnapshot}
+					terminalAvailable={terminalAvailable}
+					terminalOpen={terminalDrawerOpen}
+					onToggleTerminal={() =>
+						setTerminalDrawerOpen((current) => !current)
+					}
+					onOpenCommandPalette={onOpenCommandPalette}
+					onResumeSession={onResumeSession}
+					onAbortSession={onAbortSession}
+				/>
 			</header>
 
-			<p className="m-0 hidden pb-3 text-[12px] leading-snug text-muted-foreground sm:block">
-				{headline}
-			</p>
-
-			<Separator className="shrink-0 bg-border opacity-70" />
-
-			{/* Helmor-style contextual toolbar + provider pills (t3 secondary row) */}
-			<div className="dcc-runtime-workbench__toolbar dcc-runtime-workbench__toolbar--providers mt-4 shrink-0">
-				<div className="dcc-runtime-workbench__toolbar-meta min-w-0">
-					<span>Runtime</span>
-					<strong>Providers</strong>
-				</div>
-				<div className="dcc-runtime-workbench__toolbar-actions min-w-0 flex-1">
-					<div className="dcc-runtime-workbench__provider-strip">
-						{providerChoices.map((provider) => (
-							<Button
-								key={provider.id}
-								type="button"
-								variant={provider.id === selectedProviderId ? "default" : "outline"}
-								size="sm"
-								className="h-8 rounded-full px-3 text-[12px] font-medium"
-								onClick={() => onSelectProvider(provider.id)}
-							>
-								{provider.label}
-							</Button>
-						))}
-					</div>
-					{providerChoices.length === 0 ? (
-						<span className="self-center text-[12px] text-muted-foreground">
-							No providers configured.
-						</span>
-					) : selectedProviderLabel ? (
-						<span className="self-center whitespace-nowrap text-[12px] text-muted-foreground">
-							Active · {selectedProviderLabel}
-						</span>
-					) : null}
-				</div>
-			</div>
-
-			<div className="flex min-h-0 flex-1 flex-col gap-4 pt-4">
-				<div
-					className="dcc-runtime-workbench__timeline-shell dcc-runtime-workbench__timeline-shell--conversation dcc-runtime-workbench__timeline-shell--fill flex min-h-0 min-w-0 flex-1 flex-col"
-					aria-label="Session activity timeline"
-				>
+			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
+				<div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
 					<SessionEventFeed events={sessionEvents} compact />
 				</div>
 
-				<div className="dcc-runtime-workbench__composer shrink-0">
-				<div className="dcc-runtime-workbench__composer-top">
-					<div>
-						<Label htmlFor="dcc-session-draft" className="text-[13px] font-medium">
-							Message
-						</Label>
-						<CardDescription className="mt-0.5 max-w-[44rem] text-[12px]">
-							Next turn runs on the Dev Command Center session bridge for the selected
-							provider.
-						</CardDescription>
+				<div
+					className={cn(
+						"pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5",
+						"sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
+						isGitRepo
+							? "pb-[calc(env(safe-area-inset-bottom)+0.25rem)]"
+							: "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
+					)}
+				>
+					<div className="mx-auto w-full min-w-0 max-w-[52rem]">
+						<div className="group rounded-[22px] bg-gradient-to-b from-border/65 to-border/35 p-px transition-colors duration-200">
+							<div
+								className={cn(
+									"rounded-[20px] border border-border bg-card transition-colors duration-200",
+									"has-focus-visible:border-ring/45",
+								)}
+							>
+								<div className="relative px-3 pb-2 pt-2.5 sm:px-4 sm:pb-3 sm:pt-3">
+									<div className="scrollbar-none mb-2.5 flex max-w-full gap-2 overflow-x-auto pb-0.5 sm:gap-2.5">
+										<span className="shrink-0 pt-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+											Model
+										</span>
+										<div className="flex shrink-0 flex-nowrap gap-1.5">
+											{providerChoices.map((provider) => (
+												<Button
+													key={provider.id}
+													type="button"
+													variant={
+														provider.id === selectedProviderId
+															? "default"
+															: "outline"
+													}
+													size="sm"
+													className="h-7 shrink-0 rounded-full px-2.5 text-[11px] font-medium leading-none"
+													onClick={() => onSelectProvider(provider.id)}
+												>
+													{provider.label}
+												</Button>
+											))}
+										</div>
+										{providerChoices.length === 0 ? (
+											<span className="truncate text-[11px] text-muted-foreground">
+												No providers configured
+											</span>
+										) : selectedProviderLabel ? (
+											<span className="truncate text-[11px] text-muted-foreground">
+												{selectedProviderLabel}
+											</span>
+										) : null}
+									</div>
+
+									<div className="flex flex-wrap items-start justify-between gap-2 pb-2">
+										<div className="min-w-0">
+											<Label
+												htmlFor="dcc-session-draft"
+												className="text-[13px] font-medium leading-none"
+											>
+												Message
+											</Label>
+											<p className="mt-1 max-w-[40rem] text-[12px] leading-snug text-muted-foreground">
+												Send the next workspace turn via the desktop session bridge.
+											</p>
+										</div>
+										<div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto lg:hidden">
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												className="h-9 flex-1 text-[11px]"
+												onClick={onResumeSession}
+												disabled={!sessionSnapshot}
+											>
+												Resume
+											</Button>
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												className="h-9 flex-1 text-[11px]"
+												onClick={onAbortSession}
+												disabled={!sessionSnapshot}
+											>
+												Abort
+											</Button>
+											<Badge
+												variant="outline"
+												className="h-9 shrink-0 px-2 py-0 text-[11px] font-normal tabular-nums"
+											>
+												{sessionSnapshot?.state ?? "idle"}
+											</Badge>
+										</div>
+									</div>
+
+									<Textarea
+										id="dcc-session-draft"
+										rows={3}
+										value={sessionDraft}
+										onChange={(event) =>
+											onSessionDraftChange(event.target.value)
+										}
+										placeholder="Ask for a change, @ paths, or describe the task…"
+										className="min-h-[7.25rem] w-full resize-y rounded-xl border-border bg-background/80 px-3 py-2.5 text-[13px] leading-relaxed placeholder:text-muted-foreground/75"
+									/>
+
+									<div className="mt-2 flex flex-wrap items-center justify-between gap-2 pt-1">
+										<div className="tabular-nums text-[11px] text-muted-foreground">
+											{sessionSnapshot?.sessionId ? (
+												<>
+													{sessionSnapshot.turnCount} turns ·{" "}
+													{sessionSnapshot.checkpointCount} checkpoints
+												</>
+											) : (
+												"No active session"
+											)}
+										</div>
+										<div className="flex flex-wrap items-center justify-end gap-2">
+											<Button
+												type="button"
+												onClick={onStartSession}
+												variant="secondary"
+												size="sm"
+												className="h-9"
+											>
+												Start session
+											</Button>
+											<Button
+												type="button"
+												onClick={onSendTurn}
+												size="sm"
+												className="h-9 gap-1.5 px-4"
+											>
+												<ArrowUpRight className="size-4" strokeWidth={2} />
+												Send
+											</Button>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+
 					</div>
 				</div>
-				<Textarea
-					id="dcc-session-draft"
-					rows={4}
-					value={sessionDraft}
-					onChange={(event) => onSessionDraftChange(event.target.value)}
-					placeholder="Ask for a change, @mention paths, or describe the task…"
-					className="w-full resize-y border-border bg-background/80 text-[13px]"
-				/>
-				<div className="dcc-runtime-workbench__composer-footer">
-					<div className="dcc-runtime-workbench__composer-meta">
-						{sessionSnapshot?.sessionId ? (
-							<span className="text-[11px] tabular-nums text-muted-foreground">
-								{sessionSnapshot.turnCount} turns · {sessionSnapshot.checkpointCount}{" "}
-								checkpoints
-							</span>
-						) : (
-							<span className="text-[11px] text-muted-foreground">No active session</span>
-						)}
-					</div>
-					<div className="dcc-runtime-workbench__composer-actions">
-						<Button type="button" onClick={onStartSession} variant="secondary" size="sm">
-							Start session
-						</Button>
-						<Button type="button" onClick={onSendTurn} size="sm" className="gap-1.5">
-							<ArrowUpRight className="size-4" />
-							Send
-						</Button>
-					</div>
-				</div>
-			</div>
 
 				<WorkspaceTerminalDrawer
 					open={terminalDrawerOpen}
@@ -281,6 +258,6 @@ export function SessionWorkbench({
 					sessionId={sessionId}
 				/>
 			</div>
-		</section>
+		</div>
 	);
 }

@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { Toaster } from "sonner";
 import App from "./App";
-import { ThemeProvider } from "./components/theme-provider";
+import { ThemeProvider, useAppearance } from "./components/theme-provider";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { createDccQueryClient, dccQueryPersister } from "./lib/query-client";
 import "./styles/color-theme.css";
@@ -11,6 +11,11 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 
 const queryClient = createDccQueryClient();
+
+function ThemeAwareToaster() {
+	const { theme } = useAppearance();
+	return <Toaster richColors theme={theme} />;
+}
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
 	<React.StrictMode>
@@ -21,7 +26,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 					persistOptions={{ persister: dccQueryPersister }}
 				>
 					<App />
-					<Toaster richColors />
+					<ThemeAwareToaster />
 				</PersistQueryClientProvider>
 			</TooltipProvider>
 		</ThemeProvider>

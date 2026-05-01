@@ -22,13 +22,16 @@ function TooltipTrigger({
 function TooltipContent({
 	className,
 	sideOffset = 4,
+	collisionPadding = 12,
 	...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
 	return (
 		<TooltipPrimitive.Portal>
 			<TooltipPrimitive.Content
 				sideOffset={sideOffset}
-				className={cn("dcc-tooltip-content", className)}
+				collisionPadding={collisionPadding}
+				avoidCollisions
+				className={cn("dcc-tooltip-content z-[200]", className)}
 				{...props}
 			/>
 		</TooltipPrimitive.Portal>

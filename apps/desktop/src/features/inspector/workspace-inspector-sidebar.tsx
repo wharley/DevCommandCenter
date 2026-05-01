@@ -17,7 +17,7 @@ type WorkspaceInspectorSidebarProps = {
 };
 
 /**
- * Right rail: stacked context (Helmor inspector model). Terminal is not tabbed here —
+ * Right rail: stacked context (inspector-first workbench model). Terminal is not tabbed here —
  * it lives in the main workbench bottom drawer (t3code `ThreadTerminalDrawer` pattern).
  */
 export function WorkspaceInspectorSidebar({

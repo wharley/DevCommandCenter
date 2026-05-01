@@ -64,6 +64,37 @@ Isto equivale a dizer na doc: **“Paridade UX com os referenciais não é copia
 
 Implementação de referência a releer antes de código fechado: `helmor-main/src/features/navigation/index.tsx`, `helmor-main/src/features/navigation/shared.tsx` (grupos e tons “Done” etc.), `t3code-main/apps/web/src/components/Sidebar.tsx` e `Sidebar.logic.tsx`.
 
+### Rail esquerdo no DCC — portar o shell desktop de referência sem trade-offs herdados
+
+**Status — concluído.** A superfície de navegação esquerda do shell em `apps/desktop` cumpre o escopo abaixo no que diz respeito a hierarquia escaneável, densidade da lista (virtualização), agrupamento por projeto, secção archived, resize com hit-area, persistência da largura do painel e do colapso total da rail, secções expansíveis com estado em `localStorage`, CTAs (incluindo criar workspace) e integração visual com tokens do tema. Pontos de implementação: `apps/desktop/src/features/workspaces/sidebar.tsx` (`WorkspacesSidebar`), `workspace-rail-projection.ts`, `workspace-rail-row.tsx`, `workspace-rail-shared.tsx`, `workspace-rail-open-state.ts`, `use-workspaces.ts`; geometria/persistência de painéis em `apps/desktop/src/shell/{layout,use-panels}.ts` (por exemplo `SIDEBAR_WIDTH_STORAGE_KEY`, `dcc.workbenchRail.sectionOpenState`). **Semiologia opcional de ciclo** (badges tipo review / aguardando input conforme baseline “espinha t3 + ciclo opcional”) permanece backlog de produto, não bloqueante desta entrega.
+
+**Escopo original (mantido como especificação de regressão).** O objetivo era o **rail esquerdo** do workbench desktop de referência **funcionar igual de bem como superfície de navegação** no DCC: hierarquia, densidade da lista, colapso/expansão, resize, secções, CTAs e paleta quando integrada no mesmo bloco. Para isso pode-se **copiar de forma literal** classes **Tailwind CSS**, uso de **ícones**, **botões**/variantes, **layouts** e composição JSX do referencial — o que não se copia são **estruturas de produto ruins** já listadas mais abaixo como trade-offs vetados.
+
+**Única restrição dura em código.** **Nenhum símbolo, ficheiro, pasta, classe CSS “semântica” própria, chave de storage/query ou string técnica** pode conter o fragmento **`Helmor`**/`helmor`. Ao colar código, renomeie componentes, hooks e variáveis para prefixos/variações **`dcc`** / vocabulário de domínio (`Workspace`, `Thread`, …) e `@dcc/contracts`. Isto não impede reusar markup e utilitários Tailwind iguais ao original.
+
+**Labels e copy de UI (sim).** Textos **user-facing**: títulos de secção, placeholders, **`<label>`**, **`aria-label`**, tooltips e CTAs devem existir com a **mesma clareza** do referencial; o idioma/copy segue **produto DCC** (workspace, projeto, sessão conforme decidido aqui). Não há obrigação de “traduzir tudo só por ser portado”: o ponto é **boa semântica e acessibilidade**, não proibir inglês onde o app já usa inglês técnico comum (“Toggle sidebar”, etc.), desde que **não apareça marca ou nome do repositório externo** onde o utilizador leia marca errada.
+
+**O que é permitido portar (comportamento e forma).**
+
+- **Visual e interação**, incluindo **Tailwind, ícones, botões, layout** espelhados do referencial.  
+- Geometria e persistência do rail (largura mínima/máxima, hit area de resize, `localStorage`, colapso).  
+- Ritmo visual: cabeçalho fixo, lista rolável, blocos de secção, CTA “criar workspace”, vazios/skeletons.  
+- Agrupamentos de lista **desde que** respeitem o baseline da tabela “Sidebar esquerda” acima (espinha t3 + ciclo opcional).
+
+**Trade-offs do referencial que o DCC não deve herdar (explícito).**
+
+- **Não** substituir o baseline “espinha t3 + chips de ciclo opcionais” por um rail **só** pipeline se isso **reduzir** “encontrar thread/repo rápido” — ciclo como **opcional**.  
+- **Não** reabrir terminal no inspector: segue **Onde vai o terminal** (drawer + header).  
+- **Não** importar acoplamentos de dados (stores globais, shape de cache) que violem boundaries deste doc (Query modular, invalidação por eventos, contracts gerados).
+
+**Checklist de aceite (baseline)** — aplicável a qualquer refactor grande da rail; já verificado para a entrega atual.
+
+1. Paridade visual/interação forte: **Tailwind + ícones + botões + layout** comparáveis ao trecho copiado do referencial.  
+2. **Zero** substring `helmor`/`Helmor` em nomes de código, pastas ou chaves técnicas.  
+3. **Labels**/ARIA/copy presentes e coerentes com o produto DCC.  
+4. Terminal + inspector dentro do contrato de surfaces já documentado.  
+5. Resize/colapso e teclado no mesmo nível ou melhor que o referencial.
+
 ---
 
 ## Princípios não-negociáveis
@@ -368,7 +399,8 @@ Objetivo: criar a nova espinha dorsal sem quebrar o app atual, mantendo `src/` v
 - Concluído: UX pass 4 do shell/runtime com cabeçalho mais compacto e contexto de provider reduzido ao essencial.
 - Concluído: visual polish final do shell/runtime com topbar contextual, rail de providers mais informativo e hierarquia visual mais clara.
 - Concluído: shell principal sem `Overview`/`Runtime` tabbed shell, agora entrando direto no runtime workbench para ficar mais próximo do Helmor.
-- Em andamento: Fase 4 alinhada ao shell do Helmor com navegação agrupada à esquerda, workbench central e inspector à direita; o terminal já está integrado ao runtime com xterm, fit suspension, ações de foco/limpeza e bridge PTY Tauri conectada, mantendo 0a concluída em compile, 0b fechada no boot principal, Fase 1 fechada e Fase 2 validada no core.
+- Concluído: **rail esquerdo** no shell novo — navegação agrupada por projeto, lista virtualizada, archived, resize/largura e colapso persistidos (`useShellPanels` + estado de secções da rail).
+- Em andamento: resto da **Fase 4** (workbench central, inspector à direita, demais features da lista da fase); o terminal já está integrado ao runtime com xterm, fit suspension, ações de foco/limpeza e bridge PTY Tauri conectada, mantendo 0a concluída em compile, 0b fechada no boot principal, Fase 1 fechada e Fase 2 validada no core.
 
 **Objetivo das Fases 1-3**
 
@@ -437,6 +469,7 @@ Trazer **paridade ou melhoria real** relativamente aos referenciais: shell/UX/co
 
 **Status da Fase 4**
 
+- Concluído: **rail esquerdo** conforme secção “Rail esquerdo no DCC” deste doc (implementação sob `apps/desktop/src/features/workspaces/`, especialmente `sidebar.tsx` e `workspace-rail-*`).
 - Em andamento: `terminal` usa **PTY por `workspaceId`**, xterm, fit suspension, bridge Tauri; **surface primária = drawer inferior no workbench** (padrão t3 `ThreadTerminalDrawer`) com toggle no header do runtime — **não** painel lateral “Context \| Terminal”.
 - Inspirado na **calha de terminais do Helmor** para persistência/multi‑instância no futuro; hoje DCC garante reuso do PTY ao fechar/abrir o drawer.
 

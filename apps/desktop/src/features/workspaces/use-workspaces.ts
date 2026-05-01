@@ -32,7 +32,6 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = demoWorkspac
 	const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
 		workspaces[1]?.id ?? workspaces[0]?.id ?? "",
 	);
-	const [showArchived, setShowArchived] = useState(false);
 	const [workspaceList, setWorkspaceList] = useState<WorkspaceSummary[]>(workspaces);
 	const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
 
@@ -40,17 +39,13 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = demoWorkspac
 		() => {
 			const normalizedFilter = filter.toLowerCase();
 
-			return workspaceList.filter((workspace) => {
-				if (!showArchived && workspace.status === "archived") {
-					return false;
-				}
-
-				return `${workspace.name} ${workspace.branch} ${workspace.id}`
+			return workspaceList.filter((workspace) =>
+				`${workspace.name} ${workspace.branch} ${workspace.id}`
 					.toLowerCase()
-					.includes(normalizedFilter);
-			});
+					.includes(normalizedFilter),
+			);
 		},
-		[filter, showArchived, workspaceList],
+		[filter, workspaceList],
 	);
 
 	const selectedWorkspace =
@@ -79,9 +74,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = demoWorkspac
 		filteredWorkspaces,
 		selectedWorkspace,
 		selectedWorkspaceId,
-		showArchived,
 		setFilter,
 		setSelectedWorkspaceId,
-		setShowArchived,
 	};
 }
