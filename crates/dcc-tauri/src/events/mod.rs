@@ -16,6 +16,7 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
 		CoreEvent::SessionAborted { .. } => format!("{SESSION_EVENT_PREFIX}.aborted"),
 		CoreEvent::SessionResumed { .. } => format!("{SESSION_EVENT_PREFIX}.resumed"),
 		CoreEvent::SessionTurnStarted { .. } => format!("{SESSION_EVENT_PREFIX}.turn.started"),
+		CoreEvent::SessionTurnDelta { .. } => format!("{SESSION_EVENT_PREFIX}.turn.delta"),
 		CoreEvent::SessionTurnCompleted { .. } => {
 			format!("{SESSION_EVENT_PREFIX}.turn.completed")
 		}

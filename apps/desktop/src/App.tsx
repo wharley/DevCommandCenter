@@ -24,7 +24,6 @@ import {
 } from "./components/ui/dropdown-menu";
 import { Label } from "./components/ui/label";
 import { Separator } from "./components/ui/separator";
-import { Textarea } from "./components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { SIDEBAR_RESIZE_HIT_AREA } from "./shell/layout";
 import { useShellPanels } from "./shell/use-panels";
@@ -35,8 +34,10 @@ import {
 	CreateWorkspaceDialog,
 	useWorkspacesPanel,
 } from "./features/workspaces";
-import { ProviderCatalogCard } from "./features/providers/provider-catalog-card";
-import { SessionEventFeed } from "./features/sessions/session-event-feed";
+import {
+	SessionWorkbench,
+	type RuntimeSessionSnapshot,
+} from "./features/sessions/session-workbench";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
 import { listProviders } from "./lib/provider-api";
 import {
@@ -46,10 +47,7 @@ import {
 	startThread,
 } from "./lib/session-api";
 import type {
-	AbortRunOutput,
 	ProviderCatalog,
-	SendTurnOutput,
-	StartThreadOutput,
 } from "@dcc/contracts";
 
 export default function App() {
@@ -88,17 +86,8 @@ export default function App() {
 	const [sessionDraft, setSessionDraft] = useState(
 		"Bring the Helmor shell density into Dev Command Center, but keep the Tauri + Rust boundary clean.",
 	);
-	const [sessionSnapshot, setSessionSnapshot] = useState<{
-		sessionId: string;
-		projectId: string;
-		workspaceId: string;
-		providerId: string;
-		state: string;
-		turnCount: number;
-		checkpointCount: number;
-		lastTurnPrompt?: string | null;
-		lastTurnState?: string | null;
-	} | null>(null);
+	const [sessionSnapshot, setSessionSnapshot] =
+		useState<RuntimeSessionSnapshot | null>(null);
 	const providerChoices = providerCatalog?.providers ?? [];
 	const selectedProvider = useMemo(
 		() =>
@@ -461,133 +450,24 @@ export default function App() {
 					</TabsContent>
 
 					<TabsContent value="runtime">
-						<section className="dcc-runtime-shell">
-							<Card className="dcc-runtime-shell__main">
-								<CardHeader>
-									<div className="dcc-card__meta-row">
-										<div>
-											<Label>Session</Label>
-											<CardTitle>Workspace cockpit</CardTitle>
-										</div>
-										<Badge variant={sessionSnapshot ? "success" : "outline"}>
-											{sessionSnapshot ? sessionSnapshot.state : "idle"}
-										</Badge>
-									</div>
-								</CardHeader>
-								<CardContent className="dcc-runtime-shell__content">
-									<div className="dcc-session-summary">
-										<div className="dcc-stat">
-											<span>Workspace</span>
-											<strong>{selectedWorkspace.name}</strong>
-										</div>
-										<div className="dcc-stat">
-											<span>Provider</span>
-											<strong>{selectedProvider?.label ?? "Select one"}</strong>
-										</div>
-										<div className="dcc-stat">
-											<span>Session</span>
-											<strong>{sessionSnapshot?.sessionId ?? "Not started"}</strong>
-										</div>
-									</div>
-
-									<div className="dcc-provider-pills">
-										{providerChoices.map((provider) => (
-											<Button
-												key={provider.id}
-												type="button"
-												variant={
-													provider.id === selectedProviderId
-														? "default"
-														: "secondary"
-												}
-												onClick={() => setSelectedProviderId(provider.id)}
-											>
-												{provider.label}
-											</Button>
-										))}
-									</div>
-
-									<div className="dcc-session-composer">
-										<Label htmlFor="dcc-session-draft">Prompt</Label>
-										<Textarea
-											id="dcc-session-draft"
-											rows={8}
-											value={sessionDraft}
-											onChange={(event) => setSessionDraft(event.target.value)}
-											placeholder="Describe the workspace change or agent task here..."
-										/>
-									</div>
-
-									<div className="dcc-topbar__actions">
-										<Button
-											type="button"
-											variant="secondary"
-											onClick={handleResumeSession}
-											disabled={!sessionSnapshot}
-										>
-											Resume
-										</Button>
-										<Button
-											type="button"
-											variant="secondary"
-											onClick={handleAbortSession}
-											disabled={!sessionSnapshot}
-										>
-											Abort
-										</Button>
-										<Button type="button" onClick={handleStartSession}>
-											Start session
-										</Button>
-										<Button type="button" onClick={handleSendTurn}>
-											Send turn
-										</Button>
-									</div>
-								</CardContent>
-							</Card>
-
-							<div className="dcc-runtime-shell__rail">
-								<ProviderCatalogCard catalog={providerCatalog} />
-								<Card className="dcc-session-state-card">
-									<CardHeader>
-										<div className="dcc-card__meta-row">
-											<CardTitle>Session state</CardTitle>
-											<Badge variant="outline">
-												{sessionSnapshot?.lastTurnState ?? "pending"}
-											</Badge>
-										</div>
-									</CardHeader>
-									<CardContent className="dcc-runtime-feed__content">
-										{sessionSnapshot ? (
-											<div className="dcc-runtime-feed__list">
-												<div className="dcc-runtime-feed__row">
-													<strong>Projection</strong>
-													<small>
-														turns {sessionSnapshot.turnCount} · checkpoints{" "}
-														{sessionSnapshot.checkpointCount}
-													</small>
-												</div>
-												<div className="dcc-runtime-feed__row">
-													<strong>Provider</strong>
-													<small>{sessionSnapshot.providerId}</small>
-												</div>
-												<div className="dcc-runtime-feed__row">
-													<strong>Last turn</strong>
-													<small>
-														{sessionSnapshot.lastTurnPrompt ?? "No turn yet"}
-													</small>
-												</div>
-											</div>
-										) : (
-											<p className="dcc-card__description">
-												No session started yet. Start one to see the shell and
-												Rust core move together.
-											</p>
-										)}
-									</CardContent>
-								</Card>
-								<SessionEventFeed events={sessionEvents} />
-							</div>
-						</section>
+						<SessionWorkbench
+							workspaceName={selectedWorkspace.name}
+							workspaceBranch={selectedWorkspace.branch}
+							selectedProviderLabel={selectedProvider?.label ?? null}
+							selectedProviderId={selectedProviderId}
+							providerChoices={providerChoices}
+							providerCatalog={providerCatalog}
+							sessionSnapshot={sessionSnapshot}
+							sessionEvents={sessionEvents}
+							sessionDraft={sessionDraft}
+							onSessionDraftChange={setSessionDraft}
+							onSelectProvider={setSelectedProviderId}
+							onStartSession={handleStartSession}
+							onSendTurn={handleSendTurn}
+							onResumeSession={handleResumeSession}
+							onAbortSession={handleAbortSession}
+							onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+						/>
 					</TabsContent>
 				</Tabs>
 			</main>

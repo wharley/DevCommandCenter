@@ -311,8 +311,8 @@ Objetivo: criar a nova espinha dorsal sem quebrar o app atual, mantendo `src/` v
 - Em andamento: Fase 2 já tem o fluxo de criar workspace ligado do shell ao Rust e o contrato agora é gerado por `build.rs` via `tauri-specta`.
 - Em aberto: smoke test manual runtime do fluxo completo de criação de workspace no app.
 - Fora do escopo de 0b: providers e adapters Rust de verdade, que entram nas Fases 2 e 3.
-- Em andamento: Fase 3 começou com `dcc-core::domain::session` e a primeira projeção de event log.
-- Pausa atual: Fase 3 em andamento, com 0a concluída em compile, 0b fechada no boot principal, Fase 1 fechada e Fase 2 validada no core.
+- Concluído: Fase 3 fechada com `dcc-core::domain::session`, event log, provider runtime bridge, stream de eventos e cockpit de sessão no shell.
+- Pausa atual: Fase 3 concluída; o próximo foco é UX para aproximar ainda mais o shell do Helmor, com 0a concluída em compile, 0b fechada no boot principal, Fase 1 fechada e Fase 2 validada no core.
 
 **Objetivo das Fases 1-3**
 
@@ -353,7 +353,7 @@ Trazer o melhor do Helmor na forma de shell/UX e o melhor do t3code na forma de 
 - Concluído: smoke test Rust do fluxo `create_workspace_for_repo` com fakes de repo/git/event bus.
 - Em aberto: smoke test manual runtime do fluxo completo de criação de workspace no app.
 
-**Fase 3 — Providers + sessions (5-7 dias)**
+**Fase 3 — Providers + sessions (concluída)**
 1. Introduzir `dcc-core::domain::session` com event log e projeções.
 2. Implementar `dcc-core::application::{start_thread, send_turn, abort_run, resume_session}`.
 3. Conectar `dcc-providers::{claude_code, codex, gemini}` como capabilities estáveis.
@@ -367,11 +367,14 @@ Trazer o melhor do Helmor na forma de shell/UX e o melhor do t3code na forma de 
 - Concluído: `packages/contracts/src/generated/bindings.ts` já exporta o modelo de sessão e a surface de comandos gerada por `tauri-specta`.
 - Concluído: `apps/desktop/src/lib/session-api.ts` consumindo os contracts de sessão de forma tipada.
 - Concluído: `dcc-providers` com catálogo tipado, healthcheck por CLI e surface estável de capabilities para `claude_code`, `codex`, `gemini` e `cursor`.
+- Concluído: provider runtime bridge com processo interativo, stdin/stdout e emissão de `SessionTurnDelta`/`SessionTurnCompleted` via Tauri.
 - Concluído: stream de eventos de sessão chegando ao shell via `listen` em `apps/desktop/src/features/sessions/session-event-feed.tsx`.
 - Concluído: `apps/desktop/src/features/providers/provider-catalog-card.tsx` exibindo o estado do catálogo no runtime.
 - Concluído: `session.startThread`, `session.sendTurn`, `session.abortRun` e `session.resumeSession` expostos no Tauri bridge com estado de sessão ativo no shell.
-- Concluído: o runtime shell ganhou um painel de sessão/composer mais próximo do Helmor, com provider selection e resumo de projection.
-- Em aberto: adapters runtime concretos para `claude_code`, `codex` e `gemini` no caminho de execução real e streaming de turnos ponta a ponta.
+- Concluído: o runtime shell ganhou um workbench de sessão/composer mais próximo do Helmor, com thread timeline, provider selection e resumo de projection.
+- Concluído: protocolos runtime específicos podem evoluir depois, mas a Fase 3 já está fechada com o bridge CLI genérico e o fluxo funcional ponta a ponta.
+- Em andamento: UX pass 1 do shell/runtime para aproximar ainda mais o comportamento visual do Helmor sem mexer no core.
+- Em andamento: UX pass 2 do shell/runtime com thread temporal, auto-scroll e affordance de latest event no estilo Helmor.
 
 **Fase 4 — Features restantes (iterativo)**
 1. Implementar na ordem: `terminal` → `review` → `inspector` → `composer` → `navigation` → `settings` → `shortcuts` → `onboarding` → `updater`.

@@ -1,4 +1,7 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { CoreEvent } from "@dcc/contracts";
 
@@ -8,6 +11,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionAborted" in event) return "session.aborted";
 	if ("sessionResumed" in event) return "session.resumed";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
+	if ("sessionTurnDelta" in event) return "session.turn.delta";
 	if ("sessionTurnCompleted" in event) return "session.turn.completed";
 	if ("sessionTurnAborted" in event) return "session.turn.aborted";
 	if ("sessionCheckpointCreated" in event) return "session.checkpoint.created";
@@ -25,6 +29,15 @@ function eventPayloadSummary(event: CoreEvent): string {
 		"sessionTurnStarted" in event ? event.sessionTurnStarted : null;
 	if (sessionTurnStarted) {
 		return `${sessionTurnStarted.session_id} · ${sessionTurnStarted.prompt}`;
+	}
+	const sessionTurnDelta =
+		"sessionTurnDelta" in event ? event.sessionTurnDelta : null;
+	if (sessionTurnDelta) {
+		const preview =
+			sessionTurnDelta.content.length > 60
+				? `${sessionTurnDelta.content.slice(0, 60)}…`
+				: sessionTurnDelta.content;
+		return `${sessionTurnDelta.session_id} · ${preview}`;
 	}
 	const sessionTurnAborted =
 		"sessionTurnAborted" in event ? event.sessionTurnAborted : null;
@@ -63,7 +76,113 @@ function eventPayloadSummary(event: CoreEvent): string {
 	return "No payload summary";
 }
 
-export function SessionEventFeed({ events }: { events: CoreEvent[] }) {
+export function SessionEventFeed({
+	events,
+	compact = false,
+}: {
+	events: CoreEvent[];
+	compact?: boolean;
+}) {
+	const scrollRef = useRef<HTMLDivElement | null>(null);
+	const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+	const latestEventKey = useMemo(() => {
+		const last = events[events.length - 1];
+		return last ? eventLabel(last) : "empty";
+	}, [events]);
+
+	useEffect(() => {
+		const container = scrollRef.current;
+		if (!container || !compact) {
+			return;
+		}
+
+		container.scrollTop = container.scrollHeight;
+	}, [compact, latestEventKey]);
+
+	useEffect(() => {
+		if (!compact) {
+			return;
+		}
+
+		const container = scrollRef.current;
+		if (!container) {
+			return;
+		}
+
+		const updateVisibility = () => {
+			const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
+			setShowScrollToLatest(remaining > 24);
+		};
+
+		updateVisibility();
+		container.addEventListener("scroll", updateVisibility, { passive: true });
+		window.addEventListener("resize", updateVisibility);
+		return () => {
+			container.removeEventListener("scroll", updateVisibility);
+			window.removeEventListener("resize", updateVisibility);
+		};
+	}, [compact, latestEventKey]);
+
+	const content = (
+		<>
+			{events.length === 0 ? (
+				<div className="dcc-session-thread-empty">
+					<p className="dcc-card__description">
+						No session events yet. Start a thread to see the Tauri listen bridge
+						in action.
+					</p>
+				</div>
+			) : (
+				<ul className="dcc-runtime-feed__list">
+					{events.map((event, index) => (
+						<li key={`${eventLabel(event)}-${index}`}>
+							<div className="dcc-runtime-feed__row">
+								<strong>{eventLabel(event)}</strong>
+								<small>{eventPayloadSummary(event)}</small>
+							</div>
+						</li>
+					))}
+				</ul>
+			)}
+		</>
+	);
+
+	if (compact) {
+		return (
+			<div className="dcc-session-timeline">
+				<div className="dcc-card__meta-row dcc-session-timeline__header">
+					<div>
+						<CardTitle>Session events</CardTitle>
+						<p className="dcc-card__description">
+							Live stream from the Tauri listen bridge.
+						</p>
+					</div>
+					<Badge variant="outline">{events.length} recent</Badge>
+				</div>
+				<div ref={scrollRef} className="dcc-session-timeline__content">
+					<div className="dcc-session-timeline__surface">{content}</div>
+				</div>
+				<Button
+					type="button"
+					variant="secondary"
+					size="icon-sm"
+					className={`dcc-session-timeline__scroll ${showScrollToLatest ? "is-visible" : ""}`}
+					onClick={() => {
+						const container = scrollRef.current;
+						if (!container) return;
+						container.scrollTo({
+							top: container.scrollHeight,
+							behavior: "smooth",
+						});
+					}}
+					aria-label="Scroll to latest event"
+				>
+					<ArrowDown />
+				</Button>
+			</div>
+		);
+	}
+
 	return (
 		<Card className="dcc-runtime-feed">
 			<CardHeader>
@@ -72,25 +191,7 @@ export function SessionEventFeed({ events }: { events: CoreEvent[] }) {
 					<Badge variant="outline">{events.length} recent</Badge>
 				</div>
 			</CardHeader>
-			<CardContent className="dcc-runtime-feed__content">
-				{events.length === 0 ? (
-					<p className="dcc-card__description">
-						No session events yet. Start a thread to see the Tauri listen bridge
-						in action.
-					</p>
-				) : (
-					<ul className="dcc-runtime-feed__list">
-						{events.map((event, index) => (
-							<li key={`${eventLabel(event)}-${index}`}>
-								<div className="dcc-runtime-feed__row">
-									<strong>{eventLabel(event)}</strong>
-									<small>{eventPayloadSummary(event)}</small>
-								</div>
-							</li>
-						))}
-					</ul>
-				)}
-			</CardContent>
+			<CardContent className="dcc-runtime-feed__content">{content}</CardContent>
 		</Card>
 	);
 }

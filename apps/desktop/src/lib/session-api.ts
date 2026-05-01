@@ -35,6 +35,7 @@ const SESSION_EVENT_NAMES = [
 	"dcc.session.aborted",
 	"dcc.session.resumed",
 	"dcc.session.turn.started",
+	"dcc.session.turn.delta",
 	"dcc.session.turn.completed",
 	"dcc.session.turn.aborted",
 	"dcc.session.checkpoint.created",

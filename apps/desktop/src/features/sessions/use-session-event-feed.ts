@@ -13,7 +13,7 @@ export function useSessionEventFeed() {
 				return;
 			}
 
-			setEvents((current) => [event, ...current].slice(0, 12));
+			setEvents((current) => [...current, event].slice(-12));
 		}).then((unlisten) => {
 			if (disposed) {
 				void unlisten();

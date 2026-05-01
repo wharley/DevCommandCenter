@@ -41,38 +41,42 @@ export type CoreEvent = ({ workspacePrepared: {
 	workspace_id: string,
 	project_id: string,
 	worktree_path: string,
-} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnStarted?: never; workspaceReady?: never } | ({ workspaceReady: {
+} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnStarted?: never; workspaceReady?: never } | ({ workspaceReady: {
 	workspace_id: string,
 	project_id: string,
 	worktree_path: string,
-} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnStarted?: never; workspacePrepared?: never } | ({ sessionStarted: {
+} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnStarted?: never; workspacePrepared?: never } | ({ sessionStarted: {
 	session_id: string,
 	workspace_id: string,
 	project_id: string,
 	provider_id: string,
-} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionCompleted: {
+} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionCompleted: {
 	session_id: string,
-} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionAborted: {
+} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionAborted: {
 	session_id: string,
 	reason: string | null,
-} }) & { sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionResumed: {
+} }) & { sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionResumed: {
 	session_id: string,
-} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionTurnStarted: {
+} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionTurnStarted: {
 	session_id: string,
 	turn_id: string,
 	prompt: string,
-} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionTurnCompleted: {
+} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionTurnDelta: {
 	session_id: string,
 	turn_id: string,
-} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionTurnAborted: {
+	content: string,
+} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionTurnCompleted: {
+	session_id: string,
+	turn_id: string,
+} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnDelta?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionTurnAborted: {
 	session_id: string,
 	turn_id: string,
 	reason: string | null,
-} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnCompleted?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionCheckpointCreated: {
+} }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionCheckpointCreated: {
 	session_id: string,
 	checkpoint_id: string,
 	label: string,
-} }) & { sessionAborted?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never };
+} }) & { sessionAborted?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnStarted?: never; workspacePrepared?: never; workspaceReady?: never };
 
 export type CreateWorkspaceForRepoInput = {
 	projectId: ProjectId,

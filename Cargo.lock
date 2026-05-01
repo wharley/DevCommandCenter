@@ -794,6 +794,7 @@ name = "dcc-providers"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "dcc-core",
  "futures",
  "tokio",
@@ -808,11 +809,13 @@ dependencies = [
  "dcc-core",
  "dcc-infra",
  "dcc-providers",
+ "futures",
  "serde",
  "specta",
  "tauri",
  "tauri-specta",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

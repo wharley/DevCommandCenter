@@ -6,7 +6,8 @@ publish = false
 
 [dependencies]
 async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
 dcc-core = { path = "../dcc-core" }
 futures = "0.3"
-tokio = { version = "1", features = ["process", "rt", "macros"] }
+tokio = { version = "1", features = ["process", "rt", "macros", "io-util", "sync"] }
 uuid = { version = "1", features = ["v4"] }

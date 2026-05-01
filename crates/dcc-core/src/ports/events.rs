@@ -38,6 +38,11 @@ pub enum CoreEvent {
 		turn_id: String,
 		prompt: String,
 	},
+	SessionTurnDelta {
+		session_id: String,
+		turn_id: String,
+		content: String,
+	},
 	SessionTurnCompleted {
 		session_id: String,
 		turn_id: String,

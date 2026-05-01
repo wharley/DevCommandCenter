@@ -17,9 +17,13 @@ pub async fn start_thread(
 	_app: AppHandle,
 	input: StartThreadInput,
 ) -> Result<StartThreadOutput, String> {
-	run_start_thread(&*state, &*state, &*state, &*state, input)
+	let output = run_start_thread(&*state, &*state, &*state, &*state, input)
 		.await
-		.map_err(|error| error.to_string())
+		.map_err(|error| error.to_string())?;
+	if let Err(error) = state.attach_provider_session(&output.session).await {
+		eprintln!("[DCC] provider session attach failed: {}", error);
+	}
+	Ok(output)
 }
 
 #[tauri::command]
@@ -28,9 +32,26 @@ pub async fn send_turn(
 	_app: AppHandle,
 	input: SendTurnInput,
 ) -> Result<SendTurnOutput, String> {
-	run_send_turn(&*state, &*state, &*state, input)
+	let prompt = input.prompt.clone();
+	let output = run_send_turn(&*state, &*state, &*state, input)
 		.await
-		.map_err(|error| error.to_string())
+		.map_err(|error| error.to_string())?;
+	state
+		.attach_provider_session(&output.session)
+		.await
+		.map_err(|error| error.to_string())?;
+	state
+		.set_active_turn(&output.session.id, Some(output.turn.id.0.clone()))
+		.await
+		.map_err(|error| error.to_string())?;
+	if let Err(error) = state
+		.send_provider_input(&output.session.id, prompt)
+		.await
+	{
+		let _ = state.set_active_turn(&output.session.id, None).await;
+		return Err(error.to_string());
+	}
+	Ok(output)
 }
 
 #[tauri::command]
@@ -39,9 +60,11 @@ pub async fn abort_run(
 	_app: AppHandle,
 	input: AbortRunInput,
 ) -> Result<AbortRunOutput, String> {
-	run_abort_run(&*state, &*state, &*state, input)
+	let output = run_abort_run(&*state, &*state, &*state, input)
 		.await
-		.map_err(|error| error.to_string())
+		.map_err(|error| error.to_string())?;
+	let _ = state.cancel_provider_session(&output.session.id).await;
+	Ok(output)
 }
 
 #[tauri::command]
@@ -50,7 +73,11 @@ pub async fn resume_session(
 	_app: AppHandle,
 	input: ResumeSessionInput,
 ) -> Result<ResumeSessionOutput, String> {
-	run_resume_session(&*state, &*state, &*state, input)
+	let output = run_resume_session(&*state, &*state, &*state, input)
 		.await
-		.map_err(|error| error.to_string())
+		.map_err(|error| error.to_string())?;
+	if let Err(error) = state.attach_provider_session(&output.session).await {
+		eprintln!("[DCC] provider session attach failed: {}", error);
+	}
+	Ok(output)
 }
