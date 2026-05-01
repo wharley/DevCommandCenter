@@ -161,6 +161,27 @@ a {
 	gap: 0.75rem;
 }
 
+.dcc-switch-row {
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+}
+
+.dcc-switch-row__label {
+	display: grid;
+	gap: 0.15rem;
+}
+
+.dcc-switch-row__label span {
+	font-size: 0.82rem;
+	color: var(--dcc-text-muted);
+}
+
+.dcc-switch-row__label small {
+	color: var(--dcc-text-soft);
+	font-size: 0.76rem;
+	line-height: 1.4;
+}
+
 .dcc-sidebar__footer {
 	display: grid;
 	gap: 0.75rem;
@@ -322,8 +343,141 @@ a {
 	font-size: 1.3rem;
 }
 
+.dcc-card__meta-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+}
+
+.dcc-runtime-feed {
+	min-height: 220px;
+}
+
+.dcc-runtime-shell {
+	display: grid;
+	grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.85fr);
+	gap: 0.9rem;
+	align-items: start;
+}
+
+.dcc-runtime-shell__main,
+.dcc-runtime-shell__rail > * {
+	min-width: 0;
+}
+
+.dcc-runtime-shell__content {
+	display: grid;
+	gap: 1rem;
+}
+
+.dcc-runtime-shell__rail {
+	display: grid;
+	gap: 0.9rem;
+	align-content: start;
+}
+
+.dcc-session-summary {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 0.75rem;
+}
+
+.dcc-provider-pills {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+.dcc-provider-pills .dcc-button {
+	min-height: 2.45rem;
+}
+
+.dcc-session-composer {
+	display: grid;
+	gap: 0.5rem;
+}
+
+.dcc-session-state-card {
+	background:
+		radial-gradient(
+			circle at top left,
+			color-mix(in oklab, var(--dcc-accent-2) 14%, transparent),
+			transparent 42%
+		),
+		linear-gradient(
+			180deg,
+			color-mix(in oklab, var(--dcc-surface-2) 84%, transparent),
+			color-mix(in oklab, var(--dcc-surface) 92%, transparent)
+		);
+}
+
+.dcc-runtime-feed__content {
+	display: grid;
+	gap: 0.75rem;
+}
+
+.dcc-runtime-feed__list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: grid;
+	gap: 0.75rem;
+}
+
+.dcc-runtime-feed__list li {
+	border: 1px solid var(--dcc-shell-border);
+	border-radius: var(--dcc-radius-md);
+	padding: 0.85rem;
+	background:
+		linear-gradient(
+			180deg,
+			color-mix(in oklab, var(--dcc-surface-2) 82%, transparent),
+			color-mix(in oklab, var(--dcc-surface) 92%, transparent)
+		);
+}
+
+.dcc-runtime-feed__row {
+	display: grid;
+	gap: 0.25rem;
+}
+
+.dcc-runtime-feed__row strong {
+	font-size: 0.92rem;
+}
+
+.dcc-runtime-feed__row small {
+	color: var(--dcc-text-muted);
+	line-height: 1.45;
+}
+
+.dcc-runtime-feed__chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	margin-top: 0.65rem;
+}
+
 .dcc-dual-grid {
 	grid-template-columns: 1.25fr 0.95fr;
+}
+
+@media (max-width: 1180px) {
+	.dcc-runtime-shell {
+		grid-template-columns: 1fr;
+	}
+}
+
+@media (max-width: 960px) {
+	.dcc-session-summary {
+		grid-template-columns: 1fr;
+	}
+}
+
+.dcc-tabs-bar {
+	display: flex;
+	justify-content: flex-start;
+	padding: 0.25rem 0 0.75rem;
 }
 
 .dcc-terminal {

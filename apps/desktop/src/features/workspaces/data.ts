@@ -20,15 +20,23 @@ export const demoWorkspaces: WorkspaceSummary[] = [
 		status: "ready",
 		branch: "feat/sessions",
 	},
+	{
+		id: "ws_05",
+		name: "Archived Spike",
+		status: "archived",
+		branch: "chore/archive",
+	},
 ];
 
 export function getWorkspaceTone(status: WorkspaceSummary["status"]): WorkspaceTone {
 	switch (status) {
 		case "ready":
 			return "success";
-		case "setup_pending":
-			return "warn";
-		default:
-			return "secondary";
+	case "setup_pending":
+		return "warn";
+	case "archived":
+		return "secondary";
+	default:
+		return "secondary";
 	}
 }

@@ -307,38 +307,51 @@ Objetivo: criar a nova espinha dorsal sem quebrar o app atual, mantendo `src/` v
 - Concluído: boot principal agora aponta para o shell novo, sem alternância por flag.
 - Concluído: `yarn install`, `yarn vite:build`, `cargo check -p dcc-core` e `cargo check -p dcc-tauri` passam no workspace atual.
 - Concluído: `yarn build:contracts` passa no pacote `@dcc/contracts`.
-- Em andamento: Fase 1 shell + UI primitiva, com base visual e hooks do shell já portados.
-- Em aberto: geração real de contracts via `tauri-specta`, os primitivos restantes do Helmor que ainda não entraram (`card`, `tabs`, `switch`, `dialog` extras, etc.) e a ligação de `workspaces/` com dados/contracts reais.
+- Concluído: Fase 1 shell + UI primitiva, com base visual, primitives e feature folders já portados.
+- Em andamento: Fase 2 já tem o fluxo de criar workspace ligado do shell ao Rust e o contrato agora é gerado por `build.rs` via `tauri-specta`.
+- Em aberto: smoke test manual runtime do fluxo completo de criação de workspace no app.
 - Fora do escopo de 0b: providers e adapters Rust de verdade, que entram nas Fases 2 e 3.
-- Pausa atual: Fase 1 em andamento, com 0a concluída em compile e 0b fechada no boot principal.
+- Em andamento: Fase 3 começou com `dcc-core::domain::session` e a primeira projeção de event log.
+- Pausa atual: Fase 3 em andamento, com 0a concluída em compile, 0b fechada no boot principal, Fase 1 fechada e Fase 2 validada no core.
 
 **Objetivo das Fases 1-3**
 
 Trazer o melhor do Helmor na forma de shell/UX e o melhor do t3code na forma de contratos, boundaries e fluxo de eventos, mas com Tauri + Rust como motor e fronteira do sistema.
 
-**Fase 1 — Shell + UI primitiva (2-3 dias)**
+**Fase 1 — Shell + UI primitiva (concluída)**
 1. Copiar `components/ui/*` (shadcn) para `apps/desktop/src/components/ui/`.
 2. Implementar `apps/desktop/src/styles/color-theme.css` com tokens do shell.
 3. Portar `shell/{layout,use-panels,use-zoom}.ts` e a estrutura visual base.
 4. Subir a feature `workspaces/` como casca vazia, pronta para receber dados.
 
-**Status parcial da Fase 1**
+**Status da Fase 1**
 
-- Concluído: `apps/desktop/src/components/ui/{button,badge,input,label,separator,textarea,tooltip,dropdown-menu,scroll-area,dialog,popover,command,command-popover}.tsx`.
+- Concluído: `apps/desktop/src/components/ui/{button,badge,input,label,separator,textarea,tooltip,dropdown-menu,scroll-area,dialog,popover,command,command-popover,card,tabs,switch}.tsx`.
 - Concluído: `apps/desktop/src/styles/color-theme.css` com tokens e composição visual do shell.
 - Concluído: `apps/desktop/src/lib/query-client.ts` com persister e keys no padrão do shell.
 - Concluído: `apps/desktop/src/shell/{layout,use-panels,use-zoom}.ts`.
 - Concluído: `apps/desktop/src/features/workspaces/` extraído com hook, sidebar, tipos e command palette.
-- Concluído: `apps/desktop/src/App.tsx` refeito como shell principal com sidebar, divider, topbar, cards e composer.
-- Em aberto: completar os primitivos restantes do Helmor e ligar `workspaces/` a dados/contracts reais.
+- Concluído: `apps/desktop/src/App.tsx` refeito como shell principal com sidebar, divider, topbar, tabs, cards, composer e command palette.
+- Concluído: `apps/desktop/src/features/workspaces/` ganhou controle de archived-workspaces via `Switch`.
 
-**Fase 2 — Primeiro use case end-to-end: criar workspace (4-6 dias)**
+**Fase 2 — Primeiro use case end-to-end: criar workspace (em andamento)**
 1. Implementar `dcc-core::application::create_workspace_for_repo` com dois passos: prepare e finalize.
 2. Definir `dcc-core::ports::{WorkspaceRepo, GitOps, EventBus}` e suas primeiras entidades de domínio.
-3. Conectar `dcc-infra::db::SqliteWorkspaceRepo` e `dcc-infra::git::Git2Ops`.
-4. Expor o fluxo em `dcc-tauri::commands::workspace_commands` e consumir via `@dcc/contracts`.
+3. Conectar `dcc-infra::db::SqliteWorkspaceRepo` e `dcc-infra::git::CommandGitOps`.
+4. Expor o fluxo em `dcc-tauri::commands::workspace_commands` e consumir via `@dcc/contracts` gerado por `build.rs` + `tauri-specta`.
 5. Validar o ciclo completo: UI → Tauri → Rust core → infra → evento → React Query → UI.
 6. Usar essa fase como gate: se o fluxo não ficar limpo, corrigir antes de crescer o resto.
+
+**Status da Fase 2**
+
+- Concluído: `dcc-core::application::create_workspace_for_repo` com `prepare` + `finalize` e eventos `WorkspacePrepared`/`WorkspaceReady`.
+- Concluído: `dcc-infra::db::SqliteWorkspaceRepo` com persistência SQLite do workspace.
+- Concluído: `dcc-infra::git::CommandGitOps` preparando worktree no disco.
+- Concluído: `dcc-tauri` como bridge do comando e state mínimo para o host Tauri.
+- Concluído: `src-tauri` registrando `create_workspace_for_repo` no `invoke_handler`.
+- Concluído: shell novo com dialog de criação de workspace e atualização local da lista.
+- Concluído: smoke test Rust do fluxo `create_workspace_for_repo` com fakes de repo/git/event bus.
+- Em aberto: smoke test manual runtime do fluxo completo de criação de workspace no app.
 
 **Fase 3 — Providers + sessions (5-7 dias)**
 1. Introduzir `dcc-core::domain::session` com event log e projeções.
@@ -346,6 +359,19 @@ Trazer o melhor do Helmor na forma de shell/UX e o melhor do t3code na forma de 
 3. Conectar `dcc-providers::{claude_code, codex, gemini}` como capabilities estáveis.
 4. Deixar `dcc-providers::cursor` isolado atrás de feature flag.
 5. Fazer `conversation/` consumir stream de eventos via Tauri `listen`.
+
+**Status da Fase 3**
+
+- Concluído: `dcc-core::domain::session` com `SessionEventKind`, `SessionEventRecord` e `SessionProjection`.
+- Concluído: `dcc-core::application::{start_thread, send_turn, abort_run, resume_session}`.
+- Concluído: `packages/contracts/src/generated/bindings.ts` já exporta o modelo de sessão e a surface de comandos gerada por `tauri-specta`.
+- Concluído: `apps/desktop/src/lib/session-api.ts` consumindo os contracts de sessão de forma tipada.
+- Concluído: `dcc-providers` com catálogo tipado, healthcheck por CLI e surface estável de capabilities para `claude_code`, `codex`, `gemini` e `cursor`.
+- Concluído: stream de eventos de sessão chegando ao shell via `listen` em `apps/desktop/src/features/sessions/session-event-feed.tsx`.
+- Concluído: `apps/desktop/src/features/providers/provider-catalog-card.tsx` exibindo o estado do catálogo no runtime.
+- Concluído: `session.startThread`, `session.sendTurn`, `session.abortRun` e `session.resumeSession` expostos no Tauri bridge com estado de sessão ativo no shell.
+- Concluído: o runtime shell ganhou um painel de sessão/composer mais próximo do Helmor, com provider selection e resumo de projection.
+- Em aberto: adapters runtime concretos para `claude_code`, `codex` e `gemini` no caminho de execução real e streaming de turnos ponta a ponta.
 
 **Fase 4 — Features restantes (iterativo)**
 1. Implementar na ordem: `terminal` → `review` → `inspector` → `composer` → `navigation` → `settings` → `shortcuts` → `onboarding` → `updater`.

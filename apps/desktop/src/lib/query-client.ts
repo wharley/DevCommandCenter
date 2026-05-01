@@ -28,9 +28,21 @@ const loggingLocalStorage: Storage = {
 export const dccQueryKeys = {
 	shell: ["shell"] as const,
 	workspaces: ["workspaces"] as const,
+	sessions: ["sessions"] as const,
 } as const;
 
 export function createDccQueryClient() {
+	const queryClient = new QueryClient({
+		defaultOptions: {
+			queries: {
+				gcTime: 24 * 60 * 60_000,
+				retry: 1,
+				refetchOnWindowFocus: true,
+				refetchOnReconnect: false,
+			},
+		},
+	});
+
 	focusManager.setEventListener((handleFocus) => {
 		let unlistenFocus: (() => void) | undefined;
 		let unlistenBlur: (() => void) | undefined;
@@ -50,16 +62,14 @@ export function createDccQueryClient() {
 		};
 	});
 
-	return new QueryClient({
-		defaultOptions: {
-			queries: {
-				gcTime: 24 * 60 * 60_000,
-				retry: 1,
-				refetchOnWindowFocus: true,
-				refetchOnReconnect: false,
-			},
-		},
+	void import("@tauri-apps/api/event").then(({ listen }) => {
+		void listen("dcc:core-event", () => {
+			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.workspaces });
+			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.sessions });
+		});
 	});
+
+	return queryClient;
 }
 
 export const dccQueryPersister = createAsyncStoragePersister({

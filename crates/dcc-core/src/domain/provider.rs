@@ -24,6 +24,23 @@ pub struct Capabilities {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderDescriptor {
+	pub id: ProviderId,
+	pub label: String,
+	pub description: String,
+	pub capabilities: Capabilities,
+	pub health: HealthStatus,
+	pub stable: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderCatalog {
+	pub providers: Vec<ProviderDescriptor>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub enum ProviderEvent {
 	Started { at: String },
 	TextDelta { content: String },

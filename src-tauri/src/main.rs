@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod forge_issue;
+mod session_commands;
+mod workspace_commands;
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike, Utc};
 use dev_command_center_tauri::daemon_client::{
@@ -41,6 +43,8 @@ use tauri_plugin_dialog::{
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
+use workspace_commands::create_workspace_for_repo;
+use dcc_tauri::state::{SessionCommandState, WorkspaceCommandState};
 
 /// Schema SQLite compartilhado com `lib/database/schema.sql` (CREATE IF NOT EXISTS).
 const APP_SCHEMA_SQL: &str = include_str!("../../lib/database/schema.sql");
@@ -8560,7 +8564,12 @@ pub fn run() {
             terminal_get_backlog,
             terminal_clear_persisted_scrollback,
             terminal_get_project_activity,
-            terminal_save_temp_image
+            terminal_save_temp_image,
+            create_workspace_for_repo,
+            session_commands::start_thread,
+            session_commands::send_turn,
+            session_commands::abort_run,
+            session_commands::resume_session
         ])
         .setup(|app| {
             let app_data_dir = app
@@ -8586,6 +8595,8 @@ pub fn run() {
             sync_existing_repo_configs(&conn)
                 .map_err(|e| format!("failed to sync repo configs: {e}"))?;
             eprintln!("[DCC] Database ready at {:?}", db_path);
+            app.manage(WorkspaceCommandState::new(db_path.clone()));
+            app.manage(SessionCommandState::new(app.handle().clone()));
             let state = AppState {
                 db_path: Arc::new(db_path),
                 app_data_dir: Arc::new(app_data_dir.clone()),

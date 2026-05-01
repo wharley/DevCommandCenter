@@ -1,0 +1,247 @@
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use uuid::Uuid;
+
+use crate::{
+	domain::session::{
+		Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection, SessionState,
+		Turn, TurnId, TurnState,
+	},
+	ports::{CoreEvent, EventBus, SessionEventRepo, SessionRepo},
+	Result,
+};
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTurnInput {
+	pub session_id: SessionId,
+	pub prompt: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTurnOutput {
+	pub session: Session,
+	pub turn: Turn,
+	pub projection: SessionProjection,
+}
+
+fn now_iso() -> String {
+	chrono::Utc::now().to_rfc3339()
+}
+
+pub async fn send_turn<S, E, B>(
+	sessions: &S,
+	session_events: &E,
+	events: &B,
+	input: SendTurnInput,
+) -> Result<SendTurnOutput>
+where
+	S: SessionRepo + Sync,
+	E: SessionEventRepo + Sync,
+	B: EventBus + Sync,
+{
+	let mut session = sessions
+		.get_session(&input.session_id)
+		.await?
+		.ok_or_else(|| crate::CoreError::Repository("session not found".to_string()))?;
+
+	if session.state != SessionState::Active {
+		return Err(crate::CoreError::InvalidInput(
+			"session must be active to send a turn".to_string(),
+		));
+	}
+
+	let history = session_events.list_events_by_session(&input.session_id).await?;
+	let projection = SessionProjection::fold(&history)
+		.ok_or_else(|| crate::CoreError::Repository("session history is empty".to_string()))?;
+
+	if projection.active_turn_id.is_some() {
+		return Err(crate::CoreError::InvalidInput(
+			"session already has an active turn".to_string(),
+		));
+	}
+
+	let now = now_iso();
+	let turn_id = TurnId(Uuid::new_v4().to_string());
+	let turn = Turn {
+		id: turn_id.clone(),
+		session_id: input.session_id.clone(),
+		role: "user".to_string(),
+		content: input.prompt.clone(),
+		state: TurnState::Running,
+		created_at: now.clone(),
+		updated_at: now.clone(),
+	};
+	let sequence = history.last().map(|event| event.sequence + 1).unwrap_or(1);
+	let started = SessionEventRecord {
+		event_id: Uuid::new_v4().to_string(),
+		session_id: input.session_id.clone(),
+		sequence,
+		occurred_at: now.clone(),
+		kind: SessionEventKind::TurnStarted {
+			turn_id: turn_id.clone(),
+			prompt: input.prompt.clone(),
+		},
+	};
+
+	session_events.append_event(&started).await?;
+	session.updated_at = now.clone();
+	sessions.save_session(&session).await?;
+	events
+		.publish(CoreEvent::SessionTurnStarted {
+			session_id: input.session_id.0.clone(),
+			turn_id: turn_id.0.clone(),
+			prompt: input.prompt,
+		})
+		.await?;
+
+	let mut replay = history;
+	replay.push(started);
+	let projection = SessionProjection::fold(&replay).expect("session projection exists");
+
+	Ok(SendTurnOutput {
+		session,
+		turn,
+		projection,
+	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use async_trait::async_trait;
+	use std::sync::{Arc, Mutex};
+
+	#[derive(Clone, Default)]
+	struct FakeSessionRepo {
+		sessions: Arc<Mutex<Vec<Session>>>,
+	}
+
+	#[async_trait]
+	impl SessionRepo for FakeSessionRepo {
+		async fn save_session(&self, session: &Session) -> Result<()> {
+			self.sessions
+				.lock()
+				.expect("sessions lock poisoned")
+				.push(session.clone());
+			Ok(())
+		}
+
+		async fn get_session(&self, id: &SessionId) -> Result<Option<Session>> {
+			let found = self
+				.sessions
+				.lock()
+				.expect("sessions lock poisoned")
+				.iter()
+				.find(|session| &session.id == id)
+				.cloned();
+			Ok(found)
+		}
+	}
+
+	#[derive(Clone, Default)]
+	struct FakeSessionEventRepo {
+		events: Arc<Mutex<Vec<SessionEventRecord>>>,
+	}
+
+	#[async_trait]
+	impl SessionEventRepo for FakeSessionEventRepo {
+		async fn append_event(&self, event: &SessionEventRecord) -> Result<()> {
+			self.events
+				.lock()
+				.expect("session events lock poisoned")
+				.push(event.clone());
+			Ok(())
+		}
+
+		async fn list_events_by_session(
+			&self,
+			session_id: &SessionId,
+		) -> Result<Vec<SessionEventRecord>> {
+			let events = self
+				.events
+				.lock()
+				.expect("session events lock poisoned")
+				.iter()
+				.filter(|event| &event.session_id == session_id)
+				.cloned()
+				.collect();
+			Ok(events)
+		}
+	}
+
+	#[derive(Clone, Default)]
+	struct FakeEventBus {
+		events: Arc<Mutex<Vec<CoreEvent>>>,
+	}
+
+	#[async_trait]
+	impl EventBus for FakeEventBus {
+		async fn publish(&self, event: CoreEvent) -> Result<()> {
+			self.events
+				.lock()
+				.expect("events lock poisoned")
+				.push(event);
+			Ok(())
+		}
+	}
+
+	#[test]
+	fn send_turn_creates_running_turn_and_projection() {
+		let sessions = FakeSessionRepo::default();
+		let session_events = FakeSessionEventRepo::default();
+		let events = FakeEventBus::default();
+		let session_id = SessionId("session-1".to_string());
+
+		sessions
+			.sessions
+			.lock()
+			.expect("sessions lock poisoned")
+			.push(Session {
+				id: session_id.clone(),
+				project_id: crate::domain::project::ProjectId("project-1".to_string()),
+				workspace_id: crate::domain::workspace::WorkspaceId("workspace-1".to_string()),
+				provider_id: "codex".to_string(),
+				state: SessionState::Active,
+				created_at: "2026-05-01T12:00:00Z".to_string(),
+				updated_at: "2026-05-01T12:00:00Z".to_string(),
+			});
+		session_events
+			.events
+			.lock()
+			.expect("session events lock poisoned")
+			.push(SessionEventRecord {
+				event_id: "evt-1".to_string(),
+				session_id: session_id.clone(),
+				sequence: 1,
+				occurred_at: "2026-05-01T12:00:00Z".to_string(),
+				kind: SessionEventKind::SessionStarted {
+					workspace_id: crate::domain::workspace::WorkspaceId(
+						"workspace-1".to_string(),
+					),
+					project_id: crate::domain::project::ProjectId("project-1".to_string()),
+					provider_id: "codex".to_string(),
+				},
+			});
+
+		let output = futures::executor::block_on(send_turn(
+			&sessions,
+			&session_events,
+			&events,
+			SendTurnInput {
+				session_id: session_id.clone(),
+				prompt: "hello".to_string(),
+			},
+		))
+		.expect("send_turn should succeed");
+
+		assert_eq!(output.session.id, session_id);
+		assert_eq!(output.turn.state, TurnState::Running);
+		assert_eq!(output.projection.turn_count, 0);
+
+		let session_events = session_events.events.lock().expect("session events lock poisoned");
+		assert_eq!(session_events.len(), 2);
+		assert!(matches!(session_events[1].kind, SessionEventKind::TurnStarted { .. }));
+	}
+}

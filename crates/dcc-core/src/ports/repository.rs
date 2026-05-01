@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use crate::{
 	domain::{
 		project::{Project, ProjectId},
-		session::{Session, SessionId},
+		session::{Session, SessionEventRecord, SessionId},
 		thread::{Thread, ThreadId},
 		workspace::{Workspace, WorkspaceId},
 	},
@@ -26,6 +26,15 @@ pub trait ProjectRepo: Send + Sync {
 pub trait SessionRepo: Send + Sync {
 	async fn save_session(&self, session: &Session) -> Result<()>;
 	async fn get_session(&self, id: &SessionId) -> Result<Option<Session>>;
+}
+
+#[async_trait]
+pub trait SessionEventRepo: Send + Sync {
+	async fn append_event(&self, event: &SessionEventRecord) -> Result<()>;
+	async fn list_events_by_session(
+		&self,
+		session_id: &SessionId,
+	) -> Result<Vec<SessionEventRecord>>;
 }
 
 #[async_trait]

@@ -5,9 +5,19 @@ edition = "2021"
 default-run = "dev-command-center-tauri"
 
 [build-dependencies]
+dcc-core = { path = "../crates/dcc-core" }
+dcc-tauri = { path = "../crates/dcc-tauri" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+specta = { version = "2.0.0-rc.24", features = ["derive"] }
+specta-typescript = "0.0.11"
+tauri-specta = { version = "2.0.0-rc.24", features = ["typescript"] }
+tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+dcc-core = { path = "../crates/dcc-core" }
+dcc-tauri = { path = "../crates/dcc-tauri" }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

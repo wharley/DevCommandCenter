@@ -782,20 +782,29 @@ dependencies = [
 name = "dcc-infra"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "dcc-core",
+ "rusqlite",
+ "uuid",
 ]
 
 [[package]]
 name = "dcc-providers"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "dcc-core",
+ "futures",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
 name = "dcc-tauri"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "dcc-core",
  "dcc-infra",
  "dcc-providers",
@@ -854,6 +863,8 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "chrono",
+ "dcc-core",
+ "dcc-tauri",
  "flate2",
  "hex",
  "lazy_static",
@@ -866,12 +877,15 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "specta",
+ "specta-typescript",
  "sysinfo",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tauri-plugin-updater",
+ "tauri-specta",
  "tokio",
  "toml 0.8.2",
  "tower 0.4.13",

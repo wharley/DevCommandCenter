@@ -6,4 +6,4 @@ pub mod repository;
 pub use events::{CoreEvent, EventBus};
 pub use git::{GitOps, PreparedWorktree};
 pub use provider::{Input, Provider, SessionConfig};
-pub use repository::{ProjectRepo, SessionRepo, ThreadRepo, WorkspaceRepo};
+pub use repository::{ProjectRepo, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo};
