@@ -46,6 +46,7 @@ use uuid::Uuid;
 use workspace_commands::{
 	create_workspace_for_repo,
 	create_workspace_from_url,
+	workspace_github_cli_status,
 	list_child_directories,
 	list_git_tracked_files,
 	list_local_branches,
@@ -8590,6 +8591,7 @@ pub fn run() {
             list_git_tracked_files,
             list_child_directories,
             list_workspaces,
+            workspace_github_cli_status,
             workspace_gh_pr_create_fill,
             workspace_gh_pr_view_web,
             workspace_git_file_preview,

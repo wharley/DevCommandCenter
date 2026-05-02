@@ -197,10 +197,20 @@
       "body": "No preview toggles are exposed yet. This section stays in the nav so future shell flags land without changing the layout."
     },
     "account": {
-      "githubTitle": "GitHub account",
-      "githubHint": "Account and sync surfaces are gated behind the future integration pass.",
-      "disconnected": "Disconnected",
-      "footerHint": "The settings dialog already reserves the account section so the footer integration can slot in later without reopening the shell contract."
+      "title": "GitHub CLI integration",
+      "hint": "DCC uses the local `gh` binary for authentication, PRs, and repository setup.",
+      "sectionBadge": "Local GitHub",
+      "githubCliTitle": "GitHub CLI integration",
+      "githubCliHint": "Install and authenticate GitHub CLI so DCC can open PRs and keep GitHub actions local.",
+      "githubCliReadyBadge": "Connected",
+      "githubCliNotReadyBadge": "Disconnected",
+      "githubCliChecking": "Checking…",
+      "githubCliSetUp": "Open terminal",
+      "githubCliRefresh": "Re-check",
+      "githubCliTerminalOpened": "Terminal opened. Run `gh auth login` to connect.",
+      "githubCliTerminalFailed": "Could not open the terminal.",
+      "githubCliLoadingError": "Could not verify GitHub CLI.",
+      "githubCliCommand": "Suggested command: `{{command}}`"
     }
   },
   "shortcutsSheet": {
@@ -238,6 +248,11 @@
     },
     "phase4Title": "Phase 4 scope",
     "phase4Body": "We ship intro, agents, repo import, and the completion transition first.",
+    "repoCliTitle": "GitHub CLI integration",
+    "repoCliBody": "Open the terminal and run `gh auth login` so DCC can create PRs and keep GitHub actions local.",
+    "repoCliButton": "Open terminal",
+    "repoCliOpened": "Terminal opened. Run `gh auth login` to connect.",
+    "repoCliFailed": "Could not open the terminal.",
     "laterSteps": "Later steps",
     "conductorPreviewTitle": "Optional Conductor preview",
     "conductorPreviewBody": "The optional integration pass stays deferred, but the visual concept is available now.",

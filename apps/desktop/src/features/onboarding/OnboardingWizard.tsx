@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, Sparkles, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConductorOnboarding } from "@/components/ConductorOnboarding";
 import { cn } from "@/lib/utils";
+import { openGithubCliAuthTerminal } from "@/lib/github-cli";
 import { OnboardingMockup } from "./mockup/OnboardingMockup";
 import {
 	futureOnboardingSteps,
@@ -146,6 +148,37 @@ function WizardPanel({
 						</div>
 					</div>
 				</div>
+
+				{step === "repoImport" ? (
+					<div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3">
+						<div className="min-w-0">
+							<p className="text-[12px] font-medium text-foreground">
+								{t("onboarding.repoCliTitle")}
+							</p>
+							<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+								{t("onboarding.repoCliBody")}
+							</p>
+						</div>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="h-8 rounded-[9px] px-2.5 text-[12px]"
+							onClick={async () => {
+								const result = await openGithubCliAuthTerminal();
+								if (result.success) {
+									toast.success(t("onboarding.repoCliOpened"));
+									return;
+								}
+								toast.error(
+									result.error ?? t("onboarding.repoCliFailed"),
+								);
+							}}
+						>
+							{t("onboarding.repoCliButton")}
+						</Button>
+					</div>
+				) : null}
 
 				<div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3">
 					<div className="min-w-0">

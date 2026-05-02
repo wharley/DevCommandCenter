@@ -6,7 +6,7 @@ export const PROVIDER_METHODS = {"listProviders":"list_providers"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","listThreadEvents":"list_thread_events","resumeSession":"resume_session","sendTurn":"send_turn","startThread":"start_thread"} as const;
 
-export const WORKSPACE_METHODS = {"createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listWorkspaces":"list_workspaces","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitFilePreview":"workspace_git_file_preview","workspaceGitFilePreviewContent":"workspace_git_file_preview_content","workspaceGitPush":"workspace_git_push","workspaceGitStageAll":"workspace_git_stage_all","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitUnstageFile":"workspace_git_unstage_file"} as const;
+export const WORKSPACE_METHODS = {"createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listWorkspaces":"list_workspaces","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitFilePreview":"workspace_git_file_preview","workspaceGitFilePreviewContent":"workspace_git_file_preview_content","workspaceGitPush":"workspace_git_push","workspaceGitStageAll":"workspace_git_stage_all","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitUnstageFile":"workspace_git_unstage_file","workspaceGithubCliStatus":"workspace_github_cli_status"} as const;
 
 /* Types */
 export type AbortRunInput = {
@@ -136,6 +136,19 @@ export type CreateWorkspaceFromUrlInput = {
 export type CreateWorkspaceFromUrlOutput = {
 	workspace: Workspace,
 };
+
+export type GithubCliStatusInput = Record<string, never>;
+
+export type GithubCliStatusOutput = {
+	cliName: string,
+	hostname: string,
+	status: GithubCliStatusState,
+	login: string | null,
+	message: string,
+	loginCommand: string,
+};
+
+export type GithubCliStatusState = "ready" | "error";
 
 export type HealthStatus = "Healthy" | ({ Degraded: {
 	reason: string,

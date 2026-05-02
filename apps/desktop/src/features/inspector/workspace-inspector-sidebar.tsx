@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	useCallback,
 	useEffect,
@@ -29,6 +29,7 @@ import { EmptyState } from "@/features/panel";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
+import { getGithubCliStatus, openGithubCliAuthTerminal } from "@/lib/github-cli";
 
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
@@ -214,16 +215,39 @@ export function WorkspaceInspectorSidebar({
 	const commitMode = resolveCommitMode(workspaceBranch ?? "");
 	const queryClient = useQueryClient();
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
+	const githubCliStatusQuery = useQuery({
+		queryKey: ["githubCliStatus"],
+		queryFn: getGithubCliStatus,
+		staleTime: 60_000,
+		refetchOnWindowFocus: true,
+	});
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const hasWorkingTreeChanges =
 		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
 		(gitStatusQuery.data?.unstaged.length ?? 0) > 0;
+	const githubCliStatus = githubCliStatusQuery.data ?? null;
+	const githubCliReady = githubCliStatus?.status === "ready";
+	const githubCliMessage =
+		githubCliStatus?.message ??
+		(githubCliStatusQuery.isPending ? "Checking GitHub CLI..." : null);
 
 	const handleInspectorCommit = useCallback(async () => {
 		const root = workspacePath?.trim();
 		if (!root) {
 			toast.error("No workspace path");
 			throw new Error("No workspace path");
+		}
+
+		if (commitMode === "create-pr" && !githubCliReady) {
+			const setup = await openGithubCliAuthTerminal();
+			if (setup.success) {
+				toast.info(
+					githubCliMessage ?? "Run `gh auth login` in Terminal, then try again.",
+				);
+				return;
+			}
+
+			throw new Error(setup.error ?? "GitHub CLI setup terminal could not be opened.");
 		}
 
 		const loadingToast = toast.loading(`${inspectorActionTitle(commitMode)}...`);
@@ -268,7 +292,7 @@ export function WorkspaceInspectorSidebar({
 			});
 			throw error;
 		}
-	}, [commitMode, queryClient, workspacePath, workspaceName]);
+	}, [commitMode, githubCliMessage, githubCliReady, queryClient, workspacePath, workspaceName]);
 
 	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
 	const [manualResize, setManualResize] = useState(false);

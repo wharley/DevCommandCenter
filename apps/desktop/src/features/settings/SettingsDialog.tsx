@@ -1,23 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import {
 	CircleUserRound,
 	GitBranch,
 	Keyboard,
 	Moon,
 	Package,
+	Loader2,
 	Sparkles,
+	TerminalSquare,
 	SunMedium,
 	Wrench,
 	type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import type { DccTheme } from "@/components/theme-provider";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
+import { getGithubCliStatus, openGithubCliAuthTerminal } from "@/lib/github-cli";
 
 type SettingsDialogProps = {
 	open: boolean;
@@ -75,6 +81,111 @@ function SectionButton({
 				<p className="mt-0.5 text-[11px] leading-tight text-muted-foreground/80">{description}</p>
 			</div>
 		</button>
+	);
+}
+
+function GithubCliIntegrationCard() {
+	const { t } = useTranslation("common");
+	const statusQuery = useQuery({
+		queryKey: ["githubCliStatus"],
+		queryFn: getGithubCliStatus,
+		staleTime: 60_000,
+		refetchOnWindowFocus: true,
+	});
+
+	const status = statusQuery.data ?? {
+		cliName: "gh",
+		hostname: "github.com",
+		status: "error" as const,
+		login: null,
+		message: t("settings.account.githubCliLoadingError"),
+		loginCommand: "gh auth login",
+	};
+	const isReady = status.status === "ready";
+
+	const handleSetUp = async () => {
+		try {
+			const result = await openGithubCliAuthTerminal();
+			if (result.success) {
+				toast.success(t("settings.account.githubCliTerminalOpened"));
+				return;
+			}
+
+			toast.error(result.error ?? t("settings.account.githubCliTerminalFailed"));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : t("settings.account.githubCliTerminalFailed"));
+		}
+	};
+
+	const handleRefresh = async () => {
+		try {
+			await statusQuery.refetch();
+		} catch {
+			toast.error(t("settings.account.githubCliLoadingError"));
+		}
+	};
+
+	return (
+		<div className="rounded-xl border border-border/60 p-4">
+			<div className="flex items-start justify-between gap-4">
+				<div className="min-w-0">
+					<h3 className="text-[14px] font-medium text-foreground">
+						{t("settings.account.githubCliTitle")}
+					</h3>
+					<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+						{t("settings.account.githubCliHint")}
+					</p>
+				</div>
+				<Badge
+					variant={isReady ? "success" : "outline"}
+					className="h-8 px-3 text-[12px] font-normal"
+				>
+					{isReady
+						? t("settings.account.githubCliReadyBadge")
+						: t("settings.account.githubCliNotReadyBadge")}
+				</Badge>
+			</div>
+
+			<div className="mt-4 flex flex-wrap items-center gap-2">
+				{statusQuery.isPending ? (
+					<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-muted-foreground">
+						<Loader2 className="size-3.5 animate-spin" />
+						{t("settings.account.githubCliChecking")}
+					</div>
+				) : isReady ? (
+					<>
+						<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-foreground">
+							<TerminalSquare className="size-3.5" />
+							<span className="truncate">{status.login ?? status.message}</span>
+						</div>
+						<Button variant="ghost" size="sm" onClick={() => void handleRefresh()}>
+							{t("settings.account.githubCliRefresh")}
+						</Button>
+					</>
+				) : (
+					<>
+						<Button variant="outline" size="sm" onClick={() => void handleSetUp()}>
+							<TerminalSquare className="size-3.5" />
+							{t("settings.account.githubCliSetUp")}
+						</Button>
+						<Button variant="ghost" size="sm" onClick={() => void handleRefresh()}>
+							{t("settings.account.githubCliRefresh")}
+						</Button>
+					</>
+				)}
+
+				<div className="min-w-0 flex-1">
+					<p className="text-[12px] leading-relaxed text-muted-foreground">
+						{status.message}
+					</p>
+					<p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
+						{t("settings.account.githubCliCommand", {
+							command: status.loginCommand,
+						})}
+					</p>
+				</div>
+			</div>
+		</div>
 	);
 }
 
@@ -402,20 +513,16 @@ export function SettingsDialog({
 								<section className="space-y-4">
 									<div className="flex items-start justify-between gap-6 border-b border-border/40 pb-4">
 										<div>
-											<h3 className="text-[14px] font-medium text-foreground">{t("settings.account.githubTitle")}</h3>
+											<h3 className="text-[14px] font-medium text-foreground">{t("settings.account.title")}</h3>
 											<p className="mt-1 text-[12px] text-muted-foreground">
-												{t("settings.account.githubHint")}
+												{t("settings.account.hint")}
 											</p>
 										</div>
 										<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal">
-											{t("settings.account.disconnected")}
+											{t("settings.account.sectionBadge")}
 										</Badge>
 									</div>
-									<div className="rounded-xl border border-border/60 p-4">
-										<p className="text-[12px] leading-relaxed text-muted-foreground">
-											{t("settings.account.footerHint")}
-										</p>
-									</div>
+									<GithubCliIntegrationCard />
 								</section>
 							) : null}
 						</div>

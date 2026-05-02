@@ -150,6 +150,28 @@ pub struct WorkspaceGitFilePreviewContentOutput {
 	pub inline: bool,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubCliStatusInput {}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum GithubCliStatusState {
+	Ready,
+	Error,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubCliStatusOutput {
+	pub cli_name: String,
+	pub hostname: String,
+	pub status: GithubCliStatusState,
+	pub login: Option<String>,
+	pub message: String,
+	pub login_command: String,
+}
+
 fn normalize_git_relative_path(path: &str) -> String {
 	path.trim().replace('\\', "/")
 }
@@ -221,6 +243,125 @@ fn resolve_gh_binary() -> Result<PathBuf, String> {
 		"GitHub CLI (`gh`) is not available to the app. Install it or launch DCC from a shell where `gh` is on PATH."
 			.to_string(),
 	)
+}
+
+fn parse_gh_active_login(output: &str) -> Option<String> {
+	for line in output.lines() {
+		let trimmed = line.trim();
+		if trimmed.is_empty() {
+			continue;
+		}
+
+		if let Some((_, login)) = trimmed.split_once(" as ") {
+			let login = login
+				.trim()
+				.split('(')
+				.next()
+				.unwrap_or("")
+				.trim()
+				.trim_matches(|ch: char| ch == '(' || ch == ')' || ch == ',' || ch == '.');
+			if !login.is_empty() {
+				return Some(login.to_string());
+			}
+		}
+
+		if let Some((_, login)) = trimmed.split_once(" account ") {
+			let login = login
+				.trim()
+				.split('(')
+				.next()
+				.unwrap_or("")
+				.trim()
+				.trim_matches(|ch: char| ch == '(' || ch == ')' || ch == ',' || ch == '.');
+			if !login.is_empty() {
+				return Some(login.to_string());
+			}
+		}
+	}
+
+	None
+}
+
+fn github_cli_status_error(hostname: &str, message: String) -> GithubCliStatusOutput {
+	GithubCliStatusOutput {
+		cli_name: "gh".to_string(),
+		hostname: hostname.to_string(),
+		status: GithubCliStatusState::Error,
+		login: None,
+		message,
+		login_command: "gh auth login".to_string(),
+	}
+}
+
+#[tauri::command]
+pub async fn workspace_github_cli_status(
+	_input: GithubCliStatusInput,
+) -> Result<GithubCliStatusOutput, String> {
+	let hostname = "github.com";
+	let gh = match resolve_gh_binary() {
+		Ok(path) => path,
+		Err(message) => return Ok(github_cli_status_error(hostname, message)),
+	};
+
+	let output = Command::new(gh)
+		.args(["auth", "status", "--active", "--hostname", hostname])
+		.output()
+		.map_err(|error| error.to_string())?;
+
+	let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+	let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+	let combined = format!("{stdout}\n{stderr}");
+
+	if output.status.success() {
+		let login = parse_gh_active_login(&combined);
+		let message = login
+			.as_ref()
+			.map(|value| format!("Logged in as {value}"))
+			.unwrap_or_else(|| "GitHub CLI is connected.".to_string());
+		return Ok(GithubCliStatusOutput {
+			cli_name: "gh".to_string(),
+			hostname: hostname.to_string(),
+			status: GithubCliStatusState::Ready,
+			login,
+			message,
+			login_command: "gh auth login".to_string(),
+		});
+	}
+
+	let lower = combined.to_lowercase();
+	let message = if lower.contains("not logged in")
+		|| lower.contains("no active account")
+		|| lower.contains("gh auth login")
+		|| lower.contains("authenticate")
+	{
+		"Run `gh auth login` to connect GitHub locally.".to_string()
+	} else {
+		let trimmed = combined.trim();
+		if trimmed.is_empty() {
+			"GitHub CLI authentication failed.".to_string()
+		} else {
+			trimmed.to_string()
+		}
+	};
+
+	Ok(github_cli_status_error(hostname, message))
+}
+
+#[cfg(test)]
+mod github_cli_status_tests {
+	use super::parse_gh_active_login;
+
+	#[test]
+	fn parses_logged_in_line_with_as() {
+		let output = "github.com\n  ✓ Logged in to github.com as demo-user (keyring)";
+		assert_eq!(parse_gh_active_login(output), Some("demo-user".to_string()));
+	}
+
+	#[test]
+	fn parses_logged_in_line_with_account() {
+		let output = "github.com\n  ✓ Logged in to github.com account demo-user";
+		assert_eq!(parse_gh_active_login(output), Some("demo-user".to_string()));
+	}
 }
 
 fn resolve_current_branch_name(root: &str) -> Result<String, String> {

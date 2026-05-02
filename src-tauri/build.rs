@@ -17,12 +17,13 @@ use std::{env, fs, path::PathBuf};
 	},
 	ports::events::CoreEvent,
 };
-	use dcc_tauri::commands::{
+use dcc_tauri::commands::{
 	provider_commands::ListProvidersOutput,
 	workspace_commands::{
 		CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
-		ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
-		ListLocalBranchesInput, ListLocalBranchesOutput, ListWorkspacesOutput,
+		ListChildDirectoriesOutput, GithubCliStatusInput, GithubCliStatusOutput,
+		ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
+		ListLocalBranchesOutput, ListWorkspacesOutput,
 		WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
 		WorkspaceGitCommitPushInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
 		WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
@@ -38,6 +39,7 @@ use tauri_specta::Builder;
 	struct WorkspaceMethods {
 	create_workspace_for_repo: String,
 	create_workspace_from_url: String,
+	workspace_github_cli_status: String,
 	list_local_branches: String,
 	list_git_tracked_files: String,
 	list_child_directories: String,
@@ -111,6 +113,8 @@ fn main() {
 		.typ::<ListChildDirectoriesInput>()
 		.typ::<ListChildDirectoriesOutput>()
 		.typ::<ListWorkspacesOutput>()
+		.typ::<GithubCliStatusInput>()
+		.typ::<GithubCliStatusOutput>()
 		.typ::<WorkspaceGitStatusInput>()
 		.typ::<WorkspaceGitStatusOutput>()
 		.typ::<WorkspaceGitChangeEntry>()
@@ -137,6 +141,7 @@ fn main() {
 			WorkspaceMethods {
 				create_workspace_for_repo: "create_workspace_for_repo".to_string(),
 				create_workspace_from_url: "create_workspace_from_url".to_string(),
+				workspace_github_cli_status: "workspace_github_cli_status".to_string(),
 				list_local_branches: "list_local_branches".to_string(),
 				list_git_tracked_files: "list_git_tracked_files".to_string(),
 				list_child_directories: "list_child_directories".to_string(),

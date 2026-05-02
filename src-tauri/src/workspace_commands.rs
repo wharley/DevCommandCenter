@@ -5,6 +5,8 @@ use dcc_tauri::{
 	commands::workspace_commands::{
 		CreateWorkspaceForRepoOutput,
 		CreateWorkspaceFromUrlOutput,
+		GithubCliStatusInput,
+		GithubCliStatusOutput,
 		ListChildDirectoriesInput,
 		ListChildDirectoriesOutput,
 		ListGitTrackedFilesInput,
@@ -48,6 +50,13 @@ pub async fn list_workspaces(
 	state: State<'_, WorkspaceCommandState>,
 ) -> Result<ListWorkspacesOutput, String> {
 	dcc_tauri::commands::workspace_commands::list_workspaces(state).await
+}
+
+#[tauri::command]
+pub async fn workspace_github_cli_status(
+	input: GithubCliStatusInput,
+) -> Result<GithubCliStatusOutput, String> {
+	dcc_tauri::commands::workspace_commands::workspace_github_cli_status(input).await
 }
 
 #[tauri::command]

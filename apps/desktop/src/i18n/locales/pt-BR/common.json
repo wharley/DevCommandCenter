@@ -197,10 +197,20 @@
       "body": "Nenhum toggle de preview exposto ainda. Esta seção reserva espaço para flags futuras."
     },
     "account": {
-      "githubTitle": "Conta GitHub",
-      "githubHint": "Conta e sincronização ficam para a próxima integração.",
-      "disconnected": "Desconectado",
-      "footerHint": "O diálogo já reserva a seção de conta para integrações futuras."
+      "title": "Integração GitHub CLI",
+      "hint": "O DCC usa o `gh` local do sistema para autenticação, PRs e setup de repositório.",
+      "sectionBadge": "GitHub local",
+      "githubCliTitle": "GitHub CLI integration",
+      "githubCliHint": "Instale e autentique o GitHub CLI para o DCC conseguir abrir PRs e manter as ações no seu terminal.",
+      "githubCliReadyBadge": "Conectado",
+      "githubCliNotReadyBadge": "Desconectado",
+      "githubCliChecking": "Verificando…",
+      "githubCliSetUp": "Abrir terminal",
+      "githubCliRefresh": "Reverificar",
+      "githubCliTerminalOpened": "Terminal aberto. Rode `gh auth login` para conectar.",
+      "githubCliTerminalFailed": "Não foi possível abrir o terminal.",
+      "githubCliLoadingError": "Não foi possível verificar o GitHub CLI.",
+      "githubCliCommand": "Comando sugerido: `{{command}}`"
     }
   },
   "shortcutsSheet": {
@@ -238,6 +248,11 @@
     },
     "phase4Title": "Escopo Fase 4",
     "phase4Body": "Entregamos intro, agentes, importação de repo e a transição de conclusão primeiro.",
+    "repoCliTitle": "Integração GitHub CLI",
+    "repoCliBody": "Abra o terminal e rode `gh auth login` para o DCC conseguir criar PRs e usar o fluxo local do GitHub.",
+    "repoCliButton": "Abrir terminal",
+    "repoCliOpened": "Terminal aberto. Rode `gh auth login` para conectar.",
+    "repoCliFailed": "Não foi possível abrir o terminal.",
     "laterSteps": "Próximos passos",
     "conductorPreviewTitle": "Preview opcional do Conductor",
     "conductorPreviewBody": "A integração opcional continua adiada, mas o conceito visual já está disponível.",

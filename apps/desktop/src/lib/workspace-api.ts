@@ -5,6 +5,8 @@ import type {
 	CreateWorkspaceForRepoOutput,
 	CreateWorkspaceFromUrlInput,
 	CreateWorkspaceFromUrlOutput,
+	GithubCliStatusInput,
+	GithubCliStatusOutput,
 	ListChildDirectoriesInput,
 	ListChildDirectoriesOutput,
 	ListGitTrackedFilesInput,
@@ -31,6 +33,12 @@ export function createWorkspaceForRepo(input: CreateWorkspaceForRepoInput) {
 
 export function createWorkspaceFromUrl(input: CreateWorkspaceFromUrlInput) {
 	return invoke<CreateWorkspaceFromUrlOutput>(WORKSPACE_METHODS.createWorkspaceFromUrl, {
+		input,
+	});
+}
+
+export function workspaceGithubCliStatus(input: GithubCliStatusInput) {
+	return invoke<GithubCliStatusOutput>(WORKSPACE_METHODS.workspaceGithubCliStatus, {
 		input,
 	});
 }

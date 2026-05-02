@@ -18,6 +18,7 @@ pub use workspace_commands::{
 	list_git_tracked_files,
 	list_local_branches,
 	list_workspaces,
+	workspace_github_cli_status,
 	workspace_gh_pr_create_fill,
 	workspace_gh_pr_view_web,
 	workspace_git_file_preview,
