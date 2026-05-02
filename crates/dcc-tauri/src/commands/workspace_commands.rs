@@ -197,6 +197,53 @@ fn resolve_default_remote_name(root: &str) -> Result<String, String> {
 	Ok(remotes[0].clone())
 }
 
+fn resolve_gh_binary() -> Result<PathBuf, String> {
+	let candidates = [
+		PathBuf::from("gh"),
+		PathBuf::from("/opt/homebrew/bin/gh"),
+		PathBuf::from("/usr/local/bin/gh"),
+	];
+
+	for candidate in candidates {
+		if candidate.as_os_str() == "gh" {
+			if Command::new(&candidate).arg("--version").output().is_ok() {
+				return Ok(candidate);
+			}
+			continue;
+		}
+
+		if candidate.is_file() {
+			return Ok(candidate);
+		}
+	}
+
+	Err(
+		"GitHub CLI (`gh`) is not available to the app. Install it or launch DCC from a shell where `gh` is on PATH."
+			.to_string(),
+	)
+}
+
+fn resolve_current_branch_name(root: &str) -> Result<String, String> {
+	let output = Command::new("git")
+		.arg("-C")
+		.arg(root)
+		.args(["rev-parse", "--abbrev-ref", "HEAD"])
+		.output()
+		.map_err(|e| e.to_string())?;
+	if !output.status.success() {
+		return Err(git_output_err(
+			"git rev-parse --abbrev-ref HEAD",
+			&output.stderr,
+		));
+	}
+
+	let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+	if branch.is_empty() {
+		return Err("current branch is empty".to_string());
+	}
+	Ok(branch)
+}
+
 fn push_current_branch(root: &str) -> Result<(), String> {
 	let remote = resolve_default_remote_name(root)?;
 	let output = Command::new("git")
@@ -505,8 +552,9 @@ pub async fn workspace_gh_pr_view_web(input: WorkspaceGitPushInput) -> Result<()
 	if root.is_empty() {
 		return Err("workspace_root is empty".to_string());
 	}
+	let gh = resolve_gh_binary()?;
 
-	let output = Command::new("gh")
+	let output = Command::new(gh)
 		.current_dir(root)
 		.args(["pr", "view", "--web"])
 		.output()
@@ -527,10 +575,21 @@ pub async fn workspace_gh_pr_create_fill(input: WorkspaceGitPushInput) -> Result
 	if root.is_empty() {
 		return Err("workspace_root is empty".to_string());
 	}
+	let current_branch = resolve_current_branch_name(root)?;
+	let base_branch = resolve_branch_diff_base(root).unwrap_or_else(|| "main".to_string());
+	let gh = resolve_gh_binary()?;
 
-	let output = Command::new("gh")
+	let output = Command::new(gh)
 		.current_dir(root)
-		.args(["pr", "create", "--fill", "--web"])
+		.args([
+			"pr",
+			"create",
+			"--fill",
+			"--base",
+			&base_branch,
+			"--head",
+			&current_branch,
+		])
 		.output()
 		.map_err(|e| e.to_string())?;
 	if output.status.success() {

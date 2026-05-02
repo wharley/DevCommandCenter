@@ -88,6 +88,28 @@ function inspectorActionTitle(mode: string) {
 	}
 }
 
+function getInspectorActionErrorMessage(error: unknown): string {
+	if (typeof error === "string" && error.trim().length > 0) {
+		return error.trim();
+	}
+	if (error && typeof error === "object") {
+		const candidate = error as Record<string, unknown>;
+		if (typeof candidate.message === "string" && candidate.message.trim().length > 0) {
+			return candidate.message.trim();
+		}
+		if (typeof candidate.error === "string" && candidate.error.trim().length > 0) {
+			return candidate.error.trim();
+		}
+		if (typeof candidate.toString === "function") {
+			const text = candidate.toString();
+			if (typeof text === "string" && text !== "[object Object]" && text.trim().length > 0) {
+				return text.trim();
+			}
+		}
+	}
+	return "Action failed";
+}
+
 function ProviderCatalogDense({ catalog }: { catalog: ProviderCatalog | null }) {
 	const providers = catalog?.providers ?? [];
 
@@ -193,6 +215,9 @@ export function WorkspaceInspectorSidebar({
 	const queryClient = useQueryClient();
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
 	const rootRef = useRef<HTMLDivElement | null>(null);
+	const hasWorkingTreeChanges =
+		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
+		(gitStatusQuery.data?.unstaged.length ?? 0) > 0;
 
 	const handleInspectorCommit = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -201,19 +226,7 @@ export function WorkspaceInspectorSidebar({
 			throw new Error("No workspace path");
 		}
 
-		const promptCommitMessage = (fallback: string) => {
-			const message = window.prompt("Commit message", fallback);
-			if (message === null) {
-				return null;
-			}
-			const trimmed = message.trim();
-			if (!trimmed) {
-				toast.error("Commit message required");
-				throw new Error("Commit message required");
-			}
-			return trimmed;
-		};
-
+		const loadingToast = toast.loading(`${inspectorActionTitle(commitMode)}...`);
 		try {
 			switch (commitMode) {
 				case "merged":
@@ -221,31 +234,25 @@ export function WorkspaceInspectorSidebar({
 					return;
 				case "push":
 					await workspaceGitPush({ workspaceRoot: root });
-					toast.success("Pushed");
+					toast.success("Pushed", { id: loadingToast });
 					break;
 				case "open-pr":
 					await workspaceGhPrViewWeb({ workspaceRoot: root });
-					toast.success("Opened PR in browser");
+					toast.success("Opened PR in browser", { id: loadingToast });
 					break;
 				case "create-pr": {
-					await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
-					const message = promptCommitMessage("feat: create pull request");
-					if (!message) {
-						return;
+					if (hasWorkingTreeChanges) {
+						throw new Error("Commit local changes before creating a PR.");
 					}
-					await workspaceGitCommitPush({ workspaceRoot: root, message });
 					await workspaceGhPrCreateFill({ workspaceRoot: root });
-					toast.success("PR created");
+					toast.success("PR created", { id: loadingToast });
 					break;
 				}
 				default: {
 					await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
-					const message = promptCommitMessage("dcc: checkpoint");
-					if (!message) {
-						return;
-					}
+					const message = `chore: checkpoint for ${workspaceName ?? "workspace"}`;
 					await workspaceGitCommitPush({ workspaceRoot: root, message });
-					toast.success("Committed and pushed");
+					toast.success("Committed and pushed", { id: loadingToast });
 					break;
 				}
 			}
@@ -254,12 +261,14 @@ export function WorkspaceInspectorSidebar({
 				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
 			});
 		} catch (error) {
-			const message = error instanceof Error ? error.message : "Action failed";
+			const message = getInspectorActionErrorMessage(error);
 			console.error("[inspector] git action failed", { commitMode, root, error });
-			toast.error(`${inspectorActionTitle(commitMode)} failed: ${message}`);
+			toast.error(`${inspectorActionTitle(commitMode)} failed: ${message}`, {
+				id: loadingToast,
+			});
 			throw error;
 		}
-	}, [commitMode, queryClient, workspacePath]);
+	}, [commitMode, queryClient, workspacePath, workspaceName]);
 
 	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
 	const [manualResize, setManualResize] = useState(false);
