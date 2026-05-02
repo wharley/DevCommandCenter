@@ -390,7 +390,43 @@ fn resolve_workspace_pr_status_json(
 		Err(_) => return Ok(None),
 	};
 
-	let output = Command::new(gh)
+	let json_fields = "number,title,url,state,mergeable,mergeStateStatus,isDraft,headRefName,headRefOid,baseRefName";
+
+	// Primary: `gh pr view` with no argument resolves the PR for the current branch.
+	// This works even in worktrees and is more targeted than listing all PRs.
+	let view_output = Command::new(&gh)
+		.current_dir(root)
+		.args(["pr", "view", "--json", json_fields])
+		.output();
+	if let Ok(output) = view_output {
+		if output.status.success() {
+			if let Ok(pr) = serde_json::from_slice::<Value>(&output.stdout) {
+				if pr.is_object() && !pr.as_object().map_or(true, |o| o.is_empty()) {
+					return Ok(Some(pr));
+				}
+			}
+		}
+	}
+
+	// Secondary: `gh pr view <hint>` for each branch hint (covers detached HEAD + renamed branches).
+	for hint in branch_hints {
+		let output = Command::new(&gh)
+			.current_dir(root)
+			.args(["pr", "view", hint, "--json", json_fields])
+			.output();
+		if let Ok(output) = output {
+			if output.status.success() {
+				if let Ok(pr) = serde_json::from_slice::<Value>(&output.stdout) {
+					if pr.is_object() && !pr.as_object().map_or(true, |o| o.is_empty()) {
+						return Ok(Some(pr));
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback: `gh pr list --state all` filtered by branch name or commit SHA.
+	let output = Command::new(&gh)
 		.current_dir(root)
 		.args([
 			"pr",
@@ -398,7 +434,7 @@ fn resolve_workspace_pr_status_json(
 			"--state",
 			"all",
 			"--json",
-			"number,title,url,state,mergeable,mergeStateStatus,isDraft,headRefName,headRefOid,baseRefName",
+			json_fields,
 		])
 		.output()
 		.map_err(|e| e.to_string())?;
