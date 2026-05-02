@@ -32,11 +32,8 @@ const CURSOR_AUTODETECT_MODEL_ID: &str = "auto";
 #[derive(Clone)]
 pub struct CursorProvider {
 	id: ProviderId,
-	label: String,
-	description: String,
 	binary: String,
 	capabilities: Capabilities,
-	stable: bool,
 	runtime: Arc<ProviderRuntimeState>,
 }
 
@@ -66,14 +63,7 @@ struct CursorCommandResult {
 }
 
 pub fn adapter() -> CursorProvider {
-	CursorProvider::new(
-		"cursor",
-		PROVIDER_LABEL,
-		PROVIDER_DESCRIPTION,
-		"cursor-agent",
-		experimental_cli_capabilities(),
-		false,
-	)
+	CursorProvider::new("cursor", "cursor-agent", experimental_cli_capabilities())
 }
 
 pub fn descriptor(health: HealthStatus, discovered_models: Vec<ProviderModelDescriptor>) -> ProviderDescriptor {
@@ -110,21 +100,11 @@ pub fn descriptor(health: HealthStatus, discovered_models: Vec<ProviderModelDesc
 }
 
 impl CursorProvider {
-	pub fn new(
-		id: impl Into<String>,
-		label: impl Into<String>,
-		description: impl Into<String>,
-		binary: impl Into<String>,
-		capabilities: Capabilities,
-		stable: bool,
-	) -> Self {
+	pub fn new(id: impl Into<String>, binary: impl Into<String>, capabilities: Capabilities) -> Self {
 		Self {
 			id: ProviderId(id.into()),
-			label: label.into(),
-			description: description.into(),
 			binary: binary.into(),
 			capabilities,
-			stable,
 			runtime: Arc::new(ProviderRuntimeState::default()),
 		}
 	}
@@ -640,7 +620,7 @@ fn parse_cursor_about_result(result: &CursorCommandResult) -> CursorAboutResult 
 				return CursorAboutResult {
 					auth: CursorAuth {
 						status: "unauthenticated".to_string(),
-						email: None,
+						_email: None,
 					},
 					message: Some("Cursor Agent is not authenticated. Run `cursor-agent login` and try again.".to_string()),
 				};
@@ -649,7 +629,7 @@ fn parse_cursor_about_result(result: &CursorCommandResult) -> CursorAboutResult 
 			return CursorAboutResult {
 				auth: CursorAuth {
 					status: "authenticated".to_string(),
-					email: Some(email),
+					_email: Some(email),
 				},
 				message: None,
 			};
@@ -659,7 +639,7 @@ fn parse_cursor_about_result(result: &CursorCommandResult) -> CursorAboutResult 
 			return CursorAboutResult {
 				auth: CursorAuth {
 					status: "unknown".to_string(),
-					email: None,
+					_email: None,
 				},
 				message: None,
 			};
@@ -673,7 +653,7 @@ fn parse_cursor_about_result(result: &CursorCommandResult) -> CursorAboutResult 
 	CursorAboutResult {
 		auth: CursorAuth {
 			status: "unknown".to_string(),
-			email: None,
+			_email: None,
 		},
 		message: combined,
 	}
@@ -820,7 +800,7 @@ struct CursorAboutResult {
 #[derive(Clone, Debug)]
 struct CursorAuth {
 	status: String,
-	email: Option<String>,
+	_email: Option<String>,
 }
 
 pub async fn discover_models() -> Vec<ProviderModelDescriptor> {
