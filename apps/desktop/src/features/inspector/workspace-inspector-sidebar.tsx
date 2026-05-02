@@ -1,5 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import {
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+	type MouseEvent as ReactMouseEvent,
+	type ReactNode,
+} from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { BranchToolbar } from "@/components/BranchToolbar";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +42,7 @@ type WorkspaceInspectorSidebarProps = {
 };
 
 const MIN_SECTION_HEIGHT = 128;
-const MAX_SECTION_HEIGHT = 360;
+const MAX_SECTION_HEIGHT = 640;
 const INITIAL_CHANGES_HEIGHT = 200;
 
 type InspectorTab = "activity" | "context";
@@ -141,6 +149,7 @@ export function WorkspaceInspectorSidebar({
 	sessionId,
 	sessionEvents,
 }: WorkspaceInspectorSidebarProps) {
+	const { t } = useTranslation("common");
 	const hasWorkspace = Boolean(workspaceId && workspaceName && workspaceBranch);
 	const pathLine =
 		workspacePath && workspacePath.length > 0
@@ -151,6 +160,7 @@ export function WorkspaceInspectorSidebar({
 	const commitMode = resolveCommitMode(workspaceBranch ?? "");
 	const queryClient = useQueryClient();
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
+	const rootRef = useRef<HTMLDivElement | null>(null);
 
 	const handleInspectorCommit = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -193,10 +203,35 @@ export function WorkspaceInspectorSidebar({
 	}, [commitMode, queryClient, workspacePath]);
 
 	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
+	const [manualResize, setManualResize] = useState(false);
 	const [inspectorTab, setInspectorTab] = useState<InspectorTab>("activity");
+
+	useEffect(() => {
+		const root = rootRef.current;
+		if (!root || manualResize) {
+			return;
+		}
+
+		const syncHeight = () => {
+			const availableHeight = root.clientHeight;
+			if (availableHeight <= 0) {
+				return;
+			}
+			const half = Math.round(availableHeight / 2);
+			setChangesHeight(
+				Math.min(MAX_SECTION_HEIGHT, Math.max(MIN_SECTION_HEIGHT, half)),
+			);
+		};
+
+		syncHeight();
+		const observer = new ResizeObserver(syncHeight);
+		observer.observe(root);
+		return () => observer.disconnect();
+	}, [manualResize]);
 
 	function handleResizeGitSectionStart(event: ReactMouseEvent<HTMLButtonElement>) {
 		event.preventDefault();
+		setManualResize(true);
 		const startY = event.clientY;
 		const startHeight = changesHeight;
 		const onMove = (moveEvent: MouseEvent) => {
@@ -215,11 +250,11 @@ export function WorkspaceInspectorSidebar({
 
 	if (!hasWorkspace) {
 		return (
-			<div className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground">
+			<div ref={rootRef} className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground">
 				<div className="flex min-h-0 flex-1 items-center justify-center px-4 py-6">
 					<EmptyState
-						title="No workspace selected"
-						description="Open or create a workspace to inspect git state and session activity."
+						title={t("inspector.empty.title")}
+						description={t("inspector.empty.description")}
 					/>
 				</div>
 			</div>
@@ -230,7 +265,11 @@ export function WorkspaceInspectorSidebar({
 	const catalogCount = providerCatalog?.providers.length ?? 0;
 
 	return (
-		<div className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground" data-dcc-inspector-root>
+		<div
+			ref={rootRef}
+			className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground"
+			data-dcc-inspector-root
+		>
 			<section
 				className="flex shrink-0 flex-col overflow-hidden border-b border-border/60"
 				style={{ height: `${changesHeight}px` }}
@@ -274,27 +313,27 @@ export function WorkspaceInspectorSidebar({
 					<div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/40 px-3 py-2">
 						<div className="min-w-0">
 							<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-								Session
+								{t("inspector.gitSection.kicker")}
 							</p>
 							<p className="truncate text-[13px] font-medium leading-tight text-foreground">
-								Activity and workspace context
+								{t("inspector.gitSection.title")}
 							</p>
 						</div>
 						<Badge variant="outline" className="h-6 shrink-0 px-2 text-[10px] font-normal">
-							{activityCount} events
+							{t("inspector.gitSection.eventsCount", { count: activityCount })}
 						</Badge>
 					</div>
 
 					<div className="shrink-0 border-b border-border/40 bg-muted/15 px-2">
-						<TabsList variant="line" className="h-9 w-full justify-start gap-0 border-0 bg-transparent p-0">
-							<TabsTrigger value="activity" className="h-9 rounded-none px-3 text-[12px]">
-								Activity
-							</TabsTrigger>
-							<TabsTrigger value="context" className="h-9 rounded-none px-3 text-[12px]">
-								Context
-								{catalogCount > 0 ? (
-									<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
-										({catalogCount})
+							<TabsList variant="line" className="h-9 w-full justify-start gap-0 border-0 bg-transparent p-0">
+								<TabsTrigger value="activity" className="h-9 rounded-none px-3 text-[12px]">
+									{t("inspector.tabs.activity")}
+								</TabsTrigger>
+								<TabsTrigger value="context" className="h-9 rounded-none px-3 text-[12px]">
+									{t("inspector.tabs.context")}
+									{catalogCount > 0 ? (
+										<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
+											({catalogCount})
 									</span>
 								) : null}
 							</TabsTrigger>
@@ -308,85 +347,84 @@ export function WorkspaceInspectorSidebar({
 						<SessionEventFeed events={sessionEvents} compact />
 					</TabsContent>
 
-					<TabsContent
-						value="context"
-						className="mt-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
-					>
-						<div className="space-y-4">
-							<div>
-								<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-									Workspace
-								</p>
-								<div className="rounded-md border border-border/50 bg-muted/10 px-2">
-									<DetailRow label="Name">{workspaceName ?? "—"}</DetailRow>
-									<DetailRow label="Id">{workspaceId ?? "—"}</DetailRow>
-									<DetailRow label="Branch">{workspaceBranch ?? "—"}</DetailRow>
-									<DetailRow label="Path">
-										<span title={workspacePath ?? undefined}>{workspacePath ?? "—"}</span>
-									</DetailRow>
+						<TabsContent
+							value="context"
+							className="mt-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
+						>
+							<div className="space-y-4">
+								<div>
+									<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+										{t("inspector.groups.workspace")}
+									</p>
+									<div className="rounded-md border border-border/50 bg-muted/10 px-2">
+										<DetailRow label={t("inspector.fields.name")}>{workspaceName ?? "—"}</DetailRow>
+										<DetailRow label={t("inspector.fields.id")}>{workspaceId ?? "—"}</DetailRow>
+										<DetailRow label={t("inspector.fields.branch")}>{workspaceBranch ?? "—"}</DetailRow>
+										<DetailRow label={t("inspector.fields.path")}>
+											<span title={workspacePath ?? undefined}>{workspacePath ?? "—"}</span>
+										</DetailRow>
+									</div>
 								</div>
-							</div>
 
-							<div>
-								<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-									Composer selection
-								</p>
-								<div className="rounded-md border border-border/50 bg-muted/10 px-2">
-									<DetailRow label="Provider">{selectedProviderLabel ?? "—"}</DetailRow>
-									<DetailRow label="Model">{selectedModelLabel ?? "—"}</DetailRow>
+								<div>
+									<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+										{t("inspector.groups.composer")}
+									</p>
+									<div className="rounded-md border border-border/50 bg-muted/10 px-2">
+										<DetailRow label={t("inspector.fields.provider")}>{selectedProviderLabel ?? "—"}</DetailRow>
+										<DetailRow label={t("inspector.fields.model")}>{selectedModelLabel ?? "—"}</DetailRow>
+									</div>
 								</div>
-							</div>
 
-							<div>
-								<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-									Session runtime
-								</p>
-								<div className="rounded-md border border-border/50 bg-muted/10 px-2">
-									<DetailRow label="State">
-										<span className="inline-flex items-center gap-2">
-											{sessionState}
-											{sessionId ? (
+								<div>
+									<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+										{t("inspector.groups.runtime")}
+									</p>
+									<div className="rounded-md border border-border/50 bg-muted/10 px-2">
+										<DetailRow label={t("inspector.fields.state")}>
+											<span className="inline-flex items-center gap-2">
+												{sessionState}
+												{sessionId ? (
 												<Badge variant="outline" className="font-mono text-[10px] font-normal">
 													{sessionId.length > 14 ? `${sessionId.slice(0, 12)}…` : sessionId}
 												</Badge>
 											) : null}
 										</span>
-									</DetailRow>
-									{sessionSnapshot ? (
-										<>
-											<DetailRow label="Turns">{String(sessionSnapshot.turnCount)}</DetailRow>
-											<DetailRow label="Checkpoints">{String(sessionSnapshot.checkpointCount)}</DetailRow>
-											<DetailRow label="Last turn">
-												{sessionSnapshot.lastTurnPrompt ?? "—"}
-											</DetailRow>
-											<DetailRow label="Provider id">{sessionSnapshot.providerId}</DetailRow>
-										</>
-									) : (
-										<DetailRow label="Session">No active session — start one from the composer.</DetailRow>
-									)}
+										</DetailRow>
+										{sessionSnapshot ? (
+											<>
+												<DetailRow label={t("inspector.fields.turns")}>{String(sessionSnapshot.turnCount)}</DetailRow>
+												<DetailRow label={t("inspector.fields.checkpoints")}>{String(sessionSnapshot.checkpointCount)}</DetailRow>
+												<DetailRow label={t("inspector.fields.lastTurn")}>
+													{sessionSnapshot.lastTurnPrompt ?? "—"}
+												</DetailRow>
+												<DetailRow label={t("inspector.fields.providerId")}>{sessionSnapshot.providerId}</DetailRow>
+											</>
+										) : (
+											<DetailRow label={t("inspector.fields.session")}>{t("inspector.sessionFallback")}</DetailRow>
+										)}
+									</div>
 								</div>
-							</div>
 
-							<div>
-								<div className="mb-2 flex items-center justify-between gap-2">
-									<p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-										Provider catalog
-									</p>
-									{catalogCount > 0 ? (
-										<Badge variant="secondary" className="h-5 text-[10px] font-normal">
-											{catalogCount} registered
-										</Badge>
-									) : null}
+								<div>
+									<div className="mb-2 flex items-center justify-between gap-2">
+										<p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+											{t("inspector.groups.providers")}
+										</p>
+										{catalogCount > 0 ? (
+											<Badge variant="secondary" className="h-5 text-[10px] font-normal">
+												{t("inspector.providersRegistered", { count: catalogCount })}
+											</Badge>
+										) : null}
+									</div>
+									<ProviderCatalogDense catalog={providerCatalog} />
 								</div>
-								<ProviderCatalogDense catalog={providerCatalog} />
-							</div>
 
-							<p className="text-[10px] leading-relaxed text-muted-foreground">
-								Terminal sessions stay in the workbench drawer at the bottom of the layout — they are not
-								mirrored here so the inspector stays focused on Git and session signals.
-							</p>
-						</div>
-					</TabsContent>
+								<p className="text-[10px] leading-relaxed text-muted-foreground">
+									{t("inspector.terminalNote")}
+								</p>
+							</div>
+						</TabsContent>
 				</Tabs>
 			</section>
 		</div>

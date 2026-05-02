@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Toaster } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -50,6 +51,7 @@ import { useAppearance } from "./components/theme-provider";
 import {
 	SELECTED_PROVIDER_STORAGE_KEY,
 	SELECTED_MODEL_STORAGE_KEY,
+	getProviderUnhealthyReason,
 	getSessionComposerSelection,
 	resolveSelectedProviderId,
 	resolveSelectedModelId,
@@ -221,6 +223,10 @@ export default function App() {
 			null,
 		[selectedModelId, selectedProvider],
 	);
+	const selectedProviderBlockReason = useMemo(
+		() => getProviderUnhealthyReason(selectedProvider),
+		[selectedProvider],
+	);
 	useDockUnreadBadge(allWorkspaces);
 
 	useEffect(() => {
@@ -368,6 +374,10 @@ export default function App() {
 		if (!selectedProvider || !selectedWorkspace) {
 			return;
 		}
+		if (selectedProviderBlockReason) {
+			toast.error(selectedProviderBlockReason);
+			return;
+		}
 
 		const result = await startThread({
 			workspaceId: selectedWorkspace.id,
@@ -388,11 +398,20 @@ export default function App() {
 			checkpointCount: result.projection.checkpointCount,
 			activeTurnId: result.projection.activeTurnId ?? null,
 		});
-	}, [selectedModel, selectedProvider, selectedWorkspace]);
+	}, [
+		selectedModel,
+		selectedProvider,
+		selectedProviderBlockReason,
+		selectedWorkspace,
+	]);
 
 	const handleSubmitPrompt = useCallback(async (turn: ComposerSubmittedTurn) => {
 		const trimmedPrompt = turn.rawPrompt.trim();
 		if (trimmedPrompt.length === 0) {
+			return;
+		}
+		if (selectedProviderBlockReason) {
+			toast.error(selectedProviderBlockReason);
 			return;
 		}
 
@@ -451,12 +470,22 @@ export default function App() {
 				lastTurnPrompt: result.turn.content,
 				lastTurnState: result.turn.state,
 			});
+		} catch (error) {
+			const message =
+				error instanceof Error
+					? error.message
+					: typeof error === "string"
+						? error
+						: "Failed to send prompt";
+			console.error("[dcc] send prompt failed:", error);
+			toast.error(message);
 		} finally {
 			setPendingPrompt(null);
 		}
 	}, [
 		selectedModel,
 		selectedProvider,
+		selectedProviderBlockReason,
 		selectedWorkspace,
 		sessionSnapshot,
 	]);

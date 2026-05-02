@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowUp, ChevronDown, ClipboardList, Square, Zap } from "lucide-react";
+import type { LexicalEditor } from "lexical";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
@@ -25,6 +26,7 @@ import { cn } from "@/lib/utils";
 import type { ProviderCatalog } from "@dcc/contracts";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import { canAbortRun } from "@/features/sessions/session-chrome-state";
+import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
 import { ContextBar } from "./ContextBar";
 import { ComposerProviderModelMenu } from "./ComposerProviderModelMenu";
 import { ContextUsageRing } from "./ContextUsageRing";
@@ -50,6 +52,7 @@ import { FileBadgeNode } from "./editor/file-badge-node";
 import { ImageBadgeNode } from "./editor/image-badge-node";
 import { PastedSnippetBadgeNode } from "./editor/pasted-snippet-badge-node";
 import { AutoResizePlugin } from "./editor/plugins/AutoResizePlugin";
+import { EditorRefPlugin } from "./editor/plugins/EditorRefPlugin";
 import { DraftPersistencePlugin } from "./editor/plugins/DraftPersistencePlugin";
 import { CompositionGuardPlugin } from "./editor/plugins/CompositionGuardPlugin";
 import { DropFilePlugin } from "./editor/plugins/drop-file-plugin";
@@ -61,6 +64,8 @@ import { SlashCommandPlugin } from "./editor/plugins/slash-command-plugin";
 import { SubmitPlugin } from "./editor/plugins/SubmitPlugin";
 import { workspaceChildDirsQueryOptions } from "./workspace-child-dirs-query";
 import type { ComposerSubmittedTurn } from "./composer-turn";
+import { clearDraft } from "./draftStorage";
+import { readComposerPrompt, setEditorText } from "./editorOps";
 
 const DCC_EFFORT_LEVELS = [
 	{ id: "low" as const, label: "Low", icon: "low" as const },
@@ -103,7 +108,6 @@ export function WorkspaceComposer({
 }: WorkspaceComposerProps) {
 	const [hasContent, setHasContent] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
-	const [submitAction, setSubmitAction] = useState<(() => void) | null>(null);
 	const [isFastMode, setIsFastMode] = useState(true);
 	const [effort, setEffort] = useState<EffortId>("balanced");
 	const [isPlanMode, setIsPlanMode] = useState(false);
@@ -112,6 +116,17 @@ export function WorkspaceComposer({
 	);
 	const composerDraftKey = useMemo(() => getComposerDraftKey(draftKey), [draftKey]);
 	const composerRootRef = useRef<HTMLDivElement | null>(null);
+	const editorRef = useRef<LexicalEditor | null>(null);
+	const selectedProvider = useMemo(
+		() =>
+			providerChoices.find((provider) => provider.id === selectedProviderId) ??
+			null,
+		[providerChoices, selectedProviderId],
+	);
+	const selectedProviderBlockReason = useMemo(
+		() => getProviderUnhealthyReason(selectedProvider),
+		[selectedProvider],
+	);
 
 	const submitFromComposer = useCallback(
 		async (rawPrompt: string) => {
@@ -126,6 +141,31 @@ export function WorkspaceComposer({
 		},
 		[effort, isFastMode, isPlanMode, onSubmitPrompt],
 	);
+
+	const handleSubmitDraft = useCallback(async () => {
+		if (isSubmitting) {
+			return;
+		}
+
+		const editor = editorRef.current;
+		if (!editor) {
+			return;
+		}
+
+		const prompt = readComposerPrompt(editor).trim();
+		if (prompt.length === 0) {
+			return;
+		}
+
+		setIsSubmitting(true);
+		try {
+			await submitFromComposer(prompt);
+			clearDraft(composerDraftKey);
+			setEditorText(editor, "");
+		} finally {
+			setIsSubmitting(false);
+		}
+	}, [composerDraftKey, isSubmitting, submitFromComposer]);
 
 	const lexicalInitialConfig = useMemo(
 		() => ({
@@ -242,6 +282,11 @@ export function WorkspaceComposer({
 					);
 				}}
 			/>
+			{selectedProviderBlockReason ? (
+				<div className="mt-2 rounded-2xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-[12px] leading-5 text-destructive">
+					{selectedProviderBlockReason}
+				</div>
+			) : null}
 
 			<LexicalComposer initialConfig={lexicalInitialConfig}>
 				<div className="relative">
@@ -286,13 +331,11 @@ export function WorkspaceComposer({
 				<CompositionGuardPlugin />
 				<PasteImagePlugin workspaceRootPath={workspacePath} />
 				<SubmitPlugin
-					draftKey={composerDraftKey}
 					isDisabled={submitDisabledForPlugin}
-					onSubmittingChange={setIsSubmitting}
-					onSubmit={submitFromComposer}
-					registerSubmit={setSubmitAction}
+					onSubmit={handleSubmitDraft}
 				/>
 				<AutoResizePlugin />
+				<EditorRefPlugin editorRef={editorRef} />
 				<EditablePlugin disabled={inputDisabled} />
 				<DraftPersistencePlugin draftKey={composerDraftKey} />
 				<HasContentPlugin onChange={setHasContent} />
@@ -425,21 +468,19 @@ export function WorkspaceComposer({
 								<Square className="size-3 fill-current" strokeWidth={0} />
 							</Button>
 							{hasContent ? (
-								<Button
-									type="button"
-									variant="outline"
-									size="icon"
-									aria-label="Steer"
-									disabled={steerDisabled}
-									className="rounded-[9px]"
-									onClick={() => {
-										if (submitAction) {
-											submitAction();
-										}
-									}}
-								>
-									<ArrowUp className="size-[15px]" strokeWidth={2.2} />
-								</Button>
+							<Button
+								type="button"
+								variant="outline"
+								size="icon"
+								aria-label="Steer"
+								disabled={steerDisabled}
+								className="rounded-[9px]"
+								onClick={() => {
+									void handleSubmitDraft();
+								}}
+							>
+								<ArrowUp className="size-[15px]" strokeWidth={2.2} />
+							</Button>
 							) : null}
 						</div>
 					) : (
@@ -450,9 +491,7 @@ export function WorkspaceComposer({
 							aria-label="Send"
 							disabled={sendDisabled}
 							onClick={() => {
-								if (submitAction) {
-									submitAction();
-								}
+								void handleSubmitDraft();
 							}}
 							className="ml-1.5 rounded-[9px]"
 						>

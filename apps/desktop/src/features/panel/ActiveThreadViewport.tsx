@@ -123,12 +123,13 @@ export function ActiveThreadViewport({
 	}
 
 	return (
-		<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+	<div className="dcc-conversation-scroll-area relative min-h-0 flex-1 overflow-hidden">
 			<div
 				ref={scrollRef}
-				className="dcc-conversation-scroll-viewport conversation-scrollbar-fade-in relative flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-5 py-4"
+				tabIndex={0}
+				className="dcc-conversation-scroll-viewport conversation-scrollbar-fade-in h-full w-full overflow-x-hidden overflow-y-auto overscroll-none px-5 py-4 scrollbar-stable"
 			>
-				<div className="flex min-h-full flex-1 flex-col justify-end gap-4">
+				<div className="flex min-h-full min-w-0 flex-col justify-end gap-4">
 					{messages.length === 0 ? (
 						<EmptyState
 							title="Session loaded"

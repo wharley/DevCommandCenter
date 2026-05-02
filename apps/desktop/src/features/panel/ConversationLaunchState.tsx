@@ -1,15 +1,17 @@
 import { ArrowRight, Plus, Sparkles } from "lucide-react";
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
 	composerTurnFromRaw,
 	type ComposerSubmittedTurn,
 } from "@/features/composer/composer-turn";
 
-const SUGGESTED_PROMPTS = [
-	"Summarize what this workspace already contains.",
-	"Find the main entry points in this repo.",
-	"Show me the next best action to continue from zero.",
-];
+const SUGGESTED_PROMPT_KEYS = [
+	"conversationLaunch.prompts.summarize",
+	"conversationLaunch.prompts.entryPoints",
+	"conversationLaunch.prompts.nextAction",
+] as const;
 
 type ConversationLaunchStateProps = {
 	workspaceName: string;
@@ -26,6 +28,12 @@ export function ConversationLaunchState({
 	onStartSession,
 	onSubmitPrompt,
 }: ConversationLaunchStateProps) {
+	const { t } = useTranslation("common");
+	const suggestedPrompts = useMemo(
+		() => SUGGESTED_PROMPT_KEYS.map((key) => ({ key, text: t(key) })),
+		[t],
+	);
+
 	return (
 		<div className="flex min-h-full flex-1 items-center justify-center px-6 py-10">
 			<div className="w-full max-w-2xl rounded-3xl border border-border/60 bg-card/80 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.06)] backdrop-blur-sm sm:p-8">
@@ -33,14 +41,13 @@ export function ConversationLaunchState({
 					<div className="min-w-0">
 						<div className="mb-2 inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
 							<Sparkles className="size-3.5" aria-hidden />
-							<span>New conversation</span>
+							<span>{t("conversationLaunch.badge")}</span>
 						</div>
 						<h3 className="text-[20px] font-semibold tracking-[-0.03em] text-foreground">
 							{workspaceName}
 						</h3>
 						<p className="mt-2 max-w-xl text-[13px] leading-6 text-muted-foreground">
-							Start from scratch with a blank thread. Use one of the prompts below
-							or launch the session first and build from there.
+							{t("conversationLaunch.hint")}
 						</p>
 					</div>
 					<Button
@@ -51,40 +58,40 @@ export function ConversationLaunchState({
 						onClick={onStartSession}
 					>
 						<Plus className="size-3.5" aria-hidden />
-						Start session
+						{t("conversationLaunch.startSession")}
 					</Button>
 				</div>
 
 				<div className="mt-5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
 					<span className="rounded-full border border-border/50 bg-background/70 px-2.5 py-1">
-						Provider
+						{t("conversationLaunch.provider")}
 					</span>
 					<span className="rounded-full border border-border/50 bg-background/70 px-2.5 py-1 text-foreground">
-						{selectedProviderLabel ?? "Select a provider below"}
+						{selectedProviderLabel ?? t("conversationLaunch.selectProvider")}
 					</span>
 					<span className="rounded-full border border-border/50 bg-background/70 px-2.5 py-1">
-						Model
+						{t("conversationLaunch.model")}
 					</span>
 					<span className="rounded-full border border-border/50 bg-background/70 px-2.5 py-1 text-foreground">
-						{selectedModelLabel ?? "Select a model"}
+						{selectedModelLabel ?? t("conversationLaunch.selectModel")}
 					</span>
 				</div>
 
 				<div className="mt-5 grid gap-2">
-					{SUGGESTED_PROMPTS.map((prompt) => (
+					{suggestedPrompts.map(({ key, text }) => (
 						<Button
-							key={prompt}
+							key={key}
 							type="button"
 							variant="outline"
 							className="h-auto justify-start rounded-2xl border-border/60 px-4 py-3 text-left"
 							onClick={() => {
-								void onSubmitPrompt(composerTurnFromRaw(prompt));
+								void onSubmitPrompt(composerTurnFromRaw(text));
 							}}
 						>
 							<div className="flex min-w-0 items-center gap-2">
 								<ArrowRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
 								<span className="min-w-0 text-[13px] leading-5 text-foreground">
-									{prompt}
+									{text}
 								</span>
 							</div>
 						</Button>
@@ -92,7 +99,7 @@ export function ConversationLaunchState({
 				</div>
 
 				<p className="mt-4 text-[11px] leading-6 text-muted-foreground">
-					The conversation will appear here once you send the first prompt.
+					{t("conversationLaunch.footerHint")}
 				</p>
 			</div>
 		</div>

@@ -335,6 +335,15 @@ export type WorkspaceGitCommitPushInput = {
 	message: string,
 };
 
+export type WorkspaceGitBranchDiffInput = {
+	workspaceRoot: string,
+};
+
+export type WorkspaceGitBranchDiffOutput = {
+	changes: WorkspaceGitChangeEntry[],
+	baseBranch: string | null,
+};
+
 export type WorkspaceGitPathInput = {
 	workspaceRoot: string,
 	relativePath: string,
@@ -353,15 +362,6 @@ export type WorkspaceGitStatusOutput = {
 	unstaged: WorkspaceGitChangeEntry[],
 };
 
-export type WorkspaceGitBranchDiffInput = {
-  workspaceRoot: string,
-};
-export type WorkspaceGitBranchDiffOutput = {
-  changes: WorkspaceGitChangeEntry[],
-  baseBranch: string | null,
-};
-
 export type WorkspaceId = string;
 
 export type WorkspaceState = "initializing" | "setup_pending" | "ready" | "archived";
-

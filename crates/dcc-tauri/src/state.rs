@@ -25,6 +25,7 @@ use dcc_core::{
 	},
 	Result,
 };
+use dcc_infra::db::SqliteWorkspaceRepo;
 
 use crate::events::core_event_name;
 use dcc_providers::provider_runtime;
@@ -43,6 +44,7 @@ impl WorkspaceCommandState {
 #[derive(Clone, Debug)]
 pub struct SessionCommandState {
 	app: AppHandle,
+	db_path: PathBuf,
 	store: Arc<Mutex<SessionStore>>,
 }
 
@@ -62,9 +64,10 @@ struct SessionStore {
 }
 
 impl SessionCommandState {
-	pub fn new(app: AppHandle) -> Self {
+	pub fn new(app: AppHandle, db_path: PathBuf) -> Self {
 		Self {
 			app,
+			db_path,
 			store: Arc::new(Mutex::new(SessionStore::default())),
 		}
 	}
@@ -123,6 +126,23 @@ impl SessionCommandState {
 			return Ok(());
 		}
 
+		let workspace_repo = SqliteWorkspaceRepo::open(&self.db_path)?;
+		let workspace = workspace_repo
+			.get_workspace(&session.workspace_id)
+			.await?
+			.ok_or_else(|| {
+				dcc_core::CoreError::Repository(format!(
+					"workspace not found for session {}",
+					session.id.0
+				))
+			})?;
+		let working_directory = workspace
+			.worktree_path
+			.as_ref()
+			.filter(|value| !value.trim().is_empty())
+			.cloned()
+			.unwrap_or_else(|| workspace.root_path.clone());
+
 		let provider = provider_runtime(&session.provider_id).ok_or_else(|| {
 			dcc_core::CoreError::Provider(format!(
 				"unknown provider runtime: {}",
@@ -135,6 +155,7 @@ impl SessionCommandState {
 				workspace_id: session.workspace_id.clone(),
 				session_id: session.id.clone(),
 				model: session.model.clone(),
+				working_directory: Some(working_directory),
 			})
 			.await?;
 

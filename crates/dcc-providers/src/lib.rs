@@ -61,7 +61,8 @@ pub async fn provider_catalog() -> ProviderCatalog {
 	providers.push(claude_code::descriptor(health[0].clone()));
 	providers.push(codex::descriptor(health[1].clone()));
 	providers.push(gemini::descriptor(health[2].clone()));
-	providers.push(cursor::descriptor(health[3].clone()));
+	let cursor_models = cursor::discover_models().await;
+	providers.push(cursor::descriptor(health[3].clone(), cursor_models));
 	ProviderCatalog { providers }
 }
 

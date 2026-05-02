@@ -154,6 +154,10 @@
 		scrollbar-width: none;
 	}
 
+	.scrollbar-stable {
+		scrollbar-gutter: stable;
+	}
+
 	@media (prefers-reduced-motion: reduce) {
 		*,
 		*::before,

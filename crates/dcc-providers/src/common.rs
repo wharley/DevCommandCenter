@@ -629,6 +629,12 @@ impl CliProviderAdapter {
 	async fn start_runtime(&self, cfg: SessionConfig) -> Result<SessionHandle> {
 		let mut command = self.interactive_command();
 		apply_cli_spawn_environment(&mut command, &self.id.0, &cfg);
+		if let Some(ref working_directory) = cfg.working_directory {
+			let cwd = std::path::PathBuf::from(working_directory);
+			if !working_directory.trim().is_empty() {
+				command.current_dir(cwd);
+			}
+		}
 		let mut child = command.spawn().map_err(|error| {
 			CoreError::Provider(format!("failed to spawn {}: {}", self.binary, error))
 		})?;

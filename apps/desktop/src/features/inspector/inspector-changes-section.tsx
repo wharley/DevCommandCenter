@@ -445,8 +445,10 @@ function BranchDiffSection({
 		const curr = query.data?.changes;
 		prevDataRef.current = curr;
 		if (!prev || !curr) return;
-		const prevPaths = new Set(prev.map((e) => e.path));
-		const newPaths = curr.filter((e) => !prevPaths.has(e.path)).map((e) => e.path);
+			const prevPaths = new Set(prev.map((entry: WorkspaceGitChangeEntry) => entry.path));
+			const newPaths = curr
+				.filter((entry: WorkspaceGitChangeEntry) => !prevPaths.has(entry.path))
+				.map((entry: WorkspaceGitChangeEntry) => entry.path);
 		if (newPaths.length === 0) return;
 		setFlashingPaths(new Set(newPaths));
 		const id = window.setTimeout(() => setFlashingPaths(new Set()), 3100);
@@ -498,13 +500,13 @@ function BranchDiffSection({
 						/>
 					) : (
 						<div className="pb-2 pl-1">
-							{changes.map((e) => (
-								<ChangeRow
-									key={`remote-${e.path}-${e.status}`}
-									entry={e}
-									group="committed"
-									workspaceRoot={workspaceRoot}
-									gitBusy={gitBusy}
+								{changes.map((entry: WorkspaceGitChangeEntry) => (
+									<ChangeRow
+										key={`remote-${entry.path}-${entry.status}`}
+										entry={entry}
+										group="committed"
+										workspaceRoot={workspaceRoot}
+										gitBusy={gitBusy}
 									runGit={async () => {}}
 									flashingPaths={flashingPaths}
 								/>

@@ -1,39 +1,43 @@
 import { useEffect } from "react";
-import {
-	KEY_ENTER_COMMAND,
-	COMMAND_PRIORITY_HIGH,
-	type LexicalEditor,
-} from "lexical";
+import { KEY_ENTER_COMMAND, COMMAND_PRIORITY_HIGH } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { clearDraft } from "../../draftStorage";
-import { readComposerPrompt, setEditorText } from "../../editorOps";
+
+const TYPEAHEAD_SELECTABLE_SELECTOR = "[data-typeahead-popup] [cmdk-item]";
+
+function isTypeaheadSelectable(): boolean {
+	if (typeof document === "undefined") {
+		return false;
+	}
+
+	return document.querySelector(TYPEAHEAD_SELECTABLE_SELECTOR) !== null;
+}
 
 export function SubmitPlugin({
-	draftKey,
 	isDisabled,
-	onSubmittingChange,
 	onSubmit,
-	registerSubmit,
 }: {
-	draftKey: string;
 	isDisabled: boolean;
-	onSubmittingChange: (isSubmitting: boolean) => void;
-	onSubmit: (value: string) => Promise<void>;
-	registerSubmit: (submit: (() => void) | null) => void;
+	onSubmit: () => void | Promise<void>;
 }) {
 	const [editor] = useLexicalComposerContext();
 
 	useEffect(() => {
 		const submit = () => {
-			void submitFromEditor(editor, draftKey, onSubmittingChange, onSubmit);
+			void onSubmit();
 		};
-
-		registerSubmit(submit);
 
 		const unregisterCommand = editor.registerCommand<KeyboardEvent>(
 			KEY_ENTER_COMMAND,
 			(event) => {
-				if (!(event.metaKey || event.ctrlKey)) {
+				if (event?.isComposing || event?.keyCode === 229) {
+					return false;
+				}
+
+				if (isTypeaheadSelectable()) {
+					return false;
+				}
+
+				if (event?.shiftKey) {
 					return false;
 				}
 
@@ -48,31 +52,9 @@ export function SubmitPlugin({
 			COMMAND_PRIORITY_HIGH,
 		);
 		return () => {
-			registerSubmit(null);
 			unregisterCommand();
 		};
-	}, [draftKey, editor, isDisabled, onSubmittingChange, onSubmit, registerSubmit]);
+	}, [editor, isDisabled, onSubmit]);
 
 	return null;
-}
-
-async function submitFromEditor(
-	editor: LexicalEditor,
-	draftKey: string,
-	onSubmittingChange: (isSubmitting: boolean) => void,
-	onSubmit: (value: string) => Promise<void>,
-) {
-	const prompt = readComposerPrompt(editor).trim();
-	if (prompt.length === 0) {
-		return;
-	}
-
-	onSubmittingChange(true);
-	try {
-		await onSubmit(prompt);
-		clearDraft(draftKey);
-		setEditorText(editor, "");
-	} finally {
-		onSubmittingChange(false);
-	}
 }

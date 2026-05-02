@@ -102,19 +102,13 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 		{
 			id: "cursor",
 			label: "Cursor",
-			description: "Experimental Cursor adapter kept behind the migration boundary.",
+			description: "Cursor Agent CLI provider with CLI-native session resume.",
 			models: [
 				{
-					id: "cursor-agent",
-					label: "Cursor Agent",
-					description: "Primary Cursor agent flow.",
+					id: "auto",
+					label: "Auto",
+					description: "Use Cursor's recommended model for this account.",
 					recommended: true,
-				},
-				{
-					id: "cursor-editor",
-					label: "Cursor Editor",
-					description: "More direct editor-centric workflow.",
-					recommended: false,
 				},
 			],
 			capabilities: { ...experimentalCapabilities },

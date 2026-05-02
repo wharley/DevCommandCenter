@@ -8627,7 +8627,7 @@ pub fn run() {
                 .map_err(|e| format!("failed to sync repo configs: {e}"))?;
             eprintln!("[DCC] Database ready at {:?}", db_path);
             app.manage(WorkspaceCommandState::new(db_path.clone()));
-            app.manage(SessionCommandState::new(app.handle().clone()));
+            app.manage(SessionCommandState::new(app.handle().clone(), db_path.clone()));
             let state = AppState {
                 db_path: Arc::new(db_path),
                 app_data_dir: Arc::new(app_data_dir.clone()),

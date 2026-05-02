@@ -100,3 +100,22 @@ export function resolveSelectedModelId(
 
 	return provider.models[0]?.id ?? null;
 }
+
+export function getProviderUnhealthyReason(
+	provider: ProviderCatalog["providers"][number] | null,
+): string | null {
+	if (!provider) {
+		return null;
+	}
+
+	const health = provider.health;
+	if (health === "Healthy") {
+		return null;
+	}
+
+	if (health && typeof health === "object" && "Unhealthy" in health) {
+		return health.Unhealthy?.reason ?? "Provider is unavailable";
+	}
+
+	return null;
+}

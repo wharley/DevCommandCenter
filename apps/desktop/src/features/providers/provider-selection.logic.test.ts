@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	getProviderUnhealthyReason,
 	resolveSelectedModelId,
 	resolveSelectedProviderId,
 } from "./provider-selection.logic";
@@ -67,5 +68,20 @@ describe("resolveSelectedModelId", () => {
 
 	it("returns null when the provider has no models", () => {
 		expect(resolveSelectedModelId({ ...provider, models: [] }, "missing")).toBeNull();
+	});
+});
+
+describe("getProviderUnhealthyReason", () => {
+	it("returns null for healthy providers", () => {
+		expect(getProviderUnhealthyReason(makeProvider("alpha", true))).toBeNull();
+	});
+
+	it("returns the unhealthy reason when the provider cannot send", () => {
+		expect(
+			getProviderUnhealthyReason({
+				...makeProvider("alpha", true),
+				health: { Unhealthy: { reason: "Cursor Agent is not authenticated." } },
+			}),
+		).toBe("Cursor Agent is not authenticated.");
 	});
 });

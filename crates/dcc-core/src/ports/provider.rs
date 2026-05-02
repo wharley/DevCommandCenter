@@ -15,6 +15,7 @@ pub struct SessionConfig {
 	pub workspace_id: WorkspaceId,
 	pub session_id: SessionId,
 	pub model: Option<String>,
+	pub working_directory: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
