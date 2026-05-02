@@ -3576,6 +3576,11 @@ fn home_dir_path() -> Option<PathBuf> {
 }
 
 fn expand_user_path(s: &str) -> PathBuf {
+    if s == "~" {
+        if let Some(h) = home_dir_path() {
+            return h;
+        }
+    }
     if let Some(rest) = s.strip_prefix("~/") {
         if let Some(h) = home_dir_path() {
             return h.join(rest);

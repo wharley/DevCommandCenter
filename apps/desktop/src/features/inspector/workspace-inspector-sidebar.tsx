@@ -238,19 +238,22 @@ export function WorkspaceInspectorSidebar({
 			throw new Error("No workspace path");
 		}
 
-		if (commitMode === "create-pr" && !githubCliReady) {
-			const setup = await openGithubCliAuthTerminal();
-			if (setup.success) {
-				toast.info(
-					githubCliMessage ?? "Run `gh auth login` in Terminal, then try again.",
-				);
-				return;
-			}
+		const loadingToast = toast.loading(`${inspectorActionTitle(commitMode)}...`);
 
-			throw new Error(setup.error ?? "GitHub CLI setup terminal could not be opened.");
+		if (commitMode === "create-pr" && !githubCliReady) {
+			toast.dismiss(loadingToast);
+			const reason = githubCliMessage ?? "GitHub CLI não encontrado ou não autenticado.";
+			toast.warning(reason, {
+				description: 'Execute "gh auth login" no Terminal e tente novamente.',
+				action: {
+					label: "Abrir Terminal",
+					onClick: () => openGithubCliAuthTerminal(),
+				},
+				duration: 12_000,
+			});
+			return;
 		}
 
-		const loadingToast = toast.loading(`${inspectorActionTitle(commitMode)}...`);
 		try {
 			switch (commitMode) {
 				case "merged":

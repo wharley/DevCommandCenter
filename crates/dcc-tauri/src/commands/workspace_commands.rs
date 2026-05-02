@@ -709,6 +709,28 @@ pub async fn workspace_gh_pr_view_web(input: WorkspaceGitPushInput) -> Result<()
 	))
 }
 
+fn push_named_branch(root: &str, branch: &str) -> Result<(), String> {
+	let remote = resolve_default_remote_name(root)?;
+	let output = Command::new("git")
+		.arg("-C")
+		.arg(root)
+		.args(["push", "-u", &remote, branch])
+		.output()
+		.map_err(|e| e.to_string())?;
+	if output.status.success() {
+		return Ok(());
+	}
+	Err(git_output_err("git push -u", &output.stderr))
+}
+
+fn branch_name_from_worktree_path(root: &str) -> String {
+	let dir = std::path::Path::new(root)
+		.file_name()
+		.and_then(|n| n.to_str())
+		.unwrap_or("dcc-branch");
+	format!("dcc/{dir}")
+}
+
 /// Non-interactive PR creation (`gh pr create --fill`).
 #[tauri::command]
 pub async fn workspace_gh_pr_create_fill(input: WorkspaceGitPushInput) -> Result<(), String> {
@@ -716,9 +738,47 @@ pub async fn workspace_gh_pr_create_fill(input: WorkspaceGitPushInput) -> Result
 	if root.is_empty() {
 		return Err("workspace_root is empty".to_string());
 	}
-	let current_branch = resolve_current_branch_name(root)?;
-	let base_branch = resolve_branch_diff_base(root).unwrap_or_else(|| "main".to_string());
+
+	let raw_branch = resolve_current_branch_name(root)?;
+	let base_ref = resolve_branch_diff_base(root).unwrap_or_else(|| "main".to_string());
+	// gh pr create --base expects a branch name, not a remote tracking ref like origin/main
+	let base_stripped = base_ref.split_once('/').map(|(_, b)| b).unwrap_or(&base_ref);
+	let base_branch = if base_stripped == "HEAD" { "main" } else { base_stripped };
 	let gh = resolve_gh_binary()?;
+
+	// Worktrees are created with --detach so HEAD is a commit, not a branch.
+	// Create a named branch at the current commit so gh can reference it.
+	let head_branch = if raw_branch == "HEAD" {
+		let name = branch_name_from_worktree_path(root);
+		let already_exists = Command::new("git")
+			.arg("-C").arg(root)
+			.args(["rev-parse", "--verify", &format!("refs/heads/{name}")])
+			.output()
+			.map(|o| o.status.success())
+			.unwrap_or(false);
+		let checkout_args: &[&str] = if already_exists {
+			&["checkout", &name]
+		} else {
+			&["checkout", "-b", &name]
+		};
+		let co = Command::new("git")
+			.arg("-C").arg(root)
+			.args(checkout_args)
+			.output()
+			.map_err(|e| e.to_string())?;
+		if !co.status.success() {
+			return Err(format!(
+				"git checkout failed: {}",
+				String::from_utf8_lossy(&co.stderr).trim()
+			));
+		}
+		name
+	} else {
+		raw_branch
+	};
+
+	// Branch must exist on the remote before gh can create a PR
+	push_named_branch(root, &head_branch).map_err(|e| format!("git push failed: {e}"))?;
 
 	let output = Command::new(gh)
 		.current_dir(root)
@@ -727,9 +787,9 @@ pub async fn workspace_gh_pr_create_fill(input: WorkspaceGitPushInput) -> Result
 			"create",
 			"--fill",
 			"--base",
-			&base_branch,
+			base_branch,
 			"--head",
-			&current_branch,
+			&head_branch,
 		])
 		.output()
 		.map_err(|e| e.to_string())?;
