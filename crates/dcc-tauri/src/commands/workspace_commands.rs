@@ -3,9 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tauri::{AppHandle, State};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use specta::Type;
+use tauri::{AppHandle, State};
 
 use dcc_core::{
 	application::{
@@ -102,6 +103,10 @@ pub struct WorkspaceGitChangeEntry {
 pub struct WorkspaceGitStatusOutput {
 	pub staged: Vec<WorkspaceGitChangeEntry>,
 	pub unstaged: Vec<WorkspaceGitChangeEntry>,
+	pub current_branch: Option<String>,
+	pub ahead_of_remote_count: u32,
+	pub behind_of_remote_count: u32,
+	pub conflict_count: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -172,6 +177,34 @@ pub struct GithubCliStatusOutput {
 	pub login_command: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePrStatusInput {
+	pub workspace_root: String,
+	pub branch: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePrStatusOutput {
+	pub provider: Option<String>,
+	pub number: Option<u32>,
+	pub title: Option<String>,
+	pub url: Option<String>,
+	pub head_branch: Option<String>,
+	pub base_branch: Option<String>,
+	pub state: Option<String>,
+	pub mergeable: Option<String>,
+	pub merge_state_status: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceContinueFromBaseBranchInput {
+	pub workspace_root: String,
+	pub base_branch: Option<String>,
+}
+
 fn normalize_git_relative_path(path: &str) -> String {
 	path.trim().replace('\\', "/")
 }
@@ -190,6 +223,163 @@ fn validate_git_relative_path(path: &str) -> Result<String, String> {
 fn git_output_err(cmd: &str, stderr: &[u8]) -> String {
 	let msg = String::from_utf8_lossy(stderr);
 	format!("{cmd} failed: {}", msg.trim())
+}
+
+fn run_git_output(root: &str, args: &[&str]) -> Result<std::process::Output, String> {
+	Command::new("git")
+		.arg("-C")
+		.arg(root)
+		.args(args)
+		.output()
+		.map_err(|e| e.to_string())
+}
+
+fn resolve_current_branch_name(root: &str) -> Result<String, String> {
+	let output = run_git_output(root, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+	if !output.status.success() {
+		return Err(git_output_err(
+			"git rev-parse --abbrev-ref HEAD",
+			&output.stderr,
+		));
+	}
+
+	let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+	if branch.is_empty() {
+		return Err("current branch is empty".to_string());
+	}
+	if branch == "HEAD" {
+		let remotes_output = run_git_output(root, &["remote"])?;
+		let remotes: Vec<String> = if remotes_output.status.success() {
+			String::from_utf8_lossy(&remotes_output.stdout)
+				.lines()
+				.map(str::trim)
+				.filter(|line| !line.is_empty())
+				.map(|line| line.to_string())
+				.collect()
+		} else {
+			vec!["origin".to_string()]
+		};
+
+		let fallback = run_git_output(
+			root,
+			&[
+				"for-each-ref",
+				"--format=%(refname:short)",
+				"--contains",
+				"HEAD",
+				"refs/heads/",
+				"refs/remotes/",
+			],
+		)?;
+		if fallback.status.success() {
+			let mut candidates: Vec<String> = String::from_utf8_lossy(&fallback.stdout)
+				.lines()
+				.map(str::trim)
+				.filter(|line| !line.is_empty())
+				.filter(|line| !line.ends_with("/HEAD"))
+				.map(|line| {
+					let branch = line.to_string();
+					for remote in &remotes {
+						let prefix = format!("{remote}/");
+						if branch.starts_with(&prefix) {
+							return branch[prefix.len()..].to_string();
+						}
+					}
+					branch
+				})
+				.filter(|line| {
+					let lower = line.to_lowercase();
+					lower != "main" && lower != "master" && lower != "develop"
+				})
+				.collect();
+			candidates.sort();
+			candidates.dedup();
+			if let Some(candidate) = candidates.first() {
+				return Ok(candidate.clone());
+			}
+		}
+	}
+	Ok(branch)
+}
+
+fn resolve_default_branch_name(root: &str) -> Result<String, String> {
+	let output = run_git_output(root, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])?;
+	if output.status.success() {
+		let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+		if let Some((_, branch)) = raw.rsplit_once('/') {
+			if !branch.trim().is_empty() {
+				return Ok(branch.trim().to_string());
+			}
+		}
+	}
+	Ok("main".to_string())
+}
+
+fn resolve_upstream_branch_counts(root: &str) -> Result<(u32, u32), String> {
+	let output = run_git_output(root, &["rev-list", "--left-right", "--count", "@{u}...HEAD"])?;
+	if !output.status.success() {
+		return Ok((0, 0));
+	}
+
+	let raw = String::from_utf8_lossy(&output.stdout);
+	let mut parts = raw.split_whitespace();
+	let behind = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+	let ahead = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+	Ok((ahead, behind))
+}
+
+fn resolve_conflict_count(root: &str) -> Result<u32, String> {
+	let output = run_git_output(root, &["diff", "--name-only", "--diff-filter=U"])?;
+	if !output.status.success() {
+		return Ok(0);
+	}
+
+	let count = String::from_utf8_lossy(&output.stdout)
+		.lines()
+		.map(str::trim)
+		.filter(|line| !line.is_empty())
+		.count();
+	Ok(count as u32)
+}
+
+fn resolve_workspace_pr_status_json(root: &str, branch: &str) -> Result<Option<Value>, String> {
+	let gh = match resolve_gh_binary() {
+		Ok(path) => path,
+		Err(_) => return Ok(None),
+	};
+
+	let output = Command::new(gh)
+		.current_dir(root)
+		.args([
+			"pr",
+			"list",
+			"--state",
+			"all",
+			"--head",
+			branch,
+			"--json",
+			"number,title,url,state,mergeable,mergeStateStatus,isDraft,headRefName,baseRefName",
+		])
+		.output()
+		.map_err(|e| e.to_string())?;
+	if !output.status.success() {
+		return Ok(None);
+	}
+
+	let parsed: Value = serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+	let Some(items) = parsed.as_array() else {
+		return Ok(None);
+	};
+	let pr = items.iter().find(|item| {
+		item.get("headRefName")
+			.and_then(|value| value.as_str())
+			.map(|value| value == branch)
+			.unwrap_or(false)
+	});
+	let Some(pr) = pr else {
+		return Ok(None);
+	};
+	Ok(Some(pr.clone()))
 }
 
 fn resolve_default_remote_name(root: &str) -> Result<String, String> {
@@ -362,27 +552,6 @@ mod github_cli_status_tests {
 		let output = "github.com\n  ✓ Logged in to github.com account demo-user";
 		assert_eq!(parse_gh_active_login(output), Some("demo-user".to_string()));
 	}
-}
-
-fn resolve_current_branch_name(root: &str) -> Result<String, String> {
-	let output = Command::new("git")
-		.arg("-C")
-		.arg(root)
-		.args(["rev-parse", "--abbrev-ref", "HEAD"])
-		.output()
-		.map_err(|e| e.to_string())?;
-	if !output.status.success() {
-		return Err(git_output_err(
-			"git rev-parse --abbrev-ref HEAD",
-			&output.stderr,
-		));
-	}
-
-	let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-	if branch.is_empty() {
-		return Err("current branch is empty".to_string());
-	}
-	Ok(branch)
 }
 
 fn push_current_branch(root: &str) -> Result<(), String> {
@@ -709,6 +878,29 @@ pub async fn workspace_gh_pr_view_web(input: WorkspaceGitPushInput) -> Result<()
 	))
 }
 
+/// Merge do PR atual via GitHub CLI (`gh pr merge --merge --yes`).
+#[tauri::command]
+pub async fn workspace_gh_pr_merge(input: WorkspaceGitPushInput) -> Result<(), String> {
+	let root = input.workspace_root.trim();
+	if root.is_empty() {
+		return Err("workspace_root is empty".to_string());
+	}
+	let gh = resolve_gh_binary()?;
+
+	let output = Command::new(gh)
+		.current_dir(root)
+		.args(["pr", "merge", "--merge", "--yes"])
+		.output()
+		.map_err(|e| e.to_string())?;
+	if output.status.success() {
+		return Ok(());
+	}
+	Err(format!(
+		"gh pr merge failed: {}",
+		String::from_utf8_lossy(&output.stderr).trim()
+	))
+}
+
 fn push_named_branch(root: &str, branch: &str) -> Result<(), String> {
 	let remote = resolve_default_remote_name(root)?;
 	let output = Command::new("git")
@@ -816,6 +1008,10 @@ fn workspace_git_status_inner(workspace_root: &str) -> Result<WorkspaceGitStatus
 		return Ok(WorkspaceGitStatusOutput {
 			staged: vec![],
 			unstaged: vec![],
+			current_branch: None,
+			ahead_of_remote_count: 0,
+			behind_of_remote_count: 0,
+			conflict_count: 0,
 		});
 	}
 
@@ -904,7 +1100,19 @@ fn workspace_git_status_inner(workspace_root: &str) -> Result<WorkspaceGitStatus
 	staged.sort_by(|a, b| a.path.cmp(&b.path));
 	unstaged.sort_by(|a, b| a.path.cmp(&b.path));
 
-	Ok(WorkspaceGitStatusOutput { staged, unstaged })
+	let current_branch = resolve_current_branch_name(root).ok();
+	let (ahead_of_remote_count, behind_of_remote_count) =
+		resolve_upstream_branch_counts(root).unwrap_or((0, 0));
+	let conflict_count = resolve_conflict_count(root).unwrap_or(0);
+
+	Ok(WorkspaceGitStatusOutput {
+		staged,
+		unstaged,
+		current_branch,
+		ahead_of_remote_count,
+		behind_of_remote_count,
+		conflict_count,
+	})
 }
 
 #[tauri::command]
@@ -912,6 +1120,154 @@ pub async fn workspace_git_status(
 	input: WorkspaceGitStatusInput,
 ) -> Result<WorkspaceGitStatusOutput, String> {
 	workspace_git_status_inner(&input.workspace_root)
+}
+
+#[tauri::command]
+pub async fn workspace_pr_status(input: WorkspacePrStatusInput) -> Result<WorkspacePrStatusOutput, String> {
+	let root = input.workspace_root.trim();
+	if root.is_empty() {
+		return Ok(WorkspacePrStatusOutput {
+			provider: None,
+			number: None,
+			title: None,
+			url: None,
+			head_branch: None,
+			base_branch: None,
+			state: None,
+			mergeable: None,
+			merge_state_status: None,
+		});
+	}
+
+	let branch = match input.branch.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()) {
+		Some(branch) => branch,
+		None => match resolve_current_branch_name(root) {
+			Ok(branch) => branch,
+			Err(_) => {
+				return Ok(WorkspacePrStatusOutput {
+					provider: None,
+					number: None,
+					title: None,
+					url: None,
+					head_branch: None,
+					base_branch: None,
+					state: None,
+					mergeable: None,
+					merge_state_status: None,
+				});
+			}
+		},
+	};
+
+	let Some(raw_pr) = resolve_workspace_pr_status_json(root, &branch)? else {
+		return Ok(WorkspacePrStatusOutput {
+			provider: None,
+			number: None,
+			title: None,
+			url: None,
+			head_branch: Some(branch),
+			base_branch: None,
+			state: None,
+			mergeable: None,
+			merge_state_status: None,
+		});
+	};
+
+	let state = raw_pr
+		.get("state")
+		.and_then(|value| value.as_str())
+		.map(|value| value.to_lowercase());
+	let state = match state.as_deref() {
+		Some("open") | Some("opened") => Some("open".to_string()),
+		Some("closed") => Some("closed".to_string()),
+		Some("merged") => Some("merged".to_string()),
+		_ => None,
+	};
+
+	let number = raw_pr
+		.get("number")
+		.and_then(|value| value.as_u64())
+		.map(|value| value as u32);
+	let title = raw_pr
+		.get("title")
+		.and_then(|value| value.as_str())
+		.map(|value| value.to_string());
+	let url = raw_pr
+		.get("url")
+		.and_then(|value| value.as_str())
+		.map(|value| value.to_string());
+	let head_branch = raw_pr
+		.get("headRefName")
+		.and_then(|value| value.as_str())
+		.map(|value| value.to_string());
+	let base_branch = raw_pr
+		.get("baseRefName")
+		.and_then(|value| value.as_str())
+		.map(|value| value.to_string());
+	let mergeable = raw_pr
+		.get("mergeable")
+		.and_then(|value| value.as_str())
+		.map(|value| value.to_string());
+	let merge_state_status = raw_pr
+		.get("mergeStateStatus")
+		.and_then(|value| value.as_str())
+		.map(|value| value.to_string());
+
+	Ok(WorkspacePrStatusOutput {
+		provider: Some("github".to_string()),
+		number,
+		title,
+		url,
+		head_branch,
+		base_branch,
+		state,
+		mergeable,
+		merge_state_status,
+	})
+}
+
+#[tauri::command]
+pub async fn workspace_continue_from_base_branch(
+	input: WorkspaceContinueFromBaseBranchInput,
+) -> Result<Value, String> {
+	let root = input.workspace_root.trim();
+	if root.is_empty() {
+		return Err("workspace_root is empty".to_string());
+	}
+
+	let base_branch = input
+		.base_branch
+		.as_deref()
+		.map(str::trim)
+		.filter(|value| !value.is_empty())
+		.map(|value| value.to_string())
+		.unwrap_or_else(|| resolve_default_branch_name(root).unwrap_or_else(|_| "main".to_string()));
+	let remote_ref = format!("origin/{base_branch}");
+	let checkout = Command::new("git")
+		.arg("-C")
+		.arg(root)
+		.args(["checkout", "-B", &base_branch, &remote_ref])
+		.output()
+		.or_else(|_| {
+			Command::new("git")
+				.arg("-C")
+				.arg(root)
+				.args(["checkout", &base_branch])
+				.output()
+		})
+		.map_err(|e| e.to_string())?;
+	if !checkout.status.success() {
+		return Err(format!(
+			"git checkout failed: {}",
+			String::from_utf8_lossy(&checkout.stderr).trim()
+		));
+	}
+
+	Ok(json!({
+		"success": true,
+		"branch": base_branch,
+		"workspaceRoot": root,
+	}))
 }
 
 /// File-level preview for staged / unstaged / committed tree rows.

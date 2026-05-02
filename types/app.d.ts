@@ -485,6 +485,13 @@ declare global {
           success: boolean;
           error?: string;
         }>;
+        continueFromTargetBranch: (combId: string) => Promise<{
+          success: boolean;
+          error?: string;
+          branch?: string;
+          worktreePath?: string;
+          projectPath?: string;
+        }>;
         checkUnpushed?: (combId: string) => Promise<{
           hasUnpushed: boolean;
           count: number;

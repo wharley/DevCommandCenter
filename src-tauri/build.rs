@@ -27,6 +27,8 @@ use dcc_tauri::commands::{
 		WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
 		WorkspaceGitCommitPushInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
 		WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
+		WorkspaceContinueFromBaseBranchInput,
+		WorkspacePrStatusInput, WorkspacePrStatusOutput,
 	},
 };
 use serde::{Deserialize, Serialize};
@@ -44,8 +46,11 @@ use tauri_specta::Builder;
 	list_git_tracked_files: String,
 	list_child_directories: String,
 	list_workspaces: String,
+	workspace_continue_from_base_branch: String,
 	workspace_gh_pr_create_fill: String,
+	workspace_gh_pr_merge: String,
 	workspace_gh_pr_view_web: String,
+	workspace_pr_status: String,
 	workspace_git_branch_diff: String,
 	workspace_git_commit_push: String,
 	workspace_git_discard_file: String,
@@ -118,6 +123,9 @@ fn main() {
 		.typ::<WorkspaceGitStatusInput>()
 		.typ::<WorkspaceGitStatusOutput>()
 		.typ::<WorkspaceGitChangeEntry>()
+		.typ::<WorkspaceContinueFromBaseBranchInput>()
+		.typ::<WorkspacePrStatusInput>()
+		.typ::<WorkspacePrStatusOutput>()
 		.typ::<WorkspaceGitBranchDiffInput>()
 		.typ::<WorkspaceGitBranchDiffOutput>()
 		.typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitPreviewScope>()
@@ -146,8 +154,11 @@ fn main() {
 				list_git_tracked_files: "list_git_tracked_files".to_string(),
 				list_child_directories: "list_child_directories".to_string(),
 				list_workspaces: "list_workspaces".to_string(),
+				workspace_continue_from_base_branch: "workspace_continue_from_base_branch".to_string(),
 				workspace_gh_pr_create_fill: "workspace_gh_pr_create_fill".to_string(),
+				workspace_gh_pr_merge: "workspace_gh_pr_merge".to_string(),
 				workspace_gh_pr_view_web: "workspace_gh_pr_view_web".to_string(),
+				workspace_pr_status: "workspace_pr_status".to_string(),
 				workspace_git_branch_diff: "workspace_git_branch_diff".to_string(),
 				workspace_git_file_preview: "workspace_git_file_preview".to_string(),
 				workspace_git_file_preview_content: "workspace_git_file_preview_content".to_string(),

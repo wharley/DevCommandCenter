@@ -6,7 +6,7 @@ export const PROVIDER_METHODS = {"listProviders":"list_providers"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","listThreadEvents":"list_thread_events","resumeSession":"resume_session","sendTurn":"send_turn","startThread":"start_thread"} as const;
 
-export const WORKSPACE_METHODS = {"createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listWorkspaces":"list_workspaces","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitFilePreview":"workspace_git_file_preview","workspaceGitFilePreviewContent":"workspace_git_file_preview_content","workspaceGitPush":"workspace_git_push","workspaceGitStageAll":"workspace_git_stage_all","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitUnstageFile":"workspace_git_unstage_file","workspaceGithubCliStatus":"workspace_github_cli_status"} as const;
+export const WORKSPACE_METHODS = {"createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listWorkspaces":"list_workspaces","workspaceContinueFromBaseBranch":"workspace_continue_from_base_branch","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrMerge":"workspace_gh_pr_merge","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitFilePreview":"workspace_git_file_preview","workspaceGitFilePreviewContent":"workspace_git_file_preview_content","workspaceGitPush":"workspace_git_push","workspaceGitStageAll":"workspace_git_stage_all","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitUnstageFile":"workspace_git_unstage_file","workspaceGithubCliStatus":"workspace_github_cli_status","workspacePrStatus":"workspace_pr_status"} as const;
 
 /* Types */
 export type AbortRunInput = {
@@ -332,6 +332,11 @@ export type Workspace = {
 	updatedAt: string,
 };
 
+export type WorkspaceContinueFromBaseBranchInput = {
+	workspaceRoot: string,
+	baseBranch: string | null,
+};
+
 export type WorkspaceGitBranchDiffInput = {
 	workspaceRoot: string,
 };
@@ -389,9 +394,30 @@ export type WorkspaceGitStatusInput = {
 export type WorkspaceGitStatusOutput = {
 	staged: WorkspaceGitChangeEntry[],
 	unstaged: WorkspaceGitChangeEntry[],
+	currentBranch: string | null,
+	aheadOfRemoteCount: number,
+	behindOfRemoteCount: number,
+	conflictCount: number,
 };
 
 export type WorkspaceId = string;
+
+export type WorkspacePrStatusInput = {
+	workspaceRoot: string,
+	branch: string | null,
+};
+
+export type WorkspacePrStatusOutput = {
+	provider: string | null,
+	number: number | null,
+	title: string | null,
+	url: string | null,
+	headBranch: string | null,
+	baseBranch: string | null,
+	state: string | null,
+	mergeable: string | null,
+	mergeStateStatus: string | null,
+};
 
 export type WorkspaceState = "initializing" | "setup_pending" | "ready" | "archived";
 

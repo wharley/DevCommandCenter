@@ -41,6 +41,8 @@ export function ActiveThreadViewport({
 	onSubmitPrompt,
 }: ActiveThreadViewportProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
+	const contentRef = useRef<HTMLDivElement | null>(null);
+	const stickToBottomRef = useRef(true);
 	const [stickToBottom, setStickToBottom] = useState(true);
 	const [showScrollToLatest, setShowScrollToLatest] = useState(false);
 	const messages = useMemo(
@@ -48,6 +50,27 @@ export function ActiveThreadViewport({
 		[historyEvents, liveEvents, pendingPrompt, sessionId],
 	);
 	const latestMessageKey = messages[messages.length - 1]?.id ?? "empty";
+
+	useEffect(() => {
+		stickToBottomRef.current = stickToBottom;
+	}, [stickToBottom]);
+
+	// Scroll to bottom when content grows during streaming
+	useEffect(() => {
+		const container = scrollRef.current;
+		const content = contentRef.current;
+		if (!container || !content) return;
+
+		const observer = new ResizeObserver(() => {
+			if (stickToBottomRef.current) {
+				container.scrollTop = container.scrollHeight;
+				setShowScrollToLatest(false);
+			}
+		});
+
+		observer.observe(content);
+		return () => observer.disconnect();
+	}, []);
 
 	useEffect(() => {
 		const container = scrollRef.current;
@@ -129,7 +152,7 @@ export function ActiveThreadViewport({
 				tabIndex={0}
 				className="dcc-conversation-scroll-viewport conversation-scrollbar-fade-in h-full w-full overflow-x-hidden overflow-y-auto overscroll-none px-5 py-4 scrollbar-stable"
 			>
-				<div className="flex min-h-full min-w-0 flex-col justify-end gap-4">
+				<div ref={contentRef} className="flex min-h-full min-w-0 flex-col justify-end gap-4">
 					{messages.length === 0 ? (
 						<EmptyState
 							title="Session loaded"

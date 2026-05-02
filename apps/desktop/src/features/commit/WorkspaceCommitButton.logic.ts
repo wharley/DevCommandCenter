@@ -11,8 +11,75 @@ export type CommitMode =
 
 export type CommitButtonStatus = "idle" | "busy" | "done" | "error";
 
-export function resolveCommitMode(branch: string) {
-	const normalized = branch.toLowerCase();
+export type WorkspaceGitStatusSummary = {
+	staged: unknown[];
+	unstaged: unknown[];
+	currentBranch?: string | null;
+	aheadOfRemoteCount?: number;
+	behindOfRemoteCount?: number;
+	conflictCount?: number;
+};
+
+export type WorkspacePrStatusSummary = {
+	provider?: string | null;
+	number?: number | null;
+	title?: string | null;
+	url?: string | null;
+	headBranch?: string | null;
+	baseBranch?: string | null;
+	state?: string | null;
+	mergeable?: string | null;
+	mergeStateStatus?: string | null;
+};
+
+export type CommitModeContext = {
+	branch: string;
+	prStatus?: WorkspacePrStatusSummary | null;
+	gitStatus?: WorkspaceGitStatusSummary | null;
+};
+
+function hasWorkingTreeChanges(gitStatus?: WorkspaceGitStatusSummary | null) {
+	return (gitStatus?.staged.length ?? 0) > 0 || (gitStatus?.unstaged.length ?? 0) > 0;
+}
+
+function hasFailingChecks(prStatus?: WorkspacePrStatusSummary | null) {
+	const mergeStateStatus = prStatus?.mergeStateStatus?.toUpperCase();
+	return mergeStateStatus === "DIRTY" || mergeStateStatus === "BLOCKED" || mergeStateStatus === "UNSTABLE";
+}
+
+function resolveFromContext(context: CommitModeContext) {
+	const normalized = context.branch.toLowerCase();
+	const prState = context.prStatus?.state?.toLowerCase();
+
+	if (prState === "merged") return "merged" as const;
+	if (prState === "closed") return "open-pr" as const;
+
+	if (prState === "open") {
+		if (
+			context.prStatus?.mergeable === "CONFLICTING" ||
+			(context.gitStatus?.conflictCount ?? 0) > 0
+		) {
+			return "resolve-conflicts" as const;
+		}
+		if (hasWorkingTreeChanges(context.gitStatus)) {
+			return "commit-and-push" as const;
+		}
+		if ((context.gitStatus?.aheadOfRemoteCount ?? 0) > 0) {
+			return "push" as const;
+		}
+		if (hasFailingChecks(context.prStatus)) {
+			return "fix" as const;
+		}
+		return "merge" as const;
+	}
+
+	if (hasWorkingTreeChanges(context.gitStatus)) {
+		return "commit-and-push" as const;
+	}
+	if ((context.gitStatus?.aheadOfRemoteCount ?? 0) > 0) {
+		return "push" as const;
+	}
+
 	if (normalized.includes("closed")) return "closed" as const;
 	if (normalized.includes("merged")) return "merged" as const;
 	if (normalized.includes("conflict")) return "resolve-conflicts" as const;
@@ -21,6 +88,15 @@ export function resolveCommitMode(branch: string) {
 	if (normalized.includes("pr/")) return "open-pr" as const;
 	if (normalized.includes("push")) return "push" as const;
 	return "create-pr" as const;
+}
+
+export function resolveCommitMode(input: string): CommitMode;
+export function resolveCommitMode(input: CommitModeContext): CommitMode;
+export function resolveCommitMode(input: string | CommitModeContext) {
+	if (typeof input === "string") {
+		return resolveFromContext({ branch: input });
+	}
+	return resolveFromContext(input);
 }
 
 /** i18n key under namespace `common` (use with `t(commitTranslationKey(...))`). */

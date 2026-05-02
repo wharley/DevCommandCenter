@@ -10,7 +10,14 @@ export function useWorkspaceGitStatus(workspaceRoot: string | null) {
 		queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
 		queryFn: async () => {
 			if (!root) {
-				return { staged: [], unstaged: [] };
+				return {
+					staged: [],
+					unstaged: [],
+					currentBranch: null,
+					aheadOfRemoteCount: 0,
+					behindOfRemoteCount: 0,
+					conflictCount: 0,
+				};
 			}
 			return workspaceGitStatus({ workspaceRoot: root });
 		},

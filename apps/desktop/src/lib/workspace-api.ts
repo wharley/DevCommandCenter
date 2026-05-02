@@ -23,6 +23,9 @@ import type {
 	WorkspaceGitPushInput,
 	WorkspaceGitStatusInput,
 	WorkspaceGitStatusOutput,
+	WorkspaceContinueFromBaseBranchInput,
+	WorkspacePrStatusInput,
+	WorkspacePrStatusOutput,
 } from "@dcc/contracts";
 
 export function createWorkspaceForRepo(input: CreateWorkspaceForRepoInput) {
@@ -95,12 +98,29 @@ export function workspaceGitPush(input: WorkspaceGitPushInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceGitPush, { input });
 }
 
+export function workspaceContinueFromBaseBranch(input: WorkspaceContinueFromBaseBranchInput) {
+	return invoke<{ success: boolean; branch?: string; workspaceRoot?: string }>(
+		WORKSPACE_METHODS.workspaceContinueFromBaseBranch,
+		{ input },
+	);
+}
+
 export function workspaceGhPrViewWeb(input: WorkspaceGitPushInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceGhPrViewWeb, { input });
 }
 
 export function workspaceGhPrCreateFill(input: WorkspaceGitPushInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceGhPrCreateFill, { input });
+}
+
+export function workspaceGhPrMerge(input: WorkspaceGitPushInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGhPrMerge, { input });
+}
+
+export function workspacePrStatus(input: WorkspacePrStatusInput) {
+	return invoke<WorkspacePrStatusOutput>(WORKSPACE_METHODS.workspacePrStatus, {
+		input,
+	});
 }
 
 export function workspaceGitBranchDiff(input: WorkspaceGitBranchDiffInput) {

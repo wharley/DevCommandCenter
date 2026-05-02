@@ -1,7 +1,15 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Layers, Link2, PanelLeft, Plus } from "lucide-react";
+import {
+  ChevronsRight,
+  ChevronDown,
+  ExternalLink,
+  Layers,
+  Link2,
+  PanelLeft,
+  Plus,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +39,7 @@ import { RepoReviewSection } from "@/components/review/repo-review-section";
 import type { Comb, Project, ReviewTarget, UpdateCombDTO } from "@/lib/database/types";
 import { recordProductSignal } from "@/lib/product/signals";
 import { resolveReviewTargets } from "@/lib/review/resolve-review-targets";
+import { openExternal } from "@/lib/shell-api";
 import { toast } from "sonner";
 
 function getCombStatusLabel(status: Comb["status"]): string {
@@ -85,11 +94,13 @@ export function CombReviewPanel({
   const [addTargetOpen, setAddTargetOpen] = useState(false);
   const [newTargetProjectId, setNewTargetProjectId] = useState("");
   const [newTargetLabel, setNewTargetLabel] = useState("");
+  const [isContinuing, setIsContinuing] = useState(false);
 
   const resolved = useMemo(
     () => resolveReviewTargets(comb, projects),
     [comb, projects],
   );
+  const forgeLink = comb.forgeLink;
 
   useEffect(() => {
     setStatsByTarget({});
@@ -172,6 +183,28 @@ export function CombReviewPanel({
     onAction();
   };
 
+  const handleContinue = async () => {
+    const api = window.desktopAPI?.comb?.continueFromTargetBranch;
+    if (!api) {
+      toast.error("Ação de continuar indisponível neste ambiente.");
+      return;
+    }
+    setIsContinuing(true);
+    try {
+      const result = await api(comb.id);
+      if (!result?.success) {
+        toast.error(result?.error ?? "Não foi possível continuar o workspace.");
+        return;
+      }
+      toast.success("Workspace continuado na branch base.");
+      onAction();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao continuar o workspace");
+    } finally {
+      setIsContinuing(false);
+    }
+  };
+
   if (!comb.worktreePath) {
     return (
       <div className="flex h-full items-center justify-center p-8">
@@ -214,6 +247,18 @@ export function CombReviewPanel({
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {comb.status === "applied" ? (
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="gap-1 whitespace-nowrap"
+                  disabled={isContinuing}
+                  onClick={() => void handleContinue()}
+                >
+                  <ChevronsRight className="h-3.5 w-3.5" />
+                  {isContinuing ? "Continuando…" : "Continue"}
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 size="sm"
@@ -250,6 +295,24 @@ export function CombReviewPanel({
               </span>
             ))}
           </div>
+          {forgeLink ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="gap-1 font-mono text-[10px]">
+                {forgeLink.forge === "gitlab" ? "MR" : "PR"} #{forgeLink.number}
+              </Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1 whitespace-nowrap"
+                onClick={() => {
+                  void openExternal(forgeLink.url);
+                }}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                View {forgeLink.forge === "gitlab" ? "MR" : "PR"}
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         {multi ? (

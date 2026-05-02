@@ -6635,6 +6635,85 @@ async fn comb_merge_into_main(
     .await
     .map_err(|e| db_error(e.to_string()))?
 }
+
+#[tauri::command]
+async fn comb_continue_from_target_branch(
+    state: State<'_, AppState>,
+    comb_id: String,
+) -> ApiResult<Value> {
+    let (project_path, worktree_path, base_branch) = {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+
+        let row: Option<(String, Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT p.path, c.worktree_path, c.base_branch
+                 FROM combs c JOIN projects p ON p.id = c.project_id
+                 WHERE c.id = ?1",
+                params![comb_id.clone()],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .map_err(|e| db_error(e.to_string()))?;
+
+        let Some((project_path, worktree_path, base_branch)) = row else {
+            return Err(db_error("Comb not found"));
+        };
+
+        let Some(worktree_path) = worktree_path else {
+            return Err(db_error("Comb has no worktree"));
+        };
+
+        let target_branch = base_branch
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "main".to_string());
+
+        (project_path, worktree_path, target_branch)
+    };
+
+    let comb_id_clone = comb_id.clone();
+    let state_clone = state.inner().clone();
+    let worktree_path_clone = worktree_path.clone();
+    let base_branch_clone = base_branch.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let remote_ref = format!("origin/{}", base_branch_clone);
+        let checkout_result = run_git(
+            &worktree_path_clone,
+            &["checkout", "-B", &base_branch_clone, &remote_ref],
+        )
+        .or_else(|_| run_git(&worktree_path_clone, &["checkout", &base_branch_clone]));
+
+        if let Err(e) = checkout_result {
+            return Err(ApiError {
+                code: "GIT_ERROR",
+                message: format!("Failed to continue workspace onto {}: {}", base_branch_clone, e.message),
+            });
+        }
+
+        let conn = state_clone
+            .conn
+            .lock()
+            .map_err(|_| db_error("db lock poisoned"))?;
+        conn.execute(
+            "UPDATE combs SET branch = ?1, forge_link = NULL, status = 'active', last_git_activity_at = datetime('now') WHERE id = ?2",
+            params![base_branch_clone, comb_id_clone],
+        )
+        .map_err(|e| db_error(e.to_string()))?;
+
+        Ok(serde_json::json!({
+            "success": true,
+            "branch": base_branch,
+            "worktreePath": worktree_path,
+            "projectPath": project_path
+        }))
+    })
+    .await
+    .map_err(|e| db_error(e.to_string()))?
+}
 /// Verifica se o usuário tem permissões para fazer merge/push na branch de destino
 #[tauri::command]
 async fn comb_check_merge_permissions(
@@ -8572,6 +8651,7 @@ pub fn run() {
             comb_discard,
             comb_check_unpushed,
             comb_merge_into_main,
+            comb_continue_from_target_branch,
             comb_check_merge_permissions,
             comb_get_diffs,
             comb_apply_patch,

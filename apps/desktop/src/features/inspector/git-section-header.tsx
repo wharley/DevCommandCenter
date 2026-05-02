@@ -1,7 +1,10 @@
+import { ChevronsRight, ExternalLink } from "lucide-react";
 import { WorkspaceCommitButton } from "@/features/commit";
 import type { CommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import { INSPECTOR_SECTION_HEADER_CLASS, INSPECTOR_SECTION_TITLE_CLASS } from "@/shell/layout";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { openExternal } from "@/lib/shell-api";
 
 function gitSectionHeaderHighlightClass(mode: CommitMode): string {
   switch (mode) {
@@ -24,6 +27,11 @@ export type GitSectionHeaderProps = {
   commitMode: CommitMode;
   isRefreshing?: boolean;
   onCommit?: () => Promise<void> | void;
+  onContinueWorkspace?: () => Promise<void> | void;
+  isContinuingWorkspace?: boolean;
+  prUrl?: string | null;
+  prNumber?: number | null;
+  prProvider?: string | null;
   className?: string;
 };
 
@@ -31,9 +39,17 @@ export function GitSectionHeader({
   commitMode,
   isRefreshing = false,
   onCommit,
+  onContinueWorkspace,
+  isContinuingWorkspace = false,
+  prUrl = null,
+  prNumber = null,
+  prProvider = null,
   className,
 }: GitSectionHeaderProps) {
   const highlightClass = gitSectionHeaderHighlightClass(commitMode);
+  const showContinue = commitMode === "merged" && Boolean(onContinueWorkspace);
+  const showPrLink = Boolean(prUrl);
+  const prLabel = prProvider === "gitlab" ? "MR" : "PR";
 
   return (
     <div
@@ -58,7 +74,39 @@ export function GitSectionHeader({
         />
       )}
       <span className={cn(INSPECTOR_SECTION_TITLE_CLASS, "translate-y-px")}>Git</span>
-      <WorkspaceCommitButton mode={commitMode} onCommit={onCommit} />
+      {showPrLink ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px] font-medium text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            if (prUrl) {
+              void openExternal(prUrl);
+            }
+          }}
+        >
+          <ExternalLink className="size-3.5" />
+          {prLabel}
+          {prNumber ? ` #${prNumber}` : ""}
+        </Button>
+      ) : null}
+      {showContinue ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px] font-medium"
+          disabled={isContinuingWorkspace}
+          onClick={() => {
+            void onContinueWorkspace?.();
+          }}
+        >
+          <ChevronsRight className="size-3.5" />
+          Continue
+        </Button>
+      ) : null}
+      {!showContinue ? <WorkspaceCommitButton mode={commitMode} onCommit={onCommit} /> : null}
     </div>
   );
 }

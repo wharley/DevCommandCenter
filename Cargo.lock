@@ -814,6 +814,7 @@ dependencies = [
  "dcc-providers",
  "futures",
  "serde",
+ "serde_json",
  "specta",
  "tauri",
  "tauri-specta",

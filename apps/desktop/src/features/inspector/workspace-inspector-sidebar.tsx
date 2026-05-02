@@ -18,13 +18,16 @@ import { InspectorChangesSection } from "./inspector-changes-section";
 import { GitSectionHeader } from "./git-section-header";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import {
+	workspaceContinueFromBaseBranch,
 	workspaceGhPrViewWeb,
 	workspaceGhPrCreateFill,
+	workspaceGhPrMerge,
 	workspaceGitCommitPush,
 	workspaceGitStageAll,
 	workspaceGitPush,
 } from "@/lib/workspace-api";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
+import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
 import { EmptyState } from "@/features/panel";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -212,15 +215,25 @@ export function WorkspaceInspectorSidebar({
 				? `…${workspacePath.slice(-55)}`
 				: workspacePath
 			: null;
-	const commitMode = resolveCommitMode(workspaceBranch ?? "");
 	const queryClient = useQueryClient();
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
+	const gitBranch =
+		gitStatusQuery.data?.currentBranch &&
+		gitStatusQuery.data.currentBranch !== "HEAD"
+			? gitStatusQuery.data.currentBranch
+			: null;
+	const currentBranch = gitBranch ?? workspaceBranch ?? "";
+	const prStatusQuery = useWorkspacePrStatus(
+		workspacePath,
+		gitBranch,
+	);
 	const githubCliStatusQuery = useQuery({
 		queryKey: ["githubCliStatus"],
 		queryFn: getGithubCliStatus,
 		staleTime: 60_000,
 		refetchOnWindowFocus: true,
 	});
+	const [isContinuingWorkspace, setIsContinuingWorkspace] = useState(false);
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const hasWorkingTreeChanges =
 		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
@@ -230,6 +243,12 @@ export function WorkspaceInspectorSidebar({
 	const githubCliMessage =
 		githubCliStatus?.message ??
 		(githubCliStatusQuery.isPending ? "Checking GitHub CLI..." : null);
+	const prStatus = prStatusQuery.data ?? null;
+	const commitMode = resolveCommitMode({
+		branch: currentBranch,
+		prStatus,
+		gitStatus: gitStatusQuery.data ?? null,
+	});
 
 	const handleInspectorCommit = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -257,7 +276,12 @@ export function WorkspaceInspectorSidebar({
 		try {
 			switch (commitMode) {
 				case "merged":
+					return;
 				case "closed":
+					await workspaceGhPrViewWeb({ workspaceRoot: root });
+					toast.info("This PR is closed. Open it in the browser if you need to inspect it.", {
+						id: loadingToast,
+					});
 					return;
 				case "push":
 					await workspaceGitPush({ workspaceRoot: root });
@@ -267,6 +291,17 @@ export function WorkspaceInspectorSidebar({
 					await workspaceGhPrViewWeb({ workspaceRoot: root });
 					toast.success("Opened PR in browser", { id: loadingToast });
 					break;
+				case "merge":
+					await workspaceGhPrMerge({ workspaceRoot: root });
+					toast.success("PR merged", { id: loadingToast });
+					break;
+				case "fix":
+				case "resolve-conflicts":
+					await workspaceGhPrViewWeb({ workspaceRoot: root });
+					toast.info("Open the PR to inspect checks and conflicts.", {
+						id: loadingToast,
+					});
+					break;
 				case "create-pr": {
 					if (hasWorkingTreeChanges) {
 						throw new Error("Commit local changes before creating a PR.");
@@ -275,6 +310,7 @@ export function WorkspaceInspectorSidebar({
 					toast.success("PR created", { id: loadingToast });
 					break;
 				}
+				case "commit-and-push":
 				default: {
 					await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
 					const message = `chore: checkpoint for ${workspaceName ?? "workspace"}`;
@@ -287,6 +323,9 @@ export function WorkspaceInspectorSidebar({
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
 			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
+			});
 		} catch (error) {
 			const message = getInspectorActionErrorMessage(error);
 			console.error("[inspector] git action failed", { commitMode, root, error });
@@ -296,6 +335,39 @@ export function WorkspaceInspectorSidebar({
 			throw error;
 		}
 	}, [commitMode, githubCliMessage, githubCliReady, queryClient, workspacePath, workspaceName]);
+
+	const handleContinueWorkspace = useCallback(async () => {
+		const root = workspacePath?.trim();
+		if (!root) {
+			toast.error("No workspace path");
+			throw new Error("No workspace path");
+		}
+
+		setIsContinuingWorkspace(true);
+		const loadingToast = toast.loading("Continuing workspace...");
+		try {
+			const result = await workspaceContinueFromBaseBranch({
+				workspaceRoot: root,
+				baseBranch: workspaceBranch,
+			});
+			if (!result?.success) {
+				throw new Error("Unable to continue workspace.");
+			}
+			toast.success("Workspace continued", { id: loadingToast });
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
+			});
+		} catch (error) {
+			const message = getInspectorActionErrorMessage(error);
+			toast.error(`Continue failed: ${message}`, { id: loadingToast });
+			throw error;
+		} finally {
+			setIsContinuingWorkspace(false);
+		}
+	}, [currentBranch, queryClient, workspaceBranch, workspacePath]);
 
 	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
 	const [manualResize, setManualResize] = useState(false);
@@ -373,6 +445,11 @@ export function WorkspaceInspectorSidebar({
 					commitMode={commitMode}
 					isRefreshing={gitStatusQuery.isFetching && !gitStatusQuery.isPending}
 					onCommit={handleInspectorCommit}
+					onContinueWorkspace={handleContinueWorkspace}
+					isContinuingWorkspace={isContinuingWorkspace}
+					prUrl={prStatus?.url ?? null}
+					prNumber={prStatus?.number ?? null}
+					prProvider={prStatus?.provider ?? null}
 				/>
 
 				<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 pb-3 pt-2">
