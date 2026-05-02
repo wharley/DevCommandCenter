@@ -342,7 +342,49 @@ fn resolve_conflict_count(root: &str) -> Result<u32, String> {
 	Ok(count as u32)
 }
 
-fn resolve_workspace_pr_status_json(root: &str, branch: &str) -> Result<Option<Value>, String> {
+fn resolve_current_commit_sha(root: &str) -> Result<Option<String>, String> {
+	let output = run_git_output(root, &["rev-parse", "HEAD"])?;
+	if !output.status.success() {
+		return Ok(None);
+	}
+
+	let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+	if sha.is_empty() {
+		return Ok(None);
+	}
+
+	Ok(Some(sha))
+}
+
+fn workspace_branch_hints(root: &str, branch: Option<&str>) -> Vec<String> {
+	let mut hints = Vec::new();
+
+	if let Some(branch) = branch.map(str::trim).filter(|value| !value.is_empty()) {
+		hints.push(branch.to_string());
+	}
+
+	if let Some(name) = Path::new(root)
+		.file_name()
+		.and_then(|value| value.to_str())
+		.map(str::trim)
+		.filter(|value| !value.is_empty())
+	{
+		hints.push(name.to_string());
+		if !name.starts_with("dcc/") {
+			hints.push(format!("dcc/{name}"));
+		}
+	}
+
+	hints.sort();
+	hints.dedup();
+	hints
+}
+
+fn resolve_workspace_pr_status_json(
+	root: &str,
+	branch_hints: &[String],
+	head_sha: Option<&str>,
+) -> Result<Option<Value>, String> {
 	let gh = match resolve_gh_binary() {
 		Ok(path) => path,
 		Err(_) => return Ok(None),
@@ -355,10 +397,8 @@ fn resolve_workspace_pr_status_json(root: &str, branch: &str) -> Result<Option<V
 			"list",
 			"--state",
 			"all",
-			"--head",
-			branch,
 			"--json",
-			"number,title,url,state,mergeable,mergeStateStatus,isDraft,headRefName,baseRefName",
+			"number,title,url,state,mergeable,mergeStateStatus,isDraft,headRefName,headRefOid,baseRefName",
 		])
 		.output()
 		.map_err(|e| e.to_string())?;
@@ -371,10 +411,15 @@ fn resolve_workspace_pr_status_json(root: &str, branch: &str) -> Result<Option<V
 		return Ok(None);
 	};
 	let pr = items.iter().find(|item| {
-		item.get("headRefName")
+		let matches_branch = item
+			.get("headRefName")
 			.and_then(|value| value.as_str())
-			.map(|value| value == branch)
-			.unwrap_or(false)
+			.map(|value| branch_hints.iter().any(|hint| hint == value))
+			.unwrap_or(false);
+		let matches_sha = head_sha
+			.and_then(|sha| item.get("headRefOid").and_then(|value| value.as_str()).map(|value| value == sha))
+			.unwrap_or(false);
+		matches_branch || matches_sha
 	});
 	let Some(pr) = pr else {
 		return Ok(None);
@@ -1139,6 +1184,7 @@ pub async fn workspace_pr_status(input: WorkspacePrStatusInput) -> Result<Worksp
 		});
 	}
 
+	let head_sha = resolve_current_commit_sha(root).ok().flatten();
 	let branch = match input.branch.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()) {
 		Some(branch) => branch,
 		None => match resolve_current_branch_name(root) {
@@ -1158,8 +1204,9 @@ pub async fn workspace_pr_status(input: WorkspacePrStatusInput) -> Result<Worksp
 			}
 		},
 	};
+	let branch_hints = workspace_branch_hints(root, Some(&branch));
 
-	let Some(raw_pr) = resolve_workspace_pr_status_json(root, &branch)? else {
+	let Some(raw_pr) = resolve_workspace_pr_status_json(root, &branch_hints, head_sha.as_deref())? else {
 		return Ok(WorkspacePrStatusOutput {
 			provider: None,
 			number: None,
