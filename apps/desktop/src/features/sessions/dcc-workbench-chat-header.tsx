@@ -15,6 +15,7 @@ import {
 	canAbortRun,
 	canResumeSession,
 } from "./session-chrome-state";
+import { sessionStateLabel } from "@/i18n/session-state-label";
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
@@ -59,9 +60,9 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	const showProjectBadge = Boolean(projectBadgeLabel);
 	const resumeOk = canResumeSession(sessionSnapshot);
 	const abortOk = canAbortRun(sessionSnapshot, pendingPrompt);
-	const sessionStateLabel = useMemo(() => {
+	const sessionStateDisplay = useMemo(() => {
 		const raw = sessionSnapshot?.state ?? "idle";
-		return raw === "idle" ? t("workbench.sessionIdle") : raw;
+		return sessionStateLabel(raw, t);
 	}, [sessionSnapshot?.state, t]);
 
 	return (
@@ -96,7 +97,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 			</div>
 			<div className="flex shrink-0 items-center justify-end gap-1.5 @3xl/header-actions:gap-2">
 				<div className="hidden max-w-[5.5rem] items-center gap-1 truncate tabular-nums text-[11px] text-muted-foreground sm:flex">
-					<span className="truncate">{sessionStateLabel}</span>
+					<span className="truncate">{sessionStateDisplay}</span>
 				</div>
 				<div
 					className="flex items-center gap-0.5 rounded-md border border-border/50 bg-muted/25 p-0.5"

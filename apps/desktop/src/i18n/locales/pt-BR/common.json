@@ -122,6 +122,9 @@
       "session": "Sessão"
     },
     "sessionFallback": "Nenhuma sessão ativa - inicie uma pelo composer.",
+    "changes": {
+      "emptyOnBranch": "Nenhuma alteração neste branch."
+    },
     "providersRegistered": "{{count}} registrados",
     "terminalNote": "As sessões de terminal ficam na gaveta de workbench na parte inferior do layout — elas não são espelhadas aqui para o inspetor ficar focado em sinais do Git e da sessão."
   },
@@ -311,9 +314,25 @@
       }
     }
   },
+  "sessionEventFeed": {
+    "emptyTimeline": "Ainda não há mensagens. Inicie uma sessão e envie algo. Os eventos da sessão aparecem nesta linha do tempo."
+  },
+  "branchToolbar": {
+    "noBranch": "Sem branch",
+    "activeBadge": "Ativa",
+    "workspacePathUnavailable": "Caminho do workspace indisponível",
+    "branchOptionsAria": "Opções do branch",
+    "openBranchDetails": "Abrir detalhes do branch",
+    "copyBranchName": "Copiar nome do branch"
+  },
   "workbench": {
     "noGit": "Sem Git",
-    "sessionIdle": "ocioso",
+    "sessionState": {
+      "idle": "ocioso",
+      "active": "ativa",
+      "completed": "concluída",
+      "aborted": "interrompida"
+    },
     "sessionControlsAria": "Controles da sessão",
     "resumeAria": "Retomar sessão",
     "resumeTooltipNone": "Inicie ou selecione uma sessão primeiro",

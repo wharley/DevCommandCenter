@@ -1,4 +1,5 @@
 import { ChevronDown, GitBranch, GitCommitHorizontal } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -18,6 +19,8 @@ export function BranchToolbar({
 	workspacePath: string | null;
 	className?: string;
 }) {
+	const { t } = useTranslation("common");
+
 	return (
 		<div
 			className={cn(
@@ -29,14 +32,14 @@ export function BranchToolbar({
 			<div className="min-w-0 flex-1">
 				<div className="flex min-w-0 items-center gap-1.5">
 					<span className="truncate text-[12px] font-medium text-foreground">
-						{branch || "No branch"}
+						{branch || t("branchToolbar.noBranch")}
 					</span>
 					<Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">
-						active
+						{t("branchToolbar.activeBadge")}
 					</Badge>
 				</div>
 				<p className="truncate text-[11px] text-muted-foreground">
-					{workspacePath ?? "Workspace path unavailable"}
+					{workspacePath ?? t("branchToolbar.workspacePathUnavailable")}
 				</p>
 			</div>
 			<DropdownMenu>
@@ -46,7 +49,7 @@ export function BranchToolbar({
 						variant="ghost"
 						size="icon-xs"
 						className="text-muted-foreground hover:text-foreground"
-						aria-label="Branch options"
+						aria-label={t("branchToolbar.branchOptionsAria")}
 					>
 						<ChevronDown className="size-3.5" />
 					</Button>
@@ -54,11 +57,11 @@ export function BranchToolbar({
 				<DropdownMenuContent align="end" sideOffset={6} className="min-w-44">
 					<DropdownMenuItem className="gap-2 text-[13px]">
 						<GitCommitHorizontal className="size-4" aria-hidden />
-						Open branch details
+						{t("branchToolbar.openBranchDetails")}
 					</DropdownMenuItem>
 					<DropdownMenuItem className="gap-2 text-[13px]">
 						<GitBranch className="size-4" aria-hidden />
-						Copy branch name
+						{t("branchToolbar.copyBranchName")}
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>

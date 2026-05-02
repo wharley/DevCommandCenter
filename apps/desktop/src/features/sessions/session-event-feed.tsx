@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -138,6 +139,7 @@ export function SessionEventFeed({
 	events: CoreEvent[];
 	compact?: boolean;
 }) {
+	const { t } = useTranslation("common");
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const [showScrollToLatest, setShowScrollToLatest] = useState(false);
 	const latestEventKey = useMemo(() => {
@@ -182,8 +184,7 @@ export function SessionEventFeed({
 		events.length === 0 ? (
 			<div className="flex min-h-full flex-1 items-center justify-center px-8">
 				<p className="m-0 max-w-md text-center text-[13px] leading-relaxed text-muted-foreground">
-					No messages yet — start a session and send something. Session events appear in this
-					timeline.
+					{t("sessionEventFeed.emptyTimeline")}
 				</p>
 			</div>
 		) : (

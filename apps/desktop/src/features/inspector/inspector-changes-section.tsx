@@ -17,6 +17,7 @@ import {
 	Undo2Icon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AnimatedShinyText } from "@/components/ui/animated-shiny-text";
 import { Badge } from "@/components/ui/badge";
@@ -722,6 +723,7 @@ export function InspectorChangesSection({
 	selectedPreview,
 	onSelectPreview,
 }: InspectorChangesSectionProps) {
+	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
 	const [stagedOpen, setStagedOpen] = useState(true);
 	const [unstagedOpen, setUnstagedOpen] = useState(true);
@@ -854,7 +856,7 @@ export function InspectorChangesSection({
 				) : null}
 				{!hasAny ? (
 					<div className="px-3 py-3 text-[11px] leading-5 text-muted-foreground">
-						No changes on this branch.
+						{t("inspector.changes.emptyOnBranch")}
 					</div>
 				) : null}
 				{Boolean(root) && (

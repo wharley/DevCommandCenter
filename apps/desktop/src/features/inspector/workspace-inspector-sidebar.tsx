@@ -33,6 +33,7 @@ import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
 import { getGithubCliStatus, openGithubCliAuthTerminal } from "@/lib/github-cli";
+import { sessionStateLabel } from "@/i18n/session-state-label";
 
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
@@ -559,7 +560,7 @@ export function WorkspaceInspectorSidebar({
 									<div className="rounded-md border border-border/50 bg-muted/10 px-2">
 										<DetailRow label={t("inspector.fields.state")}>
 											<span className="inline-flex items-center gap-2">
-												{sessionState}
+												{sessionStateLabel(sessionState, t)}
 												{sessionId ? (
 												<Badge variant="outline" className="font-mono text-[10px] font-normal">
 													{sessionId.length > 14 ? `${sessionId.slice(0, 12)}…` : sessionId}

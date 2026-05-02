@@ -274,7 +274,7 @@ export function ProviderSelectionPanel({
 				className,
 			)}
 		>
-			<div className="grid min-h-[280px] grid-cols-[220px_minmax(0,1fr)]">
+			<div className="grid min-h-[300px] grid-cols-[240px_minmax(0,1fr)]">
 				<aside className="flex flex-col border-r border-border/60 bg-sidebar/55">
 					<div className="px-4 py-3">
 						<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">

@@ -1,4 +1,6 @@
+import { useTranslation } from "react-i18next";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
+import { sessionStateLabel } from "@/i18n/session-state-label";
 
 type ConversationExecutionStateProps = {
 	workspaceName: string;
@@ -17,6 +19,8 @@ export function ConversationExecutionState({
 	lastTurnState,
 	pendingPrompt,
 }: ConversationExecutionStateProps) {
+	const { t } = useTranslation("common");
+
 	return (
 		<div className="flex min-h-full flex-1 items-center justify-center px-6 py-10">
 			<div className="w-full max-w-2xl rounded-3xl border border-border/60 bg-card/80 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.06)] backdrop-blur-sm sm:p-8">
@@ -52,7 +56,7 @@ export function ConversationExecutionState({
 					</span>
 					{sessionState ? (
 						<span className="rounded-full border border-border/50 bg-background/70 px-2.5 py-1 text-foreground">
-							{sessionState}
+							{sessionStateLabel(sessionState, t)}
 						</span>
 					) : null}
 					{lastTurnState ? (

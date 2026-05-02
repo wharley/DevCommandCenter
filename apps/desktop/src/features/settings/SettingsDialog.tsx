@@ -267,9 +267,9 @@ export function SettingsDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="h-[min(80vh,640px)] w-[min(80vw,860px)] max-w-[860px] overflow-hidden rounded-2xl border-border/60 bg-background p-0 shadow-2xl">
+			<DialogContent className="h-[min(84vh,760px)] w-[min(94vw,1240px)] sm:max-w-[1240px] overflow-hidden rounded-2xl border-border/60 bg-background p-0 shadow-2xl">
 				<div className="flex h-full min-h-0 w-full min-w-0 overflow-hidden">
-					<nav className="scrollbar-stable flex w-[220px] shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-sidebar-border bg-sidebar py-5">
+					<nav className="scrollbar-stable flex w-[240px] shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-sidebar-border bg-sidebar py-5">
 						<div className="px-4 pb-3">
 							<DialogHeader>
 								<DialogTitle className="text-[15px] font-semibold text-foreground">
@@ -311,7 +311,7 @@ export function SettingsDialog({
 					</nav>
 
 					<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-						<div className="flex items-center justify-between gap-4 border-b border-border/40 px-8 py-4">
+						<div className="flex items-center justify-between gap-4 border-b border-border/40 px-6 py-4 lg:px-8">
 							<div className="min-w-0">
 								<DialogTitle className="text-[15px] font-semibold text-foreground">
 									{activeMeta.label}
@@ -325,7 +325,7 @@ export function SettingsDialog({
 							</Badge>
 						</div>
 
-						<div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-8 pt-5 pb-6">
+						<div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 pt-5 pb-6 lg:px-8">
 							{activeSection === "general" ? (
 								<section className="space-y-4">
 									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
