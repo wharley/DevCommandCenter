@@ -5,6 +5,7 @@ import { WorkspacePanel } from "@/features/panel";
 import type { AppUpdateInfo } from "@/features/updater";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import type { RuntimeSessionSnapshot } from "./workbench-types";
+import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
 
 export type { RuntimeSessionSnapshot } from "./workbench-types";
 
@@ -31,6 +32,8 @@ type SessionWorkbenchProps = {
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
 	onInstallUpdate: () => void;
+	editorSelection: WorkspaceGitPreviewSelection | null;
+	onCloseEditor: () => void;
 };
 
 export function SessionWorkbench({
@@ -56,6 +59,8 @@ export function SessionWorkbench({
 	updateInfo,
 	isInstallingUpdate,
 	onInstallUpdate,
+	editorSelection,
+	onCloseEditor,
 }: SessionWorkbenchProps) {
 	const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
 	const sessionState = sessionSnapshot?.state ?? "idle";
@@ -91,6 +96,8 @@ export function SessionWorkbench({
 				onToggleTerminal={() =>
 					setTerminalDrawerOpen((current) => !current)
 				}
+				editorSelection={editorSelection}
+				onCloseEditor={onCloseEditor}
 			/>
 
 			<WorkspaceTerminalDrawer

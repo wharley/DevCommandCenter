@@ -23,8 +23,9 @@ use std::{env, fs, path::PathBuf};
 		CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
 		ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
 		ListLocalBranchesInput, ListLocalBranchesOutput, ListWorkspacesOutput,
-		WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput, WorkspaceGitPathInput,
-		WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
+		WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
+		WorkspaceGitCommitPushInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
+		WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
 	},
 };
 use serde::{Deserialize, Serialize};
@@ -43,9 +44,13 @@ use tauri_specta::Builder;
 	list_workspaces: String,
 	workspace_gh_pr_create_fill: String,
 	workspace_gh_pr_view_web: String,
+	workspace_git_branch_diff: String,
 	workspace_git_commit_push: String,
 	workspace_git_discard_file: String,
+	workspace_git_file_preview: String,
+	workspace_git_file_preview_content: String,
 	workspace_git_push: String,
+	workspace_git_stage_all: String,
 	workspace_git_stage_file: String,
 	workspace_git_status: String,
 	workspace_git_unstage_file: String,
@@ -109,6 +114,11 @@ fn main() {
 		.typ::<WorkspaceGitStatusInput>()
 		.typ::<WorkspaceGitStatusOutput>()
 		.typ::<WorkspaceGitChangeEntry>()
+		.typ::<WorkspaceGitBranchDiffInput>()
+		.typ::<WorkspaceGitBranchDiffOutput>()
+		.typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitPreviewScope>()
+		.typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitFilePreviewInput>()
+		.typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitFilePreviewContentOutput>()
 		.typ::<WorkspaceGitPathInput>()
 		.typ::<WorkspaceGitCommitPushInput>()
 		.typ::<WorkspaceGitPushInput>()
@@ -133,9 +143,13 @@ fn main() {
 				list_workspaces: "list_workspaces".to_string(),
 				workspace_gh_pr_create_fill: "workspace_gh_pr_create_fill".to_string(),
 				workspace_gh_pr_view_web: "workspace_gh_pr_view_web".to_string(),
+				workspace_git_branch_diff: "workspace_git_branch_diff".to_string(),
+				workspace_git_file_preview: "workspace_git_file_preview".to_string(),
+				workspace_git_file_preview_content: "workspace_git_file_preview_content".to_string(),
 				workspace_git_commit_push: "workspace_git_commit_push".to_string(),
 				workspace_git_discard_file: "workspace_git_discard_file".to_string(),
 				workspace_git_push: "workspace_git_push".to_string(),
+				workspace_git_stage_all: "workspace_git_stage_all".to_string(),
 				workspace_git_stage_file: "workspace_git_stage_file".to_string(),
 				workspace_git_status: "workspace_git_status".to_string(),
 				workspace_git_unstage_file: "workspace_git_unstage_file".to_string(),

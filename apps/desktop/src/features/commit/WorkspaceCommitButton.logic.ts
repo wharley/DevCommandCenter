@@ -20,7 +20,7 @@ export function resolveCommitMode(branch: string) {
 	if (normalized.includes("fix")) return "fix" as const;
 	if (normalized.includes("pr/")) return "open-pr" as const;
 	if (normalized.includes("push")) return "push" as const;
-	return "commit-and-push" as const;
+	return "create-pr" as const;
 }
 
 /** i18n key under namespace `common` (use with `t(commitTranslationKey(...))`). */

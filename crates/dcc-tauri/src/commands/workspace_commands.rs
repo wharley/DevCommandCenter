@@ -124,6 +124,32 @@ pub struct WorkspaceGitPushInput {
 	pub workspace_root: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceGitPreviewScope {
+	Staged,
+	Unstaged,
+	Committed,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitFilePreviewInput {
+	pub workspace_root: String,
+	pub relative_path: String,
+	pub status: String,
+	pub scope: WorkspaceGitPreviewScope,
+	pub base_branch: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitFilePreviewContentOutput {
+	pub original_text: String,
+	pub modified_text: String,
+	pub inline: bool,
+}
+
 fn normalize_git_relative_path(path: &str) -> String {
 	path.trim().replace('\\', "/")
 }
@@ -144,6 +170,48 @@ fn git_output_err(cmd: &str, stderr: &[u8]) -> String {
 	format!("{cmd} failed: {}", msg.trim())
 }
 
+fn resolve_default_remote_name(root: &str) -> Result<String, String> {
+	let output = Command::new("git")
+		.arg("-C")
+		.arg(root)
+		.args(["remote"])
+		.output()
+		.map_err(|e| e.to_string())?;
+	if !output.status.success() {
+		return Err(git_output_err("git remote", &output.stderr));
+	}
+
+	let remotes: Vec<String> = String::from_utf8_lossy(&output.stdout)
+		.lines()
+		.map(str::trim)
+		.filter(|line| !line.is_empty())
+		.map(|line| line.to_string())
+		.collect();
+	if remotes.is_empty() {
+		return Ok("origin".to_string());
+	}
+	if remotes.iter().any(|remote| remote == "origin") {
+		return Ok("origin".to_string());
+	}
+
+	Ok(remotes[0].clone())
+}
+
+fn push_current_branch(root: &str) -> Result<(), String> {
+	let remote = resolve_default_remote_name(root)?;
+	let output = Command::new("git")
+		.arg("-C")
+		.arg(root)
+		.args(["push", "-u", &remote, "HEAD"])
+		.output()
+		.map_err(|e| e.to_string())?;
+	if output.status.success() {
+		return Ok(());
+	}
+
+	Err(git_output_err("git push -u", &output.stderr))
+}
+
 fn path_is_tracked(root: &str, rel: &str) -> bool {
 	Command::new("git")
 		.arg("-C")
@@ -151,7 +219,84 @@ fn path_is_tracked(root: &str, rel: &str) -> bool {
 		.args(["ls-files", "--error-unmatch", "--", rel])
 		.output()
 		.map(|o| o.status.success())
-		.unwrap_or(false)
+	.unwrap_or(false)
+}
+
+#[tauri::command]
+pub async fn workspace_git_stage_all(input: WorkspaceGitPathInput) -> Result<(), String> {
+	let root = input.workspace_root.trim();
+	if root.is_empty() {
+		return Err("workspace_root is empty".to_string());
+	}
+
+	let output = Command::new("git")
+		.arg("-C")
+		.arg(root)
+		.args(["add", "-A"])
+		.output()
+		.map_err(|e| e.to_string())?;
+	if output.status.success() {
+		return Ok(());
+	}
+
+	Err(git_output_err("git add -A", &output.stderr))
+}
+
+fn git_diff_output_text(output: std::process::Output, command: &str) -> Result<String, String> {
+	if output.status.success() || output.status.code() == Some(1) {
+		return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+	}
+	Err(git_output_err(command, &output.stderr))
+}
+
+fn run_git_diff_text(root: &str, args: &[&str], command: &str) -> Result<String, String> {
+	let output = Command::new("git")
+		.arg("-C")
+		.arg(root)
+		.args(args)
+		.output()
+		.map_err(|e| e.to_string())?;
+	git_diff_output_text(output, command)
+}
+
+fn run_git_show_text(
+	root: &str,
+	revision_path: &str,
+	command: &str,
+) -> Result<Option<String>, String> {
+	let output = Command::new("git")
+		.arg("-C")
+		.arg(root)
+		.args(["show", revision_path])
+		.output()
+		.map_err(|e| e.to_string())?;
+	if output.status.success() {
+		return Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()));
+	}
+
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	let missing_markers = [
+		"Path '",
+		"path '",
+		"does not exist",
+		"exists on disk, but not in",
+		"does not have a commit",
+	];
+	if missing_markers.iter().any(|marker| stderr.contains(marker)) {
+		return Ok(None);
+	}
+
+	Err(git_output_err(command, &output.stderr))
+}
+
+fn read_worktree_file_text(root: &str, rel: &str) -> Result<Option<String>, String> {
+	let path = PathBuf::from(root).join(rel);
+	if !path.is_file() {
+		return Ok(None);
+	}
+
+	let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+	Ok(Some(String::from_utf8_lossy(&bytes).to_string()))
 }
 
 /// `git add -- path` (Helmor `stage_workspace_file`).
@@ -340,17 +485,7 @@ pub async fn workspace_git_commit_push(input: WorkspaceGitCommitPushInput) -> Re
 		return Err(git_output_err("git commit", &commit.stderr));
 	}
 
-	let push = Command::new("git")
-		.arg("-C")
-		.arg(root)
-		.arg("push")
-		.output()
-		.map_err(|e| e.to_string())?;
-	if !push.status.success() {
-		return Err(git_output_err("git push", &push.stderr));
-	}
-
-	Ok(())
+	push_current_branch(root)
 }
 
 #[tauri::command]
@@ -360,16 +495,7 @@ pub async fn workspace_git_push(input: WorkspaceGitPushInput) -> Result<(), Stri
 		return Err("workspace_root is empty".to_string());
 	}
 
-	let output = Command::new("git")
-		.arg("-C")
-		.arg(root)
-		.arg("push")
-		.output()
-		.map_err(|e| e.to_string())?;
-	if output.status.success() {
-		return Ok(());
-	}
-	Err(git_output_err("git push", &output.stderr))
+	push_current_branch(root)
 }
 
 /// Opens the current PR in the browser (`gh pr view --web`), if GitHub CLI is available.
@@ -381,8 +507,7 @@ pub async fn workspace_gh_pr_view_web(input: WorkspaceGitPushInput) -> Result<()
 	}
 
 	let output = Command::new("gh")
-		.arg("-C")
-		.arg(root)
+		.current_dir(root)
 		.args(["pr", "view", "--web"])
 		.output()
 		.map_err(|e| e.to_string())?;
@@ -404,9 +529,8 @@ pub async fn workspace_gh_pr_create_fill(input: WorkspaceGitPushInput) -> Result
 	}
 
 	let output = Command::new("gh")
-		.arg("-C")
-		.arg(root)
-		.args(["pr", "create", "--fill"])
+		.current_dir(root)
+		.args(["pr", "create", "--fill", "--web"])
 		.output()
 		.map_err(|e| e.to_string())?;
 	if output.status.success() {
@@ -528,6 +652,136 @@ pub async fn workspace_git_status(
 	input: WorkspaceGitStatusInput,
 ) -> Result<WorkspaceGitStatusOutput, String> {
 	workspace_git_status_inner(&input.workspace_root)
+}
+
+/// File-level preview for staged / unstaged / committed tree rows.
+#[tauri::command]
+pub async fn workspace_git_file_preview(
+	input: WorkspaceGitFilePreviewInput,
+) -> Result<String, String> {
+	let root = input.workspace_root.trim();
+	if root.is_empty() {
+		return Err("workspace_root is empty".to_string());
+	}
+	let rel = validate_git_relative_path(&input.relative_path)?;
+	let absolute = PathBuf::from(root).join(&rel);
+	let status = input.status.trim();
+	let patch = match input.scope {
+		WorkspaceGitPreviewScope::Staged => run_git_diff_text(
+			root,
+			&["diff", "--cached", "--unified=80", "--no-ext-diff", "--", &rel],
+			"git diff --cached",
+		)?,
+		WorkspaceGitPreviewScope::Unstaged => {
+			if status == "?" {
+				if !absolute.is_file() {
+					return Err("file not found".to_string());
+				}
+				let absolute = absolute.to_string_lossy().to_string();
+				run_git_diff_text(
+					root,
+					&["diff", "--no-index", "--unified=80", "--no-ext-diff", "/dev/null", &absolute],
+					"git diff --no-index",
+				)?
+			} else {
+				run_git_diff_text(
+					root,
+					&["diff", "--unified=80", "--no-ext-diff", "--", &rel],
+					"git diff",
+				)?
+			}
+		}
+		WorkspaceGitPreviewScope::Committed => {
+			let base = input
+				.base_branch
+				.as_deref()
+				.map(str::trim)
+				.filter(|value| !value.is_empty())
+				.ok_or_else(|| "base_branch is required for committed previews".to_string())?;
+			let range = format!("{base}...HEAD");
+			run_git_diff_text(
+				root,
+				&["diff", "--unified=80", "--no-ext-diff", &range, "--", &rel],
+				"git diff committed",
+			)?
+		}
+	};
+
+	if patch.trim().is_empty() {
+		return Err("no diff available for this file".to_string());
+	}
+
+	Ok(patch)
+}
+
+/// File-level code snapshot used by the Monaco diff surface.
+#[tauri::command]
+pub async fn workspace_git_file_preview_content(
+	input: WorkspaceGitFilePreviewInput,
+) -> Result<WorkspaceGitFilePreviewContentOutput, String> {
+	let root = input.workspace_root.trim();
+	if root.is_empty() {
+		return Err("workspace_root is empty".to_string());
+	}
+
+	let rel = validate_git_relative_path(&input.relative_path)?;
+	let absolute = PathBuf::from(root).join(&rel);
+	let status = input.status.trim();
+	let base_branch = input
+		.base_branch
+		.as_deref()
+		.map(str::trim)
+		.filter(|value| !value.is_empty())
+		.map(|value| value.to_string());
+
+	let (original_text, modified_text, inline) = match input.scope {
+		WorkspaceGitPreviewScope::Committed => {
+			let base = base_branch
+				.clone()
+				.ok_or_else(|| "base_branch is required for committed previews".to_string())?;
+			let original = run_git_show_text(root, &format!("{base}:{rel}"), "git show base")?
+				.unwrap_or_default();
+			let modified = run_git_show_text(root, &format!("HEAD:{rel}"), "git show HEAD")?
+				.unwrap_or_default();
+			(original, modified, matches!(status, "A" | "D" | "?"))
+		}
+		WorkspaceGitPreviewScope::Staged | WorkspaceGitPreviewScope::Unstaged => {
+			let original = if status == "?" {
+				String::new()
+			} else {
+				run_git_show_text(root, &format!("HEAD:{rel}"), "git show HEAD")?
+					.unwrap_or_default()
+			};
+
+			let modified = match status {
+				"D" => String::new(),
+				"?" => read_worktree_file_text(root, &rel)?.unwrap_or_default(),
+				_ => read_worktree_file_text(root, &rel)?.unwrap_or_else(|| {
+					run_git_show_text(root, &format!(":{rel}"), "git show index")
+						.ok()
+						.flatten()
+						.unwrap_or_default()
+				}),
+			};
+
+			let inline = matches!(status, "A" | "D" | "?");
+			(original, modified, inline)
+		}
+	};
+
+	if original_text.is_empty() && modified_text.is_empty() {
+		return Err("no content available for this file".to_string());
+	}
+
+	if !absolute.is_file() && input.scope != WorkspaceGitPreviewScope::Committed && status != "D" {
+		return Err("file not found".to_string());
+	}
+
+	Ok(WorkspaceGitFilePreviewContentOutput {
+		original_text,
+		modified_text,
+		inline,
+	})
 }
 
 #[tauri::command]

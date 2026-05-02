@@ -14,6 +14,8 @@ import type {
 	ListWorkspacesOutput,
 	WorkspaceGitBranchDiffInput,
 	WorkspaceGitBranchDiffOutput,
+	WorkspaceGitFilePreviewInput,
+	WorkspaceGitFilePreviewContentOutput,
 	WorkspaceGitCommitPushInput,
 	WorkspaceGitPathInput,
 	WorkspaceGitPushInput,
@@ -65,6 +67,10 @@ export function workspaceGitStageFile(input: WorkspaceGitPathInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceGitStageFile, { input });
 }
 
+export function workspaceGitStageAll(input: WorkspaceGitPathInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGitStageAll, { input });
+}
+
 export function workspaceGitUnstageFile(input: WorkspaceGitPathInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceGitUnstageFile, { input });
 }
@@ -93,4 +99,15 @@ export function workspaceGitBranchDiff(input: WorkspaceGitBranchDiffInput) {
 	return invoke<WorkspaceGitBranchDiffOutput>(WORKSPACE_METHODS.workspaceGitBranchDiff, {
 		input,
 	});
+}
+
+export function workspaceGitFilePreview(input: WorkspaceGitFilePreviewInput) {
+	return invoke<string>(WORKSPACE_METHODS.workspaceGitFilePreview, { input });
+}
+
+export function workspaceGitFilePreviewContent(input: WorkspaceGitFilePreviewInput) {
+	return invoke<WorkspaceGitFilePreviewContentOutput>(
+		WORKSPACE_METHODS.workspaceGitFilePreviewContent,
+		{ input },
+	);
 }

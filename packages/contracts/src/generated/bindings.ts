@@ -6,7 +6,7 @@ export const PROVIDER_METHODS = {"listProviders":"list_providers"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","listThreadEvents":"list_thread_events","resumeSession":"resume_session","sendTurn":"send_turn","startThread":"start_thread"} as const;
 
-export const WORKSPACE_METHODS = {"createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listWorkspaces":"list_workspaces","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitPush":"workspace_git_push","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitUnstageFile":"workspace_git_unstage_file"} as const;
+export const WORKSPACE_METHODS = {"createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listWorkspaces":"list_workspaces","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitFilePreview":"workspace_git_file_preview","workspaceGitFilePreviewContent":"workspace_git_file_preview_content","workspaceGitPush":"workspace_git_push","workspaceGitStageAll":"workspace_git_stage_all","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitUnstageFile":"workspace_git_unstage_file"} as const;
 
 /* Types */
 export type AbortRunInput = {
@@ -319,6 +319,15 @@ export type Workspace = {
 	updatedAt: string,
 };
 
+export type WorkspaceGitBranchDiffInput = {
+	workspaceRoot: string,
+};
+
+export type WorkspaceGitBranchDiffOutput = {
+	changes: WorkspaceGitChangeEntry[],
+	baseBranch: string | null,
+};
+
 export type WorkspaceGitChangeEntry = {
 	// Repo-relative path (posix separators).
 	path: string,
@@ -335,12 +344,17 @@ export type WorkspaceGitCommitPushInput = {
 	message: string,
 };
 
-export type WorkspaceGitBranchDiffInput = {
-	workspaceRoot: string,
+export type WorkspaceGitFilePreviewContentOutput = {
+	originalText: string,
+	modifiedText: string,
+	inline: boolean,
 };
 
-export type WorkspaceGitBranchDiffOutput = {
-	changes: WorkspaceGitChangeEntry[],
+export type WorkspaceGitFilePreviewInput = {
+	workspaceRoot: string,
+	relativePath: string,
+	status: string,
+	scope: WorkspaceGitPreviewScope,
 	baseBranch: string | null,
 };
 
@@ -348,6 +362,8 @@ export type WorkspaceGitPathInput = {
 	workspaceRoot: string,
 	relativePath: string,
 };
+
+export type WorkspaceGitPreviewScope = "staged" | "unstaged" | "committed";
 
 export type WorkspaceGitPushInput = {
 	workspaceRoot: string,
@@ -365,3 +381,4 @@ export type WorkspaceGitStatusOutput = {
 export type WorkspaceId = string;
 
 export type WorkspaceState = "initializing" | "setup_pending" | "ready" | "archived";
+

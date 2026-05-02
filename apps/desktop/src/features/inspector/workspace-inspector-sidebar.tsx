@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { BranchToolbar } from "@/components/BranchToolbar";
 import { Badge } from "@/components/ui/badge";
+import type { WorkspaceGitPreviewSelection } from "./workspace-git-file-preview";
 import { SessionEventFeed } from "@/features/sessions/session-event-feed";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workbench";
 import { InspectorChangesSection } from "./inspector-changes-section";
@@ -18,7 +19,9 @@ import { GitSectionHeader } from "./git-section-header";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import {
 	workspaceGhPrViewWeb,
+	workspaceGhPrCreateFill,
 	workspaceGitCommitPush,
+	workspaceGitStageAll,
 	workspaceGitPush,
 } from "@/lib/workspace-api";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
@@ -39,6 +42,8 @@ type WorkspaceInspectorSidebarProps = {
 	sessionState: string;
 	sessionId: string | null;
 	sessionEvents: CoreEvent[];
+	selectedPreview: WorkspaceGitPreviewSelection | null;
+	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 };
 
 const MIN_SECTION_HEIGHT = 128;
@@ -56,6 +61,31 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 			<div className="min-w-0 flex-1 font-mono text-[11.5px] text-foreground">{children}</div>
 		</div>
 	);
+}
+
+function inspectorActionTitle(mode: string) {
+	switch (mode) {
+		case "create-pr":
+			return "Criar PR";
+		case "open-pr":
+			return "Abrir PR";
+		case "commit-and-push":
+			return "Commitar e enviar";
+		case "push":
+			return "Enviar";
+		case "fix":
+			return "Corrigir CI";
+		case "resolve-conflicts":
+			return "Resolver conflitos";
+		case "merge":
+			return "Mesclar";
+		case "merged":
+			return "Mesclado";
+		case "closed":
+			return "Fechado";
+		default:
+			return "Ação";
+	}
 }
 
 function ProviderCatalogDense({ catalog }: { catalog: ProviderCatalog | null }) {
@@ -148,6 +178,8 @@ export function WorkspaceInspectorSidebar({
 	sessionState,
 	sessionId,
 	sessionEvents,
+	selectedPreview,
+	onSelectPreview,
 }: WorkspaceInspectorSidebarProps) {
 	const { t } = useTranslation("common");
 	const hasWorkspace = Boolean(workspaceId && workspaceName && workspaceBranch);
@@ -169,37 +201,64 @@ export function WorkspaceInspectorSidebar({
 			throw new Error("No workspace path");
 		}
 
-		switch (commitMode) {
-			case "merged":
-			case "closed":
-				return;
-			case "push":
-				await workspaceGitPush({ workspaceRoot: root });
-				toast.success("Pushed");
-				break;
-			case "open-pr":
-				await workspaceGhPrViewWeb({ workspaceRoot: root });
-				toast.success("Opened PR in browser");
-				break;
-			default: {
-				const message = window.prompt("Commit message", "dcc: checkpoint");
-				if (message === null) {
-					return;
-				}
-				const trimmed = message.trim();
-				if (!trimmed) {
-					toast.error("Commit message required");
-					throw new Error("Commit message required");
-				}
-				await workspaceGitCommitPush({ workspaceRoot: root, message: trimmed });
-				toast.success("Committed and pushed");
-				break;
+		const promptCommitMessage = (fallback: string) => {
+			const message = window.prompt("Commit message", fallback);
+			if (message === null) {
+				return null;
 			}
-		}
+			const trimmed = message.trim();
+			if (!trimmed) {
+				toast.error("Commit message required");
+				throw new Error("Commit message required");
+			}
+			return trimmed;
+		};
 
-		await queryClient.invalidateQueries({
-			queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
-		});
+		try {
+			switch (commitMode) {
+				case "merged":
+				case "closed":
+					return;
+				case "push":
+					await workspaceGitPush({ workspaceRoot: root });
+					toast.success("Pushed");
+					break;
+				case "open-pr":
+					await workspaceGhPrViewWeb({ workspaceRoot: root });
+					toast.success("Opened PR in browser");
+					break;
+				case "create-pr": {
+					await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
+					const message = promptCommitMessage("feat: create pull request");
+					if (!message) {
+						return;
+					}
+					await workspaceGitCommitPush({ workspaceRoot: root, message });
+					await workspaceGhPrCreateFill({ workspaceRoot: root });
+					toast.success("PR created");
+					break;
+				}
+				default: {
+					await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
+					const message = promptCommitMessage("dcc: checkpoint");
+					if (!message) {
+						return;
+					}
+					await workspaceGitCommitPush({ workspaceRoot: root, message });
+					toast.success("Committed and pushed");
+					break;
+				}
+			}
+
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "Action failed";
+			console.error("[inspector] git action failed", { commitMode, root, error });
+			toast.error(`${inspectorActionTitle(commitMode)} failed: ${message}`);
+			throw error;
+		}
 	}, [commitMode, queryClient, workspacePath]);
 
 	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
@@ -293,7 +352,11 @@ export function WorkspaceInspectorSidebar({
 						</p>
 					) : null}
 					<div className="flex min-h-0 min-w-0 flex-1 flex-col">
-						<InspectorChangesSection workspaceRoot={workspacePath} />
+						<InspectorChangesSection
+							workspaceRoot={workspacePath}
+							selectedPreview={selectedPreview}
+							onSelectPreview={onSelectPreview}
+						/>
 					</div>
 				</div>
 			</section>

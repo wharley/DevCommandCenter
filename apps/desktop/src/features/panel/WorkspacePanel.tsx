@@ -1,4 +1,5 @@
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
+import { WorkspaceEditorSurface } from "@/features/editor/WorkspaceEditorSurface";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import type { ProviderCatalog, CoreEvent } from "@dcc/contracts";
 import type { AppUpdateInfo } from "@/features/updater";
@@ -7,6 +8,7 @@ import { ActiveThreadViewport } from "./ActiveThreadViewport";
 import { WorkspaceComposer } from "@/features/composer";
 import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
+import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
 
 type WorkspacePanelProps = {
 	workspaceId: string;
@@ -34,6 +36,8 @@ type WorkspacePanelProps = {
 	terminalAvailable: boolean;
 	terminalOpen: boolean;
 	onToggleTerminal: () => void;
+	editorSelection: WorkspaceGitPreviewSelection | null;
+	onCloseEditor: () => void;
 };
 
 export function WorkspacePanel({
@@ -62,6 +66,8 @@ export function WorkspacePanel({
 	terminalAvailable,
 	terminalOpen,
 	onToggleTerminal,
+	editorSelection,
+	onCloseEditor,
 }: WorkspacePanelProps) {
 	const sessionId = sessionSnapshot?.sessionId ?? null;
 	const threadHistoryQuery = useQuery(
@@ -82,7 +88,13 @@ export function WorkspacePanel({
 	const lastTurnState = sessionSnapshot?.lastTurnState ?? null;
 	const isGitRepo = Boolean(workspaceBranch) || Boolean(workspacePath);
 
-	return (
+	return editorSelection ? (
+		<WorkspaceEditorSurface
+			workspaceRoot={workspacePath}
+			selection={editorSelection}
+			onClose={onCloseEditor}
+		/>
+	) : (
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
 			<header
 				className={[

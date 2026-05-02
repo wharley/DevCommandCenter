@@ -63,6 +63,7 @@ import {
 	canAbortRun,
 	canResumeSession,
 } from "./features/sessions/session-chrome-state";
+import type { WorkspaceGitPreviewSelection } from "./features/inspector/workspace-git-file-preview";
 
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 
@@ -199,6 +200,8 @@ export default function App() {
 	const [sessionSnapshot, setSessionSnapshot] =
 		useState<RuntimeSessionSnapshot | null>(null);
 	const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+	const [editorSelection, setEditorSelection] =
+		useState<WorkspaceGitPreviewSelection | null>(null);
 	const { theme, setTheme } = useAppearance();
 	const {
 		update: appUpdateInfo,
@@ -328,6 +331,7 @@ export default function App() {
 	useEffect(() => {
 		setSessionSnapshot(null);
 		setPendingPrompt(null);
+		setEditorSelection(null);
 	}, [selectedWorkspace?.id]);
 
 	/** Keep `activeTurnId` in sync with live stream (turn finished / new turn / abort) after the send returns. */
@@ -531,6 +535,17 @@ export default function App() {
 		);
 	}, [sessionSnapshot]);
 
+	const handleOpenEditorFile = useCallback(
+		(selection: WorkspaceGitPreviewSelection | null) => {
+			setEditorSelection(selection);
+		},
+		[],
+	);
+
+	const handleCloseEditor = useCallback(() => {
+		setEditorSelection(null);
+	}, []);
+
 	const handleAbortSession = useCallback(async () => {
 		if (!sessionSnapshot || !canAbortRun(sessionSnapshot, pendingPrompt)) {
 			return;
@@ -686,6 +701,8 @@ export default function App() {
 									updateInfo={appUpdateInfo}
 									isInstallingUpdate={isInstallingUpdate}
 									onInstallUpdate={installUpdate}
+									editorSelection={editorSelection}
+									onCloseEditor={handleCloseEditor}
 								/>
 							) : (
 								<WorkspaceBootstrapState
@@ -730,6 +747,8 @@ export default function App() {
 									selectedModelLabel={selectedModel?.label ?? null}
 									sessionState={sessionSnapshot?.state ?? "idle"}
 									sessionId={sessionSnapshot?.sessionId ?? null}
+									selectedPreview={editorSelection}
+									onSelectPreview={handleOpenEditorFile}
 								/>
 							</aside>
 						</>

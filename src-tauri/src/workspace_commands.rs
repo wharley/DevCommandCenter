@@ -13,7 +13,9 @@ use dcc_tauri::{
 		ListLocalBranchesOutput,
 		ListWorkspacesOutput,
 		WorkspaceGitBranchDiffInput,
-		WorkspaceGitBranchDiffOutput,
+	WorkspaceGitBranchDiffOutput,
+	WorkspaceGitFilePreviewInput,
+	WorkspaceGitFilePreviewContentOutput,
 		WorkspaceGitCommitPushInput,
 		WorkspaceGitPathInput,
 		WorkspaceGitPushInput,
@@ -82,6 +84,11 @@ pub async fn workspace_git_stage_file(input: WorkspaceGitPathInput) -> Result<()
 }
 
 #[tauri::command]
+pub async fn workspace_git_stage_all(input: WorkspaceGitPathInput) -> Result<(), String> {
+	dcc_tauri::commands::workspace_commands::workspace_git_stage_all(input).await
+}
+
+#[tauri::command]
 pub async fn workspace_git_unstage_file(input: WorkspaceGitPathInput) -> Result<(), String> {
 	dcc_tauri::commands::workspace_commands::workspace_git_unstage_file(input).await
 }
@@ -118,4 +125,18 @@ pub async fn workspace_git_branch_diff(
 	input: WorkspaceGitBranchDiffInput,
 ) -> Result<WorkspaceGitBranchDiffOutput, String> {
 	dcc_tauri::commands::workspace_commands::workspace_git_branch_diff(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_file_preview(
+	input: WorkspaceGitFilePreviewInput,
+) -> Result<String, String> {
+	dcc_tauri::commands::workspace_commands::workspace_git_file_preview(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_file_preview_content(
+	input: WorkspaceGitFilePreviewInput,
+) -> Result<WorkspaceGitFilePreviewContentOutput, String> {
+	dcc_tauri::commands::workspace_commands::workspace_git_file_preview_content(input).await
 }

@@ -253,45 +253,45 @@
     "default": "Commit",
     "modes": {
       "create-pr": {
-        "idle": "Create PR",
-        "busy": "Creating PR...",
-        "done": "PR Created",
+        "idle": "Criar PR",
+        "busy": "Criando PR...",
+        "done": "PR criado",
         "error": "Retry"
       },
       "open-pr": {
-        "idle": "Open PR",
-        "busy": "Opening...",
-        "done": "Opened",
+        "idle": "Abrir PR",
+        "busy": "Abrindo...",
+        "done": "Aberto",
         "error": "Retry"
       },
       "commit-and-push": {
-        "idle": "Commit & Push",
-        "busy": "Committing...",
-        "done": "Pushed",
+        "idle": "Commitar e enviar",
+        "busy": "Commitando...",
+        "done": "Enviado",
         "error": "Retry"
       },
       "push": {
-        "idle": "Push",
-        "busy": "Pushing...",
-        "done": "Pushed",
+        "idle": "Enviar",
+        "busy": "Enviando...",
+        "done": "Enviado",
         "error": "Retry"
       },
       "fix": {
-        "idle": "Fix CI",
-        "busy": "Fixing...",
-        "done": "Fixed",
+        "idle": "Corrigir CI",
+        "busy": "Corrigindo...",
+        "done": "Corrigido",
         "error": "Retry"
       },
       "resolve-conflicts": {
-        "idle": "Resolve",
-        "busy": "Resolving...",
-        "done": "Resolved",
+        "idle": "Resolver",
+        "busy": "Resolvendo...",
+        "done": "Resolvido",
         "error": "Retry"
       },
       "merge": {
-        "idle": "Merge",
-        "busy": "Merging...",
-        "done": "Merged",
+        "idle": "Mesclar",
+        "busy": "Mesclando...",
+        "done": "Mesclado",
         "error": "Retry"
       }
     }

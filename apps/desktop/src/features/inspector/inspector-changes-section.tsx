@@ -26,12 +26,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import type { WorkspaceGitChangeEntry } from "@dcc/contracts";
 import {
 	workspaceGitDiscardFile,
+	workspaceGitStageAll,
 	workspaceGitStageFile,
 	workspaceGitUnstageFile,
 } from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { useWorkspaceGitBranchDiff, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./use-workspace-git-branch-diff";
+import type { WorkspaceGitPreviewSelection } from "./workspace-git-file-preview";
 
 export { WORKSPACE_GIT_STATUS_QUERY_KEY, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY };
 
@@ -145,6 +147,8 @@ function ChangeRow({
 	treeIndentPx = 0,
 	fileIconSrc,
 	flashingPaths = new Set(),
+	selected = false,
+	onSelect,
 }: {
 	entry: WorkspaceGitChangeEntry;
 	group: "staged" | "unstaged" | "committed";
@@ -154,6 +158,8 @@ function ChangeRow({
 	treeIndentPx?: number;
 	fileIconSrc?: string;
 	flashingPaths?: Set<string>;
+	selected?: boolean;
+	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	const folder = dirname(entry.path);
 	const input = { workspaceRoot, relativePath: entry.path };
@@ -161,9 +167,37 @@ function ChangeRow({
 
 	return (
 		<div
-			className="group/row flex cursor-default items-center gap-1.5 py-[1.5px] pl-2 pr-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent/60"
+			className={cn(
+				"group/row flex items-center gap-1.5 py-[1.5px] pl-2 pr-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent/60",
+				onSelect && "cursor-pointer",
+				selected && "bg-muted/60 text-foreground",
+			)}
 			style={treeIndentPx > 0 ? { paddingLeft: treeIndentPx } : undefined}
 			title={entry.absolutePath}
+			role={onSelect ? "button" : undefined}
+			tabIndex={onSelect ? 0 : undefined}
+			onClick={() =>
+				onSelect?.({
+					group,
+					path: entry.path,
+					name: entry.name,
+					status: entry.status,
+					baseBranch: null,
+				})
+			}
+			onKeyDown={(event) => {
+				if (!onSelect) return;
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					onSelect({
+						group,
+						path: entry.path,
+						name: entry.name,
+						status: entry.status,
+						baseBranch: null,
+					});
+				}
+			}}
 		>
 			<img src={iconSrc} alt="" className="size-3.5 shrink-0" />
 			<span className="min-w-0 max-w-[40%] truncate font-medium text-foreground sm:max-w-[52%]">
@@ -256,6 +290,8 @@ function ChangesTreeView({
 	gitBusy,
 	runGit,
 	flashingPaths = new Set(),
+	selectedPath = null,
+	onSelect,
 }: {
 	entries: WorkspaceGitChangeEntry[];
 	group: "staged" | "unstaged" | "committed";
@@ -263,6 +299,8 @@ function ChangesTreeView({
 	gitBusy: boolean;
 	runGit: (fn: () => Promise<void>) => Promise<void>;
 	flashingPaths?: Set<string>;
+	selectedPath?: string | null;
+	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	const tree = useMemo(() => buildTree(entries), [entries]);
 	const [expanded, setExpanded] = useState<Set<string>>(() => new Set(collectFolderPaths(tree)));
@@ -291,6 +329,8 @@ function ChangesTreeView({
 				gitBusy={gitBusy}
 				runGit={runGit}
 				flashingPaths={flashingPaths}
+				selectedPath={selectedPath}
+				onSelect={onSelect}
 			/>
 		</div>
 	);
@@ -306,6 +346,8 @@ function TreeNodeList({
 	gitBusy,
 	runGit,
 	flashingPaths = new Set(),
+	selectedPath = null,
+	onSelect,
 }: {
 	nodes: Map<string, TreeNode>;
 	expanded: Set<string>;
@@ -316,6 +358,8 @@ function TreeNodeList({
 	gitBusy: boolean;
 	runGit: (fn: () => Promise<void>) => Promise<void>;
 	flashingPaths?: Set<string>;
+	selectedPath?: string | null;
+	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	const sorted = [...nodes.values()].sort((left, right) => {
 		const leftIsFolder = left.children.size > 0 && !left.file;
@@ -373,6 +417,8 @@ function TreeNodeList({
 									gitBusy={gitBusy}
 									runGit={runGit}
 									flashingPaths={flashingPaths}
+									selectedPath={selectedPath}
+									onSelect={onSelect}
 								/>
 							) : null}
 						</div>
@@ -395,6 +441,8 @@ function TreeNodeList({
 						treeIndentPx={depth * 12 + 22}
 						fileIconSrc={getMaterialFileIcon(node.name)}
 						flashingPaths={flashingPaths}
+						selected={selectedPath === file.path}
+						onSelect={onSelect}
 					/>
 				);
 			})}
@@ -430,9 +478,13 @@ function ShinyFlash({ active, children }: { active: boolean; children: React.Rea
 function BranchDiffSection({
 	workspaceRoot,
 	gitBusy,
+	selectedPath = null,
+	onSelect,
 }: {
 	workspaceRoot: string;
 	gitBusy: boolean;
+	selectedPath?: string | null;
+	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	const [open, setOpen] = useState(true);
 	const [treeView, setTreeView] = useState(true);
@@ -497,6 +549,10 @@ function BranchDiffSection({
 							gitBusy={gitBusy}
 							runGit={async () => {}}
 							flashingPaths={flashingPaths}
+							selectedPath={selectedPath}
+							onSelect={(selection) =>
+								onSelect?.({ ...selection, baseBranch })
+							}
 						/>
 					) : (
 						<div className="pb-2 pl-1">
@@ -509,6 +565,10 @@ function BranchDiffSection({
 										gitBusy={gitBusy}
 									runGit={async () => {}}
 									flashingPaths={flashingPaths}
+									selected={selectedPath === entry.path}
+									onSelect={(selection) =>
+										onSelect?.({ ...selection, baseBranch })
+									}
 								/>
 							))}
 						</div>
@@ -558,6 +618,8 @@ function ChangesGroup({
 	onToggleTreeView,
 	showViewToggle,
 	icon,
+	selectedPath = null,
+	onSelect,
 }: {
 	label: string;
 	count: number;
@@ -575,6 +637,8 @@ function ChangesGroup({
 	onToggleTreeView: () => void;
 	showViewToggle: boolean;
 	icon?: React.ReactNode;
+	selectedPath?: string | null;
+	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	return (
 		<div className="border-b border-border/40 last:border-b-0">
@@ -623,6 +687,8 @@ function ChangesGroup({
 						workspaceRoot={workspaceRoot}
 						gitBusy={gitBusy}
 						runGit={runGit}
+						selectedPath={selectedPath}
+						onSelect={onSelect}
 					/>
 				) : (
 					<div className="pb-2 pl-1">
@@ -634,6 +700,8 @@ function ChangesGroup({
 								workspaceRoot={workspaceRoot}
 								gitBusy={gitBusy}
 								runGit={runGit}
+								selected={selectedPath === e.path}
+								onSelect={onSelect}
 							/>
 						))}
 					</div>
@@ -645,9 +713,15 @@ function ChangesGroup({
 
 type InspectorChangesSectionProps = {
 	workspaceRoot: string | null;
+	selectedPreview: WorkspaceGitPreviewSelection | null;
+	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 };
 
-export function InspectorChangesSection({ workspaceRoot }: InspectorChangesSectionProps) {
+export function InspectorChangesSection({
+	workspaceRoot,
+	selectedPreview,
+	onSelectPreview,
+}: InspectorChangesSectionProps) {
 	const queryClient = useQueryClient();
 	const [stagedOpen, setStagedOpen] = useState(true);
 	const [unstagedOpen, setUnstagedOpen] = useState(true);
@@ -693,13 +767,12 @@ export function InspectorChangesSection({ workspaceRoot }: InspectorChangesSecti
 	);
 
 	const stageAll = useCallback(
-		async (paths: string[]) => {
+		async () => {
 			await runGit(async () => {
-				await Promise.all(
-					paths.map((relativePath) =>
-						workspaceGitStageFile({ workspaceRoot: root, relativePath }),
-					),
-				);
+				await workspaceGitStageAll({
+					workspaceRoot: root,
+					relativePath: ".",
+				});
 			});
 		},
 		[root, runGit],
@@ -753,6 +826,8 @@ export function InspectorChangesSection({ workspaceRoot }: InspectorChangesSecti
 						treeView={changesTreeView}
 						onToggleTreeView={() => setChangesTreeView((v) => !v)}
 						showViewToggle
+						selectedPath={selectedPreview?.group === "staged" ? selectedPreview.path : null}
+						onSelect={onSelectPreview}
 					/>
 				) : null}
 				{data.unstaged.length > 0 ? (
@@ -766,13 +841,15 @@ export function InspectorChangesSection({ workspaceRoot }: InspectorChangesSecti
 						workspaceRoot={root}
 						gitBusy={gitBusy}
 						runGit={runGit}
-						onBatchAll={() => stageAll(data.unstaged.map((e) => e.path))}
+						onBatchAll={stageAll}
 						batchAriaLabel="Stage all changes"
 						BatchIcon={PlusIcon}
 						treeView={changesTreeView}
 						onToggleTreeView={() => setChangesTreeView((v) => !v)}
 						showViewToggle={data.staged.length === 0}
 						icon={<LaptopIcon className="size-3 shrink-0 text-muted-foreground" strokeWidth={2} />}
+						selectedPath={selectedPreview?.group === "unstaged" ? selectedPreview.path : null}
+						onSelect={onSelectPreview}
 					/>
 				) : null}
 				{!hasAny ? (
@@ -781,7 +858,12 @@ export function InspectorChangesSection({ workspaceRoot }: InspectorChangesSecti
 					</div>
 				) : null}
 				{Boolean(root) && (
-					<BranchDiffSection workspaceRoot={root} gitBusy={gitBusy} />
+					<BranchDiffSection
+						workspaceRoot={root}
+						gitBusy={gitBusy}
+						selectedPath={selectedPreview?.group === "committed" ? selectedPreview.path : null}
+						onSelect={onSelectPreview}
+					/>
 				)}
 			</div>
 		</ScrollArea>
