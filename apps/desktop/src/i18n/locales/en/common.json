@@ -1,0 +1,268 @@
+{
+  "app": {
+    "shellAria": "Application shell",
+    "workspaceSidebarAria": "Workspace sidebar",
+    "resizeSidebarAria": "Resize sidebar",
+    "workspacePanelAria": "Workspace panel",
+    "workspaceDragRegionAria": "Workspace panel drag region",
+    "workspaceViewportAria": "Workspace viewport",
+    "inspectorSidebarAria": "Inspector sidebar",
+    "resizeInspectorAria": "Resize inspector sidebar"
+  },
+  "sidebar": {
+    "title": "Workspaces",
+    "archived": "Archived",
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar",
+    "openWorkspace": "Open workspace {{label}}",
+    "openRepoPicker": "Open repository picker",
+    "searchReposPlaceholder": "Search repositories...",
+    "noRepoFound": "No repository found.",
+    "recentRepos": "Recent repos",
+    "actions": "Actions",
+    "openRepoPickerAction": "Open repo picker",
+    "cloneFromUrl": "Clone from URL",
+    "openProject": "Open project",
+    "openSettings": "Open settings",
+    "openProjectMenu": "Open project menu",
+    "noWorkspacesYet": "No workspaces yet",
+    "noWorkspacesHint": "Open a project or clone from URL to start from zero.",
+    "settings": "Settings",
+    "settingsShort": "Settings"
+  },
+  "commandPalette": {
+    "title": "Workspace command palette",
+    "description": "Jump to a workspace or run an action.",
+    "searchPlaceholder": "Search workspaces...",
+    "empty": "No workspace found.",
+    "switchWorkspace": "Switch workspace",
+    "selected": "Selected",
+    "actions": "Actions",
+    "openProject": "Open project",
+    "cloneFromUrl": "Clone from URL",
+    "openSettings": "Open settings",
+    "rebuildContracts": "Rebuild contracts",
+    "stub": "Stub",
+    "openOnboarding": "Open onboarding",
+    "keyboardShortcuts": "Keyboard shortcuts"
+  },
+  "workspaceDialog": {
+    "cloneTitle": "Clone repository",
+    "createTitle": "Create workspace",
+    "cloneDescription": "Clone a remote repository into a local folder, then create the worktree from it. Leave base branch empty to auto-detect the remote default branch.",
+    "createDescription": "New worktree from a local repo path and base branch.",
+    "repositoryUrl": "Repository URL",
+    "projectId": "Project ID",
+    "autoFilledFromFolder": "Auto-filled from folder name",
+    "destinationFolder": "Destination folder",
+    "repositoryPath": "Repository path",
+    "chooseFolder": "Choose folder",
+    "baseBranchOptional": "Base branch (optional)",
+    "baseBranch": "Base branch",
+    "loadingBranches": "Loading branches…",
+    "chooseFolderForBranches": "Choose a folder to load branches",
+    "displayName": "Display name",
+    "optional": "optional",
+    "defaultsFromBranch": "Defaults from branch if empty",
+    "autoDetectPlaceholder": "Auto-detect default branch",
+    "cancel": "Cancel",
+    "cloning": "Cloning…",
+    "creating": "Creating…",
+    "cloneSubmit": "Clone repository",
+    "createSubmit": "Create workspace",
+    "pickFolderClone": "Choose a destination folder",
+    "pickFolderRepo": "Choose a repository folder",
+    "toastLoadBranchesError": "Could not load branches",
+    "toastPickerError": "Could not open folder picker",
+    "toastCloneSuccess": "Repository cloned",
+    "toastCreateSuccess": "Workspace created",
+    "toastCloneError": "Failed to clone repository",
+    "toastCreateError": "Failed to create workspace"
+  },
+  "bootstrap": {
+    "title": "No workspace open",
+    "description": "Open a project or clone from URL to start from zero. The chat, inspector, and terminal surfaces will appear once a workspace exists.",
+    "openProject": "Open project",
+    "cloneFromUrl": "Clone from URL",
+    "commandPalette": "Command palette",
+    "currentProvider": "Current provider: {{provider}}{{model}}"
+  },
+  "settings": {
+    "title": "Settings",
+    "repository": "Repository",
+    "currentWorkspace": "Current workspace",
+    "currentWorkspaceHint": "Repository-scoped preferences live with the active workspace.",
+    "phaseBadge": "Phase 3",
+    "languageTitle": "Interface language",
+    "languageHint": "Brazilian Portuguese by default; English available for international teams.",
+    "localePtBr": "Portuguese (Brazil)",
+    "localeEn": "English",
+    "sections": {
+      "general": { "label": "General", "description": "Workspace defaults and shell behavior." },
+      "appearance": { "label": "Appearance", "description": "Theme and chrome contrast." },
+      "model": { "label": "Model", "description": "Default provider for new sessions." },
+      "shortcuts": { "label": "Shortcuts", "description": "Keyboard bindings and command palette." },
+      "git": { "label": "Git", "description": "Branch and PR-state chrome." },
+      "experimental": { "label": "Experimental", "description": "Preview toggles and future shell flags." },
+      "account": { "label": "Account", "description": "GitHub and future sync state." }
+    },
+    "general": {
+      "shellBehavior": "Shell behavior",
+      "shellBehaviorBody": "The desktop shell keeps workspace chrome, the thread composer, and the inspector aligned with the blueprint.",
+      "shellReady": "Shell ready",
+      "defaultEntry": "Default entry",
+      "defaultEntryBody": "Workspaces open into the inspector-first workbench with the composer in the center pane.",
+      "commandPalette": "Command palette",
+      "commandPaletteBody": "`Cmd/Ctrl+K` opens workspace switching and actions."
+    },
+    "appearance": {
+      "theme": "Theme",
+      "themeHint": "Match the shell to the system or force a fixed mode.",
+      "light": "Light",
+      "dark": "Dark",
+      "colorSystemHint": "The color system is driven by shell tokens, so this choice changes the whole chrome instead of just the canvas."
+    },
+    "model": {
+      "providersTitle": "Providers",
+      "providersHint": "Choose the default runtime for new sessions and composer sends."
+    },
+    "shortcuts": {
+      "keyboardShortcuts": "Keyboard shortcuts",
+      "keyboardShortcutsHint": "Command palette and composer shortcuts already wired in this shell.",
+      "activeCount": "3 active"
+    },
+    "git": {
+      "chromeTitle": "Git chrome",
+      "chromeHint": "Branch-aware header styling and the commit action live in the inspector.",
+      "prState": "PR state",
+      "badgeBranchToolbar": "Branch toolbar",
+      "badgeCommitButton": "Commit button",
+      "badgeHeaderShimmer": "Header shimmer"
+    },
+    "experimental": {
+      "title": "Experimental",
+      "body": "No preview toggles are exposed yet. This section stays in the nav so future shell flags land without changing the layout."
+    },
+    "account": {
+      "githubTitle": "GitHub account",
+      "githubHint": "Account and sync surfaces are gated behind the future integration pass.",
+      "disconnected": "Disconnected",
+      "footerHint": "The settings dialog already reserves the account section so the footer integration can slot in later without reopening the shell contract."
+    }
+  },
+  "shortcutsSheet": {
+    "badge": "Shortcuts",
+    "title": "Keyboard shortcuts",
+    "openPalette": "Open command palette",
+    "sendPrompt": "Send prompt",
+    "steerSession": "Steer session",
+    "abortSession": "Abort session"
+  },
+  "onboarding": {
+    "steps": {
+      "intro": {
+        "title": "Welcome to Dev Command Center",
+        "body": "Start from the shell, keep your workspace visible, and let the thread stay in the center."
+      },
+      "agents": {
+        "title": "Agents stay in the loop",
+        "body": "The inspector and composer are already primed for provider-driven sessions and runtime context."
+      },
+      "repoImport": {
+        "title": "Import a repository",
+        "body": "Point the shell at a local repo or clone from URL and the workspace opens around it."
+      },
+      "completeTransition": {
+        "title": "Ready to transition",
+        "body": "Finish onboarding and drop into the shell with the same chrome the blueprint calls for."
+      }
+    },
+    "chips": {
+      "intro": "intro",
+      "agents": "agents",
+      "repoImport": "repoImport",
+      "completeTransition": "completeTransition"
+    },
+    "phase4Title": "Phase 4 scope",
+    "phase4Body": "We ship intro, agents, repo import, and the completion transition first.",
+    "laterSteps": "Later steps",
+    "conductorPreviewTitle": "Optional Conductor preview",
+    "conductorPreviewBody": "The optional integration pass stays deferred, but the visual concept is available now.",
+    "previewConductor": "Preview conductor",
+    "back": "Back",
+    "skip": "Skip for now",
+    "next": "Next",
+    "finish": "Finish"
+  },
+  "commit": {
+    "merged": "Merged",
+    "closed": "Closed",
+    "default": "Commit",
+    "modes": {
+      "create-pr": {
+        "idle": "Create PR",
+        "busy": "Creating PR...",
+        "done": "PR Created",
+        "error": "Retry"
+      },
+      "open-pr": {
+        "idle": "Open PR",
+        "busy": "Opening...",
+        "done": "Opened",
+        "error": "Retry"
+      },
+      "commit-and-push": {
+        "idle": "Commit & Push",
+        "busy": "Committing...",
+        "done": "Pushed",
+        "error": "Retry"
+      },
+      "push": {
+        "idle": "Push",
+        "busy": "Pushing...",
+        "done": "Pushed",
+        "error": "Retry"
+      },
+      "fix": {
+        "idle": "Fix CI",
+        "busy": "Fixing...",
+        "done": "Fixed",
+        "error": "Retry"
+      },
+      "resolve-conflicts": {
+        "idle": "Resolve",
+        "busy": "Resolving...",
+        "done": "Resolved",
+        "error": "Retry"
+      },
+      "merge": {
+        "idle": "Merge",
+        "busy": "Merging...",
+        "done": "Merged",
+        "error": "Retry"
+      }
+    }
+  },
+  "workbench": {
+    "noGit": "No Git",
+    "sessionIdle": "idle",
+    "sessionControlsAria": "Session controls",
+    "resumeAria": "Resume session",
+    "resumeTooltipNone": "Start or select a session first",
+    "resumeTooltipOk": "Resume session",
+    "resumeTooltipActive": "Already active",
+    "abortAria": "Abort run",
+    "abortTooltipNone": "Start or select a session first",
+    "abortTooltipOk": "Abort run",
+    "abortTooltipNoTurn": "No turn in progress",
+    "terminalAria": "Toggle terminal drawer",
+    "terminalUnavailable": "Terminal needs a workspace path.",
+    "terminalHide": "Hide terminal drawer (Esc)",
+    "terminalToggle": "Toggle terminal drawer",
+    "commandPaletteAria": "Command palette",
+    "commandPaletteTooltip": "Command palette — switch workspace, search (⌘K)"
+  },
+  "updater": {
+    "update": "Update"
+  }
+}

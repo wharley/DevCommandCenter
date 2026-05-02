@@ -1,9 +1,10 @@
 import { Check, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { CommitButtonStatus, CommitMode } from "./WorkspaceCommitButton.logic";
-import { commitLabel, commitModeClassName } from "./WorkspaceCommitButton.logic";
+import { commitModeClassName, commitTranslationKey } from "./WorkspaceCommitButton.logic";
 
 type WorkspaceCommitButtonProps = {
 	mode: CommitMode;
@@ -16,8 +17,12 @@ export function WorkspaceCommitButton({
 	disabled = false,
 	onCommit,
 }: WorkspaceCommitButtonProps) {
+	const { t } = useTranslation("common");
 	const [status, setStatus] = useState<CommitButtonStatus>("idle");
-	const label = useMemo(() => commitLabel(mode, status), [mode, status]);
+	const label = useMemo(
+		() => t(commitTranslationKey(mode, status)),
+		[mode, status, t],
+	);
 	const isLocked = disabled || mode === "merged" || mode === "closed";
 
 	useEffect(() => {

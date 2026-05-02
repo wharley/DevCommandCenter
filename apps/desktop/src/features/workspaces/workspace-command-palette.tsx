@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import {
 	CommandDialog,
 	CommandEmpty,
@@ -36,26 +37,27 @@ export function WorkspaceCommandPalette({
 	onOpenOnboarding,
 	onOpenShortcuts,
 }: WorkspaceCommandPaletteProps) {
+	const { t } = useTranslation("common");
 	const groupedWorkspaces = useMemo(
 		() => [
 			{
-				label: "Switch workspace",
+				label: t("commandPalette.switchWorkspace"),
 				items: workspaces,
 			},
 		],
-		[workspaces],
+		[t, workspaces],
 	);
 
 	return (
 		<CommandDialog
 			open={open}
 			onOpenChange={onOpenChange}
-			title="Workspace command palette"
-			description="Jump to a workspace or run an action."
+			title={t("commandPalette.title")}
+			description={t("commandPalette.description")}
 		>
-			<CommandInput placeholder="Search workspaces..." />
+			<CommandInput placeholder={t("commandPalette.searchPlaceholder")} />
 			<CommandList>
-				<CommandEmpty>No workspace found.</CommandEmpty>
+				<CommandEmpty>{t("commandPalette.empty")}</CommandEmpty>
 				{groupedWorkspaces.map((group) => (
 					<CommandGroup key={group.label} heading={group.label}>
 						{group.items.map((workspace) => (
@@ -72,14 +74,14 @@ export function WorkspaceCommandPalette({
 									{workspace.branch}
 								</span>
 								{workspace.id === selectedWorkspaceId ? (
-									<CommandShortcut>Selected</CommandShortcut>
+									<CommandShortcut>{t("commandPalette.selected")}</CommandShortcut>
 								) : null}
 							</CommandItem>
 						))}
 					</CommandGroup>
 				))}
 				<CommandSeparator />
-				<CommandGroup heading="Actions">
+				<CommandGroup heading={t("commandPalette.actions")}>
 					<CommandItem
 						value="open project"
 						onSelect={() => {
@@ -87,7 +89,7 @@ export function WorkspaceCommandPalette({
 							onCreateWorkspace();
 						}}
 					>
-						Open project
+						{t("commandPalette.openProject")}
 						<CommandShortcut>⌘O</CommandShortcut>
 					</CommandItem>
 					<CommandItem
@@ -97,7 +99,7 @@ export function WorkspaceCommandPalette({
 							onCloneWorkspace();
 						}}
 					>
-						Clone from URL
+						{t("commandPalette.cloneFromUrl")}
 					</CommandItem>
 					<CommandItem
 						value="open settings"
@@ -106,15 +108,15 @@ export function WorkspaceCommandPalette({
 							onOpenSettings();
 						}}
 					>
-						Open settings
+						{t("commandPalette.openSettings")}
 						<CommandShortcut>⌘,</CommandShortcut>
 					</CommandItem>
 					<CommandItem
 						value="rebuild contracts"
 						onSelect={() => onOpenChange(false)}
 					>
-						Rebuild contracts
-						<CommandShortcut>Stub</CommandShortcut>
+						{t("commandPalette.rebuildContracts")}
+						<CommandShortcut>{t("commandPalette.stub")}</CommandShortcut>
 					</CommandItem>
 					<CommandItem
 						value="open onboarding"
@@ -123,7 +125,7 @@ export function WorkspaceCommandPalette({
 							onOpenOnboarding();
 						}}
 					>
-						Open onboarding
+						{t("commandPalette.openOnboarding")}
 					</CommandItem>
 					<CommandItem
 						value="keyboard shortcuts"
@@ -132,7 +134,7 @@ export function WorkspaceCommandPalette({
 							onOpenShortcuts();
 						}}
 					>
-						Keyboard shortcuts
+						{t("commandPalette.keyboardShortcuts")}
 					</CommandItem>
 				</CommandGroup>
 			</CommandList>

@@ -1,5 +1,6 @@
 import { CircleStop, Command, RefreshCw, TerminalSquare } from "lucide-react";
-import { memo } from "react";
+import { memo, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,9 +55,14 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	isInstallingUpdate,
 	onInstallUpdate,
 }: DccWorkbenchChatHeaderProps) {
+	const { t } = useTranslation("common");
 	const showProjectBadge = Boolean(projectBadgeLabel);
 	const resumeOk = canResumeSession(sessionSnapshot);
 	const abortOk = canAbortRun(sessionSnapshot, pendingPrompt);
+	const sessionStateLabel = useMemo(() => {
+		const raw = sessionSnapshot?.state ?? "idle";
+		return raw === "idle" ? t("workbench.sessionIdle") : raw;
+	}, [sessionSnapshot?.state, t]);
 
 	return (
 		<div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
@@ -79,7 +85,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 				) : null}
 				{showProjectBadge && !isGitRepo ? (
 					<Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
-						No Git
+						{t("workbench.noGit")}
 					</Badge>
 				) : null}
 				{pathCaption ? (
@@ -90,12 +96,12 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 			</div>
 			<div className="flex shrink-0 items-center justify-end gap-1.5 @3xl/header-actions:gap-2">
 				<div className="hidden max-w-[5.5rem] items-center gap-1 truncate tabular-nums text-[11px] text-muted-foreground sm:flex">
-					<span className="truncate">{sessionSnapshot?.state ?? "idle"}</span>
+					<span className="truncate">{sessionStateLabel}</span>
 				</div>
 				<div
 					className="flex items-center gap-0.5 rounded-md border border-border/50 bg-muted/25 p-0.5"
 					role="toolbar"
-					aria-label="Session controls"
+					aria-label={t("workbench.sessionControlsAria")}
 				>
 					<Tooltip>
 						<TooltipTrigger asChild>
@@ -104,7 +110,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 								variant="ghost"
 								size="icon"
 								className="h-7 w-7 shrink-0 [&_svg]:size-3.5"
-								aria-label="Resume session"
+								aria-label={t("workbench.resumeAria")}
 								onClick={onResumeSession}
 								disabled={!sessionSnapshot || !resumeOk}
 							>
@@ -113,10 +119,10 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						</TooltipTrigger>
 						<TooltipContent side="bottom">
 							{!sessionSnapshot
-								? "Start or select a session first"
+								? t("workbench.resumeTooltipNone")
 								: resumeOk
-									? "Resume session"
-									: "Already active"}
+									? t("workbench.resumeTooltipOk")
+									: t("workbench.resumeTooltipActive")}
 						</TooltipContent>
 					</Tooltip>
 					<Tooltip>
@@ -126,7 +132,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 								variant="ghost"
 								size="icon"
 								className="h-7 w-7 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive [&_svg]:size-3.5"
-								aria-label="Abort run"
+								aria-label={t("workbench.abortAria")}
 								onClick={onAbortSession}
 								disabled={!sessionSnapshot || !abortOk}
 							>
@@ -135,10 +141,10 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						</TooltipTrigger>
 						<TooltipContent side="bottom">
 							{!sessionSnapshot
-								? "Start or select a session first"
+								? t("workbench.abortTooltipNone")
 								: abortOk
-									? "Abort run"
-									: "No turn in progress"}
+									? t("workbench.abortTooltipOk")
+									: t("workbench.abortTooltipNoTurn")}
 						</TooltipContent>
 					</Tooltip>
 				</div>
@@ -157,7 +163,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 									? "h-7 min-h-7 min-w-7 shrink-0 rounded-md border-border bg-accent px-0 text-accent-foreground [&_svg]:size-3"
 									: "h-7 min-h-7 min-w-7 shrink-0 rounded-md px-0 [&_svg]:size-3"
 							}
-							aria-label="Toggle terminal drawer"
+							aria-label={t("workbench.terminalAria")}
 							aria-pressed={terminalOpen}
 							disabled={!terminalAvailable}
 							onClick={onToggleTerminal}
@@ -167,10 +173,10 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 					</TooltipTrigger>
 					<TooltipContent side="bottom">
 						{!terminalAvailable
-							? "Terminal needs a workspace path."
+							? t("workbench.terminalUnavailable")
 							: terminalOpen
-								? "Hide terminal drawer (Esc)"
-								: "Toggle terminal drawer"}
+								? t("workbench.terminalHide")
+								: t("workbench.terminalToggle")}
 					</TooltipContent>
 				</Tooltip>
 				<Tooltip>
@@ -180,14 +186,14 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 							variant="ghost"
 							size="icon"
 							className="size-8 shrink-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
-							aria-label="Command palette"
+							aria-label={t("workbench.commandPaletteAria")}
 							onClick={onOpenCommandPalette}
 						>
 							<Command strokeWidth={2} />
 						</Button>
 					</TooltipTrigger>
 					<TooltipContent side="bottom">
-						Command palette — switch workspace, search (⌘K)
+						{t("workbench.commandPaletteTooltip")}
 					</TooltipContent>
 				</Tooltip>
 			</div>

@@ -23,27 +23,26 @@ export function resolveCommitMode(branch: string) {
 	return "commit-and-push" as const;
 }
 
-export function commitLabel(mode: CommitMode, status: CommitButtonStatus) {
-	if (mode === "merged") return "Merged";
-	if (mode === "closed") return "Closed";
+/** i18n key under namespace `common` (use with `t(commitTranslationKey(...))`). */
+export function commitTranslationKey(mode: CommitMode, status: CommitButtonStatus): string {
+	if (mode === "merged") {
+		return "commit.merged";
+	}
+	if (mode === "closed") {
+		return "commit.closed";
+	}
 
 	switch (mode) {
 		case "create-pr":
-			return { idle: "Create PR", busy: "Creating PR...", done: "PR Created", error: "Retry" }[status];
 		case "open-pr":
-			return { idle: "Open PR", busy: "Opening...", done: "Opened", error: "Retry" }[status];
 		case "commit-and-push":
-			return { idle: "Commit & Push", busy: "Committing...", done: "Pushed", error: "Retry" }[status];
 		case "push":
-			return { idle: "Push", busy: "Pushing...", done: "Pushed", error: "Retry" }[status];
 		case "fix":
-			return { idle: "Fix CI", busy: "Fixing...", done: "Fixed", error: "Retry" }[status];
 		case "resolve-conflicts":
-			return { idle: "Resolve", busy: "Resolving...", done: "Resolved", error: "Retry" }[status];
 		case "merge":
-			return { idle: "Merge", busy: "Merging...", done: "Merged", error: "Retry" }[status];
+			return `commit.modes.${mode}.${status}`;
 		default:
-			return "Commit";
+			return "commit.default";
 	}
 }
 

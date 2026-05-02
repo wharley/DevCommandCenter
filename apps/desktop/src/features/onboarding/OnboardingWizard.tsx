@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, Sparkles, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,6 @@ import { OnboardingMockup } from "./mockup/OnboardingMockup";
 import {
 	futureOnboardingSteps,
 	getNextOnboardingStep,
-	getOnboardingStepMeta,
 	getPreviousOnboardingStep,
 	onboardingSteps,
 	type OnboardingStep,
@@ -70,7 +70,9 @@ function WizardPanel({
 	activeIndex: number;
 	onPreviewConductor: () => void;
 }) {
-	const meta = getOnboardingStepMeta(step);
+	const { t } = useTranslation("common");
+	const title = t(`onboarding.steps.${step}.title`);
+	const body = t(`onboarding.steps.${step}.body`);
 	const active = index === activeIndex;
 	const behind = index < activeIndex;
 	const motionClass = active
@@ -94,32 +96,47 @@ function WizardPanel({
 							{String(index + 1).padStart(2, "0")} / {String(onboardingSteps.length).padStart(2, "0")}
 						</Badge>
 						<h2 className="text-[24px] font-semibold tracking-[-0.03em] text-foreground">
-							{meta.title}
+							{title}
 						</h2>
 					</div>
 					<Sparkles className="size-5 shrink-0 text-muted-foreground" />
 				</div>
 
 				<p className="max-w-2xl text-[14px] leading-6 text-muted-foreground">
-					{meta.body}
+					{body}
 				</p>
 
 				<div className="flex flex-wrap gap-2">
-					<StepChip label="intro" done={index > 0} active={step === "intro"} />
-					<StepChip label="agents" done={index > 1} active={step === "agents"} />
-					<StepChip label="repoImport" done={index > 2} active={step === "repoImport"} />
-					<StepChip label="completeTransition" active={step === "completeTransition"} />
+					<StepChip
+						label={t("onboarding.chips.intro")}
+						done={index > 0}
+						active={step === "intro"}
+					/>
+					<StepChip
+						label={t("onboarding.chips.agents")}
+						done={index > 1}
+						active={step === "agents"}
+					/>
+					<StepChip
+						label={t("onboarding.chips.repoImport")}
+						done={index > 2}
+						active={step === "repoImport"}
+					/>
+					<StepChip
+						label={t("onboarding.chips.completeTransition")}
+						active={step === "completeTransition"}
+					/>
 				</div>
 
 				<div className="grid gap-3 sm:grid-cols-2">
 					<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-						<p className="text-[12px] font-medium text-foreground">Phase 4 scope</p>
+						<p className="text-[12px] font-medium text-foreground">{t("onboarding.phase4Title")}</p>
 						<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-							We ship intro, agents, repo import, and the completion transition first.
+							{t("onboarding.phase4Body")}
 						</p>
 					</div>
 					<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-						<p className="text-[12px] font-medium text-foreground">Later steps</p>
+						<p className="text-[12px] font-medium text-foreground">{t("onboarding.laterSteps")}</p>
 						<div className="mt-2 flex flex-wrap gap-1.5">
 							{futureOnboardingSteps.map((item) => (
 								<Badge key={item} variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
@@ -132,21 +149,21 @@ function WizardPanel({
 
 				<div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3">
 					<div className="min-w-0">
-						<p className="text-[12px] font-medium text-foreground">Optional Conductor preview</p>
+						<p className="text-[12px] font-medium text-foreground">{t("onboarding.conductorPreviewTitle")}</p>
 						<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-							The optional integration pass stays deferred, but the visual concept is available now.
+							{t("onboarding.conductorPreviewBody")}
 						</p>
 					</div>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="h-8 rounded-[9px] px-2.5 text-[12px]"
-							onClick={onPreviewConductor}
-						>
-							Preview conductor
-						</Button>
-					</div>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="h-8 rounded-[9px] px-2.5 text-[12px]"
+						onClick={onPreviewConductor}
+					>
+						{t("onboarding.previewConductor")}
+					</Button>
+				</div>
 			</CardContent>
 		</Card>
 	);
@@ -157,6 +174,7 @@ export function OnboardingWizard({
 	onOpenChange,
 	onComplete,
 }: OnboardingWizardProps) {
+	const { t } = useTranslation("common");
 	const [step, setStep] = useState<OnboardingStep>("intro");
 	const [viewportScale, setViewportScale] = useState(1);
 	const [showConductorPreview, setShowConductorPreview] = useState(false);
@@ -268,7 +286,7 @@ export function OnboardingWizard({
 								}}
 							>
 								<ChevronLeft className="size-3.5" />
-								Back
+								{t("onboarding.back")}
 							</Button>
 							<Button
 								type="button"
@@ -280,7 +298,7 @@ export function OnboardingWizard({
 									onComplete();
 								}}
 							>
-								Skip for now
+								{t("onboarding.skip")}
 							</Button>
 						</div>
 
@@ -298,7 +316,7 @@ export function OnboardingWizard({
 								}}
 								disabled={!canGoNext}
 							>
-								Next
+								{t("onboarding.next")}
 								<ChevronRight className="size-3.5" />
 							</Button>
 							<Button
@@ -311,7 +329,7 @@ export function OnboardingWizard({
 								}}
 							>
 								<Wand2 className="size-3.5" />
-								Finish
+								{t("onboarding.finish")}
 							</Button>
 						</div>
 					</div>

@@ -1,4 +1,5 @@
 import { FolderOpen, Link2, Command as CommandIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +18,7 @@ export function WorkspaceBootstrapState({
 	onCloneWorkspace,
 	onOpenCommandPalette,
 }: WorkspaceBootstrapStateProps) {
+	const { t } = useTranslation("common");
 	return (
 		<div className="flex min-h-0 flex-1 items-center justify-center px-6 py-10">
 			<div className="flex w-full max-w-2xl flex-col items-center text-center">
@@ -28,16 +30,15 @@ export function WorkspaceBootstrapState({
 					<FolderOpen className="size-5" aria-hidden />
 				</div>
 				<h3 className="text-[15px] font-medium tracking-[-0.01em] text-foreground">
-					No workspace open
+					{t("bootstrap.title")}
 				</h3>
 				<p className="mt-2 max-w-lg text-[13px] leading-6 text-muted-foreground">
-					Open a project or clone from URL to start from zero. The chat, inspector,
-					and terminal surfaces will appear once a workspace exists.
+					{t("bootstrap.description")}
 				</p>
 				<div className="mt-6 flex flex-wrap items-center justify-center gap-2">
 					<Button type="button" size="sm" className="gap-1.5" onClick={onCreateWorkspace}>
 						<FolderOpen className="size-3.5" strokeWidth={2} aria-hidden />
-						Open project
+						{t("bootstrap.openProject")}
 					</Button>
 					<Button
 						type="button"
@@ -47,7 +48,7 @@ export function WorkspaceBootstrapState({
 						onClick={onCloneWorkspace}
 					>
 						<Link2 className="size-3.5" strokeWidth={2} aria-hidden />
-						Clone from URL
+						{t("bootstrap.cloneFromUrl")}
 					</Button>
 					<Button
 						type="button"
@@ -57,13 +58,15 @@ export function WorkspaceBootstrapState({
 						onClick={onOpenCommandPalette}
 					>
 						<CommandIcon className="size-3.5" strokeWidth={2} aria-hidden />
-						Command palette
+						{t("bootstrap.commandPalette")}
 					</Button>
 				</div>
 				{selectedProviderLabel ? (
 					<p className="mt-4 text-[12px] text-muted-foreground">
-						Current provider: {selectedProviderLabel}
-						{selectedModelLabel ? ` · ${selectedModelLabel}` : ""}
+						{t("bootstrap.currentProvider", {
+							provider: selectedProviderLabel,
+							model: selectedModelLabel ? ` · ${selectedModelLabel}` : "",
+						})}
 					</p>
 				) : null}
 			</div>

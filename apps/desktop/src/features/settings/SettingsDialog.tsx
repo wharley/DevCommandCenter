@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
 	CircleUserRound,
 	GitBranch,
@@ -11,7 +12,6 @@ import {
 	type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
@@ -31,52 +31,21 @@ type SettingsDialogProps = {
 	onSelectModel: (modelId: string) => void;
 };
 
-const sections = [
-	{
-		id: "general",
-		label: "General",
-		description: "Workspace defaults and shell behavior.",
-		icon: Wrench,
-	},
-	{
-		id: "appearance",
-		label: "Appearance",
-		description: "Theme and chrome contrast.",
-		icon: SunMedium,
-	},
-	{
-		id: "model",
-		label: "Model",
-		description: "Default provider for new sessions.",
-		icon: Sparkles,
-	},
-	{
-		id: "shortcuts",
-		label: "Shortcuts",
-		description: "Keyboard bindings and command palette.",
-		icon: Keyboard,
-	},
-	{
-		id: "git",
-		label: "Git",
-		description: "Branch and PR-state chrome.",
-		icon: GitBranch,
-	},
-	{
-		id: "experimental",
-		label: "Experimental",
-		description: "Preview toggles and future shell flags.",
-		icon: Package,
-	},
-	{
-		id: "account",
-		label: "Account",
-		description: "GitHub and future sync state.",
-		icon: CircleUserRound,
-	},
-] as const;
+export type SettingsSectionId =
+	| "general"
+	| "appearance"
+	| "model"
+	| "shortcuts"
+	| "git"
+	| "experimental"
+	| "account";
 
-type SettingsSectionId = (typeof sections)[number]["id"];
+type SettingsSectionMeta = {
+	id: SettingsSectionId;
+	label: string;
+	description: string;
+	icon: LucideIcon;
+};
 
 function SectionButton({
 	active,
@@ -120,8 +89,57 @@ export function SettingsDialog({
 	selectedModelId,
 	onSelectModel,
 }: SettingsDialogProps) {
+	const { t, i18n } = useTranslation("common");
 	const [activeSection, setActiveSection] = useState<SettingsSectionId>("general");
 	const providers = providerCatalog?.providers ?? [];
+
+	const sections = useMemo<SettingsSectionMeta[]>(
+		() => [
+			{
+				id: "general",
+				label: t("settings.sections.general.label"),
+				description: t("settings.sections.general.description"),
+				icon: Wrench,
+			},
+			{
+				id: "appearance",
+				label: t("settings.sections.appearance.label"),
+				description: t("settings.sections.appearance.description"),
+				icon: SunMedium,
+			},
+			{
+				id: "model",
+				label: t("settings.sections.model.label"),
+				description: t("settings.sections.model.description"),
+				icon: Sparkles,
+			},
+			{
+				id: "shortcuts",
+				label: t("settings.sections.shortcuts.label"),
+				description: t("settings.sections.shortcuts.description"),
+				icon: Keyboard,
+			},
+			{
+				id: "git",
+				label: t("settings.sections.git.label"),
+				description: t("settings.sections.git.description"),
+				icon: GitBranch,
+			},
+			{
+				id: "experimental",
+				label: t("settings.sections.experimental.label"),
+				description: t("settings.sections.experimental.description"),
+				icon: Package,
+			},
+			{
+				id: "account",
+				label: t("settings.sections.account.label"),
+				description: t("settings.sections.account.description"),
+				icon: CircleUserRound,
+			},
+		],
+		[t],
+	);
 
 	useEffect(() => {
 		if (open) {
@@ -131,8 +149,10 @@ export function SettingsDialog({
 
 	const activeMeta = useMemo(
 		() => sections.find((section) => section.id === activeSection) ?? sections[0]!,
-		[activeSection],
+		[activeSection, sections],
 	);
+
+	const uiLocale = i18n.language === "en" ? "en" : "pt-BR";
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -142,7 +162,7 @@ export function SettingsDialog({
 						<div className="px-4 pb-3">
 							<DialogHeader>
 								<DialogTitle className="text-[15px] font-semibold text-foreground">
-									Settings
+									{t("settings.title")}
 								</DialogTitle>
 							</DialogHeader>
 						</div>
@@ -162,7 +182,7 @@ export function SettingsDialog({
 
 						<div className="mt-auto px-3 pt-5">
 							<p className="px-3 pb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-								Repository
+								{t("settings.repository")}
 							</p>
 							<button
 								type="button"
@@ -170,9 +190,9 @@ export function SettingsDialog({
 							>
 								<GitBranch className="mt-0.5 size-4 shrink-0" strokeWidth={1.9} aria-hidden />
 								<div className="min-w-0">
-									<div className="text-[13px] font-medium leading-tight">Current workspace</div>
+									<div className="text-[13px] font-medium leading-tight">{t("settings.currentWorkspace")}</div>
 									<p className="mt-0.5 text-[11px] leading-tight text-muted-foreground/80">
-										Repository-scoped preferences live with the active workspace.
+										{t("settings.currentWorkspaceHint")}
 									</p>
 								</div>
 							</button>
@@ -190,7 +210,7 @@ export function SettingsDialog({
 								</p>
 							</div>
 							<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal">
-								Phase 3
+								{t("settings.phaseBadge")}
 							</Badge>
 						</div>
 
@@ -200,13 +220,13 @@ export function SettingsDialog({
 									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
 										<div className="flex items-start justify-between gap-6">
 											<div className="min-w-0">
-												<h3 className="text-[14px] font-medium text-foreground">Shell behavior</h3>
+												<h3 className="text-[14px] font-medium text-foreground">{t("settings.general.shellBehavior")}</h3>
 												<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-													The desktop shell keeps workspace chrome, the thread composer, and the inspector aligned with the blueprint.
+													{t("settings.general.shellBehaviorBody")}
 												</p>
 											</div>
 											<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal">
-												Shell ready
+												{t("settings.general.shellReady")}
 											</Badge>
 										</div>
 									</div>
@@ -214,18 +234,18 @@ export function SettingsDialog({
 									<div className="grid gap-3 sm:grid-cols-2">
 										<div className="rounded-xl border border-border/60 p-4">
 											<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-												Default entry
+												{t("settings.general.defaultEntry")}
 											</p>
 											<p className="mt-2 text-[13px] text-foreground">
-												Workspaces open into the inspector-first workbench with the composer in the center pane.
+												{t("settings.general.defaultEntryBody")}
 											</p>
 										</div>
 										<div className="rounded-xl border border-border/60 p-4">
 											<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-												Command palette
+												{t("settings.general.commandPalette")}
 											</p>
 											<p className="mt-2 text-[13px] text-foreground">
-												`Cmd/Ctrl+K` opens workspace switching and actions.
+												{t("settings.general.commandPaletteBody")}
 											</p>
 										</div>
 									</div>
@@ -234,11 +254,42 @@ export function SettingsDialog({
 
 							{activeSection === "appearance" ? (
 								<section className="space-y-4">
+									<div className="flex flex-col gap-4 border-b border-border/40 pb-4">
+										<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+											<div>
+												<h3 className="text-[14px] font-medium text-foreground">{t("settings.languageTitle")}</h3>
+												<p className="mt-1 text-[12px] text-muted-foreground">{t("settings.languageHint")}</p>
+											</div>
+											<ToggleGroup
+												type="single"
+												value={uiLocale}
+												onValueChange={(value) => {
+													if (value === "pt-BR" || value === "en") {
+														void i18n.changeLanguage(value);
+													}
+												}}
+												className="gap-1 self-start sm:self-auto"
+											>
+												<ToggleGroupItem
+													value="pt-BR"
+													className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground data-[state=on]:bg-accent data-[state=on]:text-foreground"
+												>
+													{t("settings.localePtBr")}
+												</ToggleGroupItem>
+												<ToggleGroupItem
+													value="en"
+													className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] font-medium text-muted-foreground data-[state=on]:bg-accent data-[state=on]:text-foreground"
+												>
+													{t("settings.localeEn")}
+												</ToggleGroupItem>
+											</ToggleGroup>
+										</div>
+									</div>
 									<div className="flex items-start justify-between gap-6 border-b border-border/40 pb-4">
 										<div>
-											<h3 className="text-[14px] font-medium text-foreground">Theme</h3>
+											<h3 className="text-[14px] font-medium text-foreground">{t("settings.appearance.theme")}</h3>
 											<p className="mt-1 text-[12px] text-muted-foreground">
-												Match the shell to the system or force a fixed mode.
+												{t("settings.appearance.themeHint")}
 											</p>
 										</div>
 										<ToggleGroup
@@ -252,8 +303,8 @@ export function SettingsDialog({
 											className="gap-1"
 										>
 											{[
-												{ value: "light" as const, label: "Light", icon: SunMedium },
-												{ value: "dark" as const, label: "Dark", icon: Moon },
+												{ value: "light" as const, label: t("settings.appearance.light"), icon: SunMedium },
+												{ value: "dark" as const, label: t("settings.appearance.dark"), icon: Moon },
 											].map(({ value, label, icon: Icon }) => (
 												<ToggleGroupItem
 													key={value}
@@ -268,7 +319,7 @@ export function SettingsDialog({
 									</div>
 									<div className="rounded-xl border border-border/60 p-4">
 										<p className="text-[12px] leading-relaxed text-muted-foreground">
-											The color system is driven by shell tokens, so this choice changes the whole chrome instead of just the canvas.
+											{t("settings.appearance.colorSystemHint")}
 										</p>
 									</div>
 								</section>
@@ -277,8 +328,8 @@ export function SettingsDialog({
 							{activeSection === "model" ? (
 								<section className="space-y-4">
 									<ProviderSelectionPanel
-										title="Providers"
-										description="Choose the default runtime for new sessions and composer sends."
+										title={t("settings.model.providersTitle")}
+										description={t("settings.model.providersHint")}
 										providers={providers}
 										selectedProviderId={selectedProviderId}
 										selectedModelId={selectedModelId}
@@ -293,13 +344,13 @@ export function SettingsDialog({
 									<div className="rounded-xl border border-border/60 p-4">
 										<div className="flex items-center justify-between gap-4">
 											<div>
-												<h3 className="text-[14px] font-medium text-foreground">Keyboard shortcuts</h3>
+												<h3 className="text-[14px] font-medium text-foreground">{t("settings.shortcuts.keyboardShortcuts")}</h3>
 												<p className="mt-1 text-[12px] text-muted-foreground">
-													Command palette and composer shortcuts already wired in this shell.
+													{t("settings.shortcuts.keyboardShortcutsHint")}
 												</p>
 											</div>
 											<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal">
-												3 active
+												{t("settings.shortcuts.activeCount")}
 											</Badge>
 										</div>
 										<div className="mt-4 flex flex-wrap gap-2">
@@ -318,19 +369,19 @@ export function SettingsDialog({
 									<div className="rounded-xl border border-border/60 p-4">
 										<div className="flex items-start justify-between gap-6">
 											<div>
-												<h3 className="text-[14px] font-medium text-foreground">Git chrome</h3>
+												<h3 className="text-[14px] font-medium text-foreground">{t("settings.git.chromeTitle")}</h3>
 												<p className="mt-1 text-[12px] text-muted-foreground">
-													Branch-aware header styling and the commit action live in the inspector.
+													{t("settings.git.chromeHint")}
 												</p>
 											</div>
 											<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal">
-												PR state
+												{t("settings.git.prState")}
 											</Badge>
 										</div>
 										<div className="mt-4 flex flex-wrap gap-2">
-											<Badge variant="outline">Branch toolbar</Badge>
-											<Badge variant="outline">Commit button</Badge>
-											<Badge variant="outline">Header shimmer</Badge>
+											<Badge variant="outline">{t("settings.git.badgeBranchToolbar")}</Badge>
+											<Badge variant="outline">{t("settings.git.badgeCommitButton")}</Badge>
+											<Badge variant="outline">{t("settings.git.badgeHeaderShimmer")}</Badge>
 										</div>
 									</div>
 								</section>
@@ -339,9 +390,9 @@ export function SettingsDialog({
 							{activeSection === "experimental" ? (
 								<section className="space-y-4">
 									<div className="rounded-xl border border-border/60 p-4">
-										<h3 className="text-[14px] font-medium text-foreground">Experimental</h3>
+										<h3 className="text-[14px] font-medium text-foreground">{t("settings.experimental.title")}</h3>
 										<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-											No preview toggles are exposed yet. This section stays in the nav so future shell flags land without changing the layout.
+											{t("settings.experimental.body")}
 										</p>
 									</div>
 								</section>
@@ -351,18 +402,18 @@ export function SettingsDialog({
 								<section className="space-y-4">
 									<div className="flex items-start justify-between gap-6 border-b border-border/40 pb-4">
 										<div>
-											<h3 className="text-[14px] font-medium text-foreground">GitHub account</h3>
+											<h3 className="text-[14px] font-medium text-foreground">{t("settings.account.githubTitle")}</h3>
 											<p className="mt-1 text-[12px] text-muted-foreground">
-												Account and sync surfaces are gated behind the future integration pass.
+												{t("settings.account.githubHint")}
 											</p>
 										</div>
 										<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal">
-											Disconnected
+											{t("settings.account.disconnected")}
 										</Badge>
 									</div>
 									<div className="rounded-xl border border-border/60 p-4">
 										<p className="text-[12px] leading-relaxed text-muted-foreground">
-											The settings dialog already reserves the account section so the footer integration can slot in later without reopening the shell contract.
+											{t("settings.account.footerHint")}
 										</p>
 									</div>
 								</section>

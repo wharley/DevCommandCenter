@@ -17,6 +17,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { CommandPopoverContent } from "../../components/ui/command-popover";
@@ -89,6 +90,7 @@ function WorkspaceRepoPicker({
 	onCreateWorkspace: () => void;
 	onCloneWorkspace: () => void;
 }) {
+	const { t } = useTranslation("common");
 	const [open, setOpen] = useState(false);
 
 	return (
@@ -98,7 +100,7 @@ function WorkspaceRepoPicker({
 					type="button"
 					variant="ghost"
 					size="icon-xs"
-					aria-label="Open repository picker"
+					aria-label={t("sidebar.openRepoPicker")}
 					className="text-muted-foreground hover:text-foreground"
 				>
 					<Plus className="size-4" strokeWidth={2.2} />
@@ -110,10 +112,10 @@ function WorkspaceRepoPicker({
 				sideOffset={8}
 				className="w-80"
 			>
-				<CommandInput placeholder="Search repositories..." />
+				<CommandInput placeholder={t("sidebar.searchReposPlaceholder")} />
 				<CommandList>
-					<CommandEmpty>No repository found.</CommandEmpty>
-					<CommandGroup heading="Recent repos">
+					<CommandEmpty>{t("sidebar.noRepoFound")}</CommandEmpty>
+					<CommandGroup heading={t("sidebar.recentRepos")}>
 						{workspaces.map((workspace) => (
 							<CommandItem
 								key={workspace.id}
@@ -130,7 +132,7 @@ function WorkspaceRepoPicker({
 						))}
 					</CommandGroup>
 					<CommandSeparator />
-						<CommandGroup heading="Actions">
+						<CommandGroup heading={t("sidebar.actions")}>
 							<CommandItem
 								value="create workspace"
 								onSelect={() => {
@@ -138,7 +140,7 @@ function WorkspaceRepoPicker({
 									onCreateWorkspace();
 								}}
 							>
-								Open repo picker
+								{t("sidebar.openRepoPickerAction")}
 							</CommandItem>
 							<CommandItem
 								value="clone from url"
@@ -147,7 +149,7 @@ function WorkspaceRepoPicker({
 									onCloneWorkspace();
 								}}
 							>
-								Clone from URL
+								{t("sidebar.cloneFromUrl")}
 							</CommandItem>
 						</CommandGroup>
 				</CommandList>
@@ -179,6 +181,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	selectedWorkspaceId,
 	workspaces,
 }: WorkspacesSidebarProps) {
+	const { t } = useTranslation("common");
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const { activeGroups, archivedRows } = useMemo(
 		() => projectWorkspaceRailGroups(workspaces),
@@ -292,7 +295,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		items.push({
 			kind: "group-header",
 			groupId: ARCHIVED_SECTION_ID,
-			label: "Archived",
+			label: t("sidebar.archived"),
 			rowCount: archivedRows.length,
 			canCollapse: archivedRows.length > 0,
 			headerVariant: "archived",
@@ -310,7 +313,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 		items.push({ kind: "bottom-padding" });
 		return items;
-	}, [activeGroups, archivedRows, sectionOpenState]);
+	}, [activeGroups, archivedRows, sectionOpenState, t]);
 
 	const virtualizer = useVirtualizer({
 		count: flatItems.length,
@@ -445,13 +448,13 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							variant="ghost"
 							size="icon-xs"
 							onClick={onToggleCollapsed}
-							aria-label="Expand sidebar"
+							aria-label={t("sidebar.expandSidebar")}
 							className="text-muted-foreground hover:text-foreground"
 						>
 							<PanelRight className="size-4" strokeWidth={1.8} />
 						</Button>
 					</TooltipTrigger>
-					<TooltipContent side="right">Expand sidebar</TooltipContent>
+					<TooltipContent side="right">{t("sidebar.expandSidebar")}</TooltipContent>
 				</Tooltip>
 
 				<div className="scrollbar-stable min-h-0 w-full flex-1 overflow-y-auto px-1 [scrollbar-width:thin]">
@@ -469,7 +472,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 											<button
 												type="button"
 												aria-current={selected ? "location" : undefined}
-												aria-label={`Open workspace ${label}`}
+												aria-label={t("sidebar.openWorkspace", { label })}
 												onClick={() => onSelectWorkspace(workspace.id)}
 												className={cn(
 													"flex size-9 shrink-0 items-center justify-center rounded-lg text-[10px] font-semibold uppercase ring-1 transition-colors",
@@ -494,14 +497,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 										type="button"
 										variant="ghost"
 										size="icon-xs"
-										aria-label="Open project"
+										aria-label={t("sidebar.openProject")}
 										className="text-muted-foreground hover:text-foreground"
 										onClick={onCreateWorkspace}
 									>
 										<FolderPlus className="size-4" strokeWidth={1.9} aria-hidden />
 									</Button>
 								</TooltipTrigger>
-								<TooltipContent side="right">Open project</TooltipContent>
+								<TooltipContent side="right">{t("sidebar.openProject")}</TooltipContent>
 							</Tooltip>
 							<Tooltip>
 								<TooltipTrigger asChild>
@@ -509,14 +512,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								type="button"
 								variant="ghost"
 								size="icon-xs"
-								aria-label="Clone from URL"
+								aria-label={t("sidebar.cloneFromUrl")}
 								className="text-muted-foreground hover:text-foreground"
 								onClick={onCloneWorkspace}
 							>
 								<Plus className="size-4" strokeWidth={2.1} aria-hidden />
 							</Button>
 								</TooltipTrigger>
-								<TooltipContent side="right">Clone from URL</TooltipContent>
+								<TooltipContent side="right">{t("sidebar.cloneFromUrl")}</TooltipContent>
 							</Tooltip>
 						</div>
 					)}
@@ -530,13 +533,13 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								variant="ghost"
 								size="icon-xs"
 								className="text-muted-foreground hover:text-foreground"
-								aria-label="Open settings"
+								aria-label={t("sidebar.openSettings")}
 								onClick={onOpenSettings}
 							>
 								<Settings2 className="size-4" strokeWidth={1.85} aria-hidden />
 							</Button>
 						</TooltipTrigger>
-						<TooltipContent side="right">Open settings</TooltipContent>
+						<TooltipContent side="right">{t("sidebar.openSettings")}</TooltipContent>
 					</Tooltip>
 				</div>
 			</div>
@@ -552,7 +555,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					<TooltipTrigger asChild>
 						<Button
 							type="button"
-							aria-label="Collapse sidebar"
+							aria-label={t("sidebar.collapseSidebar")}
 							variant="ghost"
 							size="icon-xs"
 							onClick={onToggleCollapsed}
@@ -561,13 +564,13 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							<PanelLeft className="size-4" strokeWidth={1.8} />
 						</Button>
 					</TooltipTrigger>
-					<TooltipContent side="bottom">Collapse sidebar</TooltipContent>
+					<TooltipContent side="bottom">{t("sidebar.collapseSidebar")}</TooltipContent>
 				</Tooltip>
 			</div>
 
 			<div className="flex items-center justify-between px-3">
 				<h2 className="text-[14px] font-medium tracking-[-0.01em] text-muted-foreground">
-					Workspaces
+					{t("sidebar.title")}
 				</h2>
 				<div className="flex items-center gap-1 text-muted-foreground">
 					<DropdownMenu>
@@ -576,7 +579,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								type="button"
 								variant="ghost"
 								size="icon-xs"
-								aria-label="Open project menu"
+								aria-label={t("sidebar.openProjectMenu")}
 								className="text-muted-foreground hover:text-foreground"
 							>
 								<FolderPlus className="size-4" strokeWidth={1.9} aria-hidden />
@@ -590,7 +593,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									onCreateWorkspace();
 								}}
 							>
-								Open project
+								{t("sidebar.openProject")}
 							</DropdownMenuItem>
 							<DropdownMenuItem
 								className="gap-2 text-[13px]"
@@ -599,7 +602,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									onCloneWorkspace();
 								}}
 							>
-								Clone from URL
+								{t("sidebar.cloneFromUrl")}
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
@@ -622,10 +625,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							<FolderPlus className="size-5" strokeWidth={1.9} aria-hidden />
 						</div>
 						<h3 className="text-[15px] font-medium tracking-[-0.01em] text-foreground">
-							No workspaces yet
+							{t("sidebar.noWorkspacesYet")}
 						</h3>
 						<p className="mt-2 max-w-[18rem] text-[13px] leading-6 text-muted-foreground">
-							Open a project or clone from URL to start from zero.
+							{t("sidebar.noWorkspacesHint")}
 						</p>
 						<div className="mt-5 flex flex-wrap items-center justify-center gap-2">
 							<Button
@@ -635,7 +638,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								onClick={onCreateWorkspace}
 							>
 								<FolderPlus className="size-3.5" strokeWidth={2} aria-hidden />
-								Open project
+								{t("sidebar.openProject")}
 							</Button>
 							<Button
 								type="button"
@@ -645,7 +648,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								onClick={onCloneWorkspace}
 							>
 								<Plus className="size-3.5" strokeWidth={2} aria-hidden />
-								Clone from URL
+								{t("sidebar.cloneFromUrl")}
 							</Button>
 						</div>
 					</div>
@@ -684,14 +687,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							variant="ghost"
 							size="sm"
 							className="gap-1.5 text-muted-foreground hover:text-foreground"
-							aria-label="Open settings"
+							aria-label={t("sidebar.openSettings")}
 							onClick={onOpenSettings}
 						>
 							<Settings2 className="size-4" strokeWidth={1.85} aria-hidden />
-							<span className="text-xs font-medium">Settings</span>
+							<span className="text-xs font-medium">{t("sidebar.settingsShort")}</span>
 						</Button>
 					</TooltipTrigger>
-					<TooltipContent side="top">Open settings</TooltipContent>
+					<TooltipContent side="top">{t("sidebar.openSettings")}</TooltipContent>
 				</Tooltip>
 			</div>
 		</div>

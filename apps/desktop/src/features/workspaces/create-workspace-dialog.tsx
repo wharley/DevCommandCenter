@@ -1,5 +1,6 @@
 import { LoaderCircle, FolderOpen } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Button } from "../../components/ui/button";
@@ -55,6 +56,7 @@ export function CreateWorkspaceDialog({
 	onCloneWorkspace,
 	isSubmitting,
 }: CreateWorkspaceDialogProps) {
+	const { t } = useTranslation("common");
 	const [form, setForm] = useState(INITIAL_FORM);
 	const [availableBranches, setAvailableBranches] = useState<string[]>([]);
 	const [isLoadingBranches, setIsLoadingBranches] = useState(false);
@@ -96,7 +98,7 @@ export function CreateWorkspaceDialog({
 				baseBranch: "",
 			}));
 			const message = error instanceof Error ? error.message : String(error);
-			toast.error("Could not load branches", {
+			toast.error(t("workspaceDialog.toastLoadBranchesError"), {
 				description: message,
 			});
 		} finally {
@@ -111,8 +113,8 @@ export function CreateWorkspaceDialog({
 				multiple: false,
 				title:
 					mode === "clone"
-						? "Choose a destination folder"
-						: "Choose a repository folder",
+						? t("workspaceDialog.pickFolderClone")
+						: t("workspaceDialog.pickFolderRepo"),
 			});
 
 			const pickedPath = Array.isArray(selected)
@@ -136,7 +138,7 @@ export function CreateWorkspaceDialog({
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			toast.error("Could not open folder picker", {
+			toast.error(t("workspaceDialog.toastPickerError"), {
 				description: message,
 			});
 		}
@@ -170,7 +172,7 @@ export function CreateWorkspaceDialog({
 					baseBranch: form.baseBranch.trim(),
 					name: form.name.trim() || null,
 				});
-				toast.success("Repository cloned");
+				toast.success(t("workspaceDialog.toastCloneSuccess"));
 			} else {
 				await onCreateWorkspace({
 					projectId: form.projectId.trim(),
@@ -178,14 +180,17 @@ export function CreateWorkspaceDialog({
 					baseBranch: form.baseBranch.trim(),
 					name: form.name.trim() || null,
 				});
-				toast.success("Workspace created");
+				toast.success(t("workspaceDialog.toastCreateSuccess"));
 			}
 			onOpenChange(false);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			toast.error(mode === "clone" ? "Failed to clone repository" : "Failed to create workspace", {
-				description: message,
-			});
+			toast.error(
+				mode === "clone" ? t("workspaceDialog.toastCloneError") : t("workspaceDialog.toastCreateError"),
+				{
+					description: message,
+				},
+			);
 		}
 	}
 
@@ -202,12 +207,10 @@ export function CreateWorkspaceDialog({
 			<DialogContent className="gap-3 p-4 sm:max-w-sm">
 				<DialogHeader className="space-y-1">
 					<DialogTitle className="text-[13px] font-medium tracking-[-0.01em]">
-						{mode === "clone" ? "Clone repository" : "Create workspace"}
+						{mode === "clone" ? t("workspaceDialog.cloneTitle") : t("workspaceDialog.createTitle")}
 					</DialogTitle>
 					<p className="text-[12px] leading-snug text-muted-foreground">
-						{mode === "clone"
-							? "Clone a remote repository into a local folder, then create the worktree from it. Leave base branch empty to auto-detect the remote default branch."
-							: "New worktree from a local repo path and base branch."}
+						{mode === "clone" ? t("workspaceDialog.cloneDescription") : t("workspaceDialog.createDescription")}
 					</p>
 				</DialogHeader>
 
@@ -221,7 +224,7 @@ export function CreateWorkspaceDialog({
 								htmlFor="workspace-repository-url"
 								className="text-[12px] font-medium tracking-[-0.01em]"
 							>
-								Repository URL
+								{t("workspaceDialog.repositoryUrl")}
 							</Label>
 							<Input
 								id="workspace-repository-url"
@@ -247,10 +250,10 @@ export function CreateWorkspaceDialog({
 								htmlFor="workspace-project-id"
 								className="text-[12px] font-medium tracking-[-0.01em]"
 							>
-								Project ID
+								{t("workspaceDialog.projectId")}
 							</Label>
 							<span className="text-[11px] text-muted-foreground">
-								Auto-filled from folder name
+								{t("workspaceDialog.autoFilledFromFolder")}
 							</span>
 						</div>
 						<Input
@@ -273,7 +276,9 @@ export function CreateWorkspaceDialog({
 								htmlFor="workspace-root"
 								className="text-[12px] font-medium tracking-[-0.01em]"
 							>
-								{mode === "clone" ? "Destination folder" : "Repository path"}
+								{mode === "clone"
+									? t("workspaceDialog.destinationFolder")
+									: t("workspaceDialog.repositoryPath")}
 							</Label>
 							<Button
 								type="button"
@@ -284,7 +289,7 @@ export function CreateWorkspaceDialog({
 								onClick={handlePickWorkspaceRoot}
 							>
 								<FolderOpen className="size-3.5" aria-hidden />
-								Choose folder
+								{t("workspaceDialog.chooseFolder")}
 							</Button>
 						</div>
 						<Input
@@ -316,7 +321,9 @@ export function CreateWorkspaceDialog({
 							htmlFor="workspace-branch"
 							className="text-[12px] font-medium tracking-[-0.01em]"
 						>
-							{mode === "clone" ? "Base branch (optional)" : "Base branch"}
+							{mode === "clone"
+								? t("workspaceDialog.baseBranchOptional")
+								: t("workspaceDialog.baseBranch")}
 						</Label>
 						{mode === "open" ? (
 							<select
@@ -329,9 +336,9 @@ export function CreateWorkspaceDialog({
 								className="h-7 rounded-md border border-input bg-background px-2 text-[13px] text-foreground shadow-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
 							>
 								{isLoadingBranches ? (
-									<option value="">Loading branches…</option>
+									<option value="">{t("workspaceDialog.loadingBranches")}</option>
 								) : availableBranches.length === 0 ? (
-									<option value="">Choose a folder to load branches</option>
+									<option value="">{t("workspaceDialog.chooseFolderForBranches")}</option>
 								) : null}
 								{availableBranches.map((branch) => (
 									<option key={branch} value={branch}>
@@ -346,7 +353,7 @@ export function CreateWorkspaceDialog({
 								onChange={(event) =>
 									setForm((current) => ({ ...current, baseBranch: event.target.value }))
 								}
-								placeholder="Auto-detect default branch"
+								placeholder={t("workspaceDialog.autoDetectPlaceholder")}
 								autoComplete="off"
 								spellCheck={false}
 								disabled={isSubmitting}
@@ -360,8 +367,10 @@ export function CreateWorkspaceDialog({
 							htmlFor="workspace-name"
 							className="text-[12px] font-medium tracking-[-0.01em]"
 						>
-							Display name{" "}
-							<span className="font-normal text-muted-foreground">(optional)</span>
+							{t("workspaceDialog.displayName")}{" "}
+							<span className="font-normal text-muted-foreground">
+								({t("workspaceDialog.optional")})
+							</span>
 						</Label>
 						<Input
 							id="workspace-name"
@@ -369,7 +378,7 @@ export function CreateWorkspaceDialog({
 							onChange={(event) =>
 								setForm((current) => ({ ...current, name: event.target.value }))
 							}
-							placeholder="Defaults from branch if empty"
+							placeholder={t("workspaceDialog.defaultsFromBranch")}
 							autoComplete="off"
 							spellCheck={false}
 							disabled={isSubmitting}
@@ -385,7 +394,7 @@ export function CreateWorkspaceDialog({
 							disabled={isSubmitting}
 							onClick={() => onOpenChange(false)}
 						>
-							Cancel
+							{t("workspaceDialog.cancel")}
 						</Button>
 						<Button
 							type="submit"
@@ -400,12 +409,12 @@ export function CreateWorkspaceDialog({
 										className="size-4 shrink-0 animate-spin"
 										strokeWidth={2.1}
 									/>
-									{mode === "clone" ? "Cloning…" : "Creating…"}
+									{mode === "clone" ? t("workspaceDialog.cloning") : t("workspaceDialog.creating")}
 								</>
 							) : mode === "clone" ? (
-								"Clone repository"
+								t("workspaceDialog.cloneSubmit")
 							) : (
-								"Create workspace"
+								t("workspaceDialog.createSubmit")
 							)}
 						</Button>
 					</div>

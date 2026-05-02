@@ -1,4 +1,5 @@
 import { Download, Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -19,6 +20,7 @@ export function AppUpdateButton({
 	installing = false,
 	onInstallNow,
 }: AppUpdateButtonProps) {
+	const { t } = useTranslation("common");
 	if (!update || update.stage !== "downloaded") {
 		return null;
 	}
@@ -39,7 +41,7 @@ export function AppUpdateButton({
 					) : (
 						<Download className="size-3 text-foreground/72" />
 					)}
-					<span>Update</span>
+					<span>{t("updater.update")}</span>
 				</Button>
 			</TooltipTrigger>
 			<TooltipContent

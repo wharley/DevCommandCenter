@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
 	futureOnboardingSteps,
 	getNextOnboardingStep,
-	getOnboardingStepMeta,
 	getPreviousOnboardingStep,
 	onboardingSteps,
 } from "./OnboardingWizard.logic";
@@ -15,13 +14,6 @@ describe("OnboardingWizard.logic", () => {
 			"repoImport",
 			"completeTransition",
 		]);
-	});
-
-	it("describes the intro step", () => {
-		expect(getOnboardingStepMeta("intro")).toEqual({
-			title: "Welcome to Dev Command Center",
-			body: "Start from the shell, keep your workspace visible, and let the thread stay in the center.",
-		});
 	});
 
 	it("moves forward until the last step", () => {

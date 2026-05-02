@@ -6,6 +6,7 @@ import {
 	type KeyboardEventHandler,
 	type MouseEventHandler,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { cn } from "@/lib/utils";
@@ -118,6 +119,7 @@ function ResizeSeparator({
 }
 
 export default function App() {
+	const { t } = useTranslation("common");
 	useZoom(1);
 
 	const {
@@ -562,12 +564,12 @@ export default function App() {
 	return (
 		<>
 			<main
-				aria-label="Application shell"
+				aria-label={t("app.shellAria")}
 				className="relative h-screen overflow-hidden bg-background font-sans text-foreground antialiased"
 			>
 				<div className="relative flex h-full min-h-0 bg-background">
 					<aside
-						aria-label="Workspace sidebar"
+						aria-label={t("app.workspaceSidebarAria")}
 						data-dcc-sidebar-root
 						className="relative flex h-full shrink-0 flex-col overflow-hidden bg-sidebar"
 						style={{ width: `${sidebarRailWidth}px` }}
@@ -588,7 +590,7 @@ export default function App() {
 					<ResizeSeparator
 						side="left"
 						widthAt={sidebarRailWidth}
-						ariaLabel="Resize sidebar"
+						ariaLabel={t("app.resizeSidebarAria")}
 						ariaMin={MIN_SIDEBAR_WIDTH}
 						ariaMax={MAX_SIDEBAR_WIDTH}
 						ariaNow={sidebarWidth}
@@ -598,17 +600,17 @@ export default function App() {
 					/>
 
 					<section
-						aria-label="Workspace panel"
+						aria-label={t("app.workspacePanelAria")}
 						className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
 					>
 						{/* Keep z-index below workspace viewport so header/toolbar clicks reach buttons (Tauri drag region steals first click when on top). */}
 						<div
-							aria-label="Workspace panel drag region"
+							aria-label={t("app.workspaceDragRegionAria")}
 							data-tauri-drag-region
 							className="absolute inset-x-0 top-0 z-10 h-9 bg-transparent"
 						/>
 						<div
-							aria-label="Workspace viewport"
+							aria-label={t("app.workspaceViewportAria")}
 							className="relative z-20 flex min-h-0 flex-1 flex-col bg-background"
 						>
 							<WorkspaceCommandPalette
@@ -673,7 +675,7 @@ export default function App() {
 							<ResizeSeparator
 								side="right"
 								widthAt={inspectorWidth}
-								ariaLabel="Resize inspector sidebar"
+								ariaLabel={t("app.resizeInspectorAria")}
 								ariaMin={MIN_INSPECTOR_WIDTH}
 								ariaMax={MAX_INSPECTOR_WIDTH}
 								ariaNow={inspectorWidth}
@@ -683,7 +685,7 @@ export default function App() {
 							/>
 
 							<aside
-								aria-label="Inspector sidebar"
+								aria-label={t("app.inspectorSidebarAria")}
 								className="relative h-full shrink-0 overflow-hidden bg-sidebar"
 								style={{ width: `${inspectorWidth}px` }}
 							>
