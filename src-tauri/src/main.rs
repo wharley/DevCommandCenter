@@ -63,6 +63,7 @@ use workspace_commands::{
 	workspace_git_stage_file,
 	workspace_git_status,
 	workspace_git_unstage_file,
+	workspace_pr_status,
 };
 use dcc_tauri::state::{SessionCommandState, WorkspaceCommandState};
 
@@ -8689,6 +8690,7 @@ pub fn run() {
             workspace_git_stage_file,
             workspace_git_status,
             workspace_git_unstage_file,
+            workspace_pr_status,
             session_commands::start_thread,
             session_commands::send_turn,
             session_commands::abort_run,

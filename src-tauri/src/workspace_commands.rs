@@ -16,13 +16,15 @@ use dcc_tauri::{
 		ListWorkspacesOutput,
 		WorkspaceGitBranchDiffInput,
 	WorkspaceGitBranchDiffOutput,
-	WorkspaceGitFilePreviewInput,
-	WorkspaceGitFilePreviewContentOutput,
+		WorkspaceGitFilePreviewInput,
+		WorkspaceGitFilePreviewContentOutput,
 		WorkspaceGitCommitPushInput,
 		WorkspaceGitPathInput,
 		WorkspaceGitPushInput,
 		WorkspaceGitStatusInput,
 		WorkspaceGitStatusOutput,
+		WorkspacePrStatusInput,
+		WorkspacePrStatusOutput,
 	},
 	state::WorkspaceCommandState,
 };
@@ -148,4 +150,11 @@ pub async fn workspace_git_file_preview_content(
 	input: WorkspaceGitFilePreviewInput,
 ) -> Result<WorkspaceGitFilePreviewContentOutput, String> {
 	dcc_tauri::commands::workspace_commands::workspace_git_file_preview_content(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_pr_status(
+	input: WorkspacePrStatusInput,
+) -> Result<WorkspacePrStatusOutput, String> {
+	dcc_tauri::commands::workspace_commands::workspace_pr_status(input).await
 }
