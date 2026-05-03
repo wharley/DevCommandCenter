@@ -562,7 +562,7 @@ export function WorkspaceInspectorSidebar({
 									) : null}
 							</TabsTrigger>
 								<TabsTrigger value="plan" className="h-9 rounded-none px-3 text-[12px]">
-									Plan
+									{t("inspector.tabs.plan")}
 									{activePlanMessage ? (
 										<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
 											(1)
@@ -683,11 +683,10 @@ export function WorkspaceInspectorSidebar({
 								<div className="flex min-h-full items-center justify-center px-4 py-8 text-center">
 									<div className="max-w-sm">
 										<p className="text-[13px] font-medium text-foreground">
-											No active plan yet.
+											{t("inspector.plan.emptyTitle")}
 										</p>
 										<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-											When the assistant generates a plan, it will stay visible here while
-											the session continues.
+											{t("inspector.plan.emptyDescription")}
 										</p>
 									</div>
 								</div>

@@ -99,7 +99,12 @@
     },
     "tabs": {
       "activity": "Activity",
-      "context": "Context"
+      "context": "Context",
+      "plan": "Plan"
+    },
+    "plan": {
+      "emptyTitle": "No active plan yet.",
+      "emptyDescription": "When the assistant generates a plan, it will stay visible here while the session continues."
     },
     "groups": {
       "workspace": "Workspace",
