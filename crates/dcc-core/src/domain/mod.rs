@@ -11,7 +11,7 @@ pub use provider::{
 };
 pub use session::{
 	Checkpoint, CheckpointId, Session, SessionEventKind, SessionEventRecord, SessionId,
-	SessionProjection, SessionState, Turn, TurnId, TurnState,
+	SessionProjection, SessionState, Turn, TurnId, TurnState, WorkspaceSessionSummary,
 };
 pub use thread::{Thread, ThreadId};
 pub use workspace::{Workspace, WorkspaceId, WorkspaceState};

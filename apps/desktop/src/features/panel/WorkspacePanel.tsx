@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { WorkspaceEditorSurface } from "@/features/editor/WorkspaceEditorSurface";
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
@@ -20,12 +21,16 @@ type WorkspacePanelProps = {
 	selectedProviderId: string | null;
 	selectedModelId: string | null;
 	providerChoices: ProviderCatalog["providers"];
+	sessions: WorkspaceSessionSummary[];
+	selectedSessionId: string | null;
+	isLoadingSessions: boolean;
 	sessionSnapshot: RuntimeSessionSnapshot | null;
 	sessionEvents: CoreEvent[];
 	pendingPrompt: string | null;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
 	onStartSession: () => void;
+	onSelectSession: (sessionId: string) => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
@@ -46,12 +51,16 @@ export function WorkspacePanel({
 	selectedProviderId,
 	selectedModelId,
 	providerChoices,
+	sessions,
+	selectedSessionId,
+	isLoadingSessions,
 	sessionSnapshot,
 	sessionEvents,
 	pendingPrompt,
 	onSelectProvider,
 	onSelectModel,
 	onStartSession,
+	onSelectSession,
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
@@ -61,10 +70,13 @@ export function WorkspacePanel({
 	editorSelection,
 	onCloseEditor,
 }: WorkspacePanelProps) {
-	const sessionId = sessionSnapshot?.sessionId ?? null;
+	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
 	const threadHistoryQuery = useQuery(
-		sessionThreadHistoryQueryOptions(sessionId),
+		sessionThreadHistoryQueryOptions(effectiveSessionId),
 	);
+	const selectedSessionTitle =
+		sessions.find((session) => session.session.id === effectiveSessionId)?.thread
+			.title ?? workspaceName;
 	const pathCaption =
 		workspacePath && workspacePath.length > 0
 			? workspacePath.length > 52
@@ -95,13 +107,18 @@ export function WorkspacePanel({
 				].join(" ")}
 			>
 				<DccWorkbenchChatHeader
-					threadTitle={workspaceName}
+					threadTitle={selectedSessionTitle}
 					projectBadgeLabel={workspaceBranch || null}
 					modelBadgeLabel={selectedModelLabel}
 					isGitRepo={isGitRepo}
 					pathCaption={pathCaption}
+					sessions={sessions}
+					selectedSessionId={selectedSessionId}
+					isLoadingSessions={isLoadingSessions}
 					sessionSnapshot={sessionSnapshot}
 					pendingPrompt={pendingPrompt}
+					onSelectSession={onSelectSession}
+					onStartSession={onStartSession}
 					onResumeSession={onResumeSession}
 					onAbortSession={onAbortSession}
 					updateInfo={updateInfo}
@@ -122,7 +139,7 @@ export function WorkspacePanel({
 					selectedModelLabel={selectedModelLabel}
 					sessionState={sessionState}
 					lastTurnState={lastTurnState}
-					sessionId={sessionId}
+					sessionId={effectiveSessionId}
 					pendingPrompt={pendingPrompt}
 					onStartSession={onStartSession}
 					onSubmitPrompt={onSubmitPrompt}

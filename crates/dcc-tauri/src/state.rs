@@ -15,7 +15,10 @@ use dcc_core::{
 	domain::{
 		project::{Project, ProjectId},
 		provider::{ProviderEvent, SessionHandle},
-		session::{Session, SessionEventKind, SessionEventRecord, SessionId, TurnId},
+		session::{
+			Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection,
+			TurnId, WorkspaceSessionSummary,
+		},
 		thread::{Thread, ThreadId},
 		workspace::{Workspace, WorkspaceId},
 	},
@@ -89,6 +92,81 @@ impl SessionCommandState {
 	) -> Result<Option<Session>> {
 		let store = self.lock_store()?;
 		Ok(store.sessions.get(session_id).cloned())
+	}
+
+	pub(crate) fn list_workspace_sessions(
+		&self,
+		workspace_id: &WorkspaceId,
+	) -> Result<Vec<WorkspaceSessionSummary>> {
+		let store = self.lock_store()?;
+		let mut summaries = store
+			.sessions
+			.values()
+			.filter(|session| &session.workspace_id == workspace_id)
+			.filter_map(|session| {
+				let thread = store
+					.threads
+					.values()
+					.find(|thread| thread.session_id.as_ref() == Some(&session.id))?
+					.clone();
+				let mut events = store.events.get(&session.id).cloned().unwrap_or_default();
+				events.sort_by_key(|event| event.sequence);
+				let mut last_turn_prompt = None;
+				let mut last_turn_state = None;
+				for event in &events {
+					match &event.kind {
+						SessionEventKind::TurnStarted { prompt, .. } => {
+							last_turn_prompt = Some(prompt.clone());
+							last_turn_state = Some("running".to_string());
+						}
+						SessionEventKind::TurnCompleted { .. } => {
+							last_turn_state = Some("completed".to_string());
+						}
+						SessionEventKind::TurnAborted { .. } => {
+							last_turn_state = Some("aborted".to_string());
+						}
+						SessionEventKind::SessionCompleted => {
+							if last_turn_state.is_none() {
+								last_turn_state = Some("completed".to_string());
+							}
+						}
+						SessionEventKind::SessionAborted { .. } => {
+							if last_turn_state.is_none() {
+								last_turn_state = Some("aborted".to_string());
+							}
+						}
+						_ => {}
+					}
+				}
+				let projection = SessionProjection::fold(&events).unwrap_or_else(|| {
+					SessionProjection::new(
+						session.id.clone(),
+						session.project_id.clone(),
+						session.workspace_id.clone(),
+						session.provider_id.clone(),
+						session.model.clone(),
+						session.created_at.clone(),
+					)
+				});
+				Some(WorkspaceSessionSummary {
+					session: session.clone(),
+					thread,
+					projection,
+					last_turn_prompt,
+					last_turn_state,
+				})
+			})
+			.collect::<Vec<_>>();
+
+		summaries.sort_by(|left, right| {
+			right
+				.session
+				.created_at
+				.cmp(&left.session.created_at)
+				.then_with(|| right.thread.title.cmp(&left.thread.title))
+		});
+
+		Ok(summaries)
 	}
 
 	async fn append_session_event(

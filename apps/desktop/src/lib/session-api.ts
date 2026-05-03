@@ -1,7 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { SESSION_METHODS } from "@dcc/contracts";
-import type { CoreEvent, SessionEventRecord } from "@dcc/contracts";
+import type {
+	CoreEvent,
+	SessionEventRecord,
+	WorkspaceSessionSummary,
+} from "@dcc/contracts";
 import type {
 	AbortRunInput,
 	AbortRunOutput,
@@ -33,6 +37,13 @@ export function loadSessionThreadEvents(sessionId: string) {
 	return invoke<SessionEventRecord[]>(SESSION_METHODS.listThreadEvents, {
 		sessionId,
 	});
+}
+
+export function loadWorkspaceSessions(workspaceId: string) {
+	return invoke<WorkspaceSessionSummary[]>(
+		SESSION_METHODS.listWorkspaceSessions,
+		{ workspaceId },
+	);
 }
 
 const SESSION_EVENT_NAMES = [

@@ -6,6 +6,7 @@ import type { AppUpdateInfo } from "@/features/updater";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import type { RuntimeSessionSnapshot } from "./workbench-types";
 import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
+import type { WorkspaceSessionSummary } from "@dcc/contracts";
 
 export type { RuntimeSessionSnapshot } from "./workbench-types";
 
@@ -19,12 +20,16 @@ type SessionWorkbenchProps = {
 	selectedProviderId: string | null;
 	selectedModelId: string | null;
 	providerChoices: ProviderCatalog["providers"];
+	sessions: WorkspaceSessionSummary[];
+	selectedSessionId: string | null;
+	isLoadingSessions: boolean;
 	sessionSnapshot: RuntimeSessionSnapshot | null;
 	sessionEvents: CoreEvent[];
 	pendingPrompt: string | null;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
 	onStartSession: () => void;
+	onSelectSession: (sessionId: string) => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
@@ -45,12 +50,16 @@ export function SessionWorkbench({
 	selectedProviderId,
 	selectedModelId,
 	providerChoices,
+	sessions,
+	selectedSessionId,
+	isLoadingSessions,
 	sessionSnapshot,
 	sessionEvents,
 	pendingPrompt,
 	onSelectProvider,
 	onSelectModel,
 	onStartSession,
+	onSelectSession,
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
@@ -76,12 +85,16 @@ export function SessionWorkbench({
 				selectedProviderId={selectedProviderId}
 				selectedModelId={selectedModelId}
 				providerChoices={providerChoices}
+				sessions={sessions}
+				selectedSessionId={selectedSessionId}
+				isLoadingSessions={isLoadingSessions}
 				sessionSnapshot={sessionSnapshot}
 				sessionEvents={sessionEvents}
 				pendingPrompt={pendingPrompt}
 				onSelectProvider={onSelectProvider}
 				onSelectModel={onSelectModel}
 				onStartSession={onStartSession}
+				onSelectSession={onSelectSession}
 				onSubmitPrompt={onSubmitPrompt}
 				onResumeSession={onResumeSession}
 				onAbortSession={onAbortSession}

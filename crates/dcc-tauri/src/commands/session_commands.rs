@@ -9,7 +9,7 @@ use dcc_core::{
 		start_thread as run_start_thread, AbortRunInput, AbortRunOutput, ResumeSessionInput,
 		ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
 	},
-	domain::session::SessionEventRecord,
+	domain::session::{SessionEventRecord, WorkspaceSessionSummary},
 	ports::SessionEventRepo,
 };
 
@@ -114,5 +114,16 @@ pub async fn list_thread_events(
 	let session_id = dcc_core::domain::session::SessionId(session_id);
 	SessionEventRepo::list_events_by_session(&*state, &session_id)
 		.await
+		.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn list_workspace_sessions(
+	state: State<'_, SessionCommandState>,
+	_workspace_id: String,
+) -> Result<Vec<WorkspaceSessionSummary>, String> {
+	let workspace_id = dcc_core::domain::workspace::WorkspaceId(_workspace_id);
+	state
+		.list_workspace_sessions(&workspace_id)
 		.map_err(|error| error.to_string())
 }

@@ -12,6 +12,7 @@ use std::{env, fs, path::PathBuf};
 		session::{
 			Checkpoint, CheckpointId, Session, SessionEventKind, SessionEventRecord,
 			SessionId, SessionProjection, SessionState, Turn, TurnId, TurnState,
+			WorkspaceSessionSummary,
 		},
 		workspace::{Workspace, WorkspaceId, WorkspaceState},
 	},
@@ -71,6 +72,7 @@ struct SessionMethods {
 	abort_run: String,
 	resume_session: String,
 	list_thread_events: String,
+	list_workspace_sessions: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -107,6 +109,7 @@ fn main() {
 		.typ::<SessionEventKind>()
 		.typ::<SessionEventRecord>()
 		.typ::<SessionProjection>()
+		.typ::<WorkspaceSessionSummary>()
 		.typ::<CreateWorkspaceForRepoInput>()
 		.typ::<CreateWorkspaceForRepoOutput>()
 		.typ::<CreateWorkspaceFromUrlInput>()
@@ -180,6 +183,7 @@ fn main() {
 			abort_run: "abort_run".to_string(),
 			resume_session: "resume_session".to_string(),
 			list_thread_events: "list_thread_events".to_string(),
+			list_workspace_sessions: "list_workspace_sessions".to_string(),
 		},
 	);
 

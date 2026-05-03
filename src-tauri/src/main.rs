@@ -8772,7 +8772,8 @@ pub fn run() {
             session_commands::send_turn,
             session_commands::abort_run,
             session_commands::resume_session,
-            session_commands::list_thread_events
+            session_commands::list_thread_events,
+            session_commands::list_workspace_sessions
         ])
         .setup(|app| {
             let app_data_dir = app

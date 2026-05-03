@@ -7,9 +7,10 @@ import {
 	type MouseEventHandler,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Toaster } from "sonner";
+import type { CoreEvent, WorkspaceSessionSummary } from "@dcc/contracts";
 import { cn } from "@/lib/utils";
 import {
 	MAX_INSPECTOR_WIDTH,
@@ -38,6 +39,10 @@ import {
 } from "./features/sessions/session-workbench";
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
+import {
+	workspaceSessionSnapshotFromSummary,
+	workspaceSessionsQueryOptions,
+} from "./features/sessions/workspace-sessions-query";
 import { FALLBACK_PROVIDER_CATALOG } from "./lib/fallback-provider-catalog";
 import { listProviders } from "./lib/provider-api";
 import { listWorkspaces } from "./lib/workspace-api";
@@ -121,6 +126,92 @@ function ResizeSeparator({
 	);
 }
 
+function getCoreEventSessionId(event: CoreEvent): string | null {
+	if ("sessionStarted" in event && event.sessionStarted) {
+		return event.sessionStarted.session_id;
+	}
+	if ("sessionCompleted" in event && event.sessionCompleted) {
+		return event.sessionCompleted.session_id;
+	}
+	if ("sessionAborted" in event && event.sessionAborted) {
+		return event.sessionAborted.session_id;
+	}
+	if ("sessionResumed" in event && event.sessionResumed) {
+		return event.sessionResumed.session_id;
+	}
+	if ("sessionTurnStarted" in event && event.sessionTurnStarted) {
+		return event.sessionTurnStarted.session_id;
+	}
+	if ("sessionTurnDelta" in event && event.sessionTurnDelta) {
+		return event.sessionTurnDelta.session_id;
+	}
+	if ("sessionTurnReasoningStarted" in event && event.sessionTurnReasoningStarted) {
+		return event.sessionTurnReasoningStarted.session_id;
+	}
+	if ("sessionTurnReasoningDelta" in event && event.sessionTurnReasoningDelta) {
+		return event.sessionTurnReasoningDelta.session_id;
+	}
+	if ("sessionTurnReasoningCompleted" in event && event.sessionTurnReasoningCompleted) {
+		return event.sessionTurnReasoningCompleted.session_id;
+	}
+	if ("sessionTurnToolCallStarted" in event && event.sessionTurnToolCallStarted) {
+		return event.sessionTurnToolCallStarted.session_id;
+	}
+	if ("sessionTurnToolCallDelta" in event && event.sessionTurnToolCallDelta) {
+		return event.sessionTurnToolCallDelta.session_id;
+	}
+	if ("sessionTurnToolCallCompleted" in event && event.sessionTurnToolCallCompleted) {
+		return event.sessionTurnToolCallCompleted.session_id;
+	}
+	if ("sessionTurnToolCallFailed" in event && event.sessionTurnToolCallFailed) {
+		return event.sessionTurnToolCallFailed.session_id;
+	}
+	if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
+		return event.sessionTurnCompleted.session_id;
+	}
+	if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
+		return event.sessionTurnAborted.session_id;
+	}
+	if ("sessionCheckpointCreated" in event && event.sessionCheckpointCreated) {
+		return event.sessionCheckpointCreated.session_id;
+	}
+	return null;
+}
+
+function applyCoreEventToSnapshot(
+	snapshot: RuntimeSessionSnapshot,
+	event: CoreEvent,
+): RuntimeSessionSnapshot {
+	if (getCoreEventSessionId(event) !== snapshot.sessionId) {
+		return snapshot;
+	}
+
+	if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
+		return { ...snapshot, activeTurnId: null, lastTurnState: "completed" };
+	}
+	if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
+		return { ...snapshot, activeTurnId: null, lastTurnState: "aborted" };
+	}
+	if ("sessionAborted" in event && event.sessionAborted) {
+		return { ...snapshot, state: "aborted", activeTurnId: null };
+	}
+	if ("sessionResumed" in event && event.sessionResumed) {
+		return { ...snapshot, state: "active" };
+	}
+	if ("sessionTurnStarted" in event && event.sessionTurnStarted) {
+		return {
+			...snapshot,
+			activeTurnId: event.sessionTurnStarted.turn_id,
+			lastTurnPrompt: event.sessionTurnStarted.prompt,
+			lastTurnState: "running",
+		};
+	}
+	if ("sessionCompleted" in event && event.sessionCompleted) {
+		return { ...snapshot, state: "completed", activeTurnId: null };
+	}
+	return snapshot;
+}
+
 export default function App() {
 	const { t } = useTranslation("common");
 	useZoom(1);
@@ -156,6 +247,7 @@ export default function App() {
 		selectedWorkspaceId,
 		setSelectedWorkspaceId,
 	} = useWorkspacesPanel(workspacesFromBackend);
+	const queryClient = useQueryClient();
 	const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 	const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
 	const [workspaceCreationMode, setWorkspaceCreationMode] = useState<"open" | "clone">(
@@ -183,6 +275,10 @@ export default function App() {
 	});
 	const providerCatalog =
 		providersQuery.data?.catalog ?? FALLBACK_PROVIDER_CATALOG;
+	const workspaceSessionsQuery = useQuery(
+		workspaceSessionsQueryOptions(selectedWorkspace?.id ?? null),
+	);
+	const workspaceSessions = workspaceSessionsQuery.data ?? [];
 	const [selectedProviderId, setSelectedProviderId] = useState<string | null>(() => {
 		if (typeof window === "undefined") {
 			return null;
@@ -197,9 +293,14 @@ export default function App() {
 
 		return window.localStorage.getItem(SELECTED_MODEL_STORAGE_KEY);
 	});
-	const [sessionSnapshot, setSessionSnapshot] =
-		useState<RuntimeSessionSnapshot | null>(null);
+	const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+	const [sessionSnapshotsById, setSessionSnapshotsById] = useState<
+		Record<string, RuntimeSessionSnapshot>
+	>({});
 	const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+	const [pendingPromptSessionId, setPendingPromptSessionId] = useState<
+		string | null
+	>(null);
 	const [editorSelection, setEditorSelection] =
 		useState<WorkspaceGitPreviewSelection | null>(null);
 	const { theme, setTheme } = useAppearance();
@@ -231,6 +332,28 @@ export default function App() {
 		[selectedProvider],
 	);
 	useDockUnreadBadge(allWorkspaces);
+	const effectiveSelectedSessionId =
+		selectedSessionId ?? workspaceSessions[0]?.session.id ?? null;
+	const selectedSessionSummary = useMemo(
+		() =>
+			workspaceSessions.find(
+				(session) => session.session.id === effectiveSelectedSessionId,
+			) ??
+			null,
+		[effectiveSelectedSessionId, workspaceSessions],
+	);
+	const selectedSessionSnapshot = useMemo(() => {
+		if (!effectiveSelectedSessionId) {
+			return null;
+		}
+
+		return (
+			sessionSnapshotsById[effectiveSelectedSessionId] ??
+			(selectedSessionSummary
+				? workspaceSessionSnapshotFromSummary(selectedSessionSummary)
+				: null)
+		);
+	}, [effectiveSelectedSessionId, selectedSessionSummary, sessionSnapshotsById]);
 
 	useEffect(() => {
 		if (providerChoices.length === 0) {
@@ -284,7 +407,7 @@ export default function App() {
 		if (providerChoices.length === 0) {
 			return;
 		}
-		const sessionId = sessionSnapshot?.sessionId;
+		const sessionId = selectedSessionSnapshot?.sessionId;
 		if (!sessionId) {
 			return;
 		}
@@ -300,8 +423,8 @@ export default function App() {
 			}
 		}
 
-		const sp = sessionSnapshot.providerId;
-		const sm = sessionSnapshot.model;
+		const sp = selectedSessionSnapshot.providerId;
+		const sm = selectedSessionSnapshot.model;
 		if (sp && sm) {
 			const provider = providerChoices.find((p) => p.id === sp);
 			const model = provider?.models.find((m) => m.id === sm);
@@ -312,13 +435,13 @@ export default function App() {
 		}
 	}, [
 		providerChoices,
-		sessionSnapshot?.sessionId,
-		sessionSnapshot?.providerId,
-		sessionSnapshot?.model,
+		selectedSessionSnapshot?.sessionId,
+		selectedSessionSnapshot?.providerId,
+		selectedSessionSnapshot?.model,
 	]);
 
 	useEffect(() => {
-		const sessionId = sessionSnapshot?.sessionId;
+		const sessionId = selectedSessionSnapshot?.sessionId;
 		if (!sessionId || !selectedProviderId || !selectedModelId) {
 			return;
 		}
@@ -326,53 +449,72 @@ export default function App() {
 			providerId: selectedProviderId,
 			modelId: selectedModelId,
 		});
-	}, [sessionSnapshot?.sessionId, selectedProviderId, selectedModelId]);
+	}, [selectedSessionSnapshot?.sessionId, selectedProviderId, selectedModelId]);
 
 	useEffect(() => {
-		setSessionSnapshot(null);
+		setSelectedSessionId(null);
+		setSessionSnapshotsById({});
 		setPendingPrompt(null);
+		setPendingPromptSessionId(null);
 		setEditorSelection(null);
 	}, [selectedWorkspace?.id]);
 
-	/** Keep `activeTurnId` in sync with live stream (turn finished / new turn / abort) after the send returns. */
 	useEffect(() => {
-		const last = sessionEvents[sessionEvents.length - 1];
-		if (!last) {
+		if (!selectedWorkspace?.id) {
 			return;
 		}
 
-		setSessionSnapshot((prev) => {
-			if (!prev) {
-				return prev;
-			}
-			const sid = prev.sessionId;
+		if (workspaceSessions.length === 0) {
+			setSelectedSessionId(null);
+			return;
+		}
 
-			if ("sessionTurnCompleted" in last && last.sessionTurnCompleted?.session_id === sid) {
-				return { ...prev, activeTurnId: null, lastTurnState: "completed" };
+		setSessionSnapshotsById((current) => {
+			const next = { ...current };
+			for (const summary of workspaceSessions) {
+				next[summary.session.id] = workspaceSessionSnapshotFromSummary(summary);
 			}
-			if ("sessionTurnAborted" in last && last.sessionTurnAborted?.session_id === sid) {
-				return { ...prev, activeTurnId: null, lastTurnState: "aborted" };
-			}
-			if ("sessionAborted" in last && last.sessionAborted?.session_id === sid) {
-				return { ...prev, state: "aborted", activeTurnId: null };
-			}
-			if ("sessionResumed" in last && last.sessionResumed?.session_id === sid) {
-				return { ...prev, state: "active" };
-			}
-			if ("sessionTurnStarted" in last && last.sessionTurnStarted?.session_id === sid) {
-				const started = last.sessionTurnStarted;
-				return {
-					...prev,
-					activeTurnId: started?.turn_id ?? null,
-					lastTurnState: "running",
-				};
-			}
-			if ("sessionCompleted" in last && last.sessionCompleted?.session_id === sid) {
-				return { ...prev, state: "completed", activeTurnId: null };
-			}
-			return prev;
+			return next;
 		});
-	}, [sessionEvents]);
+
+		setSelectedSessionId((current) => {
+			if (current && workspaceSessions.some((session) => session.session.id === current)) {
+				return current;
+			}
+
+			return workspaceSessions[0]?.session.id ?? null;
+		});
+	}, [selectedWorkspace?.id, workspaceSessions]);
+
+	/** Keep the selected session snapshot in sync with live stream events from the same session. */
+	useEffect(() => {
+		const last = sessionEvents[sessionEvents.length - 1];
+		if (!last || !effectiveSelectedSessionId) {
+			return;
+		}
+
+		const eventSessionId = getCoreEventSessionId(last);
+		if (eventSessionId !== effectiveSelectedSessionId) {
+			return;
+		}
+
+		setSessionSnapshotsById((current) => {
+			const prev = current[effectiveSelectedSessionId];
+			if (!prev) {
+				return current;
+			}
+
+			const next = applyCoreEventToSnapshot(prev, last);
+			if (next === prev) {
+				return current;
+			}
+
+			return {
+				...current,
+				[effectiveSelectedSessionId]: next,
+			};
+		});
+	}, [effectiveSelectedSessionId, sessionEvents]);
 
 	const handleStartSession = useCallback(async () => {
 		if (!selectedProvider || !selectedWorkspace) {
@@ -383,30 +525,67 @@ export default function App() {
 			return;
 		}
 
-		const result = await startThread({
-			workspaceId: selectedWorkspace.id,
-			projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
-			providerId: selectedProvider.id,
-			model: selectedModel?.id ?? null,
-			title: `${selectedWorkspace.name} session`,
-		});
+		try {
+			const result = await startThread({
+				workspaceId: selectedWorkspace.id,
+				projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
+				providerId: selectedProvider.id,
+				model: selectedModel?.id ?? null,
+				title: `${selectedWorkspace.name} session`,
+			});
 
-		setSessionSnapshot({
-			sessionId: result.session.id,
-			projectId: result.session.projectId,
-			workspaceId: result.session.workspaceId,
-			providerId: result.session.providerId,
-			model: result.session.model,
-			state: result.projection.state,
-			turnCount: result.projection.turnCount,
-			checkpointCount: result.projection.checkpointCount,
-			activeTurnId: result.projection.activeTurnId ?? null,
-		});
+			const snapshot: RuntimeSessionSnapshot = {
+				sessionId: result.session.id,
+				projectId: result.session.projectId,
+				workspaceId: result.session.workspaceId,
+				providerId: result.session.providerId,
+				model: result.session.model,
+				state: result.projection.state,
+				turnCount: result.projection.turnCount,
+				checkpointCount: result.projection.checkpointCount,
+				activeTurnId: result.projection.activeTurnId ?? null,
+				lastTurnPrompt: null,
+				lastTurnState: result.projection.activeTurnId ? "running" : null,
+			};
+			setSessionSnapshotsById((current) => ({
+				...current,
+				[result.session.id]: snapshot,
+			}));
+			setSelectedSessionId(result.session.id);
+			queryClient.setQueryData<WorkspaceSessionSummary[]>(
+				["workspaceSessions", selectedWorkspace.id],
+				(current = []) => {
+					const nextSummary: WorkspaceSessionSummary = {
+						session: result.session,
+						thread: result.thread,
+						projection: result.projection,
+						lastTurnPrompt: null,
+						lastTurnState: result.projection.activeTurnId ? "running" : null,
+					};
+					return [
+						nextSummary,
+						...current.filter(
+							(summary) => summary.session.id !== result.session.id,
+						),
+					];
+				},
+			);
+		} catch (error) {
+			const message =
+				error instanceof Error
+					? error.message
+					: typeof error === "string"
+						? error
+						: "Failed to create chat";
+			console.error("[dcc] create chat failed:", error);
+			toast.error(message);
+		}
 	}, [
 		selectedModel,
 		selectedProvider,
 		selectedProviderBlockReason,
 		selectedWorkspace,
+		queryClient,
 	]);
 
 	const handleSubmitPrompt = useCallback(async (turn: ComposerSubmittedTurn) => {
@@ -419,10 +598,11 @@ export default function App() {
 			return;
 		}
 
-		let currentSession = sessionSnapshot;
+		let currentSession = selectedSessionSnapshot;
+		let currentSessionId = selectedSessionId;
 
 		try {
-			if (!currentSession) {
+			if (!currentSession || !currentSessionId) {
 				if (!selectedProvider || !selectedWorkspace) {
 					return;
 				}
@@ -445,14 +625,46 @@ export default function App() {
 					turnCount: started.projection.turnCount,
 					checkpointCount: started.projection.checkpointCount,
 					activeTurnId: started.projection.activeTurnId ?? null,
+					lastTurnPrompt: null,
+					lastTurnState: started.projection.activeTurnId ? "running" : null,
 				};
-				setSessionSnapshot(currentSession);
+				const startedSessionId = started.session.id;
+				currentSessionId = startedSessionId;
+				setSelectedSessionId(currentSessionId);
+				const startedSnapshot = currentSession as RuntimeSessionSnapshot;
+				setSessionSnapshotsById((current) => ({
+					...current,
+					[startedSessionId]: startedSnapshot,
+				}));
+				queryClient.setQueryData<WorkspaceSessionSummary[]>(
+					["workspaceSessions", selectedWorkspace.id],
+					(current = []) => {
+						const nextSummary: WorkspaceSessionSummary = {
+							session: started.session,
+							thread: started.thread,
+							projection: started.projection,
+							lastTurnPrompt: null,
+							lastTurnState: started.projection.activeTurnId ? "running" : null,
+						};
+						return [
+							nextSummary,
+							...current.filter(
+								(summary) => summary.session.id !== started.session.id,
+							),
+						];
+					},
+				);
+			}
+
+			if (!currentSessionId || !currentSession) {
+				return;
 			}
 
 			setPendingPrompt(trimmedPrompt);
+			setPendingPromptSessionId(currentSessionId);
 
 			const result = await sendTurn({
-				sessionId: currentSession.sessionId,
+				sessionId: currentSessionId,
 				prompt: trimmedPrompt,
 				providerId: selectedProvider?.id ?? null,
 				model: selectedModel?.id ?? null,
@@ -461,7 +673,7 @@ export default function App() {
 				fastMode: turn.envelope.fastMode,
 			});
 
-			setSessionSnapshot({
+			const resultSnapshot: RuntimeSessionSnapshot = {
 				sessionId: result.session.id,
 				projectId: result.session.projectId,
 				workspaceId: result.session.workspaceId,
@@ -473,7 +685,26 @@ export default function App() {
 				activeTurnId: result.projection.activeTurnId ?? null,
 				lastTurnPrompt: result.turn.content,
 				lastTurnState: result.turn.state,
-			});
+			};
+			setSessionSnapshotsById((current) => ({
+				...current,
+				[result.session.id]: resultSnapshot,
+			}));
+			queryClient.setQueryData<WorkspaceSessionSummary[]>(
+				["workspaceSessions", result.session.workspaceId],
+				(current = []) =>
+					current.map((summary) =>
+						summary.session.id === result.session.id
+							? {
+									...summary,
+									session: result.session,
+									projection: result.projection,
+									lastTurnPrompt: result.turn.content,
+									lastTurnState: result.turn.state,
+								}
+							: summary,
+					),
+			);
 		} catch (error) {
 			const message =
 				error instanceof Error
@@ -484,14 +715,21 @@ export default function App() {
 			console.error("[dcc] send prompt failed:", error);
 			toast.error(message);
 		} finally {
-			setPendingPrompt(null);
+			setPendingPrompt((current) =>
+				currentSessionId && current === trimmedPrompt ? null : current,
+			);
+			setPendingPromptSessionId((current) =>
+				current === currentSessionId ? null : current,
+			);
 		}
 	}, [
+		queryClient,
 		selectedModel,
 		selectedProvider,
 		selectedProviderBlockReason,
+		selectedSessionId,
+		selectedSessionSnapshot,
 		selectedWorkspace,
-		sessionSnapshot,
 	]);
 
 	const handleSelectProvider = useCallback(
@@ -516,24 +754,47 @@ export default function App() {
 		[providerChoices],
 	);
 
+	const handleSelectSession = useCallback((sessionId: string) => {
+		setSelectedSessionId(sessionId);
+	}, []);
+
 	const handleResumeSession = useCallback(async () => {
-		if (!sessionSnapshot || !canResumeSession(sessionSnapshot)) {
+		if (!selectedSessionSnapshot || !canResumeSession(selectedSessionSnapshot)) {
 			return;
 		}
 
-		const result = await resumeSession({ sessionId: sessionSnapshot.sessionId });
-		setSessionSnapshot((current: RuntimeSessionSnapshot | null) =>
-			current
-				? {
-						...current,
-						state: result.projection.state,
-						turnCount: result.projection.turnCount,
-						checkpointCount: result.projection.checkpointCount,
-						activeTurnId: result.projection.activeTurnId ?? null,
-					}
-				: current,
+		const result = await resumeSession({ sessionId: selectedSessionSnapshot.sessionId });
+		setSessionSnapshotsById((current) => {
+			const prev = current[selectedSessionSnapshot.sessionId];
+			if (!prev) {
+				return current;
+			}
+
+			return {
+				...current,
+				[selectedSessionSnapshot.sessionId]: {
+					...prev,
+					state: result.projection.state,
+					turnCount: result.projection.turnCount,
+					checkpointCount: result.projection.checkpointCount,
+					activeTurnId: result.projection.activeTurnId ?? null,
+				},
+			};
+		});
+		queryClient.setQueryData<WorkspaceSessionSummary[]>(
+			["workspaceSessions", selectedSessionSnapshot.workspaceId],
+			(current = []) =>
+				current.map((summary) =>
+					summary.session.id === selectedSessionSnapshot.sessionId
+						? {
+								...summary,
+								session: result.session,
+								projection: result.projection,
+							}
+						: summary,
+				),
 		);
-	}, [sessionSnapshot]);
+	}, [queryClient, selectedSessionSnapshot]);
 
 	const handleOpenEditorFile = useCallback(
 		(selection: WorkspaceGitPreviewSelection | null) => {
@@ -547,26 +808,62 @@ export default function App() {
 	}, []);
 
 	const handleAbortSession = useCallback(async () => {
-		if (!sessionSnapshot || !canAbortRun(sessionSnapshot, pendingPrompt)) {
+		const visiblePendingPrompt =
+			pendingPromptSessionId === effectiveSelectedSessionId ? pendingPrompt : null;
+		if (
+			!selectedSessionSnapshot ||
+			!canAbortRun(selectedSessionSnapshot, visiblePendingPrompt)
+		) {
 			return;
 		}
 
 		const result = await abortRun({
-			sessionId: sessionSnapshot.sessionId,
+			sessionId: selectedSessionSnapshot.sessionId,
 			reason: "Stopped from shell",
 		});
-		setSessionSnapshot((current: RuntimeSessionSnapshot | null) =>
-			current
-				? {
-						...current,
-						state: result.projection.state,
-						turnCount: result.projection.turnCount,
-						checkpointCount: result.projection.checkpointCount,
-						activeTurnId: result.projection.activeTurnId ?? null,
-					}
-				: current,
+		setSessionSnapshotsById((current) => {
+			const prev = current[selectedSessionSnapshot.sessionId];
+			if (!prev) {
+				return current;
+			}
+
+			return {
+				...current,
+				[selectedSessionSnapshot.sessionId]: {
+					...prev,
+					state: result.projection.state,
+					turnCount: result.projection.turnCount,
+					checkpointCount: result.projection.checkpointCount,
+					activeTurnId: result.projection.activeTurnId ?? null,
+				},
+			};
+		});
+		queryClient.setQueryData<WorkspaceSessionSummary[]>(
+			["workspaceSessions", selectedSessionSnapshot.workspaceId],
+			(current = []) =>
+				current.map((summary) =>
+					summary.session.id === selectedSessionSnapshot.sessionId
+						? {
+								...summary,
+								session: result.session,
+								projection: result.projection,
+							}
+						: summary,
+				),
 		);
-	}, [pendingPrompt, sessionSnapshot]);
+		setPendingPrompt((current) =>
+			visiblePendingPrompt && current === visiblePendingPrompt ? null : current,
+		);
+		setPendingPromptSessionId((current) =>
+			current === selectedSessionSnapshot.sessionId ? null : current,
+		);
+	}, [
+		effectiveSelectedSessionId,
+		pendingPrompt,
+		pendingPromptSessionId,
+		queryClient,
+		selectedSessionSnapshot,
+	]);
 
 	const handleCompleteOnboarding = useCallback(() => {
 		try {
@@ -602,6 +899,8 @@ export default function App() {
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, []);
 
+	const visiblePendingPrompt =
+		effectiveSelectedSessionId === pendingPromptSessionId ? pendingPrompt : null;
 	const sidebarRailWidth = sidebarCollapsed ? 76 : sidebarWidth;
 	const hasWorkspace = Boolean(selectedWorkspace);
 
@@ -688,12 +987,16 @@ export default function App() {
 									selectedProviderId={selectedProviderId}
 									selectedModelId={selectedModelId}
 									providerChoices={providerChoices}
-									sessionSnapshot={sessionSnapshot}
+									sessions={workspaceSessions}
+									selectedSessionId={selectedSessionId}
+									isLoadingSessions={workspaceSessionsQuery.isPending}
+									sessionSnapshot={selectedSessionSnapshot}
 									sessionEvents={sessionEvents}
-									pendingPrompt={pendingPrompt}
+									pendingPrompt={visiblePendingPrompt}
 									onSelectProvider={handleSelectProvider}
 									onSelectModel={handleSelectModel}
 									onStartSession={handleStartSession}
+									onSelectSession={handleSelectSession}
 									onSubmitPrompt={handleSubmitPrompt}
 									onResumeSession={handleResumeSession}
 									onAbortSession={handleAbortSession}
@@ -733,21 +1036,21 @@ export default function App() {
 								className="relative h-full shrink-0 overflow-hidden bg-sidebar"
 								style={{ width: `${inspectorWidth}px` }}
 							>
-								<WorkspaceInspectorSidebar
-									providerCatalog={providerCatalog}
-									sessionSnapshot={sessionSnapshot}
-									sessionEvents={sessionEvents}
-									workspaceId={selectedWorkspace?.id ?? null}
-									workspaceName={selectedWorkspace?.name ?? null}
-									workspaceBranch={selectedWorkspace?.branch ?? null}
-									workspacePath={selectedWorkspacePath}
-									selectedProviderLabel={selectedProvider?.label ?? null}
-									selectedModelLabel={selectedModel?.label ?? null}
-									sessionState={sessionSnapshot?.state ?? "idle"}
-									sessionId={sessionSnapshot?.sessionId ?? null}
-									selectedPreview={editorSelection}
-									onSelectPreview={handleOpenEditorFile}
-								/>
+							<WorkspaceInspectorSidebar
+								providerCatalog={providerCatalog}
+								sessionSnapshot={selectedSessionSnapshot}
+								sessionEvents={sessionEvents}
+								workspaceId={selectedWorkspace?.id ?? null}
+								workspaceName={selectedWorkspace?.name ?? null}
+								workspaceBranch={selectedWorkspace?.branch ?? null}
+								workspacePath={selectedWorkspacePath}
+								selectedProviderLabel={selectedProvider?.label ?? null}
+								selectedModelLabel={selectedModel?.label ?? null}
+								sessionState={selectedSessionSnapshot?.state ?? "idle"}
+								sessionId={selectedSessionSnapshot?.sessionId ?? null}
+								selectedPreview={editorSelection}
+								onSelectPreview={handleOpenEditorFile}
+							/>
 							</aside>
 						</>
 					)}

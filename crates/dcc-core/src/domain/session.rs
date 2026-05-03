@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::{project::ProjectId, workspace::WorkspaceId};
+use super::{project::ProjectId, thread::Thread, workspace::WorkspaceId};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct SessionId(pub String);
@@ -293,6 +293,16 @@ impl SessionProjection {
 
 		Some(projection)
 	}
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSessionSummary {
+	pub session: Session,
+	pub thread: Thread,
+	pub projection: SessionProjection,
+	pub last_turn_prompt: Option<String>,
+	pub last_turn_state: Option<String>,
 }
 
 #[cfg(test)]

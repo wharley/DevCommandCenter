@@ -4,7 +4,7 @@ use dcc_core::application::{
 	AbortRunInput, AbortRunOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput,
 	SendTurnOutput, StartThreadInput, StartThreadOutput,
 };
-use dcc_core::domain::session::SessionEventRecord;
+use dcc_core::domain::session::{SessionEventRecord, WorkspaceSessionSummary};
 use dcc_tauri::{
 	commands::session_commands as session_command_impl,
 	state::SessionCommandState,
@@ -53,4 +53,12 @@ pub async fn list_thread_events(
 	session_id: String,
 ) -> Result<Vec<SessionEventRecord>, String> {
 	session_command_impl::list_thread_events(state, app, session_id).await
+}
+
+#[tauri::command]
+pub async fn list_workspace_sessions(
+	state: State<'_, SessionCommandState>,
+	workspace_id: String,
+) -> Result<Vec<WorkspaceSessionSummary>, String> {
+	session_command_impl::list_workspace_sessions(state, workspace_id).await
 }
