@@ -3,9 +3,12 @@ use specta::Type;
 use uuid::Uuid;
 
 use crate::{
-	domain::session::{
-		Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection, SessionState,
-		Turn, TurnId, TurnState,
+	domain::{
+		model_registry,
+		session::{
+			Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection, SessionState,
+			Turn, TurnId, TurnState,
+		},
 	},
 	ports::{CoreEvent, EventBus, SessionEventRepo, SessionRepo},
 	Result,
@@ -46,13 +49,16 @@ pub fn merge_send_turn_session_selection(
 		.map(str::to_owned)
 		.unwrap_or_else(|| session.provider_id.clone());
 	let merged_model = match input.model.as_ref() {
-		None => session.model.clone(),
+		None => session
+			.model
+			.as_deref()
+			.map(|m| model_registry::resolve_alias(&merged_provider, m)),
 		Some(m) => {
 			let t = m.trim();
 			if t.is_empty() {
 				None
 			} else {
-				Some(t.to_owned())
+				Some(model_registry::resolve_alias(&merged_provider, t))
 			}
 		}
 	};

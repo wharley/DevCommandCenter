@@ -98,6 +98,59 @@ export const PROVIDER_MODEL_REGISTRY = {
 
 export type ProviderRegistryKey = keyof typeof PROVIDER_MODEL_REGISTRY;
 
+/**
+ * Alias tables: short names and legacy date-versioned IDs that map to canonical model IDs.
+ * When Anthropic / OpenAI / Google ships a new version:
+ *   1. Add the new model to PROVIDER_MODEL_REGISTRY above.
+ *   2. Add the old canonical ID here as an alias pointing to the new one.
+ *   3. Users with stored configs are upgraded transparently.
+ */
+export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, string>>> = {
+	claude_code: {
+		opus: "claude-opus-4-7",
+		"opus-4.7": "claude-opus-4-7",
+		"opus-4.6": "claude-opus-4-6",
+		"claude-opus-4-6-20251117": "claude-opus-4-6",
+		sonnet: "claude-sonnet-4-6",
+		"sonnet-4.6": "claude-sonnet-4-6",
+		"claude-sonnet-4-6-20251117": "claude-sonnet-4-6",
+		haiku: "claude-haiku-4-5",
+		"haiku-4.5": "claude-haiku-4-5",
+		"claude-haiku-4-5-20251001": "claude-haiku-4-5",
+	},
+	codex: {
+		"gpt-5-codex": "gpt-5.4",
+		"5.5": "gpt-5.5",
+		"5.4": "gpt-5.4",
+		"5.4-mini": "gpt-5.4-mini",
+		"5.3": "gpt-5.3-codex",
+		"gpt-5.3": "gpt-5.3-codex",
+	},
+	gemini: {
+		pro: "gemini-3.1-pro",
+		flash: "gemini-3-flash",
+		"3.1-pro": "gemini-3.1-pro",
+		"3-flash": "gemini-3-flash",
+		"2.5-pro": "gemini-2.5-pro",
+		"2.5-flash": "gemini-2.5-flash",
+	},
+};
+
+/**
+ * Resolves a model alias or legacy ID to its canonical form.
+ * Pass-through for IDs that are already canonical or unknown.
+ */
+export function resolveModelAlias(
+	registryKey: ProviderRegistryKey,
+	modelId: string | null | undefined,
+): string | null {
+	if (!modelId) return null;
+	const trimmed = modelId.trim();
+	if (!trimmed) return null;
+	const canonical = MODEL_ALIASES[registryKey]?.[trimmed];
+	return canonical ?? trimmed;
+}
+
 export function getDefaultModelId(registryKey: ProviderRegistryKey): string {
 	const models = PROVIDER_MODEL_REGISTRY[registryKey] as ModelEntry[];
 	return models.find((m) => m.recommended)?.id ?? models[0]?.id ?? "";

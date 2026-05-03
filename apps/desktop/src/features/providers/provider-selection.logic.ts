@@ -1,4 +1,8 @@
 import type { ProviderCatalog } from "@dcc/contracts";
+import {
+	type ProviderRegistryKey,
+	resolveModelAlias,
+} from "@/lib/provider-model-registry";
 
 export const SELECTED_PROVIDER_STORAGE_KEY = "dcc.selectedProviderId";
 export const SELECTED_MODEL_STORAGE_KEY = "dcc.selectedModelId";
@@ -87,7 +91,13 @@ export function resolveSelectedModelId(
 	}
 
 	if (storedModelId) {
-		const match = provider.models.find((model) => model.id === storedModelId);
+		const canonicalId = resolveModelAlias(
+			provider.id as ProviderRegistryKey,
+			storedModelId,
+		);
+		const match = provider.models.find(
+			(model) => model.id === canonicalId || model.id === storedModelId,
+		);
 		if (match) {
 			return match.id;
 		}

@@ -18,6 +18,56 @@ impl ModelEntry {
 	}
 }
 
+/// Alias tables: (short_alias_or_old_id, canonical_id).
+/// When a new model version ships, add the old ID as an alias pointing to the new canonical.
+pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
+	("opus", "claude-opus-4-7"),
+	("opus-4.7", "claude-opus-4-7"),
+	("opus-4.6", "claude-opus-4-6"),
+	("claude-opus-4-6-20251117", "claude-opus-4-6"),
+	("sonnet", "claude-sonnet-4-6"),
+	("sonnet-4.6", "claude-sonnet-4-6"),
+	("claude-sonnet-4-6-20251117", "claude-sonnet-4-6"),
+	("haiku", "claude-haiku-4-5"),
+	("haiku-4.5", "claude-haiku-4-5"),
+	("claude-haiku-4-5-20251001", "claude-haiku-4-5"),
+];
+
+pub const CODEX_ALIASES: &[(&str, &str)] = &[
+	("gpt-5-codex", "gpt-5.4"),
+	("5.5", "gpt-5.5"),
+	("5.4", "gpt-5.4"),
+	("5.4-mini", "gpt-5.4-mini"),
+	("5.3", "gpt-5.3-codex"),
+	("gpt-5.3", "gpt-5.3-codex"),
+	("gpt-5.3-spark", "gpt-5.3-codex-spark"),
+];
+
+pub const GEMINI_ALIASES: &[(&str, &str)] = &[
+	("pro", "gemini-3.1-pro"),
+	("flash", "gemini-3-flash"),
+	("3.1-pro", "gemini-3.1-pro"),
+	("3-flash", "gemini-3-flash"),
+	("2.5-pro", "gemini-2.5-pro"),
+	("2.5-flash", "gemini-2.5-flash"),
+];
+
+/// Resolves a model alias or legacy ID to its canonical form for the given provider.
+/// Returns the input unchanged if no alias matches (pass-through for already-canonical IDs).
+pub fn resolve_alias(provider_id: &str, model: &str) -> String {
+	let aliases: &[(&str, &str)] = match provider_id {
+		"claude_code" => CLAUDE_CODE_ALIASES,
+		"codex" => CODEX_ALIASES,
+		"gemini" => GEMINI_ALIASES,
+		_ => return model.to_string(),
+	};
+	aliases
+		.iter()
+		.find(|(alias, _)| *alias == model)
+		.map(|(_, canonical)| canonical.to_string())
+		.unwrap_or_else(|| model.to_string())
+}
+
 pub const CLAUDE_CODE: &[ModelEntry] = &[
 	ModelEntry {
 		id: "claude-opus-4-7",
