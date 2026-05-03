@@ -69,6 +69,10 @@ import {
 	canResumeSession,
 } from "./features/sessions/session-chrome-state";
 import type { WorkspaceGitPreviewSelection } from "./features/inspector/workspace-git-file-preview";
+import {
+	buildPlanImplementationPrompt,
+	buildPlanImplementationThreadTitle,
+} from "./features/panel/plan-content";
 
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 
@@ -596,6 +600,144 @@ export default function App() {
 		queryClient,
 	]);
 
+	const handleImplementPlanInNewThread = useCallback(
+		async (input: { planMarkdown: string; planTitle: string | null }) => {
+			const planMarkdown = input.planMarkdown.trim();
+			if (!planMarkdown) {
+				return;
+			}
+			if (!selectedProvider || !selectedWorkspace) {
+				return;
+			}
+			if (selectedProviderBlockReason) {
+				toast.error(selectedProviderBlockReason);
+				return;
+			}
+
+			const prompt = buildPlanImplementationPrompt(planMarkdown);
+			const threadTitle = buildPlanImplementationThreadTitle(
+				planMarkdown,
+				input.planTitle,
+			);
+			let startedSessionId: string | null = null;
+
+			try {
+				const started = await startThread({
+					workspaceId: selectedWorkspace.id,
+					projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
+					providerId: selectedProvider.id,
+					model: selectedModel?.id ?? null,
+					title: threadTitle,
+				});
+				const sessionId = started.session.id;
+				startedSessionId = sessionId;
+				openPlanSidebar();
+
+				const startedSnapshot: RuntimeSessionSnapshot = {
+					sessionId: started.session.id,
+					projectId: started.session.projectId,
+					workspaceId: started.session.workspaceId,
+					providerId: started.session.providerId,
+					model: started.session.model,
+					state: started.projection.state,
+					turnCount: started.projection.turnCount,
+					checkpointCount: started.projection.checkpointCount,
+					activeTurnId: started.projection.activeTurnId ?? null,
+					lastTurnPrompt: null,
+					lastTurnState: started.projection.activeTurnId ? "running" : null,
+				};
+				setSessionSnapshotsById((current) => ({
+					...current,
+					[sessionId]: startedSnapshot,
+				}));
+				setSelectedSessionId(startedSessionId);
+				queryClient.setQueryData<WorkspaceSessionSummary[]>(
+					["workspaceSessions", selectedWorkspace.id],
+					(current = []) => {
+						const nextSummary: WorkspaceSessionSummary = {
+							session: started.session,
+							thread: started.thread,
+							projection: started.projection,
+							lastTurnPrompt: null,
+							lastTurnState: started.projection.activeTurnId ? "running" : null,
+						};
+						return [
+							nextSummary,
+						...current.filter((summary) => summary.session.id !== sessionId),
+					];
+				},
+				);
+
+				setPendingPrompt(prompt);
+				setPendingPromptSessionId(startedSessionId);
+				const result = await sendTurn({
+					sessionId,
+					prompt,
+					providerId: selectedProvider.id,
+					model: selectedModel?.id ?? null,
+					planMode: false,
+					effort: "balanced",
+					fastMode: true,
+				});
+
+				const resultSnapshot: RuntimeSessionSnapshot = {
+					sessionId: result.session.id,
+					projectId: result.session.projectId,
+					workspaceId: result.session.workspaceId,
+					providerId: result.session.providerId,
+					model: result.session.model,
+					state: result.projection.state,
+					turnCount: result.projection.turnCount,
+					checkpointCount: result.projection.checkpointCount,
+					activeTurnId: result.projection.activeTurnId ?? null,
+					lastTurnPrompt: result.turn.content,
+					lastTurnState: result.turn.state,
+				};
+				setSessionSnapshotsById((current) => ({
+					...current,
+					[result.session.id]: resultSnapshot,
+				}));
+				queryClient.setQueryData<WorkspaceSessionSummary[]>(
+					["workspaceSessions", result.session.workspaceId],
+					(current = []) =>
+						current.map((summary) =>
+							summary.session.id === result.session.id
+								? {
+										...summary,
+										session: result.session,
+										projection: result.projection,
+										lastTurnPrompt: result.turn.content,
+										lastTurnState: result.turn.state,
+									}
+								: summary,
+						),
+				);
+			} catch (error) {
+				const message =
+					error instanceof Error
+						? error.message
+						: typeof error === "string"
+							? error
+							: "Failed to create implementation thread";
+				console.error("[dcc] implement plan thread failed:", error);
+				toast.error(message);
+			} finally {
+				setPendingPrompt((current) => (current === prompt ? null : current));
+				setPendingPromptSessionId((current) =>
+					current === startedSessionId ? null : current,
+				);
+			}
+		},
+		[
+			openPlanSidebar,
+			queryClient,
+			selectedModel,
+			selectedProvider,
+			selectedProviderBlockReason,
+			selectedWorkspace,
+		],
+	);
+
 	const handleSubmitPrompt = useCallback(async (turn: ComposerSubmittedTurn) => {
 		const trimmedPrompt = turn.rawPrompt.trim();
 		if (trimmedPrompt.length === 0) {
@@ -1014,6 +1156,7 @@ export default function App() {
 								editorSelection={editorSelection}
 								onCloseEditor={handleCloseEditor}
 								onOpenPlanSidebar={openPlanSidebar}
+								onImplementPlanInNewThread={handleImplementPlanInNewThread}
 							/>
 							) : (
 								<WorkspaceBootstrapState

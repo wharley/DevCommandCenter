@@ -42,6 +42,10 @@ type WorkspacePanelProps = {
 	editorSelection: WorkspaceGitPreviewSelection | null;
 	onCloseEditor: () => void;
 	onOpenPlanSidebar: () => void;
+	onImplementPlanInNewThread: (input: {
+		planMarkdown: string;
+		planTitle: string | null;
+	}) => void;
 };
 
 export function WorkspacePanel({
@@ -73,6 +77,7 @@ export function WorkspacePanel({
 	editorSelection,
 	onCloseEditor,
 	onOpenPlanSidebar,
+	onImplementPlanInNewThread,
 }: WorkspacePanelProps) {
 	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
 	const threadHistoryQuery = useQuery(
@@ -119,6 +124,8 @@ export function WorkspacePanel({
 	}, [messages, sessionState]);
 	const activePlanTitle =
 		activePlanMessage?.plan?.title ?? (activePlanMessage ? "Plan" : null);
+	const activePlanMarkdown =
+		activePlanMessage?.plan?.markdown ?? activePlanMessage?.content ?? null;
 	const showPlanFollowUpPrompt =
 		Boolean(activePlanMessage) && isPlanSessionState(sessionState);
 
@@ -188,11 +195,13 @@ export function WorkspacePanel({
 					workspaceBranch={workspaceBranch}
 					showPlanFollowUpPrompt={showPlanFollowUpPrompt}
 					planTitle={activePlanTitle}
+					planMarkdown={activePlanMarkdown}
 					onSelectProvider={onSelectProvider}
 					onSelectModel={onSelectModel}
 					onSubmitPrompt={onSubmitPrompt}
 					onAbortSession={onAbortSession}
 					onOpenPlanSidebar={onOpenPlanSidebar}
+					onImplementPlanInNewThread={onImplementPlanInNewThread}
 				/>
 				</div>
 			</div>

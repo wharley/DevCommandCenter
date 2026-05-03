@@ -80,6 +80,18 @@ export function buildPlanMarkdownFilename(content: string, fallback = "mission-p
 	return slug ? `${slug}.md` : fallback;
 }
 
+export function buildPlanImplementationPrompt(planMarkdown: string) {
+	return `PLEASE IMPLEMENT THIS PLAN:\n${normalizePlanText(planMarkdown)}`;
+}
+
+export function buildPlanImplementationThreadTitle(
+	planMarkdown: string,
+	explicitTitle?: string | null,
+) {
+	const title = explicitTitle?.trim() || parsePlanContent(planMarkdown).title;
+	return title ? `Implement ${title}` : "Implement plan";
+}
+
 export function stripDisplayedPlanMarkdown(planMarkdown: string): string {
 	const lines = normalizePlanText(planMarkdown).split("\n");
 	const sourceLines =

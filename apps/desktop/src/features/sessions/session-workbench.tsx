@@ -39,6 +39,10 @@ type SessionWorkbenchProps = {
 	editorSelection: WorkspaceGitPreviewSelection | null;
 	onCloseEditor: () => void;
 	onOpenPlanSidebar: () => void;
+	onImplementPlanInNewThread: (input: {
+		planMarkdown: string;
+		planTitle: string | null;
+	}) => void;
 };
 
 export function SessionWorkbench({
@@ -70,6 +74,7 @@ export function SessionWorkbench({
 	editorSelection,
 	onCloseEditor,
 	onOpenPlanSidebar,
+	onImplementPlanInNewThread,
 }: SessionWorkbenchProps) {
 	const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
 	const sessionState = sessionSnapshot?.state ?? "idle";
@@ -106,6 +111,7 @@ export function SessionWorkbench({
 				editorSelection={editorSelection}
 				onCloseEditor={onCloseEditor}
 				onOpenPlanSidebar={onOpenPlanSidebar}
+				onImplementPlanInNewThread={onImplementPlanInNewThread}
 			/>
 
 			<WorkspaceTerminalDrawer

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildCollapsedPlanPreviewMarkdown,
+	buildPlanImplementationPrompt,
+	buildPlanImplementationThreadTitle,
 	normalizePlanContentForExport,
 	stripDisplayedPlanMarkdown,
 } from "./plan-content";
@@ -47,5 +49,13 @@ describe("plan-content", () => {
 
 	it("normalizes exports with a trailing newline", () => {
 		expect(normalizePlanContentForExport("Plan text")).toBe("Plan text\n");
+	});
+
+	it("builds the implementation prompt and thread title", () => {
+		const markdown = "# Mission Plan\n\nShip the dashboard.";
+		expect(buildPlanImplementationPrompt(markdown)).toBe(
+			"PLEASE IMPLEMENT THIS PLAN:\n# Mission Plan\n\nShip the dashboard.",
+		);
+		expect(buildPlanImplementationThreadTitle(markdown)).toBe("Implement Mission Plan");
 	});
 });
