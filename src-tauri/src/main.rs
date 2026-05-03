@@ -5747,6 +5747,7 @@ fn review_get_diffs_bundle(worktree_paths: Vec<String>) -> ApiResult<Value> {
 const DCC_NOTES_DIR: &str = ".dcc";
 const DCC_NOTES_FILE: &str = "notes.md";
 const MAX_WORKTREE_NOTES_BYTES: usize = 512 * 1024;
+const MAX_WORKTREE_WRITE_BYTES: usize = 512 * 1024;
 
 #[tauri::command]
 fn worktree_read_notes(worktree_path: String) -> ApiResult<Value> {
@@ -5831,6 +5832,72 @@ fn worktree_write_notes(worktree_path: String, content: String) -> ApiResult<Val
         }));
     }
     Ok(serde_json::json!({ "success": true }))
+}
+
+#[tauri::command]
+fn worktree_write_file(
+    worktree_path: String,
+    relative_path: String,
+    content: String,
+) -> ApiResult<Value> {
+    let root = Path::new(worktree_path.trim());
+    if !root.is_dir() {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": "worktree path is not a directory",
+        }));
+    }
+
+    if content.as_bytes().len() > MAX_WORKTREE_WRITE_BYTES {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": format!(
+                "content exceeds max size ({} KiB)",
+                MAX_WORKTREE_WRITE_BYTES / 1024
+            ),
+        }));
+    }
+
+    let relative = Path::new(relative_path.trim());
+    if relative.as_os_str().is_empty()
+        || relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::CurDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": "relative path must not be absolute or contain traversal segments",
+        }));
+    }
+
+    let target_path = root.join(relative);
+    if let Some(parent) = target_path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            return Ok(serde_json::json!({
+                "success": false,
+                "error": format!("{}: {}", parent.display(), e),
+            }));
+        }
+    }
+
+    if let Err(e) = fs::write(&target_path, content.as_bytes()) {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": format!("{}: {}", target_path.display(), e),
+        }));
+    }
+
+    Ok(serde_json::json!({
+        "success": true,
+        "relativePath": relative_path,
+    }))
 }
 
 const DCC_TASKS_DIR: &str = ".dcc/tasks";
@@ -8719,6 +8786,7 @@ pub fn run() {
             review_get_diffs_bundle,
             worktree_read_notes,
             worktree_write_notes,
+            worktree_write_file,
             repo_list_task_templates,
             forge_fetch_issue,
             forge_sync_pr_link,

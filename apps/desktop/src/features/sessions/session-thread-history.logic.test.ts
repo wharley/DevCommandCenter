@@ -337,6 +337,54 @@ describe("projectWorkspaceMessages", () => {
 		]);
 	});
 
+	it("extracts a structured plan from assistant content", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Plan request"),
+				sessionTurnCompleted("session-a", "turn-1"),
+			],
+			[
+				sessionTurnDelta(
+					"session-a",
+					"turn-1",
+					"# Mission Plan\n\nUpdate the UI.\n\n## Steps\n- [x] Inspect the existing chat flow\n- [ ] Add the plan card\n- [ ] Run npx tsc\n",
+				),
+			],
+			"session-a",
+		);
+
+		expect(messages[1]).toMatchObject({
+			role: "assistant",
+			plan: {
+				title: "Mission Plan",
+				summary: "Update the UI.",
+				isPlanLike: true,
+				steps: [
+					{
+						text: "Inspect the existing chat flow",
+						status: "completed",
+					},
+					{
+						text: "Add the plan card",
+						status: "pending",
+					},
+					{
+						text: "Run npx tsc",
+						status: "pending",
+					},
+				],
+			},
+		});
+		expect(messages[1].plan?.approvedPrompts).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					command: "npx tsc",
+					source: "plan",
+				}),
+			]),
+		);
+	});
+
 	it("marks aborted assistant messages as incomplete", () => {
 		expect(
 			projectWorkspaceMessages(

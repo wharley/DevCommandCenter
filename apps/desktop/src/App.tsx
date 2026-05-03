@@ -225,6 +225,7 @@ export default function App() {
 		isSidebarResizing,
 		sidebarCollapsed,
 		sidebarWidth,
+		setInspectorCollapsed,
 		setSidebarCollapsed,
 	} = useShellPanels();
 	const workspacesQuery = useQuery({
@@ -294,6 +295,9 @@ export default function App() {
 		return window.localStorage.getItem(SELECTED_MODEL_STORAGE_KEY);
 	});
 	const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+	const [inspectorTab, setInspectorTab] = useState<"activity" | "context" | "plan">(
+		"activity",
+	);
 	const [sessionSnapshotsById, setSessionSnapshotsById] = useState<
 		Record<string, RuntimeSessionSnapshot>
 	>({});
@@ -354,6 +358,10 @@ export default function App() {
 				: null)
 		);
 	}, [effectiveSelectedSessionId, selectedSessionSummary, sessionSnapshotsById]);
+	const openPlanSidebar = useCallback(() => {
+		setInspectorCollapsed(false);
+		setInspectorTab("plan");
+	}, [setInspectorCollapsed]);
 
 	useEffect(() => {
 		if (providerChoices.length === 0) {
@@ -1002,10 +1010,11 @@ export default function App() {
 									onAbortSession={handleAbortSession}
 									updateInfo={appUpdateInfo}
 									isInstallingUpdate={isInstallingUpdate}
-									onInstallUpdate={installUpdate}
-									editorSelection={editorSelection}
-									onCloseEditor={handleCloseEditor}
-								/>
+								onInstallUpdate={installUpdate}
+								editorSelection={editorSelection}
+								onCloseEditor={handleCloseEditor}
+								onOpenPlanSidebar={openPlanSidebar}
+							/>
 							) : (
 								<WorkspaceBootstrapState
 									selectedProviderLabel={selectedProvider?.label ?? null}
@@ -1050,6 +1059,8 @@ export default function App() {
 								sessionId={selectedSessionSnapshot?.sessionId ?? null}
 								selectedPreview={editorSelection}
 								onSelectPreview={handleOpenEditorFile}
+								activeTab={inspectorTab}
+								onTabChange={setInspectorTab}
 							/>
 							</aside>
 						</>

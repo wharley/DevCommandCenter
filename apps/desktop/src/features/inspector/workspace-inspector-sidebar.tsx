@@ -1,11 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-	type MouseEvent as ReactMouseEvent,
-	type ReactNode,
+useCallback,
+useEffect,
+useMemo,
+useRef,
+useState,
+type MouseEvent as ReactMouseEvent,
+type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -16,6 +17,8 @@ import { SessionEventFeed } from "@/features/sessions/session-event-feed";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workbench";
 import { InspectorChangesSection } from "./inspector-changes-section";
 import { GitSectionHeader } from "./git-section-header";
+import { projectWorkspaceMessages } from "@/features/panel/thread-projection";
+import { PlanReviewCard } from "@/features/panel/message-components";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import {
 	workspaceContinueFromBaseBranch,
@@ -49,13 +52,15 @@ type WorkspaceInspectorSidebarProps = {
 	sessionEvents: CoreEvent[];
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+	activeTab: InspectorTab;
+	onTabChange: (tab: InspectorTab) => void;
 };
 
 const MIN_SECTION_HEIGHT = 128;
 const MAX_SECTION_HEIGHT = 640;
 const INITIAL_CHANGES_HEIGHT = 200;
 
-type InspectorTab = "activity" | "context";
+type InspectorTab = "activity" | "context" | "plan";
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
 	return (
@@ -207,6 +212,8 @@ export function WorkspaceInspectorSidebar({
 	sessionEvents,
 	selectedPreview,
 	onSelectPreview,
+	activeTab,
+	onTabChange,
 }: WorkspaceInspectorSidebarProps) {
 	const { t } = useTranslation("common");
 	const hasWorkspace = Boolean(workspaceId && workspaceName && workspaceBranch);
@@ -372,7 +379,47 @@ export function WorkspaceInspectorSidebar({
 
 	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
 	const [manualResize, setManualResize] = useState(false);
-	const [inspectorTab, setInspectorTab] = useState<InspectorTab>("activity");
+	const autoOpenedPlanMessageIdRef = useRef<string | null>(null);
+	const planMessages = useMemo(
+		() => projectWorkspaceMessages([], sessionEvents, sessionId, null),
+		[sessionEvents, sessionId],
+	);
+	const activePlanMessage = useMemo(() => {
+		const assistantMessages = planMessages.filter(
+			(message) => message.role === "assistant" && message.content.trim().length > 0,
+		);
+		if (assistantMessages.length === 0) {
+			return null;
+		}
+		if (sessionState === "planning" || sessionState === "plan_generated" || sessionState === "generating_code" || sessionState === "code_ready" || sessionState === "applying") {
+			return assistantMessages[assistantMessages.length - 1] ?? null;
+		}
+		return [...assistantMessages].reverse().find((message) => message.plan?.isPlanLike) ?? null;
+	}, [planMessages, sessionState]);
+
+	useEffect(() => {
+		autoOpenedPlanMessageIdRef.current = null;
+		onTabChange("activity");
+	}, [sessionId]);
+
+	useEffect(() => {
+		const planMessageId = activePlanMessage?.id ?? null;
+		if (!planMessageId) {
+			return;
+		}
+		if (!isPlanSessionState(sessionState)) {
+			return;
+		}
+		if (activeTab === "plan") {
+			autoOpenedPlanMessageIdRef.current = planMessageId;
+			return;
+		}
+		if (autoOpenedPlanMessageIdRef.current === planMessageId) {
+			return;
+		}
+		autoOpenedPlanMessageIdRef.current = planMessageId;
+		onTabChange("plan");
+	}, [activePlanMessage?.id, activeTab, onTabChange, sessionState]);
 
 	useEffect(() => {
 		const root = rootRef.current;
@@ -479,10 +526,10 @@ export function WorkspaceInspectorSidebar({
 
 			<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-border/40">
 				<Tabs
-					value={inspectorTab}
+					value={activeTab}
 					onValueChange={(value) => {
-						if (value === "activity" || value === "context") {
-							setInspectorTab(value);
+						if (value === "activity" || value === "context" || value === "plan") {
+							onTabChange(value);
 						}
 					}}
 					className="flex min-h-0 flex-1 flex-col gap-0"
@@ -512,8 +559,16 @@ export function WorkspaceInspectorSidebar({
 										<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
 											({catalogCount})
 									</span>
-								) : null}
+									) : null}
 							</TabsTrigger>
+								<TabsTrigger value="plan" className="h-9 rounded-none px-3 text-[12px]">
+									Plan
+									{activePlanMessage ? (
+										<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
+											(1)
+										</span>
+									) : null}
+								</TabsTrigger>
 						</TabsList>
 					</div>
 
@@ -602,8 +657,54 @@ export function WorkspaceInspectorSidebar({
 								</p>
 							</div>
 						</TabsContent>
+
+						<TabsContent
+							value="plan"
+							className="mt-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
+						>
+							{activePlanMessage ? (
+								<PlanReviewCard
+									plan={
+										activePlanMessage.plan ?? {
+											title: "Plan",
+											summary: activePlanMessage.content,
+											steps: [],
+											approvedPrompts: [],
+											rawMarkdown: activePlanMessage.content,
+											markdown: activePlanMessage.content,
+											isPlanLike: false,
+											canCollapse: activePlanMessage.content.length > 900,
+											source: "plain",
+										}
+									}
+									workspacePath={workspacePath}
+								/>
+							) : (
+								<div className="flex min-h-full items-center justify-center px-4 py-8 text-center">
+									<div className="max-w-sm">
+										<p className="text-[13px] font-medium text-foreground">
+											No active plan yet.
+										</p>
+										<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+											When the assistant generates a plan, it will stay visible here while
+											the session continues.
+										</p>
+									</div>
+								</div>
+							)}
+						</TabsContent>
 				</Tabs>
 			</section>
 		</div>
+	);
+}
+
+function isPlanSessionState(state: string) {
+	return (
+		state === "planning" ||
+		state === "plan_generated" ||
+		state === "generating_code" ||
+		state === "code_ready" ||
+		state === "applying"
 	);
 }

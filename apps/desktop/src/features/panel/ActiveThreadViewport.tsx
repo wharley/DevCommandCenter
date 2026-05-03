@@ -1,17 +1,15 @@
 import { ChevronDown } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { CoreEvent, SessionEventRecord } from "@dcc/contracts";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConversationExecutionState } from "./ConversationExecutionState";
 import { ConversationLaunchState } from "./ConversationLaunchState";
-import { projectWorkspaceMessages } from "./thread-projection";
+import type { WorkspaceMessage } from "./thread-projection";
 import { AssistantMessage, SystemMessage, UserMessage } from "./message-components";
 import { EmptyState } from "./EmptyState";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 
 type ActiveThreadViewportProps = {
-	historyEvents: SessionEventRecord[];
-	liveEvents: CoreEvent[];
+	messages: WorkspaceMessage[];
 	hasLoaded: boolean;
 	isEmpty: boolean;
 	workspaceName: string;
@@ -19,15 +17,15 @@ type ActiveThreadViewportProps = {
 	selectedModelLabel: string | null;
 	sessionState: string | null;
 	lastTurnState: string | null;
-	sessionId: string | null;
 	pendingPrompt: string | null;
+	workspacePath: string | null;
+	planMessageId: string | null;
 	onStartSession: () => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 };
 
 export function ActiveThreadViewport({
-	historyEvents,
-	liveEvents,
+	messages,
 	hasLoaded,
 	isEmpty,
 	workspaceName,
@@ -35,8 +33,9 @@ export function ActiveThreadViewport({
 	selectedModelLabel,
 	sessionState,
 	lastTurnState,
-	sessionId,
 	pendingPrompt,
+	workspacePath,
+	planMessageId,
 	onStartSession,
 	onSubmitPrompt,
 }: ActiveThreadViewportProps) {
@@ -45,10 +44,6 @@ export function ActiveThreadViewport({
 	const stickToBottomRef = useRef(true);
 	const [stickToBottom, setStickToBottom] = useState(true);
 	const [showScrollToLatest, setShowScrollToLatest] = useState(false);
-	const messages = useMemo(
-		() => projectWorkspaceMessages(historyEvents, liveEvents, sessionId, pendingPrompt),
-		[historyEvents, liveEvents, pendingPrompt, sessionId],
-	);
 	const latestMessageKey = messages[messages.length - 1]?.id ?? "empty";
 
 	useEffect(() => {
@@ -146,7 +141,7 @@ export function ActiveThreadViewport({
 	}
 
 	return (
-	<div className="dcc-conversation-scroll-area relative min-h-0 flex-1 overflow-hidden">
+		<div className="dcc-conversation-scroll-area relative min-h-0 flex-1 overflow-hidden">
 			<div
 				ref={scrollRef}
 				tabIndex={0}
@@ -172,13 +167,16 @@ export function ActiveThreadViewport({
 							}
 							if (message.role === "assistant") {
 								return (
-										<AssistantMessage
+									<AssistantMessage
 										key={message.id}
 										content={message.content}
 										streaming={message.streaming}
 										createdAt={message.createdAt}
 										status={message.status}
 										annotations={message.annotations}
+										plan={message.plan ?? null}
+										workspacePath={workspacePath}
+										isPlanContext={message.id === planMessageId}
 									/>
 								);
 							}

@@ -1,4 +1,5 @@
 import type { CoreEvent, SessionEventRecord } from "@dcc/contracts";
+import { parsePlanContent, type ParsedPlanContent } from "@/features/panel/plan-content";
 
 export type SessionMessageStatus = {
 	type: "incomplete";
@@ -40,6 +41,7 @@ export type WorkspaceMessage = {
 	createdAt?: string;
 	status?: SessionMessageStatus;
 	annotations?: WorkspaceMessageAnnotation[];
+	plan?: ParsedPlanContent | null;
 };
 
 type TimelineEvent = {
@@ -685,6 +687,16 @@ export function projectWorkspaceMessages(
 				label: "User",
 				content: trimmedPendingPrompt,
 			});
+		}
+	}
+
+	for (const message of messages) {
+		if (message.role !== "assistant") {
+			continue;
+		}
+		const parsedPlan = parsePlanContent(message.content);
+		if (parsedPlan.isPlanLike) {
+			message.plan = parsedPlan;
 		}
 	}
 

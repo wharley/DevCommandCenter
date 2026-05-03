@@ -793,6 +793,11 @@ declare global {
           worktreePath: string,
           content: string,
         ) => Promise<{ success: boolean; error?: string }>;
+        writeFile: (
+          worktreePath: string,
+          relativePath: string,
+          content: string,
+        ) => Promise<{ success: boolean; relativePath?: string; error?: string }>;
       };
     };
 

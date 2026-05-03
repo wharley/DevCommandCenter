@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { Reasoning } from "@/components/ai/reasoning";
 import { ToolCall } from "@/components/ai/tool-call";
 import { MessageTimestamp } from "./message-metadata";
+import { PlanReviewCard } from "./PlanReviewCard";
+import type { ParsedPlanContent } from "@/features/panel/plan-content";
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
 
 type AssistantStatus = {
@@ -30,13 +32,20 @@ export function AssistantMessage({
 	createdAt,
 	status,
 	annotations,
+	plan,
+	workspacePath,
+	isPlanContext,
 }: {
 	content: string;
 	streaming?: boolean;
 	createdAt?: string;
 	status?: AssistantStatus;
 	annotations?: WorkspaceMessageAnnotation[];
+	plan?: ParsedPlanContent | null;
+	workspacePath?: string | null;
+	isPlanContext?: boolean;
 }) {
+	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
 	return (
 		<div
 			data-message-role="assistant"
@@ -97,24 +106,28 @@ export function AssistantMessage({
 						})}
 					</div>
 				) : null}
-				<div className={cn("assistant-markdown-scale max-w-none break-words text-foreground")}>
-					<Suspense fallback={<AssistantTextFallback text={content} />}>
-						<LazyStreamdown
-							mode={streaming ? "streaming" : "static"}
-							animated={
-								streaming
-									? { animation: "blurIn", duration: 150, stagger: 30, sep: "word" }
-									: false
-							}
-							caret={streaming ? "block" : undefined}
-							className="conversation-streamdown"
-							isAnimating={Boolean(streaming)}
-							shikiTheme={["github-light", "github-dark"]}
-						>
-							{content}
-						</LazyStreamdown>
-					</Suspense>
-				</div>
+				{showPlanCard ? (
+					<PlanReviewCard plan={plan ?? { title: "Plan", summary: content, steps: [], approvedPrompts: [], rawMarkdown: content, markdown: content, isPlanLike: false, canCollapse: content.length > 900, source: "plain" }} workspacePath={workspacePath} />
+				) : (
+					<div className={cn("assistant-markdown-scale max-w-none break-words text-foreground")}>
+						<Suspense fallback={<AssistantTextFallback text={content} />}>
+							<LazyStreamdown
+								mode={streaming ? "streaming" : "static"}
+								animated={
+									streaming
+										? { animation: "blurIn", duration: 150, stagger: 30, sep: "word" }
+										: false
+								}
+								caret={streaming ? "block" : undefined}
+								className="conversation-streamdown"
+								isAnimating={Boolean(streaming)}
+								shikiTheme={["github-light", "github-dark"]}
+							>
+								{content}
+							</LazyStreamdown>
+						</Suspense>
+					</div>
+				)}
 				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
 					<MessageTimestamp createdAt={createdAt} />
 					{status?.type === "incomplete" ? (
@@ -124,27 +137,29 @@ export function AssistantMessage({
 						</span>
 					) : null}
 				</div>
-				<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/assistant:pointer-events-auto group-hover/assistant:opacity-100 group-focus-within/assistant:pointer-events-auto group-focus-within/assistant:opacity-100">
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-xs"
-						aria-label="Copy assistant message"
-						className={cn(
-							"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
-							"bg-transparent hover:bg-transparent",
-						)}
-						onClick={async () => {
-							try {
-								await navigator.clipboard.writeText(content);
-							} catch {
-								// Clipboard availability varies across desktop shells; ignore gracefully.
-							}
-						}}
-					>
-						<Copy className="size-3.5" aria-hidden />
-					</Button>
-				</div>
+				{showPlanCard ? null : (
+					<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/assistant:pointer-events-auto group-hover/assistant:opacity-100 group-focus-within/assistant:pointer-events-auto group-focus-within/assistant:opacity-100">
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-xs"
+							aria-label="Copy assistant message"
+							className={cn(
+								"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
+								"bg-transparent hover:bg-transparent",
+							)}
+							onClick={async () => {
+								try {
+									await navigator.clipboard.writeText(content);
+								} catch {
+									// Clipboard availability varies across desktop shells; ignore gracefully.
+								}
+							}}
+						>
+							<Copy className="size-3.5" aria-hidden />
+						</Button>
+					</div>
+				)}
 			</div>
 		</div>
 	);

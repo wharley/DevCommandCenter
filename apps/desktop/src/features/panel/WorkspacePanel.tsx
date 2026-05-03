@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { WorkspaceEditorSurface } from "@/features/editor/WorkspaceEditorSurface";
@@ -9,6 +10,7 @@ import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
 import type { AppUpdateInfo } from "@/features/updater";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
+import { projectWorkspaceMessages } from "./thread-projection";
 import type { ProviderCatalog, CoreEvent } from "@dcc/contracts";
 
 type WorkspacePanelProps = {
@@ -39,6 +41,7 @@ type WorkspacePanelProps = {
 	onInstallUpdate: () => void;
 	editorSelection: WorkspaceGitPreviewSelection | null;
 	onCloseEditor: () => void;
+	onOpenPlanSidebar: () => void;
 };
 
 export function WorkspacePanel({
@@ -69,6 +72,7 @@ export function WorkspacePanel({
 	onInstallUpdate,
 	editorSelection,
 	onCloseEditor,
+	onOpenPlanSidebar,
 }: WorkspacePanelProps) {
 	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
 	const threadHistoryQuery = useQuery(
@@ -91,6 +95,32 @@ export function WorkspacePanel({
 	const sessionState = sessionSnapshot?.state ?? null;
 	const lastTurnState = sessionSnapshot?.lastTurnState ?? null;
 	const isGitRepo = Boolean(workspaceBranch) || Boolean(workspacePath);
+	const messages = useMemo(
+		() =>
+			projectWorkspaceMessages(
+				historyEvents,
+				sessionEvents,
+				effectiveSessionId,
+				pendingPrompt,
+			),
+		[effectiveSessionId, historyEvents, pendingPrompt, sessionEvents],
+	);
+	const activePlanMessage = useMemo(() => {
+		const assistantMessages = messages.filter(
+			(message) => message.role === "assistant" && message.content.trim().length > 0,
+		);
+		if (assistantMessages.length === 0) {
+			return null;
+		}
+		if (isPlanSessionState(sessionState)) {
+			return assistantMessages[assistantMessages.length - 1] ?? null;
+		}
+		return [...assistantMessages].reverse().find((message) => message.plan?.isPlanLike) ?? null;
+	}, [messages, sessionState]);
+	const activePlanTitle =
+		activePlanMessage?.plan?.title ?? (activePlanMessage ? "Plan" : null);
+	const showPlanFollowUpPrompt =
+		Boolean(activePlanMessage) && isPlanSessionState(sessionState);
 
 	return editorSelection ? (
 		<WorkspaceEditorSurface
@@ -130,8 +160,7 @@ export function WorkspacePanel({
 
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 				<ActiveThreadViewport
-					historyEvents={historyEvents}
-					liveEvents={sessionEvents}
+					messages={messages}
 					hasLoaded={hasLoaded}
 					isEmpty={hasEmptyThread}
 					workspaceName={workspaceName}
@@ -139,8 +168,9 @@ export function WorkspacePanel({
 					selectedModelLabel={selectedModelLabel}
 					sessionState={sessionState}
 					lastTurnState={lastTurnState}
-					sessionId={effectiveSessionId}
 					pendingPrompt={pendingPrompt}
+					workspacePath={workspacePath}
+					planMessageId={activePlanMessage?.id ?? null}
 					onStartSession={onStartSession}
 					onSubmitPrompt={onSubmitPrompt}
 				/>
@@ -154,15 +184,28 @@ export function WorkspacePanel({
 						selectedModelId={selectedModelId}
 						sessionSnapshot={sessionSnapshot}
 						pendingPrompt={pendingPrompt}
-						workspacePath={workspacePath}
-						workspaceBranch={workspaceBranch}
-						onSelectProvider={onSelectProvider}
-						onSelectModel={onSelectModel}
-						onSubmitPrompt={onSubmitPrompt}
-						onAbortSession={onAbortSession}
-					/>
+					workspacePath={workspacePath}
+					workspaceBranch={workspaceBranch}
+					showPlanFollowUpPrompt={showPlanFollowUpPrompt}
+					planTitle={activePlanTitle}
+					onSelectProvider={onSelectProvider}
+					onSelectModel={onSelectModel}
+					onSubmitPrompt={onSubmitPrompt}
+					onAbortSession={onAbortSession}
+					onOpenPlanSidebar={onOpenPlanSidebar}
+				/>
 				</div>
 			</div>
 		</div>
+	);
+}
+
+function isPlanSessionState(state: string | null) {
+	return (
+		state === "planning" ||
+		state === "plan_generated" ||
+		state === "generating_code" ||
+		state === "code_ready" ||
+		state === "applying"
 	);
 }

@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import type { ProviderCatalog } from "@dcc/contracts";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import { canAbortRun } from "@/features/sessions/session-chrome-state";
+import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
 import { ContextBar } from "./ContextBar";
 import { ComposerProviderModelMenu } from "./ComposerProviderModelMenu";
@@ -85,10 +86,13 @@ type WorkspaceComposerProps = {
 	pendingPrompt: string | null;
 	workspacePath: string | null;
 	workspaceBranch: string | null;
+	showPlanFollowUpPrompt: boolean;
+	planTitle: string | null;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onAbortSession: () => void;
+	onOpenPlanSidebar: () => void;
 };
 
 export function WorkspaceComposer({
@@ -101,10 +105,13 @@ export function WorkspaceComposer({
 	pendingPrompt,
 	workspacePath,
 	workspaceBranch,
+	showPlanFollowUpPrompt,
+	planTitle,
 	onSelectProvider,
 	onSelectModel,
 	onSubmitPrompt,
 	onAbortSession,
+	onOpenPlanSidebar,
 }: WorkspaceComposerProps) {
 	const [hasContent, setHasContent] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
@@ -273,6 +280,12 @@ export function WorkspaceComposer({
 				inputDisabled && "cursor-not-allowed opacity-60",
 			)}
 		>
+			{showPlanFollowUpPrompt ? (
+				<ComposerPlanFollowUpBanner
+					planTitle={planTitle}
+					onOpenPlanSidebar={onOpenPlanSidebar}
+				/>
+			) : null}
 			<ContextBar
 				directories={contextDirectories}
 				disabled={inputDisabled}
