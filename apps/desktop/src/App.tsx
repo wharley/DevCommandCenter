@@ -73,6 +73,7 @@ import {
 	buildPlanImplementationPrompt,
 	buildPlanImplementationThreadTitle,
 } from "./features/panel/plan-content";
+import { resolveInitialOnboardingOpen } from "./lib/dev-onboarding-override";
 
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 
@@ -264,11 +265,13 @@ export default function App() {
 			return false;
 		}
 
-		if (window.location.search.includes("onboarding=1")) {
-			return true;
-		}
-
-		return window.localStorage.getItem(ONBOARDING_COMPLETE_KEY) !== "true";
+		return resolveInitialOnboardingOpen({
+			hasOnboardingQuery: window.location.search.includes("onboarding=1"),
+			isOnboardingCompleteInStorage:
+				window.localStorage.getItem(ONBOARDING_COMPLETE_KEY) === "true",
+			isDev: import.meta.env.DEV,
+			viteDevOnboarding: import.meta.env.VITE_DEV_ONBOARDING,
+		});
 	});
 	const [isShortcutSheetOpen, setIsShortcutSheetOpen] = useState(false);
 	const { events: sessionEvents } = useSessionEventFeed();

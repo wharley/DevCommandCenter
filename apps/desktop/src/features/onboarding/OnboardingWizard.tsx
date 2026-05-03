@@ -84,79 +84,108 @@ function WizardPanel({
 			: "translate-y-6 scale-[0.985] opacity-0";
 
 	return (
-		<Card
-			className={cn(
-				"absolute inset-x-0 top-[calc(50vh-40px)] z-20 mx-auto w-[min(680px,calc(100vw-2rem))] origin-top border-border/60 bg-background/90 shadow-[0_24px_90px_rgba(0,0,0,0.18)] transition-transform duration-1000 ease-[cubic-bezier(.22,.82,.2,1)]",
-				motionClass,
-			)}
-			data-step={step}
-		>
-			<CardContent className="space-y-5 p-6">
-				<div className="flex items-center justify-between gap-4">
-					<div className="space-y-2">
-						<Badge variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
-							{String(index + 1).padStart(2, "0")} / {String(onboardingSteps.length).padStart(2, "0")}
-						</Badge>
-						<h2 className="text-[24px] font-semibold tracking-[-0.03em] text-foreground">
-							{title}
-						</h2>
+		<div className="absolute inset-0 z-20 flex translate-y-6 items-center justify-center px-4 sm:translate-y-8 sm:px-6">
+			<Card
+				className={cn(
+					"mx-auto max-h-[calc(100dvh-14rem)] w-[min(680px,calc(100vw-2rem))] overflow-y-auto border-border/60 bg-background/90 shadow-[0_24px_90px_rgba(0,0,0,0.18)] transition-transform duration-1000 ease-[cubic-bezier(.22,.82,.2,1)]",
+					motionClass,
+				)}
+				data-step={step}
+			>
+				<CardContent className="space-y-5 p-6">
+					<div className="flex items-center justify-between gap-4">
+						<div className="space-y-2">
+							<Badge variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
+								{String(index + 1).padStart(2, "0")} / {String(onboardingSteps.length).padStart(2, "0")}
+							</Badge>
+							<h2 className="text-[24px] font-semibold tracking-[-0.03em] text-foreground">
+								{title}
+							</h2>
+						</div>
+						<Sparkles className="size-5 shrink-0 text-muted-foreground" />
 					</div>
-					<Sparkles className="size-5 shrink-0 text-muted-foreground" />
-				</div>
 
-				<p className="max-w-2xl text-[14px] leading-6 text-muted-foreground">
-					{body}
-				</p>
+					<p className="max-w-2xl text-[14px] leading-6 text-muted-foreground">
+						{body}
+					</p>
 
-				<div className="flex flex-wrap gap-2">
-					<StepChip
-						label={t("onboarding.chips.intro")}
-						done={index > 0}
-						active={step === "intro"}
-					/>
-					<StepChip
-						label={t("onboarding.chips.agents")}
-						done={index > 1}
-						active={step === "agents"}
-					/>
-					<StepChip
-						label={t("onboarding.chips.repoImport")}
-						done={index > 2}
-						active={step === "repoImport"}
-					/>
-					<StepChip
-						label={t("onboarding.chips.completeTransition")}
-						active={step === "completeTransition"}
-					/>
-				</div>
-
-				<div className="grid gap-3 sm:grid-cols-2">
-					<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-						<p className="text-[12px] font-medium text-foreground">{t("onboarding.phase4Title")}</p>
-						<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-							{t("onboarding.phase4Body")}
-						</p>
+					<div className="flex flex-wrap gap-2">
+						<StepChip
+							label={t("onboarding.chips.intro")}
+							done={index > 0}
+							active={step === "intro"}
+						/>
+						<StepChip
+							label={t("onboarding.chips.agents")}
+							done={index > 1}
+							active={step === "agents"}
+						/>
+						<StepChip
+							label={t("onboarding.chips.repoImport")}
+							done={index > 2}
+							active={step === "repoImport"}
+						/>
+						<StepChip
+							label={t("onboarding.chips.completeTransition")}
+							active={step === "completeTransition"}
+						/>
 					</div>
-					<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-						<p className="text-[12px] font-medium text-foreground">{t("onboarding.laterSteps")}</p>
-						<div className="mt-2 flex flex-wrap gap-1.5">
-							{futureOnboardingSteps.map((item) => (
-								<Badge key={item} variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
-									{item}
-								</Badge>
-							))}
+
+					<div className="grid gap-3 sm:grid-cols-2">
+						<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+							<p className="text-[12px] font-medium text-foreground">{t("onboarding.phase4Title")}</p>
+							<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+								{t("onboarding.phase4Body")}
+							</p>
+						</div>
+						<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+							<p className="text-[12px] font-medium text-foreground">{t("onboarding.laterSteps")}</p>
+							<div className="mt-2 flex flex-wrap gap-1.5">
+								{futureOnboardingSteps.map((item) => (
+									<Badge key={item} variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
+										{item}
+									</Badge>
+								))}
+							</div>
 						</div>
 					</div>
-				</div>
 
-				{step === "repoImport" ? (
+					{step === "repoImport" ? (
+						<div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3">
+							<div className="min-w-0">
+								<p className="text-[12px] font-medium text-foreground">
+									{t("onboarding.repoCliTitle")}
+								</p>
+								<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+									{t("onboarding.repoCliBody")}
+								</p>
+							</div>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="h-8 rounded-[9px] px-2.5 text-[12px]"
+								onClick={async () => {
+									const result = await openGithubCliAuthTerminal();
+									if (result.success) {
+										toast.success(t("onboarding.repoCliOpened"));
+										return;
+									}
+									toast.error(
+										result.error ?? t("onboarding.repoCliFailed"),
+									);
+								}}
+							>
+								{t("onboarding.repoCliButton")}
+							</Button>
+						</div>
+					) : null}
+
 					<div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3">
 						<div className="min-w-0">
-							<p className="text-[12px] font-medium text-foreground">
-								{t("onboarding.repoCliTitle")}
-							</p>
+							<p className="text-[12px] font-medium text-foreground">{t("onboarding.conductorPreviewTitle")}</p>
 							<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-								{t("onboarding.repoCliBody")}
+								{t("onboarding.conductorPreviewBody")}
 							</p>
 						</div>
 						<Button
@@ -164,41 +193,14 @@ function WizardPanel({
 							variant="outline"
 							size="sm"
 							className="h-8 rounded-[9px] px-2.5 text-[12px]"
-							onClick={async () => {
-								const result = await openGithubCliAuthTerminal();
-								if (result.success) {
-									toast.success(t("onboarding.repoCliOpened"));
-									return;
-								}
-								toast.error(
-									result.error ?? t("onboarding.repoCliFailed"),
-								);
-							}}
+							onClick={onPreviewConductor}
 						>
-							{t("onboarding.repoCliButton")}
+							{t("onboarding.previewConductor")}
 						</Button>
 					</div>
-				) : null}
-
-				<div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3">
-					<div className="min-w-0">
-						<p className="text-[12px] font-medium text-foreground">{t("onboarding.conductorPreviewTitle")}</p>
-						<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-							{t("onboarding.conductorPreviewBody")}
-						</p>
-					</div>
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className="h-8 rounded-[9px] px-2.5 text-[12px]"
-						onClick={onPreviewConductor}
-					>
-						{t("onboarding.previewConductor")}
-					</Button>
-				</div>
-			</CardContent>
-		</Card>
+				</CardContent>
+			</Card>
+		</div>
 	);
 }
 
@@ -292,15 +294,17 @@ export function OnboardingWizard({
 					</div>
 				</div>
 
-				{onboardingSteps.map((panel, index) => (
-					<WizardPanel
-						key={panel}
-						step={panel}
-						index={index}
-						activeIndex={activeIndex}
-						onPreviewConductor={() => setShowConductorPreview(true)}
-					/>
-				))}
+				<div className="absolute inset-x-0 top-0 bottom-24">
+					{onboardingSteps.map((panel, index) => (
+						<WizardPanel
+							key={panel}
+							step={panel}
+							index={index}
+							activeIndex={activeIndex}
+							onPreviewConductor={() => setShowConductorPreview(true)}
+						/>
+					))}
+				</div>
 
 				<div className="absolute inset-x-0 bottom-6 z-20 flex justify-center">
 					<div className="flex w-[min(680px,calc(100vw-2rem))] items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/90 px-4 py-3 shadow-[0_16px_48px_rgba(0,0,0,0.16)] backdrop-blur">

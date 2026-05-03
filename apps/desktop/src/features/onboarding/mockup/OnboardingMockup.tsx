@@ -16,7 +16,7 @@ function MockWindow({ title }: { title: string }) {
 export function OnboardingMockup() {
 	return (
 		<div className="relative h-full w-full overflow-hidden rounded-[28px] border border-border/60 bg-[radial-gradient(circle_at_20%_0%,color-mix(in_oklch,var(--workspace-pr-open-accent)_20%,transparent),transparent_28%),linear-gradient(180deg,color-mix(in_oklch,var(--background)_92%,transparent),color-mix(in_oklch,var(--sidebar)_96%,transparent))] p-4">
-			<div className="grid h-full grid-cols-[160px_minmax(0,1fr)_272px] gap-3">
+			<div className="grid h-full grid-cols-[240px_minmax(0,1fr)_240px] gap-3">
 				<div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-sidebar/80 p-3">
 					<Badge variant="outline" className="h-7 w-fit px-2.5 text-[11px] font-normal">
 						Workspaces
