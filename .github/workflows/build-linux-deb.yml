@@ -1,7 +1,4 @@
-# Gera o pacote .deb (Tauri) no GitHub Actions (Linux).
-# Repo privado: minutos contam; por isso o padrão é rodar só em push na main
-# (após merge de PR) ou manualmente — não em todo push de feature branch.
-name: Build Linux (.deb)
+name: Build Linux
 
 on:
   push:
@@ -10,13 +7,30 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: build-linux-deb-${{ github.ref }}
+  group: build-linux-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  CI: true
+
 jobs:
-  deb:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+  build:
+    name: Build Linux (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: deb
+            artifact-path: src-tauri/target/release/bundle/deb/*.deb
+            artifact-name: dev-command-center-linux-deb
+          - target: appimage
+            artifact-path: src-tauri/target/release/bundle/appimage/*.AppImage
+            artifact-name: dev-command-center-linux-appimage
 
     steps:
       - name: Checkout
@@ -34,6 +48,16 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: linux-rust-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: linux-rust-
+
       - name: Install system deps (Tauri Linux)
         run: |
           sudo apt-get update
@@ -47,19 +71,19 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            squashfs-tools \
+            fuse
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile --ignore-engines
 
-      - name: Build .deb (Tauri)
-        env:
-          CI: true
-        run: yarn exec tauri build -b deb
+      - name: Build (${{ matrix.target }})
+        run: yarn exec tauri build -b ${{ matrix.target }}
 
-      - name: Upload .deb artifact
+      - name: Upload artifact (${{ matrix.target }})
         uses: actions/upload-artifact@v4
         with:
-          name: dev-command-center-linux-deb
-          path: src-tauri/target/release/bundle/deb/*.deb
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.artifact-path }}
           if-no-files-found: error
