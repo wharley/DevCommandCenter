@@ -24,6 +24,7 @@ import { useProviders } from "@/hooks/use-data";
 import { useDesktopShell } from "@/hooks/use-desktop-shell";
 import { toast } from "sonner";
 import type { ProviderType, PermissionMode } from "@/lib/database/types";
+import { PROVIDER_MODEL_REGISTRY } from "../../apps/desktop/src/lib/provider-model-registry";
 
 const PROVIDER_TYPES_WITH_PERMISSION_MODES: ProviderType[] = [
   "claude-code",
@@ -50,7 +51,6 @@ interface AddProviderDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-/** Tipos de provedor atualmente implementados (com adapter). Os demais ficam ocultos na UI. */
 const IMPLEMENTED_PROVIDER_TYPES: ProviderType[] = [
   "claude-code",
   "codex",
@@ -109,56 +109,46 @@ const providerTypes = providerTypesAll.filter((t) =>
   IMPLEMENTED_PROVIDER_TYPES.includes(t.value),
 );
 
-const modelsByProviderType: Partial<
-  Record<ProviderType, { value: string; label: string }[]>
+/** Maps UI ProviderType to the registry key used in PROVIDER_MODEL_REGISTRY. */
+const PROVIDER_TYPE_TO_REGISTRY_KEY: Partial<
+  Record<ProviderType, keyof typeof PROVIDER_MODEL_REGISTRY>
 > = {
-  "claude-code": [
-    { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5" },
-    { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
-    { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
-    { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
-    { value: "claude-3-opus-20240229", label: "Claude 3 Opus" },
-    { value: "claude-3-haiku-20240307", label: "Claude 3 Haiku" },
-  ],
-  codex: [{ value: "", label: "Padrão do Codex" }],
-  openai: [
-    { value: "gpt-4.1", label: "GPT-4.1" },
-    { value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
-    { value: "gpt-4.1-nano", label: "GPT-4.1 Nano" },
-    { value: "gpt-4o", label: "GPT-4o" },
-    { value: "gpt-4o-mini", label: "GPT-4o Mini" },
-    { value: "o3", label: "o3" },
-    { value: "o4-mini", label: "o4-mini" },
-  ],
-  anthropic: [
-    { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5" },
-    { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
-    { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
-    { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
-    { value: "claude-3-opus-20240229", label: "Claude 3 Opus" },
-    { value: "claude-3-haiku-20240307", label: "Claude 3 Haiku" },
-  ],
-  cursor: [
-    { value: "", label: "Padrão (auto)" },
-    { value: "gpt-5.2", label: "GPT-5.2" },
-    { value: "gpt-5.2-codex", label: "GPT-5.2 Codex" },
-    { value: "claude-4.5-opus", label: "Claude 4.5 Opus" },
-    { value: "claude-4.5-sonnet", label: "Claude 4.5 Sonnet" },
-    { value: "composer-1", label: "Composer 1" },
-    { value: "gemini-3-flash", label: "Gemini 3 Flash" },
-    { value: "gemini-3-pro", label: "Gemini 3 Pro" },
-    { value: "grok-code", label: "Grok Code" },
-  ],
-  gemini: [
-    { value: "", label: "Padrão do CLI (auto)" },
-    { value: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
-    { value: "gemini-3-flash", label: "Gemini 3 Flash" },
-    { value: "gemini-3-pro", label: "Gemini 3 Pro" },
-    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-  ],
+  "claude-code": "claude_code",
+  codex: "codex",
+  cursor: "cursor",
+  gemini: "gemini",
 };
+
+const OPENAI_MODELS: { value: string; label: string }[] = [
+  { value: "gpt-4.1", label: "GPT-4.1" },
+  { value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
+  { value: "gpt-4.1-nano", label: "GPT-4.1 Nano" },
+  { value: "gpt-4o", label: "GPT-4o" },
+  { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+  { value: "o3", label: "o3" },
+  { value: "o4-mini", label: "o4-mini" },
+];
+
+function getModelsForType(
+  type: ProviderType,
+): { value: string; label: string }[] | null {
+  const registryKey = PROVIDER_TYPE_TO_REGISTRY_KEY[type];
+  if (registryKey) {
+    const models = PROVIDER_MODEL_REGISTRY[registryKey];
+    return models.map((m) => ({
+      value: m.id === "auto" ? "" : m.id,
+      label: m.label,
+    }));
+  }
+  if (type === "openai" || type === "anthropic") {
+    const claudeModels = PROVIDER_MODEL_REGISTRY.claude_code.map((m) => ({
+      value: m.id,
+      label: m.label,
+    }));
+    return type === "openai" ? OPENAI_MODELS : claudeModels;
+  }
+  return null;
+}
 
 const CLI_PROVIDER_TYPES: ProviderType[] = [
   "claude-code",
@@ -268,22 +258,27 @@ export function AddProviderDialog({
     }
   };
 
-  const getDefaultModel = (type: ProviderType) => {
-    switch (type) {
-      case "claude-code":
-        return "claude-sonnet-4-5-20250929";
-      case "codex":
-        return "";
-      case "openai":
-        return "gpt-4.1";
-      case "anthropic":
-        return "claude-sonnet-4-5-20250929";
-      case "cursor":
-        return "";
-      default:
-        return "";
+  const getDefaultModel = (type: ProviderType): string => {
+    const registryKey = PROVIDER_TYPE_TO_REGISTRY_KEY[type];
+    if (registryKey) {
+      const models = PROVIDER_MODEL_REGISTRY[registryKey];
+      const recommended = models.find((m) => m.recommended);
+      const id = recommended?.id ?? models[0]?.id ?? "";
+      return id === "auto" ? "" : id;
     }
+    if (type === "openai") return "gpt-4.1";
+    if (type === "anthropic") {
+      const recommended = PROVIDER_MODEL_REGISTRY.claude_code.find(
+        (m) => m.recommended,
+      );
+      return recommended?.id ?? "";
+    }
+    return "";
   };
+
+  const modelOptions = formData.type
+    ? getModelsForType(formData.type as ProviderType)
+    : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -475,7 +470,7 @@ export function AddProviderDialog({
             {formData.type && (
               <div className="grid gap-2">
                 <Label htmlFor="model">Modelo padrão</Label>
-                {modelsByProviderType[formData.type] ? (
+                {modelOptions ? (
                   <Select
                     value={formData.model || "__default__"}
                     onValueChange={(value) =>
@@ -489,7 +484,7 @@ export function AddProviderDialog({
                       <SelectValue placeholder="Selecione o modelo" />
                     </SelectTrigger>
                     <SelectContent>
-                      {modelsByProviderType[formData.type]!.map((opt) => (
+                      {modelOptions.map((opt) => (
                         <SelectItem
                           key={opt.value || "default"}
                           value={opt.value || "__default__"}

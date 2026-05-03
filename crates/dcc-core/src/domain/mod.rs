@@ -1,3 +1,4 @@
+pub mod model_registry;
 pub mod project;
 pub mod provider;
 pub mod session;
