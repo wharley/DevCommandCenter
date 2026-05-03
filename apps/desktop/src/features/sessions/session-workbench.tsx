@@ -28,7 +28,6 @@ type SessionWorkbenchProps = {
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
-	onOpenCommandPalette: () => void;
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
 	onInstallUpdate: () => void;
@@ -55,7 +54,6 @@ export function SessionWorkbench({
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
-	onOpenCommandPalette,
 	updateInfo,
 	isInstallingUpdate,
 	onInstallUpdate,
@@ -87,15 +85,9 @@ export function SessionWorkbench({
 				onSubmitPrompt={onSubmitPrompt}
 				onResumeSession={onResumeSession}
 				onAbortSession={onAbortSession}
-				onOpenCommandPalette={onOpenCommandPalette}
 				updateInfo={updateInfo}
 				isInstallingUpdate={isInstallingUpdate}
 				onInstallUpdate={onInstallUpdate}
-				terminalAvailable={Boolean(workspacePath)}
-				terminalOpen={terminalDrawerOpen}
-				onToggleTerminal={() =>
-					setTerminalDrawerOpen((current) => !current)
-				}
 				editorSelection={editorSelection}
 				onCloseEditor={onCloseEditor}
 			/>

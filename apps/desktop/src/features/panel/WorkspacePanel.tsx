@@ -1,14 +1,14 @@
-import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
-import { WorkspaceEditorSurface } from "@/features/editor/WorkspaceEditorSurface";
-import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
-import type { ProviderCatalog, CoreEvent } from "@dcc/contracts";
-import type { AppUpdateInfo } from "@/features/updater";
 import { useQuery } from "@tanstack/react-query";
+import { WorkspaceEditorSurface } from "@/features/editor/WorkspaceEditorSurface";
+import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
 import { WorkspaceComposer } from "@/features/composer";
 import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
+import type { AppUpdateInfo } from "@/features/updater";
+import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
+import type { ProviderCatalog, CoreEvent } from "@dcc/contracts";
 
 type WorkspacePanelProps = {
 	workspaceId: string;
@@ -29,13 +29,9 @@ type WorkspacePanelProps = {
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
-	onOpenCommandPalette: () => void;
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
 	onInstallUpdate: () => void;
-	terminalAvailable: boolean;
-	terminalOpen: boolean;
-	onToggleTerminal: () => void;
 	editorSelection: WorkspaceGitPreviewSelection | null;
 	onCloseEditor: () => void;
 };
@@ -59,13 +55,9 @@ export function WorkspacePanel({
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
-	onOpenCommandPalette,
 	updateInfo,
 	isInstallingUpdate,
 	onInstallUpdate,
-	terminalAvailable,
-	terminalOpen,
-	onToggleTerminal,
 	editorSelection,
 	onCloseEditor,
 }: WorkspacePanelProps) {
@@ -110,15 +102,12 @@ export function WorkspacePanel({
 					pathCaption={pathCaption}
 					sessionSnapshot={sessionSnapshot}
 					pendingPrompt={pendingPrompt}
-					terminalAvailable={terminalAvailable}
-					terminalOpen={terminalOpen}
-					onToggleTerminal={onToggleTerminal}
-					onOpenCommandPalette={onOpenCommandPalette}
 					onResumeSession={onResumeSession}
 					onAbortSession={onAbortSession}
 					updateInfo={updateInfo}
 					isInstallingUpdate={isInstallingUpdate}
 					onInstallUpdate={onInstallUpdate}
+					workspacePath={workspacePath}
 				/>
 			</header>
 

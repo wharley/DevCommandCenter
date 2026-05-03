@@ -1,4 +1,7 @@
-import { CircleStop, Command, RefreshCw, TerminalSquare } from "lucide-react";
+import {
+	CircleStop,
+	RefreshCw,
+} from "lucide-react";
 import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +13,7 @@ import {
 } from "@/components/ui/tooltip";
 import { AppUpdateButton } from "@/features/updater";
 import type { AppUpdateInfo } from "@/features/updater";
+import { WorkspaceEditorPicker } from "./workspace-editor-picker";
 import type { DccRuntimeSessionSnapshot } from "./workbench-types";
 import {
 	canAbortRun,
@@ -23,12 +27,9 @@ export type DccWorkbenchChatHeaderProps = {
 	modelBadgeLabel: string | null;
 	isGitRepo: boolean;
 	pathCaption: string | null;
+	workspacePath: string | null;
 	sessionSnapshot: DccRuntimeSessionSnapshot | null;
 	pendingPrompt: string | null;
-	terminalAvailable: boolean;
-	terminalOpen: boolean;
-	onToggleTerminal: () => void;
-	onOpenCommandPalette: () => void;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	updateInfo: AppUpdateInfo;
@@ -44,12 +45,9 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	modelBadgeLabel,
 	isGitRepo,
 	pathCaption,
+	workspacePath,
 	sessionSnapshot,
 	pendingPrompt,
-	terminalAvailable,
-	terminalOpen,
-	onToggleTerminal,
-	onOpenCommandPalette,
 	onResumeSession,
 	onAbortSession,
 	updateInfo,
@@ -154,49 +152,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 					installing={isInstallingUpdate}
 					onInstallNow={onInstallUpdate}
 				/>
-				<Tooltip>
-					<TooltipTrigger asChild>
-						<Button
-							type="button"
-							variant="outline"
-							className={
-								terminalOpen
-									? "h-7 min-h-7 min-w-7 shrink-0 rounded-md border-border bg-accent px-0 text-accent-foreground [&_svg]:size-3"
-									: "h-7 min-h-7 min-w-7 shrink-0 rounded-md px-0 [&_svg]:size-3"
-							}
-							aria-label={t("workbench.terminalAria")}
-							aria-pressed={terminalOpen}
-							disabled={!terminalAvailable}
-							onClick={onToggleTerminal}
-						>
-							<TerminalSquare className="size-4 opacity-90" strokeWidth={2} />
-						</Button>
-					</TooltipTrigger>
-					<TooltipContent side="bottom">
-						{!terminalAvailable
-							? t("workbench.terminalUnavailable")
-							: terminalOpen
-								? t("workbench.terminalHide")
-								: t("workbench.terminalToggle")}
-					</TooltipContent>
-				</Tooltip>
-				<Tooltip>
-					<TooltipTrigger asChild>
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon"
-							className="size-8 shrink-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
-							aria-label={t("workbench.commandPaletteAria")}
-							onClick={onOpenCommandPalette}
-						>
-							<Command strokeWidth={2} />
-						</Button>
-					</TooltipTrigger>
-					<TooltipContent side="bottom">
-						{t("workbench.commandPaletteTooltip")}
-					</TooltipContent>
-				</Tooltip>
+				<WorkspaceEditorPicker workspacePath={workspacePath} />
 			</div>
 		</div>
 	);

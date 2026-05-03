@@ -3836,6 +3836,82 @@ fn shell_open_path(path: String) -> ApiResult<Value> {
 }
 
 #[tauri::command]
+fn shell_open_in_editor(path: String, editor: String) -> ApiResult<Value> {
+    use std::process::Command;
+
+    let expanded = expand_user_path(path.trim());
+    if !expanded.exists() {
+        return Err(ApiError {
+            code: "PATH_NOT_FOUND",
+            message: format!("Path not found: {}", expanded.display()),
+        });
+    }
+
+    let editor = editor.trim();
+    if editor.is_empty() {
+        return Err(ApiError {
+            code: "SHELL_ERROR",
+            message: "Editor is required".into(),
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    let status = {
+        let app_name = match editor {
+            "cursor" => "Cursor",
+            "vscode" => "Visual Studio Code",
+            "vscode-insiders" => "Visual Studio Code - Insiders",
+            "zed" => "Zed",
+            "trae" => "Trae",
+            other => other,
+        };
+        Command::new("open")
+            .arg("-a")
+            .arg(app_name)
+            .arg(&expanded)
+            .status()
+    };
+
+    #[cfg(target_os = "linux")]
+    let status = {
+        let binary = match editor {
+            "cursor" => "cursor",
+            "vscode" => "code",
+            "vscode-insiders" => "code-insiders",
+            "zed" => "zed",
+            "trae" => "trae",
+            other => other,
+        };
+        Command::new(binary).arg(&expanded).status()
+    };
+
+    #[cfg(target_os = "windows")]
+    let status = {
+        let binary = match editor {
+            "cursor" => "cursor",
+            "vscode" => "code",
+            "vscode-insiders" => "code-insiders",
+            "zed" => "zed",
+            "trae" => "trae",
+            other => other,
+        };
+        Command::new(binary).arg(&expanded).status()
+    };
+
+    match status {
+        Ok(s) if s.success() => Ok(serde_json::json!({ "success": true })),
+        Ok(_) => Err(ApiError {
+            code: "SHELL_ERROR",
+            message: format!("Failed to open {} in {}", expanded.display(), editor),
+        }),
+        Err(e) => Err(ApiError {
+            code: "SHELL_ERROR",
+            message: e.to_string(),
+        }),
+    }
+}
+
+#[tauri::command]
 fn shell_show_item_in_folder(path: String) -> ApiResult<Value> {
     use std::process::Command;
 
@@ -8568,6 +8644,7 @@ pub fn run() {
             shell_get_default,
             shell_open_external,
             shell_open_path,
+            shell_open_in_editor,
             shell_show_item_in_folder,
             shell_resolve_cli_path,
             shell_detect_cli_for_provider,

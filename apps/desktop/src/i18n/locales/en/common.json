@@ -342,12 +342,11 @@
     "abortTooltipNone": "Start or select a session first",
     "abortTooltipOk": "Abort run",
     "abortTooltipNoTurn": "No turn in progress",
-    "terminalAria": "Toggle terminal drawer",
-    "terminalUnavailable": "Terminal needs a workspace path.",
-    "terminalHide": "Hide terminal drawer (Esc)",
-    "terminalToggle": "Toggle terminal drawer",
-    "commandPaletteAria": "Command palette",
-    "commandPaletteTooltip": "Command palette — switch workspace, search (⌘K)"
+    "openInEditorAria": "Open workspace in preferred editor",
+    "openInEditorTooltip": "Open the workspace folder in the selected editor",
+    "openInEditorUnavailable": "Workspace path unavailable",
+    "openInEditorMenuLabel": "Choose editor",
+    "openInEditorLabel": "Preferred editor: {{editor}}"
   },
   "updater": {
     "update": "Update"

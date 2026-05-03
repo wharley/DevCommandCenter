@@ -1,4 +1,4 @@
-import { FolderOpen, Link2, Command as CommandIcon } from "lucide-react";
+import { FolderOpen, Link2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -8,7 +8,6 @@ type WorkspaceBootstrapStateProps = {
 	selectedModelLabel: string | null;
 	onCreateWorkspace: () => void;
 	onCloneWorkspace: () => void;
-	onOpenCommandPalette: () => void;
 };
 
 export function WorkspaceBootstrapState({
@@ -16,7 +15,6 @@ export function WorkspaceBootstrapState({
 	selectedModelLabel,
 	onCreateWorkspace,
 	onCloneWorkspace,
-	onOpenCommandPalette,
 }: WorkspaceBootstrapStateProps) {
 	const { t } = useTranslation("common");
 	return (
@@ -49,16 +47,6 @@ export function WorkspaceBootstrapState({
 					>
 						<Link2 className="size-3.5" strokeWidth={2} aria-hidden />
 						{t("bootstrap.cloneFromUrl")}
-					</Button>
-					<Button
-						type="button"
-						size="sm"
-						variant="ghost"
-						className="gap-1.5 text-muted-foreground hover:text-foreground"
-						onClick={onOpenCommandPalette}
-					>
-						<CommandIcon className="size-3.5" strokeWidth={2} aria-hidden />
-						{t("bootstrap.commandPalette")}
 					</Button>
 				</div>
 				{selectedProviderLabel ? (

@@ -697,7 +697,6 @@ export default function App() {
 									onSubmitPrompt={handleSubmitPrompt}
 									onResumeSession={handleResumeSession}
 									onAbortSession={handleAbortSession}
-									onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
 									updateInfo={appUpdateInfo}
 									isInstallingUpdate={isInstallingUpdate}
 									onInstallUpdate={installUpdate}
@@ -710,7 +709,6 @@ export default function App() {
 									selectedModelLabel={selectedModel?.label ?? null}
 									onCreateWorkspace={() => openWorkspaceDialog("open")}
 									onCloneWorkspace={() => openWorkspaceDialog("clone")}
-									onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
 								/>
 							)}
 						</div>

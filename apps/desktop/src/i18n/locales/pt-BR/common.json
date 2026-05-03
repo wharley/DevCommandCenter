@@ -342,12 +342,11 @@
     "abortTooltipNone": "Inicie ou selecione uma sessão primeiro",
     "abortTooltipOk": "Abortar execução",
     "abortTooltipNoTurn": "Nenhum turn em andamento",
-    "terminalAria": "Alternar painel do terminal",
-    "terminalUnavailable": "O terminal precisa do caminho do workspace.",
-    "terminalHide": "Ocultar terminal (Esc)",
-    "terminalToggle": "Alternar painel do terminal",
-    "commandPaletteAria": "Paleta de comandos",
-    "commandPaletteTooltip": "Paleta de comandos — trocar workspace, buscar (⌘K)"
+    "openInEditorAria": "Abrir workspace no editor preferido",
+    "openInEditorTooltip": "Abrir a pasta do workspace no editor selecionado",
+    "openInEditorUnavailable": "Caminho do workspace indisponível",
+    "openInEditorMenuLabel": "Escolher editor",
+    "openInEditorLabel": "Editor preferido: {{editor}}"
   },
   "updater": {
     "update": "Atualizar"
