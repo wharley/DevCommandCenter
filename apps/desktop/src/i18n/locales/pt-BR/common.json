@@ -153,28 +153,28 @@
     "repository": "Repositório",
     "currentWorkspace": "Workspace atual",
     "currentWorkspaceHint": "Preferências por repositório ficam no workspace ativo.",
-    "phaseBadge": "Fase 3",
     "languageTitle": "Idioma da interface",
     "languageHint": "Português (Brasil) por padrão; inglês disponível para equipes internacionais.",
     "localePtBr": "Português (Brasil)",
     "localeEn": "English",
     "sections": {
-      "general": { "label": "Geral", "description": "Padrões do workspace e comportamento do shell." },
-      "appearance": { "label": "Aparência", "description": "Tema e contraste da interface." },
-      "model": { "label": "Modelo", "description": "Provedor padrão para novas sessões." },
-      "shortcuts": { "label": "Atalhos", "description": "Teclas de atalho e paleta de comandos." },
-      "git": { "label": "Git", "description": "Branch e elementos visuais do PR." },
-      "experimental": { "label": "Experimental", "description": "Flags de preview e futuras opções." },
-      "account": { "label": "Conta", "description": "GitHub e sincronização futura." }
+      "general": { "label": "Geral", "description": "Padrões do app e comportamento do shell." },
+      "appearance": { "label": "Aparência", "description": "Tema, idioma e contraste da interface." },
+      "model": { "label": "Modelo", "description": "Provedor e modelo padrão." },
+      "shortcuts": { "label": "Atalhos", "description": "Atalhos ativos e cheatsheet disponível." },
+      "git": { "label": "Git", "description": "Chrome do Git no inspetor, ajustes em breve." },
+      "experimental": { "label": "Experimental", "description": "Espaço reservado para opções futuras." },
+      "account": { "label": "Conta", "description": "GitHub CLI e autenticação local." }
     },
+    "statusComingSoon": "Em breve",
     "general": {
       "shellBehavior": "Comportamento do shell",
-      "shellBehaviorBody": "O shell mantém o chrome do workspace, o composer e o inspetor alinhados ao blueprint.",
+      "shellBehaviorBody": "O shell abre com workspace, composer e inspetor alinhados no fluxo principal.",
       "shellReady": "Shell pronto",
       "defaultEntry": "Entrada padrão",
-      "defaultEntryBody": "Workspaces abrem no workbench com inspetor em destaque e o composer no centro.",
+      "defaultEntryBody": "Os workspaces abrem no workbench com o inspetor à direita e o composer no centro.",
       "commandPalette": "Paleta de comandos",
-      "commandPaletteBody": "`Cmd/Ctrl+K` abre troca de workspace e ações."
+      "commandPaletteBody": "A paleta de comandos abre troca de workspace e ações."
     },
     "appearance": {
       "theme": "Tema",
@@ -189,27 +189,31 @@
     },
     "shortcuts": {
       "keyboardShortcuts": "Atalhos de teclado",
-      "keyboardShortcutsHint": "Paleta de comandos e atalhos do composer já ligados neste shell.",
-      "activeCount": "3 ativos"
+      "keyboardShortcutsHint": "Os atalhos mais usados já estão ligados nesta interface.",
+      "activeCount": "3 atalhos",
+      "openCheatsheet": "Abrir atalhos",
+      "comingSoonBody": "Os atalhos já funcionam, mas a personalização desta seção ainda não foi implementada."
     },
     "git": {
       "chromeTitle": "Chrome Git",
-      "chromeHint": "Cabeçalho com branch e a ação de Commit ficam no inspetor.",
+      "chromeHint": "A barra de branch e a ação de commit vivem no inspetor.",
       "prState": "Estado do PR",
       "badgeBranchToolbar": "Barra de branch",
       "badgeCommitButton": "Botão Commit",
-      "badgeHeaderShimmer": "Brilho no cabeçalho"
+      "badgeHeaderShimmer": "Brilho no cabeçalho",
+      "comingSoonBody": "A interface já mostra o fluxo do Git, mas as preferências editáveis ainda não foram implementadas."
     },
     "experimental": {
       "title": "Experimental",
-      "body": "Nenhum toggle de preview exposto ainda. Esta seção reserva espaço para flags futuras."
+      "body": "Nenhum toggle de preview está exposto ainda. Esta seção fica pronta para opções futuras.",
+      "comingSoonBody": "Nenhum toggle de preview está exposto ainda. Quando houver flags de teste, elas entram aqui."
     },
     "account": {
       "title": "Integração GitHub CLI",
-      "hint": "O DCC usa o `gh` local do sistema para autenticação, PRs e setup de repositório.",
+      "hint": "O DCC usa o `gh` local para autenticação, PRs e configuração do repositório.",
       "sectionBadge": "GitHub local",
-      "githubCliTitle": "GitHub CLI integration",
-      "githubCliHint": "Instale e autentique o GitHub CLI para o DCC conseguir abrir PRs e manter as ações no seu terminal.",
+      "githubCliTitle": "Integração GitHub CLI",
+      "githubCliHint": "Instale e autentique o GitHub CLI para o DCC abrir PRs e manter as ações no seu terminal.",
       "githubCliReadyBadge": "Conectado",
       "githubCliNotReadyBadge": "Desconectado",
       "githubCliChecking": "Verificando…",
@@ -221,13 +225,12 @@
       "githubCliCommand": "Comando sugerido: `{{command}}`"
     }
   },
-  "shortcutsSheet": {
-    "badge": "Atalhos",
-    "title": "Atalhos de teclado",
-    "openPalette": "Abrir paleta de comandos",
-    "sendPrompt": "Enviar prompt",
-    "steerSession": "Controlar sessão",
-    "abortSession": "Abortar sessão"
+    "shortcutsSheet": {
+      "badge": "Atalhos",
+      "title": "Atalhos de teclado",
+      "sendPrompt": "Enviar prompt",
+      "steerSession": "Controlar sessão",
+      "abortSession": "Abortar sessão"
   },
   "onboarding": {
     "steps": {
@@ -245,7 +248,7 @@
       },
       "completeTransition": {
         "title": "Pronto para entrar",
-        "body": "Conclua o onboarding e vá direto ao shell com o mesmo chrome planejado."
+        "body": "Conclua o onboarding e vá direto ao shell com a mesma interface principal."
       }
     },
     "chips": {
@@ -254,16 +257,16 @@
       "repoImport": "importar repo",
       "completeTransition": "conclusão"
     },
-    "phase4Title": "Escopo Fase 4",
-    "phase4Body": "Entregamos intro, agentes, importação de repo e a transição de conclusão primeiro.",
+    "phase4Title": "Primeiros passos",
+    "phase4Body": "Entregamos primeiro a introdução, os agentes, a importação de repositório e a transição de conclusão.",
     "repoCliTitle": "Integração GitHub CLI",
     "repoCliBody": "Abra o terminal e rode `gh auth login` para o DCC conseguir criar PRs e usar o fluxo local do GitHub.",
     "repoCliButton": "Abrir terminal",
     "repoCliOpened": "Terminal aberto. Rode `gh auth login` para conectar.",
     "repoCliFailed": "Não foi possível abrir o terminal.",
     "laterSteps": "Próximos passos",
-    "conductorPreviewTitle": "Preview opcional do Conductor",
-    "conductorPreviewBody": "A integração opcional continua adiada, mas o conceito visual já está disponível.",
+    "conductorPreviewTitle": "Prévia opcional do Conductor",
+    "conductorPreviewBody": "A integração opcional continua separada por enquanto, mas o fluxo visual já está disponível.",
     "previewConductor": "Preview conductor",
     "back": "Voltar",
     "skip": "Pular por agora",

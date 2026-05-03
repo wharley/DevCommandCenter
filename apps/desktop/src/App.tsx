@@ -1029,26 +1029,6 @@ export default function App() {
 		setIsCreateWorkspaceOpen(true);
 	}, []);
 
-	useEffect(() => {
-		const onKeyDown = (event: KeyboardEvent) => {
-			const isShortcut =
-				(event.metaKey || event.ctrlKey) &&
-				event.key.toLowerCase() === "k" &&
-				!event.shiftKey &&
-				!event.altKey;
-
-			if (!isShortcut) {
-				return;
-			}
-
-			event.preventDefault();
-			setIsCommandPaletteOpen(true);
-		};
-
-		window.addEventListener("keydown", onKeyDown);
-		return () => window.removeEventListener("keydown", onKeyDown);
-	}, []);
-
 	const visiblePendingPrompt =
 		effectiveSelectedSessionId === pendingPromptSessionId ? pendingPrompt : null;
 	const sidebarRailWidth = sidebarCollapsed ? 76 : sidebarWidth;
@@ -1213,6 +1193,7 @@ export default function App() {
 				<SettingsDialog
 					open={isSettingsOpen}
 					onOpenChange={setIsSettingsOpen}
+					onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
 					theme={theme}
 					onThemeChange={setTheme}
 					providerCatalog={providerCatalog}

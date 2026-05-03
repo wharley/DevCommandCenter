@@ -153,28 +153,28 @@
     "repository": "Repository",
     "currentWorkspace": "Current workspace",
     "currentWorkspaceHint": "Repository-scoped preferences live with the active workspace.",
-    "phaseBadge": "Phase 3",
     "languageTitle": "Interface language",
     "languageHint": "Brazilian Portuguese by default; English available for international teams.",
     "localePtBr": "Portuguese (Brazil)",
     "localeEn": "English",
     "sections": {
-      "general": { "label": "General", "description": "Workspace defaults and shell behavior." },
-      "appearance": { "label": "Appearance", "description": "Theme and chrome contrast." },
-      "model": { "label": "Model", "description": "Default provider for new sessions." },
-      "shortcuts": { "label": "Shortcuts", "description": "Keyboard bindings and command palette." },
-      "git": { "label": "Git", "description": "Branch and PR-state chrome." },
-      "experimental": { "label": "Experimental", "description": "Preview toggles and future shell flags." },
-      "account": { "label": "Account", "description": "GitHub and future sync state." }
+      "general": { "label": "General", "description": "App defaults and shell behavior." },
+      "appearance": { "label": "Appearance", "description": "Theme, language, and interface contrast." },
+      "model": { "label": "Model", "description": "Default provider and model." },
+      "shortcuts": { "label": "Shortcuts", "description": "Active shortcuts and the cheatsheet are available." },
+      "git": { "label": "Git", "description": "Git chrome in the inspector, adjustments coming soon." },
+      "experimental": { "label": "Experimental", "description": "Reserved space for future options." },
+      "account": { "label": "Account", "description": "GitHub CLI and local authentication." }
     },
+    "statusComingSoon": "Coming soon",
     "general": {
       "shellBehavior": "Shell behavior",
-      "shellBehaviorBody": "The desktop shell keeps workspace chrome, the thread composer, and the inspector aligned with the blueprint.",
+      "shellBehaviorBody": "The desktop shell opens with the workspace, composer, and inspector aligned in the main flow.",
       "shellReady": "Shell ready",
       "defaultEntry": "Default entry",
       "defaultEntryBody": "Workspaces open into the inspector-first workbench with the composer in the center pane.",
       "commandPalette": "Command palette",
-      "commandPaletteBody": "`Cmd/Ctrl+K` opens workspace switching and actions."
+      "commandPaletteBody": "The command palette opens workspace switching and actions."
     },
     "appearance": {
       "theme": "Theme",
@@ -189,20 +189,24 @@
     },
     "shortcuts": {
       "keyboardShortcuts": "Keyboard shortcuts",
-      "keyboardShortcutsHint": "Command palette and composer shortcuts already wired in this shell.",
-      "activeCount": "3 active"
+      "keyboardShortcutsHint": "The most-used shortcuts are already wired into this interface.",
+      "activeCount": "3 shortcuts",
+      "openCheatsheet": "Open shortcuts",
+      "comingSoonBody": "The shortcuts already work, but customization for this section has not been implemented yet."
     },
     "git": {
       "chromeTitle": "Git chrome",
-      "chromeHint": "Branch-aware header styling and the commit action live in the inspector.",
+      "chromeHint": "The branch bar and commit action live in the inspector.",
       "prState": "PR state",
       "badgeBranchToolbar": "Branch toolbar",
       "badgeCommitButton": "Commit button",
-      "badgeHeaderShimmer": "Header shimmer"
+      "badgeHeaderShimmer": "Header shimmer",
+      "comingSoonBody": "The interface already shows the Git flow, but editable preferences have not been implemented yet."
     },
     "experimental": {
       "title": "Experimental",
-      "body": "No preview toggles are exposed yet. This section stays in the nav so future shell flags land without changing the layout."
+      "body": "No preview toggles are exposed yet. This section stays ready for future options.",
+      "comingSoonBody": "No preview toggles are exposed yet. When test flags exist, they will live here."
     },
     "account": {
       "title": "GitHub CLI integration",
@@ -221,13 +225,12 @@
       "githubCliCommand": "Suggested command: `{{command}}`"
     }
   },
-  "shortcutsSheet": {
-    "badge": "Shortcuts",
-    "title": "Keyboard shortcuts",
-    "openPalette": "Open command palette",
-    "sendPrompt": "Send prompt",
-    "steerSession": "Steer session",
-    "abortSession": "Abort session"
+    "shortcutsSheet": {
+      "badge": "Shortcuts",
+      "title": "Keyboard shortcuts",
+      "sendPrompt": "Send prompt",
+      "steerSession": "Steer session",
+      "abortSession": "Abort session"
   },
   "onboarding": {
     "steps": {
@@ -245,7 +248,7 @@
       },
       "completeTransition": {
         "title": "Ready to transition",
-        "body": "Finish onboarding and drop into the shell with the same chrome the blueprint calls for."
+        "body": "Finish onboarding and drop into the shell with the same main interface."
       }
     },
     "chips": {
@@ -254,8 +257,8 @@
       "repoImport": "repoImport",
       "completeTransition": "completeTransition"
     },
-    "phase4Title": "Phase 4 scope",
-    "phase4Body": "We ship intro, agents, repo import, and the completion transition first.",
+    "phase4Title": "First steps",
+    "phase4Body": "We ship the intro, agents, repository import, and completion transition first.",
     "repoCliTitle": "GitHub CLI integration",
     "repoCliBody": "Open the terminal and run `gh auth login` so DCC can create PRs and keep GitHub actions local.",
     "repoCliButton": "Open terminal",
@@ -263,7 +266,7 @@
     "repoCliFailed": "Could not open the terminal.",
     "laterSteps": "Later steps",
     "conductorPreviewTitle": "Optional Conductor preview",
-    "conductorPreviewBody": "The optional integration pass stays deferred, but the visual concept is available now.",
+    "conductorPreviewBody": "The optional integration pass stays separate for now, but the visual flow is already available.",
     "previewConductor": "Preview conductor",
     "back": "Back",
     "skip": "Skip for now",

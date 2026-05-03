@@ -17,7 +17,6 @@ export function ShortcutCheatsheetDialog({
 	const shortcutRows = useMemo(
 		() =>
 			[
-				{ actionKey: "shortcutsSheet.openPalette" as const, keys: ["Cmd", "K"] as const },
 				{ actionKey: "shortcutsSheet.sendPrompt" as const, keys: ["Cmd", "Enter"] as const },
 				{
 					actionKey: "shortcutsSheet.steerSession" as const,

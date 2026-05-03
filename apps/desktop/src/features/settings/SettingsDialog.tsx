@@ -28,6 +28,7 @@ import { getGithubCliStatus, openGithubCliAuthTerminal } from "@/lib/github-cli"
 type SettingsDialogProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
+	onOpenShortcuts: () => void;
 	theme: DccTheme;
 	onThemeChange: (theme: DccTheme) => void;
 	providerCatalog: ProviderCatalog | null;
@@ -51,6 +52,7 @@ type SettingsSectionMeta = {
 	label: string;
 	description: string;
 	icon: LucideIcon;
+	status?: "comingSoon";
 };
 
 function SectionButton({
@@ -58,12 +60,14 @@ function SectionButton({
 	icon: Icon,
 	label,
 	description,
+	statusLabel,
 	onClick,
 }: {
 	active: boolean;
 	icon: LucideIcon;
 	label: string;
 	description: string;
+	statusLabel?: string;
 	onClick: () => void;
 }) {
 	return (
@@ -76,11 +80,45 @@ function SectionButton({
 			)}
 		>
 			<Icon className="mt-0.5 size-4 shrink-0" strokeWidth={1.9} aria-hidden />
-			<div className="min-w-0">
+			<div className="min-w-0 flex-1">
 				<div className="text-[13px] font-medium leading-tight">{label}</div>
 				<p className="mt-0.5 text-[11px] leading-tight text-muted-foreground/80">{description}</p>
 			</div>
+			{statusLabel ? (
+				<Badge variant="outline" className="mt-0.5 shrink-0 px-2 text-[10px] font-normal text-muted-foreground">
+					{statusLabel}
+				</Badge>
+			) : null}
 		</button>
+	);
+}
+
+function SectionHeaderBadge({ children }: { children: string }) {
+	return (
+		<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal text-muted-foreground">
+			{children}
+		</Badge>
+	);
+}
+
+function ComingSoonCard({
+	title,
+	body,
+}: {
+	title: string;
+	body: string;
+}) {
+	const { t } = useTranslation("common");
+	return (
+		<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+			<div className="flex items-start justify-between gap-4">
+				<div className="min-w-0">
+					<h3 className="text-[14px] font-medium text-foreground">{title}</h3>
+					<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{body}</p>
+				</div>
+				<SectionHeaderBadge>{t("settings.statusComingSoon")}</SectionHeaderBadge>
+			</div>
+		</div>
 	);
 }
 
@@ -192,6 +230,7 @@ function GithubCliIntegrationCard() {
 export function SettingsDialog({
 	open,
 	onOpenChange,
+	onOpenShortcuts,
 	theme,
 	onThemeChange,
 	providerCatalog,
@@ -229,18 +268,21 @@ export function SettingsDialog({
 				label: t("settings.sections.shortcuts.label"),
 				description: t("settings.sections.shortcuts.description"),
 				icon: Keyboard,
+				status: "comingSoon",
 			},
 			{
 				id: "git",
 				label: t("settings.sections.git.label"),
 				description: t("settings.sections.git.description"),
 				icon: GitBranch,
+				status: "comingSoon",
 			},
 			{
 				id: "experimental",
 				label: t("settings.sections.experimental.label"),
 				description: t("settings.sections.experimental.description"),
 				icon: Package,
+				status: "comingSoon",
 			},
 			{
 				id: "account",
@@ -286,6 +328,7 @@ export function SettingsDialog({
 									icon={section.icon}
 									label={section.label}
 									description={section.description}
+									statusLabel={section.status ? t("settings.statusComingSoon") : undefined}
 									onClick={() => setActiveSection(section.id)}
 								/>
 							))}
@@ -295,10 +338,7 @@ export function SettingsDialog({
 							<p className="px-3 pb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
 								{t("settings.repository")}
 							</p>
-							<button
-								type="button"
-								className="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-							>
+							<div className="flex w-full items-start gap-3 rounded-lg border border-border/60 bg-background px-3 py-2 text-muted-foreground">
 								<GitBranch className="mt-0.5 size-4 shrink-0" strokeWidth={1.9} aria-hidden />
 								<div className="min-w-0">
 									<div className="text-[13px] font-medium leading-tight">{t("settings.currentWorkspace")}</div>
@@ -306,7 +346,7 @@ export function SettingsDialog({
 										{t("settings.currentWorkspaceHint")}
 									</p>
 								</div>
-							</button>
+							</div>
 						</div>
 					</nav>
 
@@ -320,9 +360,7 @@ export function SettingsDialog({
 									{activeMeta.description}
 								</p>
 							</div>
-							<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal">
-								{t("settings.phaseBadge")}
-							</Badge>
+							{activeMeta.status ? <SectionHeaderBadge>{t("settings.statusComingSoon")}</SectionHeaderBadge> : null}
 						</div>
 
 						<div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 pt-5 pb-6 lg:px-8">
@@ -453,19 +491,25 @@ export function SettingsDialog({
 							{activeSection === "shortcuts" ? (
 								<section className="space-y-4">
 									<div className="rounded-xl border border-border/60 p-4">
-										<div className="flex items-center justify-between gap-4">
+										<div className="flex items-start justify-between gap-4">
 											<div>
 												<h3 className="text-[14px] font-medium text-foreground">{t("settings.shortcuts.keyboardShortcuts")}</h3>
 												<p className="mt-1 text-[12px] text-muted-foreground">
 													{t("settings.shortcuts.keyboardShortcutsHint")}
 												</p>
 											</div>
-											<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal">
-												{t("settings.shortcuts.activeCount")}
-											</Badge>
+											<div className="flex flex-col items-end gap-2">
+												<SectionHeaderBadge>{t("settings.statusComingSoon")}</SectionHeaderBadge>
+												<Button variant="outline" size="sm" onClick={onOpenShortcuts}>
+													{t("settings.shortcuts.openCheatsheet")}
+												</Button>
+											</div>
 										</div>
+										<p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
+											{t("settings.shortcuts.comingSoonBody")}
+										</p>
 										<div className="mt-4 flex flex-wrap gap-2">
-											{["Cmd/Ctrl+K", "Cmd/Ctrl+Enter", "Esc"].map((shortcut) => (
+											{["Cmd/Ctrl+Enter", "Esc"].map((shortcut) => (
 												<Badge key={shortcut} variant="secondary" className="h-8 px-3 text-[12px] font-normal">
 													{shortcut}
 												</Badge>
@@ -477,6 +521,10 @@ export function SettingsDialog({
 
 							{activeSection === "git" ? (
 								<section className="space-y-4">
+									<ComingSoonCard
+										title={t("settings.git.chromeTitle")}
+										body={t("settings.git.comingSoonBody")}
+									/>
 									<div className="rounded-xl border border-border/60 p-4">
 										<div className="flex items-start justify-between gap-6">
 											<div>
@@ -485,9 +533,7 @@ export function SettingsDialog({
 													{t("settings.git.chromeHint")}
 												</p>
 											</div>
-											<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal">
-												{t("settings.git.prState")}
-											</Badge>
+											<SectionHeaderBadge>{t("settings.git.prState")}</SectionHeaderBadge>
 										</div>
 										<div className="mt-4 flex flex-wrap gap-2">
 											<Badge variant="outline">{t("settings.git.badgeBranchToolbar")}</Badge>
@@ -500,12 +546,10 @@ export function SettingsDialog({
 
 							{activeSection === "experimental" ? (
 								<section className="space-y-4">
-									<div className="rounded-xl border border-border/60 p-4">
-										<h3 className="text-[14px] font-medium text-foreground">{t("settings.experimental.title")}</h3>
-										<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-											{t("settings.experimental.body")}
-										</p>
-									</div>
+									<ComingSoonCard
+										title={t("settings.experimental.title")}
+										body={t("settings.experimental.comingSoonBody")}
+									/>
 								</section>
 							) : null}
 

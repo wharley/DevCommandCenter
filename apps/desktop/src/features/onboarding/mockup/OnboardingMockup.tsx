@@ -43,7 +43,7 @@ export function OnboardingMockup() {
 								Compose, steer, and review in one place.
 							</p>
 						</div>
-						<Badge variant="outline">Cmd/Ctrl+K</Badge>
+						<Badge variant="outline">Palette</Badge>
 					</div>
 					<div className="flex min-h-0 flex-1 flex-col justify-between rounded-2xl border border-border/60 bg-sidebar/70 p-3">
 						<div className="space-y-2">

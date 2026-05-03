@@ -117,7 +117,7 @@ export function ConductorOnboarding({
 										Conductor coordinates workspace work and agent handoff.
 									</p>
 									<p className="text-[13px] leading-6 text-muted-foreground">
-										This is a preview-only surface for the optional integration pass. It keeps the visual grammar from the blueprint without forcing backend behavior now.
+										This is a preview-only surface for the optional integration pass. It keeps the visual flow available without forcing backend behavior yet.
 									</p>
 								</div>
 							</div>

@@ -55,6 +55,14 @@ export function WorkspaceCommandPalette({
 			title={t("commandPalette.title")}
 			description={t("commandPalette.description")}
 		>
+			<div className="border-b border-border/60 bg-muted/20 px-4 py-3">
+				<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+					{t("commandPalette.title")}
+				</p>
+				<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+					{t("commandPalette.description")}
+				</p>
+			</div>
 			<CommandInput placeholder={t("commandPalette.searchPlaceholder")} />
 			<CommandList>
 				<CommandEmpty>{t("commandPalette.empty")}</CommandEmpty>
