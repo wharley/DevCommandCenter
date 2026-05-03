@@ -384,7 +384,8 @@ Objetivo: criar a nova espinha dorsal sem quebrar o app atual, mantendo `src/` v
 **Status de execução**
 
 - Concluído: workspace Yarn + Cargo + Turbo, `packages/config`, `packages/contracts`, `crates/dcc-core`, `crates/dcc-infra`, `crates/dcc-providers`, `crates/dcc-tauri`.
-- Concluído: `legacy/` criado a partir de `src/`, preservado como base histórica enquanto o shell novo vira o caminho principal.
+- Concluído: `legacy/` criado a partir de `src/`, preservado como base histórica enquanto o shell novo vira o caminho principal (período de coexistência já encerrado).
+- Concluído: pasta `legacy/` na raiz **removida em 2026-05-03** — não era mais referenciada pelo Vite (`@` → `apps/desktop/src`), nem pelo `index.html` (entrada `apps/desktop/src/main.tsx`); apenas snapshot histórico.
 - Concluído: novo shell inicial em `apps/desktop` com query client, tema, layout base e entrada Vite separada.
 - Concluído: boot principal agora aponta para o shell novo, sem alternância por flag.
 - Concluído: `yarn install`, `yarn vite:build`, `cargo check -p dcc-core` e `cargo check -p dcc-tauri` passam no workspace atual.
@@ -474,9 +475,14 @@ Trazer **paridade ou melhoria real** relativamente aos referenciais: shell/UX/co
 - Inspirado na **calha de terminais do Helmor** para persistência/multi‑instância no futuro; hoje DCC garante reuso do PTY ao fechar/abrir o drawer.
 
 **Fase 5 — Sunset legacy + fechamento**
-1. Remover `legacy/` quando a paridade funcional estiver fechada.
+1. Remover `legacy/` quando a paridade funcional estiver fechada — **pasta removida em 2026-05-03** (critério aplicado: snapshot na raiz já órfão do Vite/`index.html`; ver status abaixo).
 2. Reavaliar extrações só se `dcc-infra` ou `sessions` ficarem grandes demais.
 3. Tratar editor rich como etapa posterior, não como pré-requisito.
+
+**Status da Fase 5**
+
+- Concluído (2026-05-03): remoção da pasta `legacy/` na raiz do repositório, após validação de que nenhum script de build, Tauri ou código em `apps/` / `packages/` a importava (o shell ativo já estava só em `apps/desktop/`).
+- Em aberto: itens 2 e 3 acima (extrações por tamanho e editor rich).
 
 ---
 
@@ -544,7 +550,7 @@ Trazer **paridade ou melhoria real** relativamente aos referenciais: shell/UX/co
 
 ## Decisões já confirmadas
 
-1. **Coexistência**: `apps/desktop/` (novo) vive lado-a-lado com `legacy/` (renomeado de `src/` atual), mas o boot principal já aponta para o shell novo.
+1. **Shell único**: o boot e o bundle usam apenas `apps/desktop/`. Durante a migração, `legacy/` (antigo `src/` renomeado) coexistiu na raiz; em **2026-05-03** essa pasta foi removida por não fazer parte do caminho de build.
 2. **State server**: TanStack Query 5 como padrão. Zustand modular **por domínio** apenas para UI ephemera.
 3. **Editor rich**: adiar para depois da Fase 3.
 4. **Package manager**: yarn (com workspaces).

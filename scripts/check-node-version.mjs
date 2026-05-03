@@ -71,12 +71,22 @@ if (engineRequirement) {
 }
 logInfo(`Versão atual do Node: v${process.versions.node}`);
 
-// Verifica se a versão é compatível
-const isCompatible = currentMajor >= 18 && (currentMajor > 18 || currentMinor >= 18);
+// Verifica se a versão é compatível (alinhado a engines: ^20.19.0 || >=22.12.0)
+function toolchainNodeOk() {
+  if (Number.isNaN(currentMajor)) return false;
+  if (currentMajor < 20) return false;
+  if (currentMajor === 20)
+    return currentMinor > 19 || (currentMinor === 19 && currentPatch >= 0);
+  if (currentMajor === 21) return false;
+  if (currentMajor === 22)
+    return currentMinor > 12 || (currentMinor === 12 && currentPatch >= 0);
+  return currentMajor >= 23;
+}
+const isCompatible = toolchainNodeOk();
 
 if (!isCompatible) {
   console.log("");
-  logError(`Node.js ${engineRequirement || ">=18.18.0"} é obrigatório!`);
+  logError(`Node.js ${engineRequirement || "^20.19.0 || >=22.12.0"} é obrigatório!`);
   console.log("");
   console.log(`${colors.bright}Para corrigir:${colors.reset}`);
   console.log("");

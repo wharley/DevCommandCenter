@@ -7,7 +7,10 @@
     "packages/*"
   ],
   "engines": {
-    "node": ">=18.18.0"
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "resolutions": {
+    "vite": "^8.0.10"
   },
   "scripts": {
     "dev": "yarn dev:tauri",
@@ -100,13 +103,13 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/react-syntax-highlighter": "^15.5.13",
-    "@vitejs/plugin-react": "^5.2.0",
+    "@vitejs/plugin-react": "^6.0.1",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
     "tsx": "^4.19.0",
     "tw-animate-css": "1.3.3",
     "typescript": "^5",
     "turbo": "^2.3.3",
-    "vite": "^6.0.0"
+    "vite": "^8.0.10"
   }
 }
