@@ -5,7 +5,13 @@
  * ser executados manualmente pelo usuário.
  */
 
-import type { PendingCommand } from "./database/types";
+export interface PendingCommand {
+	id: string;
+	command: string;
+	description?: string;
+	source: "plan" | "code" | "file";
+	confirmedAt: string | null;
+}
 
 interface CommandPattern {
   regex: RegExp;

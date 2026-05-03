@@ -1,15 +1,10 @@
 import {
 	extractCommandsFromPlan,
 	extractPendingCommands,
-} from "../../../../../lib/command-detector";
+	type PendingCommand,
+} from "@/lib/command-detector";
 
-export type PendingCommand = {
-	id: string;
-	command: string;
-	description?: string;
-	source: "plan" | "code" | "file";
-	confirmedAt: string | null;
-};
+export type { PendingCommand };
 
 export type ParsedPlanStepStatus = "completed" | "in_progress" | "pending";
 

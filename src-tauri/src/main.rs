@@ -67,8 +67,8 @@ use workspace_commands::{
 };
 use dcc_tauri::state::{SessionCommandState, WorkspaceCommandState};
 
-/// Schema SQLite compartilhado com `lib/database/schema.sql` (CREATE IF NOT EXISTS).
-const APP_SCHEMA_SQL: &str = include_str!("../../lib/database/schema.sql");
+/// Schema SQLite embutido (`src-tauri/sql/schema.sql`, CREATE IF NOT EXISTS).
+const APP_SCHEMA_SQL: &str = include_str!("../sql/schema.sql");
 const REPO_CONFIG_FILENAME: &str = ".dcc.toml";
 
 // Regex para detectar quando um terminal está esperando input do usuário

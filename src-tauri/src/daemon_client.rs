@@ -95,7 +95,7 @@ fn open_connection(db_path: &Path) -> Result<Connection, String> {
 }
 
 fn ensure_schema(conn: &Connection) -> Result<(), String> {
-    let schema = include_str!("../../lib/database/schema.sql");
+    let schema = include_str!("../sql/schema.sql");
     conn.execute_batch(schema).map_err(|e| e.to_string())
 }
 

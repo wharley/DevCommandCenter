@@ -13,7 +13,7 @@ use std::thread;
 use std::time::Duration;
 use sysinfo::{Pid, ProcessRefreshKind, System};
 
-const APP_SCHEMA_SQL: &str = include_str!("../../lib/database/schema.sql");
+const APP_SCHEMA_SQL: &str = include_str!("../sql/schema.sql");
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
