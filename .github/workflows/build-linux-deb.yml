@@ -26,10 +26,10 @@ jobs:
       matrix:
         include:
           - target: deb
-            artifact-path: src-tauri/target/release/bundle/deb/*.deb
+            artifact-path: target/release/bundle/deb/*.deb
             artifact-name: dev-command-center-linux-deb
           - target: appimage
-            artifact-path: src-tauri/target/release/bundle/appimage/*.AppImage
+            artifact-path: target/release/bundle/appimage/*.AppImage
             artifact-name: dev-command-center-linux-appimage
 
     steps:
@@ -54,7 +54,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            src-tauri/target
+            target
           key: linux-rust-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: linux-rust-
 

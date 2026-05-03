@@ -111,8 +111,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          APP_PATH="$(ls -1d src-tauri/target/release/bundle/macos/*.app | head -n 1)"
-          DMG_PATH="$(ls -1 src-tauri/target/release/bundle/dmg/*.dmg | head -n 1)"
+          APP_PATH="$(ls -1d target/release/bundle/macos/*.app | head -n 1)"
+          DMG_PATH="$(ls -1 target/release/bundle/dmg/*.dmg | head -n 1)"
 
           if [[ ! -d "${APP_PATH}" ]]; then
             echo "Missing .app bundle at expected macOS path."
@@ -159,8 +159,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          APP_PATH="$(ls -1d src-tauri/target/release/bundle/macos/*.app | head -n 1)"
-          DMG_PATH="$(ls -1 src-tauri/target/release/bundle/dmg/*.dmg | head -n 1)"
+          APP_PATH="$(ls -1d target/release/bundle/macos/*.app | head -n 1)"
+          DMG_PATH="$(ls -1 target/release/bundle/dmg/*.dmg | head -n 1)"
 
           echo "Checking code signature metadata..."
           if codesign -dv --verbose=4 "${APP_PATH}" 2>&1 | tee /tmp/codesign-info.txt; then
@@ -193,6 +193,6 @@ jobs:
         with:
           name: dev-command-center-macos-bundles
           path: |
-            src-tauri/target/release/bundle/macos/*.app
-            src-tauri/target/release/bundle/dmg/*.dmg
+            target/release/bundle/macos/*.app
+            target/release/bundle/dmg/*.dmg
           if-no-files-found: error
