@@ -386,13 +386,22 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					<button
 						type="button"
 						className={cn(
-							"group/trigger flex w-full cursor-pointer select-none items-center justify-between rounded-lg px-2 py-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground hover:bg-accent/60",
+							"flex w-full cursor-pointer select-none items-center justify-between rounded-lg px-2 py-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground hover:bg-accent/60",
 						)}
 						data-empty-group={isEmptyGroup ? "true" : "false"}
 						disabled={!item.canCollapse}
 						onClick={() => toggleSection(item.groupId)}
 					>
-						<span className="flex min-w-0 items-center gap-2">
+						<span className="flex min-w-0 items-center gap-1.5">
+							<ChevronRight
+								className={cn(
+									"size-3 shrink-0 text-muted-foreground transition-transform duration-150",
+									isOpen && "rotate-90",
+									!item.canCollapse && "opacity-0",
+								)}
+								strokeWidth={2.2}
+								aria-hidden
+							/>
 							{item.headerVariant === "archived" ? (
 								<Archive
 									className="size-[14px] shrink-0 text-[var(--workspace-sidebar-status-backlog)]"
@@ -406,22 +415,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						</span>
 
 						{item.rowCount > 0 ? (
-							<span className="relative flex h-5 min-w-5 items-center justify-center">
-								<Badge
-									variant="secondary"
-									className="h-4 min-w-[16px] justify-center rounded-full px-1 text-[9.5px]"
-								>
-									{item.rowCount}
-								</Badge>
-								<ChevronRight
-									className={cn(
-										"absolute left-1/2 top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 text-muted-foreground opacity-0 transition-all group-hover/trigger:opacity-100",
-										isOpen && "rotate-90",
-									)}
-									strokeWidth={2}
-									aria-hidden
-								/>
-							</span>
+							<Badge
+								variant="secondary"
+								className="h-4 min-w-[16px] justify-center rounded-full px-1 text-[9.5px]"
+							>
+								{item.rowCount}
+							</Badge>
 						) : null}
 					</button>
 				);
