@@ -3378,7 +3378,7 @@ fn app_show_notification(_app: AppHandle, payload: Value) -> ApiResult<Value> {
         };
 
         if _has_actions {
-            let app_handle = app.clone();
+            let app_handle = _app.clone();
             let notification_id = notification_id.clone();
             let title = title.to_string();
             let body = body.clone();
