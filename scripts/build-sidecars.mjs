@@ -95,10 +95,10 @@ mkdirSync(releaseDir, { recursive: true });
 for (const baseName of ['dcc', 'dccd']) {
   ensurePlaceholder(releaseDir, baseName, hostTriple);
 }
-ensurePlaceholder(sidecarDistDir, 'dcc-claude-sidecar', hostTriple);
 
-run('cargo', ['build', '--manifest-path', join(srcTauriDir, 'Cargo.toml'), '--release', '--bins']);
-
+// Sidecar `yarn build` must run before `cargo build --bins`: the Tauri crate's build
+// script validates `bundle.resources` (e.g. `../sidecar/dist/vendor`) while compiling
+// `dev-command-center-tauri`, and `stage-vendor.mjs` only runs during this step.
 run('yarn', ['build'], {
   cwd: sidecarDir,
   env: {
@@ -106,6 +106,8 @@ run('yarn', ['build'], {
   },
 });
 copyCompiledClaudeSidecar(hostTriple);
+
+run('cargo', ['build', '--manifest-path', join(srcTauriDir, 'Cargo.toml'), '--release', '--bins']);
 
 copySidecar('dcc', hostTriple);
 copySidecar('dccd', hostTriple);
