@@ -1835,7 +1835,5 @@ pub async fn delete_workspace(
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = WorkspaceId(input.workspace_id);
-    repo.delete_workspace(&id)
-        .await
-        .map_err(|e| e.to_string())
+    repo.delete_workspace(&id).await.map_err(|e| e.to_string())
 }

@@ -7,7 +7,7 @@ use std::{
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
@@ -86,36 +86,11 @@ impl SessionCommandState {
         Ok(store.provider_sessions.get(session_id).cloned())
     }
 
-    fn provider_home_root(&self) -> PathBuf {
-        self.app
-            .path()
-            .app_data_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join("provider-homes")
-    }
-
-    fn default_provider_runtime_config(
-        &self,
-        provider_id: &str,
-    ) -> Result<ProviderRuntimeConfig> {
-        let home_path = self.provider_home_root().join(provider_id);
-        std::fs::create_dir_all(&home_path)
-            .map_err(|error| dcc_core::CoreError::Provider(error.to_string()))?;
-        Ok(ProviderRuntimeConfig {
-            home_path: Some(home_path.to_string_lossy().to_string()),
-            shadow_home_path: None,
-        })
-    }
-
     fn provider_runtime_config(
         &self,
-        provider_id: &str,
         runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<ProviderRuntimeConfig> {
-        if let Some(runtime) = runtime {
-            return Ok(runtime.clone());
-        }
-        self.default_provider_runtime_config(provider_id)
+        Ok(runtime.cloned().unwrap_or_default())
     }
 
     pub(crate) fn peek_session(&self, session_id: &SessionId) -> Result<Option<Session>> {
@@ -277,8 +252,7 @@ impl SessionCommandState {
                 session.provider_id
             ))
         })?;
-        let provider_runtime =
-            self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
+        let provider_runtime = self.provider_runtime_config(session.provider_runtime.as_ref())?;
 
         let handle = provider
             .prepare_session(SessionConfig {

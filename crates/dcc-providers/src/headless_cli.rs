@@ -150,6 +150,7 @@ impl HeadlessCliProviderAdapter {
                     "--print".to_string(),
                     "--output-format".to_string(),
                     "stream-json".to_string(),
+                    "--verbose".to_string(),
                     "--include-partial-messages".to_string(),
                     "--dangerously-skip-permissions".to_string(),
                 ];
