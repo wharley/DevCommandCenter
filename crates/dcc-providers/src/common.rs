@@ -64,6 +64,7 @@ enum ProviderEnvelope {
 #[derive(Debug, Default)]
 pub(crate) struct ProviderStreamState {
     claude_blocks: HashMap<u64, ClaudeBlockState>,
+    claude_streamed_text_emitted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -376,7 +377,7 @@ fn parse_claude_stream_value(
 ) -> Option<ProviderEvent> {
     let kind = value.get("type").and_then(Value::as_str)?;
     if kind != "stream_event" {
-        return parse_claude_terminal_value(value);
+        return parse_claude_terminal_value(value, state);
     }
 
     let event = value.get("event")?.as_object()?;
@@ -386,6 +387,7 @@ fn parse_claude_stream_value(
     match event_type {
         "message_start" => {
             state.claude_blocks.clear();
+            state.claude_streamed_text_emitted = false;
             None
         }
         "content_block_start" => {
@@ -443,6 +445,7 @@ fn parse_claude_stream_value(
                 }
                 "text_delta" => {
                     let content = delta.get("text").and_then(Value::as_str).unwrap_or("");
+                    state.claude_streamed_text_emitted = true;
                     Some(ProviderEvent::TextDelta {
                         content: content.to_string(),
                     })
@@ -479,10 +482,34 @@ fn parse_claude_stream_value(
     }
 }
 
-fn parse_claude_terminal_value(value: &Value) -> Option<ProviderEvent> {
+fn parse_claude_terminal_value(
+    value: &Value,
+    state: &ProviderStreamState,
+) -> Option<ProviderEvent> {
     let kind = value.get("type").and_then(Value::as_str)?;
     let at = now_iso();
     match kind {
+        "assistant" => {
+            if state.claude_streamed_text_emitted {
+                return None;
+            }
+
+            let message = value.get("message")?.as_object()?;
+            let content = message.get("content")?.as_array()?;
+            let text = content
+                .iter()
+                .filter_map(|block| block.as_object())
+                .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+                .filter_map(|block| block.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("");
+
+            if text.is_empty() {
+                None
+            } else {
+                Some(ProviderEvent::TextDelta { content: text })
+            }
+        }
         "result" => {
             if value
                 .get("is_error")
@@ -1391,6 +1418,44 @@ mod tests {
         match result {
             ParsedProviderLine::Event(ProviderEvent::Completed { .. }) => {}
             other => panic!("expected turn completion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_claude_terminal_assistant_text_when_stream_is_absent() {
+        let mut state = ProviderStreamState::default();
+
+        let assistant = parse_provider_stream_line(
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Not logged in \u00b7 Please run /login"}]}}"#,
+            &mut state,
+        );
+        match assistant {
+            ParsedProviderLine::Event(ProviderEvent::TextDelta { content }) => {
+                assert_eq!(content, "Not logged in · Please run /login");
+            }
+            other => panic!("expected assistant fallback text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ignores_claude_terminal_assistant_text_after_streamed_text() {
+        let mut state = ProviderStreamState::default();
+
+        let _ = parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[]}}}"#,
+            &mut state,
+        );
+        let _ = parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}"#,
+            &mut state,
+        );
+        let assistant = parse_provider_stream_line(
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello world"}]}}"#,
+            &mut state,
+        );
+        match assistant {
+            ParsedProviderLine::Ignored => {}
+            other => panic!("expected assistant fallback to stay ignored, got {other:?}"),
         }
     }
 
