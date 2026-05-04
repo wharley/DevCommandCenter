@@ -228,6 +228,27 @@ impl SessionCommandState {
         Ok(())
     }
 
+    pub(crate) async fn emit_turn_aborted(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        reason: Option<String>,
+    ) -> Result<()> {
+        self.append_and_publish_session_event(
+            session_id,
+            SessionEventKind::TurnAborted {
+                turn_id: turn_id.clone(),
+                reason: reason.clone(),
+            },
+            dcc_core::ports::events::CoreEvent::SessionTurnAborted {
+                session_id: session_id.0.clone(),
+                turn_id: turn_id.0.clone(),
+                reason,
+            },
+        )
+        .await
+    }
+
     pub(crate) async fn attach_provider_session(&self, session: &Session) -> Result<()> {
         if self.provider_binding(&session.id)?.is_some() {
             return Ok(());

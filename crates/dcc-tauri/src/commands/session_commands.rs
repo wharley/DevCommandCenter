@@ -51,6 +51,24 @@ pub async fn send_turn(
     let output = run_send_turn(&*state, &*state, &*state, input)
         .await
         .map_err(|error| error.to_string())?;
+
+    // Turn is now recorded in the event store. Any failure from here must emit
+    // TurnAborted so the UI does not get stuck on session.turn.started.
+    let turn_id = output.turn.id.clone();
+    let session_id = output.session.id.clone();
+
+    let abort_turn = |reason: String| {
+        let state = &state;
+        let session_id = session_id.clone();
+        let turn_id = turn_id.clone();
+        async move {
+            let _ = state
+                .emit_turn_aborted(&session_id, &turn_id, Some(reason.clone()))
+                .await;
+            reason
+        }
+    };
+
     let wire_prompt = compose_wire_prompt_for_provider(
         &output.session.provider_id,
         &prompt_for_wire,
@@ -58,21 +76,26 @@ pub async fn send_turn(
         effort.as_deref(),
         fast_mode,
     );
-    state
-        .attach_provider_session(&output.session)
+
+    if let Err(error) = state.attach_provider_session(&output.session).await {
+        return Err(abort_turn(error.to_string()).await);
+    }
+
+    if let Err(error) = state
+        .set_active_turn(&output.session.id, Some(turn_id.0.clone()))
         .await
-        .map_err(|error| error.to_string())?;
-    state
-        .set_active_turn(&output.session.id, Some(output.turn.id.0.clone()))
-        .await
-        .map_err(|error| error.to_string())?;
+    {
+        return Err(abort_turn(error.to_string()).await);
+    }
+
     if let Err(error) = state
         .send_provider_input(&output.session.id, wire_prompt)
         .await
     {
         let _ = state.set_active_turn(&output.session.id, None).await;
-        return Err(error.to_string());
+        return Err(abort_turn(error.to_string()).await);
     }
+
     Ok(output)
 }
 

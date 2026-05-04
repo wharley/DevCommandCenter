@@ -5,7 +5,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
@@ -29,6 +29,8 @@ use dcc_core::{
     ports::{Input, Provider, SessionConfig},
     CoreError, Result,
 };
+
+use crate::common::augmented_path;
 
 // ── JSON-RPC helpers ────────────────────────────────────────────────────────
 
@@ -111,13 +113,7 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
             }
         }
         "error" => Some(ProviderEvent::Failed {
-            message: params
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(Value::as_str)
-                .or_else(|| params.get("message").and_then(Value::as_str))
-                .unwrap_or("codex app-server error")
-                .to_string(),
+            message: codex_error_message(params),
             at,
         }),
         "item/started" => {
@@ -222,6 +218,7 @@ struct SessionRuntime {
     pending: PendingMap,
     next_id: AtomicU64,
     events_tx: broadcast::Sender<ProviderEvent>,
+    last_retry_at: Mutex<Option<Instant>>,
 }
 
 impl SessionRuntime {
@@ -284,10 +281,13 @@ impl CodexAppServerAdapter {
     async fn start_runtime(&self, cfg: SessionConfig) -> Result<SessionHandle> {
         let mut cmd = Command::new("codex");
         cmd.arg("app-server");
+        cmd.arg("-c");
+        cmd.arg("notify=[]");
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::null());
+        cmd.stderr(Stdio::piped());
 
+        cmd.env("PATH", augmented_path());
         cmd.env("DCC_PROVIDER_ID", "codex");
         cmd.env("DCC_WORKSPACE_ID", &cfg.workspace_id.0);
         cmd.env("DCC_SESSION_ID", &cfg.session_id.0);
@@ -305,9 +305,9 @@ impl CodexAppServerAdapter {
             }
         }
 
-        let mut child = cmd.spawn().map_err(|e| {
-            CoreError::Provider(format!("failed to spawn codex app-server: {e}"))
-        })?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| CoreError::Provider(format!("failed to spawn codex app-server: {e}")))?;
 
         let stdin = child
             .stdin
@@ -317,6 +317,10 @@ impl CodexAppServerAdapter {
             .stdout
             .take()
             .ok_or_else(|| CoreError::Provider("codex app-server missing stdout".to_string()))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| CoreError::Provider("codex app-server missing stderr".to_string()))?;
 
         let handle = SessionHandle {
             provider_id: self.id.clone(),
@@ -333,6 +337,7 @@ impl CodexAppServerAdapter {
             pending: Arc::new(Mutex::new(HashMap::new())),
             next_id: AtomicU64::new(1),
             events_tx: events_tx.clone(),
+            last_retry_at: Mutex::new(None),
         });
 
         let session_key = cfg.session_id.0.clone();
@@ -346,6 +351,7 @@ impl CodexAppServerAdapter {
         Self::spawn_reader(
             runtime.clone(),
             stdout,
+            stderr,
             Arc::clone(&self.state),
             session_key.clone(),
         );
@@ -396,9 +402,7 @@ impl CodexAppServerAdapter {
             .get("thread")
             .and_then(|t| t.get("id"))
             .and_then(Value::as_str)
-            .ok_or_else(|| {
-                CoreError::Provider("codex thread/start missing thread.id".to_string())
-            })?
+            .ok_or_else(|| CoreError::Provider("codex thread/start missing thread.id".to_string()))?
             .to_string();
 
         *runtime.thread_id.lock().await = Some(thread_id);
@@ -408,6 +412,7 @@ impl CodexAppServerAdapter {
     fn spawn_reader(
         runtime: Arc<SessionRuntime>,
         stdout: tokio::process::ChildStdout,
+        stderr: tokio::process::ChildStderr,
         state: Arc<AdapterState>,
         session_key: String,
     ) {
@@ -415,6 +420,17 @@ impl CodexAppServerAdapter {
             let _ = runtime
                 .events_tx
                 .send(ProviderEvent::Started { at: now_iso() });
+
+            let retry_runtime = runtime.clone();
+            let stderr_task = tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    let trimmed = line.trim();
+                    if is_codex_reconnect_notice(trimmed) {
+                        *retry_runtime.last_retry_at.lock().await = Some(Instant::now());
+                    }
+                }
+            });
 
             let mut reader = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = reader.next_line().await {
@@ -451,6 +467,9 @@ impl CodexAppServerAdapter {
 
                 // Notification: has method, no response id
                 if let (Some(method), Some(params)) = (&msg.method, &msg.params) {
+                    if method == "error" && should_suppress_codex_error(params, &runtime).await {
+                        continue;
+                    }
                     if let Some(event) = notification_to_event(method, params) {
                         let _ = runtime.events_tx.send(event);
                     }
@@ -487,9 +506,65 @@ impl CodexAppServerAdapter {
                 }
             }
 
+            let _ = stderr_task.await;
             state.sessions.lock().await.remove(&session_key);
         });
     }
+}
+
+fn codex_error_message(params: &Value) -> String {
+    params
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .or_else(|| params.get("message").and_then(Value::as_str))
+        .unwrap_or("codex app-server error")
+        .to_string()
+}
+
+fn is_codex_reconnect_notice(message: &str) -> bool {
+    let trimmed = message.trim_start();
+    let suffix = if let Some(rest) = trimmed.strip_prefix("Reconnecting...") {
+        Some(rest.trim_start())
+    } else if let Some(rest) = trimmed.strip_prefix("Reconnecting…") {
+        Some(rest.trim_start())
+    } else {
+        None
+    };
+
+    match suffix {
+        None => false,
+        Some("") => true,
+        Some(rest) => {
+            let mut parts = rest.split('/');
+            let left = parts.next().map(str::trim);
+            let right = parts.next().map(str::trim);
+            left.is_some_and(|value| value.chars().all(|ch| ch.is_ascii_digit()))
+                && right.is_some_and(|value| value.chars().all(|ch| ch.is_ascii_digit()))
+        }
+    }
+}
+
+async fn should_suppress_codex_error(params: &Value, runtime: &SessionRuntime) -> bool {
+    if params
+        .get("willRetry")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    let message = codex_error_message(params);
+    if !is_codex_reconnect_notice(&message) {
+        return false;
+    }
+
+    runtime
+        .last_retry_at
+        .lock()
+        .await
+        .as_ref()
+        .is_some_and(|at| at.elapsed() <= Duration::from_secs(30))
 }
 
 fn now_iso() -> String {
@@ -605,7 +680,10 @@ impl Provider for CodexAppServerAdapter {
     }
 
     async fn healthcheck(&self) -> Result<HealthStatus> {
-        match Command::new("codex").arg("--version").output().await {
+        let mut command = Command::new("codex");
+        command.arg("--version");
+        command.env("PATH", augmented_path());
+        match command.output().await {
             Ok(output) if output.status.success() => Ok(HealthStatus::Healthy),
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -617,5 +695,26 @@ impl Provider for CodexAppServerAdapter {
                 reason: format!("failed to execute codex: {e}"),
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_codex_reconnect_notices() {
+        assert!(is_codex_reconnect_notice("Reconnecting... 2/5"));
+        assert!(is_codex_reconnect_notice("Reconnecting… 1/5"));
+        assert!(!is_codex_reconnect_notice("plain error"));
+    }
+
+    #[test]
+    fn reads_retryable_error_message() {
+        let payload = json!({
+            "willRetry": true,
+            "error": { "message": "Reconnecting... 2/5" }
+        });
+        assert_eq!(codex_error_message(&payload), "Reconnecting... 2/5");
     }
 }

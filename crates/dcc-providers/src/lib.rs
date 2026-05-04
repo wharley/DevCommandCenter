@@ -4,6 +4,7 @@ pub mod codex_app_server;
 pub mod common;
 pub mod cursor;
 pub mod gemini;
+pub mod headless_cli;
 
 use std::{
     collections::HashMap,

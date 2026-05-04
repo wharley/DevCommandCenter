@@ -3,16 +3,20 @@ use dcc_core::domain::{
     provider::{HealthStatus, ProviderDescriptor, ProviderId},
 };
 
-use crate::common::{stable_cli_capabilities, CliProviderAdapter};
+use crate::{
+    common::stable_cli_capabilities,
+    headless_cli::{HeadlessCliKind, HeadlessCliProviderAdapter},
+};
 
-pub fn adapter() -> CliProviderAdapter {
-    CliProviderAdapter::new(
+pub fn adapter() -> HeadlessCliProviderAdapter {
+    HeadlessCliProviderAdapter::new(
         "gemini",
         "Gemini",
         "Stable Gemini CLI provider for workspace tasks.",
         "gemini",
         stable_cli_capabilities(),
         true,
+        HeadlessCliKind::Gemini,
     )
 }
 

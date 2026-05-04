@@ -62,7 +62,7 @@ enum ProviderEnvelope {
 }
 
 #[derive(Debug, Default)]
-struct ProviderStreamState {
+pub(crate) struct ProviderStreamState {
     claude_blocks: HashMap<u64, ClaudeBlockState>,
 }
 
@@ -73,7 +73,7 @@ enum ClaudeBlockState {
 }
 
 #[derive(Debug)]
-enum ParsedProviderLine {
+pub(crate) enum ParsedProviderLine {
     Event(ProviderEvent),
     Text(String),
     Ignored,
@@ -309,7 +309,10 @@ fn materialize_codex_shadow_home(layout: &CodexHomeLayout) -> Result<()> {
     Ok(())
 }
 
-fn parse_provider_stream_line(line: &str, state: &mut ProviderStreamState) -> ParsedProviderLine {
+pub(crate) fn parse_provider_stream_line(
+    line: &str,
+    state: &mut ProviderStreamState,
+) -> ParsedProviderLine {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return ParsedProviderLine::Ignored;
@@ -800,11 +803,12 @@ struct SessionRuntime {
 }
 
 /// Namespaced env for stdin-only CLI adapters (no undocumented vendor-specific vars).
-fn apply_cli_spawn_environment(
+pub(crate) fn apply_cli_spawn_environment(
     command: &mut Command,
     provider_registry_id: &str,
     cfg: &SessionConfig,
 ) -> Result<()> {
+    command.env("PATH", augmented_path());
     command.env("DCC_PROVIDER_ID", provider_registry_id);
     command.env("DCC_WORKSPACE_ID", &cfg.workspace_id.0);
     command.env("DCC_SESSION_ID", &cfg.session_id.0);
@@ -871,6 +875,7 @@ impl CliProviderAdapter {
     fn binary_command(&self) -> Command {
         let mut command = Command::new(&self.binary);
         command.arg("--version");
+        command.env("PATH", augmented_path());
         command
     }
 
@@ -994,7 +999,7 @@ impl CliProviderAdapter {
     }
 }
 
-fn now_iso() -> String {
+pub(crate) fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
 
@@ -1017,7 +1022,7 @@ fn expand_home_path(path: &str) -> PathBuf {
     PathBuf::from(trimmed)
 }
 
-fn resolve_runtime_home_path(path: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn resolve_runtime_home_path(path: Option<&str>) -> Option<PathBuf> {
     let value = path?.trim();
     if value.is_empty() {
         return None;
@@ -1033,8 +1038,48 @@ fn resolve_runtime_home_path(path: Option<&str>) -> Option<PathBuf> {
     }
 }
 
-fn runtime_config(cfg: &SessionConfig) -> Option<&ProviderRuntimeConfig> {
+pub(crate) fn runtime_config(cfg: &SessionConfig) -> Option<&ProviderRuntimeConfig> {
     cfg.provider_runtime.as_ref()
+}
+
+pub(crate) fn augmented_path() -> String {
+    let sep = if cfg!(windows) { ';' } else { ':' };
+    let existing = std::env::var("PATH").unwrap_or_default();
+
+    let Ok(home) = std::env::var("HOME") else {
+        return existing;
+    };
+
+    let mut extra: Vec<PathBuf> = Vec::new();
+
+    let nvm_base = PathBuf::from(&home)
+        .join(".nvm")
+        .join("versions")
+        .join("node");
+    if let Ok(entries) = fs::read_dir(&nvm_base) {
+        let mut dirs: Vec<_> = entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path().join("bin"))
+            .filter(|path| path.is_dir())
+            .collect();
+        dirs.sort_by(|left, right| right.cmp(left));
+        extra.extend(dirs);
+    }
+
+    extra.push(PathBuf::from(&home).join(".local").join("bin"));
+    extra.push(PathBuf::from(&home).join("node_modules").join(".bin"));
+
+    let prefix = extra
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .filter(|path| !path.is_empty())
+        .collect::<Vec<_>>();
+
+    if prefix.is_empty() {
+        existing
+    } else {
+        format!("{}{}{}", prefix.join(&sep.to_string()), sep, existing)
+    }
 }
 
 #[async_trait]

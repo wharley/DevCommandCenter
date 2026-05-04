@@ -3,16 +3,20 @@ use dcc_core::domain::{
     provider::{HealthStatus, ProviderDescriptor, ProviderId},
 };
 
-use crate::common::{stable_cli_capabilities, CliProviderAdapter};
+use crate::{
+    common::stable_cli_capabilities,
+    headless_cli::{HeadlessCliKind, HeadlessCliProviderAdapter},
+};
 
-pub fn adapter() -> CliProviderAdapter {
-    CliProviderAdapter::new(
+pub fn adapter() -> HeadlessCliProviderAdapter {
+    HeadlessCliProviderAdapter::new(
         "claude_code",
         "Claude Code",
         "Stable Claude CLI provider for agentic coding and tool use.",
         "claude",
         stable_cli_capabilities(),
         true,
+        HeadlessCliKind::Claude,
     )
 }
 
