@@ -1,5 +1,5 @@
 import { cva } from "class-variance-authority";
-import { ArchiveRestore, GitBranch, Trash2 } from "lucide-react";
+import { Archive, GitBranch, RotateCcw, Trash2 } from "lucide-react";
 import { memo } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -30,6 +30,9 @@ export type WorkspaceRailRowProps = {
 	workspace: WorkspaceSummary;
 	selected: boolean;
 	onSelect?: (workspaceId: string) => void;
+	onArchiveWorkspace?: (workspaceId: string) => void;
+	onRestoreWorkspace?: (workspaceId: string) => void;
+	onDeleteWorkspace?: (workspaceId: string) => void;
 };
 
 function WorkspaceRailAvatar({
@@ -56,6 +59,9 @@ export const WorkspaceRailRowItem = memo(
 		workspace,
 		selected,
 		onSelect,
+		onArchiveWorkspace,
+		onRestoreWorkspace,
+		onDeleteWorkspace,
 	}: WorkspaceRailRowProps) {
 		const branchTone = branchToneFromWorkspace(workspace);
 		const displayTitle = workspace.branch
@@ -108,30 +114,56 @@ export const WorkspaceRailRowItem = memo(
 						</div>
 					</div>
 					<div className="group/actions flex shrink-0 items-center gap-0.5 pr-2.5 opacity-0 transition-opacity group-hover/dccRailRow:opacity-100 group-focus-within/dccRailRow:opacity-100">
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon-xs"
-							aria-label="Archive workspace"
-							className="text-muted-foreground/60 hover:text-foreground"
-							onClick={(event) => {
-								event.stopPropagation();
-							}}
-						>
-							<ArchiveRestore className="size-3.5" strokeWidth={2} aria-hidden />
-						</Button>
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon-xs"
-							aria-label="Delete workspace"
-							className="text-muted-foreground/60 hover:text-foreground"
-							onClick={(event) => {
-								event.stopPropagation();
-							}}
-						>
-							<Trash2 className="size-3.5" strokeWidth={2} aria-hidden />
-						</Button>
+						{workspace.status === "archived" ? (
+							<>
+								{onRestoreWorkspace && (
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										aria-label="Restore workspace"
+										className="text-muted-foreground/60 hover:text-foreground"
+										onClick={(event) => {
+											event.stopPropagation();
+											onRestoreWorkspace(workspace.id);
+										}}
+									>
+										<RotateCcw className="size-3.5" strokeWidth={2} aria-hidden />
+									</Button>
+								)}
+								{onDeleteWorkspace && (
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										aria-label="Delete workspace permanently"
+										className="text-muted-foreground/60 hover:text-destructive"
+										onClick={(event) => {
+											event.stopPropagation();
+											onDeleteWorkspace(workspace.id);
+										}}
+									>
+										<Trash2 className="size-3.5" strokeWidth={2} aria-hidden />
+									</Button>
+								)}
+							</>
+						) : (
+							onArchiveWorkspace && (
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-xs"
+									aria-label="Archive workspace"
+									className="text-muted-foreground/60 hover:text-foreground"
+									onClick={(event) => {
+										event.stopPropagation();
+										onArchiveWorkspace(workspace.id);
+									}}
+								>
+									<Archive className="size-3.5" strokeWidth={2} aria-hidden />
+								</Button>
+							)
+						)}
 					</div>
 				</div>
 			</div>
@@ -139,5 +171,8 @@ export const WorkspaceRailRowItem = memo(
 	},
 	(previous, next) =>
 		previous.selected === next.selected &&
-		previous.workspace === next.workspace,
+		previous.workspace === next.workspace &&
+		previous.onArchiveWorkspace === next.onArchiveWorkspace &&
+		previous.onRestoreWorkspace === next.onRestoreWorkspace &&
+		previous.onDeleteWorkspace === next.onDeleteWorkspace,
 );

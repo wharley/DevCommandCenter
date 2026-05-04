@@ -194,4 +194,17 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
 
         Ok(workspaces)
     }
+
+    async fn delete_workspace(&self, id: &WorkspaceId) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_workspaces WHERE id = ?1",
+            params![id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
 }

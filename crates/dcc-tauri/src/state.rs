@@ -609,6 +609,10 @@ impl WorkspaceRepo for SessionCommandState {
     async fn list_workspaces(&self) -> Result<Vec<Workspace>> {
         Ok(Vec::new())
     }
+
+    async fn delete_workspace(&self, _id: &WorkspaceId) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[async_trait]

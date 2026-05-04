@@ -10,7 +10,7 @@ use dcc_tauri::{
         WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
         WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
-        WorkspacePrStatusInput, WorkspacePrStatusOutput,
+        WorkspaceIdInput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
     },
     state::WorkspaceCommandState,
 };
@@ -141,4 +141,28 @@ pub async fn workspace_pr_status(
     input: WorkspacePrStatusInput,
 ) -> Result<WorkspacePrStatusOutput, String> {
     dcc_tauri::commands::workspace_commands::workspace_pr_status(input).await
+}
+
+#[tauri::command]
+pub async fn archive_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceIdInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::archive_workspace(state, input).await
+}
+
+#[tauri::command]
+pub async fn restore_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceIdInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::restore_workspace(state, input).await
+}
+
+#[tauri::command]
+pub async fn delete_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceIdInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::delete_workspace(state, input).await
 }

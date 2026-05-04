@@ -254,10 +254,13 @@ export default function App() {
 	const workspacesFromBackend = workspacesQuery.data ?? [];
 	const {
 		allWorkspaces,
-		createWorkspace,
+		archiveWorkspace,
 		cloneWorkspaceFromUrl,
+		createWorkspace,
+		deleteWorkspace,
 		filteredWorkspaces,
 		isCreatingWorkspace,
+		restoreWorkspace,
 		selectedWorkspace,
 		selectedWorkspaceId,
 		setSelectedWorkspaceId,
@@ -1105,6 +1108,9 @@ export default function App() {
 							onCloneWorkspace={() => openWorkspaceDialog("clone")}
 							onOpenSettings={() => setIsSettingsOpen(true)}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+							onArchiveWorkspace={archiveWorkspace}
+							onRestoreWorkspace={restoreWorkspace}
+							onDeleteWorkspace={deleteWorkspace}
 							selectedWorkspaceId={selectedWorkspaceId}
 							workspaces={filteredWorkspaces}
 						/>

@@ -1,26 +1,19 @@
 use dcc_core::domain::{
     model_registry,
-    provider::{HealthStatus, ProviderDescriptor, ProviderId},
+    provider::{Capabilities, HealthStatus, ProviderDescriptor, ProviderId},
 };
 
-use crate::common::{stable_cli_capabilities, CliProviderAdapter};
+use crate::{codex_app_server::CodexAppServerAdapter, common::stable_cli_capabilities};
 
-pub fn adapter() -> CliProviderAdapter {
-    CliProviderAdapter::new(
-        "codex",
-        "Codex",
-        "Stable OpenAI Codex provider for repo-aware coding workflows.",
-        "codex",
-        stable_cli_capabilities(),
-        true,
-    )
+pub fn adapter() -> CodexAppServerAdapter {
+    CodexAppServerAdapter::new(stable_cli_capabilities())
 }
 
 pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
     ProviderDescriptor {
         id: ProviderId("codex".to_string()),
         label: "Codex".to_string(),
-        description: "Stable OpenAI Codex provider for repo-aware coding workflows.".to_string(),
+        description: "OpenAI Codex provider via app-server protocol.".to_string(),
         models: model_registry::CODEX
             .iter()
             .map(|m| m.to_descriptor())
@@ -29,4 +22,8 @@ pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
         health,
         stable: true,
     }
+}
+
+pub fn stable_codex_capabilities() -> Capabilities {
+    stable_cli_capabilities()
 }

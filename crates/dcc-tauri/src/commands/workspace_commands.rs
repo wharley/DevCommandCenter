@@ -14,7 +14,7 @@ use dcc_core::{
         create_workspace_from_url as run_create_workspace_from_url, CreateWorkspaceForRepoInput,
         CreateWorkspaceFromUrlInput,
     },
-    domain::workspace::Workspace,
+    domain::workspace::{Workspace, WorkspaceId, WorkspaceState},
     ports::WorkspaceRepo,
 };
 use dcc_infra::{
@@ -1784,4 +1784,58 @@ pub async fn list_child_directories(
     }
     paths.sort();
     Ok(ListChildDirectoriesOutput { paths })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceIdInput {
+    pub workspace_id: String,
+}
+
+#[tauri::command]
+pub async fn archive_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceIdInput,
+) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
+    let id = WorkspaceId(input.workspace_id);
+    let mut workspace = repo
+        .get_workspace(&id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    workspace.state = WorkspaceState::Archived;
+    repo.save_workspace(&workspace)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn restore_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceIdInput,
+) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
+    let id = WorkspaceId(input.workspace_id);
+    let mut workspace = repo
+        .get_workspace(&id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    workspace.state = WorkspaceState::Ready;
+    repo.save_workspace(&workspace)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceIdInput,
+) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
+    let id = WorkspaceId(input.workspace_id);
+    repo.delete_workspace(&id)
+        .await
+        .map_err(|e| e.to_string())
 }

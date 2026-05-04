@@ -34,6 +34,18 @@ export function createWorkspaceForRepo(input: CreateWorkspaceForRepoInput) {
 	});
 }
 
+export function archiveWorkspace(workspaceId: string) {
+	return invoke<void>(WORKSPACE_METHODS.archiveWorkspace, { input: { workspaceId } });
+}
+
+export function restoreWorkspace(workspaceId: string) {
+	return invoke<void>(WORKSPACE_METHODS.restoreWorkspace, { input: { workspaceId } });
+}
+
+export function deleteWorkspace(workspaceId: string) {
+	return invoke<void>(WORKSPACE_METHODS.deleteWorkspace, { input: { workspaceId } });
+}
+
 export function createWorkspaceFromUrl(input: CreateWorkspaceFromUrlInput) {
 	return invoke<CreateWorkspaceFromUrlOutput>(WORKSPACE_METHODS.createWorkspaceFromUrl, {
 		input,

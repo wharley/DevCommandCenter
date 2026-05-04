@@ -45,11 +45,12 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
 use workspace_commands::{
-    create_workspace_for_repo, create_workspace_from_url, list_child_directories,
-    list_git_tracked_files, list_local_branches, list_workspaces, workspace_gh_pr_create_fill,
-    workspace_gh_pr_view_web, workspace_git_branch_diff, workspace_git_commit_push,
-    workspace_git_discard_file, workspace_git_file_preview, workspace_git_file_preview_content,
-    workspace_git_push, workspace_git_stage_all, workspace_git_stage_file, workspace_git_status,
+    archive_workspace, create_workspace_for_repo, create_workspace_from_url,
+    delete_workspace, list_child_directories, list_git_tracked_files, list_local_branches,
+    list_workspaces, restore_workspace, workspace_gh_pr_create_fill, workspace_gh_pr_view_web,
+    workspace_git_branch_diff, workspace_git_commit_push, workspace_git_discard_file,
+    workspace_git_file_preview, workspace_git_file_preview_content, workspace_git_push,
+    workspace_git_stage_all, workspace_git_stage_file, workspace_git_status,
     workspace_git_unstage_file, workspace_github_cli_status, workspace_pr_status,
 };
 
@@ -8818,6 +8819,9 @@ pub fn run() {
             terminal_save_temp_image,
             create_workspace_for_repo,
             create_workspace_from_url,
+            archive_workspace,
+            restore_workspace,
+            delete_workspace,
             list_local_branches,
             list_git_tracked_files,
             list_child_directories,

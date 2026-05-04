@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { WorkspaceSummary } from "./types";
-import { createWorkspaceForRepo, createWorkspaceFromUrl } from "../../lib/workspace-api";
+import {
+	archiveWorkspace as apiArchiveWorkspace,
+	createWorkspaceForRepo,
+	createWorkspaceFromUrl,
+	deleteWorkspace as apiDeleteWorkspace,
+	restoreWorkspace as apiRestoreWorkspace,
+} from "../../lib/workspace-api";
 import type {
 	CreateWorkspaceForRepoInput,
 	CreateWorkspaceFromUrlInput,
@@ -77,12 +83,40 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 		}
 	}, []);
 
+	const archiveWorkspace = useCallback(async (workspaceId: string) => {
+		await apiArchiveWorkspace(workspaceId);
+		setWorkspaceList((current) =>
+			current.map((w) => (w.id === workspaceId ? { ...w, status: "archived" as const } : w)),
+		);
+	}, []);
+
+	const restoreWorkspace = useCallback(async (workspaceId: string) => {
+		await apiRestoreWorkspace(workspaceId);
+		setWorkspaceList((current) =>
+			current.map((w) => (w.id === workspaceId ? { ...w, status: "ready" as const } : w)),
+		);
+	}, []);
+
+	const deleteWorkspace = useCallback(
+		async (workspaceId: string) => {
+			await apiDeleteWorkspace(workspaceId);
+			setWorkspaceList((current) => current.filter((w) => w.id !== workspaceId));
+			if (selectedWorkspaceId === workspaceId) {
+				setSelectedWorkspaceId(null);
+			}
+		},
+		[selectedWorkspaceId],
+	);
+
 	return {
 		allWorkspaces: workspaceList,
-		createWorkspace,
+		archiveWorkspace,
 		cloneWorkspaceFromUrl,
+		createWorkspace,
+		deleteWorkspace,
 		isCreatingWorkspace,
 		filteredWorkspaces,
+		restoreWorkspace,
 		selectedWorkspace,
 		selectedWorkspaceId,
 		setSelectedWorkspaceId,

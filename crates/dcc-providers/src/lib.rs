@@ -1,5 +1,6 @@
 pub mod claude_code;
 pub mod codex;
+pub mod codex_app_server;
 pub mod common;
 pub mod cursor;
 pub mod gemini;

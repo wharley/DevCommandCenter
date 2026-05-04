@@ -166,6 +166,9 @@ type WorkspacesSidebarProps = {
 	onCloneWorkspace: () => void;
 	onOpenSettings: () => void;
 	onToggleCollapsed: () => void;
+	onArchiveWorkspace?: (workspaceId: string) => void;
+	onRestoreWorkspace?: (workspaceId: string) => void;
+	onDeleteWorkspace?: (workspaceId: string) => void;
 	selectedWorkspaceId: string | null;
 	workspaces: WorkspaceSummary[];
 };
@@ -178,6 +181,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onCloneWorkspace,
 	onOpenSettings,
 	onToggleCollapsed,
+	onArchiveWorkspace,
+	onRestoreWorkspace,
+	onDeleteWorkspace,
 	selectedWorkspaceId,
 	workspaces,
 }: WorkspacesSidebarProps) {
@@ -431,10 +437,13 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					workspace={item.workspace}
 					selected={selectedWorkspaceId === item.workspace.id}
 					onSelect={onSelectWorkspace}
+					onArchiveWorkspace={onArchiveWorkspace}
+					onRestoreWorkspace={onRestoreWorkspace}
+					onDeleteWorkspace={onDeleteWorkspace}
 				/>
 			);
 		},
-		[sectionOpenState, selectedWorkspaceId, toggleSection, onSelectWorkspace],
+		[sectionOpenState, selectedWorkspaceId, toggleSection, onSelectWorkspace, onArchiveWorkspace, onRestoreWorkspace, onDeleteWorkspace],
 	);
 
 	if (collapsed) {
