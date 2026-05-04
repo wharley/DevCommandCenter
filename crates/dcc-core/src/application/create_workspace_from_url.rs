@@ -104,6 +104,14 @@ mod tests {
                 .expect("saved workspaces lock poisoned")
                 .clone())
         }
+
+        async fn delete_workspace(&self, id: &WorkspaceId) -> Result<()> {
+            self.saved
+                .lock()
+                .expect("saved workspaces lock poisoned")
+                .retain(|workspace| &workspace.id != id);
+            Ok(())
+        }
     }
 
     #[derive(Clone)]

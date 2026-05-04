@@ -7,7 +7,7 @@ use std::{
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
@@ -88,9 +88,42 @@ impl SessionCommandState {
 
     fn provider_runtime_config(
         &self,
+        provider_id: &str,
         runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<ProviderRuntimeConfig> {
-        Ok(runtime.cloned().unwrap_or_default())
+        let runtime = runtime.cloned().unwrap_or_default();
+        if self.is_legacy_managed_provider_home(provider_id, &runtime) {
+            return Ok(ProviderRuntimeConfig::default());
+        }
+        Ok(runtime)
+    }
+
+    fn provider_home_root(&self) -> PathBuf {
+        self.app
+            .path()
+            .app_data_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("provider-homes")
+    }
+
+    fn is_legacy_managed_provider_home(
+        &self,
+        provider_id: &str,
+        runtime: &ProviderRuntimeConfig,
+    ) -> bool {
+        if !matches!(provider_id, "claude_code" | "gemini") {
+            return false;
+        }
+
+        if runtime.shadow_home_path.is_some() {
+            return false;
+        }
+
+        let Some(home_path) = runtime.home_path.as_deref() else {
+            return false;
+        };
+
+        PathBuf::from(home_path) == self.provider_home_root().join(provider_id)
     }
 
     pub(crate) fn peek_session(&self, session_id: &SessionId) -> Result<Option<Session>> {
@@ -252,7 +285,8 @@ impl SessionCommandState {
                 session.provider_id
             ))
         })?;
-        let provider_runtime = self.provider_runtime_config(session.provider_runtime.as_ref())?;
+        let provider_runtime =
+            self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
 
         let handle = provider
             .prepare_session(SessionConfig {

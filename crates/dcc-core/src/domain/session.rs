@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::ports::ProviderRuntimeConfig;
 use super::{project::ProjectId, thread::Thread, workspace::WorkspaceId};
+use crate::ports::ProviderRuntimeConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct SessionId(pub String);

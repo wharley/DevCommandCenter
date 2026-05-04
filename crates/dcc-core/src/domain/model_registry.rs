@@ -44,10 +44,12 @@ pub const CODEX_ALIASES: &[(&str, &str)] = &[
 ];
 
 pub const GEMINI_ALIASES: &[(&str, &str)] = &[
-    ("pro", "gemini-3.1-pro"),
-    ("flash", "gemini-3-flash"),
-    ("3.1-pro", "gemini-3.1-pro"),
-    ("3-flash", "gemini-3-flash"),
+    ("pro", "gemini-2.5-pro"),
+    ("flash", "gemini-2.5-flash"),
+    ("3.1-pro", "gemini-2.5-pro"),
+    ("3-flash", "gemini-2.5-flash"),
+    ("gemini-3.1-pro", "gemini-2.5-pro"),
+    ("gemini-3-flash", "gemini-2.5-flash"),
     ("2.5-pro", "gemini-2.5-pro"),
     ("2.5-flash", "gemini-2.5-flash"),
 ];
@@ -118,22 +120,10 @@ pub const CODEX: &[ModelEntry] = &[
 
 pub const GEMINI: &[ModelEntry] = &[
     ModelEntry {
-        id: "gemini-3.1-pro",
-        label: "Gemini 3.1 Pro",
-        description: "Latest Gemini model with extended context and reasoning.",
-        recommended: true,
-    },
-    ModelEntry {
-        id: "gemini-3-flash",
-        label: "Gemini 3 Flash",
-        description: "Fast Gemini 3 variant for high-throughput tasks.",
-        recommended: false,
-    },
-    ModelEntry {
         id: "gemini-2.5-pro",
         label: "Gemini 2.5 Pro",
-        description: "Stable long-context model.",
-        recommended: false,
+        description: "Stable long-context model with the broadest CLI compatibility.",
+        recommended: true,
     },
     ModelEntry {
         id: "gemini-2.5-flash",

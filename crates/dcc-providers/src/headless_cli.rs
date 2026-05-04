@@ -90,6 +90,18 @@ impl HeadlessCliProviderAdapter {
         command
     }
 
+    fn auth_status_command(&self) -> Option<Command> {
+        match self.kind {
+            HeadlessCliKind::Claude => {
+                let mut command = Command::new(&self.binary);
+                command.args(["auth", "status"]);
+                command.env("PATH", augmented_path());
+                Some(command)
+            }
+            HeadlessCliKind::Gemini => None,
+        }
+    }
+
     fn turn_command(&self) -> Command {
         let mut command = Command::new(&self.binary);
         command.stdin(Stdio::null());
@@ -247,11 +259,19 @@ impl HeadlessCliProviderAdapter {
             let mut stream_state = ProviderStreamState::default();
             let mut reader = BufReader::new(stdout).lines();
             let mut saw_terminal_event = false;
+            let mut should_force_kill = false;
 
             while let Ok(Some(line)) = reader.next_line().await {
                 let content = line.trim_end().to_string();
                 if content.is_empty() {
                     continue;
+                }
+
+                if let Some(event) = parse_provider_prompt_line(kind, &content) {
+                    saw_terminal_event = true;
+                    should_force_kill = true;
+                    let _ = runtime_for_task.events_tx.send(event);
+                    break;
                 }
 
                 if let Some(continuation_id) = extract_continuation_id(kind, &content) {
@@ -272,8 +292,12 @@ impl HeadlessCliProviderAdapter {
                             ProviderEvent::Completed { .. } | ProviderEvent::Failed { .. }
                         ) {
                             saw_terminal_event = true;
+                            should_force_kill = true;
                         }
                         let _ = runtime_for_task.events_tx.send(event);
+                        if should_force_kill {
+                            break;
+                        }
                     }
                     ParsedProviderLine::Text(text) => {
                         let _ = runtime_for_task
@@ -287,6 +311,9 @@ impl HeadlessCliProviderAdapter {
             let stderr_output = stderr_task.await.unwrap_or_default();
             let exit_result = {
                 let mut child = child.lock().await;
+                if should_force_kill && child.try_wait().ok().flatten().is_none() {
+                    let _ = child.kill().await;
+                }
                 child.wait().await
             };
 
@@ -336,6 +363,34 @@ fn extract_continuation_id(kind: HeadlessCliKind, line: &str) -> Option<String> 
             .or_else(|| value.get("sessionId"))
             .and_then(Value::as_str)
             .map(str::to_string),
+    }
+}
+
+fn parse_provider_prompt_line(kind: HeadlessCliKind, line: &str) -> Option<ProviderEvent> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    let at = now_iso();
+
+    match kind {
+        HeadlessCliKind::Claude => None,
+        HeadlessCliKind::Gemini => {
+            if lower.contains("opening authentication page in your browser")
+                || lower.contains("do you want to continue?")
+            {
+                Some(ProviderEvent::Failed {
+                    message:
+                        "Gemini CLI is not authenticated. Run `gemini` in a terminal and complete login."
+                            .to_string(),
+                    at,
+                })
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -598,6 +653,24 @@ impl Provider for HeadlessCliProviderAdapter {
     }
 
     async fn healthcheck(&self) -> Result<HealthStatus> {
+        if let Some(mut auth_command) = self.auth_status_command() {
+            match auth_command.output().await {
+                Ok(output) if output.status.success() => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    if let Ok(value) = serde_json::from_str::<Value>(&stdout) {
+                        if value.get("loggedIn").and_then(Value::as_bool) == Some(false) {
+                            return Ok(HealthStatus::Unhealthy {
+                                reason:
+                                    "Claude Code is not authenticated. Run `claude auth login`."
+                                        .to_string(),
+                            });
+                        }
+                    }
+                }
+                Ok(_) | Err(_) => {}
+            }
+        }
+
         match self.binary_command().output().await {
             Ok(output) if output.status.success() => Ok(HealthStatus::Healthy),
             Ok(output) => {
@@ -648,6 +721,19 @@ mod tests {
         assert!(matches!(
             completed,
             ParsedProviderLine::Event(ProviderEvent::ToolCallCompleted { .. })
+        ));
+    }
+
+    #[test]
+    fn detects_gemini_auth_prompt_as_failure() {
+        let event = parse_provider_prompt_line(
+            HeadlessCliKind::Gemini,
+            "Opening authentication page in your browser. Do you want to continue? [Y/n]: ",
+        );
+        assert!(matches!(
+            event,
+            Some(ProviderEvent::Failed { message, .. })
+                if message.contains("Gemini CLI is not authenticated")
         ));
     }
 }

@@ -12,7 +12,9 @@ use crate::{
         thread::{Thread, ThreadId},
         workspace::WorkspaceId,
     },
-    ports::{CoreEvent, EventBus, ProviderRuntimeConfig, SessionEventRepo, SessionRepo, ThreadRepo},
+    ports::{
+        CoreEvent, EventBus, ProviderRuntimeConfig, SessionEventRepo, SessionRepo, ThreadRepo,
+    },
     Result,
 };
 
