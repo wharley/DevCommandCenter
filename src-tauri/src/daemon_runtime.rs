@@ -819,7 +819,10 @@ fn collect_process_metrics(system: &mut System, pid: u32) -> Option<(f64, f64)> 
     // Atualizar informações do processo específico, incluindo CPU
     // Nota: Para medições precisas de CPU, a sysinfo precisa de múltiplas amostragens.
     // A primeira chamada inicializa o estado, as subsequentes retornam valores reais.
-    system.refresh_process_specifics(sysinfo_pid, ProcessRefreshKind::new().with_cpu().with_memory());
+    system.refresh_process_specifics(
+        sysinfo_pid,
+        ProcessRefreshKind::new().with_cpu().with_memory(),
+    );
 
     if let Some(process) = system.process(sysinfo_pid) {
         // CPU em porcentagem
@@ -1298,7 +1301,9 @@ impl DaemonService {
                     ));
                 } else {
                     // Processo ainda está rodando - coletar métricas
-                    if let Some((cpu_percent, memory_mb)) = collect_process_metrics(&mut system, pid) {
+                    if let Some((cpu_percent, memory_mb)) =
+                        collect_process_metrics(&mut system, pid)
+                    {
                         metrics_updates.push((
                             process.runtime.project_id.clone(),
                             process.runtime.process.id.clone(),

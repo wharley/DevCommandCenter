@@ -5,6 +5,7 @@ mod session_commands;
 mod workspace_commands;
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike, Utc};
+use dcc_tauri::state::{SessionCommandState, WorkspaceCommandState};
 use dev_command_center_tauri::daemon_client::{
     ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo,
 };
@@ -44,28 +45,13 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
 use workspace_commands::{
-	create_workspace_for_repo,
-	create_workspace_from_url,
-	workspace_github_cli_status,
-	list_child_directories,
-	list_git_tracked_files,
-	list_local_branches,
-	list_workspaces,
-	workspace_gh_pr_create_fill,
-	workspace_gh_pr_view_web,
-	workspace_git_file_preview,
-	workspace_git_file_preview_content,
-	workspace_git_branch_diff,
-	workspace_git_commit_push,
-	workspace_git_discard_file,
-	workspace_git_push,
-	workspace_git_stage_all,
-	workspace_git_stage_file,
-	workspace_git_status,
-	workspace_git_unstage_file,
-	workspace_pr_status,
+    create_workspace_for_repo, create_workspace_from_url, list_child_directories,
+    list_git_tracked_files, list_local_branches, list_workspaces, workspace_gh_pr_create_fill,
+    workspace_gh_pr_view_web, workspace_git_branch_diff, workspace_git_commit_push,
+    workspace_git_discard_file, workspace_git_file_preview, workspace_git_file_preview_content,
+    workspace_git_push, workspace_git_stage_all, workspace_git_stage_file, workspace_git_status,
+    workspace_git_unstage_file, workspace_github_cli_status, workspace_pr_status,
 };
-use dcc_tauri::state::{SessionCommandState, WorkspaceCommandState};
 
 /// Schema SQLite embutido (`src-tauri/sql/schema.sql`, CREATE IF NOT EXISTS).
 const APP_SCHEMA_SQL: &str = include_str!("../sql/schema.sql");
@@ -3723,9 +3709,7 @@ fn bootstrap_shell_env() {
     let (tx, rx) = std::sync::mpsc::channel();
     let shell_clone = shell.clone();
     thread::spawn(move || {
-        let result = Command::new(&shell_clone)
-            .args(["-ilc", "env"])
-            .output();
+        let result = Command::new(&shell_clone).args(["-ilc", "env"]).output();
         let _ = tx.send(result);
     });
 
@@ -3739,7 +3723,14 @@ fn bootstrap_shell_env() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut new_path: Option<String> = None;
-    let keys_to_apply = ["PATH", "NVM_DIR", "NVM_BIN", "FNM_DIR", "VOLTA_HOME", "PNPM_HOME"];
+    let keys_to_apply = [
+        "PATH",
+        "NVM_DIR",
+        "NVM_BIN",
+        "FNM_DIR",
+        "VOLTA_HOME",
+        "PNPM_HOME",
+    ];
 
     for line in stdout.lines() {
         if let Some(idx) = line.find('=') {
@@ -3757,7 +3748,10 @@ fn bootstrap_shell_env() {
     if let Some(path) = new_path {
         if !path.is_empty() {
             std::env::set_var("PATH", &path);
-            eprintln!("[DCC] PATH atualizado via shell de login: {}", &path[..path.len().min(120)]);
+            eprintln!(
+                "[DCC] PATH atualizado via shell de login: {}",
+                &path[..path.len().min(120)]
+            );
         }
     }
 }
@@ -5619,7 +5613,9 @@ fn git_commit(
         })),
         Err(e) => {
             // Check if error is because there's nothing to commit
-            if e.message.contains("nothing to commit") || e.message.contains("nothing added to commit") {
+            if e.message.contains("nothing to commit")
+                || e.message.contains("nothing added to commit")
+            {
                 Ok(serde_json::json!({
                     "success": false,
                     "error": "Nothing to commit - working tree clean"
@@ -5643,7 +5639,7 @@ fn git_push(project_path: String) -> ApiResult<Value> {
         Err(e) => Ok(serde_json::json!({
             "success": false,
             "error": format!("Push failed: {}", e.message)
-        }))
+        })),
     }
 }
 
@@ -5656,7 +5652,7 @@ fn git_pull(project_path: String) -> ApiResult<Value> {
         Err(e) => Ok(serde_json::json!({
             "success": false,
             "error": format!("Pull failed: {}", e.message)
-        }))
+        })),
     }
 }
 
@@ -5671,7 +5667,7 @@ fn git_reset(project_path: String, git_ref: Option<String>) -> ApiResult<Value> 
         Err(e) => Ok(serde_json::json!({
             "success": false,
             "error": format!("Reset failed: {}", e.message)
-        }))
+        })),
     }
 }
 
@@ -5687,7 +5683,11 @@ fn git_stage_file(project_path: String, file_path: String) -> ApiResult<Value> {
 }
 
 #[tauri::command]
-fn git_discard_file(project_path: String, file_path: String, is_untracked: bool) -> ApiResult<Value> {
+fn git_discard_file(
+    project_path: String,
+    file_path: String,
+    is_untracked: bool,
+) -> ApiResult<Value> {
     let result = if is_untracked {
         run_git(&project_path, &["clean", "-f", "--", &file_path])
     } else {
@@ -8868,7 +8868,10 @@ pub fn run() {
                 .map_err(|e| format!("failed to sync repo configs: {e}"))?;
             eprintln!("[DCC] Database ready at {:?}", db_path);
             app.manage(WorkspaceCommandState::new(db_path.clone()));
-            app.manage(SessionCommandState::new(app.handle().clone(), db_path.clone()));
+            app.manage(SessionCommandState::new(
+                app.handle().clone(),
+                db_path.clone(),
+            ));
             let state = AppState {
                 db_path: Arc::new(db_path),
                 app_data_dir: Arc::new(app_data_dir.clone()),

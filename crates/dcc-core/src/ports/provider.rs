@@ -4,36 +4,44 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::{
-	domain::provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
-	domain::session::SessionId,
-	domain::workspace::WorkspaceId,
-	Result,
+    domain::provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
+    domain::session::SessionId,
+    domain::workspace::WorkspaceId,
+    Result,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub struct SessionConfig {
-	pub workspace_id: WorkspaceId,
-	pub session_id: SessionId,
-	pub model: Option<String>,
-	pub working_directory: Option<String>,
+    pub workspace_id: WorkspaceId,
+    pub session_id: SessionId,
+    pub model: Option<String>,
+    pub working_directory: Option<String>,
+    #[serde(default)]
+    pub provider_runtime: Option<ProviderRuntimeConfig>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderRuntimeConfig {
+    #[serde(default)]
+    pub home_path: Option<String>,
+    #[serde(default)]
+    pub shadow_home_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub enum Input {
-	Text(String),
+    Text(String),
 }
 
 #[async_trait]
 pub trait Provider: Send + Sync {
-	fn id(&self) -> ProviderId;
-	fn capabilities(&self) -> Capabilities;
-	async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle>;
-	async fn send_input(&self, handle: &SessionHandle, input: Input) -> Result<()>;
-	fn stream_events(
-		&self,
-		handle: &SessionHandle,
-	) -> BoxStream<'static, Result<ProviderEvent>>;
-	async fn cancel(&self, handle: &SessionHandle) -> Result<()>;
-	async fn resume(&self, previous: &SessionId) -> Result<SessionHandle>;
-	async fn healthcheck(&self) -> Result<HealthStatus>;
+    fn id(&self) -> ProviderId;
+    fn capabilities(&self) -> Capabilities;
+    async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle>;
+    async fn send_input(&self, handle: &SessionHandle, input: Input) -> Result<()>;
+    fn stream_events(&self, handle: &SessionHandle) -> BoxStream<'static, Result<ProviderEvent>>;
+    async fn cancel(&self, handle: &SessionHandle) -> Result<()>;
+    async fn resume(&self, previous: &SessionId) -> Result<SessionHandle>;
+    async fn healthcheck(&self) -> Result<HealthStatus>;
 }
