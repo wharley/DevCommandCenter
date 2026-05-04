@@ -185,7 +185,17 @@
     },
     "model": {
       "providersTitle": "Providers",
-      "providersHint": "Choose the default runtime for new sessions and composer sends."
+      "providersHint": "Choose the default runtime for new sessions and composer sends.",
+      "runtimeTitle": "Provider homes",
+      "runtimeHint": "Codex, Claude, and Gemini use isolated homes here. Cursor stays untouched.",
+      "runtimeBadge": "T3-style runtime",
+      "runtimeCardBody": "Isolated home directories keep the provider runtime independent from the user shell.",
+      "runtimeReset": "Reset",
+      "runtimeHomePath": "Home path",
+      "runtimeShadowHomePath": "Shadow home path",
+      "runtimeHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex",
+      "runtimeShadowHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex-shadow",
+      "runtimeNoSupportedProviders": "No supported providers are available in the current catalog."
     },
     "shortcuts": {
       "keyboardShortcuts": "Keyboard shortcuts",

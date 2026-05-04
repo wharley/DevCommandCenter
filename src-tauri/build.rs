@@ -15,7 +15,7 @@ use dcc_core::{
         },
         workspace::{Workspace, WorkspaceId, WorkspaceState},
     },
-    ports::events::CoreEvent,
+    ports::{events::CoreEvent, ProviderRuntimeConfig},
 };
 use dcc_tauri::commands::{
     provider_commands::ListProvidersOutput,
@@ -98,6 +98,7 @@ fn main() {
         .typ::<CheckpointId>()
         .typ::<ProviderCatalog>()
         .typ::<ProviderDescriptor>()
+        .typ::<ProviderRuntimeConfig>()
         .typ::<dcc_core::domain::provider::HealthStatus>()
         .typ::<SessionState>()
         .typ::<TurnState>()

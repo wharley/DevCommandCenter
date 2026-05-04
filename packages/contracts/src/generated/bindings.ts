@@ -213,6 +213,11 @@ export type ProviderModelDescriptor = {
 	recommended: boolean,
 };
 
+export type ProviderRuntimeConfig = {
+	homePath?: string | null,
+	shadowHomePath?: string | null,
+};
+
 export type ResumeSessionInput = {
 	sessionId: SessionId,
 };
@@ -230,6 +235,8 @@ export type SendTurnInput = {
 	providerId?: string | null,
 	// When set, replaces the session model before this turn.
 	model?: string | null,
+	// When set, replaces the session runtime config for this provider selection.
+	providerRuntime?: ProviderRuntimeConfig | null,
 	// Plan-before-edit style directives (Helmor plan-style).
 	planMode?: boolean | null,
 	// `low` | `balanced` | `high`
@@ -249,6 +256,7 @@ export type Session = {
 	workspaceId: WorkspaceId,
 	providerId: string,
 	model: string | null,
+	providerRuntime?: ProviderRuntimeConfig | null,
 	state: SessionState,
 	createdAt: string,
 	updatedAt: string,
@@ -287,6 +295,7 @@ export type StartThreadInput = {
 	projectId: ProjectId,
 	providerId: string,
 	model: string | null,
+	providerRuntime?: ProviderRuntimeConfig | null,
 	title: string | null,
 };
 

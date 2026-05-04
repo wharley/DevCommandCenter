@@ -20,7 +20,7 @@ pub struct SessionConfig {
     pub provider_runtime: Option<ProviderRuntimeConfig>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderRuntimeConfig {
     #[serde(default)]

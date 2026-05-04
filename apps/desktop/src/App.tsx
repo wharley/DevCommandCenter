@@ -74,6 +74,15 @@ import {
 	buildPlanImplementationThreadTitle,
 } from "./features/panel/plan-content";
 import { resolveInitialOnboardingOpen } from "./lib/dev-onboarding-override";
+import {
+	clearProviderRuntimeDraft,
+	draftToProviderRuntimeConfig,
+	getProviderRuntimeDraft,
+	readProviderRuntimeSettings,
+	setProviderRuntimeDraft,
+	type ProviderRuntimeSettings,
+	writeProviderRuntimeSettings,
+} from "./features/providers/provider-runtime-settings";
 
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 
@@ -301,6 +310,8 @@ export default function App() {
 
 		return window.localStorage.getItem(SELECTED_MODEL_STORAGE_KEY);
 	});
+	const [providerRuntimeSettings, setProviderRuntimeSettings] =
+		useState<ProviderRuntimeSettings>(() => readProviderRuntimeSettings());
 	const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 	const [inspectorTab, setInspectorTab] = useState<"activity" | "context" | "plan">(
 		"activity",
@@ -341,6 +352,15 @@ export default function App() {
 	const selectedProviderBlockReason = useMemo(
 		() => getProviderUnhealthyReason(selectedProvider),
 		[selectedProvider],
+	);
+	const selectedProviderRuntime = useMemo(
+		() =>
+			draftToProviderRuntimeConfig(
+				selectedProvider
+					? getProviderRuntimeDraft(providerRuntimeSettings, selectedProvider.id)
+					: null,
+			),
+		[providerRuntimeSettings, selectedProvider],
 	);
 	useDockUnreadBadge(allWorkspaces);
 	const effectiveSelectedSessionId =
@@ -416,6 +436,10 @@ export default function App() {
 
 		window.localStorage.removeItem(SELECTED_MODEL_STORAGE_KEY);
 	}, [selectedModelId]);
+
+	useEffect(() => {
+		writeProviderRuntimeSettings(providerRuntimeSettings);
+	}, [providerRuntimeSettings]);
 
 	/** Helmor-style: restore provider/model for this session, else follow backend snapshot. */
 	useEffect(() => {
@@ -546,6 +570,7 @@ export default function App() {
 				projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
 				providerId: selectedProvider.id,
 				model: selectedModel?.id ?? null,
+				providerRuntime: selectedProviderRuntime,
 				title: `${selectedWorkspace.name} session`,
 			});
 
@@ -599,6 +624,7 @@ export default function App() {
 		selectedModel,
 		selectedProvider,
 		selectedProviderBlockReason,
+		selectedProviderRuntime,
 		selectedWorkspace,
 		queryClient,
 	]);
@@ -630,6 +656,7 @@ export default function App() {
 					projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
 					providerId: selectedProvider.id,
 					model: selectedModel?.id ?? null,
+					providerRuntime: selectedProviderRuntime,
 					title: threadTitle,
 				});
 				const sessionId = started.session.id;
@@ -678,6 +705,7 @@ export default function App() {
 					prompt,
 					providerId: selectedProvider.id,
 					model: selectedModel?.id ?? null,
+					providerRuntime: selectedProviderRuntime,
 					planMode: false,
 					effort: "balanced",
 					fastMode: true,
@@ -737,6 +765,7 @@ export default function App() {
 			selectedModel,
 			selectedProvider,
 			selectedProviderBlockReason,
+			selectedProviderRuntime,
 			selectedWorkspace,
 		],
 	);
@@ -765,6 +794,7 @@ export default function App() {
 					projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
 					providerId: selectedProvider.id,
 					model: selectedModel?.id ?? null,
+					providerRuntime: selectedProviderRuntime,
 					title: `${selectedWorkspace.name} session`,
 				});
 
@@ -821,6 +851,7 @@ export default function App() {
 				prompt: trimmedPrompt,
 				providerId: selectedProvider?.id ?? null,
 				model: selectedModel?.id ?? null,
+				providerRuntime: selectedProviderRuntime,
 				planMode: turn.envelope.planMode,
 				effort: turn.envelope.effort,
 				fastMode: turn.envelope.fastMode,
@@ -880,6 +911,7 @@ export default function App() {
 		selectedModel,
 		selectedProvider,
 		selectedProviderBlockReason,
+		selectedProviderRuntime,
 		selectedSessionId,
 		selectedSessionSnapshot,
 		selectedWorkspace,
@@ -906,6 +938,21 @@ export default function App() {
 		},
 		[providerChoices],
 	);
+
+	const handleChangeProviderRuntime = useCallback(
+		(providerId: string, draft: { homePath: string; shadowHomePath: string }) => {
+			setProviderRuntimeSettings((current) =>
+				setProviderRuntimeDraft(current, providerId, draft),
+			);
+		},
+		[],
+	);
+
+	const handleClearProviderRuntime = useCallback((providerId: string) => {
+		setProviderRuntimeSettings((current) =>
+			clearProviderRuntimeDraft(current, providerId),
+		);
+	}, []);
 
 	const handleSelectSession = useCallback((sessionId: string) => {
 		setSelectedSessionId(sessionId);
@@ -1204,6 +1251,9 @@ export default function App() {
 					selectedModelId={selectedModelId}
 					onSelectProvider={handleSelectProvider}
 					onSelectModel={handleSelectModel}
+					providerRuntimeSettings={providerRuntimeSettings}
+					onChangeProviderRuntime={handleChangeProviderRuntime}
+					onClearProviderRuntime={handleClearProviderRuntime}
 				/>
 			<ShortcutCheatsheetDialog
 				open={isShortcutSheetOpen}

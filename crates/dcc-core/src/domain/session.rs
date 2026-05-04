@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::ports::ProviderRuntimeConfig;
 use super::{project::ProjectId, thread::Thread, workspace::WorkspaceId};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
@@ -58,6 +59,8 @@ pub struct Session {
     pub workspace_id: WorkspaceId,
     pub provider_id: String,
     pub model: Option<String>,
+    #[serde(default)]
+    pub provider_runtime: Option<ProviderRuntimeConfig>,
     pub state: SessionState,
     pub created_at: String,
     pub updated_at: String,

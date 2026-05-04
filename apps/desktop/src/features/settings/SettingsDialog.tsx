@@ -23,6 +23,11 @@ import { toast } from "sonner";
 import type { DccTheme } from "@/components/theme-provider";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
+import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
+import type {
+	ProviderRuntimeDraft,
+	ProviderRuntimeSettings,
+} from "@/features/providers/provider-runtime-settings";
 import { getGithubCliStatus, openGithubCliAuthTerminal } from "@/lib/github-cli";
 
 type SettingsDialogProps = {
@@ -36,6 +41,9 @@ type SettingsDialogProps = {
 	onSelectProvider: (providerId: string) => void;
 	selectedModelId: string | null;
 	onSelectModel: (modelId: string) => void;
+	providerRuntimeSettings: ProviderRuntimeSettings;
+	onChangeProviderRuntime: (providerId: string, draft: ProviderRuntimeDraft) => void;
+	onClearProviderRuntime: (providerId: string) => void;
 };
 
 export type SettingsSectionId =
@@ -238,6 +246,9 @@ export function SettingsDialog({
 	onSelectProvider,
 	selectedModelId,
 	onSelectModel,
+	providerRuntimeSettings,
+	onChangeProviderRuntime,
+	onClearProviderRuntime,
 }: SettingsDialogProps) {
 	const { t, i18n } = useTranslation("common");
 	const [activeSection, setActiveSection] = useState<SettingsSectionId>("general");
@@ -484,6 +495,12 @@ export function SettingsDialog({
 										selectedModelId={selectedModelId}
 										onSelectProvider={onSelectProvider}
 										onSelectModel={onSelectModel}
+									/>
+									<ProviderRuntimePanel
+										providers={providers}
+										runtimeSettings={providerRuntimeSettings}
+										onChangeRuntime={onChangeProviderRuntime}
+										onClearRuntime={onClearProviderRuntime}
 									/>
 								</section>
 							) : null}

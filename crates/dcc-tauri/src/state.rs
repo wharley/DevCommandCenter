@@ -94,7 +94,10 @@ impl SessionCommandState {
             .join("provider-homes")
     }
 
-    fn provider_runtime_config(&self, provider_id: &str) -> Result<ProviderRuntimeConfig> {
+    fn default_provider_runtime_config(
+        &self,
+        provider_id: &str,
+    ) -> Result<ProviderRuntimeConfig> {
         let home_path = self.provider_home_root().join(provider_id);
         std::fs::create_dir_all(&home_path)
             .map_err(|error| dcc_core::CoreError::Provider(error.to_string()))?;
@@ -102,6 +105,17 @@ impl SessionCommandState {
             home_path: Some(home_path.to_string_lossy().to_string()),
             shadow_home_path: None,
         })
+    }
+
+    fn provider_runtime_config(
+        &self,
+        provider_id: &str,
+        runtime: Option<&ProviderRuntimeConfig>,
+    ) -> Result<ProviderRuntimeConfig> {
+        if let Some(runtime) = runtime {
+            return Ok(runtime.clone());
+        }
+        self.default_provider_runtime_config(provider_id)
     }
 
     pub(crate) fn peek_session(&self, session_id: &SessionId) -> Result<Option<Session>> {
@@ -242,7 +256,8 @@ impl SessionCommandState {
                 session.provider_id
             ))
         })?;
-        let provider_runtime = self.provider_runtime_config(&session.provider_id)?;
+        let provider_runtime =
+            self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
 
         let handle = provider
             .prepare_session(SessionConfig {

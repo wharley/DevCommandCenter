@@ -10,7 +10,7 @@ use crate::{
             SessionState, Turn, TurnId, TurnState,
         },
     },
-    ports::{CoreEvent, EventBus, SessionEventRepo, SessionRepo},
+    ports::{CoreEvent, EventBus, ProviderRuntimeConfig, SessionEventRepo, SessionRepo},
     Result,
 };
 
@@ -26,6 +26,9 @@ pub struct SendTurnInput {
     /// When set, replaces the session model before this turn.
     #[serde(default)]
     pub model: Option<String>,
+    /// When set, replaces the session runtime config for this provider selection.
+    #[serde(default)]
+    pub provider_runtime: Option<ProviderRuntimeConfig>,
     /// Plan-before-edit style directives (Helmor plan-style).
     #[serde(default)]
     pub plan_mode: Option<bool>,
@@ -40,7 +43,7 @@ pub struct SendTurnInput {
 pub fn merge_send_turn_session_selection(
     session: &Session,
     input: &SendTurnInput,
-) -> (String, Option<String>) {
+) -> (String, Option<String>, Option<ProviderRuntimeConfig>) {
     let merged_provider = input
         .provider_id
         .as_ref()
@@ -62,12 +65,16 @@ pub fn merge_send_turn_session_selection(
             }
         }
     };
-    (merged_provider, merged_model)
+    let merged_provider_runtime = input
+        .provider_runtime
+        .clone()
+        .or_else(|| session.provider_runtime.clone());
+    (merged_provider, merged_model, merged_provider_runtime)
 }
 
 pub fn send_turn_selection_differs_from_session(session: &Session, input: &SendTurnInput) -> bool {
-    let (p, m) = merge_send_turn_session_selection(session, input);
-    p != session.provider_id || m != session.model
+    let (p, m, r) = merge_send_turn_session_selection(session, input);
+    p != session.provider_id || m != session.model || r != session.provider_runtime
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -98,10 +105,15 @@ where
         .await?
         .ok_or_else(|| crate::CoreError::Repository("session not found".to_string()))?;
 
-    let (merged_provider, merged_model) = merge_send_turn_session_selection(&session, &input);
-    if merged_provider != session.provider_id || merged_model != session.model {
+    let (merged_provider, merged_model, merged_provider_runtime) =
+        merge_send_turn_session_selection(&session, &input);
+    if merged_provider != session.provider_id
+        || merged_model != session.model
+        || merged_provider_runtime != session.provider_runtime
+    {
         session.provider_id = merged_provider;
         session.model = merged_model;
+        session.provider_runtime = merged_provider_runtime;
         session.updated_at = now_iso();
         sessions.save_session(&session).await?;
     }
@@ -266,6 +278,7 @@ mod tests {
                 workspace_id: crate::domain::workspace::WorkspaceId("workspace-1".to_string()),
                 provider_id: "codex".to_string(),
                 model: Some("gpt-5-codex".to_string()),
+                provider_runtime: None,
                 state: SessionState::Active,
                 created_at: "2026-05-01T12:00:00Z".to_string(),
                 updated_at: "2026-05-01T12:00:00Z".to_string(),
@@ -296,6 +309,7 @@ mod tests {
                 prompt: "hello".to_string(),
                 provider_id: None,
                 model: None,
+                provider_runtime: None,
                 plan_mode: None,
                 effort: None,
                 fast_mode: None,
@@ -316,5 +330,79 @@ mod tests {
             session_events[1].kind,
             SessionEventKind::TurnStarted { .. }
         ));
+    }
+
+    #[test]
+    fn send_turn_updates_provider_runtime_when_selection_changes() {
+        let sessions = FakeSessionRepo::default();
+        let session_events = FakeSessionEventRepo::default();
+        let events = FakeEventBus::default();
+        let session_id = SessionId("session-2".to_string());
+
+        sessions
+            .sessions
+            .lock()
+            .expect("sessions lock poisoned")
+            .push(Session {
+                id: session_id.clone(),
+                project_id: crate::domain::project::ProjectId("project-1".to_string()),
+                workspace_id: crate::domain::workspace::WorkspaceId("workspace-1".to_string()),
+                provider_id: "codex".to_string(),
+                model: Some("gpt-5-codex".to_string()),
+                provider_runtime: Some(ProviderRuntimeConfig {
+                    home_path: Some("/tmp/codex-home".to_string()),
+                    shadow_home_path: None,
+                }),
+                state: SessionState::Active,
+                created_at: "2026-05-01T12:00:00Z".to_string(),
+                updated_at: "2026-05-01T12:00:00Z".to_string(),
+            });
+        session_events
+            .events
+            .lock()
+            .expect("session events lock poisoned")
+            .push(SessionEventRecord {
+                event_id: "evt-1".to_string(),
+                session_id: session_id.clone(),
+                sequence: 1,
+                occurred_at: "2026-05-01T12:00:00Z".to_string(),
+                kind: SessionEventKind::SessionStarted {
+                    workspace_id: crate::domain::workspace::WorkspaceId("workspace-1".to_string()),
+                    project_id: crate::domain::project::ProjectId("project-1".to_string()),
+                    provider_id: "codex".to_string(),
+                    model: Some("gpt-5-codex".to_string()),
+                },
+            });
+
+        let output = futures::executor::block_on(send_turn(
+            &sessions,
+            &session_events,
+            &events,
+            SendTurnInput {
+                session_id,
+                prompt: "hello".to_string(),
+                provider_id: Some("gemini".to_string()),
+                model: Some("gemini-2.5-pro".to_string()),
+                provider_runtime: Some(ProviderRuntimeConfig {
+                    home_path: Some("/tmp/gemini-home".to_string()),
+                    shadow_home_path: None,
+                }),
+                plan_mode: None,
+                effort: None,
+                fast_mode: None,
+            },
+        ))
+        .expect("send_turn should succeed");
+
+        assert_eq!(output.session.provider_id, "gemini");
+        assert_eq!(output.session.model.as_deref(), Some("gemini-2.5-pro"));
+        assert_eq!(
+            output
+                .session
+                .provider_runtime
+                .as_ref()
+                .and_then(|runtime| runtime.home_path.as_deref()),
+            Some("/tmp/gemini-home")
+        );
     }
 }

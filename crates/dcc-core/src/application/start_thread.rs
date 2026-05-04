@@ -12,7 +12,7 @@ use crate::{
         thread::{Thread, ThreadId},
         workspace::WorkspaceId,
     },
-    ports::{CoreEvent, EventBus, SessionEventRepo, SessionRepo, ThreadRepo},
+    ports::{CoreEvent, EventBus, ProviderRuntimeConfig, SessionEventRepo, SessionRepo, ThreadRepo},
     Result,
 };
 
@@ -23,6 +23,8 @@ pub struct StartThreadInput {
     pub project_id: ProjectId,
     pub provider_id: String,
     pub model: Option<String>,
+    #[serde(default)]
+    pub provider_runtime: Option<ProviderRuntimeConfig>,
     pub title: Option<String>,
 }
 
@@ -70,6 +72,7 @@ where
         workspace_id: input.workspace_id.clone(),
         provider_id: input.provider_id.clone(),
         model: input.model.clone(),
+        provider_runtime: input.provider_runtime.clone(),
         state: SessionState::Active,
         created_at: now.clone(),
         updated_at: now.clone(),
@@ -237,6 +240,7 @@ mod tests {
                 project_id: ProjectId("project-1".to_string()),
                 provider_id: "codex".to_string(),
                 model: Some("gpt-5-codex".to_string()),
+                provider_runtime: None,
                 title: Some("Launch session".to_string()),
             },
         ))
