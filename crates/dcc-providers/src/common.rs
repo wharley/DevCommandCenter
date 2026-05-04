@@ -1181,16 +1181,12 @@ impl Provider for CliProviderAdapter {
 
         let receiver = runtime.events_tx.subscribe();
         let stream = stream::unfold(receiver, |mut receiver| async move {
-            match receiver.recv().await {
-                Ok(event) => Some((Ok(event), receiver)),
-                Err(broadcast::error::RecvError::Closed) => None,
-                Err(broadcast::error::RecvError::Lagged(_)) => Some((
-                    Ok(ProviderEvent::Failed {
-                        message: "provider event stream lagged".to_string(),
-                        at: now_iso(),
-                    }),
-                    receiver,
-                )),
+            loop {
+                match receiver.recv().await {
+                    Ok(event) => return Some((Ok(event), receiver)),
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                }
             }
         });
 

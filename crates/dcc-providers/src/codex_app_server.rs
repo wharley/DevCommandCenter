@@ -636,16 +636,12 @@ impl Provider for CodexAppServerAdapter {
 
         let rx = runtime.events_tx.subscribe();
         Box::pin(stream::unfold(rx, |mut rx| async move {
-            match rx.recv().await {
-                Ok(event) => Some((Ok(event), rx)),
-                Err(broadcast::error::RecvError::Closed) => None,
-                Err(broadcast::error::RecvError::Lagged(_)) => Some((
-                    Ok(ProviderEvent::Failed {
-                        message: "codex event stream lagged".to_string(),
-                        at: now_iso(),
-                    }),
-                    rx,
-                )),
+            loop {
+                match rx.recv().await {
+                    Ok(event) => return Some((Ok(event), rx)),
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                }
             }
         }))
     }
