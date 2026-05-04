@@ -72,6 +72,12 @@ export const PROVIDER_MODEL_REGISTRY = {
 			description: "Fast stable variant.",
 			recommended: false,
 		},
+		{
+			id: "gemini-3-flash-preview",
+			label: "Gemini 3 Flash Preview",
+			description: "Preview Gemini 3 coding model. Availability may vary by account.",
+			recommended: false,
+		},
 	] satisfies ModelEntry[],
 
 	cursor: [
@@ -117,6 +123,8 @@ export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, s
 	gemini: {
 		pro: "gemini-2.5-pro",
 		flash: "gemini-2.5-flash",
+		"3-flash-preview": "gemini-3-flash-preview",
+		"gemini-3-flash-preview": "gemini-3-flash-preview",
 		"3.1-pro": "gemini-2.5-pro",
 		"3-flash": "gemini-2.5-flash",
 		"gemini-3.1-pro": "gemini-2.5-pro",

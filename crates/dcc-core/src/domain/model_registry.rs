@@ -46,6 +46,8 @@ pub const CODEX_ALIASES: &[(&str, &str)] = &[
 pub const GEMINI_ALIASES: &[(&str, &str)] = &[
     ("pro", "gemini-2.5-pro"),
     ("flash", "gemini-2.5-flash"),
+    ("3-flash-preview", "gemini-3-flash-preview"),
+    ("gemini-3-flash-preview", "gemini-3-flash-preview"),
     ("3.1-pro", "gemini-2.5-pro"),
     ("3-flash", "gemini-2.5-flash"),
     ("gemini-3.1-pro", "gemini-2.5-pro"),
@@ -129,6 +131,12 @@ pub const GEMINI: &[ModelEntry] = &[
         id: "gemini-2.5-flash",
         label: "Gemini 2.5 Flash",
         description: "Fast stable variant.",
+        recommended: false,
+    },
+    ModelEntry {
+        id: "gemini-3-flash-preview",
+        label: "Gemini 3 Flash Preview",
+        description: "Preview Gemini 3 coding model. Availability may vary by account.",
         recommended: false,
     },
 ];

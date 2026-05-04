@@ -32,5 +32,9 @@
     "@vitejs/plugin-react": "^6.0.1",
     "typescript": "^5",
     "vite": "^8.0.10"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.2.126",
+    "@anthropic-ai/claude-code": "2.1.126"
   }
 }

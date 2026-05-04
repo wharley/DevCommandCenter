@@ -1,0 +1,11 @@
+{
+  "name": "@dcc/claude-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node src/index.mjs",
+    "stage-vendor": "node scripts/stage-vendor.mjs"
+  }
+}

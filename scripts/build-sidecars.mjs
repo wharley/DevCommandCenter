@@ -5,9 +5,11 @@ import { spawnSync } from 'node:child_process';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(scriptDir, '..');
+const sidecarDir = join(repoRoot, 'sidecar');
 const srcTauriDir = join(repoRoot, 'src-tauri');
 const targetDir = join(srcTauriDir, 'target');
 const releaseDir = join(targetDir, 'release');
+const sidecarDistDir = join(sidecarDir, 'dist');
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -63,6 +65,22 @@ function copySidecar(baseName, hostTriple) {
   copyFileSync(source, target);
 }
 
+function copyCompiledClaudeSidecar(hostTriple) {
+  const baseName = 'dcc-claude-sidecar';
+  const source = join(sidecarDistDir, binaryName(baseName));
+  const target = join(
+    sidecarDistDir,
+    `${baseName}-${hostTriple}${process.platform === 'win32' ? '.exe' : ''}`,
+  );
+
+  if (!existsSync(source)) {
+    throw new Error(`missing built Claude sidecar: ${source}`);
+  }
+
+  mkdirSync(sidecarDistDir, { recursive: true });
+  copyFileSync(source, target);
+}
+
 const hostTriple = detectHostTriple();
 mkdirSync(releaseDir, { recursive: true });
 for (const baseName of ['dcc', 'dccd']) {
@@ -74,7 +92,15 @@ for (const baseName of ['dcc', 'dccd']) {
 
 run('cargo', ['build', '--manifest-path', join(srcTauriDir, 'Cargo.toml'), '--release', '--bins']);
 
+run('yarn', ['build'], {
+  cwd: sidecarDir,
+  env: {
+    ...process.env,
+  },
+});
+copyCompiledClaudeSidecar(hostTriple);
+
 copySidecar('dcc', hostTriple);
 copySidecar('dccd', hostTriple);
 
-console.log(`[build-sidecars] prepared dcc and dccd for ${hostTriple}`);
+console.log(`[build-sidecars] prepared dcc, dccd and Claude sidecar for ${hostTriple}`);
