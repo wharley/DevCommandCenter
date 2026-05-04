@@ -53,9 +53,21 @@ function binaryName(baseName) {
   return process.platform === 'win32' ? `${baseName}.exe` : baseName;
 }
 
+function targetBinaryName(baseName, hostTriple) {
+  return `${baseName}-${hostTriple}${process.platform === 'win32' ? '.exe' : ''}`;
+}
+
+function ensurePlaceholder(dir, baseName, hostTriple) {
+  const placeholder = join(dir, targetBinaryName(baseName, hostTriple));
+  if (!existsSync(placeholder)) {
+    mkdirSync(dir, { recursive: true });
+    copyFileSync(process.execPath, placeholder);
+  }
+}
+
 function copySidecar(baseName, hostTriple) {
   const source = join(releaseDir, binaryName(baseName));
-  const target = join(releaseDir, `${baseName}-${hostTriple}${process.platform === 'win32' ? '.exe' : ''}`);
+  const target = join(releaseDir, targetBinaryName(baseName, hostTriple));
 
   if (!existsSync(source)) {
     throw new Error(`missing built sidecar: ${source}`);
@@ -68,10 +80,7 @@ function copySidecar(baseName, hostTriple) {
 function copyCompiledClaudeSidecar(hostTriple) {
   const baseName = 'dcc-claude-sidecar';
   const source = join(sidecarDistDir, binaryName(baseName));
-  const target = join(
-    sidecarDistDir,
-    `${baseName}-${hostTriple}${process.platform === 'win32' ? '.exe' : ''}`,
-  );
+  const target = join(sidecarDistDir, targetBinaryName(baseName, hostTriple));
 
   if (!existsSync(source)) {
     throw new Error(`missing built Claude sidecar: ${source}`);
@@ -84,11 +93,9 @@ function copyCompiledClaudeSidecar(hostTriple) {
 const hostTriple = detectHostTriple();
 mkdirSync(releaseDir, { recursive: true });
 for (const baseName of ['dcc', 'dccd']) {
-  const placeholder = join(releaseDir, `${baseName}-${hostTriple}${process.platform === 'win32' ? '.exe' : ''}`);
-  if (!existsSync(placeholder)) {
-    copyFileSync(process.execPath, placeholder);
-  }
+  ensurePlaceholder(releaseDir, baseName, hostTriple);
 }
+ensurePlaceholder(sidecarDistDir, 'dcc-claude-sidecar', hostTriple);
 
 run('cargo', ['build', '--manifest-path', join(srcTauriDir, 'Cargo.toml'), '--release', '--bins']);
 
