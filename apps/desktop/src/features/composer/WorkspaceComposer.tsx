@@ -125,6 +125,7 @@ export function WorkspaceComposer({
 	const [isFastMode, setIsFastMode] = useState(true);
 	const [effort, setEffort] = useState<EffortId>("balanced");
 	const [isPlanMode, setIsPlanMode] = useState(false);
+	const [lastSubmittedWithPlanMode, setLastSubmittedWithPlanMode] = useState(false);
 	const [contextDirectories, setContextDirectories] = useState(() =>
 		buildComposerContextDirectories({ workspacePath, workspaceBranch }),
 	);
@@ -144,6 +145,7 @@ export function WorkspaceComposer({
 
 	const submitFromComposer = useCallback(
 		async (rawPrompt: string) => {
+			setLastSubmittedWithPlanMode(isPlanMode);
 			await onSubmitPrompt({
 				rawPrompt,
 				envelope: {
@@ -287,7 +289,7 @@ export function WorkspaceComposer({
 				inputDisabled && "cursor-not-allowed opacity-60",
 			)}
 		>
-			{showPlanFollowUpPrompt ? (
+			{showPlanFollowUpPrompt && lastSubmittedWithPlanMode ? (
 				<ComposerPlanFollowUpBanner
 					planTitle={planTitle}
 					onImplementInNewThread={() => {
