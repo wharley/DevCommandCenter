@@ -344,6 +344,8 @@ export type Workspace = {
 export type WorkspaceContinueFromBaseBranchInput = {
 	workspaceRoot: string,
 	baseBranch: string | null,
+	targetBranch: string | null,
+	newBranchName: string | null,
 };
 
 export type WorkspaceGitBranchDiffInput = {

@@ -49,7 +49,9 @@ function hasFailingChecks(prStatus?: WorkspacePrStatusSummary | null) {
 
 function resolveFromContext(context: CommitModeContext) {
 	const normalized = context.branch.toLowerCase();
-	const prState = context.prStatus?.state?.toLowerCase();
+	const prHeadBranch = context.prStatus?.headBranch;
+	const prBelongsHere = !prHeadBranch || prHeadBranch === context.branch;
+	const prState = prBelongsHere ? context.prStatus?.state?.toLowerCase() : undefined;
 
 	if (prState === "merged") return "merged" as const;
 	if (prState === "closed") return "open-pr" as const;

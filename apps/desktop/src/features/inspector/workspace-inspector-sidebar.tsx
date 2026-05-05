@@ -357,12 +357,14 @@ export function WorkspaceInspectorSidebar({
 		try {
 			const result = await workspaceContinueFromBaseBranch({
 				workspaceRoot: root,
-				baseBranch: workspaceBranch,
+				baseBranch: null,
+				targetBranch: prStatus?.baseBranch ?? null,
+				newBranchName: workspaceName ?? null,
 			});
 			if (!result?.success) {
 				throw new Error("Unable to continue workspace.");
 			}
-			toast.success("Workspace continued", { id: loadingToast });
+			toast.success(`Workspace moved to ${result.branch}`, { id: loadingToast });
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
 			});
@@ -376,7 +378,7 @@ export function WorkspaceInspectorSidebar({
 		} finally {
 			setIsContinuingWorkspace(false);
 		}
-	}, [currentBranch, queryClient, workspaceBranch, workspacePath]);
+	}, [prStatus?.baseBranch, queryClient, workspaceName, workspacePath]);
 
 	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
 	const [manualResize, setManualResize] = useState(false);
@@ -494,7 +496,7 @@ export function WorkspaceInspectorSidebar({
 
 				<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 pb-3 pt-2">
 					<div className="shrink-0">
-						<BranchToolbar branch={workspaceBranch ?? ""} workspacePath={workspacePath} />
+						<BranchToolbar branch={currentBranch} workspacePath={workspacePath} />
 					</div>
 					{pathLine ? (
 						<p

@@ -202,6 +202,8 @@ pub struct WorkspacePrStatusOutput {
 pub struct WorkspaceContinueFromBaseBranchInput {
     pub workspace_root: String,
     pub base_branch: Option<String>,
+    pub target_branch: Option<String>,
+    pub new_branch_name: Option<String>,
 }
 
 fn normalize_git_relative_path(path: &str) -> String {
@@ -1338,28 +1340,55 @@ pub async fn workspace_continue_from_base_branch(
         return Err("workspace_root is empty".to_string());
     }
 
-    let base_branch = input
-        .base_branch
+    // Resolve the target branch to branch off from (the PR's base branch, e.g. "main")
+    let target_branch = input
+        .target_branch
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            input
+                .base_branch
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+        })
+        .map(|v| v.to_string())
         .unwrap_or_else(|| {
             resolve_default_branch_name(root).unwrap_or_else(|_| "main".to_string())
         });
-    let remote_ref = format!("origin/{base_branch}");
+
+    // Fetch latest remote state for the target branch
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["fetch", "origin", &target_branch])
+        .output();
+
+    // Derive a sanitized base name for the new branch from the workspace name
+    let raw_name = input
+        .new_branch_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|v| sanitize_branch_name(v))
+        .unwrap_or_else(|| {
+            std::path::Path::new(root)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(sanitize_branch_name)
+                .unwrap_or_else(|| "workspace".to_string())
+        });
+
+    // Find the first available branch name (raw_name, raw_name-2, raw_name-3, …)
+    let new_branch = next_available_branch_name(root, &raw_name);
+
+    let remote_ref = format!("origin/{target_branch}");
     let checkout = Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["checkout", "-B", &base_branch, &remote_ref])
+        .args(["checkout", "-b", &new_branch, &remote_ref])
         .output()
-        .or_else(|_| {
-            Command::new("git")
-                .arg("-C")
-                .arg(root)
-                .args(["checkout", &base_branch])
-                .output()
-        })
         .map_err(|e| e.to_string())?;
     if !checkout.status.success() {
         return Err(format!(
@@ -1370,9 +1399,52 @@ pub async fn workspace_continue_from_base_branch(
 
     Ok(json!({
         "success": true,
-        "branch": base_branch,
+        "branch": new_branch,
         "workspaceRoot": root,
     }))
+}
+
+fn sanitize_branch_name(name: &str) -> String {
+    let slug: String = name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c.to_ascii_lowercase() } else { '-' })
+        .collect();
+    // Collapse multiple dashes and trim from edges
+    let mut result = String::new();
+    let mut last_dash = true;
+    for c in slug.chars() {
+        if c == '-' {
+            if !last_dash { result.push('-'); }
+            last_dash = true;
+        } else {
+            result.push(c);
+            last_dash = false;
+        }
+    }
+    let result = result.trim_end_matches('-').to_string();
+    if result.is_empty() { "workspace".to_string() } else { result.chars().take(50).collect() }
+}
+
+fn next_available_branch_name(root: &str, base: &str) -> String {
+    let branch_exists = |name: &str| -> bool {
+        Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["rev-parse", "--verify", &format!("refs/heads/{name}")])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    if !branch_exists(base) {
+        return base.to_string();
+    }
+    for i in 2u32..=50 {
+        let candidate = format!("{base}-{i}");
+        if !branch_exists(&candidate) {
+            return candidate;
+        }
+    }
+    format!("{base}-next")
 }
 
 /// File-level preview for staged / unstaged / committed tree rows.

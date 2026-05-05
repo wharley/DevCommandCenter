@@ -6,8 +6,8 @@ use dcc_tauri::{
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, GithubCliStatusInput,
         GithubCliStatusOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
         ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
-        ListLocalBranchesOutput, ListWorkspacesOutput, WorkspaceGitBranchDiffInput,
-        WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
+        ListLocalBranchesOutput, ListWorkspacesOutput, WorkspaceContinueFromBaseBranchInput,
+        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
         WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
         WorkspaceIdInput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
@@ -146,6 +146,13 @@ pub async fn workspace_pr_status(
     input: WorkspacePrStatusInput,
 ) -> Result<WorkspacePrStatusOutput, String> {
     dcc_tauri::commands::workspace_commands::workspace_pr_status(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_continue_from_base_branch(
+    input: WorkspaceContinueFromBaseBranchInput,
+) -> Result<serde_json::Value, String> {
+    dcc_tauri::commands::workspace_commands::workspace_continue_from_base_branch(input).await
 }
 
 #[tauri::command]

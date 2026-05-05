@@ -47,7 +47,8 @@ use uuid::Uuid;
 use workspace_commands::{
     archive_workspace, create_workspace_for_repo, create_workspace_from_url,
     delete_workspace, list_child_directories, list_git_tracked_files, list_local_branches,
-    list_workspaces, restore_workspace, workspace_gh_pr_create_fill, workspace_gh_pr_merge,
+    list_workspaces, restore_workspace, workspace_continue_from_base_branch,
+    workspace_gh_pr_create_fill, workspace_gh_pr_merge,
     workspace_gh_pr_view_web, workspace_git_branch_diff, workspace_git_commit_push,
     workspace_git_discard_file, workspace_git_file_preview, workspace_git_file_preview_content,
     workspace_git_push, workspace_git_stage_all, workspace_git_stage_file,
@@ -8842,6 +8843,7 @@ pub fn run() {
             workspace_git_status,
             workspace_git_unstage_file,
             workspace_pr_status,
+            workspace_continue_from_base_branch,
             session_commands::start_thread,
             session_commands::send_turn,
             session_commands::abort_run,
