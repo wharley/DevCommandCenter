@@ -38,6 +38,7 @@ pub enum CoreEvent {
         session_id: String,
         turn_id: String,
         prompt: String,
+        plan_mode: Option<bool>,
     },
     SessionTurnDelta {
         session_id: String,

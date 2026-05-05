@@ -7,6 +7,7 @@ function sessionTurnStarted(
 	turnId: string,
 	prompt: string,
 	occurredAt = "2026-05-01T12:00:00Z",
+	planMode?: boolean,
 ): SessionEventRecord {
 	return {
 		eventId: `evt-${sessionId}-${turnId}-started`,
@@ -17,6 +18,7 @@ function sessionTurnStarted(
 			type: "turn_started",
 			turnId,
 			prompt,
+			planMode: planMode ?? null,
 		},
 	};
 }
@@ -241,6 +243,7 @@ describe("projectWorkspaceMessages", () => {
 				label: "User",
 				content: "Alpha",
 				createdAt: "2026-05-01T12:00:00Z",
+				planMode: false,
 			},
 		]);
 	});
@@ -262,6 +265,7 @@ describe("projectWorkspaceMessages", () => {
 				label: "User",
 				content: "Alpha",
 				createdAt: "2026-05-01T12:00:00Z",
+				planMode: false,
 			},
 			{
 				id: "assistant-session-a-turn-1",
@@ -305,6 +309,7 @@ describe("projectWorkspaceMessages", () => {
 				label: "User",
 				content: "Alpha",
 				createdAt: "2026-05-01T12:00:00Z",
+				planMode: false,
 			},
 			{
 				id: "assistant-session-a-turn-1",
@@ -337,10 +342,10 @@ describe("projectWorkspaceMessages", () => {
 		]);
 	});
 
-	it("extracts a structured plan from assistant content", () => {
+	it("extracts a structured plan from assistant content when planMode is true", () => {
 		const messages = projectWorkspaceMessages(
 			[
-				sessionTurnStarted("session-a", "turn-1", "Plan request"),
+				sessionTurnStarted("session-a", "turn-1", "Plan request", "2026-05-01T12:00:00Z", true),
 				sessionTurnCompleted("session-a", "turn-1"),
 			],
 			[
@@ -402,6 +407,7 @@ describe("projectWorkspaceMessages", () => {
 				label: "User",
 				content: "Alpha",
 				createdAt: "2026-05-01T12:00:00Z",
+				planMode: false,
 			},
 			{
 				id: "assistant-session-a-turn-1",
@@ -444,6 +450,7 @@ describe("projectWorkspaceMessages", () => {
 				label: "User",
 				content: "Draft prompt",
 				createdAt: "2026-05-01T12:00:00Z",
+				planMode: false,
 			},
 		]);
 	});

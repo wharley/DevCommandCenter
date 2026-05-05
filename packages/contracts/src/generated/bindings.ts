@@ -62,6 +62,7 @@ export type CoreEvent = ({ workspacePrepared: {
 	session_id: string,
 	turn_id: string,
 	prompt: string,
+	plan_mode: boolean | null,
 } }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnReasoningCompleted?: never; sessionTurnReasoningDelta?: never; sessionTurnReasoningStarted?: never; sessionTurnToolCallCompleted?: never; sessionTurnToolCallDelta?: never; sessionTurnToolCallFailed?: never; sessionTurnToolCallStarted?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionTurnDelta: {
 	session_id: string,
 	turn_id: string,
@@ -262,7 +263,7 @@ export type Session = {
 	updatedAt: string,
 };
 
-export type SessionEventKind = { type: "session_started"; workspaceId: WorkspaceId; projectId: ProjectId; providerId: string; model: string | null } | { type: "turn_started"; turnId: TurnId; prompt: string } | { type: "turn_delta"; turnId: TurnId; content: string } | { type: "turn_reasoning_started"; turnId: TurnId; reasoningId: string; label: string | null } | { type: "turn_reasoning_delta"; turnId: TurnId; reasoningId: string; content: string } | { type: "turn_reasoning_completed"; turnId: TurnId; reasoningId: string } | { type: "turn_tool_call_started"; turnId: TurnId; toolCallId: string; action: string; command: string | null; file: string | null } | { type: "turn_tool_call_delta"; turnId: TurnId; toolCallId: string; content: string } | { type: "turn_tool_call_completed"; turnId: TurnId; toolCallId: string } | { type: "turn_tool_call_failed"; turnId: TurnId; toolCallId: string; reason: string | null } | { type: "turn_completed"; turnId: TurnId } | { type: "turn_aborted"; turnId: TurnId; reason: string | null } | { type: "checkpoint_created"; checkpointId: CheckpointId; label: string } | { type: "session_completed" } | { type: "session_aborted"; reason: string | null } | { type: "session_resumed" };
+export type SessionEventKind = { type: "session_started"; workspaceId: WorkspaceId; projectId: ProjectId; providerId: string; model: string | null } | { type: "turn_started"; turnId: TurnId; prompt: string; planMode?: boolean | null } | { type: "turn_delta"; turnId: TurnId; content: string } | { type: "turn_reasoning_started"; turnId: TurnId; reasoningId: string; label: string | null } | { type: "turn_reasoning_delta"; turnId: TurnId; reasoningId: string; content: string } | { type: "turn_reasoning_completed"; turnId: TurnId; reasoningId: string } | { type: "turn_tool_call_started"; turnId: TurnId; toolCallId: string; action: string; command: string | null; file: string | null } | { type: "turn_tool_call_delta"; turnId: TurnId; toolCallId: string; content: string } | { type: "turn_tool_call_completed"; turnId: TurnId; toolCallId: string } | { type: "turn_tool_call_failed"; turnId: TurnId; toolCallId: string; reason: string | null } | { type: "turn_completed"; turnId: TurnId } | { type: "turn_aborted"; turnId: TurnId; reason: string | null } | { type: "checkpoint_created"; checkpointId: CheckpointId; label: string } | { type: "session_completed" } | { type: "session_aborted"; reason: string | null } | { type: "session_resumed" };
 
 export type SessionEventRecord = {
 	eventId: string,

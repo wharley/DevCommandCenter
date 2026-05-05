@@ -156,6 +156,7 @@ where
         kind: SessionEventKind::TurnStarted {
             turn_id: turn_id.clone(),
             prompt: input.prompt.clone(),
+            plan_mode: input.plan_mode,
         },
     };
 
@@ -167,6 +168,7 @@ where
             session_id: input.session_id.0.clone(),
             turn_id: turn_id.0.clone(),
             prompt: input.prompt,
+            plan_mode: input.plan_mode,
         })
         .await?;
 

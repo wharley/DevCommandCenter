@@ -42,6 +42,7 @@ export type WorkspaceMessage = {
 	status?: SessionMessageStatus;
 	annotations?: WorkspaceMessageAnnotation[];
 	plan?: ParsedPlanContent | null;
+	planMode?: boolean;
 };
 
 type TimelineEvent = {
@@ -68,6 +69,7 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					session_id: record.sessionId,
 					turn_id: record.kind.turnId,
 					prompt: record.kind.prompt,
+					plan_mode: record.kind.planMode ?? null,
 				},
 			};
 		case "turn_delta":
@@ -456,6 +458,7 @@ export function projectWorkspaceMessages(
 				label: "User",
 				content: event.sessionTurnStarted.prompt,
 				createdAt: occurredAt,
+				planMode: event.sessionTurnStarted.plan_mode === true,
 			});
 			continue;
 		}
@@ -690,8 +693,16 @@ export function projectWorkspaceMessages(
 		}
 	}
 
+	let lastUserPlanMode = false;
 	for (const message of messages) {
+		if (message.role === "user") {
+			lastUserPlanMode = message.planMode === true;
+			continue;
+		}
 		if (message.role !== "assistant") {
+			continue;
+		}
+		if (!lastUserPlanMode) {
 			continue;
 		}
 		const parsedPlan = parsePlanContent(message.content);

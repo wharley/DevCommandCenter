@@ -82,6 +82,8 @@ pub enum SessionEventKind {
         #[serde(rename = "turnId")]
         turn_id: TurnId,
         prompt: String,
+        #[serde(rename = "planMode", default)]
+        plan_mode: Option<bool>,
     },
     TurnDelta {
         #[serde(rename = "turnId")]
