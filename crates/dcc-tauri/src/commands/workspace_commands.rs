@@ -963,7 +963,7 @@ pub async fn workspace_gh_pr_view_web(input: WorkspaceGitPushInput) -> Result<()
     ))
 }
 
-/// Merge do PR atual via GitHub CLI (`gh pr merge --merge --yes`).
+/// Merge do PR atual via GitHub CLI (`gh pr merge --merge`).
 #[tauri::command]
 pub async fn workspace_gh_pr_merge(input: WorkspaceGitPushInput) -> Result<(), String> {
     let root = input.workspace_root.trim();
@@ -974,7 +974,7 @@ pub async fn workspace_gh_pr_merge(input: WorkspaceGitPushInput) -> Result<(), S
 
     let output = Command::new(gh)
         .current_dir(root)
-        .args(["pr", "merge", "--merge", "--yes"])
+        .args(["pr", "merge", "--merge"])
         .output()
         .map_err(|e| e.to_string())?;
     if output.status.success() {
