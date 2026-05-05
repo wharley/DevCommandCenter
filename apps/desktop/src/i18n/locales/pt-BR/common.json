@@ -148,6 +148,14 @@
       "nextAction": "Mostre a próxima melhor ação para continuar do zero."
     }
   },
+  "composer": {
+    "planFollowUp": {
+      "kicker": "Plano pronto",
+      "fallbackTitle": "Plano ativo da missão",
+      "openPlan": "Abrir plano",
+      "implementInNewThread": "Implementar em nova thread"
+    }
+  },
   "settings": {
     "title": "Configurações",
     "repository": "Repositório",

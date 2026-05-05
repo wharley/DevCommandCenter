@@ -12,6 +12,7 @@ import type { AppUpdateInfo } from "@/features/updater";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import { projectWorkspaceMessages } from "./thread-projection";
 import type { ProviderCatalog, CoreEvent } from "@dcc/contracts";
+import { derivePlanFollowUpState } from "./plan-follow-up";
 
 type WorkspacePanelProps = {
 	workspaceId: string;
@@ -110,24 +111,17 @@ export function WorkspacePanel({
 			),
 		[effectiveSessionId, historyEvents, pendingPrompt, sessionEvents],
 	);
-	const activePlanMessage = useMemo(() => {
-		const assistantMessages = messages.filter(
-			(message) => message.role === "assistant" && message.content.trim().length > 0,
-		);
-		if (assistantMessages.length === 0) {
-			return null;
-		}
-		if (isPlanSessionState(sessionState)) {
-			return assistantMessages[assistantMessages.length - 1] ?? null;
-		}
-		return [...assistantMessages].reverse().find((message) => message.plan?.isPlanLike) ?? null;
-	}, [messages, sessionState]);
+	const planFollowUpState = useMemo(
+		() => derivePlanFollowUpState(messages),
+		[messages],
+	);
+	const activePlanMessage = planFollowUpState.activePlanMessage;
+	const latestPlanMessage = planFollowUpState.latestPlanMessage;
 	const activePlanTitle =
 		activePlanMessage?.plan?.title ?? (activePlanMessage ? "Plan" : null);
 	const activePlanMarkdown =
 		activePlanMessage?.plan?.markdown ?? activePlanMessage?.content ?? null;
-	const showPlanFollowUpPrompt =
-		Boolean(activePlanMessage) && isPlanSessionState(sessionState);
+	const showPlanFollowUpPrompt = planFollowUpState.showPlanFollowUpPrompt;
 
 	return editorSelection ? (
 		<WorkspaceEditorSurface
@@ -177,7 +171,7 @@ export function WorkspacePanel({
 					lastTurnState={lastTurnState}
 					pendingPrompt={pendingPrompt}
 					workspacePath={workspacePath}
-					planMessageId={activePlanMessage?.id ?? null}
+					planMessageId={latestPlanMessage?.id ?? null}
 					onStartSession={onStartSession}
 					onSubmitPrompt={onSubmitPrompt}
 				/>
@@ -206,15 +200,5 @@ export function WorkspacePanel({
 				</div>
 			</div>
 		</div>
-	);
-}
-
-function isPlanSessionState(state: string | null) {
-	return (
-		state === "planning" ||
-		state === "plan_generated" ||
-		state === "generating_code" ||
-		state === "code_ready" ||
-		state === "applying"
 	);
 }

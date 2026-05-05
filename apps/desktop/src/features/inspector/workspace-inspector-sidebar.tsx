@@ -19,6 +19,7 @@ import { InspectorChangesSection } from "./inspector-changes-section";
 import { GitSectionHeader } from "./git-section-header";
 import { projectWorkspaceMessages } from "@/features/panel/thread-projection";
 import { PlanReviewCard } from "@/features/panel/message-components";
+import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import {
 	workspaceContinueFromBaseBranch,
@@ -384,18 +385,12 @@ export function WorkspaceInspectorSidebar({
 		() => projectWorkspaceMessages([], sessionEvents, sessionId, null),
 		[sessionEvents, sessionId],
 	);
-	const activePlanMessage = useMemo(() => {
-		const assistantMessages = planMessages.filter(
-			(message) => message.role === "assistant" && message.content.trim().length > 0,
-		);
-		if (assistantMessages.length === 0) {
-			return null;
-		}
-		if (sessionState === "planning" || sessionState === "plan_generated" || sessionState === "generating_code" || sessionState === "code_ready" || sessionState === "applying") {
-			return assistantMessages[assistantMessages.length - 1] ?? null;
-		}
-		return [...assistantMessages].reverse().find((message) => message.plan?.isPlanLike) ?? null;
-	}, [planMessages, sessionState]);
+	const planFollowUpState = useMemo(
+		() => derivePlanFollowUpState(planMessages),
+		[planMessages],
+	);
+	const activePlanMessage = planFollowUpState.activePlanMessage;
+	const latestPlanMessage = planFollowUpState.latestPlanMessage;
 
 	useEffect(() => {
 		autoOpenedPlanMessageIdRef.current = null;
@@ -407,9 +402,6 @@ export function WorkspaceInspectorSidebar({
 		if (!planMessageId) {
 			return;
 		}
-		if (!isPlanSessionState(sessionState)) {
-			return;
-		}
 		if (activeTab === "plan") {
 			autoOpenedPlanMessageIdRef.current = planMessageId;
 			return;
@@ -419,7 +411,7 @@ export function WorkspaceInspectorSidebar({
 		}
 		autoOpenedPlanMessageIdRef.current = planMessageId;
 		onTabChange("plan");
-	}, [activePlanMessage?.id, activeTab, onTabChange, sessionState]);
+	}, [activePlanMessage?.id, activeTab, onTabChange]);
 
 	useEffect(() => {
 		const root = rootRef.current;
@@ -563,7 +555,7 @@ export function WorkspaceInspectorSidebar({
 							</TabsTrigger>
 								<TabsTrigger value="plan" className="h-9 rounded-none px-3 text-[12px]">
 									{t("inspector.tabs.plan")}
-									{activePlanMessage ? (
+									{latestPlanMessage ? (
 										<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
 											(1)
 										</span>
@@ -662,18 +654,18 @@ export function WorkspaceInspectorSidebar({
 							value="plan"
 							className="mt-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
 						>
-							{activePlanMessage ? (
+							{latestPlanMessage ? (
 								<PlanReviewCard
 									plan={
-										activePlanMessage.plan ?? {
+										latestPlanMessage.plan ?? {
 											title: "Plan",
-											summary: activePlanMessage.content,
+											summary: latestPlanMessage.content,
 											steps: [],
 											approvedPrompts: [],
-											rawMarkdown: activePlanMessage.content,
-											markdown: activePlanMessage.content,
+											rawMarkdown: latestPlanMessage.content,
+											markdown: latestPlanMessage.content,
 											isPlanLike: false,
-											canCollapse: activePlanMessage.content.length > 900,
+											canCollapse: latestPlanMessage.content.length > 900,
 											source: "plain",
 										}
 									}
@@ -695,15 +687,5 @@ export function WorkspaceInspectorSidebar({
 				</Tabs>
 			</section>
 		</div>
-	);
-}
-
-function isPlanSessionState(state: string) {
-	return (
-		state === "planning" ||
-		state === "plan_generated" ||
-		state === "generating_code" ||
-		state === "code_ready" ||
-		state === "applying"
 	);
 }
