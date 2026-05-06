@@ -66,6 +66,7 @@ enum ProviderEnvelope {
 pub(crate) struct ProviderStreamState {
     claude_blocks: HashMap<u64, ClaudeBlockState>,
     claude_streamed_text_emitted: bool,
+    pub(crate) gemini_streamed_text_emitted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -510,6 +511,40 @@ fn parse_claude_terminal_value(
             } else {
                 Some(ProviderEvent::TextDelta { content: text })
             }
+        }
+        "dcc_user_input_request" => {
+            let id = value
+                .get("request_id")
+                .and_then(Value::as_str)
+                .unwrap_or("user-input")
+                .to_string();
+            let questions = value
+                .get("questions")
+                .cloned()
+                .and_then(|raw| serde_json::from_value(raw).ok())
+                .unwrap_or_default();
+            Some(ProviderEvent::UserInputRequested { id, questions, at })
+        }
+        "dcc_user_input_resolved" => {
+            let id = value
+                .get("request_id")
+                .and_then(Value::as_str)
+                .unwrap_or("user-input")
+                .to_string();
+            let answers = value
+                .get("answers")
+                .cloned()
+                .and_then(|raw| serde_json::from_value(raw).ok())
+                .unwrap_or_default();
+            Some(ProviderEvent::UserInputResolved { id, answers, at })
+        }
+        "dcc_plan_captured" => {
+            value
+                .get("plan")
+                .and_then(Value::as_str)
+                .map(|plan| ProviderEvent::TextDelta {
+                    content: plan.to_string(),
+                })
         }
         "result" => {
             if value
@@ -1196,6 +1231,12 @@ impl Provider for CliProviderAdapter {
                         self.binary, error
                     ))
                 })?;
+            }
+            Input::UserInputResponse(_) => {
+                return Err(CoreError::Provider(format!(
+                    "{} does not support mid-turn user input responses",
+                    self.binary
+                )));
             }
         }
 

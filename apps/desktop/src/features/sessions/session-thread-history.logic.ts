@@ -1,4 +1,9 @@
-import type { CoreEvent, SessionEventRecord } from "@dcc/contracts";
+import type {
+	CoreEvent,
+	ProviderUserInputAnswer,
+	ProviderUserInputQuestion,
+	SessionEventRecord,
+} from "@dcc/contracts";
 import { parsePlanContent, type ParsedPlanContent } from "@/features/panel/plan-content";
 
 export type SessionMessageStatus = {
@@ -30,6 +35,14 @@ export type WorkspaceMessageAnnotation =
 				type: "failed";
 				reason?: string;
 			};
+	  }
+	| {
+			type: "user-input";
+			id: string;
+			questions: ProviderUserInputQuestion[];
+			answers: ProviderUserInputAnswer[];
+			streaming?: boolean;
+			createdAt?: string;
 	  };
 
 export type WorkspaceMessage = {
@@ -143,6 +156,24 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					reason: record.kind.reason,
 				},
 			};
+		case "turn_user_input_requested":
+			return {
+				sessionTurnUserInputRequested: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId,
+					request_id: record.kind.requestId,
+					questions: record.kind.questions,
+				},
+			};
+		case "turn_user_input_resolved":
+			return {
+				sessionTurnUserInputResolved: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId,
+					request_id: record.kind.requestId,
+					answers: record.kind.answers,
+				},
+			};
 		case "turn_completed":
 			return {
 				sessionTurnCompleted: {
@@ -230,6 +261,12 @@ function getEventSessionId(event: CoreEvent): string | null {
 	if ("sessionTurnToolCallFailed" in event && event.sessionTurnToolCallFailed) {
 		return event.sessionTurnToolCallFailed.session_id;
 	}
+	if ("sessionTurnUserInputRequested" in event && event.sessionTurnUserInputRequested) {
+		return event.sessionTurnUserInputRequested.session_id;
+	}
+	if ("sessionTurnUserInputResolved" in event && event.sessionTurnUserInputResolved) {
+		return event.sessionTurnUserInputResolved.session_id;
+	}
 	if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
 		return event.sessionTurnCompleted.session_id;
 	}
@@ -256,6 +293,8 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionTurnToolCallDelta" in event) return "session.turn.tool-call.delta";
 	if ("sessionTurnToolCallCompleted" in event) return "session.turn.tool-call.completed";
 	if ("sessionTurnToolCallFailed" in event) return "session.turn.tool-call.failed";
+	if ("sessionTurnUserInputRequested" in event) return "session.turn.user-input.requested";
+	if ("sessionTurnUserInputResolved" in event) return "session.turn.user-input.resolved";
 	if ("sessionTurnCompleted" in event) return "session.turn.completed";
 	if ("sessionTurnAborted" in event) return "session.turn.aborted";
 	if ("sessionCheckpointCreated" in event) return "session.checkpoint.created";
@@ -296,6 +335,17 @@ function eventSummary(event: CoreEvent): string {
 	}
 	if ("sessionTurnToolCallFailed" in event && event.sessionTurnToolCallFailed) {
 		return event.sessionTurnToolCallFailed.reason ?? "Tool call failed";
+	}
+	if ("sessionTurnUserInputRequested" in event && event.sessionTurnUserInputRequested) {
+		return (
+			event.sessionTurnUserInputRequested.questions[0]?.question ??
+			"User input requested"
+		);
+	}
+	if ("sessionTurnUserInputResolved" in event && event.sessionTurnUserInputResolved) {
+		return event.sessionTurnUserInputResolved.answers
+			.map((answer) => `${answer.question}: ${answer.answer}`)
+			.join(" · ");
 	}
 	if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
 		return event.sessionTurnAborted.reason ?? "Turn aborted";
@@ -430,6 +480,10 @@ function getOrCreateAnnotation(
 	return annotation;
 }
 
+function isHiddenToolAction(action: string | undefined) {
+	return action === "AskUserQuestion" || action === "ExitPlanMode";
+}
+
 export function projectWorkspaceMessages(
 	historyEvents: SessionEventRecord[],
 	liveEvents: CoreEvent[],
@@ -545,6 +599,9 @@ export function projectWorkspaceMessages(
 		}
 
 		if ("sessionTurnToolCallStarted" in event && event.sessionTurnToolCallStarted) {
+			if (isHiddenToolAction(event.sessionTurnToolCallStarted.action)) {
+				continue;
+			}
 			const key = event.sessionTurnToolCallStarted.turn_id;
 			const message = ensureAssistantMessage(
 				messages,
@@ -575,15 +632,12 @@ export function projectWorkspaceMessages(
 				key,
 				turnStartedAtByTurnId.get(key) ?? occurredAt,
 			);
-			const annotation = getOrCreateAnnotation(message, {
-				type: "tool-call",
-				id: event.sessionTurnToolCallDelta.tool_call_id,
-				action: "Tool call",
-				content: "",
-				streaming: true,
-				createdAt: occurredAt,
-			});
-			if (annotation.type === "tool-call") {
+			const annotation = message.annotations?.find(
+				(item) =>
+					item.type === "tool-call" &&
+					item.id === event.sessionTurnToolCallDelta.tool_call_id,
+			);
+			if (annotation && annotation.type === "tool-call") {
 				annotation.content = `${annotation.content}${event.sessionTurnToolCallDelta.content}`;
 				annotation.streaming = true;
 				annotation.createdAt ??= occurredAt;
@@ -619,6 +673,42 @@ export function projectWorkspaceMessages(
 					type: "failed",
 					reason: event.sessionTurnToolCallFailed.reason ?? "Tool call failed",
 				};
+			}
+			continue;
+		}
+
+		if ("sessionTurnUserInputRequested" in event && event.sessionTurnUserInputRequested) {
+			const key = event.sessionTurnUserInputRequested.turn_id;
+			const message = ensureAssistantMessage(
+				messages,
+				assistantBuckets,
+				event.sessionTurnUserInputRequested.session_id,
+				key,
+				turnStartedAtByTurnId.get(key) ?? occurredAt,
+			);
+			getOrCreateAnnotation(message, {
+				type: "user-input",
+				id: event.sessionTurnUserInputRequested.request_id,
+				questions: event.sessionTurnUserInputRequested.questions,
+				answers: [],
+				streaming: true,
+				createdAt: occurredAt,
+			});
+			continue;
+		}
+
+		if ("sessionTurnUserInputResolved" in event && event.sessionTurnUserInputResolved) {
+			const key = event.sessionTurnUserInputResolved.turn_id;
+			const message = assistantBuckets.get(key);
+			const annotation = message?.annotations?.find(
+				(item) =>
+					item.type === "user-input" &&
+					item.id === event.sessionTurnUserInputResolved.request_id,
+			);
+			if (annotation && annotation.type === "user-input") {
+				annotation.answers = event.sessionTurnUserInputResolved.answers;
+				annotation.streaming = false;
+				annotation.createdAt ??= occurredAt;
 			}
 			continue;
 		}

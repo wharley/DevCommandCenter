@@ -5,7 +5,12 @@ use dcc_core::application::{
     SendTurnOutput, StartThreadInput, StartThreadOutput,
 };
 use dcc_core::domain::session::{SessionEventRecord, WorkspaceSessionSummary};
-use dcc_tauri::{commands::session_commands as session_command_impl, state::SessionCommandState};
+use dcc_tauri::{
+    commands::session_commands::{
+        self as session_command_impl, RespondToUserInputInput, RespondToUserInputOutput,
+    },
+    state::SessionCommandState,
+};
 
 #[tauri::command]
 pub async fn start_thread(
@@ -58,4 +63,13 @@ pub async fn list_workspace_sessions(
     workspace_id: String,
 ) -> Result<Vec<WorkspaceSessionSummary>, String> {
     session_command_impl::list_workspace_sessions(state, workspace_id).await
+}
+
+#[tauri::command]
+pub async fn respond_to_user_input(
+    state: State<'_, SessionCommandState>,
+    app: AppHandle,
+    input: RespondToUserInputInput,
+) -> Result<RespondToUserInputOutput, String> {
+    session_command_impl::respond_to_user_input(state, app, input).await
 }

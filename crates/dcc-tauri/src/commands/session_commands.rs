@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+use specta::Type;
 use tauri::{AppHandle, State};
 
 use dcc_core::{
@@ -8,10 +10,28 @@ use dcc_core::{
         ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
     },
     domain::session::{SessionEventRecord, WorkspaceSessionSummary},
-    ports::{Input, ProviderTurnInput, SessionEventRepo},
+    ports::{
+        provider::ProviderUserInputAnswer, provider::ProviderUserInputResponse, Input,
+        ProviderTurnInput, SessionEventRepo,
+    },
 };
 
 use crate::state::SessionCommandState;
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RespondToUserInputInput {
+    pub session_id: String,
+    pub request_id: String,
+    #[serde(default)]
+    pub answers: Vec<ProviderUserInputAnswer>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RespondToUserInputOutput {
+    pub ok: bool,
+}
 
 #[tauri::command]
 pub async fn start_thread(
@@ -141,4 +161,24 @@ pub async fn list_workspace_sessions(
     state
         .list_workspace_sessions(&workspace_id)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn respond_to_user_input(
+    state: State<'_, SessionCommandState>,
+    _app: AppHandle,
+    input: RespondToUserInputInput,
+) -> Result<RespondToUserInputOutput, String> {
+    let session_id = dcc_core::domain::session::SessionId(input.session_id);
+    state
+        .send_provider_input(
+            &session_id,
+            Input::UserInputResponse(ProviderUserInputResponse {
+                request_id: input.request_id,
+                answers: input.answers,
+            }),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(RespondToUserInputOutput { ok: true })
 }

@@ -21,6 +21,7 @@ type ActiveThreadViewportProps = {
 	pendingPrompt: string | null;
 	workspacePath: string | null;
 	planMessageId: string | null;
+	sessionId: string | null;
 	onStartSession: () => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 };
@@ -37,6 +38,7 @@ export function ActiveThreadViewport({
 	pendingPrompt,
 	workspacePath,
 	planMessageId,
+	sessionId,
 	onStartSession,
 	onSubmitPrompt,
 }: ActiveThreadViewportProps) {
@@ -138,6 +140,7 @@ export function ActiveThreadViewport({
 												plan={message.plan ?? null}
 												workspacePath={workspacePath}
 												isPlanContext={message.id === planMessageId}
+												sessionId={sessionId}
 											/>
 										</div>
 									);

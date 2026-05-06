@@ -946,6 +946,11 @@ impl Provider for CursorProvider {
                 ),
                 turn.plan_mode,
             ),
+            Input::UserInputResponse(_) => {
+                return Err(CoreError::Provider(
+                    "Cursor does not support mid-turn user input responses".to_string(),
+                ));
+            }
         };
         self.spawn_cursor_turn(runtime, prompt, plan_mode).await
     }

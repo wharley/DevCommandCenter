@@ -38,6 +38,12 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
         CoreEvent::SessionTurnToolCallFailed { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/tool-call/failed")
         }
+        CoreEvent::SessionTurnUserInputRequested { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/user-input/requested")
+        }
+        CoreEvent::SessionTurnUserInputResolved { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/user-input/resolved")
+        }
         CoreEvent::SessionTurnCompleted { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/completed")
         }

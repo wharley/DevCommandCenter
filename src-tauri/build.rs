@@ -19,6 +19,7 @@ use dcc_core::{
 };
 use dcc_tauri::commands::{
     provider_commands::ListProvidersOutput,
+    session_commands::{RespondToUserInputInput, RespondToUserInputOutput},
     workspace_commands::{
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, GithubCliStatusInput,
         GithubCliStatusOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
@@ -40,6 +41,9 @@ use tauri_specta::Builder;
 struct WorkspaceMethods {
     create_workspace_for_repo: String,
     create_workspace_from_url: String,
+    archive_workspace: String,
+    restore_workspace: String,
+    delete_workspace: String,
     workspace_github_cli_status: String,
     list_local_branches: String,
     list_git_tracked_files: String,
@@ -71,6 +75,7 @@ struct SessionMethods {
     resume_session: String,
     list_thread_events: String,
     list_workspace_sessions: String,
+    respond_to_user_input: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -145,12 +150,17 @@ fn main() {
         .typ::<AbortRunOutput>()
         .typ::<ResumeSessionInput>()
         .typ::<ResumeSessionOutput>()
+        .typ::<RespondToUserInputInput>()
+        .typ::<RespondToUserInputOutput>()
         .typ::<CoreEvent>()
         .constant(
             "WORKSPACE_METHODS",
             WorkspaceMethods {
                 create_workspace_for_repo: "create_workspace_for_repo".to_string(),
                 create_workspace_from_url: "create_workspace_from_url".to_string(),
+                archive_workspace: "archive_workspace".to_string(),
+                restore_workspace: "restore_workspace".to_string(),
+                delete_workspace: "delete_workspace".to_string(),
                 workspace_github_cli_status: "workspace_github_cli_status".to_string(),
                 list_local_branches: "list_local_branches".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),
@@ -185,6 +195,7 @@ fn main() {
             resume_session: "resume_session".to_string(),
             list_thread_events: "list_thread_events".to_string(),
             list_workspace_sessions: "list_workspace_sessions".to_string(),
+            respond_to_user_input: "respond_to_user_input".to_string(),
         },
     );
 

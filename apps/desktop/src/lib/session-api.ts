@@ -9,6 +9,8 @@ import type {
 import type {
 	AbortRunInput,
 	AbortRunOutput,
+	RespondToUserInputInput,
+	RespondToUserInputOutput,
 	ResumeSessionInput,
 	ResumeSessionOutput,
 	SendTurnInput,
@@ -33,6 +35,10 @@ export function resumeSession(input: ResumeSessionInput) {
 	return invoke<ResumeSessionOutput>(SESSION_METHODS.resumeSession, { input });
 }
 
+export function respondToUserInput(input: RespondToUserInputInput) {
+	return invoke<RespondToUserInputOutput>(SESSION_METHODS.respondToUserInput, { input });
+}
+
 export function loadSessionThreadEvents(sessionId: string) {
 	return invoke<SessionEventRecord[]>(SESSION_METHODS.listThreadEvents, {
 		sessionId,
@@ -53,6 +59,15 @@ const SESSION_EVENT_NAMES = [
 	"dcc/session/resumed",
 	"dcc/session/turn/started",
 	"dcc/session/turn/delta",
+	"dcc/session/turn/reasoning/started",
+	"dcc/session/turn/reasoning/delta",
+	"dcc/session/turn/reasoning/completed",
+	"dcc/session/turn/tool-call/started",
+	"dcc/session/turn/tool-call/delta",
+	"dcc/session/turn/tool-call/completed",
+	"dcc/session/turn/tool-call/failed",
+	"dcc/session/turn/user-input/requested",
+	"dcc/session/turn/user-input/resolved",
 	"dcc/session/turn/completed",
 	"dcc/session/turn/aborted",
 	"dcc/session/checkpoint/created",

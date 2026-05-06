@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -83,6 +84,146 @@ function buildSystemPrompt(fastMode) {
 	};
 }
 
+function normalizeQuestions(input) {
+	const rawQuestions = Array.isArray(input?.questions)
+		? input.questions
+		: typeof input?.question === "string"
+			? [
+					{
+						header: "Question",
+						question: input.question,
+						options: Array.isArray(input?.options) ? input.options : [],
+					},
+				]
+			: [];
+
+	return rawQuestions.map((question, index) => ({
+		id:
+			typeof question?.question === "string" && question.question.trim().length > 0
+				? question.question.trim()
+				: `q-${index + 1}`,
+		header:
+			typeof question?.header === "string" && question.header.trim().length > 0
+				? question.header.trim()
+				: `Question ${index + 1}`,
+		question:
+			typeof question?.question === "string" ? question.question.trim() : "",
+		options: Array.isArray(question?.options)
+			? question.options
+					.map((option) => ({
+						label: typeof option?.label === "string" ? option.label.trim() : "",
+						description:
+							typeof option?.description === "string"
+								? option.description.trim()
+								: "",
+					}))
+					.filter((option) => option.label.length > 0)
+			: [],
+	}));
+}
+
+function normalizeAnswerEntries(rawAnswers) {
+	if (Array.isArray(rawAnswers)) {
+		return rawAnswers
+			.map((entry) => ({
+				question:
+					typeof entry?.question === "string" ? entry.question.trim() : "",
+				answer: typeof entry?.answer === "string" ? entry.answer.trim() : "",
+			}))
+			.filter((entry) => entry.question.length > 0);
+	}
+
+	if (!rawAnswers || typeof rawAnswers !== "object") {
+		return [];
+	}
+
+	return Object.entries(rawAnswers)
+		.map(([question, answer]) => ({
+			question: question.trim(),
+			answer: typeof answer === "string" ? answer.trim() : "",
+		}))
+		.filter((entry) => entry.question.length > 0);
+}
+
+function answersToMap(answers) {
+	return Object.fromEntries(
+		answers
+			.filter((entry) => entry.question.length > 0)
+			.map((entry) => [entry.question, entry.answer]),
+	);
+}
+
+function extractPlanMarkdown(input) {
+	if (!input || typeof input !== "object") {
+		return null;
+	}
+
+	return typeof input.plan === "string" && input.plan.trim().length > 0
+		? input.plan.trim()
+		: null;
+}
+
+async function handleAskUserQuestion(input, options, state) {
+	const requestId =
+		typeof options?.toolUseID === "string" && options.toolUseID.trim().length > 0
+			? options.toolUseID.trim()
+			: randomUUID();
+	const questions = normalizeQuestions(input);
+	let aborted = false;
+
+	emit({
+		type: "dcc_user_input_request",
+		request_id: requestId,
+		questions,
+	});
+
+	const answers = await new Promise((resolve) => {
+		state.pendingUserInputs.set(requestId, { resolve });
+		options.signal.addEventListener(
+			"abort",
+			() => {
+				if (!state.pendingUserInputs.delete(requestId)) {
+					return;
+				}
+				aborted = true;
+				resolve([]);
+			},
+			{ once: true },
+		);
+	});
+
+	state.pendingUserInputs.delete(requestId);
+
+	const normalizedAnswers = normalizeAnswerEntries(answers);
+	emit({
+		type: "dcc_user_input_resolved",
+		request_id: requestId,
+		answers: normalizedAnswers,
+	});
+
+	if (aborted) {
+		return {
+			behavior: "deny",
+			message: "User input request was cancelled.",
+		};
+	}
+
+	return {
+		behavior: "allow",
+		updatedInput: {
+			...(input && typeof input === "object" ? input : {}),
+			questions: Array.isArray(input?.questions)
+				? input.questions
+				: questions.map((question) => ({
+						header: question.header,
+						question: question.question,
+						options: question.options,
+					})),
+			answers: answersToMap(normalizedAnswers),
+		},
+	};
+}
+
 async function runTurn(payload, state) {
 	const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
 	const permissionMode = payload?.planMode === true ? "plan" : "bypassPermissions";
@@ -101,6 +242,30 @@ async function runTurn(payload, state) {
 			settingSources: ["user", "project", "local"],
 			effort: normalizeEffort(payload?.effort),
 			systemPrompt: buildSystemPrompt(payload?.fastMode),
+			canUseTool: async (toolName, input, options) => {
+				if (toolName === "AskUserQuestion") {
+					return handleAskUserQuestion(input, options, state);
+				}
+				if (toolName === "ExitPlanMode") {
+					const plan = extractPlanMarkdown(input);
+					if (plan) {
+						emit({
+							type: "dcc_plan_captured",
+							tool_use_id: options?.toolUseID ?? null,
+							plan,
+						});
+					}
+					return {
+						behavior: "deny",
+						message:
+							"The client captured your proposed plan. Stop here and wait for the user's next turn.",
+					};
+				}
+				return {
+					behavior: "allow",
+					updatedInput: input,
+				};
+			},
 		},
 	});
 	let sawTerminalResult = false;
@@ -145,6 +310,8 @@ async function main() {
 	const state = {
 		resumeSessionId: null,
 		running: false,
+		activeTurnPromise: null,
+		pendingUserInputs: new Map(),
 	};
 
 	const rl = readline.createInterface({
@@ -172,6 +339,23 @@ async function main() {
 			continue;
 		}
 
+		if (payload.type === "user_input_response") {
+			const requestId =
+				typeof payload.requestId === "string" ? payload.requestId.trim() : "";
+			const pending = requestId ? state.pendingUserInputs.get(requestId) : null;
+			if (!pending) {
+				emit({
+					type: "result",
+					is_error: true,
+					result: "unknown pending user input request",
+					session_id: state.resumeSessionId ?? null,
+				});
+				continue;
+			}
+			pending.resolve(normalizeAnswerEntries(payload.answers));
+			continue;
+		}
+
 		if (payload.type !== "input" || typeof payload.prompt !== "string") {
 			emit({
 				type: "result",
@@ -193,11 +377,24 @@ async function main() {
 		}
 
 		state.running = true;
-		try {
-			await runTurn(payload, state);
-		} finally {
-			state.running = false;
-		}
+		state.activeTurnPromise = runTurn(payload, state)
+			.catch((error) => {
+				emit({
+					type: "result",
+					is_error: true,
+					result:
+						error instanceof Error ? error.message : String(error),
+					session_id: state.resumeSessionId ?? null,
+				});
+			})
+			.finally(() => {
+				for (const pending of state.pendingUserInputs.values()) {
+					pending.resolve([]);
+				}
+				state.pendingUserInputs.clear();
+				state.running = false;
+				state.activeTurnPromise = null;
+			});
 	}
 }
 

@@ -5,7 +5,7 @@ pub mod workspace_commands;
 
 pub use provider_commands::list_providers;
 pub use session_commands::{
-    abort_run, list_thread_events, resume_session, send_turn, start_thread,
+    abort_run, list_thread_events, respond_to_user_input, resume_session, send_turn, start_thread,
 };
 pub use workspace_commands::{
     archive_workspace, create_workspace_for_repo, create_workspace_from_url, delete_workspace,

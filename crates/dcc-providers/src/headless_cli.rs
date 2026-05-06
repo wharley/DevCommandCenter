@@ -298,7 +298,9 @@ impl HeadlessCliProviderAdapter {
                     HeadlessCliKind::Claude => {
                         parse_provider_stream_line(&content, &mut stream_state)
                     }
-                    HeadlessCliKind::Gemini => parse_gemini_stream_line(&content),
+                    HeadlessCliKind::Gemini => {
+                        parse_gemini_stream_line(&content, &mut stream_state)
+                    }
                 };
 
                 match parsed {
@@ -410,7 +412,7 @@ fn parse_provider_prompt_line(kind: HeadlessCliKind, line: &str) -> Option<Provi
     }
 }
 
-fn parse_gemini_stream_line(line: &str) -> ParsedProviderLine {
+fn parse_gemini_stream_line(line: &str, state: &mut ProviderStreamState) -> ParsedProviderLine {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return ParsedProviderLine::Ignored;
@@ -421,18 +423,25 @@ fn parse_gemini_stream_line(line: &str) -> ParsedProviderLine {
         Err(_) => return ParsedProviderLine::Text(trimmed.to_string()),
     };
 
-    match parse_gemini_stream_value(&value) {
+    match parse_gemini_stream_value(&value, state) {
+        Some(ProviderEvent::TextDelta { content }) => ParsedProviderLine::Text(content),
         Some(event) => ParsedProviderLine::Event(event),
         None => ParsedProviderLine::Ignored,
     }
 }
 
-fn parse_gemini_stream_value(value: &Value) -> Option<ProviderEvent> {
+fn parse_gemini_stream_value(
+    value: &Value,
+    state: &mut ProviderStreamState,
+) -> Option<ProviderEvent> {
     let kind = value.get("type").and_then(Value::as_str)?;
     let at = now_iso();
 
     match kind {
-        "init" => None,
+        "init" => {
+            state.gemini_streamed_text_emitted = false;
+            None
+        }
         "message" => {
             let role = value.get("role").and_then(Value::as_str)?;
             if role != "assistant" {
@@ -442,6 +451,7 @@ fn parse_gemini_stream_value(value: &Value) -> Option<ProviderEvent> {
             if content.is_empty() {
                 None
             } else {
+                state.gemini_streamed_text_emitted = true;
                 Some(ProviderEvent::TextDelta {
                     content: content.to_string(),
                 })
@@ -521,6 +531,12 @@ fn parse_gemini_stream_value(value: &Value) -> Option<ProviderEvent> {
                 .and_then(Value::as_str)
                 .unwrap_or("success");
             if status == "success" {
+                if !state.gemini_streamed_text_emitted {
+                    if let Some(text) = gemini_result_text(value) {
+                        state.gemini_streamed_text_emitted = true;
+                        return Some(ProviderEvent::TextDelta { content: text });
+                    }
+                }
                 Some(ProviderEvent::Completed { at })
             } else {
                 Some(ProviderEvent::Failed {
@@ -536,6 +552,36 @@ fn parse_gemini_stream_value(value: &Value) -> Option<ProviderEvent> {
         }
         _ => None,
     }
+}
+
+fn gemini_result_text(value: &Value) -> Option<String> {
+    let direct = value
+        .get("result")
+        .or_else(|| value.get("output"))
+        .or_else(|| value.get("content"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string);
+    if direct.is_some() {
+        return direct;
+    }
+
+    let nested = value
+        .get("result")
+        .or_else(|| value.get("output"))
+        .and_then(Value::as_object)?;
+
+    nested
+        .get("plan")
+        .or_else(|| nested.get("plan_markdown"))
+        .or_else(|| nested.get("planMarkdown"))
+        .or_else(|| nested.get("text"))
+        .or_else(|| nested.get("content"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
 }
 
 fn gemini_tool_command(parameters: &serde_json::Map<String, Value>) -> Option<String> {
@@ -623,6 +669,10 @@ impl Provider for HeadlessCliProviderAdapter {
                 };
                 self.spawn_turn(runtime, prompt, turn.plan_mode).await
             }
+            Input::UserInputResponse(_) => Err(CoreError::Provider(format!(
+                "{} does not support mid-turn user input responses",
+                self.label
+            ))),
         }
     }
 
@@ -743,8 +793,10 @@ mod tests {
 
     #[test]
     fn parses_gemini_tool_lifecycle() {
+        let mut state = ProviderStreamState::default();
         let started = parse_gemini_stream_line(
             r#"{"type":"tool_use","tool_name":"run_shell_command","tool_id":"tool-1","parameters":{"command":"ls"}}"#,
+            &mut state,
         );
         assert!(matches!(
             started,
@@ -753,10 +805,24 @@ mod tests {
 
         let completed = parse_gemini_stream_line(
             r#"{"type":"tool_result","tool_id":"tool-1","status":"success"}"#,
+            &mut state,
         );
         assert!(matches!(
             completed,
             ParsedProviderLine::Event(ProviderEvent::ToolCallCompleted { .. })
+        ));
+    }
+
+    #[test]
+    fn parses_gemini_result_text_when_stream_has_no_assistant_message() {
+        let mut state = ProviderStreamState::default();
+        let parsed = parse_gemini_stream_line(
+            r##"{"type":"result","status":"success","result":{"plan":"# Ship\n\n- inspect\n- patch"}}"##,
+            &mut state,
+        );
+        assert!(matches!(
+            parsed,
+            ParsedProviderLine::Text(text) if text == "# Ship\n\n- inspect\n- patch"
         ));
     }
 

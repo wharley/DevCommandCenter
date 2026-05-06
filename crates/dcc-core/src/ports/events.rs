@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use super::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
 use crate::Result;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -86,6 +87,18 @@ pub enum CoreEvent {
         turn_id: String,
         tool_call_id: String,
         reason: Option<String>,
+    },
+    SessionTurnUserInputRequested {
+        session_id: String,
+        turn_id: String,
+        request_id: String,
+        questions: Vec<ProviderUserInputQuestion>,
+    },
+    SessionTurnUserInputResolved {
+        session_id: String,
+        turn_id: String,
+        request_id: String,
+        answers: Vec<ProviderUserInputAnswer>,
     },
     SessionTurnCompleted {
         session_id: String,

@@ -8,6 +8,7 @@ import { Reasoning } from "@/components/ai/reasoning";
 import { ToolCall } from "@/components/ai/tool-call";
 import { MessageTimestamp } from "./message-metadata";
 import { PlanReviewCard } from "./PlanReviewCard";
+import { UserInputCard } from "./UserInputCard";
 import type { ParsedPlanContent } from "@/features/panel/plan-content";
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
 
@@ -35,6 +36,7 @@ export function AssistantMessage({
 	plan,
 	workspacePath,
 	isPlanContext,
+	sessionId,
 }: {
 	content: string;
 	streaming?: boolean;
@@ -44,6 +46,7 @@ export function AssistantMessage({
 	plan?: ParsedPlanContent | null;
 	workspacePath?: string | null;
 	isPlanContext?: boolean;
+	sessionId?: string | null;
 }) {
 	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
 	return (
@@ -75,6 +78,19 @@ export function AssistantMessage({
 											)}
 										</div>
 									</Reasoning>
+								);
+							}
+
+							if (annotation.type === "user-input") {
+								return (
+									<UserInputCard
+										key={`user-input-${annotation.id}`}
+										sessionId={sessionId ?? null}
+										requestId={annotation.id}
+										questions={annotation.questions}
+										answers={annotation.answers}
+										isLive={Boolean(annotation.streaming)}
+									/>
 								);
 							}
 

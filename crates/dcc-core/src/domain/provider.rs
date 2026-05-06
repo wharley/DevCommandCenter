@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::session::SessionId;
+use crate::ports::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(transparent)]
@@ -93,6 +94,16 @@ pub enum ProviderEvent {
     ToolCallFailed {
         id: String,
         reason: Option<String>,
+        at: String,
+    },
+    UserInputRequested {
+        id: String,
+        questions: Vec<ProviderUserInputQuestion>,
+        at: String,
+    },
+    UserInputResolved {
+        id: String,
+        answers: Vec<ProviderUserInputAnswer>,
         at: String,
     },
     Completed {

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::{project::ProjectId, thread::Thread, workspace::WorkspaceId};
+use crate::ports::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
 use crate::ports::ProviderRuntimeConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
@@ -139,6 +140,20 @@ pub enum SessionEventKind {
         tool_call_id: String,
         reason: Option<String>,
     },
+    TurnUserInputRequested {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        questions: Vec<ProviderUserInputQuestion>,
+    },
+    TurnUserInputResolved {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        answers: Vec<ProviderUserInputAnswer>,
+    },
     TurnCompleted {
         #[serde(rename = "turnId")]
         turn_id: TurnId,
@@ -237,7 +252,9 @@ impl SessionProjection {
             | SessionEventKind::TurnToolCallStarted { .. }
             | SessionEventKind::TurnToolCallDelta { .. }
             | SessionEventKind::TurnToolCallCompleted { .. }
-            | SessionEventKind::TurnToolCallFailed { .. } => {}
+            | SessionEventKind::TurnToolCallFailed { .. }
+            | SessionEventKind::TurnUserInputRequested { .. }
+            | SessionEventKind::TurnUserInputResolved { .. } => {}
             SessionEventKind::TurnCompleted { turn_id } => {
                 self.turn_count = self.turn_count.saturating_add(1);
                 if self.active_turn_id.as_ref() == Some(turn_id) {

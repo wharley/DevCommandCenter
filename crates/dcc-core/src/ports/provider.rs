@@ -41,10 +41,43 @@ pub struct ProviderTurnInput {
     pub fast_mode: Option<bool>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUserInputOption {
+    pub label: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUserInputQuestion {
+    pub id: String,
+    pub header: String,
+    pub question: String,
+    #[serde(default)]
+    pub options: Vec<ProviderUserInputOption>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUserInputAnswer {
+    pub question: String,
+    pub answer: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUserInputResponse {
+    pub request_id: String,
+    #[serde(default)]
+    pub answers: Vec<ProviderUserInputAnswer>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub enum Input {
     Text(String),
     Turn(ProviderTurnInput),
+    UserInputResponse(ProviderUserInputResponse),
 }
 
 #[async_trait]

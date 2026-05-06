@@ -501,6 +501,48 @@ impl SessionCommandState {
                                 .await;
                         }
                     }
+                    Ok(ProviderEvent::UserInputRequested { id, questions, .. }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            let _ = state
+                                .append_and_publish_session_event(
+                                    &session_id,
+                                    SessionEventKind::TurnUserInputRequested {
+                                        turn_id: TurnId(turn_id.clone()),
+                                        request_id: id.clone(),
+                                        questions: questions.clone(),
+                                    },
+                                    dcc_core::ports::events::CoreEvent::SessionTurnUserInputRequested {
+                                        session_id: session_id.0.clone(),
+                                        turn_id,
+                                        request_id: id,
+                                        questions,
+                                    },
+                                )
+                                .await;
+                        }
+                    }
+                    Ok(ProviderEvent::UserInputResolved { id, answers, .. }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            let _ = state
+                                .append_and_publish_session_event(
+                                    &session_id,
+                                    SessionEventKind::TurnUserInputResolved {
+                                        turn_id: TurnId(turn_id.clone()),
+                                        request_id: id.clone(),
+                                        answers: answers.clone(),
+                                    },
+                                    dcc_core::ports::events::CoreEvent::SessionTurnUserInputResolved {
+                                        session_id: session_id.0.clone(),
+                                        turn_id,
+                                        request_id: id,
+                                        answers,
+                                    },
+                                )
+                                .await;
+                        }
+                    }
                     Ok(ProviderEvent::Completed { .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.take();
                         if let Some(turn_id) = turn_id {

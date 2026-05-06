@@ -640,6 +640,11 @@ impl Provider for CodexAppServerAdapter {
                     Some("auto")
                 },
             ),
+            Input::UserInputResponse(_) => {
+                return Err(CoreError::Provider(
+                    "Codex does not support mid-turn user input responses".to_string(),
+                ));
+            }
         };
 
         runtime

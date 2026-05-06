@@ -172,6 +172,7 @@ export function WorkspacePanel({
 					pendingPrompt={pendingPrompt}
 					workspacePath={workspacePath}
 					planMessageId={latestPlanMessage?.id ?? null}
+					sessionId={effectiveSessionId}
 					onStartSession={onStartSession}
 					onSubmitPrompt={onSubmitPrompt}
 				/>

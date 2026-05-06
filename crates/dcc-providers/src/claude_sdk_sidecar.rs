@@ -431,6 +431,43 @@ impl Provider for ClaudeSdkSidecarAdapter {
                     CoreError::Provider(format!("failed to flush Claude sidecar input: {error}"))
                 })?;
             }
+            Input::UserInputResponse(response) => {
+                let mut stdin = runtime.stdin.lock().await;
+                let stream = stdin.as_mut().ok_or_else(|| {
+                    CoreError::Provider(format!(
+                        "stdin closed for session {} on provider {}",
+                        handle.session_id.0, self.label
+                    ))
+                })?;
+                let payload = json!({
+                    "type": "user_input_response",
+                    "requestId": response.request_id,
+                    "answers": response.answers,
+                });
+                let serialized = serde_json::to_string(&payload).map_err(|error| {
+                    CoreError::Provider(format!(
+                        "failed to encode Claude sidecar user input response: {error}"
+                    ))
+                })?;
+                stream
+                    .write_all(serialized.as_bytes())
+                    .await
+                    .map_err(|error| {
+                        CoreError::Provider(format!(
+                            "failed to write Claude sidecar user input response: {error}"
+                        ))
+                    })?;
+                stream.write_all(b"\n").await.map_err(|error| {
+                    CoreError::Provider(format!(
+                        "failed to terminate Claude sidecar user input response: {error}"
+                    ))
+                })?;
+                stream.flush().await.map_err(|error| {
+                    CoreError::Provider(format!(
+                        "failed to flush Claude sidecar user input response: {error}"
+                    ))
+                })?;
+            }
         }
 
         Ok(())
