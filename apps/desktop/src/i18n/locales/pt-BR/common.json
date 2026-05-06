@@ -248,12 +248,13 @@
       "githubCliCommand": "Comando sugerido: `{{command}}`"
     }
   },
-    "shortcutsSheet": {
-      "badge": "Atalhos",
-      "title": "Atalhos de teclado",
-      "sendPrompt": "Enviar prompt",
-      "steerSession": "Controlar sessão",
-      "abortSession": "Abortar sessão"
+  "shortcutsSheet": {
+    "badge": "Atalhos",
+    "title": "Atalhos de teclado",
+    "sendPrompt": "Enviar prompt",
+    "steerSession": "Controlar sessão",
+    "abortSession": "Abortar sessão",
+    "openPreferredEditor": "Abrir editor preferido"
   },
   "onboarding": {
     "steps": {

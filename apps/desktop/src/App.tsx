@@ -11,6 +11,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Toaster } from "sonner";
 import type { CoreEvent, WorkspaceSessionSummary } from "@dcc/contracts";
+import { openInEditor } from "@/lib/shell-api";
 import { cn } from "@/lib/utils";
 import {
 	MAX_INSPECTOR_WIDTH,
@@ -31,6 +32,10 @@ import { WorkspaceInspectorSidebar } from "./features/inspector";
 import { SettingsDialog } from "./features/settings";
 import { OnboardingWizard } from "./features/onboarding";
 import { ShortcutCheatsheetDialog } from "./features/shortcuts";
+import {
+	isOpenPreferredEditorShortcut,
+	shouldIgnoreGlobalShortcutTarget,
+} from "./features/shortcuts/shortcut-utils";
 import { useDockUnreadBadge } from "./features/dock-badge/useDockUnreadBadge";
 import { useAppUpdate } from "./features/updater";
 import {
@@ -68,6 +73,7 @@ import {
 	canAbortRun,
 	canResumeSession,
 } from "./features/sessions/session-chrome-state";
+import { getStoredPreferredEditor } from "./features/sessions/workspace-editor-preferences";
 import type { WorkspaceGitPreviewSelection } from "./features/inspector/workspace-git-file-preview";
 import {
 	buildPlanImplementationPrompt,
@@ -443,6 +449,33 @@ export default function App() {
 	useEffect(() => {
 		writeProviderRuntimeSettings(providerRuntimeSettings);
 	}, [providerRuntimeSettings]);
+
+	useEffect(() => {
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (!selectedWorkspacePath) {
+				return;
+			}
+			if (shouldIgnoreGlobalShortcutTarget(event.target)) {
+				return;
+			}
+			if (!isOpenPreferredEditorShortcut(event)) {
+				return;
+			}
+
+			event.preventDefault();
+			const preferredEditor = getStoredPreferredEditor();
+			void openInEditor(selectedWorkspacePath, preferredEditor).catch((error) => {
+				toast.error(
+					error instanceof Error
+						? error.message
+						: `Failed to open workspace in ${preferredEditor}`,
+				);
+			});
+		};
+
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [selectedWorkspacePath]);
 
 	/** Helmor-style: restore provider/model for this session, else follow backend snapshot. */
 	useEffect(() => {

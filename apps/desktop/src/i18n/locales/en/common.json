@@ -248,12 +248,13 @@
       "githubCliCommand": "Suggested command: `{{command}}`"
     }
   },
-    "shortcutsSheet": {
-      "badge": "Shortcuts",
-      "title": "Keyboard shortcuts",
-      "sendPrompt": "Send prompt",
-      "steerSession": "Steer session",
-      "abortSession": "Abort session"
+  "shortcutsSheet": {
+    "badge": "Shortcuts",
+    "title": "Keyboard shortcuts",
+    "sendPrompt": "Send prompt",
+    "steerSession": "Steer session",
+    "abortSession": "Abort session",
+    "openPreferredEditor": "Open preferred editor"
   },
   "onboarding": {
     "steps": {

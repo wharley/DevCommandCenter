@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { InlineShortcutDisplay } from "./InlineShortcutDisplay";
+import { getOpenPreferredEditorShortcutKeys } from "./shortcut-utils";
 
 type ShortcutCheatsheetDialogProps = {
 	open: boolean;
@@ -23,6 +24,10 @@ export function ShortcutCheatsheetDialog({
 					keys: ["Cmd", "Shift", "Enter"] as const,
 				},
 				{ actionKey: "shortcutsSheet.abortSession" as const, keys: ["Esc"] as const },
+				{
+					actionKey: "shortcutsSheet.openPreferredEditor" as const,
+					keys: getOpenPreferredEditorShortcutKeys(),
+				},
 			],
 		[],
 	);

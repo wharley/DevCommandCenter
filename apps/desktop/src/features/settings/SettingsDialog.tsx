@@ -24,6 +24,7 @@ import type { DccTheme } from "@/components/theme-provider";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
 import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
+import { getOpenPreferredEditorShortcutKeys } from "@/features/shortcuts/shortcut-utils";
 import type {
 	ProviderRuntimeDraft,
 	ProviderRuntimeSettings,
@@ -253,6 +254,10 @@ export function SettingsDialog({
 	const { t, i18n } = useTranslation("common");
 	const [activeSection, setActiveSection] = useState<SettingsSectionId>("general");
 	const providers = providerCatalog?.providers ?? [];
+	const shortcutBadges = useMemo(
+		() => ["Cmd/Ctrl+Enter", "Esc", getOpenPreferredEditorShortcutKeys().join("+")],
+		[],
+	);
 
 	const sections = useMemo<SettingsSectionMeta[]>(
 		() => [
@@ -526,7 +531,7 @@ export function SettingsDialog({
 											{t("settings.shortcuts.comingSoonBody")}
 										</p>
 										<div className="mt-4 flex flex-wrap gap-2">
-											{["Cmd/Ctrl+Enter", "Esc"].map((shortcut) => (
+											{shortcutBadges.map((shortcut) => (
 												<Badge key={shortcut} variant="secondary" className="h-8 px-3 text-[12px] font-normal">
 													{shortcut}
 												</Badge>
