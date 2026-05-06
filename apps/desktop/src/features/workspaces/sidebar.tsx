@@ -3,10 +3,12 @@ import {
 	Archive,
 	ChevronRight,
 	FolderPlus,
+	MoreHorizontal,
 	PanelLeft,
 	PanelRight,
 	Plus,
 	Settings2,
+	Trash2,
 } from "lucide-react";
 import {
 	memo,
@@ -18,6 +20,7 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { CommandPopoverContent } from "../../components/ui/command-popover";
@@ -29,6 +32,14 @@ import {
 	CommandList,
 	CommandSeparator,
 } from "../../components/ui/command";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "../../components/ui/dialog";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -44,7 +55,7 @@ import {
 	readStoredRailSectionState,
 	writeStoredRailSectionState,
 } from "./workspace-rail-open-state";
-import { projectWorkspaceRailGroups } from "./workspace-rail-projection";
+import { projectGroupingKey, projectWorkspaceRailGroups } from "./workspace-rail-projection";
 import {
 	ARCHIVED_SECTION_ID,
 	findSelectedRailSectionId,
@@ -60,6 +71,7 @@ type VirtualItem =
 			kind: "group-header";
 			groupId: string;
 			label: string;
+			sourceKey?: string;
 			rowCount: number;
 			canCollapse: boolean;
 			headerVariant: "project" | "archived";
@@ -133,26 +145,26 @@ function WorkspaceRepoPicker({
 						))}
 					</CommandGroup>
 					<CommandSeparator />
-						<CommandGroup heading={t("sidebar.actions")}>
-							<CommandItem
-								value="create workspace"
-								onSelect={() => {
-									setOpen(false);
-									onCreateWorkspace();
-								}}
-							>
-								{t("sidebar.openRepoPickerAction")}
-							</CommandItem>
-							<CommandItem
-								value="clone from url"
-								onSelect={() => {
-									setOpen(false);
-									onCloneWorkspace();
-								}}
-							>
-								{t("sidebar.cloneFromUrl")}
-							</CommandItem>
-						</CommandGroup>
+					<CommandGroup heading={t("sidebar.actions")}>
+						<CommandItem
+							value="create workspace"
+							onSelect={() => {
+								setOpen(false);
+								onCreateWorkspace();
+							}}
+						>
+							{t("sidebar.openRepoPickerAction")}
+						</CommandItem>
+						<CommandItem
+							value="clone from url"
+							onSelect={() => {
+								setOpen(false);
+								onCloneWorkspace();
+							}}
+						>
+							{t("sidebar.cloneFromUrl")}
+						</CommandItem>
+					</CommandGroup>
 				</CommandList>
 			</CommandPopoverContent>
 		</Popover>
@@ -170,8 +182,16 @@ type WorkspacesSidebarProps = {
 	onArchiveWorkspace?: (workspaceId: string) => void;
 	onRestoreWorkspace?: (workspaceId: string) => void;
 	onDeleteWorkspace?: (workspaceId: string) => void;
+	onDeleteProject?: (workspaceIds: string[]) => Promise<void> | void;
 	selectedWorkspaceId: string | null;
 	workspaces: WorkspaceSummary[];
+};
+
+type ProjectRemovalTarget = {
+	label: string;
+	rootPath: string | null;
+	workspaceCount: number;
+	workspaceIds: string[];
 };
 
 export const WorkspacesSidebar = memo(function WorkspacesSidebar({
@@ -185,6 +205,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onArchiveWorkspace,
 	onRestoreWorkspace,
 	onDeleteWorkspace,
+	onDeleteProject,
 	selectedWorkspaceId,
 	workspaces,
 }: WorkspacesSidebarProps) {
@@ -195,6 +216,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		() => projectWorkspaceRailGroups(workspaces),
 		[workspaces],
 	);
+	const [projectRemovalTarget, setProjectRemovalTarget] = useState<ProjectRemovalTarget | null>(
+		null,
+	);
+	const [isRemovingProject, setIsRemovingProject] = useState(false);
 
 	const [sectionOpenState, setSectionOpenState] = useState(() => ({
 		...createInitialRailSectionState(activeGroups),
@@ -276,6 +301,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				kind: "group-header",
 				groupId: group.id,
 				label: group.label,
+				sourceKey: group.sourceKey,
 				rowCount: group.rows.length,
 				canCollapse,
 				headerVariant: "project",
@@ -377,6 +403,53 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		}));
 	}, []);
 
+	const openProjectRemovalDialog = useCallback(
+		(sourceKey: string, label: string) => {
+			const matchingWorkspaces = workspaces.filter(
+				(workspace) => projectGroupingKey(workspace) === sourceKey,
+			);
+			if (matchingWorkspaces.length === 0) {
+				return;
+			}
+
+			const rootPath =
+				matchingWorkspaces.find((workspace) => workspace.rootPath?.trim())?.rootPath?.trim() ??
+				matchingWorkspaces.find((workspace) => workspace.worktreePath?.trim())?.worktreePath?.trim() ??
+				null;
+
+			setProjectRemovalTarget({
+				label,
+				rootPath,
+				workspaceCount: matchingWorkspaces.length,
+				workspaceIds: matchingWorkspaces.map((workspace) => workspace.id),
+			});
+		},
+		[workspaces],
+	);
+
+	const handleConfirmProjectRemoval = useCallback(async () => {
+		if (!projectRemovalTarget || !onDeleteProject) {
+			return;
+		}
+
+		setIsRemovingProject(true);
+		try {
+			await onDeleteProject(projectRemovalTarget.workspaceIds);
+			setProjectRemovalTarget(null);
+		} catch (error) {
+			console.error("[dcc] remove project failed", {
+				label: projectRemovalTarget.label,
+				workspaceIds: projectRemovalTarget.workspaceIds,
+				error,
+			});
+			toast.error(
+				error instanceof Error ? error.message : t("sidebar.removeProjectError"),
+			);
+		} finally {
+			setIsRemovingProject(false);
+		}
+	}, [onDeleteProject, projectRemovalTarget, t]);
+
 	const renderItem = useCallback(
 		(item: VirtualItem) => {
 			if (item.kind === "group-gap" || item.kind === "bottom-padding") {
@@ -389,48 +462,88 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						? (sectionOpenState[item.groupId] ?? false)
 						: (sectionOpenState[item.groupId] ?? true);
 				const isEmptyGroup = item.rowCount === 0;
+				const canRemoveProject =
+					item.headerVariant === "project" &&
+					Boolean(item.sourceKey) &&
+					Boolean(onDeleteProject) &&
+					!isRemovingProject;
 
 				return (
-					<button
-						type="button"
+					<div
 						className={cn(
-							"flex w-full cursor-pointer select-none items-center justify-between rounded-lg px-2 py-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground hover:bg-accent/60",
+							"group/dccRailHeader flex items-center gap-1 rounded-lg pr-1 hover:bg-accent/60",
 						)}
 						data-empty-group={isEmptyGroup ? "true" : "false"}
-						disabled={!item.canCollapse}
-						onClick={() => toggleSection(item.groupId)}
 					>
-						<span className="flex min-w-0 items-center gap-1.5">
-							<ChevronRight
-								className={cn(
-									"size-3 shrink-0 text-muted-foreground transition-transform duration-150",
-									isOpen && "rotate-90",
-									!item.canCollapse && "opacity-0",
-								)}
-								strokeWidth={2.2}
-								aria-hidden
-							/>
-							{item.headerVariant === "archived" ? (
-								<Archive
-									className="size-[14px] shrink-0 text-[var(--workspace-sidebar-status-backlog)]"
-									strokeWidth={1.9}
+						<button
+							type="button"
+							className="flex min-w-0 flex-1 cursor-pointer select-none items-center justify-between rounded-lg px-2 py-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground"
+							disabled={!item.canCollapse}
+							onClick={() => toggleSection(item.groupId)}
+						>
+							<span className="flex min-w-0 items-center gap-1.5">
+								<ChevronRight
+									className={cn(
+										"size-3 shrink-0 text-muted-foreground transition-transform duration-150",
+										isOpen && "rotate-90",
+										!item.canCollapse && "opacity-0",
+									)}
+									strokeWidth={2.2}
 									aria-hidden
 								/>
-							) : (
-								<ProjectGroupGlyph />
-							)}
-							<span className="truncate">{item.label}</span>
-						</span>
+								{item.headerVariant === "archived" ? (
+									<Archive
+										className="size-[14px] shrink-0 text-[var(--workspace-sidebar-status-backlog)]"
+										strokeWidth={1.9}
+										aria-hidden
+									/>
+								) : (
+									<ProjectGroupGlyph />
+								)}
+								<span className="truncate">{item.label}</span>
+							</span>
 
-						{item.rowCount > 0 ? (
-							<Badge
-								variant="secondary"
-								className="h-4 min-w-[16px] justify-center rounded-full px-1 text-[9.5px]"
-							>
-								{item.rowCount}
-							</Badge>
+							{item.rowCount > 0 ? (
+								<Badge
+									variant="secondary"
+									className="h-4 min-w-[16px] justify-center rounded-full px-1 text-[9.5px]"
+								>
+									{item.rowCount}
+								</Badge>
+							) : null}
+						</button>
+
+						{canRemoveProject ? (
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										aria-label={t("sidebar.projectActions")}
+										className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/dccRailHeader:opacity-100 group-focus-within/dccRailHeader:opacity-100"
+										onClick={(event) => {
+											event.stopPropagation();
+										}}
+									>
+										<MoreHorizontal className="size-4" strokeWidth={2} aria-hidden />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="end" sideOffset={6}>
+									<DropdownMenuItem
+										className="gap-2 text-[13px] text-destructive focus:text-destructive"
+										onSelect={(event) => {
+											event.preventDefault();
+											openProjectRemovalDialog(item.sourceKey!, item.label);
+										}}
+									>
+										<Trash2 className="size-3.5" strokeWidth={2} aria-hidden />
+										{t("sidebar.removeProject")}
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
 						) : null}
-					</button>
+					</div>
 				);
 			}
 
@@ -446,7 +559,20 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				/>
 			);
 		},
-		[sectionOpenState, selectedWorkspaceId, workspaceAgentStates, toggleSection, onSelectWorkspace, onArchiveWorkspace, onRestoreWorkspace, onDeleteWorkspace],
+		[
+			isRemovingProject,
+			onArchiveWorkspace,
+			onDeleteProject,
+			onDeleteWorkspace,
+			onRestoreWorkspace,
+			onSelectWorkspace,
+			openProjectRemovalDialog,
+			sectionOpenState,
+			selectedWorkspaceId,
+			t,
+			toggleSection,
+			workspaceAgentStates,
+		],
 	);
 
 	if (collapsed) {
@@ -519,16 +645,16 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							</Tooltip>
 							<Tooltip>
 								<TooltipTrigger asChild>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-xs"
-								aria-label={t("sidebar.cloneFromUrl")}
-								className="text-muted-foreground hover:text-foreground"
-								onClick={onCloneWorkspace}
-							>
-								<Plus className="size-4" strokeWidth={2.1} aria-hidden />
-							</Button>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										aria-label={t("sidebar.cloneFromUrl")}
+										className="text-muted-foreground hover:text-foreground"
+										onClick={onCloneWorkspace}
+									>
+										<Plus className="size-4" strokeWidth={2.1} aria-hidden />
+									</Button>
 								</TooltipTrigger>
 								<TooltipContent side="right">{t("sidebar.cloneFromUrl")}</TooltipContent>
 							</Tooltip>
@@ -558,156 +684,215 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	}
 
 	return (
-		<div className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
-			<div data-slot="window-safe-top" className="flex h-9 shrink-0 items-center pr-3">
-				<TrafficLightSpacer width={94} />
-				<div data-tauri-drag-region className="h-full flex-1" />
-				<Tooltip>
-					<TooltipTrigger asChild>
-						<Button
-							type="button"
-							aria-label={t("sidebar.collapseSidebar")}
-							variant="ghost"
-							size="icon-xs"
-							onClick={onToggleCollapsed}
-							className="text-muted-foreground hover:text-foreground"
-						>
-							<PanelLeft className="size-4" strokeWidth={1.8} />
-						</Button>
-					</TooltipTrigger>
-					<TooltipContent side="bottom">{t("sidebar.collapseSidebar")}</TooltipContent>
-				</Tooltip>
-			</div>
+		<>
+			<div className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
+				<div data-slot="window-safe-top" className="flex h-9 shrink-0 items-center pr-3">
+					<TrafficLightSpacer width={94} />
+					<div data-tauri-drag-region className="h-full flex-1" />
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								aria-label={t("sidebar.collapseSidebar")}
+								variant="ghost"
+								size="icon-xs"
+								onClick={onToggleCollapsed}
+								className="text-muted-foreground hover:text-foreground"
+							>
+								<PanelLeft className="size-4" strokeWidth={1.8} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">{t("sidebar.collapseSidebar")}</TooltipContent>
+					</Tooltip>
+				</div>
 
-			<div className="flex items-center justify-between px-3">
-				<h2 className="text-[14px] font-medium tracking-[-0.01em] text-muted-foreground">
-					{t("sidebar.title")}
-				</h2>
-				<div className="flex items-center gap-1 text-muted-foreground">
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
+				<div className="flex items-center justify-between px-3">
+					<h2 className="text-[14px] font-medium tracking-[-0.01em] text-muted-foreground">
+						{t("sidebar.title")}
+					</h2>
+					<div className="flex items-center gap-1 text-muted-foreground">
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-xs"
+									aria-label={t("sidebar.openProjectMenu")}
+									className="text-muted-foreground hover:text-foreground"
+								>
+									<FolderPlus className="size-4" strokeWidth={1.9} aria-hidden />
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end" sideOffset={6} className="min-w-44">
+								<DropdownMenuItem
+									className="gap-2 text-[13px]"
+									onSelect={(event) => {
+										event.preventDefault();
+										onCreateWorkspace();
+									}}
+								>
+									{t("sidebar.openProject")}
+								</DropdownMenuItem>
+								<DropdownMenuItem
+									className="gap-2 text-[13px]"
+									onSelect={(event) => {
+										event.preventDefault();
+										onCloneWorkspace();
+									}}
+								>
+									{t("sidebar.cloneFromUrl")}
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+						<WorkspaceRepoPicker
+							workspaces={workspaces}
+							onCreateWorkspace={onCreateWorkspace}
+							onCloneWorkspace={onCloneWorkspace}
+						/>
+					</div>
+				</div>
+
+				<div
+					ref={scrollContainerRef}
+					data-slot="workspace-groups-scroll"
+					className="min-h-0 flex-1 overflow-hidden"
+				>
+					{activeGroups.length === 0 && archivedRows.length === 0 ? (
+						<div className="flex h-full min-h-full flex-col items-center justify-center px-4 py-8 text-center">
+							<div className="mb-3 flex size-11 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-muted-foreground">
+								<FolderPlus className="size-5" strokeWidth={1.9} aria-hidden />
+							</div>
+							<h3 className="text-[15px] font-medium tracking-[-0.01em] text-foreground">
+								{t("sidebar.noWorkspacesYet")}
+							</h3>
+							<p className="mt-2 max-w-[18rem] text-[13px] leading-6 text-muted-foreground">
+								{t("sidebar.noWorkspacesHint")}
+							</p>
+							<div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+								<Button
+									type="button"
+									size="sm"
+									className="gap-1.5"
+									onClick={onCreateWorkspace}
+								>
+									<FolderPlus className="size-3.5" strokeWidth={2} aria-hidden />
+									{t("sidebar.openProject")}
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									className="gap-1.5"
+									onClick={onCloneWorkspace}
+								>
+									<Plus className="size-3.5" strokeWidth={2} aria-hidden />
+									{t("sidebar.cloneFromUrl")}
+								</Button>
+							</div>
+						</div>
+					) : (
+						<div
+							style={{
+								height: `${virtualizer.getTotalSize()}px`,
+								width: "100%",
+								position: "relative",
+							}}
+						>
+							{virtualizer.getVirtualItems().map((vItem) => (
+								<div
+									key={vItem.key}
+									style={{
+										position: "absolute",
+										top: 0,
+										left: 0,
+										width: "100%",
+										height: `${vItem.size}px`,
+										transform: `translateY(${vItem.start}px)`,
+									}}
+								>
+									{renderItem(flatItems[vItem.index]!)}
+								</div>
+							))}
+						</div>
+					)}
+				</div>
+
+				<div className="flex shrink-0 items-center justify-start gap-1 px-3 pb-3 pt-1">
+					<Tooltip>
+						<TooltipTrigger asChild>
 							<Button
 								type="button"
 								variant="ghost"
-								size="icon-xs"
-								aria-label={t("sidebar.openProjectMenu")}
-								className="text-muted-foreground hover:text-foreground"
+								size="sm"
+								className="gap-1.5 text-muted-foreground hover:text-foreground"
+								aria-label={t("sidebar.openSettings")}
+								onClick={onOpenSettings}
 							>
-								<FolderPlus className="size-4" strokeWidth={1.9} aria-hidden />
+								<Settings2 className="size-4" strokeWidth={1.85} aria-hidden />
+								<span className="text-xs font-medium">{t("sidebar.settingsShort")}</span>
 							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end" sideOffset={6} className="min-w-44">
-							<DropdownMenuItem
-								className="gap-2 text-[13px]"
-								onSelect={(event) => {
-									event.preventDefault();
-									onCreateWorkspace();
-								}}
-							>
-								{t("sidebar.openProject")}
-							</DropdownMenuItem>
-							<DropdownMenuItem
-								className="gap-2 text-[13px]"
-								onSelect={(event) => {
-									event.preventDefault();
-									onCloneWorkspace();
-								}}
-							>
-								{t("sidebar.cloneFromUrl")}
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-					<WorkspaceRepoPicker
-						workspaces={workspaces}
-						onCreateWorkspace={onCreateWorkspace}
-						onCloneWorkspace={onCloneWorkspace}
-					/>
+						</TooltipTrigger>
+						<TooltipContent side="top">{t("sidebar.openSettings")}</TooltipContent>
+					</Tooltip>
 				</div>
 			</div>
 
-			<div
-				ref={scrollContainerRef}
-				data-slot="workspace-groups-scroll"
-				className="min-h-0 flex-1 overflow-hidden"
+			<Dialog
+				open={projectRemovalTarget !== null}
+				onOpenChange={(open) => {
+					if (!open && !isRemovingProject) {
+						setProjectRemovalTarget(null);
+					}
+				}}
 			>
-				{activeGroups.length === 0 && archivedRows.length === 0 ? (
-					<div className="flex h-full min-h-full flex-col items-center justify-center px-4 py-8 text-center">
-						<div className="mb-3 flex size-11 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-muted-foreground">
-							<FolderPlus className="size-5" strokeWidth={1.9} aria-hidden />
+				<DialogContent showCloseButton={!isRemovingProject}>
+					<DialogHeader>
+						<DialogTitle>
+							{t("sidebar.removeProjectTitle", {
+								label: projectRemovalTarget?.label ?? "",
+							})}
+						</DialogTitle>
+						<DialogDescription>
+							{t("sidebar.removeProjectDescription", {
+								count: projectRemovalTarget?.workspaceCount ?? 0,
+							})}
+						</DialogDescription>
+					</DialogHeader>
+					{projectRemovalTarget?.rootPath ? (
+						<div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+							<span className="font-medium text-foreground">
+								{t("sidebar.removeProjectPathLabel")}
+							</span>
+							<span className="ml-2 break-all font-mono">
+								{projectRemovalTarget.rootPath}
+							</span>
 						</div>
-						<h3 className="text-[15px] font-medium tracking-[-0.01em] text-foreground">
-							{t("sidebar.noWorkspacesYet")}
-						</h3>
-						<p className="mt-2 max-w-[18rem] text-[13px] leading-6 text-muted-foreground">
-							{t("sidebar.noWorkspacesHint")}
-						</p>
-						<div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-							<Button
-								type="button"
-								size="sm"
-								className="gap-1.5"
-								onClick={onCreateWorkspace}
-							>
-								<FolderPlus className="size-3.5" strokeWidth={2} aria-hidden />
-								{t("sidebar.openProject")}
-							</Button>
-							<Button
-								type="button"
-								size="sm"
-								variant="outline"
-								className="gap-1.5"
-								onClick={onCloneWorkspace}
-							>
-								<Plus className="size-3.5" strokeWidth={2} aria-hidden />
-								{t("sidebar.cloneFromUrl")}
-							</Button>
-						</div>
-					</div>
-				) : (
-					<div
-						style={{
-							height: `${virtualizer.getTotalSize()}px`,
-							width: "100%",
-							position: "relative",
-						}}
-					>
-						{virtualizer.getVirtualItems().map((vItem) => (
-							<div
-								key={vItem.key}
-								style={{
-									position: "absolute",
-									top: 0,
-									left: 0,
-									width: "100%",
-									height: `${vItem.size}px`,
-									transform: `translateY(${vItem.start}px)`,
-								}}
-							>
-								{renderItem(flatItems[vItem.index]!)}
-							</div>
-						))}
-					</div>
-				)}
-			</div>
-
-			<div className="flex shrink-0 items-center justify-start gap-1 px-3 pb-3 pt-1">
-				<Tooltip>
-					<TooltipTrigger asChild>
+					) : null}
+					<p className="text-xs leading-5 text-muted-foreground">
+						{t("sidebar.removeProjectWarning")}
+					</p>
+					<DialogFooter>
 						<Button
 							type="button"
-							variant="ghost"
-							size="sm"
-							className="gap-1.5 text-muted-foreground hover:text-foreground"
-							aria-label={t("sidebar.openSettings")}
-							onClick={onOpenSettings}
+							variant="outline"
+							disabled={isRemovingProject}
+							onClick={() => setProjectRemovalTarget(null)}
 						>
-							<Settings2 className="size-4" strokeWidth={1.85} aria-hidden />
-							<span className="text-xs font-medium">{t("sidebar.settingsShort")}</span>
+							{t("sidebar.cancel")}
 						</Button>
-					</TooltipTrigger>
-					<TooltipContent side="top">{t("sidebar.openSettings")}</TooltipContent>
-				</Tooltip>
-			</div>
-		</div>
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={isRemovingProject || !projectRemovalTarget || !onDeleteProject}
+							onClick={() => {
+								void handleConfirmProjectRemoval();
+							}}
+						>
+							{t("sidebar.removeProjectConfirm")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+		</>
 	);
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkspaceSummary } from "./types";
 import {
 	archiveWorkspace as apiArchiveWorkspace,
@@ -12,6 +12,34 @@ import type {
 	CreateWorkspaceFromUrlInput,
 	Workspace,
 } from "@dcc/contracts";
+
+export function removeWorkspacesFromList(
+	workspaces: WorkspaceSummary[],
+	workspaceIds: readonly string[],
+	selectedWorkspaceId: string | null,
+): {
+	workspaceList: WorkspaceSummary[];
+	selectedWorkspaceId: string | null;
+} {
+	if (workspaceIds.length === 0) {
+		return {
+			workspaceList: workspaces,
+			selectedWorkspaceId,
+		};
+	}
+
+	const idsToRemove = new Set(workspaceIds);
+	const workspaceList = workspaces.filter((workspace) => !idsToRemove.has(workspace.id));
+	const nextSelectedWorkspaceId =
+		selectedWorkspaceId && !idsToRemove.has(selectedWorkspaceId)
+			? selectedWorkspaceId
+			: workspaceList[0]?.id ?? null;
+
+	return {
+		workspaceList,
+		selectedWorkspaceId: nextSelectedWorkspaceId,
+	};
+}
 
 export function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
 	const status =
@@ -42,6 +70,16 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 	);
 	const [workspaceList, setWorkspaceList] = useState<WorkspaceSummary[]>(workspaces);
 	const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+	const workspaceListRef = useRef(workspaceList);
+	const selectedWorkspaceIdRef = useRef(selectedWorkspaceId);
+
+	useEffect(() => {
+		workspaceListRef.current = workspaceList;
+	}, [workspaceList]);
+
+	useEffect(() => {
+		selectedWorkspaceIdRef.current = selectedWorkspaceId;
+	}, [selectedWorkspaceId]);
 
 	useEffect(() => {
 		if (workspaces.length === 0) {
@@ -100,12 +138,38 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 	const deleteWorkspace = useCallback(
 		async (workspaceId: string) => {
 			await apiDeleteWorkspace(workspaceId);
-			setWorkspaceList((current) => current.filter((w) => w.id !== workspaceId));
-			if (selectedWorkspaceId === workspaceId) {
-				setSelectedWorkspaceId(null);
-			}
+			const nextState = removeWorkspacesFromList(
+				workspaceListRef.current,
+				[workspaceId],
+				selectedWorkspaceIdRef.current,
+			);
+			workspaceListRef.current = nextState.workspaceList;
+			selectedWorkspaceIdRef.current = nextState.selectedWorkspaceId;
+			setWorkspaceList(nextState.workspaceList);
+			setSelectedWorkspaceId(nextState.selectedWorkspaceId);
 		},
-		[selectedWorkspaceId],
+		[],
+	);
+
+	const deleteWorkspaces = useCallback(
+		async (workspaceIds: string[]) => {
+			const uniqueWorkspaceIds = [...new Set(workspaceIds)];
+			if (uniqueWorkspaceIds.length === 0) {
+				return;
+			}
+
+			await Promise.all(uniqueWorkspaceIds.map((workspaceId) => apiDeleteWorkspace(workspaceId)));
+			const nextState = removeWorkspacesFromList(
+				workspaceListRef.current,
+				uniqueWorkspaceIds,
+				selectedWorkspaceIdRef.current,
+			);
+			workspaceListRef.current = nextState.workspaceList;
+			selectedWorkspaceIdRef.current = nextState.selectedWorkspaceId;
+			setWorkspaceList(nextState.workspaceList);
+			setSelectedWorkspaceId(nextState.selectedWorkspaceId);
+		},
+		[],
 	);
 
 	return {
@@ -114,6 +178,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 		cloneWorkspaceFromUrl,
 		createWorkspace,
 		deleteWorkspace,
+		deleteWorkspaces,
 		isCreatingWorkspace,
 		filteredWorkspaces,
 		restoreWorkspace,

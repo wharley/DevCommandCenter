@@ -5,10 +5,11 @@ export type DccWorkspaceRailRow = WorkspaceSummary;
 export type DccWorkspaceRailGroup = {
 	id: string;
 	label: string;
+	sourceKey: string;
 	rows: DccWorkspaceRailRow[];
 };
 
-function projectGroupingKey(workspace: WorkspaceSummary): string {
+export function projectGroupingKey(workspace: WorkspaceSummary): string {
 	return (
 		workspace.rootPath?.trim() ||
 		workspace.worktreePath?.trim() ||
@@ -65,6 +66,7 @@ export function projectWorkspaceRailGroups(
 			return {
 				id: `dcc.proj.${hashId(key)}`,
 				label,
+				sourceKey: key,
 				rows: sorted,
 			};
 		})

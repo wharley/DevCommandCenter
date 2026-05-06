@@ -264,6 +264,7 @@ export default function App() {
 		cloneWorkspaceFromUrl,
 		createWorkspace,
 		deleteWorkspace,
+		deleteWorkspaces,
 		filteredWorkspaces,
 		isCreatingWorkspace,
 		restoreWorkspace,
@@ -1144,6 +1145,7 @@ export default function App() {
 							onArchiveWorkspace={archiveWorkspace}
 							onRestoreWorkspace={restoreWorkspace}
 							onDeleteWorkspace={deleteWorkspace}
+							onDeleteProject={deleteWorkspaces}
 							selectedWorkspaceId={selectedWorkspaceId}
 							workspaces={filteredWorkspaces}
 						/>
