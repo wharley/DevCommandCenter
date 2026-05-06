@@ -212,6 +212,7 @@ export type ProviderModelDescriptor = {
 	label: string,
 	description: string,
 	recommended: boolean,
+	effortLevels: string[],
 };
 
 export type ProviderRuntimeConfig = {

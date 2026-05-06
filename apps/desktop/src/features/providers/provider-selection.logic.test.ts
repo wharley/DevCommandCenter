@@ -16,6 +16,7 @@ function makeProvider(id: string, stable: boolean) {
 				label: `${id.toUpperCase()} Default`,
 				description: "",
 				recommended: true,
+				effortLevels: ["low", "balanced", "high"],
 			},
 		],
 		stable,

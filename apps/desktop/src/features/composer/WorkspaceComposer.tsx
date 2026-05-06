@@ -68,13 +68,31 @@ import type { ComposerSubmittedTurn } from "./composer-turn";
 import { clearDraft } from "./draftStorage";
 import { readComposerPrompt, setEditorText } from "./editorOps";
 
-const DCC_EFFORT_LEVELS = [
-	{ id: "low" as const, label: "Low", icon: "low" as const },
-	{ id: "balanced" as const, label: "Balanced", icon: "medium" as const },
-	{ id: "high" as const, label: "High", icon: "high" as const },
-];
+/** Canonical order used for clamping when switching models. */
+const CANONICAL_EFFORT_ORDER = ["low", "balanced", "high"] as const;
 
-type EffortId = (typeof DCC_EFFORT_LEVELS)[number]["id"];
+const DEFAULT_EFFORT_LEVELS = ["low", "balanced", "high"];
+
+const EFFORT_DISPLAY: Record<string, { label: string; icon: string }> = {
+	low: { label: "Low", icon: "low" },
+	balanced: { label: "Balanced", icon: "medium" },
+	high: { label: "High", icon: "high" },
+};
+
+function getEffortDisplay(id: string) {
+	return EFFORT_DISPLAY[id] ?? { label: id.charAt(0).toUpperCase() + id.slice(1), icon: "medium" };
+}
+
+/** Clamp `effort` to the nearest supported level (walking down the canonical order). */
+function clampEffort(effort: string, supported: string[]): string {
+	if (supported.includes(effort)) return effort;
+	const idx = CANONICAL_EFFORT_ORDER.indexOf(effort as (typeof CANONICAL_EFFORT_ORDER)[number]);
+	for (let i = idx; i >= 0; i--) {
+		const candidate = CANONICAL_EFFORT_ORDER[i];
+		if (candidate && supported.includes(candidate)) return candidate;
+	}
+	return supported[0] ?? "balanced";
+}
 
 type WorkspaceComposerProps = {
 	draftKey: string;
@@ -123,7 +141,7 @@ export function WorkspaceComposer({
 	const [hasContent, setHasContent] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [isFastMode, setIsFastMode] = useState(true);
-	const [effort, setEffort] = useState<EffortId>("balanced");
+	const [effort, setEffort] = useState("balanced");
 	const [isPlanMode, setIsPlanMode] = useState(false);
 	const [lastSubmittedWithPlanMode, setLastSubmittedWithPlanMode] = useState(false);
 	const [contextDirectories, setContextDirectories] = useState(() =>
@@ -143,19 +161,43 @@ export function WorkspaceComposer({
 		[selectedProvider],
 	);
 
+	const selectedModel = useMemo(() => {
+		if (!selectedModelId) return null;
+		for (const p of providerChoices) {
+			const m = p.models.find((model) => model.id === selectedModelId);
+			if (m) return m;
+		}
+		return null;
+	}, [providerChoices, selectedModelId]);
+
+	const availableEffortLevels = useMemo(
+		() => selectedModel?.effortLevels ?? DEFAULT_EFFORT_LEVELS,
+		[selectedModel],
+	);
+
+	// Clamp effort when the model changes and no longer supports the current level.
+	useEffect(() => {
+		setEffort((current) => clampEffort(current, availableEffortLevels));
+	}, [availableEffortLevels]);
+
 	const submitFromComposer = useCallback(
 		async (rawPrompt: string) => {
+			// Detect "ultrathink" keyword → boost to the highest available effort for this turn.
+			const effectiveEffort =
+				/ultrathink/i.test(rawPrompt)
+					? (availableEffortLevels[availableEffortLevels.length - 1] ?? effort)
+					: effort;
 			setLastSubmittedWithPlanMode(isPlanMode);
 			await onSubmitPrompt({
 				rawPrompt,
 				envelope: {
 					planMode: isPlanMode,
-					effort,
+					effort: effectiveEffort,
 					fastMode: isFastMode,
 				},
 			});
 		},
-		[effort, isFastMode, isPlanMode, onSubmitPrompt],
+		[effort, availableEffortLevels, isFastMode, isPlanMode, onSubmitPrompt],
 	);
 
 	const handleSubmitDraft = useCallback(async () => {
@@ -270,7 +312,7 @@ export function WorkspaceComposer({
 		? "Describe what to change, then click Request Changes"
 		: "Ask to make changes, @mention files, run /commands";
 
-	const effortLabel = DCC_EFFORT_LEVELS.find((e) => e.id === effort)?.label ?? effort;
+	const effortLabel = getEffortDisplay(effort).label;
 
 	useEffect(() => {
 		setContextDirectories(
@@ -437,22 +479,25 @@ export function WorkspaceComposer({
 						>
 							<DropdownMenuGroup>
 								<DropdownMenuLabel>Effort</DropdownMenuLabel>
-								{DCC_EFFORT_LEVELS.map((entry) => (
-									<DropdownMenuItem
-										key={entry.id}
-										disabled={toolbarDisabled}
-										className="flex items-center justify-between gap-3"
-										onClick={() => setEffort(entry.id)}
-									>
-										<div className="flex items-center gap-2.5">
-											<EffortBrainIcon level={entry.icon} />
-											<span>{entry.label}</span>
-										</div>
-										{entry.id === effort ? (
-											<span className="text-[11px] text-foreground">✓</span>
-										) : null}
-									</DropdownMenuItem>
-								))}
+								{availableEffortLevels.map((id) => {
+									const display = getEffortDisplay(id);
+									return (
+										<DropdownMenuItem
+											key={id}
+											disabled={toolbarDisabled}
+											className="flex items-center justify-between gap-3"
+											onClick={() => setEffort(id)}
+										>
+											<div className="flex items-center gap-2.5">
+												<EffortBrainIcon level={display.icon} />
+												<span>{display.label}</span>
+											</div>
+											{id === effort ? (
+												<span className="text-[11px] text-foreground">✓</span>
+											) : null}
+										</DropdownMenuItem>
+									);
+								})}
 							</DropdownMenuGroup>
 						</DropdownMenuContent>
 					</DropdownMenu>

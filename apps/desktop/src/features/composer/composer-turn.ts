@@ -3,7 +3,7 @@
  * (`dcc-core`) so Claude / Codex / Gemini / Cursor all receive the same directives on stdin.
  */
 
-export type ComposerEffortLevel = "low" | "balanced" | "high";
+export type ComposerEffortLevel = string;
 
 export type ComposerTurnEnvelope = {
 	/** Helmor-style planning phase: structured plan before edits / risky tools. */

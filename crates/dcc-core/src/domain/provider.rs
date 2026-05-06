@@ -31,6 +31,9 @@ pub struct ProviderModelDescriptor {
     pub label: String,
     pub description: String,
     pub recommended: bool,
+    /// Ordered effort levels this model supports (e.g. `["low", "balanced", "high"]`).
+    /// Frontend uses this to drive the effort picker and clamp when switching models.
+    pub effort_levels: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

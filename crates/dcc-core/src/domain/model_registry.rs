@@ -5,6 +5,9 @@ pub struct ModelEntry {
     pub label: &'static str,
     pub description: &'static str,
     pub recommended: bool,
+    /// Ordered effort levels this model supports. Frontend uses this to populate
+    /// the effort picker and clamp the selection when the user switches models.
+    pub effort_levels: &'static [&'static str],
 }
 
 impl ModelEntry {
@@ -14,6 +17,7 @@ impl ModelEntry {
             label: self.label.to_string(),
             description: self.description.to_string(),
             recommended: self.recommended,
+            effort_levels: self.effort_levels.iter().map(|s| s.to_string()).collect(),
         }
     }
 }
@@ -78,18 +82,21 @@ pub const CLAUDE_CODE: &[ModelEntry] = &[
         label: "Claude Opus 4.7",
         description: "Highest capability, best for deep reasoning and large refactors.",
         recommended: false,
+        effort_levels: &["low", "balanced", "high"],
     },
     ModelEntry {
         id: "claude-sonnet-4-6",
         label: "Claude Sonnet 4.6",
         description: "Balanced default for coding and analysis.",
         recommended: true,
+        effort_levels: &["low", "balanced", "high"],
     },
     ModelEntry {
         id: "claude-haiku-4-5",
         label: "Claude Haiku 4.5",
         description: "Fast, lightweight option for quick follow-ups.",
         recommended: false,
+        effort_levels: &["low", "balanced"],
     },
 ];
 
@@ -99,24 +106,28 @@ pub const CODEX: &[ModelEntry] = &[
         label: "GPT-5.5",
         description: "Newest Codex model with the strongest reasoning.",
         recommended: false,
+        effort_levels: &["low", "balanced", "high"],
     },
     ModelEntry {
         id: "gpt-5.4",
         label: "GPT-5.4",
         description: "Balanced default for agentic coding workflows.",
         recommended: true,
+        effort_levels: &["low", "balanced", "high"],
     },
     ModelEntry {
         id: "gpt-5.4-mini",
         label: "GPT-5.4 Mini",
         description: "Fast, lightweight variant for quick tasks.",
         recommended: false,
+        effort_levels: &["low", "balanced"],
     },
     ModelEntry {
         id: "gpt-5.3-codex",
         label: "GPT-5.3 Codex",
         description: "Previous-generation Codex with strong repo-aware reasoning.",
         recommended: false,
+        effort_levels: &["low", "balanced", "high"],
     },
 ];
 
@@ -126,17 +137,20 @@ pub const GEMINI: &[ModelEntry] = &[
         label: "Gemini 2.5 Pro",
         description: "Stable long-context model with the broadest CLI compatibility.",
         recommended: true,
+        effort_levels: &["low", "balanced", "high"],
     },
     ModelEntry {
         id: "gemini-2.5-flash",
         label: "Gemini 2.5 Flash",
         description: "Fast stable variant.",
         recommended: false,
+        effort_levels: &["low", "balanced"],
     },
     ModelEntry {
         id: "gemini-3-flash-preview",
         label: "Gemini 3 Flash Preview",
         description: "Preview Gemini 3 coding model. Availability may vary by account.",
         recommended: false,
+        effort_levels: &["low", "balanced"],
     },
 ];

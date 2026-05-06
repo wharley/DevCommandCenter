@@ -3,6 +3,7 @@ export type ModelEntry = {
 	label: string;
 	description: string;
 	recommended: boolean;
+	effortLevels: string[];
 };
 
 /**
@@ -17,18 +18,21 @@ export const PROVIDER_MODEL_REGISTRY = {
 			label: "Claude Opus 4.7",
 			description: "Highest capability, best for deep reasoning and large refactors.",
 			recommended: false,
+			effortLevels: ["low", "balanced", "high"],
 		},
 		{
 			id: "claude-sonnet-4-6",
 			label: "Claude Sonnet 4.6",
 			description: "Balanced default for coding and analysis.",
 			recommended: true,
+			effortLevels: ["low", "balanced", "high"],
 		},
 		{
 			id: "claude-haiku-4-5",
 			label: "Claude Haiku 4.5",
 			description: "Fast, lightweight option for quick follow-ups.",
 			recommended: false,
+			effortLevels: ["low", "balanced"],
 		},
 	] satisfies ModelEntry[],
 
@@ -38,24 +42,28 @@ export const PROVIDER_MODEL_REGISTRY = {
 			label: "GPT-5.5",
 			description: "Newest Codex model with the strongest reasoning.",
 			recommended: false,
+			effortLevels: ["low", "balanced", "high"],
 		},
 		{
 			id: "gpt-5.4",
 			label: "GPT-5.4",
 			description: "Balanced default for agentic coding workflows.",
 			recommended: true,
+			effortLevels: ["low", "balanced", "high"],
 		},
 		{
 			id: "gpt-5.4-mini",
 			label: "GPT-5.4 Mini",
 			description: "Fast, lightweight variant for quick tasks.",
 			recommended: false,
+			effortLevels: ["low", "balanced"],
 		},
 		{
 			id: "gpt-5.3-codex",
 			label: "GPT-5.3 Codex",
 			description: "Previous-generation Codex with strong repo-aware reasoning.",
 			recommended: false,
+			effortLevels: ["low", "balanced", "high"],
 		},
 	] satisfies ModelEntry[],
 
@@ -65,18 +73,21 @@ export const PROVIDER_MODEL_REGISTRY = {
 			label: "Gemini 2.5 Pro",
 			description: "Stable long-context model with the broadest CLI compatibility.",
 			recommended: true,
+			effortLevels: ["low", "balanced", "high"],
 		},
 		{
 			id: "gemini-2.5-flash",
 			label: "Gemini 2.5 Flash",
 			description: "Fast stable variant.",
 			recommended: false,
+			effortLevels: ["low", "balanced"],
 		},
 		{
 			id: "gemini-3-flash-preview",
 			label: "Gemini 3 Flash Preview",
 			description: "Preview Gemini 3 coding model. Availability may vary by account.",
 			recommended: false,
+			effortLevels: ["low", "balanced"],
 		},
 	] satisfies ModelEntry[],
 
@@ -86,6 +97,7 @@ export const PROVIDER_MODEL_REGISTRY = {
 			label: "Auto",
 			description: "Use Cursor's recommended model for this account.",
 			recommended: true,
+			effortLevels: ["low", "balanced", "high"],
 		},
 	] satisfies ModelEntry[],
 } as const;

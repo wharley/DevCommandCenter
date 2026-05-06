@@ -76,6 +76,7 @@ pub fn descriptor(
         label: "Auto".to_string(),
         description: "Use Cursor's recommended model for this account.".to_string(),
         recommended: true,
+        effort_levels: vec!["low".to_string(), "balanced".to_string(), "high".to_string()],
     }];
 
     let mut seen = HashSet::from([CURSOR_AUTODETECT_MODEL_ID.to_string()]);
@@ -89,6 +90,7 @@ pub fn descriptor(
             label: model.label,
             description: model.description,
             recommended: false,
+            effort_levels: vec!["low".to_string(), "balanced".to_string(), "high".to_string()],
         });
     }
 
@@ -774,6 +776,7 @@ fn parse_cursor_models_to_descriptors(raw: &str) -> Vec<ProviderModelDescriptor>
         label: "Auto".to_string(),
         description: "Use Cursor's recommended model for this account.".to_string(),
         recommended: true,
+        effort_levels: vec!["low".to_string(), "balanced".to_string(), "high".to_string()],
     }];
 
     for model in parse_cursor_models(raw) {
@@ -790,6 +793,7 @@ fn parse_cursor_models_to_descriptors(raw: &str) -> Vec<ProviderModelDescriptor>
             label: trimmed,
             description: CURSOR_MODEL_DESCRIPTION.to_string(),
             recommended: false,
+            effort_levels: vec!["low".to_string(), "balanced".to_string(), "high".to_string()],
         });
     }
 
@@ -818,6 +822,7 @@ pub async fn discover_models() -> Vec<ProviderModelDescriptor> {
             label: "Auto".to_string(),
             description: "Use Cursor's recommended model for this account.".to_string(),
             recommended: true,
+            effort_levels: vec!["low".to_string(), "balanced".to_string(), "high".to_string()],
         }],
     }
 }
