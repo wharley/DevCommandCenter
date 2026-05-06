@@ -212,6 +212,10 @@ export type ProviderModelDescriptor = {
 	label: string,
 	description: string,
 	recommended: boolean,
+	/**
+	 *  Ordered effort levels this model supports (e.g. `["low", "medium", "high", "xhigh"]`).
+	 *  Frontend uses this to drive the effort picker and clamp when switching models.
+	 */
 	effortLevels: string[],
 };
 
@@ -231,7 +235,7 @@ export type ResumeSessionOutput = {
 
 export type SendTurnInput = {
 	sessionId: SessionId,
-	// Raw composer text for timeline / Turn records (not what stdin receives — see Tauri `compose_wire_prompt`).
+	// Raw composer text for timeline / Turn records; provider adapters decide how to transport it.
 	prompt: string,
 	// When set, replaces the session provider before this turn (same workspace session).
 	providerId?: string | null,
@@ -241,7 +245,7 @@ export type SendTurnInput = {
 	providerRuntime?: ProviderRuntimeConfig | null,
 	// Plan-before-edit style directives (Helmor plan-style).
 	planMode?: boolean | null,
-	// `low` | `balanced` | `high`
+	// `minimal` | `low` | `medium` | `high` | `xhigh` | `max`
 	effort?: string | null,
 	fastMode?: boolean | null,
 };

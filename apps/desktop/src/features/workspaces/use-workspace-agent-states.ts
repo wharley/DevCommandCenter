@@ -1,70 +1,66 @@
-import { useEffect, useRef, useState } from "react";
-import type { CoreEvent } from "@dcc/contracts";
-import { listenSessionEvents } from "@/lib/session-api";
+import { useMemo } from "react";
+import { useQueries } from "@tanstack/react-query";
+import type { WorkspaceSessionSummary } from "@dcc/contracts";
+import { workspaceSessionsQueryOptions } from "@/features/sessions/workspace-sessions-query";
+import type { WorkspaceSummary } from "./types";
 
 export type AgentState = "active" | "completed" | "aborted";
 
-const CLEAR_DELAY_MS = 8_000;
+function isRunningSession(summary: WorkspaceSessionSummary): boolean {
+	return (
+		summary.lastTurnState === "running" ||
+		(summary.projection.state === "active" &&
+			summary.projection.activeTurnId != null &&
+			summary.projection.activeTurnId.length > 0)
+	);
+}
 
-export function useWorkspaceAgentStates(): Record<string, AgentState> {
-	const [agentStates, setAgentStates] = useState<Record<string, AgentState>>({});
-	const sessionsRef = useRef<Record<string, string>>({});
-	const timeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+export function deriveAgentStateFromSessions(
+	summaries: WorkspaceSessionSummary[],
+): AgentState | null {
+	if (summaries.some(isRunningSession)) {
+		return "active";
+	}
 
-	useEffect(() => {
-		const timeouts = timeoutsRef.current;
-		let unlistenFn: (() => void) | null = null;
+	const latest = summaries[0];
+	if (!latest) {
+		return null;
+	}
 
-		function scheduleAutoClear(workspaceId: string) {
-			const existing = timeouts.get(workspaceId);
-			if (existing) clearTimeout(existing);
+	if (latest.lastTurnState === "aborted" || latest.projection.state === "aborted") {
+		return "aborted";
+	}
 
-			const id = setTimeout(() => {
-				setAgentStates((prev) => {
-					const { [workspaceId]: _, ...rest } = prev;
-					return rest;
-				});
-				timeouts.delete(workspaceId);
-			}, CLEAR_DELAY_MS);
+	if (
+		latest.lastTurnState === "completed" ||
+		latest.projection.state === "completed" ||
+		latest.projection.turnCount > 0
+	) {
+		return "completed";
+	}
 
-			timeouts.set(workspaceId, id);
+	return null;
+}
+
+export function useWorkspaceAgentStates(
+	workspaces: Pick<WorkspaceSummary, "id" | "status">[],
+): Record<string, AgentState> {
+	const trackedWorkspaces = useMemo(
+		() => workspaces.filter((workspace) => workspace.status !== "archived"),
+		[workspaces],
+	);
+	const sessionQueries = useQueries({
+		queries: trackedWorkspaces.map((workspace) =>
+			workspaceSessionsQueryOptions(workspace.id),
+		),
+	});
+
+	return trackedWorkspaces.reduce<Record<string, AgentState>>((states, workspace, index) => {
+		const query = sessionQueries[index];
+		const nextState = deriveAgentStateFromSessions(query?.data ?? []);
+		if (nextState) {
+			states[workspace.id] = nextState;
 		}
-
-		void listenSessionEvents((event: CoreEvent) => {
-			if (event.sessionStarted) {
-				const { session_id, workspace_id } = event.sessionStarted;
-				sessionsRef.current[session_id] = workspace_id;
-
-				const existing = timeouts.get(workspace_id);
-				if (existing) {
-					clearTimeout(existing);
-					timeouts.delete(workspace_id);
-				}
-
-				setAgentStates((prev) => ({ ...prev, [workspace_id]: "active" }));
-			} else if (event.sessionCompleted) {
-				const workspaceId = sessionsRef.current[event.sessionCompleted.session_id];
-				if (workspaceId) {
-					setAgentStates((prev) => ({ ...prev, [workspaceId]: "completed" }));
-					scheduleAutoClear(workspaceId);
-				}
-			} else if (event.sessionAborted) {
-				const workspaceId = sessionsRef.current[event.sessionAborted.session_id];
-				if (workspaceId) {
-					setAgentStates((prev) => ({ ...prev, [workspaceId]: "aborted" }));
-					scheduleAutoClear(workspaceId);
-				}
-			}
-		}).then((fn) => {
-			unlistenFn = fn;
-		});
-
-		return () => {
-			unlistenFn?.();
-			for (const timeout of timeouts.values()) clearTimeout(timeout);
-			timeouts.clear();
-		};
-	}, []);
-
-	return agentStates;
+		return states;
+	}, {});
 }

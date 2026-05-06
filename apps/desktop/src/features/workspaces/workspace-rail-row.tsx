@@ -99,23 +99,25 @@ export const WorkspaceRailRowItem = memo(
 				>
 					<div className="flex min-w-0 flex-1 items-center gap-2">
 						<WorkspaceRailAvatar title={displayTitle} subtitle={workspace.name} />
-						<div className="row-content-fade flex min-w-0 flex-1 items-center gap-2">
-							<GitBranch
-								className={cn(
-									"size-[13px] shrink-0",
-									workspaceRailBranchToneClasses[branchTone],
-								)}
-								strokeWidth={1.9}
-								aria-hidden
-							/>
-							<span
-								className={cn(
-									"min-w-0 truncate leading-tight",
-									selected ? "font-medium text-foreground" : "font-medium",
-								)}
-							>
-								{displayTitle}
-							</span>
+						<div className="flex min-w-0 flex-1 items-center gap-2">
+							<div className="row-content-fade flex min-w-0 flex-1 items-center gap-2">
+								<GitBranch
+									className={cn(
+										"size-[13px] shrink-0",
+										workspaceRailBranchToneClasses[branchTone],
+									)}
+									strokeWidth={1.9}
+									aria-hidden
+								/>
+								<span
+									className={cn(
+										"min-w-0 truncate leading-tight",
+										selected ? "font-medium text-foreground" : "font-medium",
+									)}
+								>
+									{displayTitle}
+								</span>
+							</div>
 							{agentState && (
 								<span className="ml-auto flex shrink-0 items-center gap-1">
 									<span
@@ -129,7 +131,7 @@ export const WorkspaceRailRowItem = memo(
 									/>
 									<span
 										className={cn(
-											"text-[10px] font-medium leading-none",
+											"whitespace-nowrap text-[10px] font-medium leading-none",
 											agentState === "active" && "text-amber-400",
 											agentState === "completed" && "text-emerald-500",
 											agentState === "aborted" && "text-destructive",

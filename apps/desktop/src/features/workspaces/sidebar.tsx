@@ -189,7 +189,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	workspaces,
 }: WorkspacesSidebarProps) {
 	const { t } = useTranslation("common");
-	const workspaceAgentStates = useWorkspaceAgentStates();
+	const workspaceAgentStates = useWorkspaceAgentStates(workspaces);
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const { activeGroups, archivedRows } = useMemo(
 		() => projectWorkspaceRailGroups(workspaces),
