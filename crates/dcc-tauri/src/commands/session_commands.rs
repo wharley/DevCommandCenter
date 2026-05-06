@@ -11,8 +11,8 @@ use dcc_core::{
     },
     domain::session::{SessionEventRecord, WorkspaceSessionSummary},
     ports::{
-        provider::ProviderUserInputAnswer, provider::ProviderUserInputResponse, Input,
-        ProviderTurnInput, SessionEventRepo,
+        provider::ProviderPermissionResponse, provider::ProviderUserInputAnswer,
+        provider::ProviderUserInputResponse, Input, ProviderTurnInput, SessionEventRepo,
     },
 };
 
@@ -30,6 +30,20 @@ pub struct RespondToUserInputInput {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RespondToUserInputOutput {
+    pub ok: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RespondToPermissionRequestInput {
+    pub session_id: String,
+    pub request_id: String,
+    pub behavior: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RespondToPermissionRequestOutput {
     pub ok: bool,
 }
 
@@ -181,4 +195,24 @@ pub async fn respond_to_user_input(
         .await
         .map_err(|error| error.to_string())?;
     Ok(RespondToUserInputOutput { ok: true })
+}
+
+#[tauri::command]
+pub async fn respond_to_permission_request(
+    state: State<'_, SessionCommandState>,
+    _app: AppHandle,
+    input: RespondToPermissionRequestInput,
+) -> Result<RespondToPermissionRequestOutput, String> {
+    let session_id = dcc_core::domain::session::SessionId(input.session_id);
+    state
+        .send_provider_input(
+            &session_id,
+            Input::PermissionResponse(ProviderPermissionResponse {
+                request_id: input.request_id,
+                behavior: input.behavior,
+            }),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(RespondToPermissionRequestOutput { ok: true })
 }

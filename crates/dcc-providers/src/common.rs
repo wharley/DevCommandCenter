@@ -538,6 +538,50 @@ fn parse_claude_terminal_value(
                 .unwrap_or_default();
             Some(ProviderEvent::UserInputResolved { id, answers, at })
         }
+        "dcc_permission_request" => {
+            let request = dcc_core::ports::provider::ProviderPermissionRequest {
+                request_id: value
+                    .get("request_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("permission")
+                    .to_string(),
+                tool_name: value
+                    .get("tool_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Tool")
+                    .to_string(),
+                title: value
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                description: value
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                command: value
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                file: value
+                    .get("file")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            };
+            Some(ProviderEvent::PermissionRequested { request, at })
+        }
+        "dcc_permission_resolved" => {
+            let id = value
+                .get("request_id")
+                .and_then(Value::as_str)
+                .unwrap_or("permission")
+                .to_string();
+            let behavior = value
+                .get("behavior")
+                .and_then(Value::as_str)
+                .unwrap_or("deny")
+                .to_string();
+            Some(ProviderEvent::PermissionResolved { id, behavior, at })
+        }
         "dcc_plan_captured" => {
             value
                 .get("plan")
@@ -1238,6 +1282,12 @@ impl Provider for CliProviderAdapter {
                     self.binary
                 )));
             }
+            Input::PermissionResponse(_) => {
+                return Err(CoreError::Provider(format!(
+                    "{} does not support mid-turn permission responses",
+                    self.binary
+                )));
+            }
         }
 
         Ok(())
@@ -1584,6 +1634,44 @@ mod tests {
         match turn_completed {
             ParsedProviderLine::Event(ProviderEvent::Completed { .. }) => {}
             other => panic!("expected provider completion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_claude_sdk_custom_permission_events() {
+        let mut state = ProviderStreamState::default();
+
+        let requested = parse_provider_stream_line(
+            r#"{"type":"dcc_permission_request","request_id":"perm-1","tool_name":"Bash","title":"Run shell command","description":"The agent wants to run npm test","command":"npm test","file":"package.json"}"#,
+            &mut state,
+        );
+        match requested {
+            ParsedProviderLine::Event(ProviderEvent::PermissionRequested { request, .. }) => {
+                assert_eq!(request.request_id, "perm-1");
+                assert_eq!(request.tool_name, "Bash");
+                assert_eq!(request.title.as_deref(), Some("Run shell command"));
+                assert_eq!(
+                    request.description.as_deref(),
+                    Some("The agent wants to run npm test")
+                );
+                assert_eq!(request.command.as_deref(), Some("npm test"));
+                assert_eq!(request.file.as_deref(), Some("package.json"));
+            }
+            other => panic!("expected permission request, got {other:?}"),
+        }
+
+        let resolved = parse_provider_stream_line(
+            r#"{"type":"dcc_permission_resolved","request_id":"perm-1","behavior":"allow"}"#,
+            &mut state,
+        );
+        match resolved {
+            ParsedProviderLine::Event(ProviderEvent::PermissionResolved {
+                id, behavior, ..
+            }) => {
+                assert_eq!(id, "perm-1");
+                assert_eq!(behavior, "allow");
+            }
+            other => panic!("expected permission resolution, got {other:?}"),
         }
     }
 }

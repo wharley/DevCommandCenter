@@ -673,6 +673,10 @@ impl Provider for HeadlessCliProviderAdapter {
                 "{} does not support mid-turn user input responses",
                 self.label
             ))),
+            Input::PermissionResponse(_) => Err(CoreError::Provider(format!(
+                "{} does not support mid-turn permission responses",
+                self.label
+            ))),
         }
     }
 

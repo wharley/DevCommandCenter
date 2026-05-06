@@ -8849,7 +8849,8 @@ pub fn run() {
             session_commands::resume_session,
             session_commands::list_thread_events,
             session_commands::list_workspace_sessions,
-            session_commands::respond_to_user_input
+            session_commands::respond_to_user_input,
+            session_commands::respond_to_permission_request
         ])
         .setup(|app| {
             let app_data_dir = app

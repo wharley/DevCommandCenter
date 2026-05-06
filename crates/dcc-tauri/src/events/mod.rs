@@ -44,6 +44,12 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
         CoreEvent::SessionTurnUserInputResolved { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/user-input/resolved")
         }
+        CoreEvent::SessionTurnPermissionRequested { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/permission/requested")
+        }
+        CoreEvent::SessionTurnPermissionResolved { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/permission/resolved")
+        }
         CoreEvent::SessionTurnCompleted { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/completed")
         }

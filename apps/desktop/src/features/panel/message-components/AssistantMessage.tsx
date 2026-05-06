@@ -8,6 +8,7 @@ import { Reasoning } from "@/components/ai/reasoning";
 import { ToolCall } from "@/components/ai/tool-call";
 import { MessageTimestamp } from "./message-metadata";
 import { PlanReviewCard } from "./PlanReviewCard";
+import { ApprovalCard } from "./ApprovalCard";
 import { UserInputCard } from "./UserInputCard";
 import type { ParsedPlanContent } from "@/features/panel/plan-content";
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
@@ -89,6 +90,23 @@ export function AssistantMessage({
 										requestId={annotation.id}
 										questions={annotation.questions}
 										answers={annotation.answers}
+										isLive={Boolean(annotation.streaming)}
+									/>
+								);
+							}
+
+							if (annotation.type === "approval") {
+								return (
+									<ApprovalCard
+										key={`approval-${annotation.id}`}
+										sessionId={sessionId ?? null}
+										requestId={annotation.id}
+										toolName={annotation.toolName}
+										title={annotation.title}
+										description={annotation.description}
+										command={annotation.command}
+										file={annotation.file}
+										behavior={annotation.behavior}
 										isLive={Boolean(annotation.streaming)}
 									/>
 								);

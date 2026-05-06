@@ -225,6 +225,56 @@ function sessionTurnAborted(
 	};
 }
 
+function sessionTurnPermissionRequested(
+	sessionId: string,
+	turnId: string,
+	requestId: string,
+	toolName: string,
+	command?: string,
+	file?: string,
+	sequence = 2,
+	occurredAt = "2026-05-01T12:00:01Z",
+): SessionEventRecord {
+	return {
+		eventId: `evt-${sessionId}-${turnId}-${requestId}-permission-requested`,
+		sessionId,
+		sequence,
+		occurredAt,
+		kind: {
+			type: "turn_permission_requested",
+			turnId,
+			requestId,
+			toolName,
+			title: "Run command",
+			description: "Agent requests approval before continuing.",
+			command: command ?? null,
+			file: file ?? null,
+		},
+	};
+}
+
+function sessionTurnPermissionResolved(
+	sessionId: string,
+	turnId: string,
+	requestId: string,
+	behavior: string,
+	sequence = 3,
+	occurredAt = "2026-05-01T12:00:02Z",
+): SessionEventRecord {
+	return {
+		eventId: `evt-${sessionId}-${turnId}-${requestId}-permission-resolved`,
+		sessionId,
+		sequence,
+		occurredAt,
+		kind: {
+			type: "turn_permission_resolved",
+			turnId,
+			requestId,
+			behavior,
+		},
+	};
+}
+
 describe("projectWorkspaceMessages", () => {
 	it("filters history records to the current session and preserves timestamps", () => {
 		expect(
@@ -420,6 +470,65 @@ describe("projectWorkspaceMessages", () => {
 					reason: "Stopped",
 				},
 				createdAt: "2026-05-01T12:00:00Z",
+			},
+		]);
+	});
+
+	it("projects approval requests and resolutions into assistant annotations", () => {
+		expect(
+			projectWorkspaceMessages(
+				[
+					sessionTurnStarted("session-a", "turn-1", "Alpha"),
+					sessionTurnPermissionRequested(
+						"session-a",
+						"turn-1",
+						"perm-1",
+						"Bash",
+						"npm test",
+						"package.json",
+					),
+					sessionTurnPermissionResolved(
+						"session-a",
+						"turn-1",
+						"perm-1",
+						"allow",
+					),
+					sessionTurnDeltaRecord("session-a", "turn-1", "Continuing after approval."),
+					sessionTurnCompleted("session-a", "turn-1"),
+				],
+				[],
+				"session-a",
+			),
+		).toEqual([
+			{
+				id: "user-session-a-turn-1",
+				role: "user",
+				label: "User",
+				content: "Alpha",
+				createdAt: "2026-05-01T12:00:00Z",
+				planMode: false,
+			},
+			{
+				id: "assistant-session-a-turn-1",
+				role: "assistant",
+				label: "Assistant",
+				content: "Continuing after approval.",
+				streaming: false,
+				createdAt: "2026-05-01T12:00:00Z",
+				annotations: [
+					{
+						type: "approval",
+						id: "perm-1",
+						toolName: "Bash",
+						title: "Run command",
+						description: "Agent requests approval before continuing.",
+						command: "npm test",
+						file: "package.json",
+						behavior: "allow",
+						streaming: false,
+						createdAt: "2026-05-01T12:00:01Z",
+					},
+				],
 			},
 		]);
 	});

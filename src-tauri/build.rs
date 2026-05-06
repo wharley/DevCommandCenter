@@ -19,7 +19,10 @@ use dcc_core::{
 };
 use dcc_tauri::commands::{
     provider_commands::ListProvidersOutput,
-    session_commands::{RespondToUserInputInput, RespondToUserInputOutput},
+    session_commands::{
+        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
+        RespondToUserInputOutput,
+    },
     workspace_commands::{
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, GithubCliStatusInput,
         GithubCliStatusOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
@@ -76,6 +79,7 @@ struct SessionMethods {
     list_thread_events: String,
     list_workspace_sessions: String,
     respond_to_user_input: String,
+    respond_to_permission_request: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -152,6 +156,8 @@ fn main() {
         .typ::<ResumeSessionOutput>()
         .typ::<RespondToUserInputInput>()
         .typ::<RespondToUserInputOutput>()
+        .typ::<RespondToPermissionRequestInput>()
+        .typ::<RespondToPermissionRequestOutput>()
         .typ::<CoreEvent>()
         .constant(
             "WORKSPACE_METHODS",
@@ -196,6 +202,7 @@ fn main() {
             list_thread_events: "list_thread_events".to_string(),
             list_workspace_sessions: "list_workspace_sessions".to_string(),
             respond_to_user_input: "respond_to_user_input".to_string(),
+            respond_to_permission_request: "respond_to_permission_request".to_string(),
         },
     );
 

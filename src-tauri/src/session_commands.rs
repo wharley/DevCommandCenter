@@ -7,7 +7,8 @@ use dcc_core::application::{
 use dcc_core::domain::session::{SessionEventRecord, WorkspaceSessionSummary};
 use dcc_tauri::{
     commands::session_commands::{
-        self as session_command_impl, RespondToUserInputInput, RespondToUserInputOutput,
+        self as session_command_impl, RespondToPermissionRequestInput,
+        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
     },
     state::SessionCommandState,
 };
@@ -72,4 +73,13 @@ pub async fn respond_to_user_input(
     input: RespondToUserInputInput,
 ) -> Result<RespondToUserInputOutput, String> {
     session_command_impl::respond_to_user_input(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn respond_to_permission_request(
+    state: State<'_, SessionCommandState>,
+    app: AppHandle,
+    input: RespondToPermissionRequestInput,
+) -> Result<RespondToPermissionRequestOutput, String> {
+    session_command_impl::respond_to_permission_request(state, app, input).await
 }

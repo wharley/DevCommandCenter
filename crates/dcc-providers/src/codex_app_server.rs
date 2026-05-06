@@ -645,6 +645,11 @@ impl Provider for CodexAppServerAdapter {
                     "Codex does not support mid-turn user input responses".to_string(),
                 ));
             }
+            Input::PermissionResponse(_) => {
+                return Err(CoreError::Provider(
+                    "Codex does not support mid-turn permission responses".to_string(),
+                ));
+            }
         };
 
         runtime

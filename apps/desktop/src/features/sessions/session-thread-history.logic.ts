@@ -43,6 +43,18 @@ export type WorkspaceMessageAnnotation =
 			answers: ProviderUserInputAnswer[];
 			streaming?: boolean;
 			createdAt?: string;
+	  }
+	| {
+			type: "approval";
+			id: string;
+			toolName: string;
+			title?: string;
+			description?: string;
+			command?: string;
+			file?: string;
+			behavior?: string;
+			streaming?: boolean;
+			createdAt?: string;
 	  };
 
 export type WorkspaceMessage = {
@@ -174,6 +186,28 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					answers: record.kind.answers,
 				},
 			};
+		case "turn_permission_requested":
+			return {
+				sessionTurnPermissionRequested: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId,
+					request_id: record.kind.requestId,
+					tool_name: record.kind.toolName,
+					title: record.kind.title,
+					description: record.kind.description,
+					command: record.kind.command,
+					file: record.kind.file,
+				},
+			};
+		case "turn_permission_resolved":
+			return {
+				sessionTurnPermissionResolved: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId,
+					request_id: record.kind.requestId,
+					behavior: record.kind.behavior,
+				},
+			};
 		case "turn_completed":
 			return {
 				sessionTurnCompleted: {
@@ -267,6 +301,12 @@ function getEventSessionId(event: CoreEvent): string | null {
 	if ("sessionTurnUserInputResolved" in event && event.sessionTurnUserInputResolved) {
 		return event.sessionTurnUserInputResolved.session_id;
 	}
+	if ("sessionTurnPermissionRequested" in event && event.sessionTurnPermissionRequested) {
+		return event.sessionTurnPermissionRequested.session_id;
+	}
+	if ("sessionTurnPermissionResolved" in event && event.sessionTurnPermissionResolved) {
+		return event.sessionTurnPermissionResolved.session_id;
+	}
 	if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
 		return event.sessionTurnCompleted.session_id;
 	}
@@ -295,6 +335,8 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionTurnToolCallFailed" in event) return "session.turn.tool-call.failed";
 	if ("sessionTurnUserInputRequested" in event) return "session.turn.user-input.requested";
 	if ("sessionTurnUserInputResolved" in event) return "session.turn.user-input.resolved";
+	if ("sessionTurnPermissionRequested" in event) return "session.turn.permission.requested";
+	if ("sessionTurnPermissionResolved" in event) return "session.turn.permission.resolved";
 	if ("sessionTurnCompleted" in event) return "session.turn.completed";
 	if ("sessionTurnAborted" in event) return "session.turn.aborted";
 	if ("sessionCheckpointCreated" in event) return "session.checkpoint.created";
@@ -346,6 +388,14 @@ function eventSummary(event: CoreEvent): string {
 		return event.sessionTurnUserInputResolved.answers
 			.map((answer) => `${answer.question}: ${answer.answer}`)
 			.join(" · ");
+	}
+	if ("sessionTurnPermissionRequested" in event && event.sessionTurnPermissionRequested) {
+		const command = event.sessionTurnPermissionRequested.command ?? "";
+		const file = event.sessionTurnPermissionRequested.file ?? "";
+		return `${event.sessionTurnPermissionRequested.tool_name}${command ? ` · ${command}` : ""}${file ? ` · ${file}` : ""}`;
+	}
+	if ("sessionTurnPermissionResolved" in event && event.sessionTurnPermissionResolved) {
+		return event.sessionTurnPermissionResolved.behavior;
 	}
 	if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
 		return event.sessionTurnAborted.reason ?? "Turn aborted";
@@ -707,6 +757,45 @@ export function projectWorkspaceMessages(
 			);
 			if (annotation && annotation.type === "user-input") {
 				annotation.answers = event.sessionTurnUserInputResolved.answers;
+				annotation.streaming = false;
+				annotation.createdAt ??= occurredAt;
+			}
+			continue;
+		}
+
+		if ("sessionTurnPermissionRequested" in event && event.sessionTurnPermissionRequested) {
+			const key = event.sessionTurnPermissionRequested.turn_id;
+			const message = ensureAssistantMessage(
+				messages,
+				assistantBuckets,
+				event.sessionTurnPermissionRequested.session_id,
+				key,
+				turnStartedAtByTurnId.get(key) ?? occurredAt,
+			);
+			getOrCreateAnnotation(message, {
+				type: "approval",
+				id: event.sessionTurnPermissionRequested.request_id,
+				toolName: event.sessionTurnPermissionRequested.tool_name,
+				title: event.sessionTurnPermissionRequested.title ?? undefined,
+				description: event.sessionTurnPermissionRequested.description ?? undefined,
+				command: event.sessionTurnPermissionRequested.command ?? undefined,
+				file: event.sessionTurnPermissionRequested.file ?? undefined,
+				streaming: true,
+				createdAt: occurredAt,
+			});
+			continue;
+		}
+
+		if ("sessionTurnPermissionResolved" in event && event.sessionTurnPermissionResolved) {
+			const key = event.sessionTurnPermissionResolved.turn_id;
+			const message = assistantBuckets.get(key);
+			const annotation = message?.annotations?.find(
+				(item) =>
+					item.type === "approval" &&
+					item.id === event.sessionTurnPermissionResolved.request_id,
+			);
+			if (annotation && annotation.type === "approval") {
+				annotation.behavior = event.sessionTurnPermissionResolved.behavior;
 				annotation.streaming = false;
 				annotation.createdAt ??= occurredAt;
 			}

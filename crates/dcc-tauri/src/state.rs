@@ -543,6 +543,56 @@ impl SessionCommandState {
                                 .await;
                         }
                     }
+                    Ok(ProviderEvent::PermissionRequested { request, .. }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            let _ = state
+                                .append_and_publish_session_event(
+                                    &session_id,
+                                    SessionEventKind::TurnPermissionRequested {
+                                        turn_id: TurnId(turn_id.clone()),
+                                        request_id: request.request_id.clone(),
+                                        tool_name: request.tool_name.clone(),
+                                        title: request.title.clone(),
+                                        description: request.description.clone(),
+                                        command: request.command.clone(),
+                                        file: request.file.clone(),
+                                    },
+                                    dcc_core::ports::events::CoreEvent::SessionTurnPermissionRequested {
+                                        session_id: session_id.0.clone(),
+                                        turn_id,
+                                        request_id: request.request_id,
+                                        tool_name: request.tool_name,
+                                        title: request.title,
+                                        description: request.description,
+                                        command: request.command,
+                                        file: request.file,
+                                    },
+                                )
+                                .await;
+                        }
+                    }
+                    Ok(ProviderEvent::PermissionResolved { id, behavior, .. }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            let _ = state
+                                .append_and_publish_session_event(
+                                    &session_id,
+                                    SessionEventKind::TurnPermissionResolved {
+                                        turn_id: TurnId(turn_id.clone()),
+                                        request_id: id.clone(),
+                                        behavior: behavior.clone(),
+                                    },
+                                    dcc_core::ports::events::CoreEvent::SessionTurnPermissionResolved {
+                                        session_id: session_id.0.clone(),
+                                        turn_id,
+                                        request_id: id,
+                                        behavior,
+                                    },
+                                )
+                                .await;
+                        }
+                    }
                     Ok(ProviderEvent::Completed { .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.take();
                         if let Some(turn_id) = turn_id {

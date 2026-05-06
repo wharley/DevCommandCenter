@@ -11,6 +11,8 @@ import type {
 	AbortRunOutput,
 	RespondToUserInputInput,
 	RespondToUserInputOutput,
+	RespondToPermissionRequestInput,
+	RespondToPermissionRequestOutput,
 	ResumeSessionInput,
 	ResumeSessionOutput,
 	SendTurnInput,
@@ -37,6 +39,13 @@ export function resumeSession(input: ResumeSessionInput) {
 
 export function respondToUserInput(input: RespondToUserInputInput) {
 	return invoke<RespondToUserInputOutput>(SESSION_METHODS.respondToUserInput, { input });
+}
+
+export function respondToPermissionRequest(input: RespondToPermissionRequestInput) {
+	return invoke<RespondToPermissionRequestOutput>(
+		SESSION_METHODS.respondToPermissionRequest,
+		{ input },
+	);
 }
 
 export function loadSessionThreadEvents(sessionId: string) {
@@ -68,6 +77,8 @@ const SESSION_EVENT_NAMES = [
 	"dcc/session/turn/tool-call/failed",
 	"dcc/session/turn/user-input/requested",
 	"dcc/session/turn/user-input/resolved",
+	"dcc/session/turn/permission/requested",
+	"dcc/session/turn/permission/resolved",
 	"dcc/session/turn/completed",
 	"dcc/session/turn/aborted",
 	"dcc/session/checkpoint/created",

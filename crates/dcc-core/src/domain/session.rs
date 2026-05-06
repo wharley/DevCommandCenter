@@ -154,6 +154,25 @@ pub enum SessionEventKind {
         request_id: String,
         answers: Vec<ProviderUserInputAnswer>,
     },
+    TurnPermissionRequested {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "toolName")]
+        tool_name: String,
+        title: Option<String>,
+        description: Option<String>,
+        command: Option<String>,
+        file: Option<String>,
+    },
+    TurnPermissionResolved {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        behavior: String,
+    },
     TurnCompleted {
         #[serde(rename = "turnId")]
         turn_id: TurnId,
@@ -254,7 +273,9 @@ impl SessionProjection {
             | SessionEventKind::TurnToolCallCompleted { .. }
             | SessionEventKind::TurnToolCallFailed { .. }
             | SessionEventKind::TurnUserInputRequested { .. }
-            | SessionEventKind::TurnUserInputResolved { .. } => {}
+            | SessionEventKind::TurnUserInputResolved { .. }
+            | SessionEventKind::TurnPermissionRequested { .. }
+            | SessionEventKind::TurnPermissionResolved { .. } => {}
             SessionEventKind::TurnCompleted { turn_id } => {
                 self.turn_count = self.turn_count.saturating_add(1);
                 if self.active_turn_id.as_ref() == Some(turn_id) {

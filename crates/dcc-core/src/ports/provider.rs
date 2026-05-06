@@ -65,7 +65,7 @@ pub struct ProviderUserInputAnswer {
     pub answer: String,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderUserInputResponse {
     pub request_id: String,
@@ -73,11 +73,34 @@ pub struct ProviderUserInputResponse {
     pub answers: Vec<ProviderUserInputAnswer>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderPermissionRequest {
+    pub request_id: String,
+    pub tool_name: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub file: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderPermissionResponse {
+    pub request_id: String,
+    pub behavior: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub enum Input {
     Text(String),
     Turn(ProviderTurnInput),
     UserInputResponse(ProviderUserInputResponse),
+    PermissionResponse(ProviderPermissionResponse),
 }
 
 #[async_trait]

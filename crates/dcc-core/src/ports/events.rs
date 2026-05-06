@@ -100,6 +100,22 @@ pub enum CoreEvent {
         request_id: String,
         answers: Vec<ProviderUserInputAnswer>,
     },
+    SessionTurnPermissionRequested {
+        session_id: String,
+        turn_id: String,
+        request_id: String,
+        tool_name: String,
+        title: Option<String>,
+        description: Option<String>,
+        command: Option<String>,
+        file: Option<String>,
+    },
+    SessionTurnPermissionResolved {
+        session_id: String,
+        turn_id: String,
+        request_id: String,
+        behavior: String,
+    },
     SessionTurnCompleted {
         session_id: String,
         turn_id: String,

@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::session::SessionId;
-use crate::ports::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
+use crate::ports::provider::{
+    ProviderPermissionRequest, ProviderUserInputAnswer, ProviderUserInputQuestion,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(transparent)]
@@ -104,6 +106,15 @@ pub enum ProviderEvent {
     UserInputResolved {
         id: String,
         answers: Vec<ProviderUserInputAnswer>,
+        at: String,
+    },
+    PermissionRequested {
+        request: ProviderPermissionRequest,
+        at: String,
+    },
+    PermissionResolved {
+        id: String,
+        behavior: String,
         at: String,
     },
     Completed {

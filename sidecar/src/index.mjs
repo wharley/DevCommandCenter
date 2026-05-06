@@ -163,6 +163,47 @@ function extractPlanMarkdown(input) {
 		: null;
 }
 
+function toolInputCommand(input) {
+	if (!input || typeof input !== "object") {
+		return null;
+	}
+
+	const candidates = [
+		input.command,
+		input.cmd,
+		input.script,
+		input.shell_command,
+		input.shellCommand,
+	];
+	for (const candidate of candidates) {
+		if (typeof candidate === "string" && candidate.trim().length > 0) {
+			return candidate.trim();
+		}
+	}
+	return null;
+}
+
+function toolInputFile(input) {
+	if (!input || typeof input !== "object") {
+		return null;
+	}
+
+	const candidates = [
+		input.file_path,
+		input.filePath,
+		input.path,
+		input.file,
+		input.target_file,
+		input.targetFile,
+	];
+	for (const candidate of candidates) {
+		if (typeof candidate === "string" && candidate.trim().length > 0) {
+			return candidate.trim();
+		}
+	}
+	return null;
+}
+
 async function handleAskUserQuestion(input, options, state) {
 	const requestId =
 		typeof options?.toolUseID === "string" && options.toolUseID.trim().length > 0
@@ -224,6 +265,66 @@ async function handleAskUserQuestion(input, options, state) {
 	};
 }
 
+async function handlePermissionRequest(toolName, input, options, state) {
+	const requestId =
+		typeof options?.toolUseID === "string" && options.toolUseID.trim().length > 0
+			? options.toolUseID.trim()
+			: randomUUID();
+	let aborted = false;
+
+	emit({
+		type: "dcc_permission_request",
+		request_id: requestId,
+		tool_name: typeof toolName === "string" ? toolName : "Tool",
+		title:
+			typeof options?.title === "string" && options.title.trim().length > 0
+				? options.title.trim()
+				: null,
+		description:
+			typeof options?.description === "string" &&
+			options.description.trim().length > 0
+				? options.description.trim()
+				: null,
+		command: toolInputCommand(input),
+		file: toolInputFile(input),
+	});
+
+	const behavior = await new Promise((resolve) => {
+		state.pendingPermissions.set(requestId, { resolve });
+		options.signal.addEventListener(
+			"abort",
+			() => {
+				if (!state.pendingPermissions.delete(requestId)) {
+					return;
+				}
+				aborted = true;
+				resolve("deny");
+			},
+			{ once: true },
+		);
+	});
+
+	state.pendingPermissions.delete(requestId);
+
+	emit({
+		type: "dcc_permission_resolved",
+		request_id: requestId,
+		behavior,
+	});
+
+	if (aborted || behavior !== "allow") {
+		return {
+			behavior: "deny",
+			message: "User denied tool execution.",
+		};
+	}
+
+	return {
+		behavior: "allow",
+		updatedInput: input,
+	};
+}
+
 async function runTurn(payload, state) {
 	const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
 	const permissionMode = payload?.planMode === true ? "plan" : "bypassPermissions";
@@ -261,10 +362,7 @@ async function runTurn(payload, state) {
 							"The client captured your proposed plan. Stop here and wait for the user's next turn.",
 					};
 				}
-				return {
-					behavior: "allow",
-					updatedInput: input,
-				};
+				return handlePermissionRequest(toolName, input, options, state);
 			},
 		},
 	});
@@ -312,6 +410,7 @@ async function main() {
 		running: false,
 		activeTurnPromise: null,
 		pendingUserInputs: new Map(),
+		pendingPermissions: new Map(),
 	};
 
 	const rl = readline.createInterface({
@@ -356,6 +455,27 @@ async function main() {
 			continue;
 		}
 
+		if (payload.type === "permission_response") {
+			const requestId =
+				typeof payload.requestId === "string" ? payload.requestId.trim() : "";
+			const pending = requestId ? state.pendingPermissions.get(requestId) : null;
+			if (!pending) {
+				emit({
+					type: "result",
+					is_error: true,
+					result: "unknown pending permission request",
+					session_id: state.resumeSessionId ?? null,
+				});
+				continue;
+			}
+			pending.resolve(
+				typeof payload.behavior === "string" && payload.behavior.trim().length > 0
+					? payload.behavior.trim()
+					: "deny",
+			);
+			continue;
+		}
+
 		if (payload.type !== "input" || typeof payload.prompt !== "string") {
 			emit({
 				type: "result",
@@ -392,6 +512,10 @@ async function main() {
 					pending.resolve([]);
 				}
 				state.pendingUserInputs.clear();
+				for (const pending of state.pendingPermissions.values()) {
+					pending.resolve("deny");
+				}
+				state.pendingPermissions.clear();
 				state.running = false;
 				state.activeTurnPromise = null;
 			});
