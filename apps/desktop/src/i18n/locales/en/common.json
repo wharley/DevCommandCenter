@@ -28,7 +28,12 @@
     "noWorkspacesYet": "No workspaces yet",
     "noWorkspacesHint": "Open a project or clone from URL to start from zero.",
     "settings": "Settings",
-    "settingsShort": "Settings"
+    "settingsShort": "Settings",
+    "agentState": {
+      "active": "Running",
+      "completed": "Completed",
+      "aborted": "Aborted"
+    }
   },
   "commandPalette": {
     "title": "Workspace command palette",

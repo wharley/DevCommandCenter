@@ -1,8 +1,10 @@
 import { cva } from "class-variance-authority";
 import { Archive, GitBranch, RotateCcw, Trash2 } from "lucide-react";
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { AgentState } from "./use-workspace-agent-states";
 import type { WorkspaceSummary } from "./types";
 import {
 	branchToneFromWorkspace,
@@ -29,6 +31,7 @@ const rowVariants = cva(
 export type WorkspaceRailRowProps = {
 	workspace: WorkspaceSummary;
 	selected: boolean;
+	agentState?: AgentState | null;
 	onSelect?: (workspaceId: string) => void;
 	onArchiveWorkspace?: (workspaceId: string) => void;
 	onRestoreWorkspace?: (workspaceId: string) => void;
@@ -58,11 +61,13 @@ export const WorkspaceRailRowItem = memo(
 	function WorkspaceRailRowItem({
 		workspace,
 		selected,
+		agentState,
 		onSelect,
 		onArchiveWorkspace,
 		onRestoreWorkspace,
 		onDeleteWorkspace,
 	}: WorkspaceRailRowProps) {
+		const { t } = useTranslation("common");
 		const branchTone = branchToneFromWorkspace(workspace);
 		const displayTitle = workspace.branch
 			? humanizeWorkspaceBranchLabel(workspace.branch)
@@ -111,6 +116,29 @@ export const WorkspaceRailRowItem = memo(
 							>
 								{displayTitle}
 							</span>
+							{agentState && (
+								<span className="ml-auto flex shrink-0 items-center gap-1">
+									<span
+										aria-hidden
+										className={cn(
+											"size-[6px] shrink-0 rounded-full",
+											agentState === "active" && "bg-amber-400 animate-pulse",
+											agentState === "completed" && "bg-emerald-500",
+											agentState === "aborted" && "bg-destructive",
+										)}
+									/>
+									<span
+										className={cn(
+											"text-[10px] font-medium leading-none",
+											agentState === "active" && "text-amber-400",
+											agentState === "completed" && "text-emerald-500",
+											agentState === "aborted" && "text-destructive",
+										)}
+									>
+										{t(`sidebar.agentState.${agentState}`)}
+									</span>
+								</span>
+							)}
 						</div>
 					</div>
 					<div className="group/actions flex shrink-0 items-center gap-0.5 pr-2.5 opacity-0 transition-opacity group-hover/dccRailRow:opacity-100 group-focus-within/dccRailRow:opacity-100">
@@ -171,6 +199,7 @@ export const WorkspaceRailRowItem = memo(
 	},
 	(previous, next) =>
 		previous.selected === next.selected &&
+		previous.agentState === next.agentState &&
 		previous.workspace === next.workspace &&
 		previous.onArchiveWorkspace === next.onArchiveWorkspace &&
 		previous.onRestoreWorkspace === next.onRestoreWorkspace &&

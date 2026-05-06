@@ -28,7 +28,12 @@
     "noWorkspacesYet": "Ainda não há workspaces",
     "noWorkspacesHint": "Abra um projeto ou faça clone pela URL para começar.",
     "settings": "Configurações",
-    "settingsShort": "Configurações"
+    "settingsShort": "Configurações",
+    "agentState": {
+      "active": "Executando",
+      "completed": "Concluído",
+      "aborted": "Interrompido"
+    }
   },
   "commandPalette": {
     "title": "Paleta de comandos do workspace",

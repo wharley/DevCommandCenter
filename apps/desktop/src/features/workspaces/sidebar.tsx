@@ -53,6 +53,7 @@ import {
 	ProjectGroupGlyph,
 } from "./workspace-rail-shared";
 import { WorkspaceRailRowItem } from "./workspace-rail-row";
+import { useWorkspaceAgentStates } from "./use-workspace-agent-states";
 
 type VirtualItem =
 	| {
@@ -188,6 +189,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	workspaces,
 }: WorkspacesSidebarProps) {
 	const { t } = useTranslation("common");
+	const workspaceAgentStates = useWorkspaceAgentStates();
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const { activeGroups, archivedRows } = useMemo(
 		() => projectWorkspaceRailGroups(workspaces),
@@ -436,6 +438,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				<WorkspaceRailRowItem
 					workspace={item.workspace}
 					selected={selectedWorkspaceId === item.workspace.id}
+					agentState={workspaceAgentStates[item.workspace.id] ?? null}
 					onSelect={onSelectWorkspace}
 					onArchiveWorkspace={onArchiveWorkspace}
 					onRestoreWorkspace={onRestoreWorkspace}
@@ -443,7 +446,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				/>
 			);
 		},
-		[sectionOpenState, selectedWorkspaceId, toggleSection, onSelectWorkspace, onArchiveWorkspace, onRestoreWorkspace, onDeleteWorkspace],
+		[sectionOpenState, selectedWorkspaceId, workspaceAgentStates, toggleSection, onSelectWorkspace, onArchiveWorkspace, onRestoreWorkspace, onDeleteWorkspace],
 	);
 
 	if (collapsed) {
