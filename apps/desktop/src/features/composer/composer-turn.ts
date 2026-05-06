@@ -1,6 +1,7 @@
 /**
- * Composer envelope sent to Tauri `send_turn`; **`compose_wire_prompt` runs in Rust**
- * (`dcc-core`) so Claude / Codex / Gemini / Cursor all receive the same directives on stdin.
+ * Composer envelope sent to Tauri `send_turn`; Rust forwards this as structured
+ * turn metadata and each provider adapter decides what travels natively vs. via
+ * provider-local prompt fallback.
  */
 
 export type ComposerEffortLevel = string;
@@ -21,7 +22,7 @@ export type ComposerSubmittedTurn = {
 
 export const DEFAULT_COMPOSER_ENVELOPE: ComposerTurnEnvelope = {
 	planMode: false,
-	effort: "balanced",
+	effort: "medium",
 	fastMode: true,
 };
 

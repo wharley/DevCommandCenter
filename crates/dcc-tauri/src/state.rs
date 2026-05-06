@@ -584,7 +584,7 @@ impl SessionCommandState {
     pub(crate) async fn send_provider_input(
         &self,
         session_id: &SessionId,
-        input: String,
+        input: Input,
     ) -> Result<()> {
         let binding = self.provider_binding(session_id)?.ok_or_else(|| {
             dcc_core::CoreError::Provider(format!(
@@ -598,9 +598,7 @@ impl SessionCommandState {
                 binding.provider_id
             ))
         })?;
-        provider
-            .send_input(&binding.handle, Input::Text(input))
-            .await
+        provider.send_input(&binding.handle, input).await
     }
 
     pub(crate) async fn cancel_provider_session(&self, session_id: &SessionId) -> Result<()> {

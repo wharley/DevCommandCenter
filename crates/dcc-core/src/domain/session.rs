@@ -343,6 +343,7 @@ mod tests {
                 SessionEventKind::TurnStarted {
                     turn_id: TurnId("turn-1".to_string()),
                     prompt: "Create shell".to_string(),
+                    plan_mode: None,
                 },
             ),
             event(

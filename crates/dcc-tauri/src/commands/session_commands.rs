@@ -2,14 +2,13 @@ use tauri::{AppHandle, State};
 
 use dcc_core::{
     application::{
-        abort_run as run_abort_run, compose_wire_prompt_for_provider,
-        resume_session as run_resume_session, send_turn as run_send_turn,
-        send_turn_selection_differs_from_session, start_thread as run_start_thread, AbortRunInput,
-        AbortRunOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput,
-        StartThreadInput, StartThreadOutput,
+        abort_run as run_abort_run, resume_session as run_resume_session,
+        send_turn as run_send_turn, send_turn_selection_differs_from_session,
+        start_thread as run_start_thread, AbortRunInput, AbortRunOutput, ResumeSessionInput,
+        ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
     },
     domain::session::{SessionEventRecord, WorkspaceSessionSummary},
-    ports::SessionEventRepo,
+    ports::{Input, ProviderTurnInput, SessionEventRepo},
 };
 
 use crate::state::SessionCommandState;
@@ -44,10 +43,12 @@ pub async fn send_turn(
         }
     }
 
-    let prompt_for_wire = input.prompt.clone();
-    let plan_mode = input.plan_mode;
-    let effort = input.effort.clone();
-    let fast_mode = input.fast_mode;
+    let provider_turn_input = ProviderTurnInput {
+        prompt: input.prompt.clone(),
+        plan_mode: input.plan_mode,
+        effort: input.effort.clone(),
+        fast_mode: input.fast_mode,
+    };
     let output = run_send_turn(&*state, &*state, &*state, input)
         .await
         .map_err(|error| error.to_string())?;
@@ -69,14 +70,6 @@ pub async fn send_turn(
         }
     };
 
-    let wire_prompt = compose_wire_prompt_for_provider(
-        &output.session.provider_id,
-        &prompt_for_wire,
-        plan_mode,
-        effort.as_deref(),
-        fast_mode,
-    );
-
     if let Err(error) = state.attach_provider_session(&output.session).await {
         return Err(abort_turn(error.to_string()).await);
     }
@@ -89,7 +82,7 @@ pub async fn send_turn(
     }
 
     if let Err(error) = state
-        .send_provider_input(&output.session.id, wire_prompt)
+        .send_provider_input(&output.session.id, Input::Turn(provider_turn_input))
         .await
     {
         let _ = state.set_active_turn(&output.session.id, None).await;

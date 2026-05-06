@@ -3,10 +3,7 @@ use dcc_core::domain::{
     provider::{HealthStatus, ProviderDescriptor, ProviderId},
 };
 
-use crate::{
-    claude_sdk_sidecar::ClaudeSdkSidecarAdapter,
-    common::stable_cli_capabilities,
-};
+use crate::{claude_sdk_sidecar::ClaudeSdkSidecarAdapter, common::stable_cli_capabilities};
 
 pub fn adapter() -> ClaudeSdkSidecarAdapter {
     ClaudeSdkSidecarAdapter::new(

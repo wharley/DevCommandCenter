@@ -11,6 +11,10 @@ use tokio::{
 use uuid::Uuid;
 
 use dcc_core::{
+    application::{
+        compose_fallback_prompt_for_provider, compose_wire_prompt_for_provider,
+        PromptInjectionOptions,
+    },
     domain::{
         provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
         session::SessionId,
@@ -155,6 +159,7 @@ impl HeadlessCliProviderAdapter {
         continuation_id: Option<&str>,
         model: Option<&str>,
         prompt: &str,
+        plan_mode: Option<bool>,
     ) -> Vec<String> {
         match self.kind {
             HeadlessCliKind::Claude => {
@@ -180,6 +185,11 @@ impl HeadlessCliProviderAdapter {
                 args
             }
             HeadlessCliKind::Gemini => {
+                let approval_mode = if plan_mode.unwrap_or(false) {
+                    "plan"
+                } else {
+                    "yolo"
+                };
                 let mut args = vec![
                     "--prompt".to_string(),
                     prompt.to_string(),
@@ -187,7 +197,7 @@ impl HeadlessCliProviderAdapter {
                     "stream-json".to_string(),
                     "--skip-trust".to_string(),
                     "--approval-mode".to_string(),
-                    "yolo".to_string(),
+                    approval_mode.to_string(),
                 ];
                 if let Some(continuation_id) =
                     continuation_id.filter(|value| !value.trim().is_empty())
@@ -204,7 +214,12 @@ impl HeadlessCliProviderAdapter {
         }
     }
 
-    async fn spawn_turn(&self, runtime: Arc<SessionRuntime>, prompt: String) -> Result<()> {
+    async fn spawn_turn(
+        &self,
+        runtime: Arc<SessionRuntime>,
+        prompt: String,
+        plan_mode: Option<bool>,
+    ) -> Result<()> {
         {
             let active_turn = runtime.active_turn.lock().await;
             if active_turn.is_some() {
@@ -220,6 +235,7 @@ impl HeadlessCliProviderAdapter {
             continuation_id.as_deref(),
             runtime.model.as_deref(),
             &prompt,
+            plan_mode,
         );
         let mut command = self.turn_command();
         command.args(&args);
@@ -582,7 +598,31 @@ impl Provider for HeadlessCliProviderAdapter {
             })?;
 
         match input {
-            Input::Text(text) => self.spawn_turn(runtime, text).await,
+            Input::Text(text) => self.spawn_turn(runtime, text, None).await,
+            Input::Turn(turn) => {
+                let prompt = match self.kind {
+                    HeadlessCliKind::Claude => compose_wire_prompt_for_provider(
+                        &self.id.0,
+                        &turn.prompt,
+                        turn.plan_mode,
+                        turn.effort.as_deref(),
+                        turn.fast_mode,
+                    ),
+                    HeadlessCliKind::Gemini => compose_fallback_prompt_for_provider(
+                        &self.id.0,
+                        &turn.prompt,
+                        turn.plan_mode,
+                        turn.effort.as_deref(),
+                        turn.fast_mode,
+                        PromptInjectionOptions {
+                            plan: false,
+                            effort: true,
+                            fast: true,
+                        },
+                    ),
+                };
+                self.spawn_turn(runtime, prompt, turn.plan_mode).await
+            }
         }
     }
 
@@ -731,5 +771,35 @@ mod tests {
             Some(ProviderEvent::Failed { message, .. })
                 if message.contains("Gemini CLI is not authenticated")
         ));
+    }
+
+    #[test]
+    fn gemini_build_turn_args_use_native_plan_mode() {
+        let provider = HeadlessCliProviderAdapter::new(
+            "gemini",
+            "Gemini",
+            "Gemini",
+            "gemini",
+            Capabilities {
+                streaming: true,
+                mcp: false,
+                tools: true,
+                vision: false,
+                resumable: false,
+                experimental: true,
+            },
+            true,
+            HeadlessCliKind::Gemini,
+        );
+
+        let plan_args = provider.build_turn_args(None, None, "ship it", Some(true));
+        assert!(plan_args
+            .windows(2)
+            .any(|pair| pair == ["--approval-mode", "plan"]));
+
+        let execute_args = provider.build_turn_args(None, None, "ship it", Some(false));
+        assert!(execute_args
+            .windows(2)
+            .any(|pair| pair == ["--approval-mode", "yolo"]));
     }
 }

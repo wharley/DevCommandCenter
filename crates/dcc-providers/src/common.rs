@@ -19,6 +19,7 @@ use tokio::{
 use uuid::Uuid;
 
 use dcc_core::{
+    application::compose_wire_prompt_for_provider,
     domain::{
         provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
         session::SessionId,
@@ -1136,6 +1137,40 @@ impl Provider for CliProviderAdapter {
 
         match input {
             Input::Text(text) => {
+                let mut stdin = runtime.stdin.lock().await;
+                let stream = stdin.as_mut().ok_or_else(|| {
+                    CoreError::Provider(format!(
+                        "stdin closed for session {} on provider {}",
+                        handle.session_id.0, self.binary
+                    ))
+                })?;
+                stream.write_all(text.as_bytes()).await.map_err(|error| {
+                    CoreError::Provider(format!(
+                        "failed to write input for {}: {}",
+                        self.binary, error
+                    ))
+                })?;
+                stream.write_all(b"\n").await.map_err(|error| {
+                    CoreError::Provider(format!(
+                        "failed to terminate input for {}: {}",
+                        self.binary, error
+                    ))
+                })?;
+                stream.flush().await.map_err(|error| {
+                    CoreError::Provider(format!(
+                        "failed to flush input for {}: {}",
+                        self.binary, error
+                    ))
+                })?;
+            }
+            Input::Turn(turn) => {
+                let text = compose_wire_prompt_for_provider(
+                    &self.id.0,
+                    &turn.prompt,
+                    turn.plan_mode,
+                    turn.effort.as_deref(),
+                    turn.fast_mode,
+                );
                 let mut stdin = runtime.stdin.lock().await;
                 let stream = stdin.as_mut().ok_or_else(|| {
                     CoreError::Provider(format!(

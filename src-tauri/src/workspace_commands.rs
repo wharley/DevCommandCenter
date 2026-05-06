@@ -9,8 +9,8 @@ use dcc_tauri::{
         ListLocalBranchesOutput, ListWorkspacesOutput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
-        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
-        WorkspaceIdInput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
+        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceIdInput,
+        WorkspacePrStatusInput, WorkspacePrStatusOutput,
     },
     state::WorkspaceCommandState,
 };

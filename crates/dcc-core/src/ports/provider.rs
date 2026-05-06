@@ -30,8 +30,21 @@ pub struct ProviderRuntimeConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderTurnInput {
+    pub prompt: String,
+    #[serde(default)]
+    pub plan_mode: Option<bool>,
+    #[serde(default)]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub fast_mode: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub enum Input {
     Text(String),
+    Turn(ProviderTurnInput),
 }
 
 #[async_trait]

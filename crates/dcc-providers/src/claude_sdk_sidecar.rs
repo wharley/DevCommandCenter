@@ -105,7 +105,11 @@ impl ClaudeSdkSidecarAdapter {
     }
 
     fn repo_vendor_claude_bin_path(&self) -> Option<PathBuf> {
-        let binary_name = if cfg!(windows) { "claude.exe" } else { "claude" };
+        let binary_name = if cfg!(windows) {
+            "claude.exe"
+        } else {
+            "claude"
+        };
         for base in self.repo_root_candidates() {
             let candidate = base
                 .join("sidecar")
@@ -141,7 +145,11 @@ impl ClaudeSdkSidecarAdapter {
         let exe = std::env::current_exe().ok()?;
         let contents_dir = exe.parent()?.parent()?;
         let resources_dir = contents_dir.join("Resources");
-        let name = if cfg!(windows) { "claude.exe" } else { "claude" };
+        let name = if cfg!(windows) {
+            "claude.exe"
+        } else {
+            "claude"
+        };
         let candidate = resources_dir.join("vendor").join("claude-code").join(name);
         if candidate.is_file() {
             Some(candidate)
@@ -202,9 +210,9 @@ impl ClaudeSdkSidecarAdapter {
             }
         }
 
-        let mut child = command
-            .spawn()
-            .map_err(|error| CoreError::Provider(format!("failed to spawn Claude sidecar: {error}")))?;
+        let mut child = command.spawn().map_err(|error| {
+            CoreError::Provider(format!("failed to spawn Claude sidecar: {error}"))
+        })?;
 
         let stdin = child.stdin.take().ok_or_else(|| {
             CoreError::Provider("Claude sidecar did not expose stdin".to_string())
@@ -316,6 +324,18 @@ impl ClaudeSdkSidecarAdapter {
             .get(&session_id.0)
             .cloned()
     }
+
+    fn sidecar_effort(effort: Option<&str>) -> Option<&'static str> {
+        match effort.map(str::trim).filter(|value| !value.is_empty()) {
+            Some("minimal") => Some("low"),
+            Some("balanced") | Some("medium") => Some("medium"),
+            Some("low") => Some("low"),
+            Some("high") => Some("high"),
+            Some("xhigh") => Some("xhigh"),
+            Some("max") | Some("ultrathink") => Some("max"),
+            Some(_) | None => None,
+        }
+    }
 }
 
 #[async_trait]
@@ -356,13 +376,56 @@ impl Provider for ClaudeSdkSidecarAdapter {
                     "type": "input",
                     "prompt": text,
                 });
-                let serialized = serde_json::to_string(&payload)
-                    .map_err(|error| CoreError::Provider(format!("failed to encode Claude sidecar input: {error}")))?;
-                stream.write_all(serialized.as_bytes()).await.map_err(|error| {
-                    CoreError::Provider(format!("failed to write Claude sidecar input: {error}"))
+                let serialized = serde_json::to_string(&payload).map_err(|error| {
+                    CoreError::Provider(format!("failed to encode Claude sidecar input: {error}"))
                 })?;
+                stream
+                    .write_all(serialized.as_bytes())
+                    .await
+                    .map_err(|error| {
+                        CoreError::Provider(format!(
+                            "failed to write Claude sidecar input: {error}"
+                        ))
+                    })?;
                 stream.write_all(b"\n").await.map_err(|error| {
-                    CoreError::Provider(format!("failed to terminate Claude sidecar input: {error}"))
+                    CoreError::Provider(format!(
+                        "failed to terminate Claude sidecar input: {error}"
+                    ))
+                })?;
+                stream.flush().await.map_err(|error| {
+                    CoreError::Provider(format!("failed to flush Claude sidecar input: {error}"))
+                })?;
+            }
+            Input::Turn(turn) => {
+                let mut stdin = runtime.stdin.lock().await;
+                let stream = stdin.as_mut().ok_or_else(|| {
+                    CoreError::Provider(format!(
+                        "stdin closed for session {} on provider {}",
+                        handle.session_id.0, self.label
+                    ))
+                })?;
+                let payload = json!({
+                    "type": "input",
+                    "prompt": turn.prompt,
+                    "planMode": turn.plan_mode,
+                    "effort": Self::sidecar_effort(turn.effort.as_deref()),
+                    "fastMode": turn.fast_mode,
+                });
+                let serialized = serde_json::to_string(&payload).map_err(|error| {
+                    CoreError::Provider(format!("failed to encode Claude sidecar input: {error}"))
+                })?;
+                stream
+                    .write_all(serialized.as_bytes())
+                    .await
+                    .map_err(|error| {
+                        CoreError::Provider(format!(
+                            "failed to write Claude sidecar input: {error}"
+                        ))
+                    })?;
+                stream.write_all(b"\n").await.map_err(|error| {
+                    CoreError::Provider(format!(
+                        "failed to terminate Claude sidecar input: {error}"
+                    ))
                 })?;
                 stream.flush().await.map_err(|error| {
                     CoreError::Provider(format!("failed to flush Claude sidecar input: {error}"))
@@ -419,10 +482,9 @@ impl Provider for ClaudeSdkSidecarAdapter {
         }
 
         let mut child = runtime.child.lock().await;
-        child
-            .kill()
-            .await
-            .map_err(|error| CoreError::Provider(format!("failed to cancel Claude sidecar: {error}")))?;
+        child.kill().await.map_err(|error| {
+            CoreError::Provider(format!("failed to cancel Claude sidecar: {error}"))
+        })?;
 
         Ok(())
     }
@@ -482,7 +544,10 @@ impl Provider for ClaudeSdkSidecarAdapter {
                 } else if !stdout.is_empty() {
                     stdout
                 } else {
-                    format!("Claude sidecar version check exited with status {}", output.status)
+                    format!(
+                        "Claude sidecar version check exited with status {}",
+                        output.status
+                    )
                 };
                 Ok(HealthStatus::Degraded { reason })
             }

@@ -14,6 +14,7 @@ import {
 	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuLabel,
+	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -34,6 +35,13 @@ import { ContextUsageRing } from "./ContextUsageRing";
 import { EffortBrainIcon } from "./EffortBrainIcon";
 import { UsageStatsIndicator } from "./UsageStatsIndicator";
 import { ComposerButton } from "./ComposerButton";
+import {
+	clampEffort,
+	DEFAULT_EFFORT_LEVEL,
+	DEFAULT_EFFORT_LEVELS,
+	getEffortDisplay,
+	resolveEffectiveEffort,
+} from "./effort";
 import {
 	buildComposerContextDirectories,
 	composerToolbarTriggerClassName,
@@ -67,32 +75,6 @@ import { workspaceChildDirsQueryOptions } from "./workspace-child-dirs-query";
 import type { ComposerSubmittedTurn } from "./composer-turn";
 import { clearDraft } from "./draftStorage";
 import { readComposerPrompt, setEditorText } from "./editorOps";
-
-/** Canonical order used for clamping when switching models. */
-const CANONICAL_EFFORT_ORDER = ["low", "balanced", "high"] as const;
-
-const DEFAULT_EFFORT_LEVELS = ["low", "balanced", "high"];
-
-const EFFORT_DISPLAY: Record<string, { label: string; icon: string }> = {
-	low: { label: "Low", icon: "low" },
-	balanced: { label: "Balanced", icon: "medium" },
-	high: { label: "High", icon: "high" },
-};
-
-function getEffortDisplay(id: string) {
-	return EFFORT_DISPLAY[id] ?? { label: id.charAt(0).toUpperCase() + id.slice(1), icon: "medium" };
-}
-
-/** Clamp `effort` to the nearest supported level (walking down the canonical order). */
-function clampEffort(effort: string, supported: string[]): string {
-	if (supported.includes(effort)) return effort;
-	const idx = CANONICAL_EFFORT_ORDER.indexOf(effort as (typeof CANONICAL_EFFORT_ORDER)[number]);
-	for (let i = idx; i >= 0; i--) {
-		const candidate = CANONICAL_EFFORT_ORDER[i];
-		if (candidate && supported.includes(candidate)) return candidate;
-	}
-	return supported[0] ?? "balanced";
-}
 
 type WorkspaceComposerProps = {
 	draftKey: string;
@@ -141,7 +123,8 @@ export function WorkspaceComposer({
 	const [hasContent, setHasContent] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [isFastMode, setIsFastMode] = useState(true);
-	const [effort, setEffort] = useState("balanced");
+	const [effort, setEffort] = useState(DEFAULT_EFFORT_LEVEL);
+	const [ultrathinkSelected, setUltrathinkSelected] = useState(false);
 	const [isPlanMode, setIsPlanMode] = useState(false);
 	const [lastSubmittedWithPlanMode, setLastSubmittedWithPlanMode] = useState(false);
 	const [contextDirectories, setContextDirectories] = useState(() =>
@@ -182,11 +165,12 @@ export function WorkspaceComposer({
 
 	const submitFromComposer = useCallback(
 		async (rawPrompt: string) => {
-			// Detect "ultrathink" keyword → boost to the highest available effort for this turn.
-			const effectiveEffort =
-				/ultrathink/i.test(rawPrompt)
-					? (availableEffortLevels[availableEffortLevels.length - 1] ?? effort)
-					: effort;
+			const effectiveEffort = resolveEffectiveEffort({
+				selectedEffort: effort,
+				supportedEfforts: availableEffortLevels,
+				ultrathinkSelected,
+				rawPrompt,
+			});
 			setLastSubmittedWithPlanMode(isPlanMode);
 			await onSubmitPrompt({
 				rawPrompt,
@@ -197,7 +181,7 @@ export function WorkspaceComposer({
 				},
 			});
 		},
-		[effort, availableEffortLevels, isFastMode, isPlanMode, onSubmitPrompt],
+		[availableEffortLevels, effort, isFastMode, isPlanMode, onSubmitPrompt, ultrathinkSelected],
 	);
 
 	const handleSubmitDraft = useCallback(async () => {
@@ -312,7 +296,10 @@ export function WorkspaceComposer({
 		? "Describe what to change, then click Request Changes"
 		: "Ask to make changes, @mention files, run /commands";
 
-	const effortLabel = getEffortDisplay(effort).label;
+	const selectedEffortId = ultrathinkSelected ? "ultrathink" : effort;
+	const effortLabel = getEffortDisplay(selectedEffortId).label;
+	const highlightEffort =
+		ultrathinkSelected || effort === "xhigh" || effort === "max";
 
 	useEffect(() => {
 		setContextDirectories(
@@ -460,7 +447,10 @@ export function WorkspaceComposer({
 							type="button"
 							disabled={toolbarDisabled}
 							className={cn(
-								`flex h-7 items-center gap-0.5 text-muted-foreground ${composerToolbarTriggerClassName}`,
+								`flex h-7 items-center gap-0.5 ${composerToolbarTriggerClassName}`,
+								highlightEffort
+									? "bg-amber-500/8 text-amber-600 hover:bg-amber-500/12 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+									: "text-muted-foreground",
 								toolbarDisabled &&
 									"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
 							)}
@@ -486,18 +476,37 @@ export function WorkspaceComposer({
 											key={id}
 											disabled={toolbarDisabled}
 											className="flex items-center justify-between gap-3"
-											onClick={() => setEffort(id)}
+											onClick={() => {
+												setUltrathinkSelected(false);
+												setEffort(id);
+											}}
 										>
 											<div className="flex items-center gap-2.5">
 												<EffortBrainIcon level={display.icon} />
 												<span>{display.label}</span>
 											</div>
-											{id === effort ? (
+											{id === effort && !ultrathinkSelected ? (
 												<span className="text-[11px] text-foreground">✓</span>
 											) : null}
 										</DropdownMenuItem>
 									);
 								})}
+								<DropdownMenuSeparator />
+								<DropdownMenuItem
+									disabled={toolbarDisabled}
+									className="flex items-center justify-between gap-3"
+									onClick={() => {
+										setUltrathinkSelected(true);
+									}}
+								>
+									<div className="flex items-center gap-2.5">
+										<EffortBrainIcon level="max" />
+										<span>Ultrathink</span>
+									</div>
+									{ultrathinkSelected ? (
+										<span className="text-[11px] text-foreground">✓</span>
+									) : null}
+								</DropdownMenuItem>
 							</DropdownMenuGroup>
 						</DropdownMenuContent>
 					</DropdownMenu>

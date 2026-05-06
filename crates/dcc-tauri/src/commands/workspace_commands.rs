@@ -1407,14 +1407,22 @@ pub async fn workspace_continue_from_base_branch(
 fn sanitize_branch_name(name: &str) -> String {
     let slug: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     // Collapse multiple dashes and trim from edges
     let mut result = String::new();
     let mut last_dash = true;
     for c in slug.chars() {
         if c == '-' {
-            if !last_dash { result.push('-'); }
+            if !last_dash {
+                result.push('-');
+            }
             last_dash = true;
         } else {
             result.push(c);
@@ -1422,7 +1430,11 @@ fn sanitize_branch_name(name: &str) -> String {
         }
     }
     let result = result.trim_end_matches('-').to_string();
-    if result.is_empty() { "workspace".to_string() } else { result.chars().take(50).collect() }
+    if result.is_empty() {
+        "workspace".to_string()
+    } else {
+        result.chars().take(50).collect()
+    }
 }
 
 fn next_available_branch_name(root: &str, base: &str) -> String {

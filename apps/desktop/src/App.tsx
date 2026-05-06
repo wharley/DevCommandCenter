@@ -710,7 +710,7 @@ export default function App() {
 					model: selectedModel?.id ?? null,
 					providerRuntime: selectedProviderRuntime,
 					planMode: false,
-					effort: "balanced",
+					effort: "medium",
 					fastMode: true,
 				});
 

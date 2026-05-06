@@ -54,7 +54,38 @@ function updateResumeSessionId(message, state) {
 	}
 }
 
-async function runTurn(prompt, state) {
+function normalizeEffort(effort) {
+	if (typeof effort !== "string") {
+		return undefined;
+	}
+
+	switch (effort.trim().toLowerCase()) {
+		case "low":
+		case "medium":
+		case "high":
+		case "xhigh":
+		case "max":
+			return effort.trim().toLowerCase();
+		default:
+			return undefined;
+	}
+}
+
+function buildSystemPrompt(fastMode) {
+	if (fastMode !== true) {
+		return undefined;
+	}
+
+	return {
+		type: "preset",
+		preset: "claude_code",
+		append: "Prefer concise assistant replies unless the user explicitly needs detail.",
+	};
+}
+
+async function runTurn(payload, state) {
+	const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
+	const permissionMode = payload?.planMode === true ? "plan" : "bypassPermissions";
 	const q = query({
 		prompt,
 		options: {
@@ -62,10 +93,14 @@ async function runTurn(prompt, state) {
 			pathToClaudeCodeExecutable: CLAUDE_BIN_PATH,
 			model: process.env.DCC_MODEL || undefined,
 			...(state.resumeSessionId ? { resume: state.resumeSessionId } : {}),
-			permissionMode: "bypassPermissions",
-			allowDangerouslySkipPermissions: true,
+			permissionMode,
+			...(permissionMode === "bypassPermissions"
+				? { allowDangerouslySkipPermissions: true }
+				: {}),
 			includePartialMessages: true,
 			settingSources: ["user", "project", "local"],
+			effort: normalizeEffort(payload?.effort),
+			systemPrompt: buildSystemPrompt(payload?.fastMode),
 		},
 	});
 	let sawTerminalResult = false;
@@ -159,7 +194,7 @@ async function main() {
 
 		state.running = true;
 		try {
-			await runTurn(payload.prompt, state);
+			await runTurn(payload, state);
 		} finally {
 			state.running = false;
 		}

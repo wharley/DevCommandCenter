@@ -11,6 +11,7 @@ use tokio::{
 };
 
 use dcc_core::{
+    application::{compose_fallback_prompt_for_provider, PromptInjectionOptions},
     domain::{
         provider::{
             Capabilities, HealthStatus, ProviderDescriptor, ProviderEvent, ProviderId,
@@ -76,7 +77,7 @@ pub fn descriptor(
         label: "Auto".to_string(),
         description: "Use Cursor's recommended model for this account.".to_string(),
         recommended: true,
-        effort_levels: vec!["low".to_string(), "balanced".to_string(), "high".to_string()],
+        effort_levels: vec!["low".to_string(), "medium".to_string(), "high".to_string()],
     }];
 
     let mut seen = HashSet::from([CURSOR_AUTODETECT_MODEL_ID.to_string()]);
@@ -90,7 +91,7 @@ pub fn descriptor(
             label: model.label,
             description: model.description,
             recommended: false,
-            effort_levels: vec!["low".to_string(), "balanced".to_string(), "high".to_string()],
+            effort_levels: vec!["low".to_string(), "medium".to_string(), "high".to_string()],
         });
     }
 
@@ -188,7 +189,13 @@ impl CursorProvider {
             .cloned()
     }
 
-    fn cursor_turn_args(&self, chat_id: &str, model: Option<&str>, prompt: &str) -> Vec<String> {
+    fn cursor_turn_args(
+        &self,
+        chat_id: &str,
+        model: Option<&str>,
+        prompt: &str,
+        plan_mode: Option<bool>,
+    ) -> Vec<String> {
         let mut args = vec![
             "--print".to_string(),
             "--output-format".to_string(),
@@ -197,6 +204,10 @@ impl CursorProvider {
             "--resume".to_string(),
             chat_id.to_string(),
         ];
+        if plan_mode.unwrap_or(false) {
+            args.push("--mode".to_string());
+            args.push("plan".to_string());
+        }
         if let Some(model) = Self::normalize_model_arg(model) {
             args.push("--model".to_string());
             args.push(model);
@@ -209,6 +220,7 @@ impl CursorProvider {
         &self,
         runtime: Arc<CursorSessionRuntime>,
         prompt: String,
+        plan_mode: Option<bool>,
     ) -> Result<()> {
         {
             let active_turn = runtime.active_turn.lock().await;
@@ -219,7 +231,12 @@ impl CursorProvider {
             }
         }
 
-        let args = self.cursor_turn_args(&runtime.chat_id, runtime.model.as_deref(), &prompt);
+        let args = self.cursor_turn_args(
+            &runtime.chat_id,
+            runtime.model.as_deref(),
+            &prompt,
+            plan_mode,
+        );
         let cwd = runtime.cwd.clone();
         let mut command = self.command();
         command.args(&args);
@@ -776,7 +793,7 @@ fn parse_cursor_models_to_descriptors(raw: &str) -> Vec<ProviderModelDescriptor>
         label: "Auto".to_string(),
         description: "Use Cursor's recommended model for this account.".to_string(),
         recommended: true,
-        effort_levels: vec!["low".to_string(), "balanced".to_string(), "high".to_string()],
+        effort_levels: vec!["low".to_string(), "medium".to_string(), "high".to_string()],
     }];
 
     for model in parse_cursor_models(raw) {
@@ -793,7 +810,7 @@ fn parse_cursor_models_to_descriptors(raw: &str) -> Vec<ProviderModelDescriptor>
             label: trimmed,
             description: CURSOR_MODEL_DESCRIPTION.to_string(),
             recommended: false,
-            effort_levels: vec!["low".to_string(), "balanced".to_string(), "high".to_string()],
+            effort_levels: vec!["low".to_string(), "medium".to_string(), "high".to_string()],
         });
     }
 
@@ -822,7 +839,7 @@ pub async fn discover_models() -> Vec<ProviderModelDescriptor> {
             label: "Auto".to_string(),
             description: "Use Cursor's recommended model for this account.".to_string(),
             recommended: true,
-            effort_levels: vec!["low".to_string(), "balanced".to_string(), "high".to_string()],
+            effort_levels: vec!["low".to_string(), "medium".to_string(), "high".to_string()],
         }],
     }
 }
@@ -912,8 +929,25 @@ impl Provider for CursorProvider {
                 ))
             })?;
 
-        let Input::Text(prompt) = input;
-        self.spawn_cursor_turn(runtime, prompt).await
+        let (prompt, plan_mode) = match input {
+            Input::Text(prompt) => (prompt, None),
+            Input::Turn(turn) => (
+                compose_fallback_prompt_for_provider(
+                    "cursor",
+                    &turn.prompt,
+                    turn.plan_mode,
+                    turn.effort.as_deref(),
+                    turn.fast_mode,
+                    PromptInjectionOptions {
+                        plan: false,
+                        effort: true,
+                        fast: true,
+                    },
+                ),
+                turn.plan_mode,
+            ),
+        };
+        self.spawn_cursor_turn(runtime, prompt, plan_mode).await
     }
 
     fn stream_events(&self, handle: &SessionHandle) -> BoxStream<'static, Result<ProviderEvent>> {
@@ -1089,5 +1123,17 @@ mod tests {
             CursorProvider::normalize_model_arg(Some("claude-4-sonnet-thinking")),
             Some("claude-4-sonnet-thinking".to_string())
         );
+    }
+
+    #[test]
+    fn cursor_turn_args_use_native_plan_mode() {
+        let provider = adapter();
+        let plan_args = provider.cursor_turn_args("chat-1", None, "ship it", Some(true));
+        assert!(plan_args.windows(2).any(|pair| pair == ["--mode", "plan"]));
+
+        let execute_args = provider.cursor_turn_args("chat-1", None, "ship it", Some(false));
+        assert!(!execute_args
+            .windows(2)
+            .any(|pair| pair == ["--mode", "plan"]));
     }
 }

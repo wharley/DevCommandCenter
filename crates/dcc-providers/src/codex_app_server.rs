@@ -22,6 +22,7 @@ use tokio::{
 use uuid::Uuid;
 
 use dcc_core::{
+    application::{compose_fallback_prompt_for_provider, PromptInjectionOptions},
     domain::{
         provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
         session::SessionId,
@@ -46,6 +47,18 @@ fn rpc_request(id: u64, method: &str, params: Value) -> String {
 
 fn rpc_notification(method: &str) -> String {
     json!({ "jsonrpc": "2.0", "method": method }).to_string()
+}
+
+fn codex_reasoning_effort(effort: Option<&str>) -> Option<&'static str> {
+    match effort.map(str::trim).filter(|value| !value.is_empty()) {
+        Some("none") => Some("none"),
+        Some("minimal") => Some("minimal"),
+        Some("low") => Some("low"),
+        Some("balanced") | Some("medium") => Some("medium"),
+        Some("high") => Some("high"),
+        Some("xhigh") | Some("max") | Some("ultrathink") => Some("xhigh"),
+        Some(_) | None => None,
+    }
 }
 
 async fn write_line(stdin: &mut ChildStdin, line: &str) -> Result<()> {
@@ -598,8 +611,6 @@ impl Provider for CodexAppServerAdapter {
                 ))
             })?;
 
-        let Input::Text(text) = input;
-
         let thread_id = runtime
             .thread_id
             .lock()
@@ -607,14 +618,40 @@ impl Provider for CodexAppServerAdapter {
             .clone()
             .ok_or_else(|| CoreError::Provider("codex session has no thread ID".to_string()))?;
 
+        let (prompt, effort, summary) = match input {
+            Input::Text(text) => (text, None, None),
+            Input::Turn(turn) => (
+                compose_fallback_prompt_for_provider(
+                    "codex",
+                    &turn.prompt,
+                    turn.plan_mode,
+                    turn.effort.as_deref(),
+                    turn.fast_mode,
+                    PromptInjectionOptions {
+                        plan: true,
+                        effort: false,
+                        fast: false,
+                    },
+                ),
+                codex_reasoning_effort(turn.effort.as_deref()),
+                if turn.fast_mode.unwrap_or(true) {
+                    Some("concise")
+                } else {
+                    Some("auto")
+                },
+            ),
+        };
+
         runtime
             .send_request(
                 "turn/start",
                 json!({
                     "threadId": thread_id,
-                    "input": [{ "type": "text", "text": text }],
+                    "input": [{ "type": "text", "text": prompt }],
+                    "effort": effort,
                     "approvalPolicy": "never",
                     "sandboxPolicy": { "type": "dangerFullAccess" },
+                    "summary": summary,
                 }),
             )
             .await?;

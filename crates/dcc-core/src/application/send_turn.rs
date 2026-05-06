@@ -18,7 +18,7 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 pub struct SendTurnInput {
     pub session_id: SessionId,
-    /// Raw composer text for timeline / Turn records (not what stdin receives — see Tauri `compose_wire_prompt`).
+    /// Raw composer text for timeline / Turn records; provider adapters decide how to transport it.
     pub prompt: String,
     /// When set, replaces the session provider before this turn (same workspace session).
     #[serde(default)]
@@ -32,7 +32,7 @@ pub struct SendTurnInput {
     /// Plan-before-edit style directives (Helmor plan-style).
     #[serde(default)]
     pub plan_mode: Option<bool>,
-    /// `low` | `balanced` | `high`
+    /// `minimal` | `low` | `medium` | `high` | `xhigh` | `max`
     #[serde(default)]
     pub effort: Option<String>,
     #[serde(default)]

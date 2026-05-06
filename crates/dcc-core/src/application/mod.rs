@@ -7,7 +7,10 @@ pub mod send_turn;
 pub mod start_thread;
 
 pub use abort_run::{abort_run, AbortRunInput, AbortRunOutput};
-pub use agent_turn_prompt::{compose_wire_prompt, compose_wire_prompt_for_provider};
+pub use agent_turn_prompt::{
+    compose_behavior_prompt_for_provider, compose_fallback_prompt_for_provider,
+    compose_wire_prompt, compose_wire_prompt_for_provider, PromptInjectionOptions,
+};
 pub use create_workspace_for_repo::{
     create_workspace_for_repo, finalize_workspace_for_repo, prepare_workspace_for_repo,
     CreateWorkspaceForRepoInput, FinalizedWorkspace, PreparedWorkspace,

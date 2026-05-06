@@ -1,11 +1,14 @@
-//! Per-provider wire prompts (Helmor session semantics + t3code-style routing key),
-//! for stdin-only `CliProviderAdapter` binaries.
+//! Per-provider prompt fallbacks for adapters that still need behavioral text.
 
 fn normalized_effort(effort: Option<&str>) -> &'static str {
-    match effort.unwrap_or("balanced") {
+    match effort.unwrap_or("medium") {
+        "minimal" => "minimal",
         "low" => "low",
+        "balanced" | "medium" => "medium",
         "high" => "high",
-        _ => "balanced",
+        "xhigh" => "xhigh",
+        "max" | "ultrathink" => "max",
+        _ => "medium",
     }
 }
 
@@ -19,11 +22,19 @@ fn normalized_plan(plan_mode: Option<bool>) -> bool {
 
 fn effort_lines(effort: &str) -> &'static str {
     match effort {
+        "minimal" => "Effort minimal: take the most direct path and avoid deep analysis unless needed.",
         "low" => "Effort low: keep reasoning concise; avoid unnecessary tool calls.",
+        "medium" => "Effort medium: balance depth vs speed sensibly for the task.",
         "high" => {
             "Effort high: reason thoroughly, verify assumptions, and double-check critical steps."
         }
-        _ => "Effort balanced: trade depth vs speed sensibly for the task.",
+        "xhigh" => {
+            "Effort extra high: reason very thoroughly, inspect edge cases, and verify key assumptions before acting."
+        }
+        "max" => {
+            "Effort max: use maximal care on complex reasoning, prefer correctness over speed, and validate every critical step."
+        }
+        _ => "Effort medium: balance depth vs speed sensibly for the task.",
     }
 }
 
@@ -35,119 +46,166 @@ fn fast_lines(fast: bool) -> &'static str {
     }
 }
 
-/// Wire text for **Claude Code** — Helmor-style plan / permission framing for agentic CLI.
-fn wire_claude_code(body: &str, plan: bool, effort: &str, fast: bool) -> String {
+fn maybe_push_plan_line(lines: &mut Vec<String>, plan: Option<bool>, on: &str, off: &str) {
+    if let Some(plan) = plan {
+        lines.push(if plan { on } else { off }.to_string());
+    }
+}
+
+fn maybe_push_effort_line(lines: &mut Vec<String>, effort: Option<&str>) {
+    if let Some(effort) = effort {
+        lines.push(effort_lines(effort).to_string());
+    }
+}
+
+fn maybe_push_fast_line(lines: &mut Vec<String>, fast: Option<bool>) {
+    if let Some(fast) = fast {
+        lines.push(fast_lines(fast).to_string());
+    }
+}
+
+fn wire_claude_code_partial(
+    body: &str,
+    plan: Option<bool>,
+    effort: Option<&str>,
+    fast: Option<bool>,
+) -> String {
     let mut lines = vec![
         "[DCC · Claude Code — composer directives]".to_string(),
         "Runtime: Anthropic Claude agent CLI semantics (tools + workspace).".to_string(),
     ];
-    if plan {
-        lines.push(
-			"PLAN / permission-style ON: respond with a structured plan first (sections, ordered steps, risks). Do NOT write files, run shell, or apply patches until the user clearly asks to execute or exit planning — treat this like Helmor `permissionMode: plan`.".to_string(),
-		);
-    } else {
-        lines.push(
-			"EXECUTION ON: you may invoke tools, edit files, and run commands as appropriate for the repo.".to_string(),
-		);
-    }
-    lines.push(effort_lines(effort).to_string());
-    lines.push(fast_lines(fast).to_string());
+    maybe_push_plan_line(
+        &mut lines,
+        plan,
+        "PLAN / permission-style ON: respond with a structured plan first (sections, ordered steps, risks). Do NOT write files, run shell, or apply patches until the user clearly asks to execute or exit planning — treat this like Helmor `permissionMode: plan`.",
+        "EXECUTION ON: you may invoke tools, edit files, and run commands as appropriate for the repo.",
+    );
+    maybe_push_effort_line(&mut lines, effort);
+    maybe_push_fast_line(&mut lines, fast);
     lines.push("[End DCC · Claude Code]".to_string());
     lines.push(String::new());
     lines.push(body.to_string());
     lines.join("\n")
 }
 
-/// Wire text for **Codex** — OpenAI Codex CLI style (repo tools, patch discipline).
-fn wire_codex(body: &str, plan: bool, effort: &str, fast: bool) -> String {
+fn wire_codex_partial(
+    body: &str,
+    plan: Option<bool>,
+    effort: Option<&str>,
+    fast: Option<bool>,
+) -> String {
     let mut lines = vec![
         "[DCC · OpenAI Codex — composer directives]".to_string(),
         "Runtime: Codex CLI — prefer repo-grounded edits and minimal destructive commands."
             .to_string(),
     ];
-    if plan {
-        lines.push(
-			"PLAN ON: outline steps and affected paths before changing anything; defer applying code edits or running terminal actions until the user confirms.".to_string(),
-		);
-    } else {
-        lines.push(
-            "EXECUTION ON: implement using Codex tools following repository conventions."
-                .to_string(),
-        );
-    }
-    lines.push(effort_lines(effort).to_string());
-    lines.push(fast_lines(fast).to_string());
+    maybe_push_plan_line(
+        &mut lines,
+        plan,
+        "PLAN ON: outline steps and affected paths before changing anything; defer applying code edits or running terminal actions until the user confirms.",
+        "EXECUTION ON: implement using Codex tools following repository conventions.",
+    );
+    maybe_push_effort_line(&mut lines, effort);
+    maybe_push_fast_line(&mut lines, fast);
     lines.push("[End DCC · Codex]".to_string());
     lines.push(String::new());
     lines.push(body.to_string());
     lines.join("\n")
 }
 
-/// Wire text for **Gemini** CLI — long-context agent defaults.
-fn wire_gemini(body: &str, plan: bool, effort: &str, fast: bool) -> String {
+fn wire_gemini_partial(
+    body: &str,
+    plan: Option<bool>,
+    effort: Option<&str>,
+    fast: Option<bool>,
+) -> String {
     let mut lines = vec![
         "[DCC · Google Gemini CLI — composer directives]".to_string(),
         "Runtime: Gemini coding agent — leverage context efficiently.".to_string(),
     ];
-    if plan {
-        lines.push(
-            "PLAN ON: produce a clear plan with milestones before modifying artifacts.".to_string(),
-        );
-    } else {
-        lines.push(
-            "EXECUTION ON: proceed with file and tool actions suitable for the workspace."
-                .to_string(),
-        );
-    }
-    lines.push(effort_lines(effort).to_string());
-    lines.push(fast_lines(fast).to_string());
+    maybe_push_plan_line(
+        &mut lines,
+        plan,
+        "PLAN ON: produce a clear plan with milestones before modifying artifacts.",
+        "EXECUTION ON: proceed with file and tool actions suitable for the workspace.",
+    );
+    maybe_push_effort_line(&mut lines, effort);
+    maybe_push_fast_line(&mut lines, fast);
     lines.push("[End DCC · Gemini]".to_string());
     lines.push(String::new());
     lines.push(body.to_string());
     lines.join("\n")
 }
 
-/// Wire text for **Cursor** experimental adapter — shorter envelope; same knobs.
-fn wire_cursor(body: &str, plan: bool, effort: &str, fast: bool) -> String {
+fn wire_cursor_partial(
+    body: &str,
+    plan: Option<bool>,
+    effort: Option<&str>,
+    fast: Option<bool>,
+) -> String {
     let mut lines = vec![
         "[DCC · Cursor adapter — composer directives]".to_string(),
         "Runtime: experimental Cursor agent bridge — prefer safe, incremental edits.".to_string(),
     ];
-    if plan {
-        lines.push(
-            "PLAN ON: describe intent and steps before automated edits or commands.".to_string(),
-        );
-    } else {
-        lines.push("EXECUTION ON: act within Cursor agent capabilities.".to_string());
-    }
-    lines.push(effort_lines(effort).to_string());
-    lines.push(fast_lines(fast).to_string());
+    maybe_push_plan_line(
+        &mut lines,
+        plan,
+        "PLAN ON: describe intent and steps before automated edits or commands.",
+        "EXECUTION ON: act within Cursor agent capabilities.",
+    );
+    maybe_push_effort_line(&mut lines, effort);
+    maybe_push_fast_line(&mut lines, fast);
     lines.push("[End DCC · Cursor]".to_string());
     lines.push(String::new());
     lines.push(body.to_string());
     lines.join("\n")
 }
 
-/// Fallback if an unknown provider id appears in session state.
-fn wire_generic(body: &str, plan: bool, effort: &str, fast: bool) -> String {
+fn wire_generic_partial(
+    body: &str,
+    plan: Option<bool>,
+    effort: Option<&str>,
+    fast: Option<bool>,
+) -> String {
     let mut lines = vec!["[DCC composer directives — generic provider]".to_string()];
-    if plan {
-        lines.push(
-			"Plan mode ON: plan first; avoid destructive actions until the user confirms execution."
-				.to_string(),
-		);
-    } else {
-        lines.push("Plan mode OFF: use tools and edits as appropriate.".to_string());
-    }
-    lines.push(effort_lines(effort).to_string());
-    lines.push(fast_lines(fast).to_string());
+    maybe_push_plan_line(
+        &mut lines,
+        plan,
+        "Plan mode ON: plan first; avoid destructive actions until the user confirms execution.",
+        "Plan mode OFF: use tools and edits as appropriate.",
+    );
+    maybe_push_effort_line(&mut lines, effort);
+    maybe_push_fast_line(&mut lines, fast);
     lines.push("[End DCC composer directives]".to_string());
     lines.push(String::new());
     lines.push(body.to_string());
     lines.join("\n")
 }
 
-/// Full stdin payload for the active provider (`claude_code`, `codex`, `gemini`, `cursor`).
+fn compose_partial_prompt_for_provider(
+    provider_id: &str,
+    body: &str,
+    plan: Option<bool>,
+    effort: Option<&str>,
+    fast: Option<bool>,
+) -> String {
+    match provider_id {
+        "claude_code" => wire_claude_code_partial(body, plan, effort, fast),
+        "codex" => wire_codex_partial(body, plan, effort, fast),
+        "gemini" => wire_gemini_partial(body, plan, effort, fast),
+        "cursor" => wire_cursor_partial(body, plan, effort, fast),
+        _ => wire_generic_partial(body, plan, effort, fast),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PromptInjectionOptions {
+    pub plan: bool,
+    pub effort: bool,
+    pub fast: bool,
+}
+
+/// Full prompt fallback for providers that only accept a plain text turn payload.
 pub fn compose_wire_prompt_for_provider(
     provider_id: &str,
     user_prompt: &str,
@@ -155,18 +213,47 @@ pub fn compose_wire_prompt_for_provider(
     effort: Option<&str>,
     fast_mode: Option<bool>,
 ) -> String {
-    let body = user_prompt.trim();
-    let plan = normalized_plan(plan_mode);
-    let e = normalized_effort(effort);
-    let fast = normalized_fast(fast_mode);
+    compose_partial_prompt_for_provider(
+        provider_id,
+        user_prompt.trim(),
+        Some(normalized_plan(plan_mode)),
+        Some(normalized_effort(effort)),
+        Some(normalized_fast(fast_mode)),
+    )
+}
 
-    match provider_id {
-        "claude_code" => wire_claude_code(body, plan, e, fast),
-        "codex" => wire_codex(body, plan, e, fast),
-        "gemini" => wire_gemini(body, plan, e, fast),
-        "cursor" => wire_cursor(body, plan, e, fast),
-        _ => wire_generic(body, plan, e, fast),
-    }
+/// Prompt fallback when effort already travels as a native provider parameter.
+pub fn compose_behavior_prompt_for_provider(
+    provider_id: &str,
+    user_prompt: &str,
+    plan_mode: Option<bool>,
+    fast_mode: Option<bool>,
+) -> String {
+    compose_partial_prompt_for_provider(
+        provider_id,
+        user_prompt.trim(),
+        Some(normalized_plan(plan_mode)),
+        None,
+        Some(normalized_fast(fast_mode)),
+    )
+}
+
+/// Prompt fallback for adapters that only need a subset of behavior text.
+pub fn compose_fallback_prompt_for_provider(
+    provider_id: &str,
+    user_prompt: &str,
+    plan_mode: Option<bool>,
+    effort: Option<&str>,
+    fast_mode: Option<bool>,
+    options: PromptInjectionOptions,
+) -> String {
+    compose_partial_prompt_for_provider(
+        provider_id,
+        user_prompt.trim(),
+        options.plan.then(|| normalized_plan(plan_mode)),
+        options.effort.then(|| normalized_effort(effort)),
+        options.fast.then(|| normalized_fast(fast_mode)),
+    )
 }
 
 /// Back-compat: previously single template; now routes as **claude_code** (stable default).
@@ -189,7 +276,7 @@ mod tests {
             "claude_code",
             "Hi",
             Some(true),
-            Some("balanced"),
+            Some("medium"),
             Some(false),
         );
         assert!(out.contains("Claude Code"));
@@ -210,5 +297,71 @@ mod tests {
         let out = compose_wire_prompt_for_provider("unknown", "z", None, None, None);
         assert!(out.contains("generic"));
         assert!(out.ends_with("z"));
+    }
+
+    #[test]
+    fn normalizes_balanced_to_medium() {
+        let out = compose_wire_prompt_for_provider(
+            "codex",
+            "x",
+            Some(false),
+            Some("balanced"),
+            Some(true),
+        );
+        assert!(out.contains("Effort medium"));
+    }
+
+    #[test]
+    fn supports_max_effort_prompt_lines() {
+        let out =
+            compose_wire_prompt_for_provider("codex", "x", Some(false), Some("max"), Some(true));
+        assert!(out.contains("Effort max"));
+    }
+
+    #[test]
+    fn behavior_prompt_omits_effort_lines() {
+        let out = compose_behavior_prompt_for_provider("codex", "x", Some(true), Some(true));
+        assert!(out.contains("PLAN ON"));
+        assert!(out.contains("Fast style"));
+        assert!(!out.contains("Effort "));
+    }
+
+    #[test]
+    fn fallback_prompt_can_omit_plan_lines() {
+        let out = compose_fallback_prompt_for_provider(
+            "gemini",
+            "x",
+            Some(true),
+            Some("high"),
+            Some(true),
+            PromptInjectionOptions {
+                plan: false,
+                effort: true,
+                fast: true,
+            },
+        );
+        assert!(!out.contains("PLAN ON"));
+        assert!(!out.contains("EXECUTION ON"));
+        assert!(out.contains("Effort high"));
+        assert!(out.contains("Fast style"));
+    }
+
+    #[test]
+    fn fallback_prompt_can_omit_fast_lines() {
+        let out = compose_fallback_prompt_for_provider(
+            "codex",
+            "x",
+            Some(true),
+            Some("high"),
+            Some(true),
+            PromptInjectionOptions {
+                plan: true,
+                effort: false,
+                fast: false,
+            },
+        );
+        assert!(out.contains("PLAN ON"));
+        assert!(!out.contains("Effort "));
+        assert!(!out.contains("Fast style"));
     }
 }
