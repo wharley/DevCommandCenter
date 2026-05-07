@@ -1,3 +1,4 @@
+import type { Repository } from "@dcc/contracts";
 import type { WorkspaceSummary } from "./types";
 
 export type DccWorkspaceRailRow = WorkspaceSummary;
@@ -94,6 +95,7 @@ export function projectWorkspaceRepositories(
  */
 export function projectWorkspaceRailGroups(
 	workspaces: WorkspaceSummary[],
+	repositories: Repository[] = [],
 ): {
 	activeGroups: DccWorkspaceRailGroup[];
 	archivedRows: DccWorkspaceRailRow[];
@@ -102,6 +104,14 @@ export function projectWorkspaceRailGroups(
 	const active = workspaces.filter((w) => w.status !== "archived");
 
 	const byKey = new Map<string, WorkspaceSummary[]>();
+	for (const repository of repositories) {
+		const key = repository.rootPath.trim();
+		if (!key) {
+			continue;
+		}
+		byKey.set(key, []);
+	}
+
 	for (const workspace of active) {
 		const key = projectGroupingKey(workspace);
 		const list = byKey.get(key);
@@ -119,7 +129,8 @@ export function projectWorkspaceRailGroups(
 				const tb = b.updatedAt ?? b.createdAt ?? b.name;
 				return tb.localeCompare(ta);
 			});
-			const label = projectGroupingLabel(sorted[0]!);
+			const repository = repositories.find((candidate) => candidate.rootPath.trim() === key) ?? null;
+			const label = repository?.name?.trim() || (sorted[0] ? projectGroupingLabel(sorted[0]) : key);
 			return {
 				id: `dcc.proj.${hashId(key)}`,
 				label,

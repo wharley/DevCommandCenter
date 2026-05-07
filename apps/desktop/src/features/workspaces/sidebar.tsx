@@ -238,8 +238,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	const workspaceAgentStates = useWorkspaceAgentStates(workspaces);
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const { activeGroups, archivedRows } = useMemo(
-		() => projectWorkspaceRailGroups(workspaces),
-		[workspaces],
+		() => projectWorkspaceRailGroups(workspaces, repositories),
+		[repositories, workspaces],
 	);
 	const repositoriesBySourceKey = useMemo(
 		() => new Map(repositories.map((repository) => [repository.rootPath, repository])),
@@ -310,7 +310,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 	const flatItems = useMemo(() => {
 		const items: VirtualItem[] = [];
-		const visibleGroups = activeGroups.filter((g) => g.rows.length > 0);
+		const visibleGroups = activeGroups;
 
 		for (let gi = 0; gi < visibleGroups.length; gi++) {
 			const group = visibleGroups[gi]!;
@@ -437,13 +437,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			const matchingWorkspaces = workspaces.filter(
 				(workspace) => projectGroupingKey(workspace) === sourceKey,
 			);
-			if (matchingWorkspaces.length === 0) {
-				return;
-			}
-
 			const rootPath =
 				matchingWorkspaces.find((workspace) => workspace.rootPath?.trim())?.rootPath?.trim() ??
 				matchingWorkspaces.find((workspace) => workspace.worktreePath?.trim())?.worktreePath?.trim() ??
+				repositoriesBySourceKey.get(sourceKey)?.rootPath?.trim() ??
 				null;
 
 			const repository = repositoriesBySourceKey.get(sourceKey) ?? null;

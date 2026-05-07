@@ -6,31 +6,44 @@ import {
 
 describe("projectWorkspaceRailGroups", () => {
 	it("groups active workspaces by project path and isolates archived rows", () => {
-		const { activeGroups, archivedRows } = projectWorkspaceRailGroups([
-			{
-				id: "a",
-				name: "Alpha",
-				branch: "main",
-				status: "ready",
-				rootPath: "/projects/alpha",
-				updatedAt: "2026-04-10T10:00:00.000Z",
-			},
-			{
-				id: "b",
-				name: "Alpha hotfix",
-				branch: "hotfix",
-				status: "ready",
-				rootPath: "/projects/alpha",
-				updatedAt: "2026-04-11T10:00:00.000Z",
-			},
-			{
-				id: "c",
-				name: "Archived Spike",
-				branch: "spike",
-				status: "archived",
-				projectId: "project-spike",
-			},
-		]);
+		const { activeGroups, archivedRows } = projectWorkspaceRailGroups(
+			[
+				{
+					id: "a",
+					name: "Alpha",
+					branch: "main",
+					status: "ready",
+					rootPath: "/projects/alpha",
+					updatedAt: "2026-04-10T10:00:00.000Z",
+				},
+				{
+					id: "b",
+					name: "Alpha hotfix",
+					branch: "hotfix",
+					status: "ready",
+					rootPath: "/projects/alpha",
+					updatedAt: "2026-04-11T10:00:00.000Z",
+				},
+				{
+					id: "c",
+					name: "Archived Spike",
+					branch: "spike",
+					status: "archived",
+					projectId: "project-spike",
+				},
+			],
+			[
+				{
+					id: "/projects/alpha",
+					projectId: "alpha",
+					name: "alpha",
+					rootPath: "/projects/alpha",
+					baseBranch: "main",
+					createdAt: "2026-04-10T10:00:00.000Z",
+					updatedAt: "2026-04-11T10:00:00.000Z",
+				},
+			],
+		);
 
 		expect(activeGroups).toHaveLength(1);
 		expect(activeGroups[0]).toMatchObject({
@@ -49,6 +62,33 @@ describe("projectWorkspaceRailGroups", () => {
 				projectId: "project-spike",
 			},
 		]);
+	});
+
+	it("keeps repository groups visible even when they have no active workspaces", () => {
+		const { activeGroups, archivedRows } = projectWorkspaceRailGroups(
+			[],
+			[
+				{
+					id: "/projects/alpha",
+					projectId: "alpha",
+					name: "alpha",
+					rootPath: "/projects/alpha",
+					baseBranch: "main",
+					createdAt: "2026-04-10T10:00:00.000Z",
+					updatedAt: "2026-04-11T10:00:00.000Z",
+				},
+			],
+		);
+
+		expect(activeGroups).toEqual([
+			{
+				id: expect.any(String),
+				label: "alpha",
+				sourceKey: "/projects/alpha",
+				rows: [],
+			},
+		]);
+		expect(archivedRows).toEqual([]);
 	});
 
 	it("builds repository-level options for quick workspace creation", () => {
