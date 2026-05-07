@@ -16,7 +16,7 @@ use dcc_core::{
         project::{Project, ProjectId},
         provider::{ProviderEvent, SessionHandle},
         session::{
-            Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection, TurnId,
+            Session, SessionEventKind, SessionEventRecord, SessionId, TurnId,
             WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
@@ -28,7 +28,7 @@ use dcc_core::{
     },
     Result,
 };
-use dcc_infra::db::SqliteWorkspaceRepo;
+use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 
 use crate::events::core_event_name;
 use dcc_providers::provider_runtime;
@@ -44,10 +44,11 @@ impl WorkspaceCommandState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SessionCommandState {
     app: AppHandle,
     db_path: PathBuf,
+    session_repo: SqliteSessionRepo,
     store: Arc<Mutex<SessionStore>>,
 }
 
@@ -60,9 +61,6 @@ struct ProviderSessionBinding {
 
 #[derive(Default, Debug)]
 struct SessionStore {
-    sessions: HashMap<SessionId, Session>,
-    threads: HashMap<ThreadId, Thread>,
-    events: HashMap<SessionId, Vec<SessionEventRecord>>,
     provider_sessions: HashMap<SessionId, ProviderSessionBinding>,
 }
 
@@ -70,6 +68,8 @@ impl SessionCommandState {
     pub fn new(app: AppHandle, db_path: PathBuf) -> Self {
         Self {
             app,
+            session_repo: SqliteSessionRepo::open(&db_path)
+                .expect("failed to open sqlite session repo"),
             db_path,
             store: Arc::new(Mutex::new(SessionStore::default())),
         }
@@ -126,85 +126,15 @@ impl SessionCommandState {
         PathBuf::from(home_path) == self.provider_home_root().join(provider_id)
     }
 
-    pub(crate) fn peek_session(&self, session_id: &SessionId) -> Result<Option<Session>> {
-        let store = self.lock_store()?;
-        Ok(store.sessions.get(session_id).cloned())
+    pub(crate) async fn peek_session(&self, session_id: &SessionId) -> Result<Option<Session>> {
+        SessionRepo::get_session(&self.session_repo, session_id).await
     }
 
     pub(crate) fn list_workspace_sessions(
         &self,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<WorkspaceSessionSummary>> {
-        let store = self.lock_store()?;
-        let mut summaries = store
-            .sessions
-            .values()
-            .filter(|session| &session.workspace_id == workspace_id)
-            .filter_map(|session| {
-                let thread = store
-                    .threads
-                    .values()
-                    .find(|thread| thread.session_id.as_ref() == Some(&session.id))?
-                    .clone();
-                let mut events = store.events.get(&session.id).cloned().unwrap_or_default();
-                events.sort_by_key(|event| event.sequence);
-                let mut last_turn_prompt = None;
-                let mut last_turn_state = None;
-                for event in &events {
-                    match &event.kind {
-                        SessionEventKind::TurnStarted { prompt, .. } => {
-                            last_turn_prompt = Some(prompt.clone());
-                            last_turn_state = Some("running".to_string());
-                        }
-                        SessionEventKind::TurnCompleted { .. } => {
-                            last_turn_state = Some("completed".to_string());
-                        }
-                        SessionEventKind::TurnAborted { .. } => {
-                            last_turn_state = Some("aborted".to_string());
-                        }
-                        SessionEventKind::SessionCompleted => {
-                            if last_turn_state.is_none() {
-                                last_turn_state = Some("completed".to_string());
-                            }
-                        }
-                        SessionEventKind::SessionAborted { .. } => {
-                            if last_turn_state.is_none() {
-                                last_turn_state = Some("aborted".to_string());
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                let projection = SessionProjection::fold(&events).unwrap_or_else(|| {
-                    SessionProjection::new(
-                        session.id.clone(),
-                        session.project_id.clone(),
-                        session.workspace_id.clone(),
-                        session.provider_id.clone(),
-                        session.model.clone(),
-                        session.created_at.clone(),
-                    )
-                });
-                Some(WorkspaceSessionSummary {
-                    session: session.clone(),
-                    thread,
-                    projection,
-                    last_turn_prompt,
-                    last_turn_state,
-                })
-            })
-            .collect::<Vec<_>>();
-
-        summaries.sort_by(|left, right| {
-            left.thread
-                .archived_at
-                .is_some()
-                .cmp(&right.thread.archived_at.is_some())
-                .then_with(|| right.session.created_at.cmp(&left.session.created_at))
-                .then_with(|| right.thread.title.cmp(&left.thread.title))
-        });
-
-        Ok(summaries)
+        self.session_repo.list_workspace_sessions(workspace_id)
     }
 
     async fn append_session_event(
@@ -212,8 +142,8 @@ impl SessionCommandState {
         session_id: &SessionId,
         kind: SessionEventKind,
     ) -> Result<SessionEventRecord> {
-        let mut store = self.lock_store()?;
-        let events = store.events.entry(session_id.clone()).or_default();
+        let events =
+            SessionEventRepo::list_events_by_session(&self.session_repo, session_id).await?;
         let sequence = events.last().map(|event| event.sequence + 1).unwrap_or(1);
         let record = SessionEventRecord {
             event_id: Uuid::new_v4().to_string(),
@@ -222,7 +152,7 @@ impl SessionCommandState {
             occurred_at: Utc::now().to_rfc3339(),
             kind,
         };
-        events.push(record.clone());
+        SessionEventRepo::append_event(&self.session_repo, &record).await?;
         Ok(record)
     }
 
@@ -749,79 +679,57 @@ impl ProjectRepo for SessionCommandState {
 #[async_trait]
 impl SessionRepo for SessionCommandState {
     async fn save_session(&self, session: &Session) -> Result<()> {
-        let mut store = self.lock_store()?;
-        store.sessions.insert(session.id.clone(), session.clone());
-        Ok(())
+        SessionRepo::save_session(&self.session_repo, session).await
     }
 
     async fn get_session(&self, id: &SessionId) -> Result<Option<Session>> {
-        let store = self.lock_store()?;
-        Ok(store.sessions.get(id).cloned())
+        SessionRepo::get_session(&self.session_repo, id).await
     }
 
     async fn delete_session(&self, id: &SessionId) -> Result<()> {
-        let mut store = self.lock_store()?;
-        store.sessions.remove(id);
-        store.provider_sessions.remove(id);
-        Ok(())
+        let result = SessionRepo::delete_session(&self.session_repo, id).await;
+        if result.is_ok() {
+            let mut store = self.lock_store()?;
+            store.provider_sessions.remove(id);
+        }
+        result
     }
 }
 
 #[async_trait]
 impl ThreadRepo for SessionCommandState {
     async fn save_thread(&self, thread: &Thread) -> Result<()> {
-        let mut store = self.lock_store()?;
-        store.threads.insert(thread.id.clone(), thread.clone());
-        Ok(())
+        ThreadRepo::save_thread(&self.session_repo, thread).await
     }
 
     async fn get_thread(&self, id: &ThreadId) -> Result<Option<Thread>> {
-        let store = self.lock_store()?;
-        Ok(store.threads.get(id).cloned())
+        ThreadRepo::get_thread(&self.session_repo, id).await
     }
 
     async fn find_thread_by_session_id(&self, session_id: &SessionId) -> Result<Option<Thread>> {
-        let store = self.lock_store()?;
-        Ok(store
-            .threads
-            .values()
-            .find(|thread| thread.session_id.as_ref() == Some(session_id))
-            .cloned())
+        ThreadRepo::find_thread_by_session_id(&self.session_repo, session_id).await
     }
 
     async fn delete_thread(&self, id: &ThreadId) -> Result<()> {
-        let mut store = self.lock_store()?;
-        store.threads.remove(id);
-        Ok(())
+        ThreadRepo::delete_thread(&self.session_repo, id).await
     }
 }
 
 #[async_trait]
 impl SessionEventRepo for SessionCommandState {
     async fn append_event(&self, event: &SessionEventRecord) -> Result<()> {
-        let mut store = self.lock_store()?;
-        store
-            .events
-            .entry(event.session_id.clone())
-            .or_default()
-            .push(event.clone());
-        Ok(())
+        SessionEventRepo::append_event(&self.session_repo, event).await
     }
 
     async fn list_events_by_session(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<SessionEventRecord>> {
-        let store = self.lock_store()?;
-        let mut events = store.events.get(session_id).cloned().unwrap_or_default();
-        events.sort_by_key(|event| event.sequence);
-        Ok(events)
+        SessionEventRepo::list_events_by_session(&self.session_repo, session_id).await
     }
 
     async fn delete_events_by_session(&self, session_id: &SessionId) -> Result<()> {
-        let mut store = self.lock_store()?;
-        store.events.remove(session_id);
-        Ok(())
+        SessionEventRepo::delete_events_by_session(&self.session_repo, session_id).await
     }
 }
 

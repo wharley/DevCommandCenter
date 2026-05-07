@@ -72,6 +72,7 @@ pub async fn send_turn(
 ) -> Result<SendTurnOutput, String> {
     if let Some(session) = state
         .peek_session(&input.session_id)
+        .await
         .map_err(|error| error.to_string())?
     {
         if send_turn_selection_differs_from_session(&session, &input) {
