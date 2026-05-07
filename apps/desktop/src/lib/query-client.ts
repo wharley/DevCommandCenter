@@ -27,6 +27,7 @@ const loggingLocalStorage: Storage = {
 
 export const dccQueryKeys = {
 	shell: ["shell"] as const,
+	repositories: ["repositories"] as const,
 	workspaces: ["workspaces"] as const,
 	sessions: ["sessions"] as const,
 	sessionThreads: (sessionId: string) => ["sessionThreads", sessionId] as const,
@@ -67,6 +68,7 @@ export function createDccQueryClient() {
 
 	void import("@tauri-apps/api/event").then(({ listen }) => {
 		void listen("dcc:core-event", () => {
+			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.repositories });
 			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.workspaces });
 			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.sessions });
 			void queryClient.invalidateQueries({ queryKey: ["sessionThreads"] });

@@ -6,8 +6,9 @@ use dcc_tauri::{
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, GithubCliStatusInput,
         GithubCliStatusOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
         ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
-        ListLocalBranchesOutput, ListWorkspacesOutput, WorkspaceContinueFromBaseBranchInput,
-        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
+        ListLocalBranchesOutput, ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
+        WorkspaceContinueFromBaseBranchInput, WorkspaceGitBranchDiffInput,
+        WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
         WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceIdInput,
         WorkspacePrStatusInput, WorkspacePrStatusOutput,
@@ -38,6 +39,13 @@ pub async fn list_workspaces(
     state: State<'_, WorkspaceCommandState>,
 ) -> Result<ListWorkspacesOutput, String> {
     dcc_tauri::commands::workspace_commands::list_workspaces(state).await
+}
+
+#[tauri::command]
+pub async fn list_repositories(
+    state: State<'_, WorkspaceCommandState>,
+) -> Result<ListRepositoriesOutput, String> {
+    dcc_tauri::commands::workspace_commands::list_repositories(state).await
 }
 
 #[tauri::command]
@@ -177,4 +185,12 @@ pub async fn delete_workspace(
     input: WorkspaceIdInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::workspace_commands::delete_workspace(state, input).await
+}
+
+#[tauri::command]
+pub async fn delete_repository(
+    state: State<'_, WorkspaceCommandState>,
+    input: RepositoryIdInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::delete_repository(state, input).await
 }

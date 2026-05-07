@@ -60,7 +60,7 @@ import {
 } from "./features/sessions/workspace-sessions-query";
 import { FALLBACK_PROVIDER_CATALOG } from "./lib/fallback-provider-catalog";
 import { listProviders } from "./lib/provider-api";
-import { listWorkspaces } from "./lib/workspace-api";
+import { deleteRepository, listRepositories, listWorkspaces } from "./lib/workspace-api";
 import {
 	abortRun,
 	closeSession,
@@ -283,7 +283,17 @@ export default function App() {
 		staleTime: 60_000,
 		refetchOnWindowFocus: false,
 	});
+	const repositoriesQuery = useQuery({
+		queryKey: ["repositories"],
+		queryFn: async () => {
+			const result = await listRepositories();
+			return result.repositories;
+		},
+		staleTime: 60_000,
+		refetchOnWindowFocus: false,
+	});
 	const workspacesFromBackend = workspacesQuery.data ?? [];
+	const repositoriesFromBackend = repositoriesQuery.data ?? [];
 	const {
 		allWorkspaces,
 		archiveWorkspace,
@@ -1412,6 +1422,15 @@ export default function App() {
 		}
 	}, []);
 
+	const handleDeleteProject = useCallback(
+		async (input: { repositoryId: string; workspaceIds: string[] }) => {
+			await deleteRepository(input.repositoryId);
+			await deleteWorkspaces(input.workspaceIds);
+			void queryClient.invalidateQueries({ queryKey: ["repositories"] });
+		},
+		[deleteWorkspaces, queryClient],
+	);
+
 	const visiblePendingPrompt =
 		effectiveSelectedSessionId === pendingPromptSessionId ? pendingPrompt : null;
 	const sidebarRailWidth = sidebarCollapsed ? 76 : sidebarWidth;
@@ -1444,7 +1463,8 @@ export default function App() {
 							onArchiveWorkspace={archiveWorkspace}
 							onRestoreWorkspace={restoreWorkspace}
 							onDeleteWorkspace={deleteWorkspace}
-							onDeleteProject={deleteWorkspaces}
+							onDeleteProject={handleDeleteProject}
+							repositories={repositoriesFromBackend}
 							selectedWorkspaceId={selectedWorkspaceId}
 							workspaces={filteredWorkspaces}
 						/>

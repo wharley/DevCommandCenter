@@ -10,6 +10,7 @@ use dcc_core::{
     domain::{
         project::ProjectId,
         provider::{ProviderCatalog, ProviderDescriptor},
+        repository::{Repository, RepositoryId},
         session::{
             Checkpoint, CheckpointId, Session, SessionEventKind, SessionEventRecord, SessionId,
             SessionProjection, SessionState, Turn, TurnId, TurnState, WorkspaceSessionSummary,
@@ -28,11 +29,11 @@ use dcc_tauri::commands::{
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, GithubCliStatusInput,
         GithubCliStatusOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
         ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
-        ListLocalBranchesOutput, ListWorkspacesOutput, WorkspaceContinueFromBaseBranchInput,
-        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
-        WorkspaceGitCommitPushInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
-        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspacePrStatusInput,
-        WorkspacePrStatusOutput,
+        ListLocalBranchesOutput, ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
+        WorkspaceContinueFromBaseBranchInput, WorkspaceGitBranchDiffInput,
+        WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput,
+        WorkspaceGitPathInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
+        WorkspaceGitStatusOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -48,11 +49,13 @@ struct WorkspaceMethods {
     archive_workspace: String,
     restore_workspace: String,
     delete_workspace: String,
+    delete_repository: String,
     workspace_github_cli_status: String,
     list_local_branches: String,
     list_git_tracked_files: String,
     list_child_directories: String,
     list_workspaces: String,
+    list_repositories: String,
     workspace_continue_from_base_branch: String,
     workspace_gh_pr_create_fill: String,
     workspace_gh_pr_merge: String,
@@ -103,8 +106,10 @@ fn main() {
     let builder = Builder::<tauri::Wry>::new()
         .typ::<WorkspaceId>()
         .typ::<ProjectId>()
+        .typ::<RepositoryId>()
         .typ::<WorkspaceState>()
         .typ::<Workspace>()
+        .typ::<Repository>()
         .typ::<SessionId>()
         .typ::<TurnId>()
         .typ::<CheckpointId>()
@@ -132,6 +137,8 @@ fn main() {
         .typ::<ListChildDirectoriesInput>()
         .typ::<ListChildDirectoriesOutput>()
         .typ::<ListWorkspacesOutput>()
+        .typ::<ListRepositoriesOutput>()
+        .typ::<RepositoryIdInput>()
         .typ::<GithubCliStatusInput>()
         .typ::<GithubCliStatusOutput>()
         .typ::<WorkspaceGitStatusInput>()
@@ -174,11 +181,13 @@ fn main() {
                 archive_workspace: "archive_workspace".to_string(),
                 restore_workspace: "restore_workspace".to_string(),
                 delete_workspace: "delete_workspace".to_string(),
+                delete_repository: "delete_repository".to_string(),
                 workspace_github_cli_status: "workspace_github_cli_status".to_string(),
                 list_local_branches: "list_local_branches".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),
                 list_child_directories: "list_child_directories".to_string(),
                 list_workspaces: "list_workspaces".to_string(),
+                list_repositories: "list_repositories".to_string(),
                 workspace_continue_from_base_branch: "workspace_continue_from_base_branch"
                     .to_string(),
                 workspace_gh_pr_create_fill: "workspace_gh_pr_create_fill".to_string(),

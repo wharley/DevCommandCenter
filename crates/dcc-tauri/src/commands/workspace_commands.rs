@@ -14,8 +14,11 @@ use dcc_core::{
         create_workspace_from_url as run_create_workspace_from_url, CreateWorkspaceForRepoInput,
         CreateWorkspaceFromUrlInput,
     },
-    domain::workspace::{Workspace, WorkspaceId, WorkspaceState},
-    ports::WorkspaceRepo,
+    domain::{
+        repository::{Repository, RepositoryId},
+        workspace::{Workspace, WorkspaceId, WorkspaceState},
+    },
+    ports::{RepositoryRepo, WorkspaceRepo},
 };
 use dcc_infra::{
     db::SqliteWorkspaceRepo,
@@ -40,6 +43,12 @@ pub struct CreateWorkspaceFromUrlOutput {
 #[serde(rename_all = "camelCase")]
 pub struct ListWorkspacesOutput {
     pub workspaces: Vec<Workspace>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListRepositoriesOutput {
+    pub repositories: Vec<Repository>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -76,6 +85,12 @@ pub struct ListChildDirectoriesInput {
 #[serde(rename_all = "camelCase")]
 pub struct ListChildDirectoriesOutput {
     pub paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryIdInput {
+    pub repository_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1655,6 +1670,19 @@ pub async fn list_workspaces(
 }
 
 #[tauri::command]
+pub async fn list_repositories(
+    state: State<'_, WorkspaceCommandState>,
+) -> Result<ListRepositoriesOutput, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let repositories = repo
+        .list_repositories()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(ListRepositoriesOutput { repositories })
+}
+
+#[tauri::command]
 pub async fn list_local_branches(
     input: ListLocalBranchesInput,
 ) -> Result<ListLocalBranchesOutput, String> {
@@ -1920,4 +1948,14 @@ pub async fn delete_workspace(
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = WorkspaceId(input.workspace_id);
     repo.delete_workspace(&id).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_repository(
+    state: State<'_, WorkspaceCommandState>,
+    input: RepositoryIdInput,
+) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
+    let id = RepositoryId(input.repository_id);
+    repo.delete_repository(&id).await.map_err(|e| e.to_string())
 }

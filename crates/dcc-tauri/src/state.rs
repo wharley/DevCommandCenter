@@ -15,6 +15,7 @@ use dcc_core::{
     domain::{
         project::{Project, ProjectId},
         provider::{ProviderEvent, SessionHandle},
+        repository::{Repository, RepositoryId},
         session::{
             Session, SessionEventKind, SessionEventRecord, SessionId, TurnId,
             WorkspaceSessionSummary,
@@ -23,8 +24,8 @@ use dcc_core::{
         workspace::{Workspace, WorkspaceId},
     },
     ports::{
-        EventBus, Input, ProjectRepo, Provider, ProviderRuntimeConfig, SessionConfig,
-        SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
+        EventBus, Input, ProjectRepo, Provider, ProviderRuntimeConfig, RepositoryRepo,
+        SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
     },
     Result,
 };
@@ -661,6 +662,25 @@ impl WorkspaceRepo for SessionCommandState {
     }
 
     async fn delete_workspace(&self, _id: &WorkspaceId) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl RepositoryRepo for SessionCommandState {
+    async fn save_repository(&self, _repository: &Repository) -> Result<()> {
+        Ok(())
+    }
+
+    async fn get_repository(&self, _id: &RepositoryId) -> Result<Option<Repository>> {
+        Ok(None)
+    }
+
+    async fn list_repositories(&self) -> Result<Vec<Repository>> {
+        Ok(Vec::new())
+    }
+
+    async fn delete_repository(&self, _id: &RepositoryId) -> Result<()> {
         Ok(())
     }
 }

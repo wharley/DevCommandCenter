@@ -48,6 +48,7 @@ import {
 } from "../../components/ui/dropdown-menu";
 import { Popover, PopoverTrigger } from "../../components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
+import type { Repository } from "@dcc/contracts";
 import { cn } from "@/lib/utils";
 import type { WorkspaceSummary } from "./types";
 import {
@@ -58,8 +59,6 @@ import {
 import {
 	projectGroupingKey,
 	projectWorkspaceRailGroups,
-	projectWorkspaceRepositories,
-	type DccWorkspaceRepository,
 } from "./workspace-rail-projection";
 import {
 	ARCHIVED_SECTION_ID,
@@ -106,9 +105,9 @@ function WorkspaceRepoPicker({
 	onCreateWorkspace,
 	onCloneWorkspace,
 }: {
-	repositories: DccWorkspaceRepository[];
+	repositories: Repository[];
 	isDisabled?: boolean;
-	onCreateWorkspaceFromRepository: (repository: DccWorkspaceRepository) => void;
+	onCreateWorkspaceFromRepository: (repository: Repository) => void;
 	onCreateWorkspace: () => void;
 	onCloneWorkspace: () => void;
 }) {
@@ -141,19 +140,19 @@ function WorkspaceRepoPicker({
 					<CommandGroup heading={t("sidebar.recentRepos")}>
 						{repositories.map((repository) => (
 							<CommandItem
-								key={repository.sourceKey}
-								value={`${repository.label} ${repository.projectId} ${repository.branch} ${repository.workspaceRoot}`}
+								key={repository.id}
+								value={`${repository.name} ${repository.projectId} ${repository.baseBranch} ${repository.rootPath}`}
 								onSelect={() => {
 									setOpen(false);
 									onCreateWorkspaceFromRepository(repository);
 								}}
 							>
-								<strong className="truncate">{repository.label}</strong>
+								<strong className="truncate">{repository.name}</strong>
 								<span className="truncate text-[var(--dcc-text-muted)]">
-									{repository.branch}
+									{repository.baseBranch}
 								</span>
 								<span className="truncate text-[10px] text-muted-foreground">
-									{repository.workspaceRoot}
+									{repository.rootPath}
 								</span>
 							</CommandItem>
 						))}
@@ -196,17 +195,22 @@ type WorkspacesSidebarProps = {
 		workspaceRoot: string;
 		label: string;
 	}) => void;
+	repositories: Repository[];
 	onOpenSettings: () => void;
 	onToggleCollapsed: () => void;
 	onArchiveWorkspace?: (workspaceId: string) => void;
 	onRestoreWorkspace?: (workspaceId: string) => void;
 	onDeleteWorkspace?: (workspaceId: string) => void;
-	onDeleteProject?: (workspaceIds: string[]) => Promise<void> | void;
+	onDeleteProject?: (input: {
+		repositoryId: string;
+		workspaceIds: string[];
+	}) => Promise<void> | void;
 	selectedWorkspaceId: string | null;
 	workspaces: WorkspaceSummary[];
 };
 
 type ProjectRemovalTarget = {
+	repositoryId: string;
 	label: string;
 	rootPath: string | null;
 	workspaceCount: number;
@@ -220,6 +224,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onCreateWorkspace,
 	onCloneWorkspace,
 	onCreateWorkspaceFromProject,
+	repositories,
 	onOpenSettings,
 	onToggleCollapsed,
 	onArchiveWorkspace,
@@ -236,9 +241,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		() => projectWorkspaceRailGroups(workspaces),
 		[workspaces],
 	);
-	const repositories = useMemo(() => projectWorkspaceRepositories(workspaces), [workspaces]);
 	const repositoriesBySourceKey = useMemo(
-		() => new Map(repositories.map((repository) => [repository.sourceKey, repository])),
+		() => new Map(repositories.map((repository) => [repository.rootPath, repository])),
 		[repositories],
 	);
 	const [projectRemovalTarget, setProjectRemovalTarget] = useState<ProjectRemovalTarget | null>(
@@ -442,14 +446,16 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				matchingWorkspaces.find((workspace) => workspace.worktreePath?.trim())?.worktreePath?.trim() ??
 				null;
 
+			const repository = repositoriesBySourceKey.get(sourceKey) ?? null;
 			setProjectRemovalTarget({
+				repositoryId: repository?.id ?? sourceKey,
 				label,
 				rootPath,
 				workspaceCount: matchingWorkspaces.length,
 				workspaceIds: matchingWorkspaces.map((workspace) => workspace.id),
 			});
 		},
-		[workspaces],
+		[repositoriesBySourceKey, workspaces],
 	);
 
 	const handleConfirmProjectRemoval = useCallback(async () => {
@@ -459,7 +465,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 		setIsRemovingProject(true);
 		try {
-			await onDeleteProject(projectRemovalTarget.workspaceIds);
+			await onDeleteProject({
+				repositoryId: projectRemovalTarget.repositoryId,
+				workspaceIds: projectRemovalTarget.workspaceIds,
+			});
 			setProjectRemovalTarget(null);
 		} catch (error) {
 			console.error("[dcc] remove project failed", {
@@ -558,14 +567,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 											label: item.label,
 										})}
 										className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/dccRailHeader:opacity-100 group-focus-within/dccRailHeader:opacity-100"
-										onClick={(event) => {
-											event.stopPropagation();
-											onCreateWorkspaceFromProject?.({
-												projectId: repository.projectId,
-												workspaceRoot: repository.workspaceRoot,
-												label: repository.label,
-											});
-										}}
+								onClick={(event) => {
+									event.stopPropagation();
+									onCreateWorkspaceFromProject?.({
+										projectId: repository.projectId,
+										workspaceRoot: repository.rootPath,
+										label: repository.name,
+									});
+								}}
 									>
 										<Plus className="size-4" strokeWidth={2.1} aria-hidden />
 									</Button>
@@ -600,8 +609,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 												event.preventDefault();
 												onCreateWorkspaceFromProject({
 													projectId: repository.projectId,
-													workspaceRoot: repository.workspaceRoot,
-													label: repository.label,
+													workspaceRoot: repository.rootPath,
+													label: repository.name,
 												});
 											}}
 										>
@@ -700,8 +709,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							onCreateWorkspaceFromRepository={(repository) => {
 								onCreateWorkspaceFromProject?.({
 									projectId: repository.projectId,
-									workspaceRoot: repository.workspaceRoot,
-									label: repository.label,
+									workspaceRoot: repository.rootPath,
+									label: repository.name,
 								});
 							}}
 							onCreateWorkspace={onCreateWorkspace}
@@ -869,8 +878,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							onCreateWorkspaceFromRepository={(repository) => {
 								onCreateWorkspaceFromProject?.({
 									projectId: repository.projectId,
-									workspaceRoot: repository.workspaceRoot,
-									label: repository.label,
+									workspaceRoot: repository.rootPath,
+									label: repository.name,
 								});
 							}}
 							onCreateWorkspace={onCreateWorkspace}

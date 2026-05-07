@@ -13,6 +13,7 @@ import type {
 	ListGitTrackedFilesOutput,
 	ListLocalBranchesInput,
 	ListLocalBranchesOutput,
+	ListRepositoriesOutput,
 	ListWorkspacesOutput,
 	WorkspaceGitBranchDiffInput,
 	WorkspaceGitBranchDiffOutput,
@@ -46,6 +47,10 @@ export function deleteWorkspace(workspaceId: string) {
 	return invoke<void>(WORKSPACE_METHODS.deleteWorkspace, { input: { workspaceId } });
 }
 
+export function deleteRepository(repositoryId: string) {
+	return invoke<void>(WORKSPACE_METHODS.deleteRepository, { input: { repositoryId } });
+}
+
 export function createWorkspaceFromUrl(input: CreateWorkspaceFromUrlInput) {
 	return invoke<CreateWorkspaceFromUrlOutput>(WORKSPACE_METHODS.createWorkspaceFromUrl, {
 		input,
@@ -66,6 +71,10 @@ export function listLocalBranches(input: ListLocalBranchesInput) {
 
 export function listWorkspaces() {
 	return invoke<ListWorkspacesOutput>(WORKSPACE_METHODS.listWorkspaces);
+}
+
+export function listRepositories() {
+	return invoke<ListRepositoriesOutput>(WORKSPACE_METHODS.listRepositories);
 }
 
 export function listGitTrackedFiles(input: ListGitTrackedFilesInput) {

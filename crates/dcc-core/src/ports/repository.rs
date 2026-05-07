@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use crate::{
     domain::{
         project::{Project, ProjectId},
+        repository::{Repository, RepositoryId},
         session::{Session, SessionEventRecord, SessionId},
         thread::{Thread, ThreadId},
         workspace::{Workspace, WorkspaceId},
@@ -16,6 +17,14 @@ pub trait WorkspaceRepo: Send + Sync {
     async fn get_workspace(&self, id: &WorkspaceId) -> Result<Option<Workspace>>;
     async fn list_workspaces(&self) -> Result<Vec<Workspace>>;
     async fn delete_workspace(&self, id: &WorkspaceId) -> Result<()>;
+}
+
+#[async_trait]
+pub trait RepositoryRepo: Send + Sync {
+    async fn save_repository(&self, repository: &Repository) -> Result<()>;
+    async fn get_repository(&self, id: &RepositoryId) -> Result<Option<Repository>>;
+    async fn list_repositories(&self) -> Result<Vec<Repository>>;
+    async fn delete_repository(&self, id: &RepositoryId) -> Result<()>;
 }
 
 #[async_trait]

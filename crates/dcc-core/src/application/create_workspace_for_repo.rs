@@ -6,9 +6,10 @@ use uuid::Uuid;
 use crate::{
     domain::{
         project::ProjectId,
+        repository::{Repository, RepositoryId},
         workspace::{Workspace, WorkspaceId, WorkspaceState},
     },
-    ports::{CoreEvent, EventBus, GitOps, PreparedWorktree, WorkspaceRepo},
+    ports::{CoreEvent, EventBus, GitOps, PreparedWorktree, RepositoryRepo, WorkspaceRepo},
     CoreError, Result,
 };
 
@@ -36,6 +37,31 @@ pub struct FinalizedWorkspace {
 
 fn now_iso() -> String {
     Utc::now().to_rfc3339()
+}
+
+fn repository_name_from_root_path(root_path: &str) -> String {
+    let normalized = root_path
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string();
+    normalized
+        .rsplit('/')
+        .find(|segment| !segment.trim().is_empty())
+        .map(|segment| segment.trim().to_string())
+        .unwrap_or_else(|| "Repository".to_string())
+}
+
+fn repository_from_workspace(workspace: &Workspace) -> Repository {
+    let root_path = workspace.root_path.trim().to_string();
+    Repository {
+        id: RepositoryId(root_path.clone()),
+        project_id: workspace.project_id.clone(),
+        name: repository_name_from_root_path(&root_path),
+        root_path,
+        base_branch: workspace.base_branch.clone(),
+        created_at: workspace.created_at.clone(),
+        updated_at: workspace.updated_at.clone(),
+    }
 }
 
 pub async fn prepare_workspace_for_repo<G, B>(
@@ -127,12 +153,15 @@ pub async fn create_workspace_for_repo<R, G, B>(
     input: CreateWorkspaceForRepoInput,
 ) -> Result<FinalizedWorkspace>
 where
-    R: WorkspaceRepo + Sync,
+    R: WorkspaceRepo + RepositoryRepo + Sync,
     G: GitOps + Sync,
     B: EventBus + Sync,
 {
     let prepared = prepare_workspace_for_repo(git, events, input).await?;
-    finalize_workspace_for_repo(repo, events, prepared).await
+    let finalized = finalize_workspace_for_repo(repo, events, prepared).await?;
+    repo.save_repository(&repository_from_workspace(&finalized.workspace))
+        .await?;
+    Ok(finalized)
 }
 
 #[cfg(test)]
@@ -146,6 +175,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct FakeWorkspaceRepo {
         saved: Arc<Mutex<Vec<Workspace>>>,
+        repositories: Arc<Mutex<Vec<Repository>>>,
     }
 
     #[async_trait]
@@ -182,6 +212,46 @@ mod tests {
                 .lock()
                 .expect("saved workspaces lock poisoned")
                 .retain(|workspace| &workspace.id != id);
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl RepositoryRepo for FakeWorkspaceRepo {
+        async fn save_repository(&self, repository: &Repository) -> Result<()> {
+            let mut repositories = self
+                .repositories
+                .lock()
+                .expect("saved repositories lock poisoned");
+            repositories.retain(|current| current.id != repository.id);
+            repositories.push(repository.clone());
+            Ok(())
+        }
+
+        async fn get_repository(&self, id: &RepositoryId) -> Result<Option<Repository>> {
+            let found = self
+                .repositories
+                .lock()
+                .expect("saved repositories lock poisoned")
+                .iter()
+                .find(|repository| &repository.id == id)
+                .cloned();
+            Ok(found)
+        }
+
+        async fn list_repositories(&self) -> Result<Vec<Repository>> {
+            Ok(self
+                .repositories
+                .lock()
+                .expect("saved repositories lock poisoned")
+                .clone())
+        }
+
+        async fn delete_repository(&self, id: &RepositoryId) -> Result<()> {
+            self.repositories
+                .lock()
+                .expect("saved repositories lock poisoned")
+                .retain(|repository| &repository.id != id);
             Ok(())
         }
     }
@@ -268,6 +338,14 @@ mod tests {
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].id, finalized.workspace.id);
         assert_eq!(saved[0].state, WorkspaceState::Ready);
+
+        let repositories = repo
+            .repositories
+            .lock()
+            .expect("saved repositories lock poisoned");
+        assert_eq!(repositories.len(), 1);
+        assert_eq!(repositories[0].root_path, "/tmp/repo");
+        assert_eq!(repositories[0].base_branch, "main");
 
         let recorded_events = events.events.lock().expect("events lock poisoned");
         assert_eq!(recorded_events.len(), 2);

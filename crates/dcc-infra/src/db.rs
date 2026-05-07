@@ -8,6 +8,7 @@ use serde_json::{from_str, to_string};
 use dcc_core::{
     domain::{
         project::ProjectId,
+        repository::{Repository, RepositoryId},
         session::{
             Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection,
             SessionState, WorkspaceSessionSummary,
@@ -15,7 +16,7 @@ use dcc_core::{
         thread::{Thread, ThreadId},
         workspace::{Workspace, WorkspaceId, WorkspaceState},
     },
-    ports::{SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo},
+    ports::{RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo},
     Result,
 };
 
@@ -34,6 +35,24 @@ CREATE TABLE IF NOT EXISTS dcc_workspaces (
 
 CREATE INDEX IF NOT EXISTS idx_dcc_workspaces_project_id
 ON dcc_workspaces(project_id);
+"#;
+
+const REPOSITORY_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_repositories (
+	id TEXT PRIMARY KEY NOT NULL,
+	project_id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	root_path TEXT NOT NULL UNIQUE,
+	base_branch TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_repositories_project_id
+ON dcc_repositories(project_id);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_repositories_updated_at
+ON dcc_repositories(updated_at DESC);
 "#;
 
 const SESSION_TABLE_SQL: &str = r#"
@@ -108,8 +127,10 @@ impl SqliteWorkspaceRepo {
             .conn
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        conn.execute_batch(&format!("PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}"))
-            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute_batch(&format!(
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}"
+        ))
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(())
     }
 
@@ -151,6 +172,18 @@ impl SqliteWorkspaceRepo {
             state,
             created_at: row.get::<_, String>(7)?,
             updated_at: row.get::<_, String>(8)?,
+        })
+    }
+
+    fn repository_from_row(row: &Row<'_>) -> rusqlite::Result<Repository> {
+        Ok(Repository {
+            id: RepositoryId(row.get::<_, String>(0)?),
+            project_id: ProjectId(row.get::<_, String>(1)?),
+            name: row.get::<_, String>(2)?,
+            root_path: row.get::<_, String>(3)?,
+            base_branch: row.get::<_, String>(4)?,
+            created_at: row.get::<_, String>(5)?,
+            updated_at: row.get::<_, String>(6)?,
         })
     }
 }
@@ -537,6 +570,109 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
 }
 
 #[async_trait]
+impl RepositoryRepo for SqliteWorkspaceRepo {
+    async fn save_repository(&self, repository: &Repository) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+
+        conn.execute(
+            r#"
+			INSERT INTO dcc_repositories (
+				id, project_id, name, root_path, base_branch, created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+			ON CONFLICT(root_path) DO UPDATE SET
+				id = excluded.id,
+				project_id = excluded.project_id,
+				name = excluded.name,
+				base_branch = excluded.base_branch,
+				created_at = excluded.created_at,
+				updated_at = excluded.updated_at
+			"#,
+            params![
+                repository.id.0.clone(),
+                repository.project_id.0.clone(),
+                repository.name.clone(),
+                repository.root_path.clone(),
+                repository.base_branch.clone(),
+                repository.created_at.clone(),
+                repository.updated_at.clone(),
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn get_repository(&self, id: &RepositoryId) -> Result<Option<Repository>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let repository = conn
+            .query_row(
+                r#"
+				SELECT id, project_id, name, root_path, base_branch, created_at, updated_at
+				  FROM dcc_repositories
+				 WHERE id = ?1
+				"#,
+                params![id.0.clone()],
+                Self::repository_from_row,
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+
+        Ok(repository)
+    }
+
+    async fn list_repositories(&self) -> Result<Vec<Repository>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                r#"
+				SELECT id, project_id, name, root_path, base_branch, created_at, updated_at
+				  FROM dcc_repositories
+				 ORDER BY updated_at DESC, created_at DESC, name ASC
+				"#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = stmt
+            .query_map([], Self::repository_from_row)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+
+        let mut repositories = Vec::new();
+        for row in rows {
+            repositories
+                .push(row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?);
+        }
+
+        Ok(repositories)
+    }
+
+    async fn delete_repository(&self, id: &RepositoryId) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_workspaces WHERE root_path = ?1",
+            params![id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_repositories WHERE id = ?1",
+            params![id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+}
+
+#[async_trait]
 impl SessionRepo for SqliteSessionRepo {
     async fn save_session(&self, session: &Session) -> Result<()> {
         let conn = self
@@ -753,10 +889,11 @@ mod tests {
     use super::*;
     use dcc_core::{
         domain::{
+            repository::{Repository, RepositoryId},
             session::{SessionEventKind, SessionState},
             workspace::WorkspaceId,
         },
-        ports::{SessionEventRepo, SessionRepo, ThreadRepo},
+        ports::{RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo},
     };
 
     fn in_memory_conn() -> Arc<Mutex<Connection>> {
@@ -810,5 +947,48 @@ mod tests {
         assert_eq!(summary[0].session.id.0, "session-1");
         assert_eq!(summary[0].thread.id.0, "thread-1");
         assert_eq!(summary[0].projection.state, SessionState::Active);
+    }
+
+    #[test]
+    fn sqlite_workspace_repo_persists_repositories_and_deletes_linked_workspaces() {
+        let repo = SqliteWorkspaceRepo::from_connection(in_memory_conn()).expect("create repo");
+        let repository = Repository {
+            id: RepositoryId("/tmp/repo".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            name: "repo".to_string(),
+            root_path: "/tmp/repo".to_string(),
+            base_branch: "main".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let workspace = Workspace {
+            id: WorkspaceId("workspace-1".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            name: Some("Workspace".to_string()),
+            root_path: "/tmp/repo".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: Some("/tmp/repo/.dcc-worktrees/main".to_string()),
+            state: WorkspaceState::Ready,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        futures::executor::block_on(repo.save_repository(&repository)).expect("save repository");
+        futures::executor::block_on(repo.save_workspace(&workspace)).expect("save workspace");
+
+        let repositories =
+            futures::executor::block_on(repo.list_repositories()).expect("list repositories");
+        assert_eq!(repositories.len(), 1);
+        assert_eq!(repositories[0].root_path, "/tmp/repo");
+
+        futures::executor::block_on(repo.delete_repository(&RepositoryId("/tmp/repo".to_string())))
+            .expect("delete repository");
+
+        let repositories =
+            futures::executor::block_on(repo.list_repositories()).expect("list repositories");
+        assert!(repositories.is_empty());
+        let workspaces =
+            futures::executor::block_on(repo.list_workspaces()).expect("list workspaces");
+        assert!(workspaces.is_empty());
     }
 }
