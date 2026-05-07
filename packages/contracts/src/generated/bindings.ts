@@ -263,22 +263,6 @@ export type ProviderRuntimeConfig = {
 	shadowHomePath?: string | null,
 };
 
-export type Repository = {
-	id: RepositoryId,
-	projectId: ProjectId,
-	name: string,
-	rootPath: string,
-	baseBranch: string,
-	createdAt: string,
-	updatedAt: string,
-};
-
-export type RepositoryId = string;
-
-export type RepositoryIdInput = {
-	repositoryId: string,
-};
-
 export type ProviderUserInputAnswer = {
 	question: string,
 	answer: string,
@@ -294,6 +278,22 @@ export type ProviderUserInputQuestion = {
 	header: string,
 	question: string,
 	options?: ProviderUserInputOption[],
+};
+
+export type Repository = {
+	id: RepositoryId,
+	projectId: ProjectId,
+	name: string,
+	rootPath: string,
+	baseBranch: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type RepositoryId = string;
+
+export type RepositoryIdInput = {
+	repositoryId: string,
 };
 
 export type RespondToPermissionRequestInput = {
@@ -545,3 +545,4 @@ export type WorkspaceSessionSummary = {
 };
 
 export type WorkspaceState = "initializing" | "setup_pending" | "ready" | "archived";
+
