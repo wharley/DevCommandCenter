@@ -4,9 +4,11 @@ use tauri::{AppHandle, State};
 
 use dcc_core::{
     application::{
-        abort_run as run_abort_run, resume_session as run_resume_session,
+        abort_run as run_abort_run, close_session as run_close_session,
+        restore_session as run_restore_session, resume_session as run_resume_session,
         send_turn as run_send_turn, send_turn_selection_differs_from_session,
-        start_thread as run_start_thread, AbortRunInput, AbortRunOutput, ResumeSessionInput,
+        start_thread as run_start_thread, AbortRunInput, AbortRunOutput, CloseSessionInput,
+        CloseSessionOutput, RestoreSessionInput, RestoreSessionOutput, ResumeSessionInput,
         ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
     },
     domain::session::{SessionEventRecord, WorkspaceSessionSummary},
@@ -152,6 +154,29 @@ pub async fn resume_session(
         eprintln!("[DCC] provider session attach failed: {}", error);
     }
     Ok(output)
+}
+
+#[tauri::command]
+pub async fn close_session(
+    state: State<'_, SessionCommandState>,
+    _app: AppHandle,
+    input: CloseSessionInput,
+) -> Result<CloseSessionOutput, String> {
+    let _ = state.cancel_provider_session(&input.session_id).await;
+    run_close_session(&*state, &*state, &*state, input)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn restore_session(
+    state: State<'_, SessionCommandState>,
+    _app: AppHandle,
+    input: RestoreSessionInput,
+) -> Result<RestoreSessionOutput, String> {
+    run_restore_session(&*state, &*state, input)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

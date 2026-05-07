@@ -154,6 +154,14 @@ mod tests {
                 .cloned();
             Ok(found)
         }
+
+        async fn delete_session(&self, id: &SessionId) -> Result<()> {
+            self.sessions
+                .lock()
+                .expect("sessions lock poisoned")
+                .retain(|session| &session.id != id);
+            Ok(())
+        }
     }
 
     #[derive(Clone, Default)]
@@ -180,6 +188,28 @@ mod tests {
                 .find(|thread| &thread.id == id)
                 .cloned();
             Ok(found)
+        }
+
+        async fn find_thread_by_session_id(
+            &self,
+            session_id: &SessionId,
+        ) -> Result<Option<Thread>> {
+            let found = self
+                .threads
+                .lock()
+                .expect("threads lock poisoned")
+                .iter()
+                .find(|thread| thread.session_id.as_ref() == Some(session_id))
+                .cloned();
+            Ok(found)
+        }
+
+        async fn delete_thread(&self, id: &ThreadId) -> Result<()> {
+            self.threads
+                .lock()
+                .expect("threads lock poisoned")
+                .retain(|thread| &thread.id != id);
+            Ok(())
         }
     }
 
@@ -223,6 +253,14 @@ mod tests {
                 .cloned()
                 .collect();
             Ok(events)
+        }
+
+        async fn delete_events_by_session(&self, session_id: &SessionId) -> Result<()> {
+            self.session_events
+                .lock()
+                .expect("session events lock poisoned")
+                .retain(|event| &event.session_id != session_id);
+            Ok(())
         }
     }
 

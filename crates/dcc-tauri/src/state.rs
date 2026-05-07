@@ -196,10 +196,11 @@ impl SessionCommandState {
             .collect::<Vec<_>>();
 
         summaries.sort_by(|left, right| {
-            right
-                .session
-                .created_at
-                .cmp(&left.session.created_at)
+            left.thread
+                .archived_at
+                .is_some()
+                .cmp(&right.thread.archived_at.is_some())
+                .then_with(|| right.session.created_at.cmp(&left.session.created_at))
                 .then_with(|| right.thread.title.cmp(&left.thread.title))
         });
 
@@ -757,6 +758,13 @@ impl SessionRepo for SessionCommandState {
         let store = self.lock_store()?;
         Ok(store.sessions.get(id).cloned())
     }
+
+    async fn delete_session(&self, id: &SessionId) -> Result<()> {
+        let mut store = self.lock_store()?;
+        store.sessions.remove(id);
+        store.provider_sessions.remove(id);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -770,6 +778,21 @@ impl ThreadRepo for SessionCommandState {
     async fn get_thread(&self, id: &ThreadId) -> Result<Option<Thread>> {
         let store = self.lock_store()?;
         Ok(store.threads.get(id).cloned())
+    }
+
+    async fn find_thread_by_session_id(&self, session_id: &SessionId) -> Result<Option<Thread>> {
+        let store = self.lock_store()?;
+        Ok(store
+            .threads
+            .values()
+            .find(|thread| thread.session_id.as_ref() == Some(session_id))
+            .cloned())
+    }
+
+    async fn delete_thread(&self, id: &ThreadId) -> Result<()> {
+        let mut store = self.lock_store()?;
+        store.threads.remove(id);
+        Ok(())
     }
 }
 
@@ -793,6 +816,12 @@ impl SessionEventRepo for SessionCommandState {
         let mut events = store.events.get(session_id).cloned().unwrap_or_default();
         events.sort_by_key(|event| event.sequence);
         Ok(events)
+    }
+
+    async fn delete_events_by_session(&self, session_id: &SessionId) -> Result<()> {
+        let mut store = self.lock_store()?;
+        store.events.remove(session_id);
+        Ok(())
     }
 }
 

@@ -214,6 +214,14 @@ mod tests {
                 .cloned();
             Ok(found)
         }
+
+        async fn delete_session(&self, id: &SessionId) -> Result<()> {
+            self.sessions
+                .lock()
+                .expect("sessions lock poisoned")
+                .retain(|session| &session.id != id);
+            Ok(())
+        }
     }
 
     #[derive(Clone, Default)]
@@ -244,6 +252,14 @@ mod tests {
                 .cloned()
                 .collect();
             Ok(events)
+        }
+
+        async fn delete_events_by_session(&self, session_id: &SessionId) -> Result<()> {
+            self.events
+                .lock()
+                .expect("session events lock poisoned")
+                .retain(|event| &event.session_id != session_id);
+            Ok(())
         }
     }
 

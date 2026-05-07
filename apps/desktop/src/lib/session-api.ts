@@ -9,10 +9,14 @@ import type {
 import type {
 	AbortRunInput,
 	AbortRunOutput,
+	CloseSessionInput,
+	CloseSessionOutput,
 	RespondToUserInputInput,
 	RespondToUserInputOutput,
 	RespondToPermissionRequestInput,
 	RespondToPermissionRequestOutput,
+	RestoreSessionInput,
+	RestoreSessionOutput,
 	ResumeSessionInput,
 	ResumeSessionOutput,
 	SendTurnInput,
@@ -35,6 +39,14 @@ export function abortRun(input: AbortRunInput) {
 
 export function resumeSession(input: ResumeSessionInput) {
 	return invoke<ResumeSessionOutput>(SESSION_METHODS.resumeSession, { input });
+}
+
+export function closeSession(input: CloseSessionInput) {
+	return invoke<CloseSessionOutput>(SESSION_METHODS.closeSession, { input });
+}
+
+export function restoreSession(input: RestoreSessionInput) {
+	return invoke<RestoreSessionOutput>(SESSION_METHODS.restoreSession, { input });
 }
 
 export function respondToUserInput(input: RespondToUserInputInput) {

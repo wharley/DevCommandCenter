@@ -34,9 +34,12 @@ type WorkspacePanelProps = {
 	onSelectModel: (modelId: string) => void;
 	onStartSession: () => void;
 	onSelectSession: (sessionId: string) => void;
+	onCloseSession: (sessionId: string) => void;
+	onRestoreSession: (sessionId: string) => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
+	sessionActionSessionId: string | null;
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
 	onInstallUpdate: () => void;
@@ -69,9 +72,12 @@ export function WorkspacePanel({
 	onSelectModel,
 	onStartSession,
 	onSelectSession,
+	onCloseSession,
+	onRestoreSession,
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
+	sessionActionSessionId,
 	updateInfo,
 	isInstallingUpdate,
 	onInstallUpdate,
@@ -150,8 +156,11 @@ export function WorkspacePanel({
 					pendingPrompt={pendingPrompt}
 					onSelectSession={onSelectSession}
 					onStartSession={onStartSession}
+					onCloseSession={onCloseSession}
+					onRestoreSession={onRestoreSession}
 					onResumeSession={onResumeSession}
 					onAbortSession={onAbortSession}
+					sessionActionSessionId={sessionActionSessionId}
 					updateInfo={updateInfo}
 					isInstallingUpdate={isInstallingUpdate}
 					onInstallUpdate={onInstallUpdate}

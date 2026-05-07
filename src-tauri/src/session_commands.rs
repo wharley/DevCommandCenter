@@ -1,8 +1,9 @@
 use tauri::{AppHandle, State};
 
 use dcc_core::application::{
-    AbortRunInput, AbortRunOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput,
-    SendTurnOutput, StartThreadInput, StartThreadOutput,
+    AbortRunInput, AbortRunOutput, CloseSessionInput, CloseSessionOutput, RestoreSessionInput,
+    RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput,
+    StartThreadInput, StartThreadOutput,
 };
 use dcc_core::domain::session::{SessionEventRecord, WorkspaceSessionSummary};
 use dcc_tauri::{
@@ -47,6 +48,24 @@ pub async fn resume_session(
     input: ResumeSessionInput,
 ) -> Result<ResumeSessionOutput, String> {
     session_command_impl::resume_session(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn close_session(
+    state: State<'_, SessionCommandState>,
+    app: AppHandle,
+    input: CloseSessionInput,
+) -> Result<CloseSessionOutput, String> {
+    session_command_impl::close_session(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn restore_session(
+    state: State<'_, SessionCommandState>,
+    app: AppHandle,
+    input: RestoreSessionInput,
+) -> Result<RestoreSessionOutput, String> {
+    session_command_impl::restore_session(state, app, input).await
 }
 
 #[tauri::command]

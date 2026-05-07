@@ -2,9 +2,10 @@ use std::{env, fs, path::PathBuf};
 
 use dcc_core::{
     application::{
-        AbortRunInput, AbortRunOutput, CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput,
-        ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput,
-        StartThreadOutput,
+        AbortRunInput, AbortRunOutput, CloseSessionInput, CloseSessionOutput,
+        CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput, RestoreSessionInput,
+        RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput,
+        SendTurnOutput, StartThreadInput, StartThreadOutput,
     },
     domain::{
         project::ProjectId,
@@ -76,6 +77,8 @@ struct SessionMethods {
     send_turn: String,
     abort_run: String,
     resume_session: String,
+    close_session: String,
+    restore_session: String,
     list_thread_events: String,
     list_workspace_sessions: String,
     respond_to_user_input: String,
@@ -154,6 +157,10 @@ fn main() {
         .typ::<AbortRunOutput>()
         .typ::<ResumeSessionInput>()
         .typ::<ResumeSessionOutput>()
+        .typ::<CloseSessionInput>()
+        .typ::<CloseSessionOutput>()
+        .typ::<RestoreSessionInput>()
+        .typ::<RestoreSessionOutput>()
         .typ::<RespondToUserInputInput>()
         .typ::<RespondToUserInputOutput>()
         .typ::<RespondToPermissionRequestInput>()
@@ -199,6 +206,8 @@ fn main() {
             send_turn: "send_turn".to_string(),
             abort_run: "abort_run".to_string(),
             resume_session: "resume_session".to_string(),
+            close_session: "close_session".to_string(),
+            restore_session: "restore_session".to_string(),
             list_thread_events: "list_thread_events".to_string(),
             list_workspace_sessions: "list_workspace_sessions".to_string(),
             respond_to_user_input: "respond_to_user_input".to_string(),

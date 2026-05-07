@@ -11,6 +11,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Toaster } from "sonner";
 import type { CoreEvent, WorkspaceSessionSummary } from "@dcc/contracts";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { openInEditor } from "@/lib/shell-api";
 import { cn } from "@/lib/utils";
 import {
@@ -53,7 +62,9 @@ import { listProviders } from "./lib/provider-api";
 import { listWorkspaces } from "./lib/workspace-api";
 import {
 	abortRun,
+	closeSession,
 	resumeSession,
+	restoreSession,
 	sendTurn,
 	startThread,
 } from "./lib/session-api";
@@ -73,6 +84,13 @@ import {
 	canAbortRun,
 	canResumeSession,
 } from "./features/sessions/session-chrome-state";
+import {
+	isSessionArchived,
+	isSessionEmpty,
+	nextVisibleSessionIdAfterClose,
+	shouldCreateReplacementSession,
+	visibleSessions,
+} from "./features/sessions/session-close";
 import { getStoredPreferredEditor } from "./features/sessions/workspace-editor-preferences";
 import type { WorkspaceGitPreviewSelection } from "./features/inspector/workspace-git-file-preview";
 import {
@@ -91,6 +109,13 @@ import {
 } from "./features/providers/provider-runtime-settings";
 
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
+
+type PendingSessionClose = {
+	sessionId: string;
+	title: string;
+	deleteHistory: boolean;
+	requiresAbort: boolean;
+};
 
 function ResizeSeparator({
 	side,
@@ -323,6 +348,9 @@ export default function App() {
 	const [providerRuntimeSettings, setProviderRuntimeSettings] =
 		useState<ProviderRuntimeSettings>(() => readProviderRuntimeSettings());
 	const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+	const [pendingSessionClose, setPendingSessionClose] =
+		useState<PendingSessionClose | null>(null);
+	const [sessionActionSessionId, setSessionActionSessionId] = useState<string | null>(null);
 	const [inspectorTab, setInspectorTab] = useState<"activity" | "context" | "plan">(
 		"activity",
 	);
@@ -373,8 +401,12 @@ export default function App() {
 		[providerRuntimeSettings, selectedProvider],
 	);
 	useDockUnreadBadge(allWorkspaces);
+	const visibleWorkspaceSessions = useMemo(
+		() => visibleSessions(workspaceSessions),
+		[workspaceSessions],
+	);
 	const effectiveSelectedSessionId =
-		selectedSessionId ?? workspaceSessions[0]?.session.id ?? null;
+		selectedSessionId ?? visibleWorkspaceSessions[0]?.session.id ?? null;
 	const selectedSessionSummary = useMemo(
 		() =>
 			workspaceSessions.find(
@@ -529,6 +561,8 @@ export default function App() {
 
 	useEffect(() => {
 		setSelectedSessionId(null);
+		setPendingSessionClose(null);
+		setSessionActionSessionId(null);
 		setSessionSnapshotsById({});
 		setPendingPrompt(null);
 		setPendingPromptSessionId(null);
@@ -540,7 +574,7 @@ export default function App() {
 			return;
 		}
 
-		if (workspaceSessions.length === 0) {
+		if (visibleWorkspaceSessions.length === 0) {
 			setSelectedSessionId(null);
 			return;
 		}
@@ -554,13 +588,16 @@ export default function App() {
 		});
 
 		setSelectedSessionId((current) => {
-			if (current && workspaceSessions.some((session) => session.session.id === current)) {
+			if (
+				current &&
+				visibleWorkspaceSessions.some((session) => session.session.id === current)
+			) {
 				return current;
 			}
 
-			return workspaceSessions[0]?.session.id ?? null;
+			return visibleWorkspaceSessions[0]?.session.id ?? null;
 		});
-	}, [selectedWorkspace?.id, workspaceSessions]);
+	}, [selectedWorkspace?.id, visibleWorkspaceSessions, workspaceSessions]);
 
 	/** Keep the selected session snapshot in sync with live stream events from the same session. */
 	useEffect(() => {
@@ -1102,6 +1139,248 @@ export default function App() {
 		selectedSessionSnapshot,
 	]);
 
+	const performCloseSession = useCallback(
+		async (request: PendingSessionClose) => {
+			if (!selectedWorkspace) {
+				return;
+			}
+
+			const sessionSummary = workspaceSessions.find(
+				(summary) => summary.session.id === request.sessionId,
+			);
+			const sessionSnapshot =
+				sessionSnapshotsById[request.sessionId] ??
+				(sessionSummary
+					? workspaceSessionSnapshotFromSummary(sessionSummary)
+					: null);
+			const closePendingPrompt =
+				pendingPromptSessionId === request.sessionId ? pendingPrompt : null;
+			const closesSelectedSession = effectiveSelectedSessionId === request.sessionId;
+			const replacementSessionId = nextVisibleSessionIdAfterClose(
+				workspaceSessions,
+				request.sessionId,
+			);
+			const shouldCreateReplacement = shouldCreateReplacementSession(
+				workspaceSessions,
+				request.sessionId,
+			);
+
+			setSessionActionSessionId(request.sessionId);
+			try {
+				if (
+					request.requiresAbort &&
+					sessionSnapshot &&
+					canAbortRun(sessionSnapshot, closePendingPrompt)
+				) {
+					const aborted = await abortRun({
+						sessionId: request.sessionId,
+						reason: "Closed from workbench",
+					});
+					setSessionSnapshotsById((current) => ({
+						...current,
+						[request.sessionId]: {
+							...(current[request.sessionId] ?? sessionSnapshot),
+							state: aborted.projection.state,
+							turnCount: aborted.projection.turnCount,
+							checkpointCount: aborted.projection.checkpointCount,
+							activeTurnId: aborted.projection.activeTurnId ?? null,
+						},
+					}));
+					queryClient.setQueryData<WorkspaceSessionSummary[]>(
+						["workspaceSessions", selectedWorkspace.id],
+						(current = []) =>
+							current.map((summary) =>
+								summary.session.id === request.sessionId
+									? {
+											...summary,
+											session: aborted.session,
+											projection: aborted.projection,
+										}
+									: summary,
+							),
+					);
+				}
+
+				const result = await closeSession({
+					sessionId: request.sessionId,
+					deleteHistory: request.deleteHistory,
+				});
+
+				queryClient.setQueryData<WorkspaceSessionSummary[]>(
+					["workspaceSessions", selectedWorkspace.id],
+					(current = []) =>
+						result.deletedHistory
+							? current.filter(
+									(summary) => summary.session.id !== request.sessionId,
+								)
+							: current.map((summary) =>
+									summary.session.id === request.sessionId
+										? {
+												...summary,
+												thread: {
+													...summary.thread,
+													archived_at: result.archivedAt ?? summary.thread.archived_at,
+												},
+											}
+										: summary,
+								),
+				);
+				setSessionSnapshotsById((current) => {
+					if (!result.deletedHistory) {
+						return current;
+					}
+
+					const next = { ...current };
+					delete next[request.sessionId];
+					return next;
+				});
+				setPendingPrompt((current) =>
+					pendingPromptSessionId === request.sessionId ? null : current,
+				);
+				setPendingPromptSessionId((current) =>
+					current === request.sessionId ? null : current,
+				);
+				setPendingSessionClose((current) =>
+					current?.sessionId === request.sessionId ? null : current,
+				);
+
+				if (closesSelectedSession) {
+					setSelectedSessionId(replacementSessionId);
+					if (shouldCreateReplacement) {
+						await handleStartSession();
+					}
+				}
+			} catch (error) {
+				const message =
+					error instanceof Error
+						? error.message
+						: typeof error === "string"
+							? error
+							: "Failed to close chat";
+				console.error("[dcc] close session failed:", error);
+				toast.error(message);
+			} finally {
+				setSessionActionSessionId((current) =>
+					current === request.sessionId ? null : current,
+				);
+			}
+		},
+		[
+			effectiveSelectedSessionId,
+			handleStartSession,
+			pendingPrompt,
+			pendingPromptSessionId,
+			queryClient,
+			selectedWorkspace,
+			sessionSnapshotsById,
+			workspaceSessions,
+		],
+	);
+
+	const handleCloseSession = useCallback(
+		(sessionId: string) => {
+			if (sessionActionSessionId) {
+				return;
+			}
+
+			const summary = workspaceSessions.find(
+				(candidate) => candidate.session.id === sessionId,
+			);
+			if (!summary || isSessionArchived(summary)) {
+				return;
+			}
+
+			const snapshot =
+				sessionSnapshotsById[sessionId] ??
+				workspaceSessionSnapshotFromSummary(summary);
+			const runningPrompt =
+				pendingPromptSessionId === sessionId ? pendingPrompt : null;
+			const request: PendingSessionClose = {
+				sessionId,
+				title: summary.thread.title,
+				deleteHistory: isSessionEmpty(summary),
+				requiresAbort: canAbortRun(snapshot, runningPrompt),
+			};
+
+			if (request.requiresAbort) {
+				setPendingSessionClose(request);
+				return;
+			}
+
+			void performCloseSession(request);
+		},
+		[
+			pendingPrompt,
+			pendingPromptSessionId,
+			performCloseSession,
+			sessionActionSessionId,
+			sessionSnapshotsById,
+			workspaceSessions,
+		],
+	);
+
+	const handleConfirmCloseSession = useCallback(() => {
+		if (!pendingSessionClose) {
+			return;
+		}
+
+		void performCloseSession(pendingSessionClose);
+	}, [pendingSessionClose, performCloseSession]);
+
+	const handleRestoreSession = useCallback(
+		async (sessionId: string) => {
+			if (!selectedWorkspace) {
+				return;
+			}
+
+			const summary = workspaceSessions.find(
+				(candidate) => candidate.session.id === sessionId,
+			);
+			if (!summary) {
+				return;
+			}
+			if (!isSessionArchived(summary)) {
+				setSelectedSessionId(sessionId);
+				return;
+			}
+
+			setSessionActionSessionId(sessionId);
+			try {
+				await restoreSession({ sessionId });
+				queryClient.setQueryData<WorkspaceSessionSummary[]>(
+					["workspaceSessions", selectedWorkspace.id],
+					(current = []) =>
+						current.map((candidate) =>
+							candidate.session.id === sessionId
+								? {
+										...candidate,
+										thread: {
+											...candidate.thread,
+											archived_at: null,
+										},
+									}
+								: candidate,
+						),
+				);
+				setSelectedSessionId(sessionId);
+			} catch (error) {
+				const message =
+					error instanceof Error
+						? error.message
+						: typeof error === "string"
+							? error
+							: "Failed to restore chat";
+				console.error("[dcc] restore session failed:", error);
+				toast.error(message);
+			} finally {
+				setSessionActionSessionId((current) =>
+					current === sessionId ? null : current,
+				);
+			}
+		},
+		[queryClient, selectedWorkspace, workspaceSessions],
+	);
+
 	const handleCompleteOnboarding = useCallback(() => {
 		try {
 			window.localStorage.setItem(ONBOARDING_COMPLETE_KEY, "true");
@@ -1218,17 +1497,20 @@ export default function App() {
 									onSelectModel={handleSelectModel}
 									onStartSession={handleStartSession}
 									onSelectSession={handleSelectSession}
+									onCloseSession={handleCloseSession}
+									onRestoreSession={handleRestoreSession}
 									onSubmitPrompt={handleSubmitPrompt}
 									onResumeSession={handleResumeSession}
 									onAbortSession={handleAbortSession}
+									sessionActionSessionId={sessionActionSessionId}
 									updateInfo={appUpdateInfo}
 									isInstallingUpdate={isInstallingUpdate}
-								onInstallUpdate={installUpdate}
-								editorSelection={editorSelection}
-								onCloseEditor={handleCloseEditor}
-								onOpenPlanSidebar={openPlanSidebar}
-								onImplementPlanInNewThread={handleImplementPlanInNewThread}
-							/>
+									onInstallUpdate={installUpdate}
+									editorSelection={editorSelection}
+									onCloseEditor={handleCloseEditor}
+									onOpenPlanSidebar={openPlanSidebar}
+									onImplementPlanInNewThread={handleImplementPlanInNewThread}
+								/>
 							) : (
 								<WorkspaceBootstrapState
 									selectedProviderLabel={selectedProvider?.label ?? null}
@@ -1281,21 +1563,67 @@ export default function App() {
 					)}
 				</div>
 			</main>
-				<SettingsDialog
-					open={isSettingsOpen}
-					onOpenChange={setIsSettingsOpen}
-					onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
-					theme={theme}
-					onThemeChange={setTheme}
-					providerCatalog={providerCatalog}
-					selectedProviderId={selectedProviderId}
-					selectedModelId={selectedModelId}
-					onSelectProvider={handleSelectProvider}
-					onSelectModel={handleSelectModel}
-					providerRuntimeSettings={providerRuntimeSettings}
-					onChangeProviderRuntime={handleChangeProviderRuntime}
-					onClearProviderRuntime={handleClearProviderRuntime}
-				/>
+			<Dialog
+				open={pendingSessionClose != null}
+				onOpenChange={(open) => {
+					if (!open && !sessionActionSessionId) {
+						setPendingSessionClose(null);
+					}
+				}}
+			>
+				<DialogContent showCloseButton={!sessionActionSessionId}>
+					<DialogHeader>
+						<DialogTitle>{t("workbench.closeSessionConfirmTitle")}</DialogTitle>
+						<DialogDescription>
+							{pendingSessionClose
+								? pendingSessionClose.deleteHistory
+									? t("workbench.closeSessionConfirmEmptyDescription", {
+											title: pendingSessionClose.title,
+										})
+									: t("workbench.closeSessionConfirmArchivedDescription", {
+											title: pendingSessionClose.title,
+										})
+								: null}
+						</DialogDescription>
+						{pendingSessionClose?.requiresAbort ? (
+							<DialogDescription>
+								{t("workbench.closeSessionConfirmRunningDescription")}
+							</DialogDescription>
+						) : null}
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => setPendingSessionClose(null)}
+							disabled={Boolean(sessionActionSessionId)}
+						>
+							{t("workbench.closeSessionCancel")}
+						</Button>
+						<Button
+							variant="destructive"
+							onClick={handleConfirmCloseSession}
+							disabled={Boolean(sessionActionSessionId)}
+						>
+							{t("workbench.closeSessionConfirm")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+			<SettingsDialog
+				open={isSettingsOpen}
+				onOpenChange={setIsSettingsOpen}
+				onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
+				theme={theme}
+				onThemeChange={setTheme}
+				providerCatalog={providerCatalog}
+				selectedProviderId={selectedProviderId}
+				selectedModelId={selectedModelId}
+				onSelectProvider={handleSelectProvider}
+				onSelectModel={handleSelectModel}
+				providerRuntimeSettings={providerRuntimeSettings}
+				onChangeProviderRuntime={handleChangeProviderRuntime}
+				onClearProviderRuntime={handleClearProviderRuntime}
+			/>
 			<ShortcutCheatsheetDialog
 				open={isShortcutSheetOpen}
 				onOpenChange={setIsShortcutSheetOpen}

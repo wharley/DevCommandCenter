@@ -1,4 +1,12 @@
-import { AlertCircle, CircleStop, Clock3, History, Plus, RefreshCw } from "lucide-react";
+import {
+	AlertCircle,
+	CircleStop,
+	Clock3,
+	History,
+	Plus,
+	RefreshCw,
+	X,
+} from "lucide-react";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
@@ -26,6 +34,7 @@ import {
 	canAbortRun,
 	canResumeSession,
 } from "./session-chrome-state";
+import { isSessionArchived, visibleSessions } from "./session-close";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import { cn } from "@/lib/utils";
 
@@ -43,8 +52,11 @@ export type DccWorkbenchChatHeaderProps = {
 	pendingPrompt: string | null;
 	onSelectSession: (sessionId: string) => void;
 	onStartSession: () => void;
+	onCloseSession: (sessionId: string) => void;
+	onRestoreSession: (sessionId: string) => void;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
+	sessionActionSessionId: string | null;
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
 	onInstallUpdate: () => void;
@@ -66,8 +78,11 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	pendingPrompt,
 	onSelectSession,
 	onStartSession,
+	onCloseSession,
+	onRestoreSession,
 	onResumeSession,
 	onAbortSession,
+	sessionActionSessionId,
 	updateInfo,
 	isInstallingUpdate,
 	onInstallUpdate,
@@ -76,7 +91,9 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	const showProjectBadge = Boolean(projectBadgeLabel);
 	const resumeOk = canResumeSession(sessionSnapshot);
 	const abortOk = canAbortRun(sessionSnapshot, pendingPrompt);
-	const activeSessionId = selectedSessionId ?? sessions[0]?.session.id ?? "";
+	const visibleSessionList = visibleSessions(sessions);
+	const archivedSessionList = sessions.filter(isSessionArchived);
+	const activeSessionId = selectedSessionId ?? visibleSessionList[0]?.session.id ?? "";
 
 	return (
 		<div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-2">
@@ -178,7 +195,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 								<Clock3 className="size-3 animate-pulse" strokeWidth={1.8} />
 								<span>{t("workbench.loadingSessions")}</span>
 							</div>
-						) : sessions.length > 0 ? (
+						) : visibleSessionList.length > 0 ? (
 							<Tabs
 								value={activeSessionId}
 								onValueChange={onSelectSession}
@@ -188,7 +205,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 									aria-label={t("workbench.sessionTabsAria")}
 									className="inline-flex min-w-full w-max justify-start self-start gap-0 rounded-none bg-transparent p-0"
 								>
-									{sessions.map((session) => {
+									{visibleSessionList.map((session) => {
 										const selected = session.session.id === activeSessionId;
 										const state = session.projection.state;
 										const stateDotClass =
@@ -203,23 +220,41 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 										return (
 											<Tooltip key={session.session.id}>
 												<TooltipTrigger asChild>
-													<TabsTrigger
-														value={session.session.id}
-														className="group/tab relative h-[1.85rem] w-auto min-w-[6.5rem] max-w-[14rem] shrink-0 flex-none justify-start gap-1.5 overflow-hidden pr-4 text-[13px] text-muted-foreground data-[state=active]:text-foreground"
-														title={session.thread.title}
-													>
-														<span className="flex min-w-0 flex-1 items-center gap-1.5">
-															<span
-																className={cn(
-																	"size-1.5 shrink-0 rounded-full",
-																	selected ? "bg-foreground" : stateDotClass,
-																)}
-															/>
-															<span className="truncate font-medium">
-																{session.thread.title}
+													<div className="group/tab relative min-w-[6.5rem] max-w-[14rem] shrink-0 flex-none">
+														<TabsTrigger
+															value={session.session.id}
+															className="h-[1.85rem] w-full justify-start gap-1.5 overflow-hidden pr-7 text-[13px] text-muted-foreground data-[state=active]:text-foreground"
+															title={session.thread.title}
+														>
+															<span className="flex min-w-0 flex-1 items-center gap-1.5">
+																<span
+																	className={cn(
+																		"size-1.5 shrink-0 rounded-full",
+																		selected ? "bg-foreground" : stateDotClass,
+																	)}
+																/>
+																<span className="truncate font-medium">
+																	{session.thread.title}
+																</span>
 															</span>
-														</span>
-													</TabsTrigger>
+														</TabsTrigger>
+														<button
+															type="button"
+															aria-label={t("workbench.closeSessionAria", {
+																title: session.thread.title,
+															})}
+															title={t("workbench.closeSessionTooltip")}
+															disabled={sessionActionSessionId === session.session.id}
+															onClick={(event) => {
+																event.preventDefault();
+																event.stopPropagation();
+																onCloseSession(session.session.id);
+															}}
+															className="absolute right-1 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground/80 opacity-0 transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 group-hover/tab:opacity-100 disabled:pointer-events-none disabled:opacity-40"
+														>
+															<X className="size-3" strokeWidth={2} />
+														</button>
+													</div>
 												</TooltipTrigger>
 												<TooltipContent
 													side="bottom"
@@ -284,20 +319,44 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						<DropdownMenuLabel>{t("workbench.sessionHistoryLabel")}</DropdownMenuLabel>
 						<DropdownMenuSeparator />
 						{sessions.length > 0 ? (
-							sessions.map((session) => (
-								<DropdownMenuItem
-									key={session.session.id}
-									onSelect={() => {
-										onSelectSession(session.session.id);
-									}}
-									className="flex items-center justify-between gap-2"
-								>
-									<span className="min-w-0 truncate">{session.thread.title}</span>
-									<span className="shrink-0 text-[11px] text-muted-foreground">
-										{sessionStateLabel(session.projection.state, t)}
-									</span>
-								</DropdownMenuItem>
-							))
+							<>
+								{visibleSessionList.map((session) => (
+									<DropdownMenuItem
+										key={session.session.id}
+										onSelect={() => {
+											onSelectSession(session.session.id);
+										}}
+										className="flex items-center justify-between gap-2"
+									>
+										<span className="min-w-0 truncate">{session.thread.title}</span>
+										<span className="shrink-0 text-[11px] text-muted-foreground">
+											{sessionStateLabel(session.projection.state, t)}
+										</span>
+									</DropdownMenuItem>
+								))}
+								{archivedSessionList.length > 0 ? (
+									<>
+										<DropdownMenuSeparator />
+										<DropdownMenuLabel className="text-xs text-muted-foreground">
+											{t("workbench.archivedSessionsLabel")}
+										</DropdownMenuLabel>
+										{archivedSessionList.map((session) => (
+											<DropdownMenuItem
+												key={session.session.id}
+												onSelect={() => {
+													onRestoreSession(session.session.id);
+												}}
+												className="flex items-center justify-between gap-2"
+											>
+												<span className="min-w-0 truncate">{session.thread.title}</span>
+												<span className="shrink-0 text-[11px] text-muted-foreground">
+													{t("workbench.restoreSessionLabel")}
+												</span>
+											</DropdownMenuItem>
+										))}
+									</>
+								) : null}
+							</>
 						) : (
 							<DropdownMenuItem disabled>
 								{t("workbench.noSessions")}
