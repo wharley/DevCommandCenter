@@ -55,7 +55,12 @@ import {
 	readStoredRailSectionState,
 	writeStoredRailSectionState,
 } from "./workspace-rail-open-state";
-import { projectGroupingKey, projectWorkspaceRailGroups } from "./workspace-rail-projection";
+import {
+	projectGroupingKey,
+	projectWorkspaceRailGroups,
+	projectWorkspaceRepositories,
+	type DccWorkspaceRepository,
+} from "./workspace-rail-projection";
 import {
 	ARCHIVED_SECTION_ID,
 	findSelectedRailSectionId,
@@ -95,11 +100,15 @@ function TrafficLightSpacer({ width }: { width: number }) {
 }
 
 function WorkspaceRepoPicker({
-	workspaces,
+	repositories,
+	isDisabled = false,
+	onCreateWorkspaceFromRepository,
 	onCreateWorkspace,
 	onCloneWorkspace,
 }: {
-	workspaces: WorkspaceSummary[];
+	repositories: DccWorkspaceRepository[];
+	isDisabled?: boolean;
+	onCreateWorkspaceFromRepository: (repository: DccWorkspaceRepository) => void;
 	onCreateWorkspace: () => void;
 	onCloneWorkspace: () => void;
 }) {
@@ -115,6 +124,7 @@ function WorkspaceRepoPicker({
 					size="icon-xs"
 					aria-label={t("sidebar.openRepoPicker")}
 					className="text-muted-foreground hover:text-foreground"
+					disabled={isDisabled}
 				>
 					<Plus className="size-4" strokeWidth={2.2} />
 				</Button>
@@ -129,17 +139,21 @@ function WorkspaceRepoPicker({
 				<CommandList>
 					<CommandEmpty>{t("sidebar.noRepoFound")}</CommandEmpty>
 					<CommandGroup heading={t("sidebar.recentRepos")}>
-						{workspaces.map((workspace) => (
+						{repositories.map((repository) => (
 							<CommandItem
-								key={workspace.id}
-								value={`${workspace.name} ${workspace.branch} ${workspace.rootPath ?? ""}`}
+								key={repository.sourceKey}
+								value={`${repository.label} ${repository.projectId} ${repository.branch} ${repository.workspaceRoot}`}
 								onSelect={() => {
 									setOpen(false);
+									onCreateWorkspaceFromRepository(repository);
 								}}
 							>
-								<strong className="truncate">{workspace.name}</strong>
+								<strong className="truncate">{repository.label}</strong>
 								<span className="truncate text-[var(--dcc-text-muted)]">
-									{workspace.branch}
+									{repository.branch}
+								</span>
+								<span className="truncate text-[10px] text-muted-foreground">
+									{repository.workspaceRoot}
 								</span>
 							</CommandItem>
 						))}
@@ -177,6 +191,11 @@ type WorkspacesSidebarProps = {
 	onSelectWorkspace: (workspaceId: string) => void;
 	onCreateWorkspace: () => void;
 	onCloneWorkspace: () => void;
+	onCreateWorkspaceFromProject?: (input: {
+		projectId: string;
+		workspaceRoot: string;
+		label: string;
+	}) => void;
 	onOpenSettings: () => void;
 	onToggleCollapsed: () => void;
 	onArchiveWorkspace?: (workspaceId: string) => void;
@@ -200,6 +219,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onSelectWorkspace,
 	onCreateWorkspace,
 	onCloneWorkspace,
+	onCreateWorkspaceFromProject,
 	onOpenSettings,
 	onToggleCollapsed,
 	onArchiveWorkspace,
@@ -215,6 +235,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	const { activeGroups, archivedRows } = useMemo(
 		() => projectWorkspaceRailGroups(workspaces),
 		[workspaces],
+	);
+	const repositories = useMemo(() => projectWorkspaceRepositories(workspaces), [workspaces]);
+	const repositoriesBySourceKey = useMemo(
+		() => new Map(repositories.map((repository) => [repository.sourceKey, repository])),
+		[repositories],
 	);
 	const [projectRemovalTarget, setProjectRemovalTarget] = useState<ProjectRemovalTarget | null>(
 		null,
@@ -462,6 +487,15 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						? (sectionOpenState[item.groupId] ?? false)
 						: (sectionOpenState[item.groupId] ?? true);
 				const isEmptyGroup = item.rowCount === 0;
+				const repository =
+					item.headerVariant === "project" && item.sourceKey
+						? repositoriesBySourceKey.get(item.sourceKey) ?? null
+						: null;
+				const canCreateProjectWorkspace =
+					item.headerVariant === "project" &&
+					repository !== null &&
+					Boolean(onCreateWorkspaceFromProject) &&
+					!isCreatingWorkspace;
 				const canRemoveProject =
 					item.headerVariant === "project" &&
 					Boolean(item.sourceKey) &&
@@ -513,6 +547,35 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							) : null}
 						</button>
 
+						{canCreateProjectWorkspace ? (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										aria-label={t("sidebar.createWorkspaceFromProject", {
+											label: item.label,
+										})}
+										className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/dccRailHeader:opacity-100 group-focus-within/dccRailHeader:opacity-100"
+										onClick={(event) => {
+											event.stopPropagation();
+											onCreateWorkspaceFromProject?.({
+												projectId: repository.projectId,
+												workspaceRoot: repository.workspaceRoot,
+												label: repository.label,
+											});
+										}}
+									>
+										<Plus className="size-4" strokeWidth={2.1} aria-hidden />
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="top">
+									{t("sidebar.newWorkspace")}
+								</TooltipContent>
+							</Tooltip>
+						) : null}
+
 						{canRemoveProject ? (
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
@@ -530,6 +593,22 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									</Button>
 								</DropdownMenuTrigger>
 								<DropdownMenuContent align="end" sideOffset={6}>
+									{repository && onCreateWorkspaceFromProject ? (
+										<DropdownMenuItem
+											className="gap-2 text-[13px]"
+											onSelect={(event) => {
+												event.preventDefault();
+												onCreateWorkspaceFromProject({
+													projectId: repository.projectId,
+													workspaceRoot: repository.workspaceRoot,
+													label: repository.label,
+												});
+											}}
+										>
+											<Plus className="size-3.5" strokeWidth={2} aria-hidden />
+											{t("sidebar.newWorkspace")}
+										</DropdownMenuItem>
+									) : null}
 									<DropdownMenuItem
 										className="gap-2 text-[13px] text-destructive focus:text-destructive"
 										onSelect={(event) => {
@@ -560,13 +639,16 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			);
 		},
 		[
+			isCreatingWorkspace,
 			isRemovingProject,
 			onArchiveWorkspace,
+			onCreateWorkspaceFromProject,
 			onDeleteProject,
 			onDeleteWorkspace,
 			onRestoreWorkspace,
 			onSelectWorkspace,
 			openProjectRemovalDialog,
+			repositoriesBySourceKey,
 			sectionOpenState,
 			selectedWorkspaceId,
 			t,
@@ -593,6 +675,40 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					</TooltipTrigger>
 					<TooltipContent side="right">{t("sidebar.expandSidebar")}</TooltipContent>
 				</Tooltip>
+
+				{workspaces.length > 0 ? (
+					<>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-xs"
+									aria-label={t("sidebar.openProject")}
+									className="text-muted-foreground hover:text-foreground"
+									disabled={isCreatingWorkspace}
+									onClick={onCreateWorkspace}
+								>
+									<FolderPlus className="size-4" strokeWidth={1.9} aria-hidden />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent side="right">{t("sidebar.openProject")}</TooltipContent>
+						</Tooltip>
+						<WorkspaceRepoPicker
+							repositories={repositories}
+							isDisabled={isCreatingWorkspace}
+							onCreateWorkspaceFromRepository={(repository) => {
+								onCreateWorkspaceFromProject?.({
+									projectId: repository.projectId,
+									workspaceRoot: repository.workspaceRoot,
+									label: repository.label,
+								});
+							}}
+							onCreateWorkspace={onCreateWorkspace}
+							onCloneWorkspace={onCloneWorkspace}
+						/>
+					</>
+				) : null}
 
 				<div className="scrollbar-stable min-h-0 w-full flex-1 overflow-y-auto px-1 [scrollbar-width:thin]">
 					{workspaces.length > 0 ? (
@@ -630,14 +746,15 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						<div className="flex h-full min-h-full flex-col items-center justify-center gap-2 px-1 text-center">
 							<Tooltip>
 								<TooltipTrigger asChild>
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("sidebar.openProject")}
-										className="text-muted-foreground hover:text-foreground"
-										onClick={onCreateWorkspace}
-									>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-xs"
+									aria-label={t("sidebar.openProject")}
+									className="text-muted-foreground hover:text-foreground"
+									disabled={isCreatingWorkspace}
+									onClick={onCreateWorkspace}
+								>
 										<FolderPlus className="size-4" strokeWidth={1.9} aria-hidden />
 									</Button>
 								</TooltipTrigger>
@@ -645,14 +762,15 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							</Tooltip>
 							<Tooltip>
 								<TooltipTrigger asChild>
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("sidebar.cloneFromUrl")}
-										className="text-muted-foreground hover:text-foreground"
-										onClick={onCloneWorkspace}
-									>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-xs"
+									aria-label={t("sidebar.cloneFromUrl")}
+									className="text-muted-foreground hover:text-foreground"
+									disabled={isCreatingWorkspace}
+									onClick={onCloneWorkspace}
+								>
 										<Plus className="size-4" strokeWidth={2.1} aria-hidden />
 									</Button>
 								</TooltipTrigger>
@@ -719,6 +837,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									size="icon-xs"
 									aria-label={t("sidebar.openProjectMenu")}
 									className="text-muted-foreground hover:text-foreground"
+									disabled={isCreatingWorkspace}
 								>
 									<FolderPlus className="size-4" strokeWidth={1.9} aria-hidden />
 								</Button>
@@ -745,7 +864,15 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							</DropdownMenuContent>
 						</DropdownMenu>
 						<WorkspaceRepoPicker
-							workspaces={workspaces}
+							repositories={repositories}
+							isDisabled={isCreatingWorkspace}
+							onCreateWorkspaceFromRepository={(repository) => {
+								onCreateWorkspaceFromProject?.({
+									projectId: repository.projectId,
+									workspaceRoot: repository.workspaceRoot,
+									label: repository.label,
+								});
+							}}
 							onCreateWorkspace={onCreateWorkspace}
 							onCloneWorkspace={onCloneWorkspace}
 						/>
@@ -773,6 +900,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									type="button"
 									size="sm"
 									className="gap-1.5"
+									disabled={isCreatingWorkspace}
 									onClick={onCreateWorkspace}
 								>
 									<FolderPlus className="size-3.5" strokeWidth={2} aria-hidden />
@@ -783,6 +911,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									size="sm"
 									variant="outline"
 									className="gap-1.5"
+									disabled={isCreatingWorkspace}
 									onClick={onCloneWorkspace}
 								>
 									<Plus className="size-3.5" strokeWidth={2} aria-hidden />

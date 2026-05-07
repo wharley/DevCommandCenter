@@ -22,9 +22,16 @@ import { listLocalBranches } from "../../lib/workspace-api";
 
 type WorkspaceCreationMode = "open" | "clone";
 
+export type ExistingRepositoryContext = {
+	projectId: string;
+	workspaceRoot: string;
+	label: string;
+};
+
 type CreateWorkspaceDialogProps = {
 	open: boolean;
 	mode: WorkspaceCreationMode;
+	repositoryContext?: ExistingRepositoryContext | null;
 	onOpenChange: (open: boolean) => void;
 	onCreateWorkspace: (input: CreateWorkspaceForRepoInput) => Promise<WorkspaceSummary>;
 	onCloneWorkspace: (input: CreateWorkspaceFromUrlInput) => Promise<WorkspaceSummary>;
@@ -48,9 +55,27 @@ function getInitialForm(mode: WorkspaceCreationMode) {
 		: INITIAL_FORM;
 }
 
+function buildInitialForm(
+	mode: WorkspaceCreationMode,
+	repositoryContext: ExistingRepositoryContext | null | undefined,
+) {
+	const initial = getInitialForm(mode);
+	if (mode !== "open" || !repositoryContext) {
+		return initial;
+	}
+
+	return {
+		...initial,
+		projectId: repositoryContext.projectId,
+		workspaceRoot: repositoryContext.workspaceRoot,
+		baseBranch: "",
+	};
+}
+
 export function CreateWorkspaceDialog({
 	open,
 	mode,
+	repositoryContext = null,
 	onOpenChange,
 	onCreateWorkspace,
 	onCloneWorkspace,
@@ -63,11 +88,15 @@ export function CreateWorkspaceDialog({
 
 	useEffect(() => {
 		if (open) {
-			setForm(getInitialForm(mode));
+			const initialForm = buildInitialForm(mode, repositoryContext);
+			setForm(initialForm);
 			setAvailableBranches([]);
 			setIsLoadingBranches(false);
+			if (mode === "open" && initialForm.workspaceRoot.trim().length > 0) {
+				void loadBranchesForWorkspaceRoot(initialForm.workspaceRoot);
+			}
 		}
-	}, [mode, open]);
+	}, [mode, open, repositoryContext]);
 
 	async function loadBranchesForWorkspaceRoot(workspaceRoot: string) {
 		if (mode !== "open" || workspaceRoot.trim().length === 0) {
@@ -212,6 +241,18 @@ export function CreateWorkspaceDialog({
 					<p className="text-[12px] leading-snug text-muted-foreground">
 						{mode === "clone" ? t("workspaceDialog.cloneDescription") : t("workspaceDialog.createDescription")}
 					</p>
+					{mode === "open" && repositoryContext ? (
+						<div className="rounded-md border border-border/70 bg-muted/30 px-2.5 py-2 text-[11.5px] leading-5 text-muted-foreground">
+							<span className="font-medium text-foreground">
+								{t("workspaceDialog.usingTrackedRepository", {
+									label: repositoryContext.label,
+								})}
+							</span>
+							<span className="block font-mono text-[11px]">
+								{repositoryContext.workspaceRoot}
+							</span>
+						</div>
+					) : null}
 				</DialogHeader>
 
 				<form
@@ -265,7 +306,7 @@ export function CreateWorkspaceDialog({
 							placeholder="dcc-demo"
 							autoComplete="off"
 							spellCheck={false}
-							disabled={isSubmitting}
+							disabled={isSubmitting || (mode === "open" && repositoryContext !== null)}
 							className="h-7 text-[13px] md:text-[13px]"
 						/>
 					</div>
@@ -285,7 +326,7 @@ export function CreateWorkspaceDialog({
 								variant="ghost"
 								size="sm"
 								className="h-6 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-								disabled={isSubmitting}
+								disabled={isSubmitting || (mode === "open" && repositoryContext !== null)}
 								onClick={handlePickWorkspaceRoot}
 							>
 								<FolderOpen className="size-3.5" aria-hidden />
@@ -311,7 +352,7 @@ export function CreateWorkspaceDialog({
 							}
 							autoComplete="off"
 							spellCheck={false}
-							disabled={isSubmitting}
+							disabled={isSubmitting || (mode === "open" && repositoryContext !== null)}
 							className="h-7 font-mono text-[13px] md:text-[13px]"
 						/>
 					</div>

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { projectWorkspaceRailGroups } from "./workspace-rail-projection";
+import {
+	projectWorkspaceRailGroups,
+	projectWorkspaceRepositories,
+} from "./workspace-rail-projection";
 
 describe("projectWorkspaceRailGroups", () => {
 	it("groups active workspaces by project path and isolates archived rows", () => {
@@ -44,6 +47,63 @@ describe("projectWorkspaceRailGroups", () => {
 				branch: "spike",
 				status: "archived",
 				projectId: "project-spike",
+			},
+		]);
+	});
+
+	it("builds repository-level options for quick workspace creation", () => {
+		const repositories = projectWorkspaceRepositories([
+			{
+				id: "a",
+				name: "Alpha",
+				branch: "main",
+				status: "ready",
+				projectId: "alpha",
+				rootPath: "/projects/alpha",
+				updatedAt: "2026-04-10T10:00:00.000Z",
+			},
+			{
+				id: "b",
+				name: "Alpha hotfix",
+				branch: "hotfix",
+				status: "archived",
+				projectId: "alpha",
+				rootPath: "/projects/alpha",
+				updatedAt: "2026-04-11T10:00:00.000Z",
+			},
+			{
+				id: "c",
+				name: "Beta",
+				branch: "develop",
+				status: "ready",
+				projectId: "beta",
+				rootPath: "/projects/beta",
+				updatedAt: "2026-04-12T10:00:00.000Z",
+			},
+			{
+				id: "d",
+				name: "Loose Workspace",
+				branch: "spike",
+				status: "ready",
+			},
+		]);
+
+		expect(repositories).toEqual([
+			{
+				sourceKey: "/projects/beta",
+				label: "beta",
+				projectId: "beta",
+				workspaceRoot: "/projects/beta",
+				branch: "develop",
+				updatedAt: "2026-04-12T10:00:00.000Z",
+			},
+			{
+				sourceKey: "/projects/alpha",
+				label: "alpha",
+				projectId: "alpha",
+				workspaceRoot: "/projects/alpha",
+				branch: "hotfix",
+				updatedAt: "2026-04-11T10:00:00.000Z",
 			},
 		]);
 	});

@@ -36,6 +36,7 @@ import {
 	WorkspaceCommandPalette,
 	CreateWorkspaceDialog,
 	useWorkspacesPanel,
+	type ExistingRepositoryContext,
 } from "./features/workspaces";
 import { WorkspaceInspectorSidebar } from "./features/inspector";
 import { SettingsDialog } from "./features/settings";
@@ -303,6 +304,8 @@ export default function App() {
 	const [workspaceCreationMode, setWorkspaceCreationMode] = useState<"open" | "clone">(
 		"open",
 	);
+	const [workspaceRepositoryContext, setWorkspaceRepositoryContext] =
+		useState<ExistingRepositoryContext | null>(null);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [isOnboardingOpen, setIsOnboardingOpen] = useState(() => {
 		if (typeof window === "undefined") {
@@ -1390,9 +1393,23 @@ export default function App() {
 		setIsOnboardingOpen(false);
 	}, []);
 
-	const openWorkspaceDialog = useCallback((mode: "open" | "clone") => {
-		setWorkspaceCreationMode(mode);
-		setIsCreateWorkspaceOpen(true);
+	const openWorkspaceDialog = useCallback(
+		(
+			mode: "open" | "clone",
+			repositoryContext: ExistingRepositoryContext | null = null,
+		) => {
+			setWorkspaceCreationMode(mode);
+			setWorkspaceRepositoryContext(mode === "open" ? repositoryContext : null);
+			setIsCreateWorkspaceOpen(true);
+		},
+		[],
+	);
+
+	const handleWorkspaceDialogOpenChange = useCallback((open: boolean) => {
+		setIsCreateWorkspaceOpen(open);
+		if (!open) {
+			setWorkspaceRepositoryContext(null);
+		}
 	}, []);
 
 	const visiblePendingPrompt =
@@ -1419,6 +1436,9 @@ export default function App() {
 							onSelectWorkspace={setSelectedWorkspaceId}
 							onCreateWorkspace={() => openWorkspaceDialog("open")}
 							onCloneWorkspace={() => openWorkspaceDialog("clone")}
+							onCreateWorkspaceFromProject={(repository) =>
+								openWorkspaceDialog("open", repository)
+							}
 							onOpenSettings={() => setIsSettingsOpen(true)}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
 							onArchiveWorkspace={archiveWorkspace}
@@ -1471,7 +1491,8 @@ export default function App() {
 							<CreateWorkspaceDialog
 								open={isCreateWorkspaceOpen}
 								mode={workspaceCreationMode}
-								onOpenChange={setIsCreateWorkspaceOpen}
+								repositoryContext={workspaceRepositoryContext}
+								onOpenChange={handleWorkspaceDialogOpenChange}
 								onCreateWorkspace={createWorkspace}
 								onCloneWorkspace={cloneWorkspaceFromUrl}
 								isSubmitting={isCreatingWorkspace}

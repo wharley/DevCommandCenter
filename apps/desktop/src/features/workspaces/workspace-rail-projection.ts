@@ -9,6 +9,15 @@ export type DccWorkspaceRailGroup = {
 	rows: DccWorkspaceRailRow[];
 };
 
+export type DccWorkspaceRepository = {
+	sourceKey: string;
+	label: string;
+	projectId: string;
+	workspaceRoot: string;
+	branch: string;
+	updatedAt: string;
+};
+
 export function projectGroupingKey(workspace: WorkspaceSummary): string {
 	return (
 		workspace.rootPath?.trim() ||
@@ -29,6 +38,54 @@ function projectGroupingLabel(workspace: WorkspaceSummary): string {
 		return workspace.projectId.trim();
 	}
 	return workspace.name.trim() || "Workspace";
+}
+
+export function projectWorkspaceRepositories(
+	workspaces: WorkspaceSummary[],
+): DccWorkspaceRepository[] {
+	const byKey = new Map<string, WorkspaceSummary[]>();
+
+	for (const workspace of workspaces) {
+		const workspaceRoot = workspace.rootPath?.trim();
+		const projectId = workspace.projectId?.trim();
+		if (!workspaceRoot || !projectId) {
+			continue;
+		}
+
+		const key = projectGroupingKey(workspace);
+		const list = byKey.get(key);
+		if (list) {
+			list.push(workspace);
+		} else {
+			byKey.set(key, [workspace]);
+		}
+	}
+
+	return [...byKey.entries()]
+		.map(([sourceKey, entries]) => {
+			const sorted = [...entries].sort((a, b) => {
+				const ta = a.updatedAt ?? a.createdAt ?? a.name;
+				const tb = b.updatedAt ?? b.createdAt ?? b.name;
+				return tb.localeCompare(ta);
+			});
+			const representative = sorted[0]!;
+			return {
+				sourceKey,
+				label: projectGroupingLabel(representative),
+				projectId: representative.projectId!.trim(),
+				workspaceRoot: representative.rootPath!.trim(),
+				branch: representative.branch,
+				updatedAt:
+					representative.updatedAt ?? representative.createdAt ?? representative.name,
+			};
+		})
+		.sort((a, b) => {
+			const updatedAtOrder = b.updatedAt.localeCompare(a.updatedAt);
+			if (updatedAtOrder !== 0) {
+				return updatedAtOrder;
+			}
+			return a.label.localeCompare(b.label);
+		});
 }
 
 /**
