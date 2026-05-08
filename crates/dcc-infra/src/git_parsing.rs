@@ -62,8 +62,7 @@ pub fn parse_numstat_z(stdout: &[u8]) -> HashMap<String, (u32, u32)> {
             break;
         };
         let ins_end = cursor + ins_end;
-        let Some(del_end_rel) = stdout[ins_end + 1..].iter().position(|byte| *byte == b'\t')
-        else {
+        let Some(del_end_rel) = stdout[ins_end + 1..].iter().position(|byte| *byte == b'\t') else {
             break;
         };
         let del_end = ins_end + 1 + del_end_rel;

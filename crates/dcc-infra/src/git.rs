@@ -1,10 +1,6 @@
 use std::{
-    ffi::{OsStr, OsString},
+    ffi::OsString,
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
-    sync::mpsc,
-    thread,
-    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -16,18 +12,20 @@ use dcc_core::{
     CoreError, Result,
 };
 
+pub use crate::git_command::{
+    configure_git_command, git_command_succeeds, git_output_detail, git_output_err,
+    run_git_network_output, run_git_output, run_git_output_owned, run_git_output_with_timeout,
+    GIT_CLONE_TIMEOUT, GIT_HARDENED_CONFIG_ARGS, GIT_LOCAL_TIMEOUT, GIT_NETWORK_TIMEOUT,
+};
+use crate::git_command::{run_git_output_with_timeout_in_dir, run_git_stdout_in_dir};
+pub use crate::git_parsing::{
+    parse_default_branch_from_ls_remote_output, parse_git_status_porcelain_z,
+    parse_local_branch_names, parse_name_status_z, parse_numstat_z, split_null_terminated_fields,
+    GitNameStatusEntry, GitStatusPorcelainEntry,
+};
+
 #[derive(Clone, Debug, Default)]
 pub struct CommandGitOps;
-
-const GIT_LOCAL_TIMEOUT: Duration = Duration::from_secs(15);
-const GIT_NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
-const GIT_CLONE_TIMEOUT: Duration = Duration::from_secs(300);
-const GIT_HARDENED_CONFIG_ARGS: [&str; 4] = [
-    "-c",
-    "core.fsmonitor=false",
-    "-c",
-    "core.untrackedCache=false",
-];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkspaceSetupSuggestion {
@@ -42,122 +40,29 @@ impl CommandGitOps {
     }
 }
 
-fn apply_non_interactive_git_env(command: &mut Command) {
-    command.env("GIT_TERMINAL_PROMPT", "0");
-    command.env("GCM_INTERACTIVE", "Never");
-    command.env_remove("GIT_ASKPASS");
-    command.env_remove("SSH_ASKPASS");
-
-    let base_ssh = std::env::var("GIT_SSH_COMMAND").unwrap_or_else(|_| "ssh".to_string());
-    command.env(
-        "GIT_SSH_COMMAND",
-        format!("{base_ssh} -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes"),
-    );
-}
-
-fn git_output_detail(output: &Output, fallback: &str) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if !stderr.is_empty() {
-        return stderr;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if !stdout.is_empty() {
-        return stdout;
-    }
-
-    fallback.to_string()
-}
-
-fn run_git_with_timeout<I>(args: I, current_dir: Option<&Path>, timeout: Duration) -> Result<Output>
-where
-    I: IntoIterator,
-    I::Item: AsRef<OsStr>,
-{
-    let mut command = Command::new("git");
-    command.args(GIT_HARDENED_CONFIG_ARGS);
-    for arg in args {
-        command.arg(arg.as_ref());
-    }
-    if let Some(current_dir) = current_dir {
-        command.current_dir(current_dir);
-    }
-
-    apply_non_interactive_git_env(&mut command);
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-
-    let child = command
-        .spawn()
-        .map_err(|error| CoreError::Git(error.to_string()))?;
-    let child_pid = child.id();
-
-    let (tx, rx) = mpsc::channel();
-    let waiter = thread::spawn(move || {
-        let result = child.wait_with_output();
-        let _ = tx.send(result);
-    });
-
-    match rx.recv_timeout(timeout) {
-        Ok(Ok(output)) => {
-            let _ = waiter.join();
-            Ok(output)
-        }
-        Ok(Err(error)) => {
-            let _ = waiter.join();
-            Err(CoreError::Git(error.to_string()))
-        }
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            #[cfg(unix)]
-            unsafe {
-                libc::kill(-(child_pid as libc::pid_t), libc::SIGKILL);
-            }
-            #[cfg(windows)]
-            {
-                let child_pid = child_pid.to_string();
-                let _ = Command::new("taskkill")
-                    .arg("/PID")
-                    .arg(&child_pid)
-                    .arg("/T")
-                    .arg("/F")
-                    .output();
-            }
-            let _ = waiter.join();
-            Err(CoreError::Git(format!(
-                "git command timed out after {}s",
-                timeout.as_secs()
-            )))
-        }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            let _ = waiter.join();
-            Err(CoreError::Git(
-                "git waiter thread crashed before returning output".to_string(),
-            ))
-        }
-    }
-}
-
 fn run_git_stdout<I>(
     args: I,
     current_dir: Option<&Path>,
-    timeout: Duration,
+    timeout: std::time::Duration,
     fallback: &str,
 ) -> Result<String>
 where
     I: IntoIterator,
-    I::Item: AsRef<OsStr>,
+    I::Item: AsRef<std::ffi::OsStr>,
 {
-    let output = run_git_with_timeout(args, current_dir, timeout)?;
-    if !output.status.success() {
-        return Err(CoreError::Git(git_output_detail(&output, fallback)));
-    }
+    run_git_stdout_in_dir(args, current_dir, timeout, fallback).map_err(CoreError::Git)
+}
 
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+fn run_git_with_timeout<I>(
+    args: I,
+    current_dir: Option<&Path>,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output>
+where
+    I: IntoIterator,
+    I::Item: AsRef<std::ffi::OsStr>,
+{
+    run_git_output_with_timeout_in_dir(args, current_dir, timeout).map_err(CoreError::Git)
 }
 
 fn sanitize_segment(input: &str) -> String {
@@ -195,41 +100,6 @@ pub fn is_git_repo(workspace_root: &Path) -> bool {
     )
     .map(|output| output.status.success())
     .unwrap_or(false)
-}
-
-fn parse_local_branch_names(output: &str) -> Vec<String> {
-    let mut branches: Vec<String> = output
-        .split('\0')
-        .flat_map(|line| line.lines())
-        .map(|line| line.trim().to_string())
-        .filter(|line| !line.is_empty())
-        .collect();
-    branches.sort();
-    branches.dedup();
-    branches
-}
-
-fn parse_default_branch_from_ls_remote_output(output: &str) -> Option<String> {
-    for line in output.lines() {
-        let Some((ref_part, remainder)) = line.split_once('\t') else {
-            continue;
-        };
-
-        if remainder.trim() != "HEAD" {
-            continue;
-        }
-
-        let Some(branch) = ref_part.strip_prefix("ref: refs/heads/") else {
-            continue;
-        };
-
-        let branch = branch.trim();
-        if !branch.is_empty() {
-            return Some(branch.to_string());
-        }
-    }
-
-    None
 }
 
 fn detect_default_branch(repository_url: &str) -> Result<String> {
@@ -556,41 +426,7 @@ mod tests {
     use std::{fs, path::PathBuf};
     use uuid::Uuid;
 
-    use super::{
-        detect_workspace_setup_suggestions, is_broken_worktree_error_text,
-        parse_default_branch_from_ls_remote_output, parse_local_branch_names,
-    };
-
-    #[test]
-    fn parse_default_branch_from_ls_remote_output_extracts_branch_name() {
-        let output = "ref: refs/heads/main\tHEAD\nabc123\tHEAD\n";
-
-        assert_eq!(
-            parse_default_branch_from_ls_remote_output(output),
-            Some("main".to_string()),
-        );
-    }
-
-    #[test]
-    fn parse_default_branch_from_ls_remote_output_returns_none_when_missing() {
-        let output = "abc123\trefs/heads/main\n";
-
-        assert_eq!(parse_default_branch_from_ls_remote_output(output), None);
-    }
-
-    #[test]
-    fn parse_local_branch_names_sorts_and_deduplicates() {
-        let output = "feature/a\nmain\nfeature/a\nrelease\n";
-
-        assert_eq!(
-            parse_local_branch_names(output),
-            vec![
-                "feature/a".to_string(),
-                "main".to_string(),
-                "release".to_string(),
-            ]
-        );
-    }
+    use super::{detect_workspace_setup_suggestions, is_broken_worktree_error_text};
 
     #[test]
     fn detect_workspace_setup_suggestions_prefers_lockfile_package_manager() {
