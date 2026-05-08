@@ -34,7 +34,7 @@ import {
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
 import { EmptyState } from "@/features/panel";
-import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
+import type { CoreEvent, ProviderCatalog, WorkspaceSetupReport } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
 import { getGithubCliStatus, openGithubCliAuthTerminal } from "@/lib/github-cli";
@@ -50,6 +50,7 @@ type WorkspaceInspectorSidebarProps = {
 	workspaceBranch: string | null;
 	workspacePath: string | null;
 	workspaceStatus: WorkspaceStatus | null;
+	workspaceSetupReport: WorkspaceSetupReport | null;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
 	sessionState: string;
@@ -211,6 +212,7 @@ export function WorkspaceInspectorSidebar({
 	workspaceBranch,
 	workspacePath,
 	workspaceStatus,
+	workspaceSetupReport,
 	selectedProviderLabel,
 	selectedModelLabel,
 	sessionState,
@@ -256,6 +258,10 @@ export function WorkspaceInspectorSidebar({
 	const githubCliStatus = githubCliStatusQuery.data ?? null;
 	const githubCliReady = githubCliStatus?.status === "ready";
 	const isSetupPending = workspaceStatus === "setup_pending";
+	const setupReportSummary =
+		workspaceSetupReport == null
+			? null
+			: setupReportDescription(t, workspaceSetupReport, []);
 	const githubCliMessage =
 		githubCliStatus?.message ??
 		(githubCliStatusQuery.isPending ? "Checking GitHub CLI..." : null);
@@ -590,6 +596,14 @@ export function WorkspaceInspectorSidebar({
 						>
 							{pathLine}
 						</p>
+					) : null}
+					{isSetupPending && setupReportSummary ? (
+						<div className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/8 px-2.5 py-2 text-[11px] leading-relaxed text-amber-950 dark:text-amber-100">
+							<p className="font-medium">{t("inspector.setupRetry.pendingTitle")}</p>
+							<p className="mt-1 text-amber-900/80 dark:text-amber-100/80">
+								{setupReportSummary}
+							</p>
+						</div>
 					) : null}
 					<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 						<InspectorChangesSection

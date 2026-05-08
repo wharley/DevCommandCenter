@@ -67,6 +67,7 @@ export function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
 		projectId: workspace.projectId,
 		rootPath: workspace.rootPath,
 		worktreePath: workspace.worktreePath,
+		setupReport: workspace.setupReport,
 		createdAt: workspace.createdAt,
 		updatedAt: workspace.updatedAt,
 	};

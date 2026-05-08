@@ -12,8 +12,6 @@ use dcc_core::{
     CoreError, Result,
 };
 
-use crate::repo_config::read_workspace_setup_command;
-
 pub use crate::git_command::{
     configure_git_command, git_command_succeeds, git_output_detail, git_output_err,
     run_git_network_output, run_git_output, run_git_output_owned, run_git_output_with_timeout,
@@ -25,16 +23,12 @@ pub use crate::git_parsing::{
     parse_local_branch_names, parse_name_status_z, parse_numstat_z, split_null_terminated_fields,
     GitNameStatusEntry, GitStatusPorcelainEntry,
 };
+pub use crate::workspace_setup_plan::{
+    detect_workspace_setup_suggestions, WorkspaceSetupSuggestion,
+};
 
 #[derive(Clone, Debug, Default)]
 pub struct CommandGitOps;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WorkspaceSetupSuggestion {
-    pub label: String,
-    pub command: String,
-    pub source_path: String,
-}
 
 impl CommandGitOps {
     pub fn new() -> Self {
@@ -177,54 +171,6 @@ pub fn list_local_branch_names(project_path: &str) -> Result<Vec<String>> {
         "failed to list local branches",
     )?;
     Ok(parse_local_branch_names(&stdout))
-}
-
-pub fn detect_workspace_setup_suggestions(workspace_root: &str) -> Vec<WorkspaceSetupSuggestion> {
-    let workspace_root = Path::new(workspace_root);
-    if !workspace_root.exists() {
-        return Vec::new();
-    }
-
-    if let Some(setup_command) = read_workspace_setup_command(workspace_root) {
-        return vec![WorkspaceSetupSuggestion {
-            label: "Run repository setup script".to_string(),
-            command: setup_command.command,
-            source_path: setup_command.source_path,
-        }];
-    }
-
-    let mut suggestions = Vec::new();
-    let package_json = workspace_root.join("package.json");
-    if package_json.is_file() {
-        let command = if workspace_root.join("pnpm-lock.yaml").is_file() {
-            "pnpm install"
-        } else if workspace_root.join("yarn.lock").is_file() {
-            "yarn install"
-        } else if workspace_root.join("bun.lock").is_file()
-            || workspace_root.join("bun.lockb").is_file()
-        {
-            "bun install"
-        } else {
-            "npm install"
-        };
-
-        suggestions.push(WorkspaceSetupSuggestion {
-            label: "Install JavaScript dependencies".to_string(),
-            command: command.to_string(),
-            source_path: package_json.to_string_lossy().to_string(),
-        });
-    }
-
-    let cargo_toml = workspace_root.join("Cargo.toml");
-    if cargo_toml.is_file() {
-        suggestions.push(WorkspaceSetupSuggestion {
-            label: "Build Rust workspace".to_string(),
-            command: "cargo build".to_string(),
-            source_path: cargo_toml.to_string_lossy().to_string(),
-        });
-    }
-
-    suggestions
 }
 
 pub fn create_worktree_branch_from_ref(
@@ -433,87 +379,7 @@ impl GitOps for CommandGitOps {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
-    use uuid::Uuid;
-
-    use super::{detect_workspace_setup_suggestions, is_broken_worktree_error_text};
-
-    #[test]
-    fn detect_workspace_setup_suggestions_prefers_lockfile_package_manager() {
-        let root = temp_test_dir("setup-node");
-        fs::create_dir_all(&root).expect("create temp dir");
-        fs::write(root.join("package.json"), "{}").expect("write package.json");
-        fs::write(root.join("yarn.lock"), "").expect("write yarn.lock");
-
-        let suggestions = detect_workspace_setup_suggestions(
-            root.to_str().expect("temp path should be valid utf-8"),
-        );
-
-        assert_eq!(suggestions.len(), 1);
-        assert_eq!(suggestions[0].command, "yarn install");
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn detect_workspace_setup_suggestions_includes_rust_build() {
-        let root = temp_test_dir("setup-rust");
-        fs::create_dir_all(&root).expect("create temp dir");
-        fs::write(root.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("write cargo");
-
-        let suggestions = detect_workspace_setup_suggestions(
-            root.to_str().expect("temp path should be valid utf-8"),
-        );
-
-        assert_eq!(suggestions.len(), 1);
-        assert_eq!(suggestions[0].command, "cargo build");
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn detect_workspace_setup_suggestions_prefers_repo_config_script() {
-        let root = temp_test_dir("setup-repo-config");
-        fs::create_dir_all(&root).expect("create temp dir");
-        fs::write(
-            root.join(".dcc.toml"),
-            "[scripts]\nsetup = \"pnpm bootstrap\"\n",
-        )
-        .expect("write repo config");
-        fs::write(root.join("package.json"), "{}").expect("write package.json");
-        fs::write(root.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("write cargo");
-
-        let suggestions = detect_workspace_setup_suggestions(
-            root.to_str().expect("temp path should be valid utf-8"),
-        );
-
-        assert_eq!(suggestions.len(), 1);
-        assert_eq!(suggestions[0].command, "pnpm bootstrap");
-        assert!(suggestions[0].source_path.ends_with(".dcc.toml"));
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn detect_workspace_setup_suggestions_falls_back_when_repo_config_is_invalid() {
-        let root = temp_test_dir("setup-invalid-repo-config");
-        fs::create_dir_all(&root).expect("create temp dir");
-        fs::write(
-            root.join(".dcc.toml"),
-            "[scripts\nsetup = \"pnpm bootstrap\"\n",
-        )
-        .expect("write invalid repo config");
-        fs::write(root.join("package.json"), "{}").expect("write package.json");
-
-        let suggestions = detect_workspace_setup_suggestions(
-            root.to_str().expect("temp path should be valid utf-8"),
-        );
-
-        assert_eq!(suggestions.len(), 1);
-        assert_eq!(suggestions[0].command, "npm install");
-
-        let _ = fs::remove_dir_all(root);
-    }
+    use super::is_broken_worktree_error_text;
 
     #[test]
     fn broken_worktree_detection_matches_known_git_failures() {
@@ -526,9 +392,5 @@ mod tests {
         assert!(!is_broken_worktree_error_text(
             "fatal: not a valid object name HEAD~99"
         ));
-    }
-
-    fn temp_test_dir(label: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("dcc-git-tests-{label}-{}", Uuid::new_v4()))
     }
 }

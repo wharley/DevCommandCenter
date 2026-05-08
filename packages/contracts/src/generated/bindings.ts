@@ -447,6 +447,7 @@ export type Workspace = {
 	baseBranch: string,
 	worktreePath: string | null,
 	state: WorkspaceState,
+	setupReport: WorkspaceSetupReport | null,
 	createdAt: string,
 	updatedAt: string,
 };

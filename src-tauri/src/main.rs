@@ -1,13 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod forge_issue;
-mod git_legacy;
-mod git_legacy_commands;
+mod git_commands;
+mod git_support;
 mod session_commands;
 mod workspace_commands;
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike, Utc};
+use dcc_core::domain::workspace::WorkspaceSetupStatus;
+use dcc_infra::git::detect_workspace_setup_suggestions;
 use dcc_tauri::state::{SessionCommandState, WorkspaceCommandState};
+use dcc_tauri::workspace_setup::{
+    run_workspace_setup_with_options_blocking, WorkspaceSetupFailurePolicy,
+};
 use dev_command_center_tauri::daemon_client::{
     ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo,
 };
@@ -41,15 +46,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::{Pid, System};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::git_legacy::{
-    build_review_diffs_for_path, get_unpushed_commits, git_output_in_dir,
-    git_remove_worktree_and_branch_best_effort, git_worktree_last_activity_epoch,
-    git_worktree_list_contains_path, run_git,
-};
-use crate::git_legacy_commands::{
+use crate::git_commands::{
     git_commit, git_discard_file, git_get_current_branch, git_get_local_branches,
     git_get_review_diffs, git_get_status, git_pull, git_push, git_reset, git_stage_file,
     review_get_diffs_bundle,
+};
+use crate::git_support::{
+    build_review_diffs_for_path, get_unpushed_commits, git_output_in_dir,
+    git_remove_worktree_and_branch_best_effort, git_worktree_last_activity_epoch,
+    git_worktree_list_contains_path, run_git,
 };
 use tauri_plugin_dialog::{
     DialogExt, FilePath, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
@@ -1236,109 +1241,6 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "createdAt": created_at,
         "updatedAt": updated_at,
     }))
-}
-
-fn setup_failure_mentions_missing_node_runtime(reason: &str) -> bool {
-    let reason = reason.to_lowercase();
-    let node_missing_patterns = [
-        "command not found: node",
-        "command not found: npm",
-        "command not found: pnpm",
-        "command not found: yarn",
-        "node: command not found",
-        "npm: command not found",
-        "pnpm: command not found",
-        "yarn: command not found",
-        "/usr/bin/env: node: no such file or directory",
-        "'node' is not recognized as an internal or external command",
-        "'npm' is not recognized as an internal or external command",
-        "'pnpm' is not recognized as an internal or external command",
-        "'yarn' is not recognized as an internal or external command",
-    ];
-
-    node_missing_patterns
-        .iter()
-        .any(|pattern| reason.contains(pattern))
-}
-
-/// Executa o script de setup do repositório no diretório do worktree.
-fn run_repo_setup_script(worktree_path: &str, script: &str) -> Result<(), String> {
-    let script = script.trim();
-    if script.is_empty() {
-        return Ok(());
-    }
-    #[cfg(windows)]
-    let output = {
-        let mut c = Command::new("cmd");
-        c.args(["/C", script]).current_dir(worktree_path);
-        c.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        c.output().map_err(|e| e.to_string())?
-    };
-
-    #[cfg(not(windows))]
-    let output = run_repo_setup_script_unix(worktree_path, script)?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(format_output_failure(&output))
-}
-
-#[cfg(not(windows))]
-fn run_repo_setup_script_unix(
-    worktree_path: &str,
-    script: &str,
-) -> Result<std::process::Output, String> {
-    let shells = [
-        std::env::var("SHELL").ok(),
-        Some("/bin/zsh".to_string()),
-        Some("/bin/bash".to_string()),
-        Some("/bin/sh".to_string()),
-    ];
-
-    let mut last_error: Option<std::io::Error> = None;
-    for shell in shells.into_iter().flatten() {
-        match Command::new(&shell)
-            .args(["-lc", script])
-            .current_dir(worktree_path)
-            .output()
-        {
-            Ok(output) => return Ok(output),
-            Err(err) => {
-                last_error = Some(err);
-            }
-        }
-    }
-
-    Err(last_error
-        .map(|e| e.to_string())
-        .unwrap_or_else(|| "nenhum shell disponível para executar o setup".into()))
-}
-
-fn format_output_failure(output: &std::process::Output) -> String {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let mut detail = String::new();
-    if !stderr.trim().is_empty() {
-        detail.push_str(stderr.trim());
-    }
-    if !stdout.trim().is_empty() {
-        if !detail.is_empty() {
-            detail.push('\n');
-        }
-        detail.push_str(stdout.trim());
-    }
-    if detail.is_empty() {
-        detail = format!(
-            "exit code {}",
-            output
-                .status
-                .code()
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "?".into())
-        );
-    }
-    detail
 }
 
 /// Partes da branch: slug (nome sanitizado) e sufixo hex derivado do ID do comb.
@@ -5898,12 +5800,6 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
         .map(str::to_string)
         .filter(|prefix| !prefix.trim().is_empty())
         .unwrap_or_else(|| "dcc-comb".to_string());
-    let setup_script = resolved_repo_config
-        .get("setupCommand")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
     let branch = safe_branch_name(&branch_prefix, &comb_id, &name);
     let worktree_path = format!("{}/.dcc/worktrees/{}", project_path, branch);
     let from_ref = if base_branch.trim().is_empty() {
@@ -5956,23 +5852,44 @@ async fn comb_ensure_worktree(state: State<'_, AppState>, comb_id: String) -> Ap
                     &from_ref_git,
                 ],
             )?;
-            if let Some(ref script) = setup_script {
-                if let Err(reason) = run_repo_setup_script(&worktree_path_git, script) {
-                    if setup_failure_mentions_missing_node_runtime(&reason) {
-                        return Ok(EnsureWorktreeStep::Ok(Some(
-                            "Node.js não encontrado. O workspace foi aberto, mas o setup automático não foi executado."
-                                .to_string(),
-                        )));
-                    }
-                    git_remove_worktree_and_branch_best_effort(
-                        &project_path_git,
-                        &worktree_path_git,
-                        &branch_git,
-                    );
-                    return Ok(EnsureWorktreeStep::SetupFailedAfterRollback(reason));
-                }
+            let setup_suggestions = detect_workspace_setup_suggestions(&worktree_path_git);
+            let setup_outcome = run_workspace_setup_with_options_blocking(
+                &worktree_path_git,
+                &setup_suggestions,
+                WorkspaceSetupFailurePolicy::RollbackOnFailure,
+            )
+            .map_err(db_error)?;
+
+            if setup_outcome.should_rollback {
+                let reason = setup_outcome
+                    .report
+                    .steps
+                    .iter()
+                    .rev()
+                    .find_map(|step| step.detail.clone())
+                    .or_else(|| setup_outcome.report.message.clone())
+                    .unwrap_or_else(|| "automatic setup failed".to_string());
+                git_remove_worktree_and_branch_best_effort(
+                    &project_path_git,
+                    &worktree_path_git,
+                    &branch_git,
+                );
+                return Ok(EnsureWorktreeStep::SetupFailedAfterRollback(reason));
             }
-            Ok(EnsureWorktreeStep::Ok(None))
+
+            let warning = if matches!(setup_outcome.report.status, WorkspaceSetupStatus::Warning) {
+                setup_outcome
+                    .report
+                    .steps
+                    .iter()
+                    .rev()
+                    .find_map(|step| step.detail.clone())
+                    .or_else(|| setup_outcome.report.message.clone())
+            } else {
+                None
+            };
+
+            Ok(EnsureWorktreeStep::Ok(warning))
         })
         .await
         .map_err(|e| db_error(e.to_string()))?;

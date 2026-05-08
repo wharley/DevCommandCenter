@@ -18,7 +18,9 @@ use dcc_core::{
     },
     domain::{
         repository::{Repository, RepositoryId},
-        workspace::{Workspace, WorkspaceId, WorkspaceState},
+        workspace::{
+            Workspace, WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus, WorkspaceState,
+        },
     },
     ports::{RepositoryRepo, WorkspaceRepo},
 };
@@ -39,7 +41,7 @@ use crate::{
         run_git_network_output, run_git_output, run_git_output_owned, split_null_terminated_fields,
     },
     state::WorkspaceCommandState,
-    workspace_setup::{run_detected_workspace_setup, WorkspaceSetupReport, WorkspaceSetupStatus},
+    workspace_setup::run_detected_workspace_setup,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -334,6 +336,7 @@ async fn persist_workspace_setup_outcome(
             WorkspaceState::SetupPending
         }
     };
+    workspace.setup_report = Some(setup_report.clone());
     workspace.updated_at = Utc::now().to_rfc3339();
     repo.save_workspace(workspace)
         .await

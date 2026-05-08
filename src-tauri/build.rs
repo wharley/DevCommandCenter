@@ -15,7 +15,10 @@ use dcc_core::{
             Checkpoint, CheckpointId, Session, SessionEventKind, SessionEventRecord, SessionId,
             SessionProjection, SessionState, Turn, TurnId, TurnState, WorkspaceSessionSummary,
         },
-        workspace::{Workspace, WorkspaceId, WorkspaceState},
+        workspace::{
+            Workspace, WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus,
+            WorkspaceSetupStepReport, WorkspaceState,
+        },
     },
     ports::{events::CoreEvent, ProviderRuntimeConfig},
 };
@@ -37,9 +40,6 @@ use dcc_tauri::commands::{
         WorkspacePrStatusOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
         WorkspaceSetupHint,
     },
-};
-use dcc_tauri::workspace_setup::{
-    WorkspaceSetupReport, WorkspaceSetupStatus, WorkspaceSetupStepReport,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;

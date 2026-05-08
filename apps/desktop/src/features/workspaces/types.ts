@@ -1,3 +1,5 @@
+import type { WorkspaceSetupReport } from "@dcc/contracts";
+
 export type WorkspaceStatus = "ready" | "setup_pending" | "initializing" | "archived";
 
 export interface WorkspaceSummary {
@@ -9,6 +11,7 @@ export interface WorkspaceSummary {
 	projectId?: string | null;
 	rootPath?: string | null;
 	worktreePath?: string | null;
+	setupReport?: WorkspaceSetupReport | null;
 	createdAt?: string;
 	updatedAt?: string;
 }

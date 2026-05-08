@@ -877,6 +877,7 @@ dependencies = [
  "axum",
  "chrono",
  "dcc-core",
+ "dcc-infra",
  "dcc-tauri",
  "flate2",
  "hex",

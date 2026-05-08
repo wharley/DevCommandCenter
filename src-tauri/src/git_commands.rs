@@ -2,7 +2,7 @@ use dcc_tauri::git::parse_git_status_porcelain_z;
 use serde_json::Value;
 
 use crate::{
-    git_legacy::{
+    git_support::{
         build_review_diffs_for_path, git_current_branch_impl, git_local_branch_names,
         git_output_in_dir, run_git,
     },

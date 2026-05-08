@@ -1,59 +1,63 @@
 use std::process::Command;
 
+use dcc_core::domain::workspace::{
+    WorkspaceSetupReport, WorkspaceSetupStatus, WorkspaceSetupStepReport,
+};
 use dcc_infra::git::WorkspaceSetupSuggestion;
-use serde::{Deserialize, Serialize};
-use specta::Type;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkspaceSetupStatus {
-    Skipped,
-    Completed,
-    Warning,
-    Failed,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkspaceSetupFailurePolicy {
+    ContinueOnFailure,
+    RollbackOnFailure,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceSetupStepReport {
-    pub label: String,
-    pub command: String,
-    pub source_path: String,
-    pub status: WorkspaceSetupStatus,
-    pub detail: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceSetupReport {
-    pub status: WorkspaceSetupStatus,
-    pub steps: Vec<WorkspaceSetupStepReport>,
-    pub message: Option<String>,
+#[derive(Clone, Debug)]
+pub struct WorkspaceSetupExecutionOutcome {
+    pub report: WorkspaceSetupReport,
+    pub should_rollback: bool,
 }
 
 pub async fn run_detected_workspace_setup(
     workspace_root: String,
     suggestions: Vec<WorkspaceSetupSuggestion>,
 ) -> Result<WorkspaceSetupReport, String> {
-    if suggestions.is_empty() {
-        return Ok(WorkspaceSetupReport {
-            status: WorkspaceSetupStatus::Skipped,
-            steps: Vec::new(),
-            message: None,
-        });
-    }
+    Ok(run_workspace_setup_with_options(
+        workspace_root,
+        suggestions,
+        WorkspaceSetupFailurePolicy::ContinueOnFailure,
+    )
+    .await?
+    .report)
+}
 
+pub async fn run_workspace_setup_with_options(
+    workspace_root: String,
+    suggestions: Vec<WorkspaceSetupSuggestion>,
+    failure_policy: WorkspaceSetupFailurePolicy,
+) -> Result<WorkspaceSetupExecutionOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        run_detected_workspace_setup_blocking(&workspace_root, &suggestions)
+        run_workspace_setup_with_options_blocking(&workspace_root, &suggestions, failure_policy)
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
-fn run_detected_workspace_setup_blocking(
+pub fn run_workspace_setup_with_options_blocking(
     workspace_root: &str,
     suggestions: &[WorkspaceSetupSuggestion],
-) -> Result<WorkspaceSetupReport, String> {
+    failure_policy: WorkspaceSetupFailurePolicy,
+) -> Result<WorkspaceSetupExecutionOutcome, String> {
+    if suggestions.is_empty() {
+        return Ok(WorkspaceSetupExecutionOutcome {
+            report: WorkspaceSetupReport {
+                status: WorkspaceSetupStatus::Skipped,
+                steps: Vec::new(),
+                message: None,
+            },
+            should_rollback: false,
+        });
+    }
+
     let mut steps = Vec::with_capacity(suggestions.len());
     let mut saw_warning = false;
 
@@ -84,32 +88,42 @@ fn run_detected_workspace_setup_blocking(
                     status: WorkspaceSetupStatus::Failed,
                     detail: Some(reason.clone()),
                 });
-                return Ok(WorkspaceSetupReport {
-                    status: WorkspaceSetupStatus::Failed,
-                    steps,
-                    message: Some(format!(
-                        "Automatic workspace setup failed while running `{}`.",
-                        suggestion.command
-                    )),
+                return Ok(WorkspaceSetupExecutionOutcome {
+                    report: WorkspaceSetupReport {
+                        status: WorkspaceSetupStatus::Failed,
+                        steps,
+                        message: Some(format!(
+                            "Automatic workspace setup failed while running `{}`.",
+                            suggestion.command
+                        )),
+                    },
+                    should_rollback: matches!(
+                        failure_policy,
+                        WorkspaceSetupFailurePolicy::RollbackOnFailure
+                    ),
                 });
             }
         }
     }
 
-    Ok(WorkspaceSetupReport {
-        status: if saw_warning {
-            WorkspaceSetupStatus::Warning
-        } else {
-            WorkspaceSetupStatus::Completed
+    Ok(WorkspaceSetupExecutionOutcome {
+        report: WorkspaceSetupReport {
+            status: if saw_warning {
+                WorkspaceSetupStatus::Warning
+            } else {
+                WorkspaceSetupStatus::Completed
+            },
+            steps,
+            message: if saw_warning {
+                Some(
+                    "Workspace was created, but some setup steps need manual intervention."
+                        .to_string(),
+                )
+            } else {
+                Some("Workspace setup completed successfully.".to_string())
+            },
         },
-        steps,
-        message: if saw_warning {
-            Some(
-                "Workspace was created, but some setup steps need manual intervention.".to_string(),
-            )
-        } else {
-            Some("Workspace setup completed successfully.".to_string())
-        },
+        should_rollback: false,
     })
 }
 

@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 dcc-core = { path = "../crates/dcc-core" }
+dcc-infra = { path = "../crates/dcc-infra" }
 dcc-tauri = { path = "../crates/dcc-tauri" }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }

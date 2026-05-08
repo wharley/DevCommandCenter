@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS dcc_workspaces (
 	base_branch TEXT NOT NULL,
 	worktree_path TEXT NULL,
 	state TEXT NOT NULL,
+	setup_report_json TEXT NULL,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
@@ -131,6 +132,27 @@ impl SqliteWorkspaceRepo {
             "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
+        Ok(())
+    }
+
+    fn ensure_column(conn: &Connection, table: &str, column: &str, sql_type: &str) -> Result<()> {
+        let pragma = format!("PRAGMA table_info({table})");
+        let mut stmt = conn
+            .prepare(&pragma)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let existing_columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if existing_columns.iter().any(|existing| existing == column) {
+            return Ok(());
+        }
+
+        let sql = format!("ALTER TABLE {table} ADD COLUMN {column} {sql_type}");
+        conn.execute(&sql, [])
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(())
     }
 
@@ -162,6 +184,20 @@ impl SqliteWorkspaceRepo {
             }
         };
 
+        let setup_report_json = row.get::<_, Option<String>>(7)?;
+        let setup_report = setup_report_json
+            .as_deref()
+            .map(|json| {
+                from_str(json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        7,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })
+            })
+            .transpose()?;
+
         Ok(Workspace {
             id: WorkspaceId(row.get::<_, String>(0)?),
             project_id: ProjectId(row.get::<_, String>(1)?),
@@ -170,8 +206,9 @@ impl SqliteWorkspaceRepo {
             base_branch: row.get::<_, String>(4)?,
             worktree_path: row.get::<_, Option<String>>(5)?,
             state,
-            created_at: row.get::<_, String>(7)?,
-            updated_at: row.get::<_, String>(8)?,
+            setup_report,
+            created_at: row.get::<_, String>(8)?,
+            updated_at: row.get::<_, String>(9)?,
         })
     }
 
@@ -476,8 +513,8 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             r#"
 			INSERT INTO dcc_workspaces (
 				id, project_id, name, root_path, base_branch, worktree_path,
-				state, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+				state, setup_report_json, created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
 			ON CONFLICT(id) DO UPDATE SET
 				project_id = excluded.project_id,
 				name = excluded.name,
@@ -485,6 +522,7 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
 				base_branch = excluded.base_branch,
 				worktree_path = excluded.worktree_path,
 				state = excluded.state,
+				setup_report_json = excluded.setup_report_json,
 				created_at = excluded.created_at,
 				updated_at = excluded.updated_at
 			"#,
@@ -496,6 +534,12 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
                 workspace.base_branch.clone(),
                 workspace.worktree_path.clone(),
                 Self::workspace_state_as_str(&workspace.state),
+                workspace
+                    .setup_report
+                    .as_ref()
+                    .map(to_string)
+                    .transpose()
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
                 workspace.created_at.clone(),
                 workspace.updated_at.clone(),
             ],
@@ -514,7 +558,7 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             .query_row(
                 r#"
 				SELECT id, project_id, name, root_path, base_branch, worktree_path,
-				       state, created_at, updated_at
+				       state, setup_report_json, created_at, updated_at
 				  FROM dcc_workspaces
 				 WHERE id = ?1
 				"#,
@@ -536,7 +580,7 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             .prepare(
                 r#"
 				SELECT id, project_id, name, root_path, base_branch, worktree_path,
-				       state, created_at, updated_at
+				       state, setup_report_json, created_at, updated_at
 				  FROM dcc_workspaces
 				 ORDER BY updated_at DESC, created_at DESC
 				"#,
@@ -891,7 +935,9 @@ mod tests {
         domain::{
             repository::{Repository, RepositoryId},
             session::{SessionEventKind, SessionState},
-            workspace::WorkspaceId,
+            workspace::{
+                WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus, WorkspaceSetupStepReport,
+            },
         },
         ports::{RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo},
     };
@@ -969,6 +1015,7 @@ mod tests {
             base_branch: "main".to_string(),
             worktree_path: Some("/tmp/repo/.dcc-worktrees/main".to_string()),
             state: WorkspaceState::Ready,
+            setup_report: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -990,5 +1037,51 @@ mod tests {
         let workspaces =
             futures::executor::block_on(repo.list_workspaces()).expect("list workspaces");
         assert!(workspaces.is_empty());
+    }
+
+    #[test]
+    fn sqlite_workspace_repo_roundtrips_setup_report() {
+        let repo = SqliteWorkspaceRepo::from_connection(in_memory_conn()).expect("create repo");
+        let workspace = Workspace {
+            id: WorkspaceId("workspace-setup".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            name: Some("Workspace".to_string()),
+            root_path: "/tmp/repo".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: Some("/tmp/repo/.dcc-worktrees/main".to_string()),
+            state: WorkspaceState::SetupPending,
+            setup_report: Some(WorkspaceSetupReport {
+                status: WorkspaceSetupStatus::Warning,
+                steps: vec![WorkspaceSetupStepReport {
+                    label: "Install dependencies".to_string(),
+                    command: "pnpm install".to_string(),
+                    source_path: "/tmp/repo/package.json".to_string(),
+                    status: WorkspaceSetupStatus::Warning,
+                    detail: Some("pnpm: command not found".to_string()),
+                }],
+                message: Some("Workspace was created, but setup needs attention.".to_string()),
+            }),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        futures::executor::block_on(repo.save_workspace(&workspace)).expect("save workspace");
+        let workspaces =
+            futures::executor::block_on(repo.list_workspaces()).expect("list workspaces");
+
+        assert_eq!(workspaces.len(), 1);
+        let restored = &workspaces[0];
+        assert_eq!(restored.state, WorkspaceState::SetupPending);
+        let setup_report = restored
+            .setup_report
+            .as_ref()
+            .expect("workspace setup report should persist");
+        assert_eq!(setup_report.status, WorkspaceSetupStatus::Warning);
+        assert_eq!(setup_report.steps.len(), 1);
+        assert_eq!(setup_report.steps[0].command, "pnpm install");
+        assert_eq!(
+            setup_report.steps[0].detail.as_deref(),
+            Some("pnpm: command not found")
+        );
     }
 }

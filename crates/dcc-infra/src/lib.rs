@@ -6,5 +6,14 @@ mod git_command;
 mod git_parsing;
 pub mod process;
 mod repo_config;
+mod workspace_setup_plan;
 
-pub const PHASE_0A_MODULES: [&str; 6] = ["db", "events", "fs", "git", "process", "repo_config"];
+pub const PHASE_0A_MODULES: [&str; 7] = [
+    "db",
+    "events",
+    "fs",
+    "git",
+    "process",
+    "repo_config",
+    "workspace_setup_plan",
+];
