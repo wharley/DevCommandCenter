@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { WorkspaceSummary } from "./types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { WorkspaceStatus, WorkspaceSummary } from "./types";
 import {
 	archiveWorkspace as apiArchiveWorkspace,
 	createWorkspaceForRepo,
@@ -20,6 +20,51 @@ export type WorkspaceCreationResult = {
 	setupHints: WorkspaceSetupHint[];
 	setupReport: WorkspaceSetupReport;
 };
+
+function applyStatusOverride(
+	workspace: WorkspaceSummary,
+	statusOverrides: Partial<Record<string, WorkspaceStatus>>,
+): WorkspaceSummary {
+	const nextStatus = statusOverrides[workspace.id];
+	return nextStatus && nextStatus !== workspace.status
+		? { ...workspace, status: nextStatus }
+		: workspace;
+}
+
+function removeStatusOverrides(
+	statusOverrides: Partial<Record<string, WorkspaceStatus>>,
+	workspaceIds: readonly string[],
+): Partial<Record<string, WorkspaceStatus>> {
+	if (workspaceIds.length === 0) {
+		return statusOverrides;
+	}
+	let changed = false;
+	const nextOverrides = { ...statusOverrides };
+	for (const workspaceId of workspaceIds) {
+		if (workspaceId in nextOverrides) {
+			delete nextOverrides[workspaceId];
+			changed = true;
+		}
+	}
+	return changed ? nextOverrides : statusOverrides;
+}
+
+function mergeWorkspaceSummaries(
+	workspaces: WorkspaceSummary[],
+	optimisticCreated: WorkspaceSummary[],
+	statusOverrides: Partial<Record<string, WorkspaceStatus>>,
+	hiddenWorkspaceIds: readonly string[],
+): WorkspaceSummary[] {
+	const hiddenIds = new Set(hiddenWorkspaceIds);
+	const backendIds = new Set(workspaces.map((workspace) => workspace.id));
+	const mergedCreated = optimisticCreated
+		.filter((workspace) => !hiddenIds.has(workspace.id) && !backendIds.has(workspace.id))
+		.map((workspace) => applyStatusOverride(workspace, statusOverrides));
+	const mergedBackend = workspaces
+		.filter((workspace) => !hiddenIds.has(workspace.id))
+		.map((workspace) => applyStatusOverride(workspace, statusOverrides));
+	return [...mergedCreated, ...mergedBackend];
+}
 
 export function removeWorkspacesFromList(
 	workspaces: WorkspaceSummary[],
@@ -77,8 +122,22 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 	const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
 		workspaces[0]?.id ?? null,
 	);
-	const [workspaceList, setWorkspaceList] = useState<WorkspaceSummary[]>(workspaces);
+	const [optimisticCreated, setOptimisticCreated] = useState<WorkspaceSummary[]>([]);
+	const [hiddenWorkspaceIds, setHiddenWorkspaceIds] = useState<string[]>([]);
+	const [statusOverrides, setStatusOverrides] = useState<
+		Partial<Record<string, WorkspaceStatus>>
+	>({});
 	const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+	const workspaceList = useMemo(
+		() =>
+			mergeWorkspaceSummaries(
+				workspaces,
+				optimisticCreated,
+				statusOverrides,
+				hiddenWorkspaceIds,
+			),
+		[hiddenWorkspaceIds, optimisticCreated, statusOverrides, workspaces],
+	);
 	const workspaceListRef = useRef(workspaceList);
 	const selectedWorkspaceIdRef = useRef(selectedWorkspaceId);
 
@@ -91,13 +150,22 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 	}, [selectedWorkspaceId]);
 
 	useEffect(() => {
-		setWorkspaceList(workspaces);
-		setSelectedWorkspaceId((current) =>
-			current && workspaces.some((workspace) => workspace.id === current)
-				? current
-				: workspaces[0]?.id ?? null,
-		);
+		const backendIds = new Set(workspaces.map((workspace) => workspace.id));
+		setOptimisticCreated((current) => {
+			const next = current.filter((workspace) => !backendIds.has(workspace.id));
+			return next.length === current.length ? current : next;
+		});
 	}, [workspaces]);
+
+	useEffect(() => {
+		setSelectedWorkspaceId((current) => {
+			const nextSelectedWorkspaceId =
+				current && workspaceList.some((workspace) => workspace.id === current)
+					? current
+					: workspaceList[0]?.id ?? null;
+			return current === nextSelectedWorkspaceId ? current : nextSelectedWorkspaceId;
+		});
+	}, [workspaceList]);
 
 	const filteredWorkspaces = workspaceList;
 
@@ -109,7 +177,16 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 		try {
 			const result = await createWorkspaceForRepo(input);
 			const summary = workspaceToSummary(result.workspace);
-			setWorkspaceList((current) => [summary, ...current]);
+			setOptimisticCreated((current) => [
+				summary,
+				...current.filter((workspace) => workspace.id !== summary.id),
+			]);
+			setHiddenWorkspaceIds((current) =>
+				current.includes(summary.id)
+					? current.filter((workspaceId) => workspaceId !== summary.id)
+					: current,
+			);
+			setStatusOverrides((current) => removeStatusOverrides(current, [summary.id]));
 			setSelectedWorkspaceId(summary.id);
 			return {
 				workspace: summary,
@@ -126,7 +203,16 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 		try {
 			const result = await createWorkspaceFromUrl(input);
 			const summary = workspaceToSummary(result.workspace);
-			setWorkspaceList((current) => [summary, ...current]);
+			setOptimisticCreated((current) => [
+				summary,
+				...current.filter((workspace) => workspace.id !== summary.id),
+			]);
+			setHiddenWorkspaceIds((current) =>
+				current.includes(summary.id)
+					? current.filter((workspaceId) => workspaceId !== summary.id)
+					: current,
+			);
+			setStatusOverrides((current) => removeStatusOverrides(current, [summary.id]));
 			setSelectedWorkspaceId(summary.id);
 			return {
 				workspace: summary,
@@ -140,15 +226,17 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 
 	const archiveWorkspace = useCallback(async (workspaceId: string) => {
 		await apiArchiveWorkspace(workspaceId);
-		setWorkspaceList((current) =>
-			current.map((w) => (w.id === workspaceId ? { ...w, status: "archived" as const } : w)),
+		setStatusOverrides((current) =>
+			current[workspaceId] === "archived"
+				? current
+				: { ...current, [workspaceId]: "archived" }
 		);
 	}, []);
 
 	const restoreWorkspace = useCallback(async (workspaceId: string) => {
 		await apiRestoreWorkspace(workspaceId);
-		setWorkspaceList((current) =>
-			current.map((w) => (w.id === workspaceId ? { ...w, status: "ready" as const } : w)),
+		setStatusOverrides((current) =>
+			current[workspaceId] === "ready" ? current : { ...current, [workspaceId]: "ready" }
 		);
 	}, []);
 
@@ -160,9 +248,13 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 				[workspaceId],
 				selectedWorkspaceIdRef.current,
 			);
-			workspaceListRef.current = nextState.workspaceList;
-			selectedWorkspaceIdRef.current = nextState.selectedWorkspaceId;
-			setWorkspaceList(nextState.workspaceList);
+			setOptimisticCreated((current) =>
+				current.filter((workspace) => workspace.id !== workspaceId),
+			);
+			setHiddenWorkspaceIds((current) =>
+				current.includes(workspaceId) ? current : [...current, workspaceId],
+			);
+			setStatusOverrides((current) => removeStatusOverrides(current, [workspaceId]));
 			setSelectedWorkspaceId(nextState.selectedWorkspaceId);
 		},
 		[],
@@ -181,9 +273,15 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 				uniqueWorkspaceIds,
 				selectedWorkspaceIdRef.current,
 			);
-			workspaceListRef.current = nextState.workspaceList;
-			selectedWorkspaceIdRef.current = nextState.selectedWorkspaceId;
-			setWorkspaceList(nextState.workspaceList);
+			const idsToRemove = new Set(uniqueWorkspaceIds);
+			setOptimisticCreated((current) =>
+				current.filter((workspace) => !idsToRemove.has(workspace.id)),
+			);
+			setHiddenWorkspaceIds((current) => [
+				...current,
+				...uniqueWorkspaceIds.filter((workspaceId) => !current.includes(workspaceId)),
+			]);
+			setStatusOverrides((current) => removeStatusOverrides(current, uniqueWorkspaceIds));
 			setSelectedWorkspaceId(nextState.selectedWorkspaceId);
 		},
 		[],

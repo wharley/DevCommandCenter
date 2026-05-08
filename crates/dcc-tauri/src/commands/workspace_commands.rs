@@ -431,59 +431,29 @@ fn resolve_current_branch_name(root: &str) -> Result<String, String> {
     if branch.is_empty() {
         return Err("current branch is empty".to_string());
     }
-    if branch == "HEAD" {
-        let remotes_output = run_git_output(root, &["remote"])?;
-        let remotes: Vec<String> = if remotes_output.status.success() {
-            String::from_utf8_lossy(&remotes_output.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(|line| line.to_string())
-                .collect()
-        } else {
-            vec!["origin".to_string()]
-        };
-
-        let fallback = run_git_output(
-            root,
-            &[
-                "for-each-ref",
-                "--format=%(refname:short)",
-                "--contains",
-                "HEAD",
-                "refs/heads/",
-                "refs/remotes/",
-            ],
-        )?;
-        if fallback.status.success() {
-            let mut candidates: Vec<String> = String::from_utf8_lossy(&fallback.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .filter(|line| !line.ends_with("/HEAD"))
-                .map(|line| {
-                    let branch = line.to_string();
-                    for remote in &remotes {
-                        let prefix = format!("{remote}/");
-                        if branch.starts_with(&prefix) {
-                            return branch[prefix.len()..].to_string();
-                        }
-                    }
-                    branch
-                })
-                .filter(|line| {
-                    let lower = line.to_lowercase();
-                    lower != "main" && lower != "master" && lower != "develop"
-                })
-                .collect();
-            candidates.sort();
-            candidates.dedup();
-            if let Some(candidate) = candidates.first() {
-                return Ok(candidate.clone());
-            }
-        }
-    }
     Ok(branch)
+}
+
+async fn resolve_workspace_target_branch(
+    state: &State<'_, WorkspaceCommandState>,
+    workspace_root: &str,
+) -> Option<String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).ok()?;
+    let workspace = find_workspace_by_root(&repo, workspace_root)
+        .await
+        .ok()
+        .flatten()?;
+    let repository = repo
+        .get_repository(&RepositoryId(workspace.root_path.clone()))
+        .await
+        .ok()
+        .flatten()?;
+    let branch = repository.base_branch.trim();
+    if branch.is_empty() {
+        None
+    } else {
+        Some(branch.to_string())
+    }
 }
 
 fn resolve_default_branch_name(root: &str) -> Result<String, String> {
@@ -828,8 +798,8 @@ mod github_cli_status_tests {
     }
 }
 
-fn push_current_branch(root: &str) -> Result<(), String> {
-    let branch = ensure_pushable_branch(root)?;
+fn push_current_branch(root: &str, protected_branch: Option<&str>) -> Result<(), String> {
+    let branch = ensure_pushable_branch(root, protected_branch)?;
     push_branch_refspec(root, &branch)
 }
 
@@ -1050,7 +1020,8 @@ pub async fn workspace_git_commit_push(
         return Err(git_output_err("git commit", &commit.stderr));
     }
 
-    push_current_branch(root)
+    let protected_branch = resolve_workspace_target_branch(&state, root).await;
+    push_current_branch(root, protected_branch.as_deref())
 }
 
 #[tauri::command]
@@ -1064,7 +1035,8 @@ pub async fn workspace_git_push(
         return Err("workspace_root is empty".to_string());
     }
 
-    push_current_branch(root)
+    let protected_branch = resolve_workspace_target_branch(&state, root).await;
+    push_current_branch(root, protected_branch.as_deref())
 }
 
 /// Opens the current PR in the browser (`gh pr view --web`), if GitHub CLI is available.
@@ -1133,26 +1105,26 @@ fn branch_name_from_worktree_path(root: &str) -> String {
     format!("dcc/{dir}")
 }
 
-fn ensure_pushable_branch(root: &str) -> Result<String, String> {
+fn materialize_workspace_branch(root: &str) -> Result<String, String> {
+    let preferred = branch_name_from_worktree_path(root);
+    let branch = next_available_branch_name(root, &preferred);
+    let checkout = run_git_output(root, &["switch", "-c", &branch])?;
+    if !checkout.status.success() {
+        return Err(git_output_err("git switch -c", &checkout.stderr));
+    }
+    Ok(branch)
+}
+
+fn ensure_pushable_branch(root: &str, protected_branch: Option<&str>) -> Result<String, String> {
     let raw_branch = resolve_current_branch_name(root)?;
-    if raw_branch != "HEAD" {
+    let protected_branch = protected_branch
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty());
+    if raw_branch != "HEAD" && protected_branch != Some(raw_branch.as_str()) {
         return Ok(raw_branch);
     }
 
-    let branch = branch_name_from_worktree_path(root);
-    let branch_ref = format!("refs/heads/{branch}");
-    let already_exists = git_command_succeeds(root, &["rev-parse", "--verify", &branch_ref]);
-    let checkout_args: &[&str] = if already_exists {
-        &["checkout", &branch]
-    } else {
-        &["checkout", "-b", &branch]
-    };
-    let checkout = run_git_output(root, checkout_args)?;
-    if !checkout.status.success() {
-        return Err(git_output_err("git checkout", &checkout.stderr));
-    }
-
-    Ok(branch)
+    materialize_workspace_branch(root)
 }
 
 /// Non-interactive PR creation (`gh pr create --fill`).
@@ -1167,8 +1139,10 @@ pub async fn workspace_gh_pr_create_fill(
         return Err("workspace_root is empty".to_string());
     }
 
-    let raw_branch = ensure_pushable_branch(root)?;
-    let base_ref = resolve_branch_diff_base(root).unwrap_or_else(|| "main".to_string());
+    let protected_branch = resolve_workspace_target_branch(&state, root).await;
+    let raw_branch = ensure_pushable_branch(root, protected_branch.as_deref())?;
+    let base_ref = resolve_branch_diff_base(root, protected_branch.as_deref())
+        .unwrap_or_else(|| "main".to_string());
     // gh pr create --base expects a branch name, not a remote tracking ref like origin/main
     let base_stripped = base_ref
         .split_once('/')
@@ -1934,8 +1908,8 @@ pub async fn workspace_git_branch_diff(
         return Err("workspace_root is empty".to_string());
     }
 
-    // Resolve base ref: try upstream, then common origin branches.
-    let base = resolve_branch_diff_base(root);
+    let protected_branch = resolve_workspace_target_branch(&state, root).await;
+    let base = resolve_branch_diff_base(root, protected_branch.as_deref());
 
     let changes = match base {
         Some(ref b) => compute_branch_diff(root, b)?,
@@ -1948,8 +1922,22 @@ pub async fn workspace_git_branch_diff(
     })
 }
 
-fn resolve_branch_diff_base(root: &str) -> Option<String> {
-    // 1. Try @{upstream}
+fn resolve_branch_diff_base(root: &str, target_branch: Option<&str>) -> Option<String> {
+    let current_branch = resolve_current_branch_name(root).ok();
+
+    if let Some(target_branch) = target_branch
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+    {
+        let remote_target = format!("origin/{target_branch}");
+        if git_command_succeeds(root, &["rev-parse", "--verify", &remote_target]) {
+            return Some(remote_target);
+        }
+        if git_command_succeeds(root, &["rev-parse", "--verify", target_branch]) {
+            return Some(target_branch.to_string());
+        }
+    }
+
     let upstream = run_git_output(root, &["rev-parse", "--abbrev-ref", "@{upstream}"])
         .ok()
         .filter(|o| o.status.success())
@@ -1960,20 +1948,25 @@ fn resolve_branch_diff_base(root: &str) -> Option<String> {
             } else {
                 Some(s)
             }
+        })
+        .filter(|upstream| {
+            let short = upstream.rsplit('/').next().unwrap_or(upstream.as_str());
+            current_branch
+                .as_deref()
+                .map(|branch| branch != short)
+                .unwrap_or(true)
         });
     if upstream.is_some() {
         return upstream;
     }
 
-    // 2. Try common origin branches
     for candidate in &[
         "origin/HEAD",
         "origin/main",
         "origin/master",
         "origin/develop",
     ] {
-        let ok = git_command_succeeds(root, &["rev-parse", "--verify", candidate]);
-        if ok {
+        if git_command_succeeds(root, &["rev-parse", "--verify", candidate]) {
             return Some(candidate.to_string());
         }
     }

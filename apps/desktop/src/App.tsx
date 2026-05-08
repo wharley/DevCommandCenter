@@ -81,6 +81,7 @@ import {
 } from "./features/providers/provider-selection.logic";
 import type { ComposerSubmittedTurn } from "./features/composer/composer-turn";
 import { workspaceToSummary } from "./features/workspaces/use-workspaces";
+import type { WorkspaceSummary } from "./features/workspaces/types";
 import {
 	canAbortRun,
 	canResumeSession,
@@ -110,6 +111,7 @@ import {
 } from "./features/providers/provider-runtime-settings";
 
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
+const EMPTY_WORKSPACES: WorkspaceSummary[] = [];
 
 type PendingSessionClose = {
 	sessionId: string;
@@ -292,7 +294,7 @@ export default function App() {
 		staleTime: 60_000,
 		refetchOnWindowFocus: false,
 	});
-	const workspacesFromBackend = workspacesQuery.data ?? [];
+	const workspacesFromBackend = workspacesQuery.data ?? EMPTY_WORKSPACES;
 	const repositoriesFromBackend = repositoriesQuery.data ?? [];
 	const {
 		allWorkspaces,

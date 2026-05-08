@@ -35,6 +35,23 @@ export const dccQueryKeys = {
 		["workspaceSessions", workspaceId] as const,
 } as const;
 
+function shouldRefreshInspectorGitQueries(payload: unknown) {
+	if (!payload || typeof payload !== "object") {
+		return false;
+	}
+
+	const event = payload as Record<string, unknown>;
+	return Boolean(
+		event.workspacePrepared ||
+			event.workspaceReady ||
+			event.sessionCompleted ||
+			event.sessionTurnCompleted ||
+			event.sessionTurnAborted ||
+			event.sessionTurnToolCallCompleted ||
+			event.sessionTurnToolCallFailed,
+	);
+}
+
 export function createDccQueryClient() {
 	const queryClient = new QueryClient({
 		defaultOptions: {
@@ -67,12 +84,24 @@ export function createDccQueryClient() {
 	});
 
 	void import("@tauri-apps/api/event").then(({ listen }) => {
-		void listen("dcc:core-event", () => {
+		void listen("dcc:core-event", (event) => {
 			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.repositories });
 			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.workspaces });
 			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.sessions });
 			void queryClient.invalidateQueries({ queryKey: ["sessionThreads"] });
 			void queryClient.invalidateQueries({ queryKey: ["workspaceSessions"] });
+			if (shouldRefreshInspectorGitQueries(event.payload)) {
+				void queryClient.invalidateQueries({
+					predicate: (query) => {
+						const queryKey = query.queryKey[0];
+						return (
+							queryKey === "workspaceGitStatus" ||
+							queryKey === "workspacePrStatus" ||
+							queryKey === "workspaceGitBranchDiff"
+						);
+					},
+				});
+			}
 		});
 	});
 

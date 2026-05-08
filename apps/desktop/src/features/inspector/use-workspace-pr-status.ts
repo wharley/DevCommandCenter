@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { workspacePrStatus } from "@/lib/workspace-api";
 
 export const WORKSPACE_PR_STATUS_QUERY_KEY = "workspacePrStatus";
+const WORKSPACE_PR_REFETCH_INTERVAL_MS = 10_000;
 
 export function useWorkspacePrStatus(workspaceRoot: string | null, branch: string | null) {
 	const root = workspaceRoot?.trim() ?? "";
@@ -32,5 +33,6 @@ export function useWorkspacePrStatus(workspaceRoot: string | null, branch: strin
 		enabled: Boolean(root),
 		staleTime: 8_000,
 		refetchOnWindowFocus: true,
+		refetchInterval: WORKSPACE_PR_REFETCH_INTERVAL_MS,
 	});
 }

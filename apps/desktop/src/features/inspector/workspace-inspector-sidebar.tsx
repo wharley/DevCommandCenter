@@ -32,6 +32,7 @@ import {
 	workspaceRunSetup,
 } from "@/lib/workspace-api";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
+import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./use-workspace-git-branch-diff";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
 import { EmptyState } from "@/features/panel";
 import type { CoreEvent, ProviderCatalog, WorkspaceSetupReport } from "@dcc/contracts";
@@ -348,6 +349,9 @@ export function WorkspaceInspectorSidebar({
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
 			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+			});
 		} catch (error) {
 			const message = getInspectorActionErrorMessage(error);
 			console.error("[inspector] git action failed", { commitMode, root, error });
@@ -392,9 +396,15 @@ export function WorkspaceInspectorSidebar({
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
 			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+			});
 			if (result.workspaceRoot && result.workspaceRoot !== root) {
 				await queryClient.invalidateQueries({
 					queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, result.workspaceRoot],
+				});
+				await queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, result.workspaceRoot],
 				});
 			}
 		} catch (error) {
@@ -454,6 +464,9 @@ export function WorkspaceInspectorSidebar({
 			});
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
 			});
 		} catch (error) {
 			const message = getInspectorActionErrorMessage(error);
