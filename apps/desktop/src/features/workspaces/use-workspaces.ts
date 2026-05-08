@@ -11,7 +11,13 @@ import type {
 	CreateWorkspaceForRepoInput,
 	CreateWorkspaceFromUrlInput,
 	Workspace,
+	WorkspaceSetupHint,
 } from "@dcc/contracts";
+
+export type WorkspaceCreationResult = {
+	workspace: WorkspaceSummary;
+	setupHints: WorkspaceSetupHint[];
+};
 
 export function removeWorkspacesFromList(
 	workspaces: WorkspaceSummary[],
@@ -82,12 +88,12 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 	}, [selectedWorkspaceId]);
 
 	useEffect(() => {
-		if (workspaces.length === 0) {
-			return;
-		}
-
-		setWorkspaceList((current) => (current.length === 0 ? workspaces : current));
-		setSelectedWorkspaceId((current) => current ?? workspaces[0]?.id ?? null);
+		setWorkspaceList(workspaces);
+		setSelectedWorkspaceId((current) =>
+			current && workspaces.some((workspace) => workspace.id === current)
+				? current
+				: workspaces[0]?.id ?? null,
+		);
 	}, [workspaces]);
 
 	const filteredWorkspaces = workspaceList;
@@ -102,7 +108,10 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 			const summary = workspaceToSummary(result.workspace);
 			setWorkspaceList((current) => [summary, ...current]);
 			setSelectedWorkspaceId(summary.id);
-			return summary;
+			return {
+				workspace: summary,
+				setupHints: result.setupHints,
+			} satisfies WorkspaceCreationResult;
 		} finally {
 			setIsCreatingWorkspace(false);
 		}
@@ -115,7 +124,10 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 			const summary = workspaceToSummary(result.workspace);
 			setWorkspaceList((current) => [summary, ...current]);
 			setSelectedWorkspaceId(summary.id);
-			return summary;
+			return {
+				workspace: summary,
+				setupHints: result.setupHints,
+			} satisfies WorkspaceCreationResult;
 		} finally {
 			setIsCreatingWorkspace(false);
 		}

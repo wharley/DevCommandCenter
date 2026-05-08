@@ -25,6 +25,7 @@ import type {
 	WorkspaceGitStatusInput,
 	WorkspaceGitStatusOutput,
 	WorkspaceContinueFromBaseBranchInput,
+	WorkspaceContinueFromBaseBranchOutput,
 	WorkspacePrStatusInput,
 	WorkspacePrStatusOutput,
 } from "@dcc/contracts";
@@ -120,7 +121,7 @@ export function workspaceGitPush(input: WorkspaceGitPushInput) {
 }
 
 export function workspaceContinueFromBaseBranch(input: WorkspaceContinueFromBaseBranchInput) {
-	return invoke<{ success: boolean; branch?: string; workspaceRoot?: string }>(
+	return invoke<WorkspaceContinueFromBaseBranchOutput>(
 		WORKSPACE_METHODS.workspaceContinueFromBaseBranch,
 		{ input },
 	);

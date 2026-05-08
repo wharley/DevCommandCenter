@@ -30,10 +30,11 @@ use dcc_tauri::commands::{
         GithubCliStatusOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
         ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
         ListLocalBranchesOutput, ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
-        WorkspaceContinueFromBaseBranchInput, WorkspaceGitBranchDiffInput,
-        WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput,
-        WorkspaceGitPathInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
-        WorkspaceGitStatusOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
+        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
+        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
+        WorkspaceGitCommitPushInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
+        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspacePrStatusInput,
+        WorkspacePrStatusOutput, WorkspaceSetupHint,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -130,6 +131,7 @@ fn main() {
         .typ::<CreateWorkspaceForRepoOutput>()
         .typ::<CreateWorkspaceFromUrlInput>()
         .typ::<CreateWorkspaceFromUrlOutput>()
+        .typ::<WorkspaceSetupHint>()
         .typ::<ListLocalBranchesInput>()
         .typ::<ListLocalBranchesOutput>()
         .typ::<ListGitTrackedFilesInput>()
@@ -145,6 +147,7 @@ fn main() {
         .typ::<WorkspaceGitStatusOutput>()
         .typ::<WorkspaceGitChangeEntry>()
         .typ::<WorkspaceContinueFromBaseBranchInput>()
+        .typ::<WorkspaceContinueFromBaseBranchOutput>()
         .typ::<WorkspacePrStatusInput>()
         .typ::<WorkspacePrStatusOutput>()
         .typ::<WorkspaceGitBranchDiffInput>()

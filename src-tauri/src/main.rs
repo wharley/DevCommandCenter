@@ -5,6 +5,9 @@ mod session_commands;
 mod workspace_commands;
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike, Utc};
+use dcc_tauri::git::{
+    configure_git_command, parse_git_status_porcelain_z, split_null_terminated_fields,
+};
 use dcc_tauri::state::{SessionCommandState, WorkspaceCommandState};
 use dev_command_center_tauri::daemon_client::{
     ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo,
@@ -1225,11 +1228,7 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 }
 
 fn run_git(cwd: &str, args: &[&str]) -> ApiResult<String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| db_error(e.to_string()))?;
+    let output = git_output_in_dir(cwd, args).map_err(|e| db_error(e.to_string()))?;
     if !output.status.success() {
         return Err(db_error(
             String::from_utf8_lossy(&output.stderr).to_string(),
@@ -1240,11 +1239,7 @@ fn run_git(cwd: &str, args: &[&str]) -> ApiResult<String> {
 
 /// Like run_git but accepts exit code 1 as success (git diff --no-index exits 1 when differences found).
 fn run_git_diff(cwd: &str, args: &[&str]) -> ApiResult<String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| db_error(e.to_string()))?;
+    let output = git_output_in_dir(cwd, args).map_err(|e| db_error(e.to_string()))?;
     let code = output.status.code().unwrap_or(2);
     if code >= 2 {
         return Err(db_error(
@@ -1252,6 +1247,12 @@ fn run_git_diff(cwd: &str, args: &[&str]) -> ApiResult<String> {
         ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn git_output_in_dir(cwd: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
+    let mut command = Command::new("git");
+    configure_git_command(&mut command);
+    command.args(args).current_dir(cwd).output()
 }
 
 /// Caminho do ficheiro `index` do repositório para um worktree (dir `.git` ou ficheiro `gitdir:`).
@@ -1277,11 +1278,7 @@ fn resolve_git_index_path(worktree: &str) -> Option<PathBuf> {
 }
 
 fn git_parse_first_unix_ts(worktree: &str, args: &[&str]) -> Option<i64> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(worktree)
-        .output()
-        .ok()?;
+    let output = git_output_in_dir(worktree, args).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -1310,10 +1307,7 @@ fn git_worktree_last_activity_epoch(worktree: &str) -> Option<i64> {
         bump(t);
     }
 
-    let dirty = Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(worktree)
-        .output()
+    let dirty = git_output_in_dir(worktree, &["status", "--porcelain"])
         .ok()
         .filter(|o| o.status.success())
         .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
@@ -1469,11 +1463,7 @@ fn git_worktree_list_contains_path(project_path: &str, worktree_path: &str) -> b
         .to_string_lossy()
         .to_string();
 
-    let output = match Command::new("git")
-        .args(["worktree", "list", "--porcelain"])
-        .current_dir(project_path)
-        .output()
-    {
+    let output = match git_output_in_dir(project_path, &["worktree", "list", "--porcelain"]) {
         Ok(output) => output,
         Err(_) => return false,
     };
@@ -1501,15 +1491,21 @@ fn git_worktree_list_contains_path(project_path: &str, worktree_path: &str) -> b
 
 /// Branches locais (`refs/heads/`), ordenadas, sem duplicatas.
 fn git_local_branch_names(project_path: &str) -> ApiResult<Vec<String>> {
-    let raw = run_git(
+    let output = git_output_in_dir(
         project_path,
-        &["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
-    )?;
-    let mut branches: Vec<String> = raw
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect();
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)%00",
+            "refs/heads/",
+        ],
+    )
+    .map_err(|e| db_error(e.to_string()))?;
+    if !output.status.success() {
+        return Err(db_error(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+    let mut branches = split_null_terminated_fields(&output.stdout);
     branches.sort();
     branches.dedup();
     Ok(branches)
@@ -1545,17 +1541,6 @@ fn get_unpushed_commits(cwd: &str, branch: &str) -> ApiResult<Vec<String>> {
     Ok(log.lines().map(|s| s.to_string()).collect())
 }
 
-fn parse_git_status_porcelain(raw: &str) -> Vec<(String, String)> {
-    raw.lines()
-        .filter(|l| !l.trim().is_empty() && l.len() > 3)
-        .map(|line| {
-            let status = line[0..2].trim().to_string();
-            let path = line[3..].trim().to_string();
-            (status, path)
-        })
-        .collect()
-}
-
 fn count_diff_stats(diff: &str) -> (i64, i64) {
     let mut ins = 0i64;
     let mut del = 0i64;
@@ -1570,16 +1555,22 @@ fn count_diff_stats(diff: &str) -> (i64, i64) {
 }
 
 fn build_review_diffs_for_path(target_path: &str) -> ApiResult<Value> {
-    let status_raw = run_git(target_path, &["status", "--porcelain"])?;
-    let files_meta = parse_git_status_porcelain(&status_raw);
+    let status_output = git_output_in_dir(target_path, &["status", "--porcelain", "-z"])
+        .map_err(|e| db_error(e.to_string()))?;
+    if !status_output.status.success() {
+        return Err(db_error(
+            String::from_utf8_lossy(&status_output.stderr).to_string(),
+        ));
+    }
+    let files_meta = parse_git_status_porcelain_z(&status_output.stdout);
     let mut files = Vec::new();
     let mut insertions = 0i64;
     let mut deletions = 0i64;
 
-    for (git_status, path) in &files_meta {
-        let is_untracked = git_status.contains('?');
-        let first_char = git_status.chars().next().unwrap_or(' ');
-        let is_staged_new = !is_untracked && first_char == 'A';
+    for file in &files_meta {
+        let path = &file.path;
+        let is_untracked = file.index_status == '?' && file.worktree_status == '?';
+        let is_staged_new = !is_untracked && file.index_status == 'A';
         let diff = if is_untracked {
             // git diff --no-index exits with code 1 when differences exist — use run_git_diff
             run_git_diff(
@@ -1598,7 +1589,7 @@ fn build_review_diffs_for_path(target_path: &str) -> ApiResult<Value> {
         deletions += del;
         let status = if is_untracked {
             "untracked"
-        } else if !git_status.is_empty() && first_char != ' ' {
+        } else if file.index_status != ' ' {
             "staged"
         } else {
             "modified"
@@ -5537,8 +5528,8 @@ fn git_get_status(project_path: String) -> ApiResult<Value> {
         }));
     }
 
-    // Executa git status --porcelain
-    let status_output = match run_git(&project_path, &["status", "--porcelain"]) {
+    // Executa git status --porcelain -z
+    let status_output = match git_output_in_dir(&project_path, &["status", "--porcelain", "-z"]) {
         Ok(output) => output,
         Err(_) => {
             return Ok(serde_json::json!({
@@ -5550,35 +5541,33 @@ fn git_get_status(project_path: String) -> ApiResult<Value> {
             }));
         }
     };
+    if !status_output.status.success() {
+        return Ok(serde_json::json!({
+            "isRepo": true,
+            "isDirty": false,
+            "staged": [],
+            "unstaged": [],
+            "untracked": []
+        }));
+    }
 
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
     let mut untracked = Vec::new();
 
-    for line in status_output.lines() {
-        if line.len() < 4 {
+    for entry in parse_git_status_porcelain_z(&status_output.stdout) {
+        if entry.index_status == '?' && entry.worktree_status == '?' {
+            untracked.push(entry.path);
             continue;
         }
 
-        let index_status = line.chars().nth(0).unwrap_or(' ');
-        let worktree_status = line.chars().nth(1).unwrap_or(' ');
-        let file_path = line[3..].trim().to_string();
-
-        // Untracked files
-        if line.starts_with("??") {
-            untracked.push(file_path);
-            continue;
+        if entry.index_status != ' ' && entry.index_status != '?' {
+            staged.push(entry.path.clone());
         }
 
-        // Staged changes (index status != ' ')
-        if index_status != ' ' && index_status != '?' {
-            staged.push(file_path.clone());
-        }
-
-        // Unstaged changes (worktree status != ' ')
-        if worktree_status != ' ' && worktree_status != '?' {
-            if !staged.contains(&file_path) {
-                unstaged.push(file_path);
+        if entry.worktree_status != ' ' && entry.worktree_status != '?' {
+            if !staged.contains(&entry.path) {
+                unstaged.push(entry.path);
             }
         }
     }
@@ -6938,10 +6927,10 @@ async fn comb_check_merge_permissions(
         );
 
         // Verificar se conseguimos fazer push (dry-run)
-        let push_check = Command::new("git")
-            .args(&["push", "--dry-run", "origin", &target_clone])
-            .current_dir(&project_path_clone)
-            .output();
+        let push_check = git_output_in_dir(
+            &project_path_clone,
+            &["push", "--dry-run", "origin", &target_clone],
+        );
 
         match push_check {
             Ok(output) => {

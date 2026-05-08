@@ -5,6 +5,7 @@
 //! tentados **antes** do REST — reutilizam a sessão do utilizador sem precisar de PAT na UI.
 
 use chrono::Utc;
+use dcc_tauri::git::configure_git_command;
 use lazy_static::lazy_static;
 use regex::Regex;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION};
@@ -52,11 +53,11 @@ fn gitlab_api_base(host: &str) -> String {
 }
 
 fn git_remote_origin(project_path: &str) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["remote", "get-url", "origin"])
-        .current_dir(project_path)
-        .output()
-        .ok()?;
+    let mut command = std::process::Command::new("git");
+    configure_git_command(&mut command);
+    command.args(["remote", "get-url", "origin"]);
+    command.current_dir(project_path);
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }

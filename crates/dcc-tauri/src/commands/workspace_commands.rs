@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use specta::Type;
 use tauri::{AppHandle, State};
 
@@ -22,21 +24,43 @@ use dcc_core::{
 };
 use dcc_infra::{
     db::SqliteWorkspaceRepo,
-    git::{list_local_branch_names, CommandGitOps},
+    git::{
+        broken_worktree_reason, build_worktree_path, create_worktree_branch_from_ref,
+        detect_workspace_setup_suggestions, is_git_repo, list_local_branch_names,
+        list_untracked_files, remove_branch, remove_worktree, stash_apply_sha, stash_create,
+        CommandGitOps,
+    },
 };
 
-use crate::{events::TauriEventBus, state::WorkspaceCommandState};
+use crate::{
+    events::TauriEventBus,
+    git::{
+        git_command_succeeds, git_output_err, parse_name_status_z, parse_numstat_z,
+        run_git_network_output, run_git_output, run_git_output_owned, split_null_terminated_fields,
+    },
+    state::WorkspaceCommandState,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateWorkspaceForRepoOutput {
     pub workspace: Workspace,
+    pub setup_hints: Vec<WorkspaceSetupHint>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateWorkspaceFromUrlOutput {
     pub workspace: Workspace,
+    pub setup_hints: Vec<WorkspaceSetupHint>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSetupHint {
+    pub label: String,
+    pub command: String,
+    pub source_path: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -221,8 +245,106 @@ pub struct WorkspaceContinueFromBaseBranchInput {
     pub new_branch_name: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceContinueFromBaseBranchOutput {
+    pub success: bool,
+    pub branch: String,
+    pub workspace_root: String,
+    pub previous_workspace_root: String,
+    pub workspace: Workspace,
+}
+
 fn normalize_git_relative_path(path: &str) -> String {
     path.trim().replace('\\', "/")
+}
+
+fn resolve_workspace_setup_root(workspace: &Workspace) -> &str {
+    workspace
+        .worktree_path
+        .as_deref()
+        .unwrap_or(workspace.root_path.as_str())
+}
+
+fn resolve_workspace_active_root(workspace: &Workspace) -> &str {
+    resolve_workspace_setup_root(workspace)
+}
+
+fn collect_workspace_setup_hints(workspace: &Workspace) -> Vec<WorkspaceSetupHint> {
+    detect_workspace_setup_suggestions(resolve_workspace_setup_root(workspace))
+        .into_iter()
+        .map(|suggestion| WorkspaceSetupHint {
+            label: suggestion.label,
+            command: suggestion.command,
+            source_path: suggestion.source_path,
+        })
+        .collect()
+}
+
+fn resolve_workspace_broken_reason(workspace: &Workspace) -> Option<String> {
+    let active_root = Path::new(resolve_workspace_active_root(workspace));
+    if !active_root.exists() {
+        return Some(format!(
+            "workspace path no longer exists: {}",
+            active_root.display()
+        ));
+    }
+
+    let repo_root = Path::new(workspace.root_path.as_str());
+    let looks_git_backed = is_git_repo(repo_root) || active_root.join(".git").exists();
+    if !looks_git_backed {
+        return None;
+    }
+
+    broken_worktree_reason(active_root)
+}
+
+async fn find_workspace_by_root(
+    repo: &SqliteWorkspaceRepo,
+    workspace_root: &str,
+) -> Result<Option<Workspace>, String> {
+    let workspace_root = workspace_root.trim();
+    let workspaces = repo
+        .list_workspaces()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(workspaces.into_iter().find(|workspace| {
+        workspace.root_path == workspace_root
+            || workspace.worktree_path.as_deref() == Some(workspace_root)
+    }))
+}
+
+async fn purge_broken_workspace_by_root(
+    repo: &SqliteWorkspaceRepo,
+    workspace_root: &str,
+) -> Result<Option<String>, String> {
+    let Some(workspace) = find_workspace_by_root(repo, workspace_root).await? else {
+        return Ok(None);
+    };
+
+    let Some(reason) = resolve_workspace_broken_reason(&workspace) else {
+        return Ok(None);
+    };
+
+    repo.delete_workspace(&workspace.id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(Some(reason))
+}
+
+fn broken_workspace_message(reason: &str) -> String {
+    format!("workspace became unavailable and was removed from DCC: {reason}")
+}
+
+async fn preflight_workspace_root(
+    state: &State<'_, WorkspaceCommandState>,
+    workspace_root: &str,
+) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    if let Some(reason) = purge_broken_workspace_by_root(&repo, workspace_root).await? {
+        return Err(broken_workspace_message(&reason));
+    }
+    Ok(())
 }
 
 fn validate_git_relative_path(path: &str) -> Result<String, String> {
@@ -234,20 +356,6 @@ fn validate_git_relative_path(path: &str) -> Result<String, String> {
         return Err("invalid path".to_string());
     }
     Ok(p)
-}
-
-fn git_output_err(cmd: &str, stderr: &[u8]) -> String {
-    let msg = String::from_utf8_lossy(stderr);
-    format!("{cmd} failed: {}", msg.trim())
-}
-
-fn run_git_output(root: &str, args: &[&str]) -> Result<std::process::Output, String> {
-    Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .map_err(|e| e.to_string())
 }
 
 fn resolve_current_branch_name(root: &str) -> Result<String, String> {
@@ -494,12 +602,7 @@ fn resolve_workspace_pr_status_json(
 }
 
 fn resolve_default_remote_name(root: &str) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["remote"])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = run_git_output(root, &["remote"])?;
     if !output.status.success() {
         return Err(git_output_err("git remote", &output.stderr));
     }
@@ -667,12 +770,7 @@ mod github_cli_status_tests {
 
 fn push_current_branch(root: &str) -> Result<(), String> {
     let remote = resolve_default_remote_name(root)?;
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["push", "-u", &remote, "HEAD"])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = run_git_network_output(root, &["push", "-u", &remote, "HEAD"])?;
     if output.status.success() {
         return Ok(());
     }
@@ -681,28 +779,21 @@ fn push_current_branch(root: &str) -> Result<(), String> {
 }
 
 fn path_is_tracked(root: &str, rel: &str) -> bool {
-    Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["ls-files", "--error-unmatch", "--", rel])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    git_command_succeeds(root, &["ls-files", "--error-unmatch", "--", rel])
 }
 
 #[tauri::command]
-pub async fn workspace_git_stage_all(input: WorkspaceGitPathInput) -> Result<(), String> {
+pub async fn workspace_git_stage_all(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
 
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["add", "-A"])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = run_git_output(root, &["add", "-A"])?;
     if output.status.success() {
         return Ok(());
     }
@@ -718,12 +809,7 @@ fn git_diff_output_text(output: std::process::Output, command: &str) -> Result<S
 }
 
 fn run_git_diff_text(root: &str, args: &[&str], command: &str) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = run_git_output(root, args)?;
     git_diff_output_text(output, command)
 }
 
@@ -732,12 +818,7 @@ fn run_git_show_text(
     revision_path: &str,
     command: &str,
 ) -> Result<Option<String>, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["show", revision_path])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = run_git_output(root, &["show", revision_path])?;
     if output.status.success() {
         return Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()));
     }
@@ -769,18 +850,17 @@ fn read_worktree_file_text(root: &str, rel: &str) -> Result<Option<String>, Stri
 
 /// `git add -- path` (Helmor `stage_workspace_file`).
 #[tauri::command]
-pub async fn workspace_git_stage_file(input: WorkspaceGitPathInput) -> Result<(), String> {
+pub async fn workspace_git_stage_file(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
     let path = validate_git_relative_path(&input.relative_path)?;
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["add", "--", &path])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = run_git_output(root, &["add", "--", &path])?;
     if output.status.success() {
         return Ok(());
     }
@@ -789,27 +869,21 @@ pub async fn workspace_git_stage_file(input: WorkspaceGitPathInput) -> Result<()
 
 /// `git restore --staged` with `git reset HEAD --` fallback (Helmor `unstage_workspace_file`).
 #[tauri::command]
-pub async fn workspace_git_unstage_file(input: WorkspaceGitPathInput) -> Result<(), String> {
+pub async fn workspace_git_unstage_file(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
     let path = validate_git_relative_path(&input.relative_path)?;
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["restore", "--staged", "--", &path])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = run_git_output(root, &["restore", "--staged", "--", &path])?;
     if output.status.success() {
         return Ok(());
     }
-    let fallback = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["reset", "HEAD", "--", &path])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let fallback = run_git_output(root, &["reset", "HEAD", "--", &path])?;
     if fallback.status.success() {
         return Ok(());
     }
@@ -818,7 +892,11 @@ pub async fn workspace_git_unstage_file(input: WorkspaceGitPathInput) -> Result<
 
 /// Tracked: `git checkout HEAD -- path`; untracked file: remove (Helmor `discard_workspace_file`).
 #[tauri::command]
-pub async fn workspace_git_discard_file(input: WorkspaceGitPathInput) -> Result<(), String> {
+pub async fn workspace_git_discard_file(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -827,12 +905,7 @@ pub async fn workspace_git_discard_file(input: WorkspaceGitPathInput) -> Result<
     let absolute = PathBuf::from(root).join(&path);
 
     if path_is_tracked(root, &path) {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(["checkout", "HEAD", "--", &path])
-            .output()
-            .map_err(|e| e.to_string())?;
+        let output = run_git_output(root, &["checkout", "HEAD", "--", &path])?;
         if output.status.success() {
             return Ok(());
         }
@@ -848,49 +921,15 @@ pub async fn workspace_git_discard_file(input: WorkspaceGitPathInput) -> Result<
 }
 
 fn parse_git_numstat_maps(root: &str, cached: bool) -> Result<HashMap<String, (u32, u32)>, String> {
-    let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(root).arg("diff");
-    if cached {
-        cmd.arg("--cached");
-    }
-    let output = cmd
-        .args(["--numstat"])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = if cached {
+        run_git_output(root, &["diff", "--cached", "--numstat", "-z"])?
+    } else {
+        run_git_output(root, &["diff", "--numstat", "-z"])?
+    };
     if !output.status.success() {
         return Ok(HashMap::new());
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(parse_numstat_tab_lines(&stdout))
-}
-
-fn parse_numstat_tab_lines(stdout: &str) -> HashMap<String, (u32, u32)> {
-    let mut m = HashMap::new();
-    for line in stdout.lines() {
-        let line = line.trim_end();
-        if line.is_empty() {
-            continue;
-        }
-        let mut parts = line.splitn(3, '\t');
-        let ins_s = parts.next().unwrap_or("");
-        let del_s = parts.next().unwrap_or("");
-        let path = parts.next().unwrap_or("").trim();
-        if path.is_empty() {
-            continue;
-        }
-        let insertions = if ins_s == "-" {
-            0
-        } else {
-            ins_s.parse().unwrap_or(0)
-        };
-        let deletions = if del_s == "-" {
-            0
-        } else {
-            del_s.parse().unwrap_or(0)
-        };
-        m.insert(path.to_string(), (insertions, deletions));
-    }
-    m
+    Ok(parse_numstat_z(&output.stdout))
 }
 
 fn join_workspace_path(root: &str, rel: &str) -> String {
@@ -899,12 +938,7 @@ fn join_workspace_path(root: &str, rel: &str) -> String {
 
 /// `git diff --cached --quiet` → `true` if there is at least one staged change.
 fn git_has_staged_changes(root: &str) -> Result<bool, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["diff", "--cached", "--quiet"])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = run_git_output(root, &["diff", "--cached", "--quiet"])?;
     let code = output.status.code();
     if code == Some(0) {
         return Ok(false);
@@ -920,7 +954,11 @@ fn git_has_staged_changes(root: &str) -> Result<bool, String> {
 
 /// Commit staged changes and push (requires at least one staged path).
 #[tauri::command]
-pub async fn workspace_git_commit_push(input: WorkspaceGitCommitPushInput) -> Result<(), String> {
+pub async fn workspace_git_commit_push(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitCommitPushInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -934,12 +972,7 @@ pub async fn workspace_git_commit_push(input: WorkspaceGitCommitPushInput) -> Re
         return Err("nothing to commit — stage changes first".to_string());
     }
 
-    let commit = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["commit", "-m", message])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let commit = run_git_output(root, &["commit", "-m", message])?;
     if !commit.status.success() {
         return Err(git_output_err("git commit", &commit.stderr));
     }
@@ -948,7 +981,11 @@ pub async fn workspace_git_commit_push(input: WorkspaceGitCommitPushInput) -> Re
 }
 
 #[tauri::command]
-pub async fn workspace_git_push(input: WorkspaceGitPushInput) -> Result<(), String> {
+pub async fn workspace_git_push(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -959,7 +996,11 @@ pub async fn workspace_git_push(input: WorkspaceGitPushInput) -> Result<(), Stri
 
 /// Opens the current PR in the browser (`gh pr view --web`), if GitHub CLI is available.
 #[tauri::command]
-pub async fn workspace_gh_pr_view_web(input: WorkspaceGitPushInput) -> Result<(), String> {
+pub async fn workspace_gh_pr_view_web(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -982,7 +1023,11 @@ pub async fn workspace_gh_pr_view_web(input: WorkspaceGitPushInput) -> Result<()
 
 /// Merge do PR atual via GitHub CLI (`gh pr merge --merge`).
 #[tauri::command]
-pub async fn workspace_gh_pr_merge(input: WorkspaceGitPushInput) -> Result<(), String> {
+pub async fn workspace_gh_pr_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -1005,12 +1050,7 @@ pub async fn workspace_gh_pr_merge(input: WorkspaceGitPushInput) -> Result<(), S
 
 fn push_named_branch(root: &str, branch: &str) -> Result<(), String> {
     let remote = resolve_default_remote_name(root)?;
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["push", "-u", &remote, branch])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = run_git_network_output(root, &["push", "-u", &remote, branch])?;
     if output.status.success() {
         return Ok(());
     }
@@ -1027,7 +1067,11 @@ fn branch_name_from_worktree_path(root: &str) -> String {
 
 /// Non-interactive PR creation (`gh pr create --fill`).
 #[tauri::command]
-pub async fn workspace_gh_pr_create_fill(input: WorkspaceGitPushInput) -> Result<(), String> {
+pub async fn workspace_gh_pr_create_fill(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -1051,24 +1095,14 @@ pub async fn workspace_gh_pr_create_fill(input: WorkspaceGitPushInput) -> Result
     // Create a named branch at the current commit so gh can reference it.
     let head_branch = if raw_branch == "HEAD" {
         let name = branch_name_from_worktree_path(root);
-        let already_exists = Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(["rev-parse", "--verify", &format!("refs/heads/{name}")])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
+        let branch_ref = format!("refs/heads/{name}");
+        let already_exists = git_command_succeeds(root, &["rev-parse", "--verify", &branch_ref]);
         let checkout_args: &[&str] = if already_exists {
             &["checkout", &name]
         } else {
             &["checkout", "-b", &name]
         };
-        let co = Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(checkout_args)
-            .output()
-            .map_err(|e| e.to_string())?;
+        let co = run_git_output(root, checkout_args)?;
         if !co.status.success() {
             return Err(format!(
                 "git checkout failed: {}",
@@ -1129,83 +1163,68 @@ fn workspace_git_status_inner(workspace_root: &str) -> Result<WorkspaceGitStatus
     let cached_stats = parse_git_numstat_maps(root, true)?;
     let unstaged_stats = parse_git_numstat_maps(root, false)?;
 
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["status", "--porcelain"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
+    let staged_output = run_git_output(root, &["diff", "--cached", "--name-status", "-z"])?;
+    if !staged_output.status.success() {
         return Err(format!(
-            "git status failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            "git diff --cached --name-status failed: {}",
+            String::from_utf8_lossy(&staged_output.stderr)
+        ));
+    }
+    let unstaged_output = run_git_output(root, &["diff", "--name-status", "-z"])?;
+    if !unstaged_output.status.success() {
+        return Err(format!(
+            "git diff --name-status failed: {}",
+            String::from_utf8_lossy(&unstaged_output.stderr)
+        ));
+    }
+    let untracked_output =
+        run_git_output(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    if !untracked_output.status.success() {
+        return Err(format!(
+            "git ls-files --others failed: {}",
+            String::from_utf8_lossy(&untracked_output.stderr)
         ));
     }
 
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let mut staged: Vec<WorkspaceGitChangeEntry> = Vec::new();
-    let mut unstaged: Vec<WorkspaceGitChangeEntry> = Vec::new();
-
-    for line in raw.lines() {
-        let line = line.trim_end();
-        if line.is_empty() {
-            continue;
-        }
-
-        if line.starts_with("?? ") {
-            let path = line[3..].trim();
-            if path.is_empty() {
-                continue;
+    let mut staged: Vec<WorkspaceGitChangeEntry> = parse_name_status_z(&staged_output.stdout)
+        .into_iter()
+        .map(|entry| {
+            let (ins, del) = cached_stats.get(&entry.path).copied().unwrap_or((0, 0));
+            WorkspaceGitChangeEntry {
+                path: entry.path.clone(),
+                name: file_name_from_path(&entry.path),
+                absolute_path: join_workspace_path(root, &entry.path),
+                status: entry.status,
+                insertions: ins,
+                deletions: del,
             }
-            let (ins, del) = unstaged_stats.get(path).copied().unwrap_or((0, 0));
-            unstaged.push(WorkspaceGitChangeEntry {
-                path: path.to_string(),
-                name: file_name_from_path(path),
-                absolute_path: join_workspace_path(root, path),
-                status: "?".to_string(),
+        })
+        .collect();
+
+    let mut unstaged: Vec<WorkspaceGitChangeEntry> = parse_name_status_z(&unstaged_output.stdout)
+        .into_iter()
+        .map(|entry| {
+            let (ins, del) = unstaged_stats.get(&entry.path).copied().unwrap_or((0, 0));
+            WorkspaceGitChangeEntry {
+                path: entry.path.clone(),
+                name: file_name_from_path(&entry.path),
+                absolute_path: join_workspace_path(root, &entry.path),
+                status: entry.status,
                 insertions: ins,
                 deletions: del,
-            });
-            continue;
-        }
+            }
+        })
+        .collect();
 
-        if line.len() < 4 {
-            continue;
-        }
-        let idx = line.chars().next().unwrap_or(' ');
-        let wt = line.chars().nth(1).unwrap_or(' ');
-        let path = line[3..].trim();
-        if path.is_empty() {
-            continue;
-        }
-
-        let idx_active = idx != ' ' && idx != '?';
-        let wt_active = wt != ' ' && wt != '?';
-
-        if idx_active {
-            let st = idx.to_string();
-            let (ins, del) = cached_stats.get(path).copied().unwrap_or((0, 0));
-            staged.push(WorkspaceGitChangeEntry {
-                path: path.to_string(),
-                name: file_name_from_path(path),
-                absolute_path: join_workspace_path(root, path),
-                status: st,
-                insertions: ins,
-                deletions: del,
-            });
-        }
-        if wt_active {
-            let st = wt.to_string();
-            let (ins, del) = unstaged_stats.get(path).copied().unwrap_or((0, 0));
-            unstaged.push(WorkspaceGitChangeEntry {
-                path: path.to_string(),
-                name: file_name_from_path(path),
-                absolute_path: join_workspace_path(root, path),
-                status: st,
-                insertions: ins,
-                deletions: del,
-            });
-        }
+    for path in split_null_terminated_fields(&untracked_output.stdout) {
+        unstaged.push(WorkspaceGitChangeEntry {
+            path: path.clone(),
+            name: file_name_from_path(&path),
+            absolute_path: join_workspace_path(root, &path),
+            status: "?".to_string(),
+            insertions: 0,
+            deletions: 0,
+        });
     }
 
     staged.sort_by(|a, b| a.path.cmp(&b.path));
@@ -1228,15 +1247,20 @@ fn workspace_git_status_inner(workspace_root: &str) -> Result<WorkspaceGitStatus
 
 #[tauri::command]
 pub async fn workspace_git_status(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitStatusInput,
 ) -> Result<WorkspaceGitStatusOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     workspace_git_status_inner(&input.workspace_root)
 }
 
 #[tauri::command]
 pub async fn workspace_pr_status(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspacePrStatusInput,
 ) -> Result<WorkspacePrStatusOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Ok(WorkspacePrStatusOutput {
@@ -1348,12 +1372,25 @@ pub async fn workspace_pr_status(
 
 #[tauri::command]
 pub async fn workspace_continue_from_base_branch(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspaceContinueFromBaseBranchInput,
-) -> Result<Value, String> {
+) -> Result<WorkspaceContinueFromBaseBranchOutput, String> {
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
+
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    if let Some(reason) = purge_broken_workspace_by_root(&repo, root).await? {
+        return Err(broken_workspace_message(&reason));
+    }
+    let Some(mut workspace) = find_workspace_by_root(&repo, root).await? else {
+        return Err(format!("workspace not found for path: {root}"));
+    };
+
+    let active_root = resolve_workspace_active_root(&workspace).to_string();
+    let active_root_path = PathBuf::from(active_root.clone());
+    let repo_root = PathBuf::from(workspace.root_path.clone());
 
     // Resolve the target branch to branch off from (the PR's base branch, e.g. "main")
     let target_branch = input
@@ -1370,15 +1407,12 @@ pub async fn workspace_continue_from_base_branch(
         })
         .map(|v| v.to_string())
         .unwrap_or_else(|| {
-            resolve_default_branch_name(root).unwrap_or_else(|_| "main".to_string())
+            resolve_default_branch_name(&workspace.root_path).unwrap_or_else(|_| "main".to_string())
         });
 
     // Fetch latest remote state for the target branch
-    let _ = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["fetch", "origin", &target_branch])
-        .output();
+    let _ = run_git_network_output(&workspace.root_path, &["fetch", "origin", &target_branch]);
+    let start_point = resolve_continue_start_point(&workspace.root_path, &target_branch)?;
 
     // Derive a sanitized base name for the new branch from the workspace name
     let raw_name = input
@@ -1388,35 +1422,117 @@ pub async fn workspace_continue_from_base_branch(
         .filter(|v| !v.is_empty())
         .map(|v| sanitize_branch_name(v))
         .unwrap_or_else(|| {
-            std::path::Path::new(root)
-                .file_name()
-                .and_then(|n| n.to_str())
+            workspace
+                .name
+                .as_deref()
                 .map(sanitize_branch_name)
+                .or_else(|| {
+                    std::path::Path::new(active_root.as_str())
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(sanitize_branch_name)
+                })
                 .unwrap_or_else(|| "workspace".to_string())
         });
 
     // Find the first available branch name (raw_name, raw_name-2, raw_name-3, …)
-    let new_branch = next_available_branch_name(root, &raw_name);
+    let new_branch = next_available_branch_name(&workspace.root_path, &raw_name);
+    let new_worktree_path = build_worktree_path(&repo_root, &new_branch);
+    let stash_sha = stash_create(&active_root_path).map_err(|error| error.to_string())?;
+    let untracked = list_untracked_files(&active_root_path).map_err(|error| error.to_string())?;
 
-    let remote_ref = format!("origin/{target_branch}");
-    let checkout = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["checkout", "-b", &new_branch, &remote_ref])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !checkout.status.success() {
-        return Err(format!(
-            "git checkout failed: {}",
-            String::from_utf8_lossy(&checkout.stderr).trim()
-        ));
+    let mut created_worktree = false;
+    let mut copied_untracked: Vec<PathBuf> = Vec::new();
+
+    let create_result: Result<(), String> = (|| {
+        create_worktree_branch_from_ref(&repo_root, &new_worktree_path, &new_branch, &start_point)
+            .map_err(|error| error.to_string())?;
+        created_worktree = true;
+
+        if let Some(stash_sha) = stash_sha.as_deref() {
+            stash_apply_sha(&new_worktree_path, stash_sha).map_err(|error| error.to_string())?;
+        }
+
+        for relative_path in &untracked {
+            let source_path = active_root_path.join(relative_path);
+            let destination_path = new_worktree_path.join(relative_path);
+            if let Some(parent) = destination_path.parent() {
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+
+            match fs::metadata(&source_path) {
+                Ok(metadata) if metadata.is_file() => {
+                    fs::copy(&source_path, &destination_path).map_err(|error| {
+                        format!(
+                            "failed to copy untracked file {} to {}: {}",
+                            source_path.display(),
+                            destination_path.display(),
+                            error
+                        )
+                    })?;
+                    copied_untracked.push(destination_path);
+                }
+                _ => continue,
+            }
+        }
+
+        Ok(())
+    })();
+
+    if let Err(error) = create_result {
+        if created_worktree {
+            for copied_path in &copied_untracked {
+                let _ = fs::remove_file(copied_path);
+            }
+            let _ = remove_worktree(&repo_root, &new_worktree_path);
+            let _ = fs::remove_dir_all(&new_worktree_path);
+            let _ = remove_branch(&repo_root, &new_branch);
+        }
+        return Err(error);
     }
 
-    Ok(json!({
-        "success": true,
-        "branch": new_branch,
-        "workspaceRoot": root,
-    }))
+    workspace.base_branch = new_branch.clone();
+    workspace.worktree_path = Some(new_worktree_path.to_string_lossy().to_string());
+    workspace.updated_at = Utc::now().to_rfc3339();
+    if let Err(error) = repo.save_workspace(&workspace).await {
+        let _ = remove_worktree(&repo_root, &new_worktree_path);
+        let _ = fs::remove_dir_all(&new_worktree_path);
+        let _ = remove_branch(&repo_root, &new_branch);
+        return Err(error.to_string());
+    }
+
+    if active_root != workspace.root_path {
+        let _ = remove_worktree(&repo_root, &active_root_path);
+        let _ = fs::remove_dir_all(&active_root_path);
+    }
+
+    Ok(WorkspaceContinueFromBaseBranchOutput {
+        success: true,
+        branch: new_branch,
+        workspace_root: workspace
+            .worktree_path
+            .clone()
+            .unwrap_or_else(|| workspace.root_path.clone()),
+        previous_workspace_root: active_root,
+        workspace,
+    })
+}
+
+fn resolve_continue_start_point(root: &str, target_branch: &str) -> Result<String, String> {
+    let remote_ref = format!("origin/{target_branch}");
+    let remote_exists = run_git_output(root, &["rev-parse", "--verify", &remote_ref])?;
+    if remote_exists.status.success() {
+        return Ok(remote_ref);
+    }
+
+    let local_exists = run_git_output(root, &["rev-parse", "--verify", target_branch])?;
+    if local_exists.status.success() {
+        return Ok(target_branch.to_string());
+    }
+
+    Err(format!(
+        "could not resolve base branch `{target_branch}` locally or on origin"
+    ))
 }
 
 fn sanitize_branch_name(name: &str) -> String {
@@ -1454,13 +1570,8 @@ fn sanitize_branch_name(name: &str) -> String {
 
 fn next_available_branch_name(root: &str, base: &str) -> String {
     let branch_exists = |name: &str| -> bool {
-        Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(["rev-parse", "--verify", &format!("refs/heads/{name}")])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        let branch_ref = format!("refs/heads/{name}");
+        git_command_succeeds(root, &["rev-parse", "--verify", &branch_ref])
     };
     if !branch_exists(base) {
         return base.to_string();
@@ -1477,8 +1588,10 @@ fn next_available_branch_name(root: &str, base: &str) -> String {
 /// File-level preview for staged / unstaged / committed tree rows.
 #[tauri::command]
 pub async fn workspace_git_file_preview(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitFilePreviewInput,
 ) -> Result<String, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -1551,8 +1664,10 @@ pub async fn workspace_git_file_preview(
 /// File-level code snapshot used by the Monaco diff surface.
 #[tauri::command]
 pub async fn workspace_git_file_preview_content(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitFilePreviewInput,
 ) -> Result<WorkspaceGitFilePreviewContentOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -1631,9 +1746,11 @@ pub async fn create_workspace_for_repo(
     let finalized = run_create_workspace_for_repo(&repo, &git, &events, input)
         .await
         .map_err(|error| error.to_string())?;
+    let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
 
     Ok(CreateWorkspaceForRepoOutput {
         workspace: finalized.workspace,
+        setup_hints,
     })
 }
 
@@ -1650,9 +1767,11 @@ pub async fn create_workspace_from_url(
     let finalized = run_create_workspace_from_url(&repo, &git, &events, input)
         .await
         .map_err(|error| error.to_string())?;
+    let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
 
     Ok(CreateWorkspaceFromUrlOutput {
         workspace: finalized.workspace,
+        setup_hints,
     })
 }
 
@@ -1665,8 +1784,20 @@ pub async fn list_workspaces(
         .list_workspaces()
         .await
         .map_err(|error| error.to_string())?;
+    let mut healthy_workspaces = Vec::with_capacity(workspaces.len());
+    for workspace in workspaces {
+        if resolve_workspace_broken_reason(&workspace).is_some() {
+            repo.delete_workspace(&workspace.id)
+                .await
+                .map_err(|error| error.to_string())?;
+            continue;
+        }
+        healthy_workspaces.push(workspace);
+    }
 
-    Ok(ListWorkspacesOutput { workspaces })
+    Ok(ListWorkspacesOutput {
+        workspaces: healthy_workspaces,
+    })
 }
 
 #[tauri::command]
@@ -1684,8 +1815,10 @@ pub async fn list_repositories(
 
 #[tauri::command]
 pub async fn list_local_branches(
+    state: State<'_, WorkspaceCommandState>,
     input: ListLocalBranchesInput,
 ) -> Result<ListLocalBranchesOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
     let branches =
         list_local_branch_names(&input.workspace_root).map_err(|error| error.to_string())?;
     Ok(ListLocalBranchesOutput { branches })
@@ -1695,19 +1828,17 @@ pub async fn list_local_branches(
 /// Empty vec if not a git worktree or git fails.
 #[tauri::command]
 pub async fn list_git_tracked_files(
+    state: State<'_, WorkspaceCommandState>,
     input: ListGitTrackedFilesInput,
 ) -> Result<ListGitTrackedFilesOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Ok(ListGitTrackedFilesOutput { paths: Vec::new() });
     }
 
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .arg("ls-files")
-        .output()
-        .map_err(|error| error.to_string())?;
+    let output = run_git_output(root, &["ls-files", "-z"])?;
 
     if !output.status.success() {
         return Ok(ListGitTrackedFilesOutput { paths: Vec::new() });
@@ -1715,9 +1846,9 @@ pub async fn list_git_tracked_files(
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut paths: Vec<String> = stdout
-        .lines()
-        .map(|line| line.trim().to_string())
+        .split('\0')
         .filter(|line| !line.is_empty())
+        .map(|line| line.to_string())
         .collect();
     paths.sort();
     paths.dedup();
@@ -1742,8 +1873,11 @@ pub struct WorkspaceGitBranchDiffOutput {
 /// Falls back through: @{upstream} → origin/HEAD → origin/main → origin/master.
 #[tauri::command]
 pub async fn workspace_git_branch_diff(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitBranchDiffInput,
 ) -> Result<WorkspaceGitBranchDiffOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -1765,11 +1899,7 @@ pub async fn workspace_git_branch_diff(
 
 fn resolve_branch_diff_base(root: &str) -> Option<String> {
     // 1. Try @{upstream}
-    let upstream = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["rev-parse", "--abbrev-ref", "@{upstream}"])
-        .output()
+    let upstream = run_git_output(root, &["rev-parse", "--abbrev-ref", "@{upstream}"])
         .ok()
         .filter(|o| o.status.success())
         .and_then(|o| {
@@ -1791,13 +1921,7 @@ fn resolve_branch_diff_base(root: &str) -> Option<String> {
         "origin/master",
         "origin/develop",
     ] {
-        let ok = Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(["rev-parse", "--verify", candidate])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
+        let ok = git_command_succeeds(root, &["rev-parse", "--verify", candidate]);
         if ok {
             return Some(candidate.to_string());
         }
@@ -1809,56 +1933,41 @@ fn compute_branch_diff(root: &str, base: &str) -> Result<Vec<WorkspaceGitChangeE
     let range = format!("{base}...HEAD");
 
     // name-status
-    let ns_out = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["diff", "--name-status", &range])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let ns_out = run_git_output_owned(
+        root,
+        vec![
+            OsString::from("diff"),
+            OsString::from("--name-status"),
+            OsString::from("-z"),
+            OsString::from(&range),
+        ],
+    )?;
     if !ns_out.status.success() {
         return Err(git_output_err("git diff --name-status", &ns_out.stderr));
     }
-    let ns_text = String::from_utf8_lossy(&ns_out.stdout);
 
     // numstat
     let stat_map = {
-        let stat_out = Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(["diff", "--numstat", &range])
-            .output()
-            .map_err(|e| e.to_string())?;
+        let stat_out = run_git_output_owned(
+            root,
+            vec![
+                OsString::from("diff"),
+                OsString::from("--numstat"),
+                OsString::from("-z"),
+                OsString::from(&range),
+            ],
+        )?;
         if stat_out.status.success() {
-            parse_numstat_tab_lines(&String::from_utf8_lossy(&stat_out.stdout))
+            parse_numstat_z(&stat_out.stdout)
         } else {
             HashMap::new()
         }
     };
 
     let mut entries = Vec::new();
-    for line in ns_text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let mut parts = line.splitn(2, '\t');
-        let status_raw = parts.next().unwrap_or("").trim();
-        let path_part = parts.next().unwrap_or("").trim();
-        if path_part.is_empty() {
-            continue;
-        }
-        // Handle rename: "R100\told_path\tnew_path"
-        let path = if status_raw.starts_with('R') || status_raw.starts_with('C') {
-            path_part
-                .split('\t')
-                .last()
-                .unwrap_or(path_part)
-                .trim()
-                .to_string()
-        } else {
-            path_part.to_string()
-        };
-        let status = status_raw.chars().next().unwrap_or('M').to_string();
+    for entry in parse_name_status_z(&ns_out.stdout) {
+        let path = entry.path;
+        let status = entry.status;
         let (insertions, deletions) = stat_map.get(&path).copied().unwrap_or((0, 0));
         let name = Path::new(&path)
             .file_name()

@@ -7,8 +7,8 @@ use dcc_tauri::{
         GithubCliStatusOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
         ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
         ListLocalBranchesOutput, ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
-        WorkspaceContinueFromBaseBranchInput, WorkspaceGitBranchDiffInput,
-        WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
+        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
+        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
         WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceIdInput,
         WorkspacePrStatusInput, WorkspacePrStatusOutput,
@@ -57,16 +57,18 @@ pub async fn workspace_github_cli_status(
 
 #[tauri::command]
 pub async fn list_local_branches(
+    state: State<'_, WorkspaceCommandState>,
     input: ListLocalBranchesInput,
 ) -> Result<ListLocalBranchesOutput, String> {
-    dcc_tauri::commands::workspace_commands::list_local_branches(input).await
+    dcc_tauri::commands::workspace_commands::list_local_branches(state, input).await
 }
 
 #[tauri::command]
 pub async fn list_git_tracked_files(
+    state: State<'_, WorkspaceCommandState>,
     input: ListGitTrackedFilesInput,
 ) -> Result<ListGitTrackedFilesOutput, String> {
-    dcc_tauri::commands::workspace_commands::list_git_tracked_files(input).await
+    dcc_tauri::commands::workspace_commands::list_git_tracked_files(state, input).await
 }
 
 #[tauri::command]
@@ -78,89 +80,122 @@ pub async fn list_child_directories(
 
 #[tauri::command]
 pub async fn workspace_git_status(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitStatusInput,
 ) -> Result<WorkspaceGitStatusOutput, String> {
-    dcc_tauri::commands::workspace_commands::workspace_git_status(input).await
+    dcc_tauri::commands::workspace_commands::workspace_git_status(state, input).await
 }
 
 #[tauri::command]
-pub async fn workspace_git_stage_file(input: WorkspaceGitPathInput) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_git_stage_file(input).await
+pub async fn workspace_git_stage_file(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_stage_file(state, input).await
 }
 
 #[tauri::command]
-pub async fn workspace_git_stage_all(input: WorkspaceGitPathInput) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_git_stage_all(input).await
+pub async fn workspace_git_stage_all(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_stage_all(state, input).await
 }
 
 #[tauri::command]
-pub async fn workspace_git_unstage_file(input: WorkspaceGitPathInput) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_git_unstage_file(input).await
+pub async fn workspace_git_unstage_file(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_unstage_file(state, input).await
 }
 
 #[tauri::command]
-pub async fn workspace_git_discard_file(input: WorkspaceGitPathInput) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_git_discard_file(input).await
+pub async fn workspace_git_discard_file(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_discard_file(state, input).await
 }
 
 #[tauri::command]
-pub async fn workspace_git_commit_push(input: WorkspaceGitCommitPushInput) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_git_commit_push(input).await
+pub async fn workspace_git_commit_push(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitCommitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_commit_push(state, input).await
 }
 
 #[tauri::command]
-pub async fn workspace_git_push(input: WorkspaceGitPushInput) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_git_push(input).await
+pub async fn workspace_git_push(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_push(state, input).await
 }
 
 #[tauri::command]
-pub async fn workspace_gh_pr_view_web(input: WorkspaceGitPushInput) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_gh_pr_view_web(input).await
+pub async fn workspace_gh_pr_view_web(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_gh_pr_view_web(state, input).await
 }
 
 #[tauri::command]
-pub async fn workspace_gh_pr_create_fill(input: WorkspaceGitPushInput) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_gh_pr_create_fill(input).await
+pub async fn workspace_gh_pr_create_fill(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_gh_pr_create_fill(state, input).await
 }
 
 #[tauri::command]
-pub async fn workspace_gh_pr_merge(input: WorkspaceGitPushInput) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_gh_pr_merge(input).await
+pub async fn workspace_gh_pr_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_gh_pr_merge(state, input).await
 }
 
 #[tauri::command]
 pub async fn workspace_git_branch_diff(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitBranchDiffInput,
 ) -> Result<WorkspaceGitBranchDiffOutput, String> {
-    dcc_tauri::commands::workspace_commands::workspace_git_branch_diff(input).await
+    dcc_tauri::commands::workspace_commands::workspace_git_branch_diff(state, input).await
 }
 
 #[tauri::command]
 pub async fn workspace_git_file_preview(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitFilePreviewInput,
 ) -> Result<String, String> {
-    dcc_tauri::commands::workspace_commands::workspace_git_file_preview(input).await
+    dcc_tauri::commands::workspace_commands::workspace_git_file_preview(state, input).await
 }
 
 #[tauri::command]
 pub async fn workspace_git_file_preview_content(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitFilePreviewInput,
 ) -> Result<WorkspaceGitFilePreviewContentOutput, String> {
-    dcc_tauri::commands::workspace_commands::workspace_git_file_preview_content(input).await
+    dcc_tauri::commands::workspace_commands::workspace_git_file_preview_content(state, input).await
 }
 
 #[tauri::command]
 pub async fn workspace_pr_status(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspacePrStatusInput,
 ) -> Result<WorkspacePrStatusOutput, String> {
-    dcc_tauri::commands::workspace_commands::workspace_pr_status(input).await
+    dcc_tauri::commands::workspace_commands::workspace_pr_status(state, input).await
 }
 
 #[tauri::command]
 pub async fn workspace_continue_from_base_branch(
+    state: State<'_, WorkspaceCommandState>,
     input: WorkspaceContinueFromBaseBranchInput,
-) -> Result<serde_json::Value, String> {
-    dcc_tauri::commands::workspace_commands::workspace_continue_from_base_branch(input).await
+) -> Result<WorkspaceContinueFromBaseBranchOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_continue_from_base_branch(state, input).await
 }
 
 #[tauri::command]

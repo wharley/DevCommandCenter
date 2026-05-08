@@ -93,6 +93,7 @@
     "toastPickerError": "Não foi possível abrir o seletor de pasta",
     "toastCloneSuccess": "Repositório clonado",
     "toastCreateSuccess": "Workspace criado",
+    "toastSetupSuggestions": "Setup sugerido: {{commands}}",
     "toastCloneError": "Falha ao clonar repositório",
     "toastCreateError": "Falha ao criar workspace"
   },

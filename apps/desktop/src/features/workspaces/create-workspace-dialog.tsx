@@ -16,7 +16,7 @@ import type {
 	CreateWorkspaceForRepoInput,
 	CreateWorkspaceFromUrlInput,
 } from "@dcc/contracts";
-import type { WorkspaceSummary } from "./types";
+import type { WorkspaceCreationResult } from "./use-workspaces";
 import { inferProjectIdFromWorkspaceRoot } from "./create-workspace-dialog.logic";
 import { listLocalBranches } from "../../lib/workspace-api";
 
@@ -33,8 +33,8 @@ type CreateWorkspaceDialogProps = {
 	mode: WorkspaceCreationMode;
 	repositoryContext?: ExistingRepositoryContext | null;
 	onOpenChange: (open: boolean) => void;
-	onCreateWorkspace: (input: CreateWorkspaceForRepoInput) => Promise<WorkspaceSummary>;
-	onCloneWorkspace: (input: CreateWorkspaceFromUrlInput) => Promise<WorkspaceSummary>;
+	onCreateWorkspace: (input: CreateWorkspaceForRepoInput) => Promise<WorkspaceCreationResult>;
+	onCloneWorkspace: (input: CreateWorkspaceFromUrlInput) => Promise<WorkspaceCreationResult>;
 	isSubmitting: boolean;
 };
 
@@ -70,6 +70,19 @@ function buildInitialForm(
 		workspaceRoot: repositoryContext.workspaceRoot,
 		baseBranch: "",
 	};
+}
+
+function setupHintsDescription(
+	t: (key: string, options?: Record<string, string>) => string,
+	setupHints: WorkspaceCreationResult["setupHints"],
+) {
+	if (setupHints.length === 0) {
+		return undefined;
+	}
+
+	return t("workspaceDialog.toastSetupSuggestions", {
+		commands: setupHints.map((hint) => hint.command).join(" • "),
+	});
 }
 
 export function CreateWorkspaceDialog({
@@ -194,22 +207,26 @@ export function CreateWorkspaceDialog({
 
 		try {
 			if (mode === "clone") {
-				await onCloneWorkspace({
+				const result = await onCloneWorkspace({
 					projectId: form.projectId.trim(),
 					repositoryUrl: form.repositoryUrl.trim(),
 					workspaceRoot: form.workspaceRoot.trim(),
 					baseBranch: form.baseBranch.trim(),
 					name: form.name.trim() || null,
 				});
-				toast.success(t("workspaceDialog.toastCloneSuccess"));
+				toast.success(t("workspaceDialog.toastCloneSuccess"), {
+					description: setupHintsDescription(t, result.setupHints),
+				});
 			} else {
-				await onCreateWorkspace({
+				const result = await onCreateWorkspace({
 					projectId: form.projectId.trim(),
 					workspaceRoot: form.workspaceRoot.trim(),
 					baseBranch: form.baseBranch.trim(),
 					name: form.name.trim() || null,
 				});
-				toast.success(t("workspaceDialog.toastCreateSuccess"));
+				toast.success(t("workspaceDialog.toastCreateSuccess"), {
+					description: setupHintsDescription(t, result.setupHints),
+				});
 			}
 			onOpenChange(false);
 		} catch (error) {

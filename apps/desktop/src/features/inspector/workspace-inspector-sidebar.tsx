@@ -366,11 +366,24 @@ export function WorkspaceInspectorSidebar({
 			}
 			toast.success(`Workspace moved to ${result.branch}`, { id: loadingToast });
 			await queryClient.invalidateQueries({
+				queryKey: ["workspaces"],
+			});
+			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
 			});
+			if (result.workspaceRoot && result.workspaceRoot !== root) {
+				await queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, result.workspaceRoot],
+				});
+			}
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
 			});
+			if (result.workspaceRoot && result.workspaceRoot !== root) {
+				await queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, result.workspaceRoot],
+				});
+			}
 		} catch (error) {
 			const message = getInspectorActionErrorMessage(error);
 			toast.error(`Continue failed: ${message}`, { id: loadingToast });

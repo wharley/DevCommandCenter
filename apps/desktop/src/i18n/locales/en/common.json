@@ -93,6 +93,7 @@
     "toastPickerError": "Could not open folder picker",
     "toastCloneSuccess": "Repository cloned",
     "toastCreateSuccess": "Workspace created",
+    "toastSetupSuggestions": "Suggested setup: {{commands}}",
     "toastCloneError": "Failed to clone repository",
     "toastCreateError": "Failed to create workspace"
   },

@@ -1,4 +1,5 @@
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike};
+use dcc_tauri::git::configure_git_command;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -850,11 +851,10 @@ fn collect_daemon_health_snapshot(system: &mut System) -> DaemonHealthSnapshot {
 }
 
 fn git_output_in_path(cwd: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .current_dir(cwd)
-        .args(args)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let mut command = Command::new("git");
+    configure_git_command(&mut command);
+    command.current_dir(cwd).args(args);
+    let output = command.output().map_err(|e| e.to_string())?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {

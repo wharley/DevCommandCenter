@@ -159,6 +159,7 @@ export type CreateWorkspaceForRepoInput = {
 
 export type CreateWorkspaceForRepoOutput = {
 	workspace: Workspace,
+	setupHints: WorkspaceSetupHint[],
 };
 
 export type CreateWorkspaceFromUrlInput = {
@@ -171,6 +172,7 @@ export type CreateWorkspaceFromUrlInput = {
 
 export type CreateWorkspaceFromUrlOutput = {
 	workspace: Workspace,
+	setupHints: WorkspaceSetupHint[],
 };
 
 export type GithubCliStatusInput = Record<string, never>;
@@ -454,6 +456,14 @@ export type WorkspaceContinueFromBaseBranchInput = {
 	newBranchName: string | null,
 };
 
+export type WorkspaceContinueFromBaseBranchOutput = {
+	success: boolean,
+	branch: string,
+	workspaceRoot: string,
+	previousWorkspaceRoot: string,
+	workspace: Workspace,
+};
+
 export type WorkspaceGitBranchDiffInput = {
 	workspaceRoot: string,
 };
@@ -542,6 +552,12 @@ export type WorkspaceSessionSummary = {
 	projection: SessionProjection,
 	lastTurnPrompt: string | null,
 	lastTurnState: string | null,
+};
+
+export type WorkspaceSetupHint = {
+	label: string,
+	command: string,
+	sourcePath: string,
 };
 
 export type WorkspaceState = "initializing" | "setup_pending" | "ready" | "archived";
