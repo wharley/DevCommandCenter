@@ -27,10 +27,8 @@ use dcc_core::{
 use dcc_infra::{
     db::SqliteWorkspaceRepo,
     git::{
-        broken_worktree_reason, build_worktree_path, create_worktree_branch_from_ref,
-        detect_workspace_setup_suggestions, is_git_repo, list_local_branch_names,
-        list_untracked_files, remove_branch, remove_worktree, stash_apply_sha, stash_create,
-        CommandGitOps,
+        broken_worktree_reason, detect_workspace_setup_suggestions, is_git_repo,
+        list_local_branch_names, CommandGitOps,
     },
 };
 
@@ -831,8 +829,21 @@ mod github_cli_status_tests {
 }
 
 fn push_current_branch(root: &str) -> Result<(), String> {
+    let branch = ensure_pushable_branch(root)?;
+    push_branch_refspec(root, &branch)
+}
+
+fn push_branch_refspec(root: &str, branch: &str) -> Result<(), String> {
+    let branch = branch.trim();
+    if branch.is_empty() || branch == "HEAD" {
+        return Err(
+            "cannot push from detached HEAD because no branch name could be resolved".to_string(),
+        );
+    }
+
     let remote = resolve_default_remote_name(root)?;
-    let output = run_git_network_output(root, &["push", "-u", &remote, "HEAD"])?;
+    let remote_ref = format!("HEAD:refs/heads/{branch}");
+    let output = run_git_network_output(root, &["push", "-u", &remote, &remote_ref])?;
     if output.status.success() {
         return Ok(());
     }
@@ -1111,12 +1122,7 @@ pub async fn workspace_gh_pr_merge(
 }
 
 fn push_named_branch(root: &str, branch: &str) -> Result<(), String> {
-    let remote = resolve_default_remote_name(root)?;
-    let output = run_git_network_output(root, &["push", "-u", &remote, branch])?;
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(git_output_err("git push -u", &output.stderr))
+    push_branch_refspec(root, branch)
 }
 
 fn branch_name_from_worktree_path(root: &str) -> String {
@@ -1125,6 +1131,28 @@ fn branch_name_from_worktree_path(root: &str) -> String {
         .and_then(|n| n.to_str())
         .unwrap_or("dcc-branch");
     format!("dcc/{dir}")
+}
+
+fn ensure_pushable_branch(root: &str) -> Result<String, String> {
+    let raw_branch = resolve_current_branch_name(root)?;
+    if raw_branch != "HEAD" {
+        return Ok(raw_branch);
+    }
+
+    let branch = branch_name_from_worktree_path(root);
+    let branch_ref = format!("refs/heads/{branch}");
+    let already_exists = git_command_succeeds(root, &["rev-parse", "--verify", &branch_ref]);
+    let checkout_args: &[&str] = if already_exists {
+        &["checkout", &branch]
+    } else {
+        &["checkout", "-b", &branch]
+    };
+    let checkout = run_git_output(root, checkout_args)?;
+    if !checkout.status.success() {
+        return Err(git_output_err("git checkout", &checkout.stderr));
+    }
+
+    Ok(branch)
 }
 
 /// Non-interactive PR creation (`gh pr create --fill`).
@@ -1139,7 +1167,7 @@ pub async fn workspace_gh_pr_create_fill(
         return Err("workspace_root is empty".to_string());
     }
 
-    let raw_branch = resolve_current_branch_name(root)?;
+    let raw_branch = ensure_pushable_branch(root)?;
     let base_ref = resolve_branch_diff_base(root).unwrap_or_else(|| "main".to_string());
     // gh pr create --base expects a branch name, not a remote tracking ref like origin/main
     let base_stripped = base_ref
@@ -1153,28 +1181,7 @@ pub async fn workspace_gh_pr_create_fill(
     };
     let gh = resolve_gh_binary()?;
 
-    // Worktrees are created with --detach so HEAD is a commit, not a branch.
-    // Create a named branch at the current commit so gh can reference it.
-    let head_branch = if raw_branch == "HEAD" {
-        let name = branch_name_from_worktree_path(root);
-        let branch_ref = format!("refs/heads/{name}");
-        let already_exists = git_command_succeeds(root, &["rev-parse", "--verify", &branch_ref]);
-        let checkout_args: &[&str] = if already_exists {
-            &["checkout", &name]
-        } else {
-            &["checkout", "-b", &name]
-        };
-        let co = run_git_output(root, checkout_args)?;
-        if !co.status.success() {
-            return Err(format!(
-                "git checkout failed: {}",
-                String::from_utf8_lossy(&co.stderr).trim()
-            ));
-        }
-        name
-    } else {
-        raw_branch
-    };
+    let head_branch = raw_branch;
 
     // Branch must exist on the remote before gh can create a PR
     push_named_branch(root, &head_branch).map_err(|e| format!("git push failed: {e}"))?;
@@ -1451,8 +1458,6 @@ pub async fn workspace_continue_from_base_branch(
     };
 
     let active_root = resolve_workspace_active_root(&workspace).to_string();
-    let active_root_path = PathBuf::from(active_root.clone());
-    let repo_root = PathBuf::from(workspace.root_path.clone());
 
     // Resolve the target branch to branch off from (the PR's base branch, e.g. "main")
     let target_branch = input
@@ -1499,85 +1504,39 @@ pub async fn workspace_continue_from_base_branch(
 
     // Find the first available branch name (raw_name, raw_name-2, raw_name-3, …)
     let new_branch = next_available_branch_name(&workspace.root_path, &raw_name);
-    let new_worktree_path = build_worktree_path(&repo_root, &new_branch);
-    let stash_sha = stash_create(&active_root_path).map_err(|error| error.to_string())?;
-    let untracked = list_untracked_files(&active_root_path).map_err(|error| error.to_string())?;
-
-    let mut created_worktree = false;
-    let mut copied_untracked: Vec<PathBuf> = Vec::new();
-
-    let create_result: Result<(), String> = (|| {
-        create_worktree_branch_from_ref(&repo_root, &new_worktree_path, &new_branch, &start_point)
-            .map_err(|error| error.to_string())?;
-        created_worktree = true;
-
-        if let Some(stash_sha) = stash_sha.as_deref() {
-            stash_apply_sha(&new_worktree_path, stash_sha).map_err(|error| error.to_string())?;
-        }
-
-        for relative_path in &untracked {
-            let source_path = active_root_path.join(relative_path);
-            let destination_path = new_worktree_path.join(relative_path);
-            if let Some(parent) = destination_path.parent() {
-                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-            }
-
-            match fs::metadata(&source_path) {
-                Ok(metadata) if metadata.is_file() => {
-                    fs::copy(&source_path, &destination_path).map_err(|error| {
-                        format!(
-                            "failed to copy untracked file {} to {}: {}",
-                            source_path.display(),
-                            destination_path.display(),
-                            error
-                        )
-                    })?;
-                    copied_untracked.push(destination_path);
-                }
-                _ => continue,
-            }
-        }
-
-        Ok(())
-    })();
-
-    if let Err(error) = create_result {
-        if created_worktree {
-            for copied_path in &copied_untracked {
-                let _ = fs::remove_file(copied_path);
-            }
-            let _ = remove_worktree(&repo_root, &new_worktree_path);
-            let _ = fs::remove_dir_all(&new_worktree_path);
-            let _ = remove_branch(&repo_root, &new_branch);
-        }
-        return Err(error);
+    let old_branch = resolve_current_branch_name(&active_root)
+        .map_err(|error| format!("failed to resolve current workspace branch: {error}"))?;
+    let switch = run_git_output(&active_root, &["switch", "-c", &new_branch, &start_point])?;
+    if !switch.status.success() {
+        return Err(
+            "Continue could not move your local changes onto the target branch. Commit, stash, or discard the conflicting changes, then try again."
+                .to_string(),
+        );
     }
+    let _ = run_git_output(&active_root, &["branch", "--unset-upstream", &new_branch]);
 
     workspace.base_branch = new_branch.clone();
-    workspace.worktree_path = Some(new_worktree_path.to_string_lossy().to_string());
     workspace.updated_at = Utc::now().to_rfc3339();
     if let Err(error) = repo.save_workspace(&workspace).await {
-        let _ = remove_worktree(&repo_root, &new_worktree_path);
-        let _ = fs::remove_dir_all(&new_worktree_path);
-        let _ = remove_branch(&repo_root, &new_branch);
+        rollback_continue_branch(&active_root, &old_branch, &new_branch);
         return Err(error.to_string());
-    }
-
-    if active_root != workspace.root_path {
-        let _ = remove_worktree(&repo_root, &active_root_path);
-        let _ = fs::remove_dir_all(&active_root_path);
     }
 
     Ok(WorkspaceContinueFromBaseBranchOutput {
         success: true,
         branch: new_branch,
-        workspace_root: workspace
-            .worktree_path
-            .clone()
-            .unwrap_or_else(|| workspace.root_path.clone()),
+        workspace_root: active_root.clone(),
         previous_workspace_root: active_root,
         workspace,
     })
+}
+
+fn rollback_continue_branch(root: &str, old_branch: &str, new_branch: &str) {
+    if let Ok(output) = run_git_output(root, &["switch", old_branch]) {
+        if output.status.success() {
+            let _ = run_git_output(root, &["branch", "-D", new_branch]);
+        }
+    }
 }
 
 fn resolve_continue_start_point(root: &str, target_branch: &str) -> Result<String, String> {
