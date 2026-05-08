@@ -19,6 +19,10 @@ import type {
 import type { WorkspaceCreationResult } from "./use-workspaces";
 import { inferProjectIdFromWorkspaceRoot } from "./create-workspace-dialog.logic";
 import { listLocalBranches } from "../../lib/workspace-api";
+import {
+	setupHintsDescription,
+	setupReportDescription,
+} from "./workspace-setup-report";
 
 type WorkspaceCreationMode = "open" | "clone";
 
@@ -72,17 +76,37 @@ function buildInitialForm(
 	};
 }
 
-function setupHintsDescription(
+function notifyWorkspaceCreationResult(
 	t: (key: string, options?: Record<string, string>) => string,
-	setupHints: WorkspaceCreationResult["setupHints"],
+	mode: WorkspaceCreationMode,
+	result: WorkspaceCreationResult,
 ) {
-	if (setupHints.length === 0) {
-		return undefined;
-	}
+	const successTitle =
+		mode === "clone"
+			? t("workspaceDialog.toastCloneSuccess")
+			: t("workspaceDialog.toastCreateSuccess");
 
-	return t("workspaceDialog.toastSetupSuggestions", {
-		commands: setupHints.map((hint) => hint.command).join(" • "),
-	});
+	switch (result.setupReport.status) {
+		case "completed":
+			toast.success(successTitle, {
+				description: setupReportDescription(t, result.setupReport, result.setupHints),
+			});
+			return;
+		case "warning":
+			toast.warning(successTitle, {
+				description: setupReportDescription(t, result.setupReport, result.setupHints),
+			});
+			return;
+		case "failed":
+			toast.error(t("workspaceDialog.toastSetupFailedTitle"), {
+				description: setupReportDescription(t, result.setupReport, result.setupHints),
+			});
+			return;
+		default:
+			toast.success(successTitle, {
+				description: setupHintsDescription(t, result.setupHints),
+			});
+	}
 }
 
 export function CreateWorkspaceDialog({
@@ -214,9 +238,7 @@ export function CreateWorkspaceDialog({
 					baseBranch: form.baseBranch.trim(),
 					name: form.name.trim() || null,
 				});
-				toast.success(t("workspaceDialog.toastCloneSuccess"), {
-					description: setupHintsDescription(t, result.setupHints),
-				});
+				notifyWorkspaceCreationResult(t, mode, result);
 			} else {
 				const result = await onCreateWorkspace({
 					projectId: form.projectId.trim(),
@@ -224,9 +246,7 @@ export function CreateWorkspaceDialog({
 					baseBranch: form.baseBranch.trim(),
 					name: form.name.trim() || null,
 				});
-				toast.success(t("workspaceDialog.toastCreateSuccess"), {
-					description: setupHintsDescription(t, result.setupHints),
-				});
+				notifyWorkspaceCreationResult(t, mode, result);
 			}
 			onOpenChange(false);
 		} catch (error) {

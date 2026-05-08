@@ -94,6 +94,10 @@
     "toastCloneSuccess": "Repository cloned",
     "toastCreateSuccess": "Workspace created",
     "toastSetupSuggestions": "Suggested setup: {{commands}}",
+    "toastSetupCompleted": "Automatic setup completed: {{commands}}",
+    "toastSetupWarning": "Workspace is ready, but setup still needs attention: {{commands}}",
+    "toastSetupFailed": "Automatic setup failed: {{commands}}",
+    "toastSetupFailedTitle": "Workspace created with setup pending",
     "toastCloneError": "Failed to clone repository",
     "toastCreateError": "Failed to create workspace"
   },
@@ -147,6 +151,13 @@
     "sessionFallback": "No active session - start one from the composer.",
     "changes": {
       "emptyOnBranch": "No changes on this branch."
+    },
+    "setupRetry": {
+      "button": "Retry setup",
+      "loading": "Retrying setup...",
+      "successTitle": "Setup completed",
+      "pendingTitle": "Workspace still has setup pending",
+      "errorTitle": "Failed to retry setup"
     },
     "providersRegistered": "{{count}} registered",
     "terminalNote": "Terminal sessions stay in the workbench drawer at the bottom of the layout - they are not mirrored here so the inspector stays focused on Git and session signals."

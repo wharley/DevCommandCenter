@@ -39,6 +39,7 @@ use crate::{
         run_git_network_output, run_git_output, run_git_output_owned, split_null_terminated_fields,
     },
     state::WorkspaceCommandState,
+    workspace_setup::{run_detected_workspace_setup, WorkspaceSetupReport, WorkspaceSetupStatus},
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -46,6 +47,7 @@ use crate::{
 pub struct CreateWorkspaceForRepoOutput {
     pub workspace: Workspace,
     pub setup_hints: Vec<WorkspaceSetupHint>,
+    pub setup_report: WorkspaceSetupReport,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -53,6 +55,21 @@ pub struct CreateWorkspaceForRepoOutput {
 pub struct CreateWorkspaceFromUrlOutput {
     pub workspace: Workspace,
     pub setup_hints: Vec<WorkspaceSetupHint>,
+    pub setup_report: WorkspaceSetupReport,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRunSetupInput {
+    pub workspace_root: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRunSetupOutput {
+    pub workspace: Workspace,
+    pub setup_hints: Vec<WorkspaceSetupHint>,
+    pub setup_report: WorkspaceSetupReport,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -279,6 +296,48 @@ fn collect_workspace_setup_hints(workspace: &Workspace) -> Vec<WorkspaceSetupHin
             source_path: suggestion.source_path,
         })
         .collect()
+}
+
+fn collect_workspace_setup_suggestions(
+    workspace: &Workspace,
+) -> Vec<dcc_infra::git::WorkspaceSetupSuggestion> {
+    detect_workspace_setup_suggestions(resolve_workspace_setup_root(workspace))
+}
+
+async fn execute_workspace_setup_report(workspace: &Workspace) -> WorkspaceSetupReport {
+    let setup_suggestions = collect_workspace_setup_suggestions(workspace);
+    match run_detected_workspace_setup(
+        resolve_workspace_setup_root(workspace).to_string(),
+        setup_suggestions,
+    )
+    .await
+    {
+        Ok(report) => report,
+        Err(error) => WorkspaceSetupReport {
+            status: WorkspaceSetupStatus::Failed,
+            steps: Vec::new(),
+            message: Some(format!(
+                "Workspace was created, but the automatic setup runner failed: {error}"
+            )),
+        },
+    }
+}
+
+async fn persist_workspace_setup_outcome(
+    repo: &SqliteWorkspaceRepo,
+    workspace: &mut Workspace,
+    setup_report: &WorkspaceSetupReport,
+) -> Result<(), String> {
+    workspace.state = match setup_report.status {
+        WorkspaceSetupStatus::Completed | WorkspaceSetupStatus::Skipped => WorkspaceState::Ready,
+        WorkspaceSetupStatus::Warning | WorkspaceSetupStatus::Failed => {
+            WorkspaceState::SetupPending
+        }
+    };
+    workspace.updated_at = Utc::now().to_rfc3339();
+    repo.save_workspace(workspace)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 fn resolve_workspace_broken_reason(workspace: &Workspace) -> Option<String> {
@@ -1747,10 +1806,14 @@ pub async fn create_workspace_for_repo(
         .await
         .map_err(|error| error.to_string())?;
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
+    let setup_report = execute_workspace_setup_report(&finalized.workspace).await;
+    let mut workspace = finalized.workspace;
+    persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
 
     Ok(CreateWorkspaceForRepoOutput {
-        workspace: finalized.workspace,
+        workspace,
         setup_hints,
+        setup_report,
     })
 }
 
@@ -1768,10 +1831,36 @@ pub async fn create_workspace_from_url(
         .await
         .map_err(|error| error.to_string())?;
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
+    let setup_report = execute_workspace_setup_report(&finalized.workspace).await;
+    let mut workspace = finalized.workspace;
+    persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
 
     Ok(CreateWorkspaceFromUrlOutput {
-        workspace: finalized.workspace,
+        workspace,
         setup_hints,
+        setup_report,
+    })
+}
+
+pub async fn workspace_run_setup(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRunSetupInput,
+) -> Result<WorkspaceRunSetupOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let mut workspace = find_workspace_by_root(&repo, &input.workspace_root)
+        .await?
+        .ok_or_else(|| format!("workspace not found for root {}", input.workspace_root))?;
+
+    let setup_hints = collect_workspace_setup_hints(&workspace);
+    let setup_report = execute_workspace_setup_report(&workspace).await;
+    persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
+
+    Ok(WorkspaceRunSetupOutput {
+        workspace,
+        setup_hints,
+        setup_report,
     })
 }
 

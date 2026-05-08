@@ -66,6 +66,7 @@ use workspace_commands::{
     workspace_git_file_preview, workspace_git_file_preview_content, workspace_git_push,
     workspace_git_stage_all, workspace_git_stage_file, workspace_git_status,
     workspace_git_unstage_file, workspace_github_cli_status, workspace_pr_status,
+    workspace_run_setup,
 };
 
 /// Schema SQLite embutido (`src-tauri/sql/schema.sql`, CREATE IF NOT EXISTS).
@@ -8326,6 +8327,7 @@ pub fn run() {
             workspace_git_status,
             workspace_git_unstage_file,
             workspace_pr_status,
+            workspace_run_setup,
             workspace_continue_from_base_branch,
             session_commands::start_thread,
             session_commands::send_turn,

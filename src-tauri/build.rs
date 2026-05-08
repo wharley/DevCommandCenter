@@ -34,8 +34,12 @@ use dcc_tauri::commands::{
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
         WorkspaceGitCommitPushInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
         WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspacePrStatusInput,
-        WorkspacePrStatusOutput, WorkspaceSetupHint,
+        WorkspacePrStatusOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspaceSetupHint,
     },
+};
+use dcc_tauri::workspace_setup::{
+    WorkspaceSetupReport, WorkspaceSetupStatus, WorkspaceSetupStepReport,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -72,6 +76,7 @@ struct WorkspaceMethods {
     workspace_git_stage_file: String,
     workspace_git_status: String,
     workspace_git_unstage_file: String,
+    workspace_run_setup: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -131,7 +136,12 @@ fn main() {
         .typ::<CreateWorkspaceForRepoOutput>()
         .typ::<CreateWorkspaceFromUrlInput>()
         .typ::<CreateWorkspaceFromUrlOutput>()
+        .typ::<WorkspaceRunSetupInput>()
+        .typ::<WorkspaceRunSetupOutput>()
         .typ::<WorkspaceSetupHint>()
+        .typ::<WorkspaceSetupStatus>()
+        .typ::<WorkspaceSetupStepReport>()
+        .typ::<WorkspaceSetupReport>()
         .typ::<ListLocalBranchesInput>()
         .typ::<ListLocalBranchesOutput>()
         .typ::<ListGitTrackedFilesInput>()
@@ -208,6 +218,7 @@ fn main() {
                 workspace_git_stage_file: "workspace_git_stage_file".to_string(),
                 workspace_git_status: "workspace_git_status".to_string(),
                 workspace_git_unstage_file: "workspace_git_unstage_file".to_string(),
+                workspace_run_setup: "workspace_run_setup".to_string(),
             },
         );
 

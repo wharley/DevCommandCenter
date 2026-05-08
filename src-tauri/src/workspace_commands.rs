@@ -11,7 +11,8 @@ use dcc_tauri::{
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
         WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceIdInput,
-        WorkspacePrStatusInput, WorkspacePrStatusOutput,
+        WorkspacePrStatusInput, WorkspacePrStatusOutput, WorkspaceRunSetupInput,
+        WorkspaceRunSetupOutput,
     },
     state::WorkspaceCommandState,
 };
@@ -32,6 +33,14 @@ pub async fn create_workspace_from_url(
     input: CreateWorkspaceFromUrlInput,
 ) -> Result<CreateWorkspaceFromUrlOutput, String> {
     dcc_tauri::commands::workspace_commands::create_workspace_from_url(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_run_setup(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRunSetupInput,
+) -> Result<WorkspaceRunSetupOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_run_setup(state, input).await
 }
 
 #[tauri::command]

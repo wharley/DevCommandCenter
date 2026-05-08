@@ -12,11 +12,13 @@ import type {
 	CreateWorkspaceFromUrlInput,
 	Workspace,
 	WorkspaceSetupHint,
+	WorkspaceSetupReport,
 } from "@dcc/contracts";
 
 export type WorkspaceCreationResult = {
 	workspace: WorkspaceSummary;
 	setupHints: WorkspaceSetupHint[];
+	setupReport: WorkspaceSetupReport;
 };
 
 export function removeWorkspacesFromList(
@@ -111,6 +113,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 			return {
 				workspace: summary,
 				setupHints: result.setupHints,
+				setupReport: result.setupReport,
 			} satisfies WorkspaceCreationResult;
 		} finally {
 			setIsCreatingWorkspace(false);
@@ -127,6 +130,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 			return {
 				workspace: summary,
 				setupHints: result.setupHints,
+				setupReport: result.setupReport,
 			} satisfies WorkspaceCreationResult;
 		} finally {
 			setIsCreatingWorkspace(false);

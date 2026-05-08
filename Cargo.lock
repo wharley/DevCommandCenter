@@ -789,6 +789,7 @@ dependencies = [
  "libc",
  "rusqlite",
  "serde_json",
+ "toml 0.8.2",
  "uuid",
 ]
 

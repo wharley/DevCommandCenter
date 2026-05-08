@@ -28,6 +28,8 @@ import type {
 	WorkspaceContinueFromBaseBranchOutput,
 	WorkspacePrStatusInput,
 	WorkspacePrStatusOutput,
+	WorkspaceRunSetupInput,
+	WorkspaceRunSetupOutput,
 } from "@dcc/contracts";
 
 export function createWorkspaceForRepo(input: CreateWorkspaceForRepoInput) {
@@ -125,6 +127,12 @@ export function workspaceContinueFromBaseBranch(input: WorkspaceContinueFromBase
 		WORKSPACE_METHODS.workspaceContinueFromBaseBranch,
 		{ input },
 	);
+}
+
+export function workspaceRunSetup(input: WorkspaceRunSetupInput) {
+	return invoke<WorkspaceRunSetupOutput>(WORKSPACE_METHODS.workspaceRunSetup, {
+		input,
+	});
 }
 
 export function workspaceGhPrViewWeb(input: WorkspaceGitPushInput) {

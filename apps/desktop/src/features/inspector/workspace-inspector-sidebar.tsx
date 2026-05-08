@@ -29,6 +29,7 @@ import {
 	workspaceGitCommitPush,
 	workspaceGitStageAll,
 	workspaceGitPush,
+	workspaceRunSetup,
 } from "@/lib/workspace-api";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
@@ -38,6 +39,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
 import { getGithubCliStatus, openGithubCliAuthTerminal } from "@/lib/github-cli";
 import { sessionStateLabel } from "@/i18n/session-state-label";
+import type { WorkspaceStatus } from "@/features/workspaces/types";
+import { setupReportDescription } from "@/features/workspaces/workspace-setup-report";
 
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
@@ -46,6 +49,7 @@ type WorkspaceInspectorSidebarProps = {
 	workspaceName: string | null;
 	workspaceBranch: string | null;
 	workspacePath: string | null;
+	workspaceStatus: WorkspaceStatus | null;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
 	sessionState: string;
@@ -206,6 +210,7 @@ export function WorkspaceInspectorSidebar({
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
+	workspaceStatus,
 	selectedProviderLabel,
 	selectedModelLabel,
 	sessionState,
@@ -243,12 +248,14 @@ export function WorkspaceInspectorSidebar({
 		refetchOnWindowFocus: true,
 	});
 	const [isContinuingWorkspace, setIsContinuingWorkspace] = useState(false);
+	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const hasWorkingTreeChanges =
 		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
 		(gitStatusQuery.data?.unstaged.length ?? 0) > 0;
 	const githubCliStatus = githubCliStatusQuery.data ?? null;
 	const githubCliReady = githubCliStatus?.status === "ready";
+	const isSetupPending = workspaceStatus === "setup_pending";
 	const githubCliMessage =
 		githubCliStatus?.message ??
 		(githubCliStatusQuery.isPending ? "Checking GitHub CLI..." : null);
@@ -393,6 +400,67 @@ export function WorkspaceInspectorSidebar({
 		}
 	}, [prStatus?.baseBranch, queryClient, workspaceName, workspacePath]);
 
+	const handleRetrySetup = useCallback(async () => {
+		const root = workspacePath?.trim();
+		if (!root) {
+			toast.error("No workspace path");
+			throw new Error("No workspace path");
+		}
+
+		setIsRetryingSetup(true);
+		const loadingToast = toast.loading(t("inspector.setupRetry.loading"));
+		try {
+			const result = await workspaceRunSetup({ workspaceRoot: root });
+			const description = setupReportDescription(t, result.setupReport, result.setupHints);
+
+			switch (result.setupReport.status) {
+				case "completed":
+					toast.success(t("inspector.setupRetry.successTitle"), {
+						id: loadingToast,
+						description,
+					});
+					break;
+				case "warning":
+					toast.warning(t("inspector.setupRetry.pendingTitle"), {
+						id: loadingToast,
+						description,
+					});
+					break;
+				case "failed":
+					toast.error(t("inspector.setupRetry.pendingTitle"), {
+						id: loadingToast,
+						description,
+					});
+					break;
+				default:
+					toast.success(t("inspector.setupRetry.successTitle"), {
+						id: loadingToast,
+						description,
+					});
+					break;
+			}
+
+			await queryClient.invalidateQueries({
+				queryKey: ["workspaces"],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
+			});
+		} catch (error) {
+			const message = getInspectorActionErrorMessage(error);
+			toast.error(t("inspector.setupRetry.errorTitle"), {
+				id: loadingToast,
+				description: message,
+			});
+			throw error;
+		} finally {
+			setIsRetryingSetup(false);
+		}
+	}, [queryClient, t, workspacePath]);
+
 	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
 	const [manualResize, setManualResize] = useState(false);
 	const autoOpenedPlanMessageIdRef = useRef<string | null>(null);
@@ -502,6 +570,10 @@ export function WorkspaceInspectorSidebar({
 					onCommit={handleInspectorCommit}
 					onContinueWorkspace={handleContinueWorkspace}
 					isContinuingWorkspace={isContinuingWorkspace}
+					onRetrySetup={handleRetrySetup}
+					isRetryingSetup={isRetryingSetup}
+					showRetrySetup={isSetupPending}
+					retrySetupLabel={t("inspector.setupRetry.button")}
 					prUrl={prStatus?.url ?? null}
 					prNumber={prStatus?.number ?? null}
 					prProvider={prStatus?.provider ?? null}

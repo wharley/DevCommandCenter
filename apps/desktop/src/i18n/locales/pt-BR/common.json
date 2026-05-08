@@ -94,6 +94,10 @@
     "toastCloneSuccess": "Repositório clonado",
     "toastCreateSuccess": "Workspace criado",
     "toastSetupSuggestions": "Setup sugerido: {{commands}}",
+    "toastSetupCompleted": "Setup automático concluído: {{commands}}",
+    "toastSetupWarning": "Workspace pronto, mas o setup ainda precisa de atenção: {{commands}}",
+    "toastSetupFailed": "O setup automático falhou: {{commands}}",
+    "toastSetupFailedTitle": "Workspace criado com setup pendente",
     "toastCloneError": "Falha ao clonar repositório",
     "toastCreateError": "Falha ao criar workspace"
   },
@@ -147,6 +151,13 @@
     "sessionFallback": "Nenhuma sessão ativa - inicie uma pelo composer.",
     "changes": {
       "emptyOnBranch": "Nenhuma alteração neste branch."
+    },
+    "setupRetry": {
+      "button": "Refazer setup",
+      "loading": "Refazendo setup...",
+      "successTitle": "Setup concluído",
+      "pendingTitle": "Workspace segue com setup pendente",
+      "errorTitle": "Falha ao refazer setup"
     },
     "providersRegistered": "{{count}} registrados",
     "terminalNote": "As sessões de terminal ficam na gaveta de workbench na parte inferior do layout — elas não são espelhadas aqui para o inspetor ficar focado em sinais do Git e da sessão."

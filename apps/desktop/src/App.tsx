@@ -1590,6 +1590,7 @@ export default function App() {
 								workspaceName={selectedWorkspace?.name ?? null}
 								workspaceBranch={selectedWorkspace?.branch ?? null}
 								workspacePath={selectedWorkspacePath}
+								workspaceStatus={selectedWorkspace?.status ?? null}
 								selectedProviderLabel={selectedProvider?.label ?? null}
 								selectedModelLabel={selectedModel?.label ?? null}
 								sessionState={selectedSessionSnapshot?.state ?? "idle"}

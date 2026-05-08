@@ -12,6 +12,8 @@ use dcc_core::{
     CoreError, Result,
 };
 
+use crate::repo_config::read_workspace_setup_command;
+
 pub use crate::git_command::{
     configure_git_command, git_command_succeeds, git_output_detail, git_output_err,
     run_git_network_output, run_git_output, run_git_output_owned, run_git_output_with_timeout,
@@ -181,6 +183,14 @@ pub fn detect_workspace_setup_suggestions(workspace_root: &str) -> Vec<Workspace
     let workspace_root = Path::new(workspace_root);
     if !workspace_root.exists() {
         return Vec::new();
+    }
+
+    if let Some(setup_command) = read_workspace_setup_command(workspace_root) {
+        return vec![WorkspaceSetupSuggestion {
+            label: "Run repository setup script".to_string(),
+            command: setup_command.command,
+            source_path: setup_command.source_path,
+        }];
     }
 
     let mut suggestions = Vec::new();
@@ -457,6 +467,50 @@ mod tests {
 
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].command, "cargo build");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn detect_workspace_setup_suggestions_prefers_repo_config_script() {
+        let root = temp_test_dir("setup-repo-config");
+        fs::create_dir_all(&root).expect("create temp dir");
+        fs::write(
+            root.join(".dcc.toml"),
+            "[scripts]\nsetup = \"pnpm bootstrap\"\n",
+        )
+        .expect("write repo config");
+        fs::write(root.join("package.json"), "{}").expect("write package.json");
+        fs::write(root.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("write cargo");
+
+        let suggestions = detect_workspace_setup_suggestions(
+            root.to_str().expect("temp path should be valid utf-8"),
+        );
+
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].command, "pnpm bootstrap");
+        assert!(suggestions[0].source_path.ends_with(".dcc.toml"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn detect_workspace_setup_suggestions_falls_back_when_repo_config_is_invalid() {
+        let root = temp_test_dir("setup-invalid-repo-config");
+        fs::create_dir_all(&root).expect("create temp dir");
+        fs::write(
+            root.join(".dcc.toml"),
+            "[scripts\nsetup = \"pnpm bootstrap\"\n",
+        )
+        .expect("write invalid repo config");
+        fs::write(root.join("package.json"), "{}").expect("write package.json");
+
+        let suggestions = detect_workspace_setup_suggestions(
+            root.to_str().expect("temp path should be valid utf-8"),
+        );
+
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].command, "npm install");
 
         let _ = fs::remove_dir_all(root);
     }

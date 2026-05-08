@@ -1,4 +1,4 @@
-import { ChevronsRight, ExternalLink } from "lucide-react";
+import { ChevronsRight, ExternalLink, RotateCcw } from "lucide-react";
 import { WorkspaceCommitButton } from "@/features/commit";
 import type { CommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import { INSPECTOR_SECTION_HEADER_CLASS, INSPECTOR_SECTION_TITLE_CLASS } from "@/shell/layout";
@@ -29,6 +29,10 @@ export type GitSectionHeaderProps = {
   onCommit?: () => Promise<void> | void;
   onContinueWorkspace?: () => Promise<void> | void;
   isContinuingWorkspace?: boolean;
+  onRetrySetup?: () => Promise<void> | void;
+  isRetryingSetup?: boolean;
+  showRetrySetup?: boolean;
+  retrySetupLabel?: string;
   prUrl?: string | null;
   prNumber?: number | null;
   prProvider?: string | null;
@@ -41,6 +45,10 @@ export function GitSectionHeader({
   onCommit,
   onContinueWorkspace,
   isContinuingWorkspace = false,
+  onRetrySetup,
+  isRetryingSetup = false,
+  showRetrySetup = false,
+  retrySetupLabel = "Retry setup",
   prUrl = null,
   prNumber = null,
   prProvider = null,
@@ -104,6 +112,21 @@ export function GitSectionHeader({
         >
           <ChevronsRight className="size-3.5" />
           Continue
+        </Button>
+      ) : null}
+      {showRetrySetup ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px] font-medium"
+          disabled={isRetryingSetup}
+          onClick={() => {
+            void onRetrySetup?.();
+          }}
+        >
+          <RotateCcw className="size-3.5" />
+          {retrySetupLabel}
         </Button>
       ) : null}
       {!showContinue ? <WorkspaceCommitButton mode={commitMode} onCommit={onCommit} /> : null}
