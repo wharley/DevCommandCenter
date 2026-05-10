@@ -43,6 +43,7 @@ import {
 	useForgeCliAccounts,
 	useForgeCliStatus,
 } from "@/features/settings/forge-cli-queries";
+import { useForgeCliLoginsHealth } from "@/features/settings/use-forge-cli-logins-health";
 import { WORKSPACE_FORGE_CONTEXT_QUERY_KEY } from "@/features/inspector/use-workspace-forge-context";
 
 type SettingsDialogProps = {
@@ -158,6 +159,7 @@ function ForgeCliIntegrationCard() {
 	const normalizedHost = normalizeForgeHost(provider, host);
 	const accountsQuery = useForgeCliAccounts(provider, normalizedHost);
 	const statusQuery = useForgeCliStatus(provider, normalizedHost);
+	useForgeCliLoginsHealth(provider, normalizedHost, { enabled: true });
 
 	const accounts = accountsQuery.data ?? {
 		provider,

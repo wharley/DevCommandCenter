@@ -43,6 +43,7 @@ import type { CoreEvent, ProviderCatalog, WorkspaceSetupReport } from "@dcc/cont
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
+import { useForgeCliLoginsHealth } from "@/features/settings/use-forge-cli-logins-health";
 import { getDefaultForgeHost } from "@/lib/forge-cli";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import type { WorkspaceStatus } from "@/features/workspaces/types";
@@ -279,6 +280,9 @@ export function WorkspaceInspectorSidebar({
 		workspaceForgeContext?.provider,
 		workspaceForgeContext?.host,
 	);
+	useForgeCliLoginsHealth(forgeContext.provider, forgeContext.host, {
+		enabled: Boolean(workspaceForgeContext?.provider && workspaceForgeContext?.host),
+	});
 	const selectedForgeLogin = workspaceForgeContext?.effectiveLogin ?? null;
 	const prStatusQuery = useWorkspacePrStatus(
 		workspacePath,

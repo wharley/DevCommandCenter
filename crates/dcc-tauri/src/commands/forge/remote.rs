@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::commands::forge::detect::detect_provider_for_repo;
 use crate::commands::forge_commands::ForgeCliProvider;
 use crate::git::run_git_output;
 
@@ -58,72 +59,6 @@ fn parsed_remote_from_host_path(host: &str, path: &str) -> Option<ParsedRemote> 
         repo: repo.to_string(),
         path: raw_path.to_string(),
     })
-}
-
-fn matches_wellknown_github(host: &str) -> bool {
-    matches!(
-        host.to_ascii_lowercase().as_str(),
-        "github.com" | "www.github.com" | "gist.github.com" | "api.github.com"
-    )
-}
-
-fn matches_wellknown_gitlab(host: &str) -> bool {
-    matches!(
-        host.to_ascii_lowercase().as_str(),
-        "gitlab.com" | "www.gitlab.com" | "salsa.debian.org" | "framagit.org" | "invent.kde.org"
-    )
-}
-
-fn host_looks_like_github(host: &str) -> bool {
-    let host = host.to_ascii_lowercase();
-    host.starts_with("github.")
-        || host.ends_with(".github.com")
-        || host.ends_with(".ghe.com")
-        || host.ends_with(".ghe.io")
-}
-
-fn host_looks_like_gitlab(host: &str) -> bool {
-    let host = host.to_ascii_lowercase();
-    host.starts_with("gitlab.")
-        || host.ends_with(".gitlab.com")
-        || host.ends_with(".gitlab.io")
-        || host.split('.').any(|segment| segment == "gitlab")
-}
-
-pub(crate) fn detect_provider_for_repo(
-    remote_url: Option<&str>,
-    repo_root: Option<&Path>,
-) -> Option<ForgeCliProvider> {
-    let parsed = remote_url.and_then(parse_remote);
-    if let Some(remote) = parsed.as_ref() {
-        let host = remote.host.as_str();
-        if matches_wellknown_github(host) {
-            return Some(ForgeCliProvider::Github);
-        }
-        if matches_wellknown_gitlab(host) {
-            return Some(ForgeCliProvider::Gitlab);
-        }
-        if remote.path.contains("/-/") {
-            return Some(ForgeCliProvider::Gitlab);
-        }
-        if host_looks_like_github(host) {
-            return Some(ForgeCliProvider::Github);
-        }
-        if host_looks_like_gitlab(host) {
-            return Some(ForgeCliProvider::Gitlab);
-        }
-    }
-
-    if let Some(root) = repo_root {
-        if root.join(".gitlab-ci.yml").is_file() {
-            return Some(ForgeCliProvider::Gitlab);
-        }
-        if root.join(".github").join("workflows").is_dir() {
-            return Some(ForgeCliProvider::Github);
-        }
-    }
-
-    None
 }
 
 fn resolve_default_remote_name(root: &str) -> Result<String, String> {

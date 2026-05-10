@@ -1,4 +1,5 @@
 pub(crate) mod context;
+pub(crate) mod detect;
 pub(crate) mod github;
 pub(crate) mod gitlab;
 pub(crate) mod provider;
