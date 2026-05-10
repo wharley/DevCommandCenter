@@ -186,6 +186,7 @@ export type ForgeCliAccountEntry = {
 export type ForgeCliAccountsInput = {
 	provider: ForgeCliProvider,
 	host: string | null,
+	forceRefresh: boolean | null,
 };
 
 export type ForgeCliAccountsOutput = {
@@ -211,6 +212,7 @@ export type ForgeCliSelectLoginInput = {
 export type ForgeCliStatusInput = {
 	provider: ForgeCliProvider,
 	host: string | null,
+	forceRefresh: boolean | null,
 };
 
 export type ForgeCliStatusOutput = {
@@ -664,4 +666,3 @@ export type WorkspaceSetupStepReport = {
 };
 
 export type WorkspaceState = "initializing" | "setup_pending" | "ready" | "archived";
-

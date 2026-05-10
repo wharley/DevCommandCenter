@@ -61,11 +61,19 @@ pub(crate) fn resolve_forge_cli_status(
     provider: ForgeCliProvider,
     host: &str,
 ) -> Result<ResolvedCliStatus, String> {
+    resolve_forge_cli_status_with_options(provider, host, false)
+}
+
+pub(crate) fn resolve_forge_cli_status_with_options(
+    provider: ForgeCliProvider,
+    host: &str,
+    force_refresh: bool,
+) -> Result<ResolvedCliStatus, String> {
     let result = match provider {
-        ForgeCliProvider::Github => github::auth_status(host).map(|status| {
+        ForgeCliProvider::Github => github::auth_status_with_options(host, force_refresh).map(|status| {
             (status.logins, status.active_login)
         }),
-        ForgeCliProvider::Gitlab => gitlab::auth_status(host).map(|status| {
+        ForgeCliProvider::Gitlab => gitlab::auth_status_with_options(host, force_refresh).map(|status| {
             (status.logins, status.active_login)
         }),
     };

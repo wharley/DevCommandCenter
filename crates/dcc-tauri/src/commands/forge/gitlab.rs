@@ -1,4 +1,6 @@
 use std::process::Command;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -11,6 +13,17 @@ pub(crate) struct GitlabCliAuthStatus {
     pub(crate) logins: Vec<String>,
     pub(crate) active_login: Option<String>,
 }
+
+#[derive(Clone)]
+struct CachedGitlabAuthStatus {
+    status: GitlabCliAuthStatus,
+    cached_at: Instant,
+}
+
+const GITLAB_AUTH_STATUS_CACHE_TTL: Duration = Duration::from_secs(2);
+
+static GITLAB_AUTH_STATUS_CACHE: LazyLock<Mutex<std::collections::HashMap<String, CachedGitlabAuthStatus>>> =
+    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 #[derive(Debug, Clone)]
 pub(crate) struct GitlabAuthContext {
@@ -70,6 +83,24 @@ fn extract_glab_token(text: &str) -> Option<String> {
     None
 }
 
+fn canonical_gitlab_username(host: &str) -> Option<String> {
+    let glab = resolve_cli_binary("glab").ok()?;
+    let output = Command::new(glab)
+        .args(["api", "--hostname", host, "user"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let parsed: Value = serde_json::from_slice(&output.stdout).ok()?;
+    parsed
+        .get("username")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
 fn encode_percent(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
@@ -97,6 +128,21 @@ fn last_commit_title(root: &str) -> Result<String, String> {
 }
 
 pub(crate) fn auth_status(host: &str) -> Result<GitlabCliAuthStatus, String> {
+    auth_status_with_options(host, false)
+}
+
+pub(crate) fn auth_status_with_options(
+    host: &str,
+    force_refresh: bool,
+) -> Result<GitlabCliAuthStatus, String> {
+    if !force_refresh {
+        if let Some(cached) = auth_status_cache::get(host) {
+            return Ok(cached);
+        }
+    } else {
+        auth_status_cache::invalidate(host);
+    }
+
     let glab = resolve_cli_binary("glab")?;
     let output = Command::new(glab)
         .args(["auth", "status", "--hostname", host])
@@ -109,10 +155,12 @@ pub(crate) fn auth_status(host: &str) -> Result<GitlabCliAuthStatus, String> {
 
     if !output.status.success() {
         if looks_like_gitlab_unauthenticated(&combined) {
-            return Ok(GitlabCliAuthStatus {
+            let status = GitlabCliAuthStatus {
                 logins: Vec::new(),
                 active_login: None,
-            });
+            };
+            auth_status_cache::put(host, status.clone());
+            return Ok(status);
         }
 
         let trimmed = combined.trim();
@@ -127,9 +175,51 @@ pub(crate) fn auth_status(host: &str) -> Result<GitlabCliAuthStatus, String> {
         .into_iter()
         .filter_map(|(entry_host, login)| (entry_host == host).then_some(login))
         .collect::<Vec<_>>();
+    if let Some(canonical) = canonical_gitlab_username(host) {
+        logins = vec![canonical];
+    }
     logins.dedup();
     let active_login = logins.first().cloned();
-    Ok(GitlabCliAuthStatus { logins, active_login })
+    let status = GitlabCliAuthStatus { logins, active_login };
+    auth_status_cache::put(host, status.clone());
+    Ok(status)
+}
+
+mod auth_status_cache {
+    use super::*;
+
+    pub(super) fn get(host: &str) -> Option<GitlabCliAuthStatus> {
+        let mut cache = GITLAB_AUTH_STATUS_CACHE.lock().ok()?;
+        let fresh = cache
+            .get(host)
+            .filter(|entry| entry.cached_at.elapsed() < GITLAB_AUTH_STATUS_CACHE_TTL)
+            .map(|entry| entry.status.clone());
+        if fresh.is_some() {
+            return fresh;
+        }
+        cache.remove(host);
+        None
+    }
+
+    pub(super) fn put(host: &str, status: GitlabCliAuthStatus) {
+        let Ok(mut cache) = GITLAB_AUTH_STATUS_CACHE.lock() else {
+            return;
+        };
+        cache.insert(
+            host.to_string(),
+            CachedGitlabAuthStatus {
+                status,
+                cached_at: Instant::now(),
+            },
+        );
+    }
+
+    pub(super) fn invalidate(host: &str) {
+        let Ok(mut cache) = GITLAB_AUTH_STATUS_CACHE.lock() else {
+            return;
+        };
+        cache.remove(host);
+    }
 }
 
 pub(crate) fn resolve_auth_context(

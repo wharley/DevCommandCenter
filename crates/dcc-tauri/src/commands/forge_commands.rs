@@ -32,6 +32,7 @@ pub enum ForgeCliProvider {
 pub struct ForgeCliStatusInput {
     pub provider: ForgeCliProvider,
     pub host: Option<String>,
+    pub force_refresh: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -39,6 +40,7 @@ pub struct ForgeCliStatusInput {
 pub struct ForgeCliAccountsInput {
     pub provider: ForgeCliProvider,
     pub host: Option<String>,
+    pub force_refresh: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -192,8 +194,9 @@ fn resolve_forge_cli_snapshot(
     state: &WorkspaceCommandState,
     provider: ForgeCliProvider,
     host: &str,
+    force_refresh: bool,
 ) -> Result<ForgeCliStatusOutput, String> {
-    let status = forge_provider::resolve_forge_cli_status(provider, host)?;
+    let status = forge_provider::resolve_forge_cli_status_with_options(provider, host, force_refresh)?;
     let selected_login =
         forge_context::resolve_selected_forge_login(&state.db_path, provider, host, &status)?;
 
@@ -220,7 +223,12 @@ pub async fn workspace_forge_cli_status(
     input: ForgeCliStatusInput,
 ) -> Result<ForgeCliStatusOutput, String> {
     let host = forge_context::normalize_forge_host(input.provider, input.host)?;
-    resolve_forge_cli_snapshot(&state, input.provider, &host)
+    resolve_forge_cli_snapshot(
+        &state,
+        input.provider,
+        &host,
+        input.force_refresh.unwrap_or(false),
+    )
 }
 
 #[tauri::command]
@@ -229,7 +237,12 @@ pub async fn workspace_forge_cli_accounts(
     input: ForgeCliAccountsInput,
 ) -> Result<ForgeCliAccountsOutput, String> {
     let host = forge_context::normalize_forge_host(input.provider, input.host)?;
-    let snapshot = resolve_forge_cli_snapshot(&state, input.provider, &host)?;
+    let snapshot = resolve_forge_cli_snapshot(
+        &state,
+        input.provider,
+        &host,
+        input.force_refresh.unwrap_or(false),
+    )?;
     let selected_login = snapshot.selected_login.clone();
     let active_login = snapshot.login.clone();
     let accounts = snapshot
@@ -280,6 +293,7 @@ pub async fn workspace_github_cli_status(
         ForgeCliStatusInput {
             provider: ForgeCliProvider::Github,
             host: Some("github.com".to_string()),
+            force_refresh: None,
         },
     )
     .await?;

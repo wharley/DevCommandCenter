@@ -68,7 +68,9 @@ async function detectLoginAfterClose(
 
 	while (Date.now() - startedAt < NEW_LOGIN_POLL_TIMEOUT_MS) {
 		try {
-			const next = await getForgeCliStatus(provider, host);
+				const next = await getForgeCliStatus(provider, host, {
+					forceRefresh: true,
+				});
 			lastSeen = next.logins ?? [];
 			const newLogin = lastSeen.find((login) => !baseline.has(login));
 			if (newLogin) {

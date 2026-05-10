@@ -80,16 +80,18 @@ function fallbackForgeAccounts(
 export async function getForgeCliStatus(
 	provider: ForgeCliProvider,
 	host?: string | null,
+	options?: { forceRefresh?: boolean },
 ): Promise<ForgeCliStatusOutput> {
 	if (!isTauriRuntime()) {
 		return fallbackForgeStatus(provider, host);
 	}
 
 	try {
-		return await workspaceForgeCliStatus({
-			provider,
-			host: normalizeForgeHost(provider, host),
-		});
+			return await workspaceForgeCliStatus({
+				provider,
+				host: normalizeForgeHost(provider, host),
+				forceRefresh: options?.forceRefresh ?? null,
+			});
 	} catch (error) {
 		return fallbackForgeStatus(
 			provider,
@@ -102,16 +104,18 @@ export async function getForgeCliStatus(
 export async function getForgeCliAccounts(
 	provider: ForgeCliProvider,
 	host?: string | null,
+	options?: { forceRefresh?: boolean },
 ): Promise<ForgeCliAccountsOutput> {
 	if (!isTauriRuntime()) {
 		return fallbackForgeAccounts(provider, host);
 	}
 
 	try {
-		return await workspaceForgeCliAccounts({
-			provider,
-			host: normalizeForgeHost(provider, host),
-		});
+			return await workspaceForgeCliAccounts({
+				provider,
+				host: normalizeForgeHost(provider, host),
+				forceRefresh: options?.forceRefresh ?? null,
+			});
 	} catch (error) {
 		return fallbackForgeAccounts(
 			provider,

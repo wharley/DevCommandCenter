@@ -33,7 +33,9 @@ export function useForgeCliLoginsHealth(
 	return useQuery({
 		queryKey: ["forgeCliLoginsHealth", provider, normalizedHost],
 		queryFn: async () => {
-			const accounts = await getForgeCliAccounts(provider, normalizedHost);
+			const accounts = await getForgeCliAccounts(provider, normalizedHost, {
+				forceRefresh: true,
+			});
 			const nextSet = new Set(accounts.accounts.map((account) => account.login));
 			const previousSet = previousRef.current;
 			previousRef.current = nextSet;

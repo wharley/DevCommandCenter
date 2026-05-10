@@ -1,4 +1,6 @@
 use std::process::Command;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -10,6 +12,17 @@ pub(crate) struct GithubCliAuthStatus {
     pub(crate) logins: Vec<String>,
     pub(crate) active_login: Option<String>,
 }
+
+#[derive(Clone)]
+struct CachedGithubAuthStatus {
+    status: GithubCliAuthStatus,
+    cached_at: Instant,
+}
+
+const GITHUB_AUTH_STATUS_CACHE_TTL: Duration = Duration::from_secs(2);
+
+static GITHUB_AUTH_STATUS_CACHE: LazyLock<Mutex<std::collections::HashMap<String, CachedGithubAuthStatus>>> =
+    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 #[derive(Debug, Clone)]
 pub(crate) struct GithubAuthContext {
@@ -109,6 +122,15 @@ pub(crate) fn resolve_auth_context(
         return Ok(None);
     }
 
+    let status = auth_status(host)?;
+    if let Some(login) = requested_login {
+        if !status.logins.iter().any(|candidate| candidate == login) {
+            return Err(format!(
+                "GitHub CLI does not currently list `{login}` as authenticated for `{host}`."
+            ));
+        }
+    }
+
     let gh = resolve_cli_binary("gh")?;
     let mut command = Command::new(gh);
     command.args(["auth", "token", "--hostname", host]);
@@ -146,6 +168,21 @@ pub(crate) fn resolve_auth_context(
 }
 
 pub(crate) fn auth_status(host: &str) -> Result<GithubCliAuthStatus, String> {
+    auth_status_with_options(host, false)
+}
+
+pub(crate) fn auth_status_with_options(
+    host: &str,
+    force_refresh: bool,
+) -> Result<GithubCliAuthStatus, String> {
+    if !force_refresh {
+        if let Some(cached) = auth_status_cache::get(host) {
+            return Ok(cached);
+        }
+    } else {
+        auth_status_cache::invalidate(host);
+    }
+
     let gh = resolve_cli_binary("gh")?;
     let output = Command::new(gh)
         .args(["auth", "status", "--hostname", host, "--json", "hosts"])
@@ -158,10 +195,12 @@ pub(crate) fn auth_status(host: &str) -> Result<GithubCliAuthStatus, String> {
 
     if !output.status.success() {
         if looks_like_github_unauthenticated(&combined) {
-            return Ok(GithubCliAuthStatus {
+            let status = GithubCliAuthStatus {
                 logins: Vec::new(),
                 active_login: None,
-            });
+            };
+            auth_status_cache::put(host, status.clone());
+            return Ok(status);
         }
 
         let trimmed = combined.trim();
@@ -172,10 +211,49 @@ pub(crate) fn auth_status(host: &str) -> Result<GithubCliAuthStatus, String> {
         });
     }
 
-    Ok(GithubCliAuthStatus {
+    let status = GithubCliAuthStatus {
         logins: parse_github_logins_for_host(&stdout, host)?,
         active_login: parse_github_active_login_for_host(&stdout, host)?,
-    })
+    };
+    auth_status_cache::put(host, status.clone());
+    Ok(status)
+}
+
+mod auth_status_cache {
+    use super::*;
+
+    pub(super) fn get(host: &str) -> Option<GithubCliAuthStatus> {
+        let mut cache = GITHUB_AUTH_STATUS_CACHE.lock().ok()?;
+        let fresh = cache
+            .get(host)
+            .filter(|entry| entry.cached_at.elapsed() < GITHUB_AUTH_STATUS_CACHE_TTL)
+            .map(|entry| entry.status.clone());
+        if fresh.is_some() {
+            return fresh;
+        }
+        cache.remove(host);
+        None
+    }
+
+    pub(super) fn put(host: &str, status: GithubCliAuthStatus) {
+        let Ok(mut cache) = GITHUB_AUTH_STATUS_CACHE.lock() else {
+            return;
+        };
+        cache.insert(
+            host.to_string(),
+            CachedGithubAuthStatus {
+                status,
+                cached_at: Instant::now(),
+            },
+        );
+    }
+
+    pub(super) fn invalidate(host: &str) {
+        let Ok(mut cache) = GITHUB_AUTH_STATUS_CACHE.lock() else {
+            return;
+        };
+        cache.remove(host);
+    }
 }
 
 pub(crate) fn resolve_change_request_json(
