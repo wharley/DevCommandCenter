@@ -4,9 +4,10 @@ use dcc_core::application::{CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlI
 use dcc_tauri::{
     commands::workspace_commands::{
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, GithubCliStatusInput,
-        GithubCliStatusOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
-        ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
-        ListLocalBranchesOutput, ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
+        GithubCliStatusOutput, ForgeCliStatusInput, ForgeCliStatusOutput,
+        ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
+        ListGitTrackedFilesOutput, ListLocalBranchesInput, ListLocalBranchesOutput,
+        ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
@@ -62,6 +63,13 @@ pub async fn workspace_github_cli_status(
     input: GithubCliStatusInput,
 ) -> Result<GithubCliStatusOutput, String> {
     dcc_tauri::commands::workspace_commands::workspace_github_cli_status(input).await
+}
+
+#[tauri::command]
+pub async fn workspace_forge_cli_status(
+    input: ForgeCliStatusInput,
+) -> Result<ForgeCliStatusOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_forge_cli_status(input).await
 }
 
 #[tauri::command]
@@ -141,6 +149,30 @@ pub async fn workspace_git_push(
     input: WorkspaceGitPushInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::workspace_commands::workspace_git_push(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_change_request_view_web(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_change_request_view_web(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_change_request_create(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_change_request_create(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_change_request_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_change_request_merge(state, input).await
 }
 
 #[tauri::command]

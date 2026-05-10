@@ -30,9 +30,10 @@ use dcc_tauri::commands::{
     },
     workspace_commands::{
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, GithubCliStatusInput,
-        GithubCliStatusOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
-        ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
-        ListLocalBranchesOutput, ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
+        GithubCliStatusOutput, ForgeCliProvider, ForgeCliStatusInput, ForgeCliStatusOutput,
+        ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
+        ListGitTrackedFilesOutput, ListLocalBranchesInput, ListLocalBranchesOutput,
+        ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
         WorkspaceGitCommitPushInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
@@ -56,12 +57,16 @@ struct WorkspaceMethods {
     delete_workspace: String,
     delete_repository: String,
     workspace_github_cli_status: String,
+    workspace_forge_cli_status: String,
     list_local_branches: String,
     list_git_tracked_files: String,
     list_child_directories: String,
     list_workspaces: String,
     list_repositories: String,
     workspace_continue_from_base_branch: String,
+    workspace_change_request_create: String,
+    workspace_change_request_merge: String,
+    workspace_change_request_view_web: String,
     workspace_gh_pr_create_fill: String,
     workspace_gh_pr_merge: String,
     workspace_gh_pr_view_web: String,
@@ -153,6 +158,9 @@ fn main() {
         .typ::<RepositoryIdInput>()
         .typ::<GithubCliStatusInput>()
         .typ::<GithubCliStatusOutput>()
+        .typ::<ForgeCliProvider>()
+        .typ::<ForgeCliStatusInput>()
+        .typ::<ForgeCliStatusOutput>()
         .typ::<WorkspaceGitStatusInput>()
         .typ::<WorkspaceGitStatusOutput>()
         .typ::<WorkspaceGitChangeEntry>()
@@ -196,6 +204,7 @@ fn main() {
                 delete_workspace: "delete_workspace".to_string(),
                 delete_repository: "delete_repository".to_string(),
                 workspace_github_cli_status: "workspace_github_cli_status".to_string(),
+                workspace_forge_cli_status: "workspace_forge_cli_status".to_string(),
                 list_local_branches: "list_local_branches".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),
                 list_child_directories: "list_child_directories".to_string(),
@@ -203,6 +212,9 @@ fn main() {
                 list_repositories: "list_repositories".to_string(),
                 workspace_continue_from_base_branch: "workspace_continue_from_base_branch"
                     .to_string(),
+                workspace_change_request_create: "workspace_change_request_create".to_string(),
+                workspace_change_request_merge: "workspace_change_request_merge".to_string(),
+                workspace_change_request_view_web: "workspace_change_request_view_web".to_string(),
                 workspace_gh_pr_create_fill: "workspace_gh_pr_create_fill".to_string(),
                 workspace_gh_pr_merge: "workspace_gh_pr_merge".to_string(),
                 workspace_gh_pr_view_web: "workspace_gh_pr_view_web".to_string(),

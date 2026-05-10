@@ -201,7 +201,7 @@
       "shortcuts": { "label": "Shortcuts", "description": "Active shortcuts and the cheatsheet are available." },
       "git": { "label": "Git", "description": "Git chrome in the inspector, adjustments coming soon." },
       "experimental": { "label": "Experimental", "description": "Reserved space for future options." },
-      "account": { "label": "Account", "description": "GitHub CLI and local authentication." }
+      "account": { "label": "Account", "description": "GitHub, GitLab, and local in-app authentication." }
     },
     "statusComingSoon": "Coming soon",
     "general": {
@@ -256,20 +256,24 @@
       "comingSoonBody": "No preview toggles are exposed yet. When test flags exist, they will live here."
     },
     "account": {
-      "title": "GitHub CLI integration",
-      "hint": "DCC uses the local `gh` binary for authentication, PRs, and repository setup.",
-      "sectionBadge": "Local GitHub",
-      "githubCliTitle": "GitHub CLI integration",
-      "githubCliHint": "Install and authenticate GitHub CLI so DCC can open PRs and keep GitHub actions local.",
-      "githubCliReadyBadge": "Connected",
-      "githubCliNotReadyBadge": "Disconnected",
-      "githubCliChecking": "Checking…",
-      "githubCliSetUp": "Open terminal",
-      "githubCliRefresh": "Re-check",
-      "githubCliTerminalOpened": "Terminal opened. Run `gh auth login` to connect.",
-      "githubCliTerminalFailed": "Could not open the terminal.",
-      "githubCliLoadingError": "Could not verify GitHub CLI.",
-      "githubCliCommand": "Suggested command: `{{command}}`"
+      "title": "Forge accounts",
+      "hint": "Manage local authentication with GitHub CLI and GitLab CLI without leaving the app.",
+      "sectionBadge": "Embedded login",
+      "cardTitle": "Connect GitHub or GitLab",
+      "cardHint": "Open an embedded terminal to authenticate with `gh auth login` or `glab auth login` inside DCC.",
+      "readyBadge": "Connected",
+      "notReadyBadge": "Disconnected",
+      "checking": "Checking…",
+      "connect": "Connect in app",
+      "refresh": "Re-check",
+      "switchAccount": "Switch account",
+      "accountLabel": "Active account in DCC",
+      "hostLabel": "Host",
+      "githubHint": "Use `github.com` or your GitHub Enterprise hostname.",
+      "gitlabHint": "Use `gitlab.com` or your self-hosted GitLab hostname.",
+      "accountsConnected": "{{count}} accounts: {{logins}}",
+      "loadingError": "Could not verify the {{provider}} CLI.",
+      "command": "Suggested command: `{{command}}`"
     }
   },
   "shortcutsSheet": {
@@ -327,13 +331,13 @@
     "default": "Commit",
     "modes": {
       "create-pr": {
-        "idle": "Create PR",
-        "busy": "Creating PR...",
-        "done": "PR Created",
+        "idle": "Create {{requestLabel}}",
+        "busy": "Creating {{requestLabel}}...",
+        "done": "{{requestLabel}} created",
         "error": "Retry"
       },
       "open-pr": {
-        "idle": "Open PR",
+        "idle": "Open {{requestLabel}}",
         "busy": "Opening...",
         "done": "Opened",
         "error": "Retry"

@@ -129,7 +129,13 @@ export function GitSectionHeader({
           {retrySetupLabel}
         </Button>
       ) : null}
-      {!showContinue ? <WorkspaceCommitButton mode={commitMode} onCommit={onCommit} /> : null}
+      {!showContinue ? (
+        <WorkspaceCommitButton
+          mode={commitMode}
+          prProvider={prProvider}
+          onCommit={onCommit}
+        />
+      ) : null}
     </div>
   );
 }

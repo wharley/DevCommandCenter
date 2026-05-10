@@ -22,6 +22,7 @@ export type WorkspaceGitStatusSummary = {
 
 export type WorkspacePrStatusSummary = {
 	provider?: string | null;
+	host?: string | null;
 	number?: number | null;
 	title?: string | null;
 	url?: string | null;

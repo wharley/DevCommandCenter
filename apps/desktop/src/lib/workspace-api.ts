@@ -5,6 +5,8 @@ import type {
 	CreateWorkspaceForRepoOutput,
 	CreateWorkspaceFromUrlInput,
 	CreateWorkspaceFromUrlOutput,
+	ForgeCliStatusInput,
+	ForgeCliStatusOutput,
 	GithubCliStatusInput,
 	GithubCliStatusOutput,
 	ListChildDirectoriesInput,
@@ -62,6 +64,12 @@ export function createWorkspaceFromUrl(input: CreateWorkspaceFromUrlInput) {
 
 export function workspaceGithubCliStatus(input: GithubCliStatusInput) {
 	return invoke<GithubCliStatusOutput>(WORKSPACE_METHODS.workspaceGithubCliStatus, {
+		input,
+	});
+}
+
+export function workspaceForgeCliStatus(input: ForgeCliStatusInput) {
+	return invoke<ForgeCliStatusOutput>(WORKSPACE_METHODS.workspaceForgeCliStatus, {
 		input,
 	});
 }
@@ -135,16 +143,28 @@ export function workspaceRunSetup(input: WorkspaceRunSetupInput) {
 	});
 }
 
+export function workspaceChangeRequestViewWeb(input: WorkspaceGitPushInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceChangeRequestViewWeb, { input });
+}
+
+export function workspaceChangeRequestCreate(input: WorkspaceGitPushInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceChangeRequestCreate, { input });
+}
+
+export function workspaceChangeRequestMerge(input: WorkspaceGitPushInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceChangeRequestMerge, { input });
+}
+
 export function workspaceGhPrViewWeb(input: WorkspaceGitPushInput) {
-	return invoke<void>(WORKSPACE_METHODS.workspaceGhPrViewWeb, { input });
+	return workspaceChangeRequestViewWeb(input);
 }
 
 export function workspaceGhPrCreateFill(input: WorkspaceGitPushInput) {
-	return invoke<void>(WORKSPACE_METHODS.workspaceGhPrCreateFill, { input });
+	return workspaceChangeRequestCreate(input);
 }
 
 export function workspaceGhPrMerge(input: WorkspaceGitPushInput) {
-	return invoke<void>(WORKSPACE_METHODS.workspaceGhPrMerge, { input });
+	return workspaceChangeRequestMerge(input);
 }
 
 export function workspacePrStatus(input: WorkspacePrStatusInput) {

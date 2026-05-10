@@ -23,9 +23,9 @@ import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import {
 	workspaceContinueFromBaseBranch,
-	workspaceGhPrViewWeb,
-	workspaceGhPrCreateFill,
-	workspaceGhPrMerge,
+	workspaceChangeRequestViewWeb,
+	workspaceChangeRequestCreate,
+	workspaceChangeRequestMerge,
 	workspaceGitCommitPush,
 	workspaceGitStageAll,
 	workspaceGitPush,
@@ -38,10 +38,13 @@ import { EmptyState } from "@/features/panel";
 import type { CoreEvent, ProviderCatalog, WorkspaceSetupReport } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
-import { getGithubCliStatus, openGithubCliAuthTerminal } from "@/lib/github-cli";
+import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
+import { getDefaultForgeHost, getForgeCliStatus } from "@/lib/forge-cli";
+import { readSelectedForgeLogin } from "@/lib/forge-account-preferences";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import type { WorkspaceStatus } from "@/features/workspaces/types";
 import { setupReportDescription } from "@/features/workspaces/workspace-setup-report";
+import type { ForgeCliProvider } from "@dcc/contracts";
 
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
@@ -80,12 +83,39 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 	);
 }
 
-function inspectorActionTitle(mode: string) {
+function changeRequestLabel(provider?: string | null): "PR" | "MR" {
+	return provider === "gitlab" ? "MR" : "PR";
+}
+
+function forgeProviderLabel(provider: ForgeCliProvider): "GitHub" | "GitLab" {
+	return provider === "gitlab" ? "GitLab" : "GitHub";
+}
+
+function resolveForgeContext(
+	provider?: string | null,
+	host?: string | null,
+): {
+	provider: ForgeCliProvider;
+	host: string;
+	providerLabel: "GitHub" | "GitLab";
+	requestLabel: "PR" | "MR";
+} {
+	const normalizedProvider: ForgeCliProvider = provider === "gitlab" ? "gitlab" : "github";
+	const normalizedHost = host?.trim() || getDefaultForgeHost(normalizedProvider);
+	return {
+		provider: normalizedProvider,
+		host: normalizedHost,
+		providerLabel: forgeProviderLabel(normalizedProvider),
+		requestLabel: changeRequestLabel(normalizedProvider),
+	};
+}
+
+function inspectorActionTitle(mode: string, requestLabel: "PR" | "MR") {
 	switch (mode) {
 		case "create-pr":
-			return "Criar PR";
+			return `Criar ${requestLabel}`;
 		case "open-pr":
-			return "Abrir PR";
+			return `Abrir ${requestLabel}`;
 		case "commit-and-push":
 			return "Commitar e enviar";
 		case "push":
@@ -244,34 +274,41 @@ export function WorkspaceInspectorSidebar({
 		workspacePath,
 		gitBranch,
 	);
-	const githubCliStatusQuery = useQuery({
-		queryKey: ["githubCliStatus"],
-		queryFn: getGithubCliStatus,
+	const prStatus = prStatusQuery.data ?? null;
+	const forgeContext = resolveForgeContext(prStatus?.provider, prStatus?.host);
+	const forgeCliStatusQuery = useQuery({
+		queryKey: ["forgeCliStatus", forgeContext.provider, forgeContext.host],
+		queryFn: () => getForgeCliStatus(forgeContext.provider, forgeContext.host),
 		staleTime: 60_000,
 		refetchOnWindowFocus: true,
+		enabled: Boolean(workspacePath?.trim()),
 	});
+	const [forgeConnectOpen, setForgeConnectOpen] = useState(false);
 	const [isContinuingWorkspace, setIsContinuingWorkspace] = useState(false);
 	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const hasWorkingTreeChanges =
 		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
 		(gitStatusQuery.data?.unstaged.length ?? 0) > 0;
-	const githubCliStatus = githubCliStatusQuery.data ?? null;
-	const githubCliReady = githubCliStatus?.status === "ready";
+	const forgeCliStatus = forgeCliStatusQuery.data ?? null;
+	const forgeCliReady = forgeCliStatus?.status === "ready";
 	const isSetupPending = workspaceStatus === "setup_pending";
 	const setupReportSummary =
 		workspaceSetupReport == null
 			? null
 			: setupReportDescription(t, workspaceSetupReport, []);
-	const githubCliMessage =
-		githubCliStatus?.message ??
-		(githubCliStatusQuery.isPending ? "Checking GitHub CLI..." : null);
-	const prStatus = prStatusQuery.data ?? null;
+	const forgeCliMessage =
+		forgeCliStatus?.message ??
+		(forgeCliStatusQuery.isPending ? `Checking ${forgeContext.providerLabel} CLI...` : null);
 	const commitMode = resolveCommitMode({
 		branch: currentBranch,
 		prStatus,
 		gitStatus: gitStatusQuery.data ?? null,
 	});
+	const selectedForgeLogin = readSelectedForgeLogin(
+		forgeContext.provider,
+		forgeContext.host,
+	);
 
 	const handleInspectorCommit = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -280,16 +317,20 @@ export function WorkspaceInspectorSidebar({
 			throw new Error("No workspace path");
 		}
 
-		const loadingToast = toast.loading(`${inspectorActionTitle(commitMode)}...`);
+		const loadingToast = toast.loading(
+			`${inspectorActionTitle(commitMode, forgeContext.requestLabel)}...`,
+		);
 
-		if (commitMode === "create-pr" && !githubCliReady) {
+		if (commitMode === "create-pr" && !forgeCliReady) {
 			toast.dismiss(loadingToast);
-			const reason = githubCliMessage ?? "GitHub CLI não encontrado ou não autenticado.";
+			const reason =
+				forgeCliMessage ??
+				`${forgeContext.providerLabel} CLI não encontrado ou não autenticado.`;
 			toast.warning(reason, {
-				description: 'Execute "gh auth login" no Terminal e tente novamente.',
+				description: `Conecte o ${forgeContext.providerLabel} no terminal embutido e tente novamente.`,
 				action: {
-					label: "Abrir Terminal",
-					onClick: () => openGithubCliAuthTerminal(),
+					label: `Conectar ${forgeContext.providerLabel}`,
+					onClick: () => setForgeConnectOpen(true),
 				},
 				duration: 12_000,
 			});
@@ -301,43 +342,70 @@ export function WorkspaceInspectorSidebar({
 				case "merged":
 					return;
 				case "closed":
-					await workspaceGhPrViewWeb({ workspaceRoot: root });
-					toast.info("This PR is closed. Open it in the browser if you need to inspect it.", {
-						id: loadingToast,
+					await workspaceChangeRequestViewWeb({
+						workspaceRoot: root,
+						forgeLogin: selectedForgeLogin,
 					});
+					toast.info(
+						`Este ${forgeContext.requestLabel} está fechado. Abra no navegador se precisar inspecionar.`,
+						{ id: loadingToast },
+					);
 					return;
 				case "push":
-					await workspaceGitPush({ workspaceRoot: root });
+					await workspaceGitPush({
+						workspaceRoot: root,
+						forgeLogin: selectedForgeLogin,
+					});
 					toast.success("Pushed", { id: loadingToast });
 					break;
 				case "open-pr":
-					await workspaceGhPrViewWeb({ workspaceRoot: root });
-					toast.success("Opened PR in browser", { id: loadingToast });
+					await workspaceChangeRequestViewWeb({
+						workspaceRoot: root,
+						forgeLogin: selectedForgeLogin,
+					});
+					toast.success(`${forgeContext.requestLabel} aberto no navegador`, {
+						id: loadingToast,
+					});
 					break;
 				case "merge":
-					await workspaceGhPrMerge({ workspaceRoot: root });
-					toast.success("PR merged", { id: loadingToast });
+					await workspaceChangeRequestMerge({
+						workspaceRoot: root,
+						forgeLogin: selectedForgeLogin,
+					});
+					toast.success(`${forgeContext.requestLabel} mesclado`, { id: loadingToast });
 					break;
 				case "fix":
 				case "resolve-conflicts":
-					await workspaceGhPrViewWeb({ workspaceRoot: root });
-					toast.info("Open the PR to inspect checks and conflicts.", {
+					await workspaceChangeRequestViewWeb({
+						workspaceRoot: root,
+						forgeLogin: selectedForgeLogin,
+					});
+					toast.info(`Abra o ${forgeContext.requestLabel} para inspecionar checks e conflitos.`, {
 						id: loadingToast,
 					});
 					break;
 				case "create-pr": {
 					if (hasWorkingTreeChanges) {
-						throw new Error("Commit local changes before creating a PR.");
+						throw new Error(
+							`Commit local changes before creating a ${forgeContext.requestLabel}.`,
+						);
 					}
-					await workspaceGhPrCreateFill({ workspaceRoot: root });
-					toast.success("PR created", { id: loadingToast });
+					await workspaceChangeRequestCreate({
+						workspaceRoot: root,
+						forgeLogin: selectedForgeLogin,
+					});
+					toast.success(`${forgeContext.requestLabel} criado`, { id: loadingToast });
 					break;
 				}
 				case "commit-and-push":
 				default: {
 					await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
 					const message = `chore: checkpoint for ${workspaceName ?? "workspace"}`;
-					await workspaceGitCommitPush({ workspaceRoot: root, message });
+					await workspaceGitCommitPush({
+						workspaceRoot: root,
+						message,
+						forgeLogin: selectedForgeLogin,
+					});
 					toast.success("Committed and pushed", { id: loadingToast });
 					break;
 				}
@@ -355,12 +423,25 @@ export function WorkspaceInspectorSidebar({
 		} catch (error) {
 			const message = getInspectorActionErrorMessage(error);
 			console.error("[inspector] git action failed", { commitMode, root, error });
-			toast.error(`${inspectorActionTitle(commitMode)} failed: ${message}`, {
+			toast.error(
+				`${inspectorActionTitle(commitMode, forgeContext.requestLabel)} failed: ${message}`,
+				{
 				id: loadingToast,
-			});
+				},
+			);
 			throw error;
 		}
-	}, [commitMode, githubCliMessage, githubCliReady, queryClient, workspacePath, workspaceName]);
+	}, [
+		commitMode,
+		forgeCliMessage,
+		forgeCliReady,
+		forgeContext.providerLabel,
+		forgeContext.requestLabel,
+		queryClient,
+		selectedForgeLogin,
+		workspacePath,
+		workspaceName,
+	]);
 
 	const handleContinueWorkspace = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -574,11 +655,12 @@ export function WorkspaceInspectorSidebar({
 	const catalogCount = providerCatalog?.providers.length ?? 0;
 
 	return (
-		<div
-			ref={rootRef}
-			className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground"
-			data-dcc-inspector-root
-		>
+		<>
+			<div
+				ref={rootRef}
+				className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground"
+				data-dcc-inspector-root
+			>
 			<section
 				className="flex shrink-0 flex-col overflow-hidden border-b border-border/60"
 				style={{ height: `${changesHeight}px` }}
@@ -800,6 +882,16 @@ export function WorkspaceInspectorSidebar({
 						</TabsContent>
 				</Tabs>
 			</section>
-		</div>
+			</div>
+			<ForgeConnectDialog
+				open={forgeConnectOpen}
+				onOpenChange={setForgeConnectOpen}
+				provider={forgeContext.provider}
+				host={forgeContext.host}
+				onConnected={() => {
+					void forgeCliStatusQuery.refetch();
+				}}
+			/>
+		</>
 	);
 }

@@ -8,20 +8,23 @@ import { commitModeClassName, commitTranslationKey } from "./WorkspaceCommitButt
 
 type WorkspaceCommitButtonProps = {
 	mode: CommitMode;
+	prProvider?: string | null;
 	disabled?: boolean;
 	onCommit?: () => Promise<void> | void;
 };
 
 export function WorkspaceCommitButton({
 	mode,
+	prProvider = null,
 	disabled = false,
 	onCommit,
 }: WorkspaceCommitButtonProps) {
 	const { t } = useTranslation("common");
 	const [status, setStatus] = useState<CommitButtonStatus>("idle");
+	const requestLabel = prProvider === "gitlab" ? "MR" : "PR";
 	const label = useMemo(
-		() => t(commitTranslationKey(mode, status)),
-		[mode, status, t],
+		() => t(commitTranslationKey(mode, status), { requestLabel }),
+		[mode, requestLabel, status, t],
 	);
 	const isLocked = disabled || mode === "merged" || mode === "closed";
 

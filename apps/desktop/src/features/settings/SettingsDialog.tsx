@@ -14,9 +14,12 @@ import {
 	Wrench,
 	type LucideIcon,
 } from "lucide-react";
+import type { ForgeCliProvider } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -24,12 +27,17 @@ import type { DccTheme } from "@/components/theme-provider";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
 import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
+import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
 import { getOpenPreferredEditorShortcutKeys } from "@/features/shortcuts/shortcut-utils";
 import type {
 	ProviderRuntimeDraft,
 	ProviderRuntimeSettings,
 } from "@/features/providers/provider-runtime-settings";
-import { getGithubCliStatus, openGithubCliAuthTerminal } from "@/lib/github-cli";
+import { getDefaultForgeHost, getForgeCliStatus, normalizeForgeHost } from "@/lib/forge-cli";
+import {
+	readSelectedForgeLogin,
+	writeSelectedForgeLogin,
+} from "@/lib/forge-account-preferences";
 
 type SettingsDialogProps = {
 	open: boolean;
@@ -131,56 +139,89 @@ function ComingSoonCard({
 	);
 }
 
-function GithubCliIntegrationCard() {
+function ForgeCliIntegrationCard() {
 	const { t } = useTranslation("common");
+	const [provider, setProvider] = useState<ForgeCliProvider>("github");
+	const [hosts, setHosts] = useState<Record<ForgeCliProvider, string>>({
+		github: getDefaultForgeHost("github"),
+		gitlab: getDefaultForgeHost("gitlab"),
+	});
+	const [connectOpen, setConnectOpen] = useState(false);
+	const host = hosts[provider];
+	const normalizedHost = normalizeForgeHost(provider, host);
+	const [selectedLogin, setSelectedLogin] = useState<string | null>(() =>
+		readSelectedForgeLogin(provider, normalizedHost),
+	);
 	const statusQuery = useQuery({
-		queryKey: ["githubCliStatus"],
-		queryFn: getGithubCliStatus,
+		queryKey: ["forgeCliStatus", provider, normalizedHost],
+		queryFn: () => getForgeCliStatus(provider, normalizedHost),
 		staleTime: 60_000,
 		refetchOnWindowFocus: true,
 	});
 
 	const status = statusQuery.data ?? {
-		cliName: "gh",
-		hostname: "github.com",
+		provider,
+		cliName: provider === "github" ? "gh" : "glab",
+		hostname: normalizedHost,
 		status: "error" as const,
 		login: null,
-		message: t("settings.account.githubCliLoadingError"),
-		loginCommand: "gh auth login",
+		logins: [],
+		message: t("settings.account.loadingError", {
+			provider: provider === "github" ? "GitHub" : "GitLab",
+		}),
+		loginCommand:
+			provider === "github"
+				? normalizedHost === "github.com"
+					? "gh auth login"
+					: `gh auth login --hostname ${normalizedHost}`
+				: `glab auth login --hostname ${normalizedHost}`,
 	};
 	const isReady = status.status === "ready";
+	const effectiveSelectedLogin =
+		selectedLogin && status.logins.includes(selectedLogin)
+			? selectedLogin
+			: status.login ?? status.logins[0] ?? null;
 
-	const handleSetUp = async () => {
-		try {
-			const result = await openGithubCliAuthTerminal();
-			if (result.success) {
-				toast.success(t("settings.account.githubCliTerminalOpened"));
-				return;
-			}
+	useEffect(() => {
+		setSelectedLogin(readSelectedForgeLogin(provider, normalizedHost));
+	}, [normalizedHost, provider]);
 
-			toast.error(result.error ?? t("settings.account.githubCliTerminalFailed"));
-		} catch (error) {
-			toast.error(error instanceof Error ? error.message : t("settings.account.githubCliTerminalFailed"));
+	useEffect(() => {
+		if (!isReady) {
+			return;
 		}
-	};
+		const nextLogin = effectiveSelectedLogin;
+		if (!nextLogin) {
+			return;
+		}
+		if (selectedLogin !== nextLogin) {
+			setSelectedLogin(nextLogin);
+		}
+		writeSelectedForgeLogin(provider, normalizedHost, nextLogin);
+	}, [effectiveSelectedLogin, isReady, normalizedHost, provider, selectedLogin]);
 
 	const handleRefresh = async () => {
 		try {
 			await statusQuery.refetch();
 		} catch {
-			toast.error(t("settings.account.githubCliLoadingError"));
+			toast.error(
+				t("settings.account.loadingError", {
+					provider: provider === "github" ? "GitHub" : "GitLab",
+				}),
+			);
 		}
 	};
 
 	return (
+		<>
 		<div className="rounded-xl border border-border/60 p-4">
 			<div className="flex items-start justify-between gap-4">
 				<div className="min-w-0">
 					<h3 className="text-[14px] font-medium text-foreground">
-						{t("settings.account.githubCliTitle")}
+						{t("settings.account.cardTitle")}
 					</h3>
 					<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-						{t("settings.account.githubCliHint")}
+						{t("settings.account.cardHint")}
 					</p>
 				</div>
 				<Badge
@@ -188,51 +229,129 @@ function GithubCliIntegrationCard() {
 					className="h-8 px-3 text-[12px] font-normal"
 				>
 					{isReady
-						? t("settings.account.githubCliReadyBadge")
-						: t("settings.account.githubCliNotReadyBadge")}
+						? t("settings.account.readyBadge")
+						: t("settings.account.notReadyBadge")}
 				</Badge>
 			</div>
 
-			<div className="mt-4 flex flex-wrap items-center gap-2">
+			<div className="mt-4 space-y-4">
+				<Tabs value={provider} onValueChange={(value) => setProvider(value as ForgeCliProvider)}>
+					<TabsList className="w-full">
+						<TabsTrigger value="github">GitHub</TabsTrigger>
+						<TabsTrigger value="gitlab">GitLab</TabsTrigger>
+					</TabsList>
+				</Tabs>
+
+				<div className="grid gap-2">
+					<label className="text-[12px] font-medium text-foreground">
+						{t("settings.account.hostLabel")}
+					</label>
+					<Input
+						value={host}
+						onChange={(event) =>
+							setHosts((current) => ({
+								...current,
+								[provider]: event.target.value,
+							}))
+						}
+						placeholder={provider === "github" ? "github.com" : "gitlab.com"}
+					/>
+					<p className="text-[11px] leading-relaxed text-muted-foreground">
+						{provider === "github"
+							? t("settings.account.githubHint")
+							: t("settings.account.gitlabHint")}
+					</p>
+				</div>
+
+				<div className="flex flex-wrap items-center gap-2">
 				{statusQuery.isPending ? (
 					<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-muted-foreground">
 						<Loader2 className="size-3.5 animate-spin" />
-						{t("settings.account.githubCliChecking")}
+						{t("settings.account.checking")}
 					</div>
 				) : isReady ? (
 					<>
 						<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-foreground">
 							<TerminalSquare className="size-3.5" />
-							<span className="truncate">{status.login ?? status.message}</span>
+							<span className="truncate">
+								{status.logins.length > 1
+									? t("settings.account.accountsConnected", {
+										count: status.logins.length,
+										logins: status.logins.join(", "),
+									})
+									: status.login ?? status.message}
+							</span>
 						</div>
 						<Button variant="ghost" size="sm" onClick={() => void handleRefresh()}>
-							{t("settings.account.githubCliRefresh")}
+							{t("settings.account.refresh")}
+						</Button>
+						<Button variant="outline" size="sm" onClick={() => setConnectOpen(true)}>
+							<TerminalSquare className="size-3.5" />
+							{t("settings.account.switchAccount")}
 						</Button>
 					</>
 				) : (
 					<>
-						<Button variant="outline" size="sm" onClick={() => void handleSetUp()}>
+						<Button variant="outline" size="sm" onClick={() => setConnectOpen(true)}>
 							<TerminalSquare className="size-3.5" />
-							{t("settings.account.githubCliSetUp")}
+							{t("settings.account.connect")}
 						</Button>
 						<Button variant="ghost" size="sm" onClick={() => void handleRefresh()}>
-							{t("settings.account.githubCliRefresh")}
+							{t("settings.account.refresh")}
 						</Button>
 					</>
 				)}
+				</div>
+
+				{isReady && status.logins.length > 0 ? (
+					<div className="grid gap-2">
+						<label className="text-[12px] font-medium text-foreground">
+							{t("settings.account.accountLabel")}
+						</label>
+						<div className="flex flex-wrap gap-2">
+							{status.logins.map((login) => {
+								const active = login === effectiveSelectedLogin;
+								return (
+									<Button
+										key={login}
+										type="button"
+										variant={active ? "default" : "outline"}
+										size="sm"
+										onClick={() => {
+											setSelectedLogin(login);
+											writeSelectedForgeLogin(provider, normalizedHost, login);
+										}}
+									>
+										{login}
+									</Button>
+								);
+							})}
+						</div>
+					</div>
+				) : null}
 
 				<div className="min-w-0 flex-1">
 					<p className="text-[12px] leading-relaxed text-muted-foreground">
 						{status.message}
 					</p>
 					<p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
-						{t("settings.account.githubCliCommand", {
+						{t("settings.account.command", {
 							command: status.loginCommand,
 						})}
 					</p>
 				</div>
 			</div>
 		</div>
+			<ForgeConnectDialog
+				open={connectOpen}
+				onOpenChange={setConnectOpen}
+				provider={provider}
+				host={normalizedHost}
+				onConnected={() => {
+					void statusQuery.refetch();
+				}}
+			/>
+		</>
 	);
 }
 
@@ -588,7 +707,7 @@ export function SettingsDialog({
 											{t("settings.account.sectionBadge")}
 										</Badge>
 									</div>
-									<GithubCliIntegrationCard />
+									<ForgeCliIntegrationCard />
 								</section>
 							) : null}
 						</div>

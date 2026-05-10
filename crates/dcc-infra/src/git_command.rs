@@ -209,6 +209,81 @@ where
     }
 }
 
+pub fn run_git_output_with_timeout_and_env<I, K, V>(
+    root: &str,
+    args: I,
+    timeout: Duration,
+    envs: &[(K, V)],
+) -> Result<Output, String>
+where
+    I: IntoIterator,
+    I::Item: AsRef<OsStr>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    let mut command = Command::new("git");
+    configure_git_command(&mut command);
+    command.arg("-C").arg(root);
+    for arg in args {
+        command.arg(arg.as_ref());
+    }
+    for (key, value) in envs {
+        command.env(key.as_ref(), value.as_ref());
+    }
+
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
+    let child = command.spawn().map_err(|error| error.to_string())?;
+    let child_pid = child.id();
+    let (tx, rx) = mpsc::channel();
+    let waiter = thread::spawn(move || {
+        let result = child.wait_with_output();
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(output)) => {
+            let _ = waiter.join();
+            Ok(output)
+        }
+        Ok(Err(error)) => {
+            let _ = waiter.join();
+            Err(error.to_string())
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(child_pid as libc::pid_t), libc::SIGKILL);
+            }
+            #[cfg(windows)]
+            {
+                let child_pid = child_pid.to_string();
+                let _ = Command::new("taskkill")
+                    .arg("/PID")
+                    .arg(&child_pid)
+                    .arg("/T")
+                    .arg("/F")
+                    .output();
+            }
+            let _ = waiter.join();
+            Err(format!(
+                "git command timed out after {}s",
+                timeout.as_secs()
+            ))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = waiter.join();
+            Err("git waiter thread crashed before returning output".to_string())
+        }
+    }
+}
+
 pub fn run_git_output(root: &str, args: &[&str]) -> Result<Output, String> {
     run_git_output_with_timeout(root, args, GIT_LOCAL_TIMEOUT)
 }
@@ -219,6 +294,18 @@ pub fn run_git_output_owned(root: &str, args: Vec<OsString>) -> Result<Output, S
 
 pub fn run_git_network_output(root: &str, args: &[&str]) -> Result<Output, String> {
     run_git_output_with_timeout(root, args, GIT_NETWORK_TIMEOUT)
+}
+
+pub fn run_git_network_output_with_env<K, V>(
+    root: &str,
+    args: &[&str],
+    envs: &[(K, V)],
+) -> Result<Output, String>
+where
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    run_git_output_with_timeout_and_env(root, args, GIT_NETWORK_TIMEOUT, envs)
 }
 
 pub fn git_command_succeeds(root: &str, args: &[&str]) -> bool {

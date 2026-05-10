@@ -2,11 +2,9 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use specta::Type;
 use tauri::{AppHandle, State};
 
@@ -33,10 +31,12 @@ use dcc_infra::{
 };
 
 use crate::{
+    commands::forge::{provider as forge_provider, remote as forge_remote},
     events::TauriEventBus,
     git::{
         git_command_succeeds, git_output_err, parse_name_status_z, parse_numstat_z,
-        run_git_network_output, run_git_output, run_git_output_owned, split_null_terminated_fields,
+        run_git_network_output, run_git_network_output_with_env, run_git_output,
+        run_git_output_owned, split_null_terminated_fields,
     },
     state::WorkspaceCommandState,
     workspace_setup::run_detected_workspace_setup,
@@ -176,12 +176,14 @@ pub struct WorkspaceGitPathInput {
 pub struct WorkspaceGitCommitPushInput {
     pub workspace_root: String,
     pub message: String,
+    pub forge_login: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceGitPushInput {
     pub workspace_root: String,
+    pub forge_login: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -214,6 +216,40 @@ pub struct WorkspaceGitFilePreviewContentOutput {
 #[serde(rename_all = "camelCase")]
 pub struct GithubCliStatusInput {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum ForgeCliProvider {
+    Github,
+    Gitlab,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ForgeCliStatusInput {
+    pub provider: ForgeCliProvider,
+    pub host: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum ForgeCliStatusState {
+    Ready,
+    Error,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ForgeCliStatusOutput {
+    pub provider: ForgeCliProvider,
+    pub cli_name: String,
+    pub hostname: String,
+    pub status: ForgeCliStatusState,
+    pub login: Option<String>,
+    pub logins: Vec<String>,
+    pub message: String,
+    pub login_command: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum GithubCliStatusState {
@@ -237,12 +273,14 @@ pub struct GithubCliStatusOutput {
 pub struct WorkspacePrStatusInput {
     pub workspace_root: String,
     pub branch: Option<String>,
+    pub forge_login: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePrStatusOutput {
     pub provider: Option<String>,
+    pub host: Option<String>,
     pub number: Option<u32>,
     pub title: Option<String>,
     pub url: Option<String>,
@@ -551,86 +589,6 @@ fn workspace_branch_hints(root: &str, branch: Option<&str>) -> Vec<String> {
     hints
 }
 
-fn resolve_workspace_pr_status_json(
-    root: &str,
-    branch_hints: &[String],
-    head_sha: Option<&str>,
-) -> Result<Option<Value>, String> {
-    let gh = match resolve_gh_binary() {
-        Ok(path) => path,
-        Err(_) => return Ok(None),
-    };
-
-    let json_fields = "number,title,url,state,mergeable,mergeStateStatus,isDraft,headRefName,headRefOid,baseRefName";
-
-    // Primary: `gh pr view` with no argument resolves the PR for the current branch.
-    // This works even in worktrees and is more targeted than listing all PRs.
-    let view_output = Command::new(&gh)
-        .current_dir(root)
-        .args(["pr", "view", "--json", json_fields])
-        .output();
-    if let Ok(output) = view_output {
-        if output.status.success() {
-            if let Ok(pr) = serde_json::from_slice::<Value>(&output.stdout) {
-                if pr.is_object() && !pr.as_object().map_or(true, |o| o.is_empty()) {
-                    return Ok(Some(pr));
-                }
-            }
-        }
-    }
-
-    // Secondary: `gh pr view <hint>` for each branch hint (covers detached HEAD + renamed branches).
-    for hint in branch_hints {
-        let output = Command::new(&gh)
-            .current_dir(root)
-            .args(["pr", "view", hint, "--json", json_fields])
-            .output();
-        if let Ok(output) = output {
-            if output.status.success() {
-                if let Ok(pr) = serde_json::from_slice::<Value>(&output.stdout) {
-                    if pr.is_object() && !pr.as_object().map_or(true, |o| o.is_empty()) {
-                        return Ok(Some(pr));
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback: `gh pr list --state all` filtered by branch name or commit SHA.
-    let output = Command::new(&gh)
-        .current_dir(root)
-        .args(["pr", "list", "--state", "all", "--json", json_fields])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-
-    let parsed: Value = serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-    let Some(items) = parsed.as_array() else {
-        return Ok(None);
-    };
-    let pr = items.iter().find(|item| {
-        let matches_branch = item
-            .get("headRefName")
-            .and_then(|value| value.as_str())
-            .map(|value| branch_hints.iter().any(|hint| hint == value))
-            .unwrap_or(false);
-        let matches_sha = head_sha
-            .and_then(|sha| {
-                item.get("headRefOid")
-                    .and_then(|value| value.as_str())
-                    .map(|value| value == sha)
-            })
-            .unwrap_or(false);
-        matches_branch || matches_sha
-    });
-    let Some(pr) = pr else {
-        return Ok(None);
-    };
-    Ok(Some(pr.clone()))
-}
-
 fn resolve_default_remote_name(root: &str) -> Result<String, String> {
     let output = run_git_output(root, &["remote"])?;
     if !output.status.success() {
@@ -653,157 +611,113 @@ fn resolve_default_remote_name(root: &str) -> Result<String, String> {
     Ok(remotes[0].clone())
 }
 
-fn resolve_gh_binary() -> Result<PathBuf, String> {
-    let candidates = [
-        PathBuf::from("gh"),
-        PathBuf::from("/opt/homebrew/bin/gh"),
-        PathBuf::from("/usr/local/bin/gh"),
-    ];
-
-    for candidate in candidates {
-        if candidate.as_os_str() == "gh" {
-            if Command::new(&candidate).arg("--version").output().is_ok() {
-                return Ok(candidate);
-            }
-            continue;
-        }
-
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
+fn default_forge_host(provider: ForgeCliProvider) -> &'static str {
+    match provider {
+        ForgeCliProvider::Github => "github.com",
+        ForgeCliProvider::Gitlab => "gitlab.com",
     }
-
-    Err(
-		"GitHub CLI (`gh`) is not available to the app. Install it or launch DCC from a shell where `gh` is on PATH."
-			.to_string(),
-	)
 }
 
-fn parse_gh_active_login(output: &str) -> Option<String> {
-    for line in output.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
+fn normalize_forge_host(provider: ForgeCliProvider, host: Option<String>) -> Result<String, String> {
+    let host = host
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default_forge_host(provider));
 
-        if let Some((_, login)) = trimmed.split_once(" as ") {
-            let login = login
-                .trim()
-                .split('(')
-                .next()
-                .unwrap_or("")
-                .trim()
-                .trim_matches(|ch: char| ch == '(' || ch == ')' || ch == ',' || ch == '.');
-            if !login.is_empty() {
-                return Some(login.to_string());
-            }
-        }
-
-        if let Some((_, login)) = trimmed.split_once(" account ") {
-            let login = login
-                .trim()
-                .split('(')
-                .next()
-                .unwrap_or("")
-                .trim()
-                .trim_matches(|ch: char| ch == '(' || ch == ')' || ch == ',' || ch == '.');
-            if !login.is_empty() {
-                return Some(login.to_string());
-            }
-        }
+    if host.contains(['\n', '\r']) || host.chars().any(char::is_whitespace) {
+        return Err(format!("Invalid host `{host}`."));
     }
 
-    None
+    Ok(host.to_string())
 }
 
-fn github_cli_status_error(hostname: &str, message: String) -> GithubCliStatusOutput {
+fn legacy_github_cli_status(output: ForgeCliStatusOutput) -> GithubCliStatusOutput {
     GithubCliStatusOutput {
-        cli_name: "gh".to_string(),
-        hostname: hostname.to_string(),
-        status: GithubCliStatusState::Error,
-        login: None,
-        message,
-        login_command: "gh auth login".to_string(),
+        cli_name: output.cli_name,
+        hostname: output.hostname,
+        status: match output.status {
+            ForgeCliStatusState::Ready => GithubCliStatusState::Ready,
+            ForgeCliStatusState::Error => GithubCliStatusState::Error,
+        },
+        login: output.login,
+        message: output.message,
+        login_command: output.login_command,
     }
+}
+
+#[tauri::command]
+pub async fn workspace_forge_cli_status(
+    input: ForgeCliStatusInput,
+) -> Result<ForgeCliStatusOutput, String> {
+    let host = normalize_forge_host(input.provider, input.host)?;
+    let status = forge_provider::resolve_forge_cli_status(input.provider, &host)?;
+    Ok(ForgeCliStatusOutput {
+        provider: status.provider,
+        cli_name: status.cli_name,
+        hostname: status.hostname,
+        status: if status.ready {
+            ForgeCliStatusState::Ready
+        } else {
+            ForgeCliStatusState::Error
+        },
+        login: status.login,
+        logins: status.logins,
+        message: status.message,
+        login_command: status.login_command,
+    })
 }
 
 #[tauri::command]
 pub async fn workspace_github_cli_status(
     _input: GithubCliStatusInput,
 ) -> Result<GithubCliStatusOutput, String> {
-    let hostname = "github.com";
-    let gh = match resolve_gh_binary() {
-        Ok(path) => path,
-        Err(message) => return Ok(github_cli_status_error(hostname, message)),
-    };
-
-    let output = Command::new(gh)
-        .args(["auth", "status", "--active", "--hostname", hostname])
-        .output()
-        .map_err(|error| error.to_string())?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let combined = format!("{stdout}\n{stderr}");
-
-    if output.status.success() {
-        let login = parse_gh_active_login(&combined);
-        let message = login
-            .as_ref()
-            .map(|value| format!("Logged in as {value}"))
-            .unwrap_or_else(|| "GitHub CLI is connected.".to_string());
-        return Ok(GithubCliStatusOutput {
-            cli_name: "gh".to_string(),
-            hostname: hostname.to_string(),
-            status: GithubCliStatusState::Ready,
-            login,
-            message,
-            login_command: "gh auth login".to_string(),
-        });
-    }
-
-    let lower = combined.to_lowercase();
-    let message = if lower.contains("not logged in")
-        || lower.contains("no active account")
-        || lower.contains("gh auth login")
-        || lower.contains("authenticate")
-    {
-        "Run `gh auth login` to connect GitHub locally.".to_string()
-    } else {
-        let trimmed = combined.trim();
-        if trimmed.is_empty() {
-            "GitHub CLI authentication failed.".to_string()
-        } else {
-            trimmed.to_string()
-        }
-    };
-
-    Ok(github_cli_status_error(hostname, message))
+    let output = workspace_forge_cli_status(ForgeCliStatusInput {
+        provider: ForgeCliProvider::Github,
+        host: Some("github.com".to_string()),
+    })
+    .await?;
+    Ok(legacy_github_cli_status(output))
 }
 
-#[cfg(test)]
-mod github_cli_status_tests {
-    use super::parse_gh_active_login;
-
-    #[test]
-    fn parses_logged_in_line_with_as() {
-        let output = "github.com\n  ✓ Logged in to github.com as demo-user (keyring)";
-        assert_eq!(parse_gh_active_login(output), Some("demo-user".to_string()));
-    }
-
-    #[test]
-    fn parses_logged_in_line_with_account() {
-        let output = "github.com\n  ✓ Logged in to github.com account demo-user";
-        assert_eq!(parse_gh_active_login(output), Some("demo-user".to_string()));
-    }
-}
-
-fn push_current_branch(root: &str, protected_branch: Option<&str>) -> Result<(), String> {
+fn push_current_branch(
+    root: &str,
+    protected_branch: Option<&str>,
+    forge_login: Option<&str>,
+) -> Result<(), String> {
     let branch = ensure_pushable_branch(root, protected_branch)?;
-    push_branch_refspec(root, &branch)
+    push_branch_refspec(root, &branch, forge_login)
 }
 
-fn push_branch_refspec(root: &str, branch: &str) -> Result<(), String> {
+fn base64_encode(input: &str) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut index = 0;
+    while index < bytes.len() {
+        let b0 = bytes[index];
+        let b1 = bytes.get(index + 1).copied().unwrap_or(0);
+        let b2 = bytes.get(index + 2).copied().unwrap_or(0);
+        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | b2 as u32;
+
+        out.push(TABLE[((triple >> 18) & 0x3F) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3F) as usize] as char);
+        out.push(if index + 1 < bytes.len() {
+            TABLE[((triple >> 6) & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if index + 2 < bytes.len() {
+            TABLE[(triple & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        index += 3;
+    }
+    out
+}
+
+fn push_branch_refspec(root: &str, branch: &str, forge_login: Option<&str>) -> Result<(), String> {
     let branch = branch.trim();
     if branch.is_empty() || branch == "HEAD" {
         return Err(
@@ -813,7 +727,19 @@ fn push_branch_refspec(root: &str, branch: &str) -> Result<(), String> {
 
     let remote = resolve_default_remote_name(root)?;
     let remote_ref = format!("HEAD:refs/heads/{branch}");
-    let output = run_git_network_output(root, &["push", "-u", &remote, &remote_ref])?;
+    let auth = forge_provider::resolve_workspace_git_auth(root, forge_login)?;
+    let output = if let Some(auth) = auth {
+        let extraheader_key = format!("http.https://{}/.extraheader", auth.host);
+        let extraheader_value = format!(
+            "AUTHORIZATION: Basic {}",
+            base64_encode(&auth.git_http_authorization)
+        );
+        let config_arg = format!("{extraheader_key}={extraheader_value}");
+        let args = ["-c", config_arg.as_str(), "push", "-u", &remote, &remote_ref];
+        run_git_network_output_with_env(root, &args, &auth.envs)?
+    } else {
+        run_git_network_output(root, &["push", "-u", &remote, &remote_ref])?
+    };
     if output.status.success() {
         return Ok(());
     }
@@ -1021,7 +947,7 @@ pub async fn workspace_git_commit_push(
     }
 
     let protected_branch = resolve_workspace_target_branch(&state, root).await;
-    push_current_branch(root, protected_branch.as_deref())
+    push_current_branch(root, protected_branch.as_deref(), input.forge_login.as_deref())
 }
 
 #[tauri::command]
@@ -1036,12 +962,11 @@ pub async fn workspace_git_push(
     }
 
     let protected_branch = resolve_workspace_target_branch(&state, root).await;
-    push_current_branch(root, protected_branch.as_deref())
+    push_current_branch(root, protected_branch.as_deref(), input.forge_login.as_deref())
 }
 
-/// Opens the current PR in the browser (`gh pr view --web`), if GitHub CLI is available.
 #[tauri::command]
-pub async fn workspace_gh_pr_view_web(
+pub async fn workspace_change_request_view_web(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitPushInput,
 ) -> Result<(), String> {
@@ -1050,25 +975,11 @@ pub async fn workspace_gh_pr_view_web(
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    let gh = resolve_gh_binary()?;
-
-    let output = Command::new(gh)
-        .current_dir(root)
-        .args(["pr", "view", "--web"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(format!(
-        "gh pr view failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    ))
+    forge_provider::view_workspace_change_request(root, input.forge_login.as_deref())
 }
 
-/// Merge do PR atual via GitHub CLI (`gh pr merge --merge`).
 #[tauri::command]
-pub async fn workspace_gh_pr_merge(
+pub async fn workspace_change_request_merge(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitPushInput,
 ) -> Result<(), String> {
@@ -1077,24 +988,8 @@ pub async fn workspace_gh_pr_merge(
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    let gh = resolve_gh_binary()?;
-
-    let output = Command::new(gh)
-        .current_dir(root)
-        .args(["pr", "merge", "--merge"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(format!(
-        "gh pr merge failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    ))
-}
-
-fn push_named_branch(root: &str, branch: &str) -> Result<(), String> {
-    push_branch_refspec(root, branch)
+    let branch = resolve_current_branch_name(root)?;
+    forge_provider::merge_workspace_change_request(root, &branch, input.forge_login.as_deref())
 }
 
 fn branch_name_from_worktree_path(root: &str) -> String {
@@ -1127,9 +1022,8 @@ fn ensure_pushable_branch(root: &str, protected_branch: Option<&str>) -> Result<
     materialize_workspace_branch(root)
 }
 
-/// Non-interactive PR creation (`gh pr create --fill`).
 #[tauri::command]
-pub async fn workspace_gh_pr_create_fill(
+pub async fn workspace_change_request_create(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitPushInput,
 ) -> Result<(), String> {
@@ -1153,33 +1047,42 @@ pub async fn workspace_gh_pr_create_fill(
     } else {
         base_stripped
     };
-    let gh = resolve_gh_binary()?;
-
     let head_branch = raw_branch;
 
     // Branch must exist on the remote before gh can create a PR
-    push_named_branch(root, &head_branch).map_err(|e| format!("git push failed: {e}"))?;
+    push_branch_refspec(root, &head_branch, input.forge_login.as_deref())
+        .map_err(|e| format!("git push failed: {e}"))?;
 
-    let output = Command::new(gh)
-        .current_dir(root)
-        .args([
-            "pr",
-            "create",
-            "--fill",
-            "--base",
-            base_branch,
-            "--head",
-            &head_branch,
-        ])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(format!(
-        "gh pr create failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    ))
+    forge_provider::create_workspace_change_request(
+        root,
+        base_branch,
+        &head_branch,
+        input.forge_login.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub async fn workspace_gh_pr_view_web(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    workspace_change_request_view_web(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_gh_pr_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    workspace_change_request_merge(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_gh_pr_create_fill(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    workspace_change_request_create(state, input).await
 }
 
 fn file_name_from_path(path: &str) -> String {
@@ -1308,6 +1211,7 @@ pub async fn workspace_pr_status(
     if root.is_empty() {
         return Ok(WorkspacePrStatusOutput {
             provider: None,
+            host: None,
             number: None,
             title: None,
             url: None,
@@ -1331,6 +1235,7 @@ pub async fn workspace_pr_status(
             Err(_) => {
                 return Ok(WorkspacePrStatusOutput {
                     provider: None,
+                    host: None,
                     number: None,
                     title: None,
                     url: None,
@@ -1345,10 +1250,21 @@ pub async fn workspace_pr_status(
     };
     let branch_hints = workspace_branch_hints(root, Some(&branch));
 
-    let Some(raw_pr) = resolve_workspace_pr_status_json(root, &branch_hints, head_sha.as_deref())?
-    else {
+    let resolved = forge_provider::resolve_workspace_change_request_status(
+        root,
+        &branch,
+        &branch_hints,
+        head_sha.as_deref(),
+        input.forge_login.as_deref(),
+    )?;
+    let forge_target = forge_remote::resolve_workspace_forge_target(root)?;
+    let Some(resolved) = resolved else {
         return Ok(WorkspacePrStatusOutput {
-            provider: None,
+            provider: forge_target.as_ref().map(|target| match target.provider {
+                ForgeCliProvider::Github => "github".to_string(),
+                ForgeCliProvider::Gitlab => "gitlab".to_string(),
+            }),
+            host: forge_target.map(|target| target.remote.host),
             number: None,
             title: None,
             url: None,
@@ -1360,56 +1276,17 @@ pub async fn workspace_pr_status(
         });
     };
 
-    let state = raw_pr
-        .get("state")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_lowercase());
-    let state = match state.as_deref() {
-        Some("open") | Some("opened") => Some("open".to_string()),
-        Some("closed") => Some("closed".to_string()),
-        Some("merged") => Some("merged".to_string()),
-        _ => None,
-    };
-
-    let number = raw_pr
-        .get("number")
-        .and_then(|value| value.as_u64())
-        .map(|value| value as u32);
-    let title = raw_pr
-        .get("title")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let url = raw_pr
-        .get("url")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let head_branch = raw_pr
-        .get("headRefName")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let base_branch = raw_pr
-        .get("baseRefName")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let mergeable = raw_pr
-        .get("mergeable")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let merge_state_status = raw_pr
-        .get("mergeStateStatus")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-
     Ok(WorkspacePrStatusOutput {
-        provider: Some("github".to_string()),
-        number,
-        title,
-        url,
-        head_branch,
-        base_branch,
-        state,
-        mergeable,
-        merge_state_status,
+        provider: Some(resolved.provider),
+        host: resolved.host,
+        number: resolved.number,
+        title: resolved.title,
+        url: resolved.url,
+        head_branch: resolved.head_branch,
+        base_branch: resolved.base_branch,
+        state: resolved.state,
+        mergeable: resolved.mergeable,
+        merge_state_status: resolved.merge_state_status,
     })
 }
 

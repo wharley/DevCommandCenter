@@ -201,7 +201,7 @@
       "shortcuts": { "label": "Atalhos", "description": "Atalhos ativos e cheatsheet disponível." },
       "git": { "label": "Git", "description": "Chrome do Git no inspetor, ajustes em breve." },
       "experimental": { "label": "Experimental", "description": "Espaço reservado para opções futuras." },
-      "account": { "label": "Conta", "description": "GitHub CLI e autenticação local." }
+      "account": { "label": "Conta", "description": "GitHub, GitLab e autenticação local no app." }
     },
     "statusComingSoon": "Em breve",
     "general": {
@@ -256,20 +256,24 @@
       "comingSoonBody": "Nenhum toggle de preview está exposto ainda. Quando houver flags de teste, elas entram aqui."
     },
     "account": {
-      "title": "Integração GitHub CLI",
-      "hint": "O DCC usa o `gh` local para autenticação, PRs e configuração do repositório.",
-      "sectionBadge": "GitHub local",
-      "githubCliTitle": "Integração GitHub CLI",
-      "githubCliHint": "Instale e autentique o GitHub CLI para o DCC abrir PRs e manter as ações no seu terminal.",
-      "githubCliReadyBadge": "Conectado",
-      "githubCliNotReadyBadge": "Desconectado",
-      "githubCliChecking": "Verificando…",
-      "githubCliSetUp": "Abrir terminal",
-      "githubCliRefresh": "Reverificar",
-      "githubCliTerminalOpened": "Terminal aberto. Rode `gh auth login` para conectar.",
-      "githubCliTerminalFailed": "Não foi possível abrir o terminal.",
-      "githubCliLoadingError": "Não foi possível verificar o GitHub CLI.",
-      "githubCliCommand": "Comando sugerido: `{{command}}`"
+      "title": "Contas de forge",
+      "hint": "Gerencie autenticação local com GitHub CLI e GitLab CLI sem sair do app.",
+      "sectionBadge": "Login embutido",
+      "cardTitle": "Conectar GitHub ou GitLab",
+      "cardHint": "Abra um terminal embutido para autenticar com `gh auth login` ou `glab auth login` dentro do DCC.",
+      "readyBadge": "Conectado",
+      "notReadyBadge": "Desconectado",
+      "checking": "Verificando…",
+      "connect": "Conectar no app",
+      "refresh": "Reverificar",
+      "switchAccount": "Trocar conta",
+      "accountLabel": "Conta ativa no DCC",
+      "hostLabel": "Host",
+      "githubHint": "Use `github.com` ou a hostname da sua instância GitHub Enterprise.",
+      "gitlabHint": "Use `gitlab.com` ou a hostname da sua instância GitLab self-hosted.",
+      "accountsConnected": "{{count}} contas: {{logins}}",
+      "loadingError": "Não foi possível verificar o CLI do {{provider}}.",
+      "command": "Comando sugerido: `{{command}}`"
     }
   },
   "shortcutsSheet": {
@@ -327,13 +331,13 @@
     "default": "Commit",
     "modes": {
       "create-pr": {
-        "idle": "Criar PR",
-        "busy": "Criando PR...",
-        "done": "PR criado",
+        "idle": "Criar {{requestLabel}}",
+        "busy": "Criando {{requestLabel}}...",
+        "done": "{{requestLabel}} criado",
         "error": "Retry"
       },
       "open-pr": {
-        "idle": "Abrir PR",
+        "idle": "Abrir {{requestLabel}}",
         "busy": "Abrindo...",
         "done": "Aberto",
         "error": "Retry"
