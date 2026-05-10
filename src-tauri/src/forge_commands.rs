@@ -2,7 +2,8 @@ use tauri::State;
 
 use dcc_tauri::{
     commands::forge_commands::{
-        WorkspacePrStatusInput, WorkspacePrStatusOutput,
+        WorkspaceForgeContextInput, WorkspaceForgeContextOutput, WorkspacePrStatusInput,
+        WorkspacePrStatusOutput,
         ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliSelectLoginInput,
         ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput, GithubCliStatusOutput,
     },
@@ -40,6 +41,14 @@ pub async fn workspace_forge_cli_select_login(
     input: ForgeCliSelectLoginInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::forge_commands::workspace_forge_cli_select_login(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_forge_context(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceForgeContextInput,
+) -> Result<WorkspaceForgeContextOutput, String> {
+    dcc_tauri::commands::forge_commands::workspace_forge_context(state, input).await
 }
 
 #[tauri::command]

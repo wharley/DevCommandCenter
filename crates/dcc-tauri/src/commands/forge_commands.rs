@@ -5,7 +5,7 @@ use tauri::State;
 use dcc_infra::db::SqliteWorkspaceRepo;
 
 use crate::{
-    commands::forge::remote as forge_remote,
+    commands::forge::context as forge_context,
     commands::forge::provider as forge_provider,
     commands::workspace_commands::WorkspaceGitPushInput,
     commands::workspace_support::{
@@ -133,32 +133,45 @@ pub struct WorkspacePrStatusOutput {
     pub merge_state_status: Option<String>,
 }
 
-fn default_forge_host(provider: ForgeCliProvider) -> &'static str {
-    match provider {
-        ForgeCliProvider::Github => "github.com",
-        ForgeCliProvider::Gitlab => "gitlab.com",
-    }
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceForgeContextInput {
+    pub workspace_root: String,
+    pub forge_login: Option<String>,
 }
 
-fn forge_provider_key(provider: ForgeCliProvider) -> &'static str {
-    match provider {
-        ForgeCliProvider::Github => "github",
-        ForgeCliProvider::Gitlab => "gitlab",
-    }
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceForgeContextOutput {
+    pub provider: Option<ForgeCliProvider>,
+    pub host: Option<String>,
+    pub remote_name: Option<String>,
+    pub namespace: Option<String>,
+    pub repo: Option<String>,
+    pub cli_name: Option<String>,
+    pub status: Option<ForgeCliStatusState>,
+    pub login: Option<String>,
+    pub selected_login: Option<String>,
+    pub effective_login: Option<String>,
+    pub message: Option<String>,
+    pub login_command: Option<String>,
 }
 
-fn normalize_forge_host(provider: ForgeCliProvider, host: Option<String>) -> Result<String, String> {
-    let host = host
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(default_forge_host(provider));
-
-    if host.contains(['\n', '\r']) || host.chars().any(char::is_whitespace) {
-        return Err(format!("Invalid host `{host}`."));
+fn empty_workspace_forge_context() -> WorkspaceForgeContextOutput {
+    WorkspaceForgeContextOutput {
+        provider: None,
+        host: None,
+        remote_name: None,
+        namespace: None,
+        repo: None,
+        cli_name: None,
+        status: None,
+        login: None,
+        selected_login: None,
+        effective_login: None,
+        message: None,
+        login_command: None,
     }
-
-    Ok(host.to_string())
 }
 
 fn legacy_github_cli_status(output: ForgeCliStatusOutput) -> GithubCliStatusOutput {
@@ -181,13 +194,8 @@ fn resolve_forge_cli_snapshot(
     host: &str,
 ) -> Result<ForgeCliStatusOutput, String> {
     let status = forge_provider::resolve_forge_cli_status(provider, host)?;
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let stored_selected_login = repo
-        .get_forge_login_preference(forge_provider_key(provider), host)
-        .map_err(|error| error.to_string())?;
-    let selected_login = stored_selected_login
-        .filter(|login| status.logins.iter().any(|candidate| candidate == login))
-        .or_else(|| status.login.clone());
+    let selected_login =
+        forge_context::resolve_selected_forge_login(&state.db_path, provider, host, &status)?;
 
     Ok(ForgeCliStatusOutput {
         provider: status.provider,
@@ -211,7 +219,7 @@ pub async fn workspace_forge_cli_status(
     state: State<'_, WorkspaceCommandState>,
     input: ForgeCliStatusInput,
 ) -> Result<ForgeCliStatusOutput, String> {
-    let host = normalize_forge_host(input.provider, input.host)?;
+    let host = forge_context::normalize_forge_host(input.provider, input.host)?;
     resolve_forge_cli_snapshot(&state, input.provider, &host)
 }
 
@@ -220,7 +228,7 @@ pub async fn workspace_forge_cli_accounts(
     state: State<'_, WorkspaceCommandState>,
     input: ForgeCliAccountsInput,
 ) -> Result<ForgeCliAccountsOutput, String> {
-    let host = normalize_forge_host(input.provider, input.host)?;
+    let host = forge_context::normalize_forge_host(input.provider, input.host)?;
     let snapshot = resolve_forge_cli_snapshot(&state, input.provider, &host)?;
     let selected_login = snapshot.selected_login.clone();
     let active_login = snapshot.login.clone();
@@ -252,10 +260,10 @@ pub async fn workspace_forge_cli_select_login(
     state: State<'_, WorkspaceCommandState>,
     input: ForgeCliSelectLoginInput,
 ) -> Result<(), String> {
-    let host = normalize_forge_host(input.provider, input.host)?;
+    let host = forge_context::normalize_forge_host(input.provider, input.host)?;
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     repo.set_forge_login_preference(
-        forge_provider_key(input.provider),
+        forge_context::forge_provider_key(input.provider),
         &host,
         input.login.as_deref(),
     )
@@ -279,6 +287,46 @@ pub async fn workspace_github_cli_status(
 }
 
 #[tauri::command]
+pub async fn workspace_forge_context(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceForgeContextInput,
+) -> Result<WorkspaceForgeContextOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Ok(empty_workspace_forge_context());
+    }
+
+    let Some(context) = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )? else {
+        return Ok(empty_workspace_forge_context());
+    };
+
+    Ok(WorkspaceForgeContextOutput {
+        provider: Some(context.provider),
+        host: Some(context.host),
+        remote_name: Some(context.remote_name),
+        namespace: Some(context.namespace),
+        repo: Some(context.repo),
+        cli_name: Some(context.cli_name),
+        status: Some(if context.ready {
+            ForgeCliStatusState::Ready
+        } else {
+            ForgeCliStatusState::Error
+        }),
+        login: context.login,
+        selected_login: context.selected_login,
+        effective_login: context.effective_login,
+        message: Some(context.message),
+        login_command: Some(context.login_command),
+    })
+}
+
+#[tauri::command]
 pub async fn workspace_change_request_view_web(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitPushInput,
@@ -288,7 +336,13 @@ pub async fn workspace_change_request_view_web(
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    forge_provider::view_workspace_change_request(root, input.forge_login.as_deref())
+    let login = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?
+    .and_then(|context| context.effective_login);
+    forge_provider::view_workspace_change_request(root, login.as_deref())
 }
 
 #[tauri::command]
@@ -302,7 +356,13 @@ pub async fn workspace_change_request_merge(
         return Err("workspace_root is empty".to_string());
     }
     let branch = resolve_current_branch_name(root)?;
-    forge_provider::merge_workspace_change_request(root, &branch, input.forge_login.as_deref())
+    let login = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?
+    .and_then(|context| context.effective_login);
+    forge_provider::merge_workspace_change_request(root, &branch, login.as_deref())
 }
 
 #[tauri::command]
@@ -329,15 +389,21 @@ pub async fn workspace_change_request_create(
     } else {
         base_stripped
     };
+    let login = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?
+    .and_then(|context| context.effective_login);
 
-    push_branch_refspec(root, &head_branch, input.forge_login.as_deref())
+    push_branch_refspec(&state.db_path, root, &head_branch, login.as_deref())
         .map_err(|error| format!("git push failed: {error}"))?;
 
     forge_provider::create_workspace_change_request(
         root,
         base_branch,
         &head_branch,
-        input.forge_login.as_deref(),
+        login.as_deref(),
     )
 }
 
@@ -388,6 +454,11 @@ pub async fn workspace_pr_status(
         });
     }
 
+    let forge_context =
+        forge_context::resolve_workspace_forge_context(&state.db_path, root, input.forge_login.as_deref())?;
+    let effective_login = forge_context
+        .as_ref()
+        .and_then(|context| context.effective_login.as_deref());
     let head_sha = resolve_current_commit_sha(root).ok().flatten();
     let branch = match input
         .branch
@@ -420,16 +491,15 @@ pub async fn workspace_pr_status(
         &branch,
         &branch_hints,
         head_sha.as_deref(),
-        input.forge_login.as_deref(),
+        effective_login,
     )?;
-    let forge_target = forge_remote::resolve_workspace_forge_target(root)?;
     let Some(resolved) = resolved else {
         return Ok(WorkspacePrStatusOutput {
-            provider: forge_target.as_ref().map(|target| match target.provider {
+            provider: forge_context.as_ref().map(|context| match context.provider {
                 ForgeCliProvider::Github => "github".to_string(),
                 ForgeCliProvider::Gitlab => "gitlab".to_string(),
             }),
-            host: forge_target.map(|target| target.remote.host),
+            host: forge_context.as_ref().map(|context| context.host.clone()),
             number: None,
             title: None,
             url: None,

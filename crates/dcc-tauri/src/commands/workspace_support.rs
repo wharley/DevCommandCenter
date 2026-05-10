@@ -13,7 +13,7 @@ use dcc_infra::{
 };
 
 use crate::{
-    commands::forge::provider as forge_provider,
+    commands::forge::context as forge_context,
     git::{
         git_command_succeeds, git_output_err, run_git_network_output,
         run_git_network_output_with_env, run_git_output,
@@ -225,6 +225,7 @@ fn base64_encode(input: &str) -> String {
 }
 
 pub(crate) fn push_branch_refspec(
+    db_path: &Path,
     root: &str,
     branch: &str,
     forge_login: Option<&str>,
@@ -238,7 +239,7 @@ pub(crate) fn push_branch_refspec(
 
     let remote = resolve_default_remote_name(root)?;
     let remote_ref = format!("HEAD:refs/heads/{branch}");
-    let auth = forge_provider::resolve_workspace_git_auth(root, forge_login)?;
+    let auth = forge_context::resolve_workspace_git_auth(db_path, root, forge_login)?;
     let output = if let Some(auth) = auth {
         let extraheader_key = format!("http.https://{}/.extraheader", auth.host);
         let extraheader_value = format!(
@@ -329,7 +330,7 @@ pub(crate) fn resolve_branch_diff_base(root: &str, target_branch: Option<&str>) 
         return upstream;
     }
 
-    for fallback in ["origin/main", "origin/master"] {
+    for fallback in ["origin/HEAD", "origin/main", "origin/master", "origin/develop"] {
         if git_command_succeeds(root, &["rev-parse", "--verify", fallback]) {
             return Some(fallback.to_string());
         }

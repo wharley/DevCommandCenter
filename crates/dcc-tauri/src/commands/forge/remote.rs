@@ -14,6 +14,7 @@ pub(crate) struct ParsedRemote {
 #[derive(Debug, Clone)]
 pub(crate) struct WorkspaceForgeTarget {
     pub(crate) provider: ForgeCliProvider,
+    pub(crate) remote_name: String,
     pub(crate) remote: ParsedRemote,
 }
 
@@ -147,7 +148,7 @@ fn resolve_default_remote_name(root: &str) -> Result<String, String> {
     Ok(remotes[0].clone())
 }
 
-fn resolve_workspace_remote_url(root: &str) -> Result<Option<String>, String> {
+fn resolve_workspace_remote(root: &str) -> Result<Option<(String, String)>, String> {
     let remote = resolve_default_remote_name(root)?;
     let output = run_git_output(root, &["remote", "get-url", &remote])?;
     if !output.status.success() {
@@ -159,19 +160,28 @@ fn resolve_workspace_remote_url(root: &str) -> Result<Option<String>, String> {
         return Ok(None);
     }
 
-    Ok(Some(remote_url))
+    Ok(Some((remote, remote_url)))
 }
 
 pub(crate) fn resolve_workspace_forge_target(root: &str) -> Result<Option<WorkspaceForgeTarget>, String> {
-    let remote_url = resolve_workspace_remote_url(root)?;
+    let workspace_remote = resolve_workspace_remote(root)?;
+    let remote_url = workspace_remote.as_ref().map(|(_, url)| url.as_str());
     let provider = detect_provider_for_repo(remote_url.as_deref(), Some(Path::new(root)));
     let Some(provider) = provider else {
         return Ok(None);
     };
-    let Some(remote) = remote_url.as_deref().and_then(parse_remote) else {
+    let Some(parsed_remote) = remote_url.as_deref().and_then(parse_remote) else {
         return Ok(None);
     };
-    Ok(Some(WorkspaceForgeTarget { provider, remote }))
+    let remote_name = workspace_remote
+        .as_ref()
+        .map(|(name, _)| name.clone())
+        .unwrap_or_else(|| "origin".to_string());
+    Ok(Some(WorkspaceForgeTarget {
+        provider,
+        remote_name,
+        remote: parsed_remote,
+    }))
 }
 
 #[cfg(test)]

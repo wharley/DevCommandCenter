@@ -115,6 +115,40 @@ pub(crate) fn resolve_forge_cli_status(
     }
 }
 
+pub(crate) fn resolve_forge_git_auth(
+    provider: ForgeCliProvider,
+    host: &str,
+    login: Option<&str>,
+) -> Result<Option<ResolvedGitAuth>, String> {
+    let requested_login = login.map(str::trim).filter(|value| !value.is_empty());
+    if requested_login.is_none() {
+        return Ok(None);
+    }
+
+    match provider {
+        ForgeCliProvider::Github => {
+            let Some(auth) = github::resolve_auth_context(host, requested_login)? else {
+                return Ok(None);
+            };
+            Ok(Some(ResolvedGitAuth {
+                host: host.to_string(),
+                git_http_authorization: auth.git_http_authorization,
+                envs: auth.envs,
+            }))
+        }
+        ForgeCliProvider::Gitlab => {
+            let Some(auth) = gitlab::resolve_auth_context(host, requested_login)? else {
+                return Ok(None);
+            };
+            Ok(Some(ResolvedGitAuth {
+                host: host.to_string(),
+                git_http_authorization: auth.git_http_authorization,
+                envs: auth.envs,
+            }))
+        }
+    }
+}
+
 pub(crate) fn resolve_workspace_change_request_status(
     root: &str,
     branch: &str,
@@ -229,42 +263,5 @@ pub(crate) fn create_workspace_change_request(
             github::create_change_request(root, base_branch, head_branch, &target.remote.host, login)
         }
         None => github::create_change_request(root, base_branch, head_branch, "github.com", login),
-    }
-}
-
-pub(crate) fn resolve_workspace_git_auth(
-    root: &str,
-    login: Option<&str>,
-) -> Result<Option<ResolvedGitAuth>, String> {
-    let requested_login = login.map(str::trim).filter(|login| !login.is_empty());
-    if requested_login.is_none() {
-        return Ok(None);
-    }
-
-    let Some(target) = resolve_workspace_forge_target(root)? else {
-        return Ok(None);
-    };
-
-    match target.provider {
-        ForgeCliProvider::Github => {
-            let Some(auth) = github::resolve_auth_context(&target.remote.host, requested_login)? else {
-                return Ok(None);
-            };
-            Ok(Some(ResolvedGitAuth {
-                host: target.remote.host,
-                git_http_authorization: auth.git_http_authorization,
-                envs: auth.envs,
-            }))
-        }
-        ForgeCliProvider::Gitlab => {
-            let Some(auth) = gitlab::resolve_auth_context(&target.remote.host, requested_login)? else {
-                return Ok(None);
-            };
-            Ok(Some(ResolvedGitAuth {
-                host: target.remote.host,
-                git_http_authorization: auth.git_http_authorization,
-                envs: auth.envs,
-            }))
-        }
     }
 }

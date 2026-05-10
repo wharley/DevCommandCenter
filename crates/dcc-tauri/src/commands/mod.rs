@@ -9,6 +9,7 @@ pub mod workspace_commands;
 pub use forge_commands::{
     workspace_change_request_create, workspace_change_request_merge,
     workspace_change_request_view_web, workspace_forge_cli_accounts,
+    workspace_forge_context,
     workspace_forge_cli_select_login, workspace_forge_cli_status, workspace_gh_pr_create_fill,
     workspace_gh_pr_merge, workspace_gh_pr_view_web, workspace_github_cli_status,
     workspace_pr_status,

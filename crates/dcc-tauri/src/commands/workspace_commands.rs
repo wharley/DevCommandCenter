@@ -24,19 +24,22 @@ use dcc_core::{
 };
 use dcc_infra::{
     db::SqliteWorkspaceRepo,
-    git::{
-        broken_worktree_reason, detect_workspace_setup_suggestions, is_git_repo,
-        list_local_branch_names, CommandGitOps,
-    },
+    git::{detect_workspace_setup_suggestions, list_local_branch_names, CommandGitOps},
 };
 
 use crate::{
-    commands::forge::provider as forge_provider,
+    commands::workspace_support::{
+        broken_workspace_message, ensure_pushable_branch, find_workspace_by_root,
+        next_available_branch_name, preflight_workspace_root, purge_broken_workspace_by_root,
+        push_branch_refspec, resolve_branch_diff_base, resolve_current_branch_name,
+        resolve_workspace_active_root, resolve_workspace_broken_reason,
+        resolve_workspace_setup_root, resolve_workspace_target_branch,
+    },
     events::TauriEventBus,
     git::{
         git_command_succeeds, git_output_err, parse_name_status_z, parse_numstat_z,
-        run_git_network_output, run_git_network_output_with_env, run_git_output,
-        run_git_output_owned, split_null_terminated_fields,
+        run_git_network_output, run_git_output, run_git_output_owned,
+        split_null_terminated_fields,
     },
     state::WorkspaceCommandState,
     workspace_setup::run_detected_workspace_setup,
@@ -235,17 +238,6 @@ fn normalize_git_relative_path(path: &str) -> String {
     path.trim().replace('\\', "/")
 }
 
-fn resolve_workspace_setup_root(workspace: &Workspace) -> &str {
-    workspace
-        .worktree_path
-        .as_deref()
-        .unwrap_or(workspace.root_path.as_str())
-}
-
-fn resolve_workspace_active_root(workspace: &Workspace) -> &str {
-    resolve_workspace_setup_root(workspace)
-}
-
 fn collect_workspace_setup_hints(workspace: &Workspace) -> Vec<WorkspaceSetupHint> {
     detect_workspace_setup_suggestions(resolve_workspace_setup_root(workspace))
         .into_iter()
@@ -300,71 +292,6 @@ async fn persist_workspace_setup_outcome(
         .map_err(|error| error.to_string())
 }
 
-fn resolve_workspace_broken_reason(workspace: &Workspace) -> Option<String> {
-    let active_root = Path::new(resolve_workspace_active_root(workspace));
-    if !active_root.exists() {
-        return Some(format!(
-            "workspace path no longer exists: {}",
-            active_root.display()
-        ));
-    }
-
-    let repo_root = Path::new(workspace.root_path.as_str());
-    let looks_git_backed = is_git_repo(repo_root) || active_root.join(".git").exists();
-    if !looks_git_backed {
-        return None;
-    }
-
-    broken_worktree_reason(active_root)
-}
-
-async fn find_workspace_by_root(
-    repo: &SqliteWorkspaceRepo,
-    workspace_root: &str,
-) -> Result<Option<Workspace>, String> {
-    let workspace_root = workspace_root.trim();
-    let workspaces = repo
-        .list_workspaces()
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(workspaces.into_iter().find(|workspace| {
-        workspace.root_path == workspace_root
-            || workspace.worktree_path.as_deref() == Some(workspace_root)
-    }))
-}
-
-async fn purge_broken_workspace_by_root(
-    repo: &SqliteWorkspaceRepo,
-    workspace_root: &str,
-) -> Result<Option<String>, String> {
-    let Some(workspace) = find_workspace_by_root(repo, workspace_root).await? else {
-        return Ok(None);
-    };
-
-    let Some(reason) = resolve_workspace_broken_reason(&workspace) else {
-        return Ok(None);
-    };
-
-    repo.delete_workspace(&workspace.id)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(Some(reason))
-}
-
-fn broken_workspace_message(reason: &str) -> String {
-    format!("workspace became unavailable and was removed from DCC: {reason}")
-}
-
-pub(crate) async fn preflight_workspace_root(
-    state: &State<'_, WorkspaceCommandState>,
-    workspace_root: &str,
-) -> Result<(), String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    if let Some(reason) = purge_broken_workspace_by_root(&repo, workspace_root).await? {
-        return Err(broken_workspace_message(&reason));
-    }
-    Ok(())
-}
 
 fn validate_git_relative_path(path: &str) -> Result<String, String> {
     let p = normalize_git_relative_path(path);
@@ -377,43 +304,6 @@ fn validate_git_relative_path(path: &str) -> Result<String, String> {
     Ok(p)
 }
 
-pub(crate) fn resolve_current_branch_name(root: &str) -> Result<String, String> {
-    let output = run_git_output(root, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    if !output.status.success() {
-        return Err(git_output_err(
-            "git rev-parse --abbrev-ref HEAD",
-            &output.stderr,
-        ));
-    }
-
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if branch.is_empty() {
-        return Err("current branch is empty".to_string());
-    }
-    Ok(branch)
-}
-
-pub(crate) async fn resolve_workspace_target_branch(
-    state: &State<'_, WorkspaceCommandState>,
-    workspace_root: &str,
-) -> Option<String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).ok()?;
-    let workspace = find_workspace_by_root(&repo, workspace_root)
-        .await
-        .ok()
-        .flatten()?;
-    let repository = repo
-        .get_repository(&RepositoryId(workspace.root_path.clone()))
-        .await
-        .ok()
-        .flatten()?;
-    let branch = repository.base_branch.trim();
-    if branch.is_empty() {
-        None
-    } else {
-        Some(branch.to_string())
-    }
-}
 
 fn resolve_default_branch_name(root: &str) -> Result<String, String> {
     let output = run_git_output(
@@ -472,98 +362,16 @@ fn resolve_conflict_count(root: &str) -> Result<u32, String> {
     Ok(count as u32)
 }
 
-fn resolve_default_remote_name(root: &str) -> Result<String, String> {
-    let output = run_git_output(root, &["remote"])?;
-    if !output.status.success() {
-        return Err(git_output_err("git remote", &output.stderr));
-    }
-
-    let remotes: Vec<String> = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(|line| line.to_string())
-        .collect();
-    if remotes.is_empty() {
-        return Ok("origin".to_string());
-    }
-    if remotes.iter().any(|remote| remote == "origin") {
-        return Ok("origin".to_string());
-    }
-
-    Ok(remotes[0].clone())
-}
-
 fn push_current_branch(
+    db_path: &Path,
     root: &str,
     protected_branch: Option<&str>,
     forge_login: Option<&str>,
 ) -> Result<(), String> {
     let branch = ensure_pushable_branch(root, protected_branch)?;
-    push_branch_refspec(root, &branch, forge_login)
+    push_branch_refspec(db_path, root, &branch, forge_login)
 }
 
-fn base64_encode(input: &str) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let bytes = input.as_bytes();
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    let mut index = 0;
-    while index < bytes.len() {
-        let b0 = bytes[index];
-        let b1 = bytes.get(index + 1).copied().unwrap_or(0);
-        let b2 = bytes.get(index + 2).copied().unwrap_or(0);
-        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | b2 as u32;
-
-        out.push(TABLE[((triple >> 18) & 0x3F) as usize] as char);
-        out.push(TABLE[((triple >> 12) & 0x3F) as usize] as char);
-        out.push(if index + 1 < bytes.len() {
-            TABLE[((triple >> 6) & 0x3F) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if index + 2 < bytes.len() {
-            TABLE[(triple & 0x3F) as usize] as char
-        } else {
-            '='
-        });
-        index += 3;
-    }
-    out
-}
-
-pub(crate) fn push_branch_refspec(
-    root: &str,
-    branch: &str,
-    forge_login: Option<&str>,
-) -> Result<(), String> {
-    let branch = branch.trim();
-    if branch.is_empty() || branch == "HEAD" {
-        return Err(
-            "cannot push from detached HEAD because no branch name could be resolved".to_string(),
-        );
-    }
-
-    let remote = resolve_default_remote_name(root)?;
-    let remote_ref = format!("HEAD:refs/heads/{branch}");
-    let auth = forge_provider::resolve_workspace_git_auth(root, forge_login)?;
-    let output = if let Some(auth) = auth {
-        let extraheader_key = format!("http.https://{}/.extraheader", auth.host);
-        let extraheader_value = format!(
-            "AUTHORIZATION: Basic {}",
-            base64_encode(&auth.git_http_authorization)
-        );
-        let config_arg = format!("{extraheader_key}={extraheader_value}");
-        let args = ["-c", config_arg.as_str(), "push", "-u", &remote, &remote_ref];
-        run_git_network_output_with_env(root, &args, &auth.envs)?
-    } else {
-        run_git_network_output(root, &["push", "-u", &remote, &remote_ref])?
-    };
-    if output.status.success() {
-        return Ok(());
-    }
-
-    Err(git_output_err("git push -u", &output.stderr))
-}
 
 fn path_is_tracked(root: &str, rel: &str) -> bool {
     git_command_succeeds(root, &["ls-files", "--error-unmatch", "--", rel])
@@ -765,7 +573,12 @@ pub async fn workspace_git_commit_push(
     }
 
     let protected_branch = resolve_workspace_target_branch(&state, root).await;
-    push_current_branch(root, protected_branch.as_deref(), input.forge_login.as_deref())
+    push_current_branch(
+        &state.db_path,
+        root,
+        protected_branch.as_deref(),
+        input.forge_login.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -780,40 +593,12 @@ pub async fn workspace_git_push(
     }
 
     let protected_branch = resolve_workspace_target_branch(&state, root).await;
-    push_current_branch(root, protected_branch.as_deref(), input.forge_login.as_deref())
-}
-
-fn branch_name_from_worktree_path(root: &str) -> String {
-    let dir = std::path::Path::new(root)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("dcc-branch");
-    format!("dcc/{dir}")
-}
-
-fn materialize_workspace_branch(root: &str) -> Result<String, String> {
-    let preferred = branch_name_from_worktree_path(root);
-    let branch = next_available_branch_name(root, &preferred);
-    let checkout = run_git_output(root, &["switch", "-c", &branch])?;
-    if !checkout.status.success() {
-        return Err(git_output_err("git switch -c", &checkout.stderr));
-    }
-    Ok(branch)
-}
-
-pub(crate) fn ensure_pushable_branch(
-    root: &str,
-    protected_branch: Option<&str>,
-) -> Result<String, String> {
-    let raw_branch = resolve_current_branch_name(root)?;
-    let protected_branch = protected_branch
-        .map(str::trim)
-        .filter(|branch| !branch.is_empty());
-    if raw_branch != "HEAD" && protected_branch != Some(raw_branch.as_str()) {
-        return Ok(raw_branch);
-    }
-
-    materialize_workspace_branch(root)
+    push_current_branch(
+        &state.db_path,
+        root,
+        protected_branch.as_deref(),
+        input.forge_login.as_deref(),
+    )
 }
 
 fn file_name_from_path(path: &str) -> String {
@@ -1079,23 +864,6 @@ fn sanitize_branch_name(name: &str) -> String {
     } else {
         result.chars().take(50).collect()
     }
-}
-
-fn next_available_branch_name(root: &str, base: &str) -> String {
-    let branch_exists = |name: &str| -> bool {
-        let branch_ref = format!("refs/heads/{name}");
-        git_command_succeeds(root, &["rev-parse", "--verify", &branch_ref])
-    };
-    if !branch_exists(base) {
-        return base.to_string();
-    }
-    for i in 2u32..=50 {
-        let candidate = format!("{base}-{i}");
-        if !branch_exists(&candidate) {
-            return candidate;
-        }
-    }
-    format!("{base}-next")
 }
 
 /// File-level preview for staged / unstaged / committed tree rows.
@@ -1438,57 +1206,6 @@ pub async fn workspace_git_branch_diff(
         changes,
         base_branch: base,
     })
-}
-
-pub(crate) fn resolve_branch_diff_base(root: &str, target_branch: Option<&str>) -> Option<String> {
-    let current_branch = resolve_current_branch_name(root).ok();
-
-    if let Some(target_branch) = target_branch
-        .map(str::trim)
-        .filter(|branch| !branch.is_empty())
-    {
-        let remote_target = format!("origin/{target_branch}");
-        if git_command_succeeds(root, &["rev-parse", "--verify", &remote_target]) {
-            return Some(remote_target);
-        }
-        if git_command_succeeds(root, &["rev-parse", "--verify", target_branch]) {
-            return Some(target_branch.to_string());
-        }
-    }
-
-    let upstream = run_git_output(root, &["rev-parse", "--abbrev-ref", "@{upstream}"])
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| {
-            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            if s.is_empty() {
-                None
-            } else {
-                Some(s)
-            }
-        })
-        .filter(|upstream| {
-            let short = upstream.rsplit('/').next().unwrap_or(upstream.as_str());
-            current_branch
-                .as_deref()
-                .map(|branch| branch != short)
-                .unwrap_or(true)
-        });
-    if upstream.is_some() {
-        return upstream;
-    }
-
-    for candidate in &[
-        "origin/HEAD",
-        "origin/main",
-        "origin/master",
-        "origin/develop",
-    ] {
-        if git_command_succeeds(root, &["rev-parse", "--verify", candidate]) {
-            return Some(candidate.to_string());
-        }
-    }
-    None
 }
 
 fn compute_branch_diff(root: &str, base: &str) -> Result<Vec<WorkspaceGitChangeEntry>, String> {
