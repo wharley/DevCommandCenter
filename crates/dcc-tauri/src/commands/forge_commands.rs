@@ -5,7 +5,14 @@ use tauri::State;
 use dcc_infra::db::SqliteWorkspaceRepo;
 
 use crate::{
+    commands::forge::remote as forge_remote,
     commands::forge::provider as forge_provider,
+    commands::workspace_commands::WorkspaceGitPushInput,
+    commands::workspace_support::{
+        ensure_pushable_branch, preflight_workspace_root, push_branch_refspec,
+        resolve_branch_diff_base, resolve_current_branch_name, resolve_current_commit_sha,
+        resolve_workspace_target_branch, workspace_branch_hints,
+    },
     state::WorkspaceCommandState,
 };
 
@@ -101,6 +108,29 @@ pub struct GithubCliStatusOutput {
     pub login: Option<String>,
     pub message: String,
     pub login_command: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePrStatusInput {
+    pub workspace_root: String,
+    pub branch: Option<String>,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePrStatusOutput {
+    pub provider: Option<String>,
+    pub host: Option<String>,
+    pub number: Option<u32>,
+    pub title: Option<String>,
+    pub url: Option<String>,
+    pub head_branch: Option<String>,
+    pub base_branch: Option<String>,
+    pub state: Option<String>,
+    pub mergeable: Option<String>,
+    pub merge_state_status: Option<String>,
 }
 
 fn default_forge_host(provider: ForgeCliProvider) -> &'static str {
@@ -246,4 +276,181 @@ pub async fn workspace_github_cli_status(
     )
     .await?;
     Ok(legacy_github_cli_status(output))
+}
+
+#[tauri::command]
+pub async fn workspace_change_request_view_web(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    forge_provider::view_workspace_change_request(root, input.forge_login.as_deref())
+}
+
+#[tauri::command]
+pub async fn workspace_change_request_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    let branch = resolve_current_branch_name(root)?;
+    forge_provider::merge_workspace_change_request(root, &branch, input.forge_login.as_deref())
+}
+
+#[tauri::command]
+pub async fn workspace_change_request_create(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+
+    let protected_branch = resolve_workspace_target_branch(&state, root).await;
+    let head_branch = ensure_pushable_branch(root, protected_branch.as_deref())?;
+    let base_ref =
+        resolve_branch_diff_base(root, protected_branch.as_deref()).unwrap_or_else(|| "main".to_string());
+    let base_stripped = base_ref
+        .split_once('/')
+        .map(|(_, branch)| branch)
+        .unwrap_or(&base_ref);
+    let base_branch = if base_stripped == "HEAD" {
+        "main"
+    } else {
+        base_stripped
+    };
+
+    push_branch_refspec(root, &head_branch, input.forge_login.as_deref())
+        .map_err(|error| format!("git push failed: {error}"))?;
+
+    forge_provider::create_workspace_change_request(
+        root,
+        base_branch,
+        &head_branch,
+        input.forge_login.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub async fn workspace_gh_pr_view_web(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    workspace_change_request_view_web(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_gh_pr_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    workspace_change_request_merge(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_gh_pr_create_fill(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    workspace_change_request_create(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_pr_status(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePrStatusInput,
+) -> Result<WorkspacePrStatusOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Ok(WorkspacePrStatusOutput {
+            provider: None,
+            host: None,
+            number: None,
+            title: None,
+            url: None,
+            head_branch: None,
+            base_branch: None,
+            state: None,
+            mergeable: None,
+            merge_state_status: None,
+        });
+    }
+
+    let head_sha = resolve_current_commit_sha(root).ok().flatten();
+    let branch = match input
+        .branch
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(branch) => branch,
+        None => match resolve_current_branch_name(root) {
+            Ok(branch) => branch,
+            Err(_) => {
+                return Ok(WorkspacePrStatusOutput {
+                    provider: None,
+                    host: None,
+                    number: None,
+                    title: None,
+                    url: None,
+                    head_branch: None,
+                    base_branch: None,
+                    state: None,
+                    mergeable: None,
+                    merge_state_status: None,
+                });
+            }
+        },
+    };
+    let branch_hints = workspace_branch_hints(root, Some(&branch));
+
+    let resolved = forge_provider::resolve_workspace_change_request_status(
+        root,
+        &branch,
+        &branch_hints,
+        head_sha.as_deref(),
+        input.forge_login.as_deref(),
+    )?;
+    let forge_target = forge_remote::resolve_workspace_forge_target(root)?;
+    let Some(resolved) = resolved else {
+        return Ok(WorkspacePrStatusOutput {
+            provider: forge_target.as_ref().map(|target| match target.provider {
+                ForgeCliProvider::Github => "github".to_string(),
+                ForgeCliProvider::Gitlab => "gitlab".to_string(),
+            }),
+            host: forge_target.map(|target| target.remote.host),
+            number: None,
+            title: None,
+            url: None,
+            head_branch: Some(branch),
+            base_branch: None,
+            state: None,
+            mergeable: None,
+            merge_state_status: None,
+        });
+    };
+
+    Ok(WorkspacePrStatusOutput {
+        provider: Some(resolved.provider),
+        host: resolved.host,
+        number: resolved.number,
+        title: resolved.title,
+        url: resolved.url,
+        head_branch: resolved.head_branch,
+        base_branch: resolved.base_branch,
+        state: resolved.state,
+        mergeable: resolved.mergeable,
+        merge_state_status: resolved.merge_state_status,
+    })
 }

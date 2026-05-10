@@ -26,7 +26,8 @@ use dcc_tauri::commands::{
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
         ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput,
-        GithubCliStatusInput, GithubCliStatusOutput,
+        GithubCliStatusInput, GithubCliStatusOutput, WorkspacePrStatusInput,
+        WorkspacePrStatusOutput,
     },
     provider_commands::ListProvidersOutput,
     session_commands::{
@@ -41,9 +42,8 @@ use dcc_tauri::commands::{
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
         WorkspaceGitCommitPushInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
-        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspacePrStatusInput,
-        WorkspacePrStatusOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
-        WorkspaceSetupHint,
+        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceRunSetupInput,
+        WorkspaceRunSetupOutput, WorkspaceSetupHint,
     },
 };
 use serde::{Deserialize, Serialize};

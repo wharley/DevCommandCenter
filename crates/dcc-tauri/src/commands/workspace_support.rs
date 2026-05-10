@@ -1,0 +1,357 @@
+use std::path::Path;
+
+use tauri::State;
+
+use dcc_core::domain::{
+    repository::RepositoryId,
+    workspace::Workspace,
+};
+use dcc_core::ports::{RepositoryRepo, WorkspaceRepo};
+use dcc_infra::{
+    db::SqliteWorkspaceRepo,
+    git::{broken_worktree_reason, is_git_repo},
+};
+
+use crate::{
+    commands::forge::provider as forge_provider,
+    git::{
+        git_command_succeeds, git_output_err, run_git_network_output,
+        run_git_network_output_with_env, run_git_output,
+    },
+    state::WorkspaceCommandState,
+};
+
+pub(crate) fn resolve_workspace_setup_root(workspace: &Workspace) -> &str {
+    workspace
+        .worktree_path
+        .as_deref()
+        .unwrap_or(workspace.root_path.as_str())
+}
+
+pub(crate) fn resolve_workspace_active_root(workspace: &Workspace) -> &str {
+    resolve_workspace_setup_root(workspace)
+}
+
+pub(crate) fn resolve_workspace_broken_reason(workspace: &Workspace) -> Option<String> {
+    let active_root = Path::new(resolve_workspace_active_root(workspace));
+    if !active_root.exists() {
+        return Some(format!(
+            "workspace path no longer exists: {}",
+            active_root.display()
+        ));
+    }
+
+    let repo_root = Path::new(workspace.root_path.as_str());
+    let looks_git_backed = is_git_repo(repo_root) || active_root.join(".git").exists();
+    if !looks_git_backed {
+        return None;
+    }
+
+    broken_worktree_reason(active_root)
+}
+
+pub(crate) async fn find_workspace_by_root(
+    repo: &SqliteWorkspaceRepo,
+    workspace_root: &str,
+) -> Result<Option<Workspace>, String> {
+    let workspace_root = workspace_root.trim();
+    let workspaces = repo
+        .list_workspaces()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(workspaces.into_iter().find(|workspace| {
+        workspace.root_path == workspace_root
+            || workspace.worktree_path.as_deref() == Some(workspace_root)
+    }))
+}
+
+pub(crate) async fn purge_broken_workspace_by_root(
+    repo: &SqliteWorkspaceRepo,
+    workspace_root: &str,
+) -> Result<Option<String>, String> {
+    let Some(workspace) = find_workspace_by_root(repo, workspace_root).await? else {
+        return Ok(None);
+    };
+
+    let Some(reason) = resolve_workspace_broken_reason(&workspace) else {
+        return Ok(None);
+    };
+
+    repo.delete_workspace(&workspace.id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(Some(reason))
+}
+
+pub(crate) fn broken_workspace_message(reason: &str) -> String {
+    format!("workspace became unavailable and was removed from DCC: {reason}")
+}
+
+pub(crate) async fn preflight_workspace_root(
+    state: &State<'_, WorkspaceCommandState>,
+    workspace_root: &str,
+) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    if let Some(reason) = purge_broken_workspace_by_root(&repo, workspace_root).await? {
+        return Err(broken_workspace_message(&reason));
+    }
+    Ok(())
+}
+
+pub(crate) fn resolve_current_branch_name(root: &str) -> Result<String, String> {
+    let output = run_git_output(root, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    if !output.status.success() {
+        return Err(git_output_err(
+            "git rev-parse --abbrev-ref HEAD",
+            &output.stderr,
+        ));
+    }
+
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() {
+        return Err("current branch is empty".to_string());
+    }
+    Ok(branch)
+}
+
+pub(crate) async fn resolve_workspace_target_branch(
+    state: &State<'_, WorkspaceCommandState>,
+    workspace_root: &str,
+) -> Option<String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).ok()?;
+    let workspace = find_workspace_by_root(&repo, workspace_root)
+        .await
+        .ok()
+        .flatten()?;
+    let repository = repo
+        .get_repository(&RepositoryId(workspace.root_path.clone()))
+        .await
+        .ok()
+        .flatten()?;
+    let branch = repository.base_branch.trim();
+    if branch.is_empty() {
+        None
+    } else {
+        Some(branch.to_string())
+    }
+}
+
+pub(crate) fn resolve_current_commit_sha(root: &str) -> Result<Option<String>, String> {
+    let output = run_git_output(root, &["rev-parse", "HEAD"])?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(sha))
+}
+
+pub(crate) fn workspace_branch_hints(root: &str, branch: Option<&str>) -> Vec<String> {
+    let mut hints = Vec::new();
+
+    if let Some(branch) = branch.map(str::trim).filter(|value| !value.is_empty()) {
+        hints.push(branch.to_string());
+    }
+
+    if let Some(name) = Path::new(root)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        hints.push(name.to_string());
+        if !name.starts_with("dcc/") {
+            hints.push(format!("dcc/{name}"));
+        }
+    }
+
+    hints.sort();
+    hints.dedup();
+    hints
+}
+
+fn resolve_default_remote_name(root: &str) -> Result<String, String> {
+    let output = run_git_output(root, &["remote"])?;
+    if !output.status.success() {
+        return Err(git_output_err("git remote", &output.stderr));
+    }
+
+    let remotes: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| line.to_string())
+        .collect();
+    if remotes.is_empty() {
+        return Ok("origin".to_string());
+    }
+    if remotes.iter().any(|remote| remote == "origin") {
+        return Ok("origin".to_string());
+    }
+
+    Ok(remotes[0].clone())
+}
+
+fn base64_encode(input: &str) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut index = 0;
+    while index < bytes.len() {
+        let b0 = bytes[index];
+        let b1 = bytes.get(index + 1).copied().unwrap_or(0);
+        let b2 = bytes.get(index + 2).copied().unwrap_or(0);
+        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | b2 as u32;
+
+        out.push(TABLE[((triple >> 18) & 0x3F) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3F) as usize] as char);
+        out.push(if index + 1 < bytes.len() {
+            TABLE[((triple >> 6) & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if index + 2 < bytes.len() {
+            TABLE[(triple & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        index += 3;
+    }
+    out
+}
+
+pub(crate) fn push_branch_refspec(
+    root: &str,
+    branch: &str,
+    forge_login: Option<&str>,
+) -> Result<(), String> {
+    let branch = branch.trim();
+    if branch.is_empty() || branch == "HEAD" {
+        return Err(
+            "cannot push from detached HEAD because no branch name could be resolved".to_string(),
+        );
+    }
+
+    let remote = resolve_default_remote_name(root)?;
+    let remote_ref = format!("HEAD:refs/heads/{branch}");
+    let auth = forge_provider::resolve_workspace_git_auth(root, forge_login)?;
+    let output = if let Some(auth) = auth {
+        let extraheader_key = format!("http.https://{}/.extraheader", auth.host);
+        let extraheader_value = format!(
+            "AUTHORIZATION: Basic {}",
+            base64_encode(&auth.git_http_authorization)
+        );
+        let config_arg = format!("{extraheader_key}={extraheader_value}");
+        let args = ["-c", config_arg.as_str(), "push", "-u", &remote, &remote_ref];
+        run_git_network_output_with_env(root, &args, &auth.envs)?
+    } else {
+        run_git_network_output(root, &["push", "-u", &remote, &remote_ref])?
+    };
+    if output.status.success() {
+        return Ok(());
+    }
+
+    Err(git_output_err("git push -u", &output.stderr))
+}
+
+fn branch_name_from_worktree_path(root: &str) -> String {
+    let dir = Path::new(root)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("dcc-branch");
+    format!("dcc/{dir}")
+}
+
+fn materialize_workspace_branch(root: &str) -> Result<String, String> {
+    let preferred = branch_name_from_worktree_path(root);
+    let branch = next_available_branch_name(root, &preferred);
+    let checkout = run_git_output(root, &["switch", "-c", &branch])?;
+    if !checkout.status.success() {
+        return Err(git_output_err("git switch -c", &checkout.stderr));
+    }
+    Ok(branch)
+}
+
+pub(crate) fn ensure_pushable_branch(
+    root: &str,
+    protected_branch: Option<&str>,
+) -> Result<String, String> {
+    let raw_branch = resolve_current_branch_name(root)?;
+    let protected_branch = protected_branch
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty());
+    if raw_branch != "HEAD" && protected_branch != Some(raw_branch.as_str()) {
+        return Ok(raw_branch);
+    }
+
+    materialize_workspace_branch(root)
+}
+
+pub(crate) fn resolve_branch_diff_base(root: &str, target_branch: Option<&str>) -> Option<String> {
+    let current_branch = resolve_current_branch_name(root).ok();
+
+    if let Some(target_branch) = target_branch
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+    {
+        let remote_target = format!("origin/{target_branch}");
+        if git_command_succeeds(root, &["rev-parse", "--verify", &remote_target]) {
+            return Some(remote_target);
+        }
+        if git_command_succeeds(root, &["rev-parse", "--verify", target_branch]) {
+            return Some(target_branch.to_string());
+        }
+    }
+
+    let upstream = run_git_output(root, &["rev-parse", "--abbrev-ref", "@{upstream}"])
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| {
+            let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if value.is_empty() {
+                None
+            } else {
+                Some(value)
+            }
+        })
+        .filter(|upstream| {
+            let short = upstream.rsplit('/').next().unwrap_or(upstream.as_str());
+            current_branch
+                .as_deref()
+                .map(|branch| branch != short)
+                .unwrap_or(true)
+        });
+    if upstream.is_some() {
+        return upstream;
+    }
+
+    for fallback in ["origin/main", "origin/master"] {
+        if git_command_succeeds(root, &["rev-parse", "--verify", fallback]) {
+            return Some(fallback.to_string());
+        }
+    }
+
+    None
+}
+
+pub(crate) fn next_available_branch_name(root: &str, preferred: &str) -> String {
+    if !git_command_succeeds(root, &["show-ref", "--verify", &format!("refs/heads/{preferred}")]) {
+        return preferred.to_string();
+    }
+
+    for attempt in 2..=9999 {
+        let candidate = format!("{preferred}-{attempt}");
+        if !git_command_succeeds(
+            root,
+            &["show-ref", "--verify", &format!("refs/heads/{candidate}")],
+        ) {
+            return candidate;
+        }
+    }
+
+    format!("{preferred}-{}", uuid::Uuid::new_v4().simple())
+}

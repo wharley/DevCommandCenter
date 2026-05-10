@@ -2,9 +2,11 @@ use tauri::State;
 
 use dcc_tauri::{
     commands::forge_commands::{
+        WorkspacePrStatusInput, WorkspacePrStatusOutput,
         ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliSelectLoginInput,
         ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput, GithubCliStatusOutput,
     },
+    commands::workspace_commands::WorkspaceGitPushInput,
     state::WorkspaceCommandState,
 };
 
@@ -38,4 +40,60 @@ pub async fn workspace_forge_cli_select_login(
     input: ForgeCliSelectLoginInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::forge_commands::workspace_forge_cli_select_login(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_change_request_view_web(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::forge_commands::workspace_change_request_view_web(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_change_request_create(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::forge_commands::workspace_change_request_create(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_change_request_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::forge_commands::workspace_change_request_merge(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_gh_pr_view_web(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::forge_commands::workspace_gh_pr_view_web(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_gh_pr_create_fill(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::forge_commands::workspace_gh_pr_create_fill(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_gh_pr_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::forge_commands::workspace_gh_pr_merge(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_pr_status(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePrStatusInput,
+) -> Result<WorkspacePrStatusOutput, String> {
+    dcc_tauri::commands::forge_commands::workspace_pr_status(state, input).await
 }

@@ -10,9 +10,8 @@ use dcc_tauri::{
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
-        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceIdInput,
-        WorkspacePrStatusInput, WorkspacePrStatusOutput, WorkspaceRunSetupInput,
-        WorkspaceRunSetupOutput,
+        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
+        WorkspaceIdInput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
     },
     state::WorkspaceCommandState,
 };
@@ -137,54 +136,6 @@ pub async fn workspace_git_push(
 }
 
 #[tauri::command]
-pub async fn workspace_change_request_view_web(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_change_request_view_web(state, input).await
-}
-
-#[tauri::command]
-pub async fn workspace_change_request_create(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_change_request_create(state, input).await
-}
-
-#[tauri::command]
-pub async fn workspace_change_request_merge(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_change_request_merge(state, input).await
-}
-
-#[tauri::command]
-pub async fn workspace_gh_pr_view_web(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_gh_pr_view_web(state, input).await
-}
-
-#[tauri::command]
-pub async fn workspace_gh_pr_create_fill(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_gh_pr_create_fill(state, input).await
-}
-
-#[tauri::command]
-pub async fn workspace_gh_pr_merge(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    dcc_tauri::commands::workspace_commands::workspace_gh_pr_merge(state, input).await
-}
-
-#[tauri::command]
 pub async fn workspace_git_branch_diff(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitBranchDiffInput,
@@ -206,14 +157,6 @@ pub async fn workspace_git_file_preview_content(
     input: WorkspaceGitFilePreviewInput,
 ) -> Result<WorkspaceGitFilePreviewContentOutput, String> {
     dcc_tauri::commands::workspace_commands::workspace_git_file_preview_content(state, input).await
-}
-
-#[tauri::command]
-pub async fn workspace_pr_status(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspacePrStatusInput,
-) -> Result<WorkspacePrStatusOutput, String> {
-    dcc_tauri::commands::workspace_commands::workspace_pr_status(state, input).await
 }
 
 #[tauri::command]

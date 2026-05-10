@@ -31,8 +31,7 @@ use dcc_infra::{
 };
 
 use crate::{
-    commands::forge_commands::ForgeCliProvider,
-    commands::forge::{provider as forge_provider, remote as forge_remote},
+    commands::forge::provider as forge_provider,
     events::TauriEventBus,
     git::{
         git_command_succeeds, git_output_err, parse_name_status_z, parse_numstat_z,
@@ -215,29 +214,6 @@ pub struct WorkspaceGitFilePreviewContentOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkspacePrStatusInput {
-    pub workspace_root: String,
-    pub branch: Option<String>,
-    pub forge_login: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspacePrStatusOutput {
-    pub provider: Option<String>,
-    pub host: Option<String>,
-    pub number: Option<u32>,
-    pub title: Option<String>,
-    pub url: Option<String>,
-    pub head_branch: Option<String>,
-    pub base_branch: Option<String>,
-    pub state: Option<String>,
-    pub mergeable: Option<String>,
-    pub merge_state_status: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
 pub struct WorkspaceContinueFromBaseBranchInput {
     pub workspace_root: String,
     pub base_branch: Option<String>,
@@ -379,7 +355,7 @@ fn broken_workspace_message(reason: &str) -> String {
     format!("workspace became unavailable and was removed from DCC: {reason}")
 }
 
-async fn preflight_workspace_root(
+pub(crate) async fn preflight_workspace_root(
     state: &State<'_, WorkspaceCommandState>,
     workspace_root: &str,
 ) -> Result<(), String> {
@@ -401,7 +377,7 @@ fn validate_git_relative_path(path: &str) -> Result<String, String> {
     Ok(p)
 }
 
-fn resolve_current_branch_name(root: &str) -> Result<String, String> {
+pub(crate) fn resolve_current_branch_name(root: &str) -> Result<String, String> {
     let output = run_git_output(root, &["rev-parse", "--abbrev-ref", "HEAD"])?;
     if !output.status.success() {
         return Err(git_output_err(
@@ -417,7 +393,7 @@ fn resolve_current_branch_name(root: &str) -> Result<String, String> {
     Ok(branch)
 }
 
-async fn resolve_workspace_target_branch(
+pub(crate) async fn resolve_workspace_target_branch(
     state: &State<'_, WorkspaceCommandState>,
     workspace_root: &str,
 ) -> Option<String> {
@@ -496,44 +472,6 @@ fn resolve_conflict_count(root: &str) -> Result<u32, String> {
     Ok(count as u32)
 }
 
-fn resolve_current_commit_sha(root: &str) -> Result<Option<String>, String> {
-    let output = run_git_output(root, &["rev-parse", "HEAD"])?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-
-    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if sha.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(sha))
-}
-
-fn workspace_branch_hints(root: &str, branch: Option<&str>) -> Vec<String> {
-    let mut hints = Vec::new();
-
-    if let Some(branch) = branch.map(str::trim).filter(|value| !value.is_empty()) {
-        hints.push(branch.to_string());
-    }
-
-    if let Some(name) = Path::new(root)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        hints.push(name.to_string());
-        if !name.starts_with("dcc/") {
-            hints.push(format!("dcc/{name}"));
-        }
-    }
-
-    hints.sort();
-    hints.dedup();
-    hints
-}
-
 fn resolve_default_remote_name(root: &str) -> Result<String, String> {
     let output = run_git_output(root, &["remote"])?;
     if !output.status.success() {
@@ -593,7 +531,11 @@ fn base64_encode(input: &str) -> String {
     out
 }
 
-fn push_branch_refspec(root: &str, branch: &str, forge_login: Option<&str>) -> Result<(), String> {
+pub(crate) fn push_branch_refspec(
+    root: &str,
+    branch: &str,
+    forge_login: Option<&str>,
+) -> Result<(), String> {
     let branch = branch.trim();
     if branch.is_empty() || branch == "HEAD" {
         return Err(
@@ -841,33 +783,6 @@ pub async fn workspace_git_push(
     push_current_branch(root, protected_branch.as_deref(), input.forge_login.as_deref())
 }
 
-#[tauri::command]
-pub async fn workspace_change_request_view_web(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
-        return Err("workspace_root is empty".to_string());
-    }
-    forge_provider::view_workspace_change_request(root, input.forge_login.as_deref())
-}
-
-#[tauri::command]
-pub async fn workspace_change_request_merge(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
-        return Err("workspace_root is empty".to_string());
-    }
-    let branch = resolve_current_branch_name(root)?;
-    forge_provider::merge_workspace_change_request(root, &branch, input.forge_login.as_deref())
-}
-
 fn branch_name_from_worktree_path(root: &str) -> String {
     let dir = std::path::Path::new(root)
         .file_name()
@@ -886,7 +801,10 @@ fn materialize_workspace_branch(root: &str) -> Result<String, String> {
     Ok(branch)
 }
 
-fn ensure_pushable_branch(root: &str, protected_branch: Option<&str>) -> Result<String, String> {
+pub(crate) fn ensure_pushable_branch(
+    root: &str,
+    protected_branch: Option<&str>,
+) -> Result<String, String> {
     let raw_branch = resolve_current_branch_name(root)?;
     let protected_branch = protected_branch
         .map(str::trim)
@@ -896,69 +814,6 @@ fn ensure_pushable_branch(root: &str, protected_branch: Option<&str>) -> Result<
     }
 
     materialize_workspace_branch(root)
-}
-
-#[tauri::command]
-pub async fn workspace_change_request_create(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
-        return Err("workspace_root is empty".to_string());
-    }
-
-    let protected_branch = resolve_workspace_target_branch(&state, root).await;
-    let raw_branch = ensure_pushable_branch(root, protected_branch.as_deref())?;
-    let base_ref = resolve_branch_diff_base(root, protected_branch.as_deref())
-        .unwrap_or_else(|| "main".to_string());
-    // gh pr create --base expects a branch name, not a remote tracking ref like origin/main
-    let base_stripped = base_ref
-        .split_once('/')
-        .map(|(_, b)| b)
-        .unwrap_or(&base_ref);
-    let base_branch = if base_stripped == "HEAD" {
-        "main"
-    } else {
-        base_stripped
-    };
-    let head_branch = raw_branch;
-
-    // Branch must exist on the remote before gh can create a PR
-    push_branch_refspec(root, &head_branch, input.forge_login.as_deref())
-        .map_err(|e| format!("git push failed: {e}"))?;
-
-    forge_provider::create_workspace_change_request(
-        root,
-        base_branch,
-        &head_branch,
-        input.forge_login.as_deref(),
-    )
-}
-
-#[tauri::command]
-pub async fn workspace_gh_pr_view_web(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    workspace_change_request_view_web(state, input).await
-}
-
-#[tauri::command]
-pub async fn workspace_gh_pr_merge(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    workspace_change_request_merge(state, input).await
-}
-
-#[tauri::command]
-pub async fn workspace_gh_pr_create_fill(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    workspace_change_request_create(state, input).await
 }
 
 fn file_name_from_path(path: &str) -> String {
@@ -1074,96 +929,6 @@ pub async fn workspace_git_status(
 ) -> Result<WorkspaceGitStatusOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     workspace_git_status_inner(&input.workspace_root)
-}
-
-#[tauri::command]
-pub async fn workspace_pr_status(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspacePrStatusInput,
-) -> Result<WorkspacePrStatusOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
-        return Ok(WorkspacePrStatusOutput {
-            provider: None,
-            host: None,
-            number: None,
-            title: None,
-            url: None,
-            head_branch: None,
-            base_branch: None,
-            state: None,
-            mergeable: None,
-            merge_state_status: None,
-        });
-    }
-
-    let head_sha = resolve_current_commit_sha(root).ok().flatten();
-    let branch = match input
-        .branch
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    {
-        Some(branch) => branch,
-        None => match resolve_current_branch_name(root) {
-            Ok(branch) => branch,
-            Err(_) => {
-                return Ok(WorkspacePrStatusOutput {
-                    provider: None,
-                    host: None,
-                    number: None,
-                    title: None,
-                    url: None,
-                    head_branch: None,
-                    base_branch: None,
-                    state: None,
-                    mergeable: None,
-                    merge_state_status: None,
-                });
-            }
-        },
-    };
-    let branch_hints = workspace_branch_hints(root, Some(&branch));
-
-    let resolved = forge_provider::resolve_workspace_change_request_status(
-        root,
-        &branch,
-        &branch_hints,
-        head_sha.as_deref(),
-        input.forge_login.as_deref(),
-    )?;
-    let forge_target = forge_remote::resolve_workspace_forge_target(root)?;
-    let Some(resolved) = resolved else {
-        return Ok(WorkspacePrStatusOutput {
-            provider: forge_target.as_ref().map(|target| match target.provider {
-                ForgeCliProvider::Github => "github".to_string(),
-                ForgeCliProvider::Gitlab => "gitlab".to_string(),
-            }),
-            host: forge_target.map(|target| target.remote.host),
-            number: None,
-            title: None,
-            url: None,
-            head_branch: Some(branch),
-            base_branch: None,
-            state: None,
-            mergeable: None,
-            merge_state_status: None,
-        });
-    };
-
-    Ok(WorkspacePrStatusOutput {
-        provider: Some(resolved.provider),
-        host: resolved.host,
-        number: resolved.number,
-        title: resolved.title,
-        url: resolved.url,
-        head_branch: resolved.head_branch,
-        base_branch: resolved.base_branch,
-        state: resolved.state,
-        mergeable: resolved.mergeable,
-        merge_state_status: resolved.merge_state_status,
-    })
 }
 
 #[tauri::command]
@@ -1675,7 +1440,7 @@ pub async fn workspace_git_branch_diff(
     })
 }
 
-fn resolve_branch_diff_base(root: &str, target_branch: Option<&str>) -> Option<String> {
+pub(crate) fn resolve_branch_diff_base(root: &str, target_branch: Option<&str>) -> Option<String> {
     let current_branch = resolve_current_branch_name(root).ok();
 
     if let Some(target_branch) = target_branch
