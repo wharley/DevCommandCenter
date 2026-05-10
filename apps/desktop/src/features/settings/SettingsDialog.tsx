@@ -43,6 +43,7 @@ import {
 	useForgeCliAccounts,
 	useForgeCliStatus,
 } from "@/features/settings/forge-cli-queries";
+import { WORKSPACE_FORGE_CONTEXT_QUERY_KEY } from "@/features/inspector/use-workspace-forge-context";
 
 type SettingsDialogProps = {
 	open: boolean;
@@ -196,6 +197,9 @@ function ForgeCliIntegrationCard() {
 		}
 		void setForgeCliSelectedLogin(provider, normalizedHost, nextLogin).then(() => {
 			void invalidateForgeCliQueries(queryClient, provider, normalizedHost);
+			void queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY],
+			});
 		});
 	}, [effectiveSelectedLogin, isReady, normalizedHost, provider, queryClient, selectedLogin]);
 
@@ -319,6 +323,9 @@ function ForgeCliIntegrationCard() {
 										onClick={() => {
 											void setForgeCliSelectedLogin(provider, normalizedHost, account.login).then(() => {
 												void invalidateForgeCliQueries(queryClient, provider, normalizedHost);
+												void queryClient.invalidateQueries({
+													queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY],
+												});
 											});
 										}}
 									>

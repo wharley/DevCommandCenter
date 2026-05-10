@@ -34,13 +34,16 @@ import {
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./use-workspace-git-branch-diff";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
+import {
+	useWorkspaceForgeContext,
+	WORKSPACE_FORGE_CONTEXT_QUERY_KEY,
+} from "./use-workspace-forge-context";
 import { EmptyState } from "@/features/panel";
 import type { CoreEvent, ProviderCatalog, WorkspaceSetupReport } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
 import { getDefaultForgeHost } from "@/lib/forge-cli";
-import { useForgeCliStatus } from "@/features/settings/forge-cli-queries";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import type { WorkspaceStatus } from "@/features/workspaces/types";
 import { setupReportDescription } from "@/features/workspaces/workspace-setup-report";
@@ -270,26 +273,19 @@ export function WorkspaceInspectorSidebar({
 			? gitStatusQuery.data.currentBranch
 			: null;
 	const currentBranch = gitBranch ?? workspaceBranch ?? "";
-	const prStatusProbeQuery = useWorkspacePrStatus(
-		workspacePath,
-		gitBranch,
-		null,
+	const workspaceForgeContextQuery = useWorkspaceForgeContext(workspacePath);
+	const workspaceForgeContext = workspaceForgeContextQuery.data ?? null;
+	const forgeContext = resolveForgeContext(
+		workspaceForgeContext?.provider,
+		workspaceForgeContext?.host,
 	);
-	const prStatusProbe = prStatusProbeQuery.data ?? null;
-	const forgeContext = resolveForgeContext(prStatusProbe?.provider, prStatusProbe?.host);
-	const forgeCliStatusQuery = useForgeCliStatus(
-		forgeContext.provider,
-		forgeContext.host,
-		{ enabled: Boolean(workspacePath?.trim()) },
-	);
-	const forgeCliStatus = forgeCliStatusQuery.data ?? null;
-	const selectedForgeLogin = forgeCliStatus?.selectedLogin ?? forgeCliStatus?.login ?? null;
+	const selectedForgeLogin = workspaceForgeContext?.effectiveLogin ?? null;
 	const prStatusQuery = useWorkspacePrStatus(
 		workspacePath,
 		gitBranch,
 		selectedForgeLogin,
 	);
-	const prStatus = prStatusQuery.data ?? prStatusProbe ?? null;
+	const prStatus = prStatusQuery.data ?? null;
 	const [forgeConnectOpen, setForgeConnectOpen] = useState(false);
 	const [isContinuingWorkspace, setIsContinuingWorkspace] = useState(false);
 	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
@@ -297,15 +293,17 @@ export function WorkspaceInspectorSidebar({
 	const hasWorkingTreeChanges =
 		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
 		(gitStatusQuery.data?.unstaged.length ?? 0) > 0;
-	const forgeCliReady = forgeCliStatus?.status === "ready";
+	const forgeCliReady = workspaceForgeContext?.status === "ready";
 	const isSetupPending = workspaceStatus === "setup_pending";
 	const setupReportSummary =
 		workspaceSetupReport == null
 			? null
 			: setupReportDescription(t, workspaceSetupReport, []);
 	const forgeCliMessage =
-		forgeCliStatus?.message ??
-		(forgeCliStatusQuery.isPending ? `Checking ${forgeContext.providerLabel} CLI...` : null);
+		workspaceForgeContext?.message ??
+		(workspaceForgeContextQuery.isPending
+			? `Checking ${forgeContext.providerLabel} CLI...`
+			: null);
 	const commitMode = resolveCommitMode({
 		branch: currentBranch,
 		prStatus,
@@ -420,6 +418,9 @@ export function WorkspaceInspectorSidebar({
 				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
 			});
 		} catch (error) {
@@ -480,11 +481,17 @@ export function WorkspaceInspectorSidebar({
 				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
 			});
 			if (result.workspaceRoot && result.workspaceRoot !== root) {
 				await queryClient.invalidateQueries({
 					queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, result.workspaceRoot],
+				});
+				await queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, result.workspaceRoot],
 				});
 				await queryClient.invalidateQueries({
 					queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, result.workspaceRoot],
@@ -891,7 +898,14 @@ export function WorkspaceInspectorSidebar({
 				provider={forgeContext.provider}
 				host={forgeContext.host}
 				onConnected={() => {
-					void forgeCliStatusQuery.refetch();
+					void queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, workspacePath?.trim() ?? ""],
+					});
+					if (workspacePath?.trim()) {
+						void queryClient.invalidateQueries({
+							queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, workspacePath.trim()],
+						});
+					}
 				}}
 			/>
 		</>

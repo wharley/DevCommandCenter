@@ -16,6 +16,7 @@ import {
 	normalizeForgeHost,
 } from "@/lib/forge-cli";
 import { invalidateForgeCliQueries } from "@/features/settings/forge-cli-queries";
+import { WORKSPACE_FORGE_CONTEXT_QUERY_KEY } from "@/features/inspector/use-workspace-forge-context";
 import {
 	getDefaultShell,
 	killTerminal,
@@ -145,6 +146,9 @@ export function ForgeConnectDialog({
 
 		const probe = await detectLoginAfterClose(provider, hostValue, baselineRef.current);
 		await invalidateForgeCliQueries(queryClient, provider, hostValue);
+		await queryClient.invalidateQueries({
+			queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY],
+		});
 
 		if (probe.login) {
 			toast.success(connectedToastMessage(provider, probe.login));

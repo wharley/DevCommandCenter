@@ -26,8 +26,8 @@ use dcc_tauri::commands::{
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
         ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput,
-        GithubCliStatusInput, GithubCliStatusOutput, WorkspacePrStatusInput,
-        WorkspacePrStatusOutput,
+        GithubCliStatusInput, GithubCliStatusOutput, WorkspaceForgeContextInput,
+        WorkspaceForgeContextOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
     },
     provider_commands::ListProvidersOutput,
     session_commands::{
@@ -64,6 +64,7 @@ struct WorkspaceMethods {
     workspace_forge_cli_status: String,
     workspace_forge_cli_accounts: String,
     workspace_forge_cli_select_login: String,
+    workspace_forge_context: String,
     list_local_branches: String,
     list_git_tracked_files: String,
     list_child_directories: String,
@@ -171,6 +172,8 @@ fn main() {
         .typ::<ForgeCliSelectLoginInput>()
         .typ::<ForgeCliStatusInput>()
         .typ::<ForgeCliStatusOutput>()
+        .typ::<WorkspaceForgeContextInput>()
+        .typ::<WorkspaceForgeContextOutput>()
         .typ::<WorkspaceGitStatusInput>()
         .typ::<WorkspaceGitStatusOutput>()
         .typ::<WorkspaceGitChangeEntry>()
@@ -217,6 +220,7 @@ fn main() {
                 workspace_forge_cli_status: "workspace_forge_cli_status".to_string(),
                 workspace_forge_cli_accounts: "workspace_forge_cli_accounts".to_string(),
                 workspace_forge_cli_select_login: "workspace_forge_cli_select_login".to_string(),
+                workspace_forge_context: "workspace_forge_context".to_string(),
                 list_local_branches: "list_local_branches".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),
                 list_child_directories: "list_child_directories".to_string(),

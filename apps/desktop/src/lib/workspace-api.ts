@@ -29,6 +29,8 @@ import type {
 	WorkspaceGitPushInput,
 	WorkspaceGitStatusInput,
 	WorkspaceGitStatusOutput,
+	WorkspaceForgeContextInput,
+	WorkspaceForgeContextOutput,
 	WorkspaceContinueFromBaseBranchInput,
 	WorkspaceContinueFromBaseBranchOutput,
 	WorkspacePrStatusInput,
@@ -85,6 +87,12 @@ export function workspaceForgeCliAccounts(input: ForgeCliAccountsInput) {
 
 export function workspaceForgeCliSelectLogin(input: ForgeCliSelectLoginInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceForgeCliSelectLogin, {
+		input,
+	});
+}
+
+export function workspaceForgeContext(input: WorkspaceForgeContextInput) {
+	return invoke<WorkspaceForgeContextOutput>(WORKSPACE_METHODS.workspaceForgeContext, {
 		input,
 	});
 }
