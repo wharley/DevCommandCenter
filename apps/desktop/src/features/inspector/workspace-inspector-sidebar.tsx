@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
 useCallback,
 useEffect,
@@ -39,8 +39,8 @@ import type { CoreEvent, ProviderCatalog, WorkspaceSetupReport } from "@dcc/cont
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
-import { getDefaultForgeHost, getForgeCliStatus } from "@/lib/forge-cli";
-import { readSelectedForgeLogin } from "@/lib/forge-account-preferences";
+import { getDefaultForgeHost } from "@/lib/forge-cli";
+import { useForgeCliStatus } from "@/features/settings/forge-cli-queries";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import type { WorkspaceStatus } from "@/features/workspaces/types";
 import { setupReportDescription } from "@/features/workspaces/workspace-setup-report";
@@ -270,19 +270,26 @@ export function WorkspaceInspectorSidebar({
 			? gitStatusQuery.data.currentBranch
 			: null;
 	const currentBranch = gitBranch ?? workspaceBranch ?? "";
+	const prStatusProbeQuery = useWorkspacePrStatus(
+		workspacePath,
+		gitBranch,
+		null,
+	);
+	const prStatusProbe = prStatusProbeQuery.data ?? null;
+	const forgeContext = resolveForgeContext(prStatusProbe?.provider, prStatusProbe?.host);
+	const forgeCliStatusQuery = useForgeCliStatus(
+		forgeContext.provider,
+		forgeContext.host,
+		{ enabled: Boolean(workspacePath?.trim()) },
+	);
+	const forgeCliStatus = forgeCliStatusQuery.data ?? null;
+	const selectedForgeLogin = forgeCliStatus?.selectedLogin ?? forgeCliStatus?.login ?? null;
 	const prStatusQuery = useWorkspacePrStatus(
 		workspacePath,
 		gitBranch,
+		selectedForgeLogin,
 	);
-	const prStatus = prStatusQuery.data ?? null;
-	const forgeContext = resolveForgeContext(prStatus?.provider, prStatus?.host);
-	const forgeCliStatusQuery = useQuery({
-		queryKey: ["forgeCliStatus", forgeContext.provider, forgeContext.host],
-		queryFn: () => getForgeCliStatus(forgeContext.provider, forgeContext.host),
-		staleTime: 60_000,
-		refetchOnWindowFocus: true,
-		enabled: Boolean(workspacePath?.trim()),
-	});
+	const prStatus = prStatusQuery.data ?? prStatusProbe ?? null;
 	const [forgeConnectOpen, setForgeConnectOpen] = useState(false);
 	const [isContinuingWorkspace, setIsContinuingWorkspace] = useState(false);
 	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
@@ -290,7 +297,6 @@ export function WorkspaceInspectorSidebar({
 	const hasWorkingTreeChanges =
 		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
 		(gitStatusQuery.data?.unstaged.length ?? 0) > 0;
-	const forgeCliStatus = forgeCliStatusQuery.data ?? null;
 	const forgeCliReady = forgeCliStatus?.status === "ready";
 	const isSetupPending = workspaceStatus === "setup_pending";
 	const setupReportSummary =
@@ -305,10 +311,6 @@ export function WorkspaceInspectorSidebar({
 		prStatus,
 		gitStatus: gitStatusQuery.data ?? null,
 	});
-	const selectedForgeLogin = readSelectedForgeLogin(
-		forgeContext.provider,
-		forgeContext.host,
-	);
 
 	const handleInspectorCommit = useCallback(async () => {
 		const root = workspacePath?.trim();

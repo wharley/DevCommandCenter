@@ -5,6 +5,9 @@ import type {
 	CreateWorkspaceForRepoOutput,
 	CreateWorkspaceFromUrlInput,
 	CreateWorkspaceFromUrlOutput,
+	ForgeCliAccountsInput,
+	ForgeCliAccountsOutput,
+	ForgeCliSelectLoginInput,
 	ForgeCliStatusInput,
 	ForgeCliStatusOutput,
 	GithubCliStatusInput,
@@ -70,6 +73,18 @@ export function workspaceGithubCliStatus(input: GithubCliStatusInput) {
 
 export function workspaceForgeCliStatus(input: ForgeCliStatusInput) {
 	return invoke<ForgeCliStatusOutput>(WORKSPACE_METHODS.workspaceForgeCliStatus, {
+		input,
+	});
+}
+
+export function workspaceForgeCliAccounts(input: ForgeCliAccountsInput) {
+	return invoke<ForgeCliAccountsOutput>(WORKSPACE_METHODS.workspaceForgeCliAccounts, {
+		input,
+	});
+}
+
+export function workspaceForgeCliSelectLogin(input: ForgeCliSelectLoginInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceForgeCliSelectLogin, {
 		input,
 	});
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
 	CircleUserRound,
 	GitBranch,
@@ -33,11 +33,16 @@ import type {
 	ProviderRuntimeDraft,
 	ProviderRuntimeSettings,
 } from "@/features/providers/provider-runtime-settings";
-import { getDefaultForgeHost, getForgeCliStatus, normalizeForgeHost } from "@/lib/forge-cli";
 import {
-	readSelectedForgeLogin,
-	writeSelectedForgeLogin,
-} from "@/lib/forge-account-preferences";
+	getDefaultForgeHost,
+	normalizeForgeHost,
+	setForgeCliSelectedLogin,
+} from "@/lib/forge-cli";
+import {
+	invalidateForgeCliQueries,
+	useForgeCliAccounts,
+	useForgeCliStatus,
+} from "@/features/settings/forge-cli-queries";
 
 type SettingsDialogProps = {
 	open: boolean;
@@ -141,6 +146,7 @@ function ComingSoonCard({
 
 function ForgeCliIntegrationCard() {
 	const { t } = useTranslation("common");
+	const queryClient = useQueryClient();
 	const [provider, setProvider] = useState<ForgeCliProvider>("github");
 	const [hosts, setHosts] = useState<Record<ForgeCliProvider, string>>({
 		github: getDefaultForgeHost("github"),
@@ -149,23 +155,17 @@ function ForgeCliIntegrationCard() {
 	const [connectOpen, setConnectOpen] = useState(false);
 	const host = hosts[provider];
 	const normalizedHost = normalizeForgeHost(provider, host);
-	const [selectedLogin, setSelectedLogin] = useState<string | null>(() =>
-		readSelectedForgeLogin(provider, normalizedHost),
-	);
-	const statusQuery = useQuery({
-		queryKey: ["forgeCliStatus", provider, normalizedHost],
-		queryFn: () => getForgeCliStatus(provider, normalizedHost),
-		staleTime: 60_000,
-		refetchOnWindowFocus: true,
-	});
+	const accountsQuery = useForgeCliAccounts(provider, normalizedHost);
+	const statusQuery = useForgeCliStatus(provider, normalizedHost);
 
-	const status = statusQuery.data ?? {
+	const accounts = accountsQuery.data ?? {
 		provider,
 		cliName: provider === "github" ? "gh" : "glab",
 		hostname: normalizedHost,
 		status: "error" as const,
 		login: null,
-		logins: [],
+		selectedLogin: null,
+		accounts: [],
 		message: t("settings.account.loadingError", {
 			provider: provider === "github" ? "GitHub" : "GitLab",
 		}),
@@ -176,15 +176,12 @@ function ForgeCliIntegrationCard() {
 					: `gh auth login --hostname ${normalizedHost}`
 				: `glab auth login --hostname ${normalizedHost}`,
 	};
-	const isReady = status.status === "ready";
+	const isReady = accounts.status === "ready";
+	const selectedLogin = accounts.selectedLogin ?? null;
 	const effectiveSelectedLogin =
-		selectedLogin && status.logins.includes(selectedLogin)
+		selectedLogin && accounts.accounts.some((account) => account.login === selectedLogin)
 			? selectedLogin
-			: status.login ?? status.logins[0] ?? null;
-
-	useEffect(() => {
-		setSelectedLogin(readSelectedForgeLogin(provider, normalizedHost));
-	}, [normalizedHost, provider]);
+			: accounts.login ?? accounts.accounts[0]?.login ?? null;
 
 	useEffect(() => {
 		if (!isReady) {
@@ -194,15 +191,17 @@ function ForgeCliIntegrationCard() {
 		if (!nextLogin) {
 			return;
 		}
-		if (selectedLogin !== nextLogin) {
-			setSelectedLogin(nextLogin);
+		if (selectedLogin === nextLogin) {
+			return;
 		}
-		writeSelectedForgeLogin(provider, normalizedHost, nextLogin);
-	}, [effectiveSelectedLogin, isReady, normalizedHost, provider, selectedLogin]);
+		void setForgeCliSelectedLogin(provider, normalizedHost, nextLogin).then(() => {
+			void invalidateForgeCliQueries(queryClient, provider, normalizedHost);
+		});
+	}, [effectiveSelectedLogin, isReady, normalizedHost, provider, queryClient, selectedLogin]);
 
 	const handleRefresh = async () => {
 		try {
-			await statusQuery.refetch();
+			await Promise.all([accountsQuery.refetch(), statusQuery.refetch()]);
 		} catch {
 			toast.error(
 				t("settings.account.loadingError", {
@@ -264,7 +263,7 @@ function ForgeCliIntegrationCard() {
 				</div>
 
 				<div className="flex flex-wrap items-center gap-2">
-				{statusQuery.isPending ? (
+				{accountsQuery.isPending ? (
 					<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-muted-foreground">
 						<Loader2 className="size-3.5 animate-spin" />
 						{t("settings.account.checking")}
@@ -274,12 +273,12 @@ function ForgeCliIntegrationCard() {
 						<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-foreground">
 							<TerminalSquare className="size-3.5" />
 							<span className="truncate">
-								{status.logins.length > 1
+								{accounts.accounts.length > 1
 									? t("settings.account.accountsConnected", {
-										count: status.logins.length,
-										logins: status.logins.join(", "),
+										count: accounts.accounts.length,
+										logins: accounts.accounts.map((account) => account.login).join(", "),
 									})
-									: status.login ?? status.message}
+									: accounts.login ?? accounts.message}
 							</span>
 						</div>
 						<Button variant="ghost" size="sm" onClick={() => void handleRefresh()}>
@@ -303,26 +302,27 @@ function ForgeCliIntegrationCard() {
 				)}
 				</div>
 
-				{isReady && status.logins.length > 0 ? (
+				{isReady && accounts.accounts.length > 0 ? (
 					<div className="grid gap-2">
 						<label className="text-[12px] font-medium text-foreground">
 							{t("settings.account.accountLabel")}
 						</label>
 						<div className="flex flex-wrap gap-2">
-							{status.logins.map((login) => {
-								const active = login === effectiveSelectedLogin;
+							{accounts.accounts.map((account) => {
+								const active = account.login === effectiveSelectedLogin;
 								return (
 									<Button
-										key={login}
+										key={account.login}
 										type="button"
 										variant={active ? "default" : "outline"}
 										size="sm"
 										onClick={() => {
-											setSelectedLogin(login);
-											writeSelectedForgeLogin(provider, normalizedHost, login);
+											void setForgeCliSelectedLogin(provider, normalizedHost, account.login).then(() => {
+												void invalidateForgeCliQueries(queryClient, provider, normalizedHost);
+											});
 										}}
 									>
-										{login}
+										{account.login}
 									</Button>
 								);
 							})}
@@ -332,11 +332,11 @@ function ForgeCliIntegrationCard() {
 
 				<div className="min-w-0 flex-1">
 					<p className="text-[12px] leading-relaxed text-muted-foreground">
-						{status.message}
+						{accounts.message}
 					</p>
 					<p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
 						{t("settings.account.command", {
-							command: status.loginCommand,
+							command: accounts.loginCommand,
 						})}
 					</p>
 				</div>
@@ -348,7 +348,7 @@ function ForgeCliIntegrationCard() {
 				provider={provider}
 				host={normalizedHost}
 				onConnected={() => {
-					void statusQuery.refetch();
+					void invalidateForgeCliQueries(queryClient, provider, normalizedHost);
 				}}
 			/>
 		</>

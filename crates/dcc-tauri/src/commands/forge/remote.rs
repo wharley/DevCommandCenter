@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::commands::workspace_commands::ForgeCliProvider;
+use crate::commands::forge_commands::ForgeCliProvider;
 use crate::git::run_git_output;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

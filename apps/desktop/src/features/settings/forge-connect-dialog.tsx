@@ -15,6 +15,7 @@ import {
 	getForgeCliStatus,
 	normalizeForgeHost,
 } from "@/lib/forge-cli";
+import { invalidateForgeCliQueries } from "@/features/settings/forge-cli-queries";
 import {
 	getDefaultShell,
 	killTerminal,
@@ -143,9 +144,7 @@ export function ForgeConnectDialog({
 		onOpenChange(false);
 
 		const probe = await detectLoginAfterClose(provider, hostValue, baselineRef.current);
-		await queryClient.invalidateQueries({
-			queryKey: ["forgeCliStatus", provider, hostValue],
-		});
+		await invalidateForgeCliQueries(queryClient, provider, hostValue);
 
 		if (probe.login) {
 			toast.success(connectedToastMessage(provider, probe.login));

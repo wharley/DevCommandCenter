@@ -3,8 +3,7 @@ use tauri::{AppHandle, State};
 use dcc_core::application::{CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput};
 use dcc_tauri::{
     commands::workspace_commands::{
-        CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, GithubCliStatusInput,
-        GithubCliStatusOutput, ForgeCliStatusInput, ForgeCliStatusOutput,
+        CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput,
         ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
         ListGitTrackedFilesOutput, ListLocalBranchesInput, ListLocalBranchesOutput,
         ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
@@ -56,20 +55,6 @@ pub async fn list_repositories(
     state: State<'_, WorkspaceCommandState>,
 ) -> Result<ListRepositoriesOutput, String> {
     dcc_tauri::commands::workspace_commands::list_repositories(state).await
-}
-
-#[tauri::command]
-pub async fn workspace_github_cli_status(
-    input: GithubCliStatusInput,
-) -> Result<GithubCliStatusOutput, String> {
-    dcc_tauri::commands::workspace_commands::workspace_github_cli_status(input).await
-}
-
-#[tauri::command]
-pub async fn workspace_forge_cli_status(
-    input: ForgeCliStatusInput,
-) -> Result<ForgeCliStatusOutput, String> {
-    dcc_tauri::commands::workspace_commands::workspace_forge_cli_status(input).await
 }
 
 #[tauri::command]

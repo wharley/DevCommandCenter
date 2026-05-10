@@ -31,6 +31,7 @@ use dcc_infra::{
 };
 
 use crate::{
+    commands::forge_commands::ForgeCliProvider,
     commands::forge::{provider as forge_provider, remote as forge_remote},
     events::TauriEventBus,
     git::{
@@ -210,62 +211,6 @@ pub struct WorkspaceGitFilePreviewContentOutput {
     pub original_text: String,
     pub modified_text: String,
     pub inline: bool,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct GithubCliStatusInput {}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum ForgeCliProvider {
-    Github,
-    Gitlab,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ForgeCliStatusInput {
-    pub provider: ForgeCliProvider,
-    pub host: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum ForgeCliStatusState {
-    Ready,
-    Error,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ForgeCliStatusOutput {
-    pub provider: ForgeCliProvider,
-    pub cli_name: String,
-    pub hostname: String,
-    pub status: ForgeCliStatusState,
-    pub login: Option<String>,
-    pub logins: Vec<String>,
-    pub message: String,
-    pub login_command: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum GithubCliStatusState {
-    Ready,
-    Error,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct GithubCliStatusOutput {
-    pub cli_name: String,
-    pub hostname: String,
-    pub status: GithubCliStatusState,
-    pub login: Option<String>,
-    pub message: String,
-    pub login_command: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -609,75 +554,6 @@ fn resolve_default_remote_name(root: &str) -> Result<String, String> {
     }
 
     Ok(remotes[0].clone())
-}
-
-fn default_forge_host(provider: ForgeCliProvider) -> &'static str {
-    match provider {
-        ForgeCliProvider::Github => "github.com",
-        ForgeCliProvider::Gitlab => "gitlab.com",
-    }
-}
-
-fn normalize_forge_host(provider: ForgeCliProvider, host: Option<String>) -> Result<String, String> {
-    let host = host
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(default_forge_host(provider));
-
-    if host.contains(['\n', '\r']) || host.chars().any(char::is_whitespace) {
-        return Err(format!("Invalid host `{host}`."));
-    }
-
-    Ok(host.to_string())
-}
-
-fn legacy_github_cli_status(output: ForgeCliStatusOutput) -> GithubCliStatusOutput {
-    GithubCliStatusOutput {
-        cli_name: output.cli_name,
-        hostname: output.hostname,
-        status: match output.status {
-            ForgeCliStatusState::Ready => GithubCliStatusState::Ready,
-            ForgeCliStatusState::Error => GithubCliStatusState::Error,
-        },
-        login: output.login,
-        message: output.message,
-        login_command: output.login_command,
-    }
-}
-
-#[tauri::command]
-pub async fn workspace_forge_cli_status(
-    input: ForgeCliStatusInput,
-) -> Result<ForgeCliStatusOutput, String> {
-    let host = normalize_forge_host(input.provider, input.host)?;
-    let status = forge_provider::resolve_forge_cli_status(input.provider, &host)?;
-    Ok(ForgeCliStatusOutput {
-        provider: status.provider,
-        cli_name: status.cli_name,
-        hostname: status.hostname,
-        status: if status.ready {
-            ForgeCliStatusState::Ready
-        } else {
-            ForgeCliStatusState::Error
-        },
-        login: status.login,
-        logins: status.logins,
-        message: status.message,
-        login_command: status.login_command,
-    })
-}
-
-#[tauri::command]
-pub async fn workspace_github_cli_status(
-    _input: GithubCliStatusInput,
-) -> Result<GithubCliStatusOutput, String> {
-    let output = workspace_forge_cli_status(ForgeCliStatusInput {
-        provider: ForgeCliProvider::Github,
-        host: Some("github.com".to_string()),
-    })
-    .await?;
-    Ok(legacy_github_cli_status(output))
 }
 
 fn push_current_branch(

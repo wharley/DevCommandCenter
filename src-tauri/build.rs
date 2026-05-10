@@ -23,14 +23,18 @@ use dcc_core::{
     ports::{events::CoreEvent, ProviderRuntimeConfig},
 };
 use dcc_tauri::commands::{
+    forge_commands::{
+        ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
+        ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput,
+        GithubCliStatusInput, GithubCliStatusOutput,
+    },
     provider_commands::ListProvidersOutput,
     session_commands::{
         RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
         RespondToUserInputOutput,
     },
     workspace_commands::{
-        CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, GithubCliStatusInput,
-        GithubCliStatusOutput, ForgeCliProvider, ForgeCliStatusInput, ForgeCliStatusOutput,
+        CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput,
         ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
         ListGitTrackedFilesOutput, ListLocalBranchesInput, ListLocalBranchesOutput,
         ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
@@ -58,6 +62,8 @@ struct WorkspaceMethods {
     delete_repository: String,
     workspace_github_cli_status: String,
     workspace_forge_cli_status: String,
+    workspace_forge_cli_accounts: String,
+    workspace_forge_cli_select_login: String,
     list_local_branches: String,
     list_git_tracked_files: String,
     list_child_directories: String,
@@ -159,6 +165,10 @@ fn main() {
         .typ::<GithubCliStatusInput>()
         .typ::<GithubCliStatusOutput>()
         .typ::<ForgeCliProvider>()
+        .typ::<ForgeCliAccountsInput>()
+        .typ::<ForgeCliAccountEntry>()
+        .typ::<ForgeCliAccountsOutput>()
+        .typ::<ForgeCliSelectLoginInput>()
         .typ::<ForgeCliStatusInput>()
         .typ::<ForgeCliStatusOutput>()
         .typ::<WorkspaceGitStatusInput>()
@@ -205,6 +215,8 @@ fn main() {
                 delete_repository: "delete_repository".to_string(),
                 workspace_github_cli_status: "workspace_github_cli_status".to_string(),
                 workspace_forge_cli_status: "workspace_forge_cli_status".to_string(),
+                workspace_forge_cli_accounts: "workspace_forge_cli_accounts".to_string(),
+                workspace_forge_cli_select_login: "workspace_forge_cli_select_login".to_string(),
                 list_local_branches: "list_local_branches".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),
                 list_child_directories: "list_child_directories".to_string(),

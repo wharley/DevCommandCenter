@@ -1,5 +1,13 @@
-import type { ForgeCliProvider, ForgeCliStatusOutput } from "@dcc/contracts";
-import { workspaceForgeCliStatus } from "./workspace-api";
+import type {
+	ForgeCliAccountsOutput,
+	ForgeCliProvider,
+	ForgeCliStatusOutput,
+} from "@dcc/contracts";
+import {
+	workspaceForgeCliAccounts,
+	workspaceForgeCliSelectLogin,
+	workspaceForgeCliStatus,
+} from "./workspace-api";
 
 export const DEFAULT_FORGE_HOSTS: Record<ForgeCliProvider, string> = {
 	github: "github.com",
@@ -31,9 +39,41 @@ function fallbackForgeStatus(
 		hostname,
 		status: "error",
 		login: null,
+		selectedLogin: null,
 		logins: [],
 		message: message ?? "Forge CLI is only available in the desktop runtime.",
 		loginCommand: buildForgeCliDisplayCommand(provider, hostname),
+	};
+}
+
+export function setForgeCliSelectedLogin(
+	provider: ForgeCliProvider,
+	host: string | null | undefined,
+	login: string | null,
+) {
+	return workspaceForgeCliSelectLogin({
+		provider,
+		host: normalizeForgeHost(provider, host),
+		login,
+	});
+}
+
+function fallbackForgeAccounts(
+	provider: ForgeCliProvider,
+	host?: string | null,
+	message?: string,
+): ForgeCliAccountsOutput {
+	const status = fallbackForgeStatus(provider, host, message);
+	return {
+		provider: status.provider,
+		cliName: status.cliName,
+		hostname: status.hostname,
+		status: status.status,
+		login: status.login,
+		selectedLogin: status.selectedLogin,
+		accounts: [],
+		message: status.message,
+		loginCommand: status.loginCommand,
 	};
 }
 
@@ -52,6 +92,28 @@ export async function getForgeCliStatus(
 		});
 	} catch (error) {
 		return fallbackForgeStatus(
+			provider,
+			host,
+			error instanceof Error ? error.message : String(error),
+		);
+	}
+}
+
+export async function getForgeCliAccounts(
+	provider: ForgeCliProvider,
+	host?: string | null,
+): Promise<ForgeCliAccountsOutput> {
+	if (!isTauriRuntime()) {
+		return fallbackForgeAccounts(provider, host);
+	}
+
+	try {
+		return await workspaceForgeCliAccounts({
+			provider,
+			host: normalizeForgeHost(provider, host),
+		});
+	} catch (error) {
+		return fallbackForgeAccounts(
 			provider,
 			host,
 			error instanceof Error ? error.message : String(error),

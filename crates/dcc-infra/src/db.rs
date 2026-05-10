@@ -56,6 +56,15 @@ CREATE INDEX IF NOT EXISTS idx_dcc_repositories_updated_at
 ON dcc_repositories(updated_at DESC);
 "#;
 
+const FORGE_LOGIN_PREFERENCE_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_forge_login_preferences (
+	provider TEXT NOT NULL,
+	host TEXT NOT NULL,
+	login TEXT NOT NULL,
+	PRIMARY KEY (provider, host)
+);
+"#;
+
 const SESSION_TABLE_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS dcc_sessions (
 	id TEXT PRIMARY KEY NOT NULL,
@@ -129,10 +138,53 @@ impl SqliteWorkspaceRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
+        Ok(())
+    }
+
+    pub fn get_forge_login_preference(&self, provider: &str, host: &str) -> Result<Option<String>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            "SELECT login FROM dcc_forge_login_preferences WHERE provider = ?1 AND host = ?2",
+            params![provider, host],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    pub fn set_forge_login_preference(
+        &self,
+        provider: &str,
+        host: &str,
+        login: Option<&str>,
+    ) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let normalized_login = login.map(str::trim).filter(|login| !login.is_empty());
+        if let Some(login) = normalized_login {
+            conn.execute(
+                "INSERT INTO dcc_forge_login_preferences (provider, host, login)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(provider, host) DO UPDATE SET login = excluded.login",
+                params![provider, host, login],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        } else {
+            conn.execute(
+                "DELETE FROM dcc_forge_login_preferences WHERE provider = ?1 AND host = ?2",
+                params![provider, host],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
         Ok(())
     }
 

@@ -1,6 +1,6 @@
 use crate::commands::forge::{github, gitlab};
 use crate::commands::forge::remote::resolve_workspace_forge_target;
-use crate::commands::workspace_commands::ForgeCliProvider;
+use crate::commands::forge_commands::ForgeCliProvider;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedCliStatus {
