@@ -968,8 +968,8 @@ export function WorkspaceInspectorSidebar({
 												: "—"}
 										</DetailRow>
 										<DetailRow label={t("inspector.fields.knownHosts")}>
-											{workspaceForgeContext && workspaceForgeContext.knownHosts.length > 0
-												? workspaceForgeContext.knownHosts.join(", ")
+											{(workspaceForgeContext?.knownHosts?.length ?? 0) > 0
+												? workspaceForgeContext?.knownHosts?.join(", ")
 												: "—"}
 										</DetailRow>
 										<DetailRow label={t("inspector.fields.account")}>

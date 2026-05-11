@@ -689,3 +689,4 @@ export type WorkspaceSetupStepReport = {
 };
 
 export type WorkspaceState = "initializing" | "setup_pending" | "ready" | "archived";
+
