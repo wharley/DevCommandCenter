@@ -893,6 +893,11 @@ export function WorkspaceInspectorSidebar({
 												? `${workspaceForgeContext.remoteName}/${workspaceForgeContext.namespace}/${workspaceForgeContext.repo}`
 												: "—"}
 										</DetailRow>
+										<DetailRow label={t("inspector.fields.knownHosts")}>
+											{workspaceForgeContext && workspaceForgeContext.knownHosts.length > 0
+												? workspaceForgeContext.knownHosts.join(", ")
+												: "—"}
+										</DetailRow>
 										<DetailRow label={t("inspector.fields.account")}>
 											{workspaceForgeContext?.provider && workspaceForgeContext.host ? (
 												<div className="flex flex-wrap gap-2">

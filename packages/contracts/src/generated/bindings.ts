@@ -549,6 +549,7 @@ export type WorkspaceForgeContextOutput = {
 	login: string | null,
 	selectedLogin: string | null,
 	effectiveLogin: string | null,
+	knownHosts: string[],
 	message: string | null,
 	loginCommand: string | null,
 };

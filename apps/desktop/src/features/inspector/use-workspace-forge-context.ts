@@ -25,6 +25,7 @@ export function useWorkspaceForgeContext(
 					login: null,
 					selectedLogin: null,
 					effectiveLogin: null,
+					knownHosts: [],
 					message: null,
 					loginCommand: null,
 				};

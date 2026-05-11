@@ -173,6 +173,7 @@ pub struct WorkspaceForgeContextOutput {
     pub login: Option<String>,
     pub selected_login: Option<String>,
     pub effective_login: Option<String>,
+    pub known_hosts: Vec<String>,
     pub message: Option<String>,
     pub login_command: Option<String>,
 }
@@ -189,6 +190,7 @@ fn empty_workspace_forge_context() -> WorkspaceForgeContextOutput {
         login: None,
         selected_login: None,
         effective_login: None,
+        known_hosts: Vec::new(),
         message: None,
         login_command: None,
     }
@@ -373,6 +375,7 @@ pub async fn workspace_forge_context(
         login: context.login,
         selected_login: context.selected_login,
         effective_login: context.effective_login,
+        known_hosts: context.known_hosts,
         message: Some(context.message),
         login_command: Some(context.login_command),
     })

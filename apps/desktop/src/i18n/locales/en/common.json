@@ -143,6 +143,7 @@
       "provider": "Provider",
       "host": "Host",
       "remote": "Remote",
+      "knownHosts": "Known hosts",
       "account": "Account",
       "forgeStatus": "Forge CLI",
       "model": "Model",

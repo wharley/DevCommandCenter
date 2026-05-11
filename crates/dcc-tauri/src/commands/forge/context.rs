@@ -3,6 +3,7 @@ use std::path::Path;
 use dcc_infra::db::SqliteWorkspaceRepo;
 
 use crate::commands::forge::{
+    accounts::backend_for,
     provider::{self as forge_provider, ResolvedCliStatus, ResolvedGitAuth},
     remote::resolve_workspace_forge_target,
 };
@@ -20,6 +21,7 @@ pub(crate) struct ResolvedWorkspaceForgeContext {
     pub(crate) login: Option<String>,
     pub(crate) selected_login: Option<String>,
     pub(crate) effective_login: Option<String>,
+    pub(crate) known_hosts: Vec<String>,
     pub(crate) message: String,
     pub(crate) login_command: String,
 }
@@ -84,6 +86,26 @@ pub(crate) fn resolve_selected_forge_login(
     Ok(resolved_login)
 }
 
+fn resolve_workspace_forge_message(
+    provider_label: &str,
+    target_host: &str,
+    status: &ResolvedCliStatus,
+    known_hosts: &[String],
+) -> String {
+    if status.ready
+        || known_hosts.is_empty()
+        || known_hosts.iter().any(|host| host == target_host)
+    {
+        return status.message.clone();
+    }
+
+    format!(
+        "This repo uses `{target_host}`, but DCC found authenticated {provider_label} hosts: {}. Run `{}` to connect the repo host.",
+        known_hosts.join(", "),
+        status.login_command
+    )
+}
+
 pub(crate) fn resolve_workspace_forge_context(
     db_path: &Path,
     root: &str,
@@ -94,6 +116,8 @@ pub(crate) fn resolve_workspace_forge_context(
     };
 
     let status = forge_provider::resolve_forge_cli_status(target.provider, &target.remote.host)?;
+    let backend = backend_for(target.provider);
+    let known_hosts = backend.list_hosts(false).unwrap_or_default();
     let selected_login =
         resolve_selected_forge_login(db_path, target.provider, &target.remote.host, &status)?;
     let requested_login = requested_login
@@ -102,6 +126,12 @@ pub(crate) fn resolve_workspace_forge_context(
         .filter(|login| status.logins.iter().any(|candidate| candidate == login))
         .map(ToString::to_string);
     let effective_login = requested_login.or_else(|| selected_login.clone());
+    let message = resolve_workspace_forge_message(
+        backend.provider_label(),
+        &target.remote.host,
+        &status,
+        &known_hosts,
+    );
 
     Ok(Some(ResolvedWorkspaceForgeContext {
         provider: target.provider,
@@ -114,7 +144,8 @@ pub(crate) fn resolve_workspace_forge_context(
         login: status.login,
         selected_login,
         effective_login,
-        message: status.message,
+        known_hosts,
+        message,
         login_command: status.login_command,
     }))
 }
@@ -212,5 +243,53 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn rewrites_message_when_repo_host_differs_from_authenticated_hosts() {
+        let status = ResolvedCliStatus {
+            provider: ForgeCliProvider::Gitlab,
+            cli_name: "glab".to_string(),
+            hostname: "gitlab.company.com".to_string(),
+            ready: false,
+            login: None,
+            logins: Vec::new(),
+            message: "Run `glab auth login --hostname gitlab.company.com` to connect GitLab locally."
+                .to_string(),
+            login_command: "glab auth login --hostname gitlab.company.com".to_string(),
+        };
+
+        let message = resolve_workspace_forge_message(
+            "GitLab",
+            "gitlab.company.com",
+            &status,
+            &["gitlab.com".to_string()],
+        );
+
+        assert!(message.contains("gitlab.company.com"));
+        assert!(message.contains("gitlab.com"));
+    }
+
+    #[test]
+    fn keeps_message_when_repo_host_is_already_authenticated() {
+        let status = ResolvedCliStatus {
+            provider: ForgeCliProvider::Gitlab,
+            cli_name: "glab".to_string(),
+            hostname: "gitlab.company.com".to_string(),
+            ready: false,
+            login: None,
+            logins: Vec::new(),
+            message: "base message".to_string(),
+            login_command: "glab auth login --hostname gitlab.company.com".to_string(),
+        };
+
+        let message = resolve_workspace_forge_message(
+            "GitLab",
+            "gitlab.company.com",
+            &status,
+            &["gitlab.company.com".to_string()],
+        );
+
+        assert_eq!(message, "base message");
     }
 }
