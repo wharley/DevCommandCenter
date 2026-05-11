@@ -28,9 +28,6 @@ jobs:
           - target: deb
             artifact-path: target/release/bundle/deb/*.deb
             artifact-name: dev-command-center-linux-deb
-          - target: appimage
-            artifact-path: target/release/bundle/appimage/*.AppImage
-            artifact-name: dev-command-center-linux-appimage
 
     steps:
       - name: Checkout
