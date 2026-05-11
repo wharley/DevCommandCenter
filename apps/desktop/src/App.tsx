@@ -1584,15 +1584,15 @@ export default function App() {
 								className="relative h-full shrink-0 overflow-hidden bg-sidebar"
 								style={{ width: `${inspectorWidth}px` }}
 							>
-							<WorkspaceInspectorSidebar
-								providerCatalog={providerCatalog}
-								sessionSnapshot={selectedSessionSnapshot}
-								sessionEvents={sessionEvents}
-								currentRepository={
-									selectedWorkspacePath?.trim()
-										? repositoriesFromBackend.find(
+								<WorkspaceInspectorSidebar
+									providerCatalog={providerCatalog}
+									sessionSnapshot={selectedSessionSnapshot}
+									sessionEvents={sessionEvents}
+									currentRepository={
+										selectedWorkspace?.rootPath?.trim()
+											? repositoriesFromBackend.find(
 												(repository) =>
-													repository.rootPath.trim() === selectedWorkspacePath.trim(),
+													repository.rootPath.trim() === selectedWorkspace.rootPath!.trim(),
 											) ?? null
 										: null
 								}
