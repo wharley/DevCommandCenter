@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { Info } from "lucide-react";
 import {
 	useCallback,
 	useEffect,
@@ -13,6 +14,15 @@ import { toast } from "sonner";
 import { BranchToolbar } from "@/components/BranchToolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	Popover,
+	PopoverContent,
+	PopoverDescription,
+	PopoverHeader,
+	PopoverTitle,
+	PopoverTrigger,
+} from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { WorkspaceGitPreviewSelection } from "./workspace-git-file-preview";
 import { SessionEventFeed } from "@/features/sessions/session-event-feed";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workbench";
@@ -88,7 +98,9 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 			<span className="w-[76px] shrink-0 font-medium uppercase tracking-[0.06em] text-muted-foreground">
 				{label}
 			</span>
-			<div className="min-w-0 flex-1 font-mono text-[11.5px] text-foreground">{children}</div>
+			<div className="min-w-0 flex-1 whitespace-normal break-words [overflow-wrap:anywhere] font-mono text-[11.5px] text-foreground">
+				{children}
+			</div>
 		</div>
 	);
 }
@@ -253,6 +265,54 @@ function ResizeHandle({
 		>
 			<span className="h-px w-full bg-border/70 transition-colors group-hover:bg-foreground/30 group-focus-visible:bg-foreground/40" />
 		</button>
+	);
+}
+
+function SetupPendingBanner({
+	title,
+	description,
+	detailsLabel,
+}: {
+	title: string;
+	description: string;
+	detailsLabel: string;
+}) {
+	return (
+		<div className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/8 px-2.5 py-2 text-[11px] text-amber-950 dark:text-amber-100">
+			<div className="flex items-center justify-between gap-2">
+				<p className="min-w-0 truncate font-medium leading-tight">{title}</p>
+				<Popover>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<PopoverTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-xs"
+									className="size-5 shrink-0 rounded-full border border-amber-500/25 text-amber-900 hover:bg-amber-500/12 hover:text-amber-950 dark:text-amber-100 dark:hover:bg-amber-400/12"
+									aria-label={detailsLabel}
+								>
+									<Info className="size-3.5" aria-hidden />
+								</Button>
+							</PopoverTrigger>
+						</TooltipTrigger>
+						<TooltipContent side="top">{detailsLabel}</TooltipContent>
+					</Tooltip>
+					<PopoverContent
+						align="end"
+						side="bottom"
+						className="max-h-72 w-80 max-w-[calc(100vw-2rem)] overflow-y-auto"
+					>
+						<PopoverHeader>
+							<PopoverTitle>{title}</PopoverTitle>
+							<PopoverDescription className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/80">
+								{description}
+							</PopoverDescription>
+						</PopoverHeader>
+					</PopoverContent>
+				</Popover>
+			</div>
+		</div>
 	);
 }
 
@@ -774,12 +834,11 @@ export function WorkspaceInspectorSidebar({
 						</p>
 					) : null}
 					{isSetupPending && setupReportSummary ? (
-						<div className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/8 px-2.5 py-2 text-[11px] leading-relaxed text-amber-950 dark:text-amber-100">
-							<p className="font-medium">{t("inspector.setupRetry.pendingTitle")}</p>
-							<p className="mt-1 text-amber-900/80 dark:text-amber-100/80">
-								{setupReportSummary}
-							</p>
-						</div>
+						<SetupPendingBanner
+							title={t("inspector.setupRetry.pendingTitle")}
+							description={setupReportSummary}
+							detailsLabel={t("inspector.setupRetry.details")}
+						/>
 					) : null}
 					<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 						<InspectorChangesSection
@@ -850,7 +909,7 @@ export function WorkspaceInspectorSidebar({
 
 						<TabsContent
 							value="context"
-							className="mt-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
+							className="mt-0 min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
 						>
 							<div className="space-y-4">
 								<div>
@@ -862,7 +921,9 @@ export function WorkspaceInspectorSidebar({
 										<DetailRow label={t("inspector.fields.id")}>{workspaceId ?? "—"}</DetailRow>
 										<DetailRow label={t("inspector.fields.branch")}>{workspaceBranch ?? "—"}</DetailRow>
 										<DetailRow label={t("inspector.fields.path")}>
-											<span title={workspacePath ?? undefined}>{workspacePath ?? "—"}</span>
+											<span className="break-all" title={workspacePath ?? undefined}>
+												{workspacePath ?? "—"}
+											</span>
 										</DetailRow>
 									</div>
 								</div>
@@ -883,7 +944,7 @@ export function WorkspaceInspectorSidebar({
 									</p>
 									<div className="rounded-md border border-border/50 bg-muted/10 px-2">
 										<DetailRow label={t("inspector.fields.state")}>
-											<span className="inline-flex items-center gap-2">
+											<span className="flex flex-wrap items-center gap-2">
 												{sessionStateLabel(sessionState, t)}
 												{sessionId ? (
 												<Badge variant="outline" className="font-mono text-[10px] font-normal">
@@ -920,7 +981,7 @@ export function WorkspaceInspectorSidebar({
 												{forgeIdentityInitials(forgeIdentityLabel)}
 											</span>
 											<div className="min-w-0 flex-1">
-												<div className="flex items-center gap-2">
+												<div className="flex flex-wrap items-center gap-2">
 													<span className="truncate text-[13px] font-semibold text-foreground">
 														{forgeConnected
 															? forgeIdentityLabel

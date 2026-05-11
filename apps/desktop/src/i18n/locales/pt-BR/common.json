@@ -160,6 +160,7 @@
     },
     "setupRetry": {
       "button": "Refazer setup",
+      "details": "Ver detalhes do setup",
       "loading": "Refazendo setup...",
       "successTitle": "Setup concluído",
       "pendingTitle": "Workspace segue com setup pendente",
