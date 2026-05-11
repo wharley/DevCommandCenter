@@ -382,7 +382,19 @@ async fn refresh_repository_forge_metadata(
     });
     repo.save_repository(&repository)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    if repository
+        .forge_login
+        .as_deref()
+        .is_some_and(|login| !login.trim().is_empty())
+    {
+        return Ok(());
+    }
+
+    let _ = crate::commands::forge::accounts::auto_bind_repository(repo, &repository_id);
+
+    Ok(())
 }
 
 fn push_current_branch(

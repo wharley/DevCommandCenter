@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::commands::forge::accounts::ForgeCliAccountProfile;
+use crate::commands::forge::accounts::{AuthCheck, ForgeCliAccountProfile, RepoAccess};
 use crate::commands::forge::remote::WorkspaceForgeTarget;
 use crate::commands::forge::resolve_cli_binary;
 use crate::git::{git_output_err, run_git_output};
@@ -95,6 +95,16 @@ fn looks_like_gitlab_unauthenticated(message: &str) -> bool {
         || normalized.contains("unauthenticated")
 }
 
+fn looks_like_gitlab_missing_repo_access(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    normalized.contains("not found")
+        || normalized.contains("404")
+        || normalized.contains("403")
+        || normalized.contains("forbidden")
+        || normalized.contains("401")
+        || normalized.contains("unauthorized")
+}
+
 fn extract_glab_token(text: &str) -> Option<String> {
     for raw in text.lines() {
         let line = raw.trim();
@@ -152,6 +162,20 @@ fn last_commit_title(root: &str) -> Result<String, String> {
 
 pub(crate) fn auth_status(host: &str) -> Result<GitlabCliAuthStatus, String> {
     auth_status_with_options(host, false)
+}
+
+pub(crate) fn list_logins(host: &str, force_refresh: bool) -> Result<Vec<String>, String> {
+    Ok(auth_status_with_options(host, force_refresh)?.logins)
+}
+
+pub(crate) fn check_auth(host: &str, login: &str) -> AuthCheck {
+    match auth_status(host) {
+        Ok(status) if status.logins.iter().any(|candidate| candidate == login) => {
+            AuthCheck::LoggedIn
+        }
+        Ok(_) => AuthCheck::LoggedOut,
+        Err(_) => AuthCheck::Indeterminate,
+    }
 }
 
 pub(crate) fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
@@ -272,6 +296,50 @@ pub(crate) fn list_accounts_for_host(
         .collect())
 }
 
+const GITLAB_DEVELOPER_ACCESS_LEVEL: i32 = 30;
+
+pub(crate) fn repo_access(
+    host: &str,
+    login: &str,
+    owner: &str,
+    name: &str,
+) -> Result<RepoAccess, String> {
+    let auth = match resolve_auth_context(host, Some(login)) {
+        Ok(Some(auth)) => auth,
+        Ok(None) => return Ok(RepoAccess::None),
+        Err(error)
+            if looks_like_gitlab_unauthenticated(&error)
+                || error.contains("currently exposes the active account") =>
+        {
+            return Ok(RepoAccess::None);
+        }
+        Err(error) => return Err(error),
+    };
+
+    let path = format!("projects/{}", encode_percent(&format!("{owner}/{name}")));
+    let glab = resolve_cli_binary("glab")?;
+    let mut command = Command::new(glab);
+    command
+        .args(["api", "--hostname", host, path.as_str()])
+        .envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let detail = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if looks_like_gitlab_unauthenticated(&detail)
+            || looks_like_gitlab_missing_repo_access(&detail)
+        {
+            return Ok(RepoAccess::None);
+        }
+        return Err(detail.trim().to_string());
+    }
+
+    parse_project_push_permission(&output.stdout)
+}
+
 fn fetch_gitlab_profile(host: &str) -> Result<GitlabUserProfile, String> {
     if let Some(cached) = profile_cache::get(host) {
         return Ok(cached);
@@ -295,6 +363,48 @@ fn fetch_gitlab_profile(host: &str) -> Result<GitlabUserProfile, String> {
         serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
     profile_cache::put(host, profile.clone());
     Ok(profile)
+}
+
+fn parse_project_push_permission(stdout: &[u8]) -> Result<RepoAccess, String> {
+    let parsed: GitlabProjectPermissionsResponse =
+        serde_json::from_slice(stdout).map_err(|error| error.to_string())?;
+    let project_level = parsed
+        .permissions
+        .as_ref()
+        .and_then(|permissions| permissions.project_access.as_ref())
+        .and_then(|access| access.access_level);
+    let group_level = parsed
+        .permissions
+        .as_ref()
+        .and_then(|permissions| permissions.group_access.as_ref())
+        .and_then(|access| access.access_level);
+
+    if project_level.is_none() && group_level.is_none() {
+        return Ok(RepoAccess::Probable);
+    }
+
+    let highest = project_level.unwrap_or(0).max(group_level.unwrap_or(0));
+    Ok(if highest >= GITLAB_DEVELOPER_ACCESS_LEVEL {
+        RepoAccess::Push
+    } else {
+        RepoAccess::None
+    })
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GitlabProjectPermissionsResponse {
+    permissions: Option<GitlabProjectPermissions>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GitlabProjectPermissions {
+    project_access: Option<GitlabAccessLevel>,
+    group_access: Option<GitlabAccessLevel>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GitlabAccessLevel {
+    access_level: Option<i32>,
 }
 
 mod auth_status_cache {
@@ -635,7 +745,11 @@ pub(crate) fn create_change_request(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_glab_authenticated_hosts, parse_glab_logged_in_pairs};
+    use super::{
+        parse_glab_authenticated_hosts, parse_glab_logged_in_pairs, parse_project_push_permission,
+    };
+
+    use crate::commands::forge::accounts::RepoAccess;
 
     #[test]
     fn parses_gitlab_logged_in_pairs() {
@@ -657,6 +771,25 @@ self.gitlab.example.com\n  ✓ Logged in to self.gitlab.example.com as team-user
                 "gitlab.com".to_string(),
                 "self.gitlab.example.com".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn parses_project_push_permission_push_for_developer() {
+        let payload =
+            br#"{"permissions":{"project_access":{"access_level":30},"group_access":null}}"#;
+        assert_eq!(
+            parse_project_push_permission(payload).unwrap(),
+            RepoAccess::Push
+        );
+    }
+
+    #[test]
+    fn parses_project_push_permission_probable_when_access_levels_missing() {
+        let payload = br#"{"permissions":{"project_access":{"access_level":null},"group_access":{"access_level":null}}}"#;
+        assert_eq!(
+            parse_project_push_permission(payload).unwrap(),
+            RepoAccess::Probable
         );
     }
 }

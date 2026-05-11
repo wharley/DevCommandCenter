@@ -99,6 +99,10 @@ export function workspaceForgeCliSelectLogin(input: ForgeCliSelectLoginInput) {
 	});
 }
 
+export function workspaceBackfillForgeRepoBindings() {
+	return invoke<number>(WORKSPACE_METHODS.workspaceBackfillForgeRepoBindings);
+}
+
 export function workspaceForgeContext(input: WorkspaceForgeContextInput) {
 	return invoke<WorkspaceForgeContextOutput>(WORKSPACE_METHODS.workspaceForgeContext, {
 		input,

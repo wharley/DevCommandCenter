@@ -119,6 +119,12 @@ pub struct SqliteWorkspaceRepo {
     conn: Arc<Mutex<Connection>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ForgeBoundRepositoryRecord {
+    pub id: RepositoryId,
+    pub login: String,
+}
+
 impl SqliteWorkspaceRepo {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path.as_ref())
@@ -194,6 +200,86 @@ impl SqliteWorkspaceRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         }
         Ok(())
+    }
+
+    pub fn update_repository_forge_login(
+        &self,
+        repository_id: &RepositoryId,
+        login: Option<&str>,
+    ) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "UPDATE dcc_repositories SET forge_login = ?1, updated_at = datetime('now') WHERE id = ?2",
+            params![login.map(str::trim).filter(|value| !value.is_empty()), repository_id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_repositories_needing_forge_binding(&self) -> Result<Vec<RepositoryId>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT id
+                  FROM dcc_repositories
+                 WHERE forge_login IS NULL
+                   AND remote_url IS NOT NULL
+                   AND forge_provider IN ('github', 'gitlab')
+                 ORDER BY updated_at DESC, created_at DESC
+                "#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| Ok(RepositoryId(row.get::<_, String>(0)?)))
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+
+        let mut repository_ids = Vec::new();
+        for row in rows {
+            repository_ids
+                .push(row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?);
+        }
+        Ok(repository_ids)
+    }
+
+    pub fn list_forge_bound_repositories(&self) -> Result<Vec<ForgeBoundRepositoryRecord>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT id, forge_login
+                  FROM dcc_repositories
+                 WHERE forge_login IS NOT NULL
+                   AND remote_url IS NOT NULL
+                   AND forge_provider IN ('github', 'gitlab')
+                 ORDER BY updated_at DESC, created_at DESC
+                "#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ForgeBoundRepositoryRecord {
+                    id: RepositoryId(row.get::<_, String>(0)?),
+                    login: row.get::<_, String>(1)?,
+                })
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+
+        let mut repositories = Vec::new();
+        for row in rows {
+            repositories
+                .push(row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?);
+        }
+        Ok(repositories)
     }
 
     fn ensure_column(conn: &Connection, table: &str, column: &str, sql_type: &str) -> Result<()> {
@@ -1115,6 +1201,40 @@ mod tests {
         let workspaces =
             futures::executor::block_on(repo.list_workspaces()).expect("list workspaces");
         assert!(workspaces.is_empty());
+    }
+
+    #[test]
+    fn sqlite_workspace_repo_lists_and_updates_forge_bindings() {
+        let repo = SqliteWorkspaceRepo::from_connection(in_memory_conn()).expect("create repo");
+        let repository = Repository {
+            id: RepositoryId("/tmp/repo".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            name: "repo".to_string(),
+            root_path: "/tmp/repo".to_string(),
+            base_branch: "main".to_string(),
+            remote: Some("origin".to_string()),
+            remote_url: Some("git@github.com:acme/repo.git".to_string()),
+            forge_provider: Some("github".to_string()),
+            forge_login: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        futures::executor::block_on(repo.save_repository(&repository)).expect("save repository");
+
+        let unbound = repo
+            .list_repositories_needing_forge_binding()
+            .expect("list unbound repositories");
+        assert_eq!(unbound, vec![RepositoryId("/tmp/repo".to_string())]);
+
+        repo.update_repository_forge_login(&RepositoryId("/tmp/repo".to_string()), Some("octocat"))
+            .expect("update forge login");
+        let bound = repo
+            .list_forge_bound_repositories()
+            .expect("list bound repositories");
+        assert_eq!(bound.len(), 1);
+        assert_eq!(bound[0].id.0, "/tmp/repo");
+        assert_eq!(bound[0].login, "octocat");
     }
 
     #[test]

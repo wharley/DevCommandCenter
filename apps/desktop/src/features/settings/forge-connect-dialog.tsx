@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
+	backfillForgeRepoBindings,
 	buildForgeCliDisplayCommand,
 	buildForgeCliShellCommand,
 	getForgeCliStatus,
@@ -17,6 +18,7 @@ import {
 } from "@/lib/forge-cli";
 import { invalidateForgeCliQueries } from "@/features/settings/forge-cli-queries";
 import { WORKSPACE_FORGE_CONTEXT_QUERY_KEY } from "@/features/inspector/use-workspace-forge-context";
+import { WORKSPACE_PR_STATUS_QUERY_KEY } from "@/features/inspector/use-workspace-pr-status";
 import {
 	getDefaultShell,
 	killTerminal,
@@ -147,9 +149,18 @@ export function ForgeConnectDialog({
 		onOpenChange(false);
 
 		const probe = await detectLoginAfterClose(provider, hostValue, baselineRef.current);
+		if (probe.login) {
+			await backfillForgeRepoBindings();
+		}
 		await invalidateForgeCliQueries(queryClient, provider, hostValue);
 		await queryClient.invalidateQueries({
+			queryKey: ["repositories"],
+		});
+		await queryClient.invalidateQueries({
 			queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY],
+		});
+		await queryClient.invalidateQueries({
+			queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY],
 		});
 
 		if (probe.login) {

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::commands::forge::accounts::ForgeCliAccountProfile;
+use crate::commands::forge::accounts::{AuthCheck, ForgeCliAccountProfile, RepoAccess};
 use crate::commands::forge::resolve_cli_binary;
 
 #[derive(Debug, Clone)]
@@ -143,6 +143,16 @@ fn looks_like_github_unauthenticated(message: &str) -> bool {
         || normalized.contains("gh auth login")
 }
 
+fn looks_like_github_missing_repo_access(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    normalized.contains("not found")
+        || normalized.contains("http 404")
+        || normalized.contains("http 403")
+        || normalized.contains("forbidden")
+        || normalized.contains("resource not accessible")
+        || normalized.contains("sso")
+}
+
 fn trim_token(stdout: &[u8]) -> Option<String> {
     let token = String::from_utf8_lossy(stdout).trim().to_string();
     (!token.is_empty()).then_some(token)
@@ -208,6 +218,20 @@ pub(crate) fn resolve_auth_context(
 
 pub(crate) fn auth_status(host: &str) -> Result<GithubCliAuthStatus, String> {
     auth_status_with_options(host, false)
+}
+
+pub(crate) fn list_logins(host: &str, force_refresh: bool) -> Result<Vec<String>, String> {
+    Ok(auth_status_with_options(host, force_refresh)?.logins)
+}
+
+pub(crate) fn check_auth(host: &str, login: &str) -> AuthCheck {
+    match auth_status(host) {
+        Ok(status) if status.logins.iter().any(|candidate| candidate == login) => {
+            AuthCheck::LoggedIn
+        }
+        Ok(_) => AuthCheck::LoggedOut,
+        Err(_) => AuthCheck::Indeterminate,
+    }
 }
 
 pub(crate) fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
@@ -337,6 +361,55 @@ pub(crate) fn list_accounts_for_host(
     Ok(accounts)
 }
 
+pub(crate) fn repo_access(
+    host: &str,
+    login: &str,
+    owner: &str,
+    name: &str,
+) -> Result<RepoAccess, String> {
+    let auth = match resolve_auth_context(host, Some(login)) {
+        Ok(Some(auth)) => auth,
+        Ok(None) => return Ok(RepoAccess::None),
+        Err(error)
+            if looks_like_github_unauthenticated(&error)
+                || error.contains("does not currently list") =>
+        {
+            return Ok(RepoAccess::None);
+        }
+        Err(error) => return Err(error),
+    };
+
+    let path = format!("/repos/{owner}/{name}");
+    let gh = resolve_cli_binary("gh")?;
+    let mut command = Command::new(gh);
+    command
+        .args([
+            "api",
+            "--hostname",
+            host,
+            "-H",
+            "Accept: application/vnd.github+json",
+            path.as_str(),
+        ])
+        .envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let detail = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if looks_like_github_unauthenticated(&detail)
+            || looks_like_github_missing_repo_access(&detail)
+        {
+            return Ok(RepoAccess::None);
+        }
+        return Err(detail.trim().to_string());
+    }
+
+    parse_repo_push_permission(&output.stdout)
+}
+
 fn fetch_github_profile(host: &str, login: &str) -> Result<GithubUserProfile, String> {
     if let Some(cached) = profile_cache::get(host, login) {
         return Ok(cached);
@@ -367,6 +440,26 @@ fn fetch_github_profile(host: &str, login: &str) -> Result<GithubUserProfile, St
         serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
     profile_cache::put(host, login, profile.clone());
     Ok(profile)
+}
+
+fn parse_repo_push_permission(stdout: &[u8]) -> Result<RepoAccess, String> {
+    let parsed: GithubRepoPermissionsResponse =
+        serde_json::from_slice(stdout).map_err(|error| error.to_string())?;
+    Ok(match parsed.permissions {
+        Some(permissions) if permissions.push => RepoAccess::Push,
+        Some(_) => RepoAccess::None,
+        None => RepoAccess::Probable,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubRepoPermissionsResponse {
+    permissions: Option<GithubRepoPermissions>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubRepoPermissions {
+    push: bool,
 }
 
 mod auth_status_cache {
@@ -627,8 +720,10 @@ pub(crate) fn create_change_request(
 mod tests {
     use super::{
         parse_github_active_login_for_host, parse_github_authenticated_hosts,
-        parse_github_logins_for_host,
+        parse_github_logins_for_host, parse_repo_push_permission,
     };
+
+    use crate::commands::forge::accounts::RepoAccess;
 
     #[test]
     fn parses_active_github_login_from_json() {
@@ -683,6 +778,24 @@ mod tests {
         assert_eq!(
             parse_github_authenticated_hosts(output).unwrap(),
             vec!["ghe.example.com".to_string(), "github.com".to_string()]
+        );
+    }
+
+    #[test]
+    fn parses_repo_push_permission_push_when_explicitly_allowed() {
+        let payload = br#"{"permissions":{"push":true}}"#;
+        assert_eq!(
+            parse_repo_push_permission(payload).unwrap(),
+            RepoAccess::Push
+        );
+    }
+
+    #[test]
+    fn parses_repo_push_permission_probable_when_permissions_missing() {
+        let payload = br#"{"id":1,"name":"repo"}"#;
+        assert_eq!(
+            parse_repo_push_permission(payload).unwrap(),
+            RepoAccess::Probable
         );
     }
 }

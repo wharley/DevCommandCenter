@@ -323,6 +323,15 @@ pub async fn workspace_forge_cli_select_login(
 }
 
 #[tauri::command]
+pub async fn workspace_backfill_forge_repo_bindings(
+    state: State<'_, WorkspaceCommandState>,
+) -> Result<usize, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let summary = crate::commands::forge::accounts::backfill_repository_bindings(&repo)?;
+    Ok(summary.bound)
+}
+
+#[tauri::command]
 pub async fn workspace_github_cli_status(
     state: State<'_, WorkspaceCommandState>,
     _input: GithubCliStatusInput,

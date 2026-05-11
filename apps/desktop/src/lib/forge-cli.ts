@@ -5,6 +5,7 @@ import type {
 	ForgeCliStatusOutput,
 } from "@dcc/contracts";
 import {
+	workspaceBackfillForgeRepoBindings,
 	workspaceForgeCliAccounts,
 	workspaceForgeCliHosts,
 	workspaceForgeCliSelectLogin,
@@ -150,6 +151,18 @@ export async function getForgeCliHosts(
 		});
 	} catch {
 		return fallbackForgeHosts(provider);
+	}
+}
+
+export async function backfillForgeRepoBindings(): Promise<number> {
+	if (!isTauriRuntime()) {
+		return 0;
+	}
+
+	try {
+		return await workspaceBackfillForgeRepoBindings();
+	} catch {
+		return 0;
 	}
 }
 

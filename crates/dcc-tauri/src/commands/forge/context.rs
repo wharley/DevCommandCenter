@@ -92,9 +92,7 @@ fn resolve_workspace_forge_message(
     status: &ResolvedCliStatus,
     known_hosts: &[String],
 ) -> String {
-    if status.ready
-        || known_hosts.is_empty()
-        || known_hosts.iter().any(|host| host == target_host)
+    if status.ready || known_hosts.is_empty() || known_hosts.iter().any(|host| host == target_host)
     {
         return status.message.clone();
     }
@@ -254,8 +252,9 @@ mod tests {
             ready: false,
             login: None,
             logins: Vec::new(),
-            message: "Run `glab auth login --hostname gitlab.company.com` to connect GitLab locally."
-                .to_string(),
+            message:
+                "Run `glab auth login --hostname gitlab.company.com` to connect GitLab locally."
+                    .to_string(),
             login_command: "glab auth login --hostname gitlab.company.com".to_string(),
         };
 

@@ -42,11 +42,12 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::git_support::build_review_diffs_for_path;
 use forge_commands::{
-    workspace_change_request_create, workspace_change_request_merge,
-    workspace_change_request_view_web, workspace_forge_cli_accounts, workspace_forge_cli_hosts,
-    workspace_forge_cli_select_login, workspace_forge_cli_status, workspace_forge_context,
-    workspace_gh_pr_create_fill, workspace_gh_pr_merge, workspace_gh_pr_view_web,
-    workspace_github_cli_status, workspace_pr_status,
+    workspace_backfill_forge_repo_bindings, workspace_change_request_create,
+    workspace_change_request_merge, workspace_change_request_view_web,
+    workspace_forge_cli_accounts, workspace_forge_cli_hosts, workspace_forge_cli_select_login,
+    workspace_forge_cli_status, workspace_forge_context, workspace_gh_pr_create_fill,
+    workspace_gh_pr_merge, workspace_gh_pr_view_web, workspace_github_cli_status,
+    workspace_pr_status,
 };
 use tauri_plugin_dialog::{
     DialogExt, FilePath, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
@@ -6395,6 +6396,7 @@ pub fn run() {
             workspace_forge_cli_accounts,
             workspace_forge_cli_hosts,
             workspace_forge_cli_select_login,
+            workspace_backfill_forge_repo_bindings,
             workspace_forge_context,
             workspace_change_request_create,
             workspace_change_request_merge,

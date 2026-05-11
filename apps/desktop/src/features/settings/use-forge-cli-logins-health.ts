@@ -1,7 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import type { ForgeCliProvider } from "@dcc/contracts";
-import { getForgeCliAccounts, normalizeForgeHost } from "@/lib/forge-cli";
+import {
+	backfillForgeRepoBindings,
+	getForgeCliAccounts,
+	normalizeForgeHost,
+} from "@/lib/forge-cli";
 import {
 	forgeCliAccountsQueryKey,
 	forgeCliStatusQueryKey,
@@ -49,6 +53,9 @@ export function useForgeCliLoginsHealth(
 						queryKey: forgeCliAccountsQueryKey(provider, normalizedHost),
 					}),
 					queryClient.invalidateQueries({
+						queryKey: ["repositories"],
+					}),
+					queryClient.invalidateQueries({
 						predicate: (query) => {
 							const head = query.queryKey[0];
 							return (
@@ -58,6 +65,22 @@ export function useForgeCliLoginsHealth(
 						},
 					}),
 				]);
+				void backfillForgeRepoBindings().then((bound) => {
+					if (bound > 0) {
+						void queryClient.invalidateQueries({
+							queryKey: ["repositories"],
+						});
+						void queryClient.invalidateQueries({
+							predicate: (query) => {
+								const head = query.queryKey[0];
+								return (
+									head === WORKSPACE_FORGE_CONTEXT_QUERY_KEY ||
+									head === WORKSPACE_PR_STATUS_QUERY_KEY
+								);
+							},
+						});
+					}
+				});
 			}
 
 			return [...nextSet];

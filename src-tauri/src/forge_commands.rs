@@ -52,6 +52,13 @@ pub async fn workspace_forge_cli_select_login(
 }
 
 #[tauri::command]
+pub async fn workspace_backfill_forge_repo_bindings(
+    state: State<'_, WorkspaceCommandState>,
+) -> Result<usize, String> {
+    dcc_tauri::commands::forge_commands::workspace_backfill_forge_repo_bindings(state).await
+}
+
+#[tauri::command]
 pub async fn workspace_forge_context(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceForgeContextInput,
