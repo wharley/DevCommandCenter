@@ -81,7 +81,7 @@ jobs:
         run: yarn install --frozen-lockfile --ignore-engines
 
       - name: Build (${{ matrix.target }})
-        run: yarn exec tauri build -b ${{ matrix.target }}
+        run: yarn tauri build --bundles ${{ matrix.target }}
 
       - name: Upload artifact (${{ matrix.target }})
         uses: actions/upload-artifact@v4
