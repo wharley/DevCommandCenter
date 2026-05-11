@@ -1,3 +1,4 @@
+pub(crate) mod accounts;
 pub(crate) mod context;
 pub(crate) mod detect;
 pub(crate) mod github;

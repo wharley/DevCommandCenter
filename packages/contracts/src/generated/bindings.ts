@@ -179,6 +179,9 @@ export type CreateWorkspaceFromUrlOutput = {
 
 export type ForgeCliAccountEntry = {
 	login: string,
+	name: string | null,
+	avatarUrl: string | null,
+	email: string | null,
 	active: boolean,
 	selected: boolean,
 };

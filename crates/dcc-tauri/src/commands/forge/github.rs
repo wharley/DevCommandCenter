@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::commands::forge::accounts::ForgeCliAccountProfile;
 use crate::commands::forge::resolve_cli_binary;
 
 #[derive(Debug, Clone)]
@@ -24,10 +25,28 @@ const GITHUB_AUTH_STATUS_CACHE_TTL: Duration = Duration::from_secs(2);
 static GITHUB_AUTH_STATUS_CACHE: LazyLock<Mutex<std::collections::HashMap<String, CachedGithubAuthStatus>>> =
     LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
+#[derive(Clone)]
+struct CachedGithubProfile {
+    profile: GithubUserProfile,
+    cached_at: Instant,
+}
+
+static GITHUB_PROFILE_CACHE: LazyLock<
+    Mutex<std::collections::HashMap<(String, String), CachedGithubProfile>>,
+> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
 #[derive(Debug, Clone)]
 pub(crate) struct GithubAuthContext {
     pub(crate) envs: Vec<(String, String)>,
     pub(crate) git_http_authorization: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GithubUserProfile {
+    login: Option<String>,
+    name: Option<String>,
+    avatar_url: Option<String>,
+    email: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -219,6 +238,83 @@ pub(crate) fn auth_status_with_options(
     Ok(status)
 }
 
+pub(crate) fn list_accounts_for_host(
+    host: &str,
+    force_refresh: bool,
+) -> Result<Vec<ForgeCliAccountProfile>, String> {
+    let status = auth_status_with_options(host, force_refresh)?;
+    if force_refresh {
+        profile_cache::invalidate_host(host);
+    }
+
+    let accounts = std::thread::scope(|scope| {
+        let active_login = status.active_login.clone();
+        let handles: Vec<_> = status
+            .logins
+            .iter()
+            .map(|login| {
+                let host = host.to_string();
+                let login = login.clone();
+                let active_login = active_login.clone();
+                scope.spawn(move || {
+                    let profile = fetch_github_profile(&host, &login).ok();
+                    let resolved_login = profile
+                        .as_ref()
+                        .and_then(|profile| profile.login.clone())
+                        .unwrap_or_else(|| login.clone());
+                    ForgeCliAccountProfile {
+                        login: resolved_login,
+                        name: profile.as_ref().and_then(|profile| profile.name.clone()),
+                        avatar_url: profile
+                            .as_ref()
+                            .and_then(|profile| profile.avatar_url.clone()),
+                        email: profile.and_then(|profile| profile.email),
+                        active: active_login.as_deref() == Some(login.as_str()),
+                    }
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("github profile worker panicked"))
+            .collect::<Vec<_>>()
+    });
+
+    Ok(accounts)
+}
+
+fn fetch_github_profile(host: &str, login: &str) -> Result<GithubUserProfile, String> {
+    if let Some(cached) = profile_cache::get(host, login) {
+        return Ok(cached);
+    }
+
+    let Some(auth) = resolve_auth_context(host, Some(login))? else {
+        return Err(format!(
+            "GitHub CLI could not resolve auth context for `{login}` on `{host}`."
+        ));
+    };
+
+    let gh = resolve_cli_binary("gh")?;
+    let mut command = Command::new(gh);
+    command
+        .args(["api", "--hostname", host, "/user"])
+        .envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("`gh api /user` failed for `{login}`.")
+        } else {
+            stderr
+        });
+    }
+
+    let profile: GithubUserProfile =
+        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+    profile_cache::put(host, login, profile.clone());
+    Ok(profile)
+}
+
 mod auth_status_cache {
     use super::*;
 
@@ -253,6 +349,50 @@ mod auth_status_cache {
             return;
         };
         cache.remove(host);
+    }
+}
+
+mod profile_cache {
+    use super::*;
+
+    const TTL: Duration = Duration::from_secs(30);
+
+    fn key(host: &str, login: &str) -> (String, String) {
+        (host.to_string(), login.to_string())
+    }
+
+    pub(super) fn get(host: &str, login: &str) -> Option<GithubUserProfile> {
+        let mut cache = GITHUB_PROFILE_CACHE.lock().ok()?;
+        let cache_key = key(host, login);
+        let fresh = cache
+            .get(&cache_key)
+            .filter(|entry| entry.cached_at.elapsed() < TTL)
+            .map(|entry| entry.profile.clone());
+        if fresh.is_some() {
+            return fresh;
+        }
+        cache.remove(&cache_key);
+        None
+    }
+
+    pub(super) fn put(host: &str, login: &str, profile: GithubUserProfile) {
+        let Ok(mut cache) = GITHUB_PROFILE_CACHE.lock() else {
+            return;
+        };
+        cache.insert(
+            key(host, login),
+            CachedGithubProfile {
+                profile,
+                cached_at: Instant::now(),
+            },
+        );
+    }
+
+    pub(super) fn invalidate_host(host: &str) {
+        let Ok(mut cache) = GITHUB_PROFILE_CACHE.lock() else {
+            return;
+        };
+        cache.retain(|(entry_host, _), _| entry_host != host);
     }
 }
 

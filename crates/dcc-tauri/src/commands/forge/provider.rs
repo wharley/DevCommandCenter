@@ -1,3 +1,4 @@
+use crate::commands::forge::accounts::backend_for;
 use crate::commands::forge::{github, gitlab};
 use crate::commands::forge::remote::resolve_workspace_forge_target;
 use crate::commands::forge_commands::ForgeCliProvider;
@@ -35,28 +36,6 @@ pub(crate) struct ResolvedGitAuth {
     pub(crate) envs: Vec<(String, String)>,
 }
 
-fn cli_name_for_provider(provider: ForgeCliProvider) -> &'static str {
-    match provider {
-        ForgeCliProvider::Github => "gh",
-        ForgeCliProvider::Gitlab => "glab",
-    }
-}
-
-fn provider_label(provider: ForgeCliProvider) -> &'static str {
-    match provider {
-        ForgeCliProvider::Github => "GitHub",
-        ForgeCliProvider::Gitlab => "GitLab",
-    }
-}
-
-fn login_command_for(provider: ForgeCliProvider, host: &str) -> String {
-    match provider {
-        ForgeCliProvider::Github if host == "github.com" => "gh auth login".to_string(),
-        ForgeCliProvider::Github => format!("gh auth login --hostname {host}"),
-        ForgeCliProvider::Gitlab => format!("glab auth login --hostname {host}"),
-    }
-}
-
 pub(crate) fn resolve_forge_cli_status(
     provider: ForgeCliProvider,
     host: &str,
@@ -69,14 +48,10 @@ pub(crate) fn resolve_forge_cli_status_with_options(
     host: &str,
     force_refresh: bool,
 ) -> Result<ResolvedCliStatus, String> {
-    let result = match provider {
-        ForgeCliProvider::Github => github::auth_status_with_options(host, force_refresh).map(|status| {
-            (status.logins, status.active_login)
-        }),
-        ForgeCliProvider::Gitlab => gitlab::auth_status_with_options(host, force_refresh).map(|status| {
-            (status.logins, status.active_login)
-        }),
-    };
+    let backend = backend_for(provider);
+    let result = backend
+        .auth_status(host, force_refresh)
+        .map(|status| (status.logins, status.active_login));
 
     match result {
         Ok((logins, login)) if !logins.is_empty() => {
@@ -87,38 +62,38 @@ pub(crate) fn resolve_forge_cli_status_with_options(
             };
             Ok(ResolvedCliStatus {
                 provider,
-                cli_name: cli_name_for_provider(provider).to_string(),
+                cli_name: backend.cli_name().to_string(),
                 hostname: host.to_string(),
                 ready: true,
                 login,
                 logins,
                 message,
-                login_command: login_command_for(provider, host),
+                login_command: backend.login_command(host),
             })
         }
         Ok(_) => Ok(ResolvedCliStatus {
             provider,
-            cli_name: cli_name_for_provider(provider).to_string(),
+            cli_name: backend.cli_name().to_string(),
             hostname: host.to_string(),
             ready: false,
             login: None,
             logins: Vec::new(),
             message: format!(
                 "Run `{}` to connect {} locally.",
-                login_command_for(provider, host),
-                provider_label(provider)
+                backend.login_command(host),
+                backend.provider_label()
             ),
-            login_command: login_command_for(provider, host),
+            login_command: backend.login_command(host),
         }),
         Err(message) => Ok(ResolvedCliStatus {
             provider,
-            cli_name: cli_name_for_provider(provider).to_string(),
+            cli_name: backend.cli_name().to_string(),
             hostname: host.to_string(),
             ready: false,
             login: None,
             logins: Vec::new(),
             message,
-            login_command: login_command_for(provider, host),
+            login_command: backend.login_command(host),
         }),
     }
 }
@@ -133,28 +108,15 @@ pub(crate) fn resolve_forge_git_auth(
         return Ok(None);
     }
 
-    match provider {
-        ForgeCliProvider::Github => {
-            let Some(auth) = github::resolve_auth_context(host, requested_login)? else {
-                return Ok(None);
-            };
-            Ok(Some(ResolvedGitAuth {
-                host: host.to_string(),
-                git_http_authorization: auth.git_http_authorization,
-                envs: auth.envs,
-            }))
-        }
-        ForgeCliProvider::Gitlab => {
-            let Some(auth) = gitlab::resolve_auth_context(host, requested_login)? else {
-                return Ok(None);
-            };
-            Ok(Some(ResolvedGitAuth {
-                host: host.to_string(),
-                git_http_authorization: auth.git_http_authorization,
-                envs: auth.envs,
-            }))
-        }
-    }
+    let backend = backend_for(provider);
+    let Some(auth) = backend.resolve_auth_context(host, requested_login)? else {
+        return Ok(None);
+    };
+    Ok(Some(ResolvedGitAuth {
+        host: host.to_string(),
+        git_http_authorization: auth.git_http_authorization,
+        envs: auth.envs,
+    }))
 }
 
 pub(crate) fn resolve_workspace_change_request_status(

@@ -314,27 +314,34 @@ function ForgeCliIntegrationCard() {
 							{t("settings.account.accountLabel")}
 						</label>
 						<div className="flex flex-wrap gap-2">
-							{accounts.accounts.map((account) => {
-								const active = account.login === effectiveSelectedLogin;
-								return (
-									<Button
-										key={account.login}
-										type="button"
-										variant={active ? "default" : "outline"}
-										size="sm"
-										onClick={() => {
-											void setForgeCliSelectedLogin(provider, normalizedHost, account.login).then(() => {
-												void invalidateForgeCliQueries(queryClient, provider, normalizedHost);
+								{accounts.accounts.map((account) => {
+									const active = account.login === effectiveSelectedLogin;
+									const label = account.name
+										? `${account.name} · @${account.login}`
+										: account.login;
+									const title = [account.name, account.email, `@${account.login}`]
+										.filter(Boolean)
+										.join(" · ");
+									return (
+										<Button
+											key={account.login}
+											type="button"
+											variant={active ? "default" : "outline"}
+											size="sm"
+											title={title}
+											onClick={() => {
+												void setForgeCliSelectedLogin(provider, normalizedHost, account.login).then(() => {
+													void invalidateForgeCliQueries(queryClient, provider, normalizedHost);
 												void queryClient.invalidateQueries({
 													queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY],
 												});
 											});
 										}}
 									>
-										{account.login}
-									</Button>
-								);
-							})}
+											{label}
+										</Button>
+									);
+								})}
 						</div>
 					</div>
 				) : null}

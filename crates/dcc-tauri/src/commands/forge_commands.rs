@@ -76,6 +76,9 @@ pub struct ForgeCliStatusOutput {
 #[serde(rename_all = "camelCase")]
 pub struct ForgeCliAccountEntry {
     pub login: String,
+    pub name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub email: Option<String>,
     pub active: bool,
     pub selected: bool,
 }
@@ -245,13 +248,17 @@ pub async fn workspace_forge_cli_accounts(
     )?;
     let selected_login = snapshot.selected_login.clone();
     let active_login = snapshot.login.clone();
-    let accounts = snapshot
-        .logins
+    let backend = crate::commands::forge::accounts::backend_for(input.provider);
+    let profiles = backend.list_accounts(&host, input.force_refresh.unwrap_or(false))?;
+    let accounts = profiles
         .iter()
-        .map(|login| ForgeCliAccountEntry {
-            login: login.clone(),
-            active: active_login.as_deref() == Some(login.as_str()),
-            selected: selected_login.as_deref() == Some(login.as_str()),
+        .map(|account| ForgeCliAccountEntry {
+            login: account.login.clone(),
+            name: account.name.clone(),
+            avatar_url: account.avatar_url.clone(),
+            email: account.email.clone(),
+            active: account.active || active_login.as_deref() == Some(account.login.as_str()),
+            selected: selected_login.as_deref() == Some(account.login.as_str()),
         })
         .collect();
 

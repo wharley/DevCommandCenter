@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use crate::commands::forge::accounts::ForgeCliAccountProfile;
 use crate::commands::forge::remote::WorkspaceForgeTarget;
 use crate::commands::forge::resolve_cli_binary;
 use crate::git::{git_output_err, run_git_output};
@@ -25,10 +26,28 @@ const GITLAB_AUTH_STATUS_CACHE_TTL: Duration = Duration::from_secs(2);
 static GITLAB_AUTH_STATUS_CACHE: LazyLock<Mutex<std::collections::HashMap<String, CachedGitlabAuthStatus>>> =
     LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
+#[derive(Clone)]
+struct CachedGitlabProfile {
+    profile: GitlabUserProfile,
+    cached_at: Instant,
+}
+
+static GITLAB_PROFILE_CACHE: LazyLock<Mutex<std::collections::HashMap<String, CachedGitlabProfile>>> =
+    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
 #[derive(Debug, Clone)]
 pub(crate) struct GitlabAuthContext {
     pub(crate) envs: Vec<(String, String)>,
     pub(crate) git_http_authorization: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct GitlabUserProfile {
+    username: Option<String>,
+    name: Option<String>,
+    avatar_url: Option<String>,
+    public_email: Option<String>,
+    email: Option<String>,
 }
 
 fn parse_glab_logged_in_pairs(text: &str) -> Vec<(String, String)> {
@@ -84,18 +103,10 @@ fn extract_glab_token(text: &str) -> Option<String> {
 }
 
 fn canonical_gitlab_username(host: &str) -> Option<String> {
-    let glab = resolve_cli_binary("glab").ok()?;
-    let output = Command::new(glab)
-        .args(["api", "--hostname", host, "user"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let parsed: Value = serde_json::from_slice(&output.stdout).ok()?;
-    parsed
-        .get("username")
-        .and_then(|value| value.as_str())
+    let profile = fetch_gitlab_profile(host).ok()?;
+    profile
+        .username
+        .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
@@ -185,6 +196,58 @@ pub(crate) fn auth_status_with_options(
     Ok(status)
 }
 
+pub(crate) fn list_accounts_for_host(
+    host: &str,
+    force_refresh: bool,
+) -> Result<Vec<ForgeCliAccountProfile>, String> {
+    let status = auth_status_with_options(host, force_refresh)?;
+    if force_refresh {
+        profile_cache::invalidate(host);
+    }
+
+    let profile = fetch_gitlab_profile(host).ok();
+    Ok(status
+        .logins
+        .into_iter()
+        .map(|login| ForgeCliAccountProfile {
+            login,
+            name: profile.as_ref().and_then(|profile| profile.name.clone()),
+            avatar_url: profile
+                .as_ref()
+                .and_then(|profile| profile.avatar_url.clone()),
+            email: profile
+                .as_ref()
+                .and_then(|profile| profile.public_email.clone().or(profile.email.clone())),
+            active: true,
+        })
+        .collect())
+}
+
+fn fetch_gitlab_profile(host: &str) -> Result<GitlabUserProfile, String> {
+    if let Some(cached) = profile_cache::get(host) {
+        return Ok(cached);
+    }
+
+    let glab = resolve_cli_binary("glab")?;
+    let output = Command::new(glab)
+        .args(["api", "--hostname", host, "user"])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("`glab api user` failed for `{host}`.")
+        } else {
+            stderr
+        });
+    }
+
+    let profile: GitlabUserProfile =
+        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+    profile_cache::put(host, profile.clone());
+    Ok(profile)
+}
+
 mod auth_status_cache {
     use super::*;
 
@@ -216,6 +279,45 @@ mod auth_status_cache {
 
     pub(super) fn invalidate(host: &str) {
         let Ok(mut cache) = GITLAB_AUTH_STATUS_CACHE.lock() else {
+            return;
+        };
+        cache.remove(host);
+    }
+}
+
+mod profile_cache {
+    use super::*;
+
+    const TTL: Duration = Duration::from_secs(30);
+
+    pub(super) fn get(host: &str) -> Option<GitlabUserProfile> {
+        let mut cache = GITLAB_PROFILE_CACHE.lock().ok()?;
+        let fresh = cache
+            .get(host)
+            .filter(|entry| entry.cached_at.elapsed() < TTL)
+            .map(|entry| entry.profile.clone());
+        if fresh.is_some() {
+            return fresh;
+        }
+        cache.remove(host);
+        None
+    }
+
+    pub(super) fn put(host: &str, profile: GitlabUserProfile) {
+        let Ok(mut cache) = GITLAB_PROFILE_CACHE.lock() else {
+            return;
+        };
+        cache.insert(
+            host.to_string(),
+            CachedGitlabProfile {
+                profile,
+                cached_at: Instant::now(),
+            },
+        );
+    }
+
+    pub(super) fn invalidate(host: &str) {
+        let Ok(mut cache) = GITLAB_PROFILE_CACHE.lock() else {
             return;
         };
         cache.remove(host);
