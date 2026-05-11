@@ -3,16 +3,15 @@ pub mod forge;
 pub mod forge_commands;
 pub mod provider_commands;
 pub mod session_commands;
-pub(crate) mod workspace_support;
 pub mod workspace_commands;
+pub(crate) mod workspace_support;
 
 pub use forge_commands::{
     workspace_change_request_create, workspace_change_request_merge,
-    workspace_change_request_view_web, workspace_forge_cli_accounts,
-    workspace_forge_context,
-    workspace_forge_cli_select_login, workspace_forge_cli_status, workspace_gh_pr_create_fill,
-    workspace_gh_pr_merge, workspace_gh_pr_view_web, workspace_github_cli_status,
-    workspace_pr_status,
+    workspace_change_request_view_web, workspace_forge_cli_accounts, workspace_forge_cli_hosts,
+    workspace_forge_cli_select_login, workspace_forge_cli_status, workspace_forge_context,
+    workspace_gh_pr_create_fill, workspace_gh_pr_merge, workspace_gh_pr_view_web,
+    workspace_github_cli_status, workspace_pr_status,
 };
 pub use provider_commands::list_providers;
 pub use session_commands::{

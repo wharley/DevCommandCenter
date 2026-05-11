@@ -1,17 +1,18 @@
 import { useQueryClient } from "@tanstack/react-query";
 import {
-useCallback,
-useEffect,
-useMemo,
-useRef,
-useState,
-type MouseEvent as ReactMouseEvent,
-type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	type MouseEvent as ReactMouseEvent,
+	type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { BranchToolbar } from "@/components/BranchToolbar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import type { WorkspaceGitPreviewSelection } from "./workspace-git-file-preview";
 import { SessionEventFeed } from "@/features/sessions/session-event-feed";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workbench";
@@ -43,8 +44,12 @@ import type { CoreEvent, ProviderCatalog, WorkspaceSetupReport } from "@dcc/cont
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
+import {
+	invalidateForgeCliQueries,
+	useForgeCliAccounts,
+} from "@/features/settings/forge-cli-queries";
 import { useForgeCliLoginsHealth } from "@/features/settings/use-forge-cli-logins-health";
-import { getDefaultForgeHost } from "@/lib/forge-cli";
+import { getDefaultForgeHost, setForgeCliSelectedLogin } from "@/lib/forge-cli";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import type { WorkspaceStatus } from "@/features/workspaces/types";
 import { setupReportDescription } from "@/features/workspaces/workspace-setup-report";
@@ -280,10 +285,14 @@ export function WorkspaceInspectorSidebar({
 		workspaceForgeContext?.provider,
 		workspaceForgeContext?.host,
 	);
+	const forgeAccountsQuery = useForgeCliAccounts(forgeContext.provider, forgeContext.host, {
+		enabled: Boolean(workspaceForgeContext?.provider && workspaceForgeContext?.host),
+	});
 	useForgeCliLoginsHealth(forgeContext.provider, forgeContext.host, {
 		enabled: Boolean(workspaceForgeContext?.provider && workspaceForgeContext?.host),
 	});
 	const selectedForgeLogin = workspaceForgeContext?.effectiveLogin ?? null;
+	const forgeAccounts = forgeAccountsQuery.data?.accounts ?? [];
 	const prStatusQuery = useWorkspacePrStatus(
 		workspacePath,
 		gitBranch,
@@ -574,6 +583,33 @@ export function WorkspaceInspectorSidebar({
 		}
 	}, [queryClient, t, workspacePath]);
 
+	const handleSelectForgeLogin = useCallback(
+		async (login: string) => {
+			const root = workspacePath?.trim();
+			if (!root || !workspaceForgeContext?.provider || !workspaceForgeContext.host) {
+				return;
+			}
+
+			await setForgeCliSelectedLogin(
+				workspaceForgeContext.provider,
+				workspaceForgeContext.host,
+				login,
+			);
+			await invalidateForgeCliQueries(
+				queryClient,
+				workspaceForgeContext.provider,
+				workspaceForgeContext.host,
+			);
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
+			});
+		},
+		[queryClient, workspaceForgeContext, workspacePath],
+	);
+
 	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
 	const [manualResize, setManualResize] = useState(false);
 	const autoOpenedPlanMessageIdRef = useRef<string | null>(null);
@@ -836,6 +872,92 @@ export function WorkspaceInspectorSidebar({
 										) : (
 											<DetailRow label={t("inspector.fields.session")}>{t("inspector.sessionFallback")}</DetailRow>
 										)}
+									</div>
+								</div>
+
+								<div>
+									<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+										{t("inspector.groups.forge")}
+									</p>
+									<div className="rounded-md border border-border/50 bg-muted/10 px-2">
+										<DetailRow label={t("inspector.fields.provider")}>
+											{workspaceForgeContext?.provider
+												? forgeProviderLabel(workspaceForgeContext.provider)
+												: "—"}
+										</DetailRow>
+										<DetailRow label={t("inspector.fields.host")}>
+											{workspaceForgeContext?.host ?? "—"}
+										</DetailRow>
+										<DetailRow label={t("inspector.fields.remote")}>
+											{workspaceForgeContext
+												? `${workspaceForgeContext.remoteName}/${workspaceForgeContext.namespace}/${workspaceForgeContext.repo}`
+												: "—"}
+										</DetailRow>
+										<DetailRow label={t("inspector.fields.account")}>
+											{workspaceForgeContext?.provider && workspaceForgeContext.host ? (
+												<div className="flex flex-wrap gap-2">
+													{forgeAccountsQuery.isPending ? (
+														<span className="text-muted-foreground">
+															{t("settings.account.checking")}
+														</span>
+													) : forgeAccounts.length > 0 ? (
+														forgeAccounts.map((account) => {
+															const active =
+																account.login === selectedForgeLogin ||
+																(!selectedForgeLogin && account.selected);
+															const label = account.name
+																? `${account.name} · @${account.login}`
+																: account.login;
+															return (
+																<Button
+																	key={account.login}
+																	type="button"
+																	variant={active ? "default" : "outline"}
+																	size="sm"
+																	title={account.email ?? undefined}
+																	onClick={() => {
+																		void handleSelectForgeLogin(account.login);
+																	}}
+																>
+																	{label}
+																</Button>
+															);
+														})
+													) : (
+														<span className="text-muted-foreground">—</span>
+													)}
+												</div>
+											) : (
+												"—"
+											)}
+										</DetailRow>
+										<DetailRow label={t("inspector.fields.forgeStatus")}>
+											<div className="flex flex-wrap items-center gap-2">
+												<Badge
+													variant={forgeCliReady ? "success" : "outline"}
+													className="text-[10px] font-normal"
+												>
+													{forgeCliReady
+														? t("settings.account.readyBadge")
+														: t("settings.account.notReadyBadge")}
+												</Badge>
+												<span className="text-muted-foreground">
+													{forgeCliMessage ?? "—"}
+												</span>
+												{workspaceForgeContext?.provider && workspaceForgeContext.host ? (
+													<Button
+														type="button"
+														variant="outline"
+														size="sm"
+														onClick={() => setForgeConnectOpen(true)}
+													>
+														{forgeCliReady
+															? t("settings.account.switchAccount")
+															: t("settings.account.connect")}
+													</Button>
+												) : null}
+											</div>
+										</DetailRow>
 									</div>
 								</div>
 

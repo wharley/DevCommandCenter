@@ -41,6 +41,7 @@ import {
 import {
 	invalidateForgeCliQueries,
 	useForgeCliAccounts,
+	useForgeCliHosts,
 	useForgeCliStatus,
 } from "@/features/settings/forge-cli-queries";
 import { useForgeCliLoginsHealth } from "@/features/settings/use-forge-cli-logins-health";
@@ -158,8 +159,10 @@ function ForgeCliIntegrationCard() {
 	const host = hosts[provider];
 	const normalizedHost = normalizeForgeHost(provider, host);
 	const accountsQuery = useForgeCliAccounts(provider, normalizedHost);
+	const hostsQuery = useForgeCliHosts(provider, { enabled: true });
 	const statusQuery = useForgeCliStatus(provider, normalizedHost);
 	useForgeCliLoginsHealth(provider, normalizedHost, { enabled: true });
+	const discoveredHosts = hostsQuery.data?.hosts ?? [];
 
 	const accounts = accountsQuery.data ?? {
 		provider,
@@ -207,7 +210,7 @@ function ForgeCliIntegrationCard() {
 
 	const handleRefresh = async () => {
 		try {
-			await Promise.all([accountsQuery.refetch(), statusQuery.refetch()]);
+			await Promise.all([accountsQuery.refetch(), hostsQuery.refetch(), statusQuery.refetch()]);
 		} catch {
 			toast.error(
 				t("settings.account.loadingError", {
@@ -219,101 +222,133 @@ function ForgeCliIntegrationCard() {
 
 	return (
 		<>
-		<div className="rounded-xl border border-border/60 p-4">
-			<div className="flex items-start justify-between gap-4">
-				<div className="min-w-0">
-					<h3 className="text-[14px] font-medium text-foreground">
-						{t("settings.account.cardTitle")}
-					</h3>
-					<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-						{t("settings.account.cardHint")}
-					</p>
-				</div>
-				<Badge
-					variant={isReady ? "success" : "outline"}
-					className="h-8 px-3 text-[12px] font-normal"
-				>
-					{isReady
-						? t("settings.account.readyBadge")
-						: t("settings.account.notReadyBadge")}
-				</Badge>
-			</div>
-
-			<div className="mt-4 space-y-4">
-				<Tabs value={provider} onValueChange={(value) => setProvider(value as ForgeCliProvider)}>
-					<TabsList className="w-full">
-						<TabsTrigger value="github">GitHub</TabsTrigger>
-						<TabsTrigger value="gitlab">GitLab</TabsTrigger>
-					</TabsList>
-				</Tabs>
-
-				<div className="grid gap-2">
-					<label className="text-[12px] font-medium text-foreground">
-						{t("settings.account.hostLabel")}
-					</label>
-					<Input
-						value={host}
-						onChange={(event) =>
-							setHosts((current) => ({
-								...current,
-								[provider]: event.target.value,
-							}))
-						}
-						placeholder={provider === "github" ? "github.com" : "gitlab.com"}
-					/>
-					<p className="text-[11px] leading-relaxed text-muted-foreground">
-						{provider === "github"
-							? t("settings.account.githubHint")
-							: t("settings.account.gitlabHint")}
-					</p>
-				</div>
-
-				<div className="flex flex-wrap items-center gap-2">
-				{accountsQuery.isPending ? (
-					<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-muted-foreground">
-						<Loader2 className="size-3.5 animate-spin" />
-						{t("settings.account.checking")}
+			<div className="rounded-xl border border-border/60 p-4">
+				<div className="flex items-start justify-between gap-4">
+					<div className="min-w-0">
+						<h3 className="text-[14px] font-medium text-foreground">
+							{t("settings.account.cardTitle")}
+						</h3>
+						<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+							{t("settings.account.cardHint")}
+						</p>
 					</div>
-				) : isReady ? (
-					<>
-						<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-foreground">
-							<TerminalSquare className="size-3.5" />
-							<span className="truncate">
-								{accounts.accounts.length > 1
-									? t("settings.account.accountsConnected", {
-										count: accounts.accounts.length,
-										logins: accounts.accounts.map((account) => account.login).join(", "),
-									})
-									: accounts.login ?? accounts.message}
-							</span>
-						</div>
-						<Button variant="ghost" size="sm" onClick={() => void handleRefresh()}>
-							{t("settings.account.refresh")}
-						</Button>
-						<Button variant="outline" size="sm" onClick={() => setConnectOpen(true)}>
-							<TerminalSquare className="size-3.5" />
-							{t("settings.account.switchAccount")}
-						</Button>
-					</>
-				) : (
-					<>
-						<Button variant="outline" size="sm" onClick={() => setConnectOpen(true)}>
-							<TerminalSquare className="size-3.5" />
-							{t("settings.account.connect")}
-						</Button>
-						<Button variant="ghost" size="sm" onClick={() => void handleRefresh()}>
-							{t("settings.account.refresh")}
-						</Button>
-					</>
-				)}
+					<Badge
+						variant={isReady ? "success" : "outline"}
+						className="h-8 px-3 text-[12px] font-normal"
+					>
+						{isReady
+							? t("settings.account.readyBadge")
+							: t("settings.account.notReadyBadge")}
+					</Badge>
 				</div>
 
-				{isReady && accounts.accounts.length > 0 ? (
+				<div className="mt-4 space-y-4">
+					<Tabs
+						value={provider}
+						onValueChange={(value) => setProvider(value as ForgeCliProvider)}
+					>
+						<TabsList className="w-full">
+							<TabsTrigger value="github">GitHub</TabsTrigger>
+							<TabsTrigger value="gitlab">GitLab</TabsTrigger>
+						</TabsList>
+					</Tabs>
+
 					<div className="grid gap-2">
 						<label className="text-[12px] font-medium text-foreground">
-							{t("settings.account.accountLabel")}
+							{t("settings.account.hostLabel")}
 						</label>
-						<div className="flex flex-wrap gap-2">
+						<Input
+							value={host}
+							onChange={(event) =>
+								setHosts((current) => ({
+									...current,
+									[provider]: event.target.value,
+								}))
+							}
+							placeholder={provider === "github" ? "github.com" : "gitlab.com"}
+						/>
+						{discoveredHosts.length > 0 ? (
+							<div className="flex flex-wrap gap-2">
+								{discoveredHosts.map((candidateHost) => {
+									const active = candidateHost === normalizedHost;
+									return (
+										<Button
+											key={candidateHost}
+											type="button"
+											variant={active ? "default" : "outline"}
+											size="sm"
+											onClick={() =>
+												setHosts((current) => ({
+													...current,
+													[provider]: candidateHost,
+												}))
+											}
+										>
+											{candidateHost}
+										</Button>
+									);
+								})}
+							</div>
+						) : null}
+						<p className="text-[11px] leading-relaxed text-muted-foreground">
+							{discoveredHosts.length > 0
+								? t("settings.account.knownHosts", {
+										hosts: discoveredHosts.join(", "),
+									})
+								: provider === "github"
+									? t("settings.account.githubHint")
+									: t("settings.account.gitlabHint")}
+						</p>
+					</div>
+
+					<div className="flex flex-wrap items-center gap-2">
+						{accountsQuery.isPending ? (
+							<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-muted-foreground">
+								<Loader2 className="size-3.5 animate-spin" />
+								{t("settings.account.checking")}
+							</div>
+						) : isReady ? (
+							<>
+								<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-foreground">
+									<TerminalSquare className="size-3.5" />
+									<span className="truncate">
+										{accounts.accounts.length > 1
+											? t("settings.account.accountsConnected", {
+													count: accounts.accounts.length,
+													logins: accounts.accounts
+														.map((account) => account.login)
+														.join(", "),
+												})
+											: accounts.login ?? accounts.message}
+									</span>
+								</div>
+								<Button variant="ghost" size="sm" onClick={() => void handleRefresh()}>
+									{t("settings.account.refresh")}
+								</Button>
+								<Button variant="outline" size="sm" onClick={() => setConnectOpen(true)}>
+									<TerminalSquare className="size-3.5" />
+									{t("settings.account.switchAccount")}
+								</Button>
+							</>
+						) : (
+							<>
+								<Button variant="outline" size="sm" onClick={() => setConnectOpen(true)}>
+									<TerminalSquare className="size-3.5" />
+									{t("settings.account.connect")}
+								</Button>
+								<Button variant="ghost" size="sm" onClick={() => void handleRefresh()}>
+									{t("settings.account.refresh")}
+								</Button>
+							</>
+						)}
+					</div>
+
+					{isReady && accounts.accounts.length > 0 ? (
+						<div className="grid gap-2">
+							<label className="text-[12px] font-medium text-foreground">
+								{t("settings.account.accountLabel")}
+							</label>
+							<div className="flex flex-wrap gap-2">
 								{accounts.accounts.map((account) => {
 									const active = account.login === effectiveSelectedLogin;
 									const label = account.name
@@ -330,34 +365,42 @@ function ForgeCliIntegrationCard() {
 											size="sm"
 											title={title}
 											onClick={() => {
-												void setForgeCliSelectedLogin(provider, normalizedHost, account.login).then(() => {
-													void invalidateForgeCliQueries(queryClient, provider, normalizedHost);
-												void queryClient.invalidateQueries({
-													queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY],
+												void setForgeCliSelectedLogin(
+													provider,
+													normalizedHost,
+													account.login,
+												).then(() => {
+													void invalidateForgeCliQueries(
+														queryClient,
+														provider,
+														normalizedHost,
+													);
+													void queryClient.invalidateQueries({
+														queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY],
+													});
 												});
-											});
-										}}
-									>
+											}}
+										>
 											{label}
 										</Button>
 									);
 								})}
+							</div>
 						</div>
-					</div>
-				) : null}
+					) : null}
 
-				<div className="min-w-0 flex-1">
-					<p className="text-[12px] leading-relaxed text-muted-foreground">
-						{accounts.message}
-					</p>
-					<p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
-						{t("settings.account.command", {
-							command: accounts.loginCommand,
-						})}
-					</p>
+					<div className="min-w-0 flex-1">
+						<p className="text-[12px] leading-relaxed text-muted-foreground">
+							{accounts.message}
+						</p>
+						<p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
+							{t("settings.account.command", {
+								command: accounts.loginCommand,
+							})}
+						</p>
+					</div>
 				</div>
 			</div>
-		</div>
 			<ForgeConnectDialog
 				open={connectOpen}
 				onOpenChange={setConnectOpen}

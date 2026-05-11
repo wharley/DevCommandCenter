@@ -3,15 +3,15 @@ use tauri::{AppHandle, State};
 use dcc_core::application::{CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput};
 use dcc_tauri::{
     commands::workspace_commands::{
-        CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput,
-        ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
-        ListGitTrackedFilesOutput, ListLocalBranchesInput, ListLocalBranchesOutput,
-        ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
-        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
-        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
+        CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
+        ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
+        ListLocalBranchesInput, ListLocalBranchesOutput, ListRepositoriesOutput,
+        ListWorkspacesOutput, RepositoryIdInput, WorkspaceContinueFromBaseBranchInput,
+        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
+        WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
-        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
-        WorkspaceIdInput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceIdInput,
+        WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
     },
     state::WorkspaceCommandState,
 };

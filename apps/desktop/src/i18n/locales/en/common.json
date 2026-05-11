@@ -132,6 +132,7 @@
       "workspace": "Workspace",
       "composer": "Composer selection",
       "runtime": "Session runtime",
+      "forge": "Forge context",
       "providers": "Provider catalog"
     },
     "fields": {
@@ -140,6 +141,10 @@
       "branch": "Branch",
       "path": "Path",
       "provider": "Provider",
+      "host": "Host",
+      "remote": "Remote",
+      "account": "Account",
+      "forgeStatus": "Forge CLI",
       "model": "Model",
       "state": "State",
       "turns": "Turns",
@@ -271,6 +276,7 @@
       "hostLabel": "Host",
       "githubHint": "Use `github.com` or your GitHub Enterprise hostname.",
       "gitlabHint": "Use `gitlab.com` or your self-hosted GitLab hostname.",
+      "knownHosts": "Detected authenticated hosts: {{hosts}}",
       "accountsConnected": "{{count}} accounts: {{logins}}",
       "loadingError": "Could not verify the {{provider}} CLI.",
       "command": "Suggested command: `{{command}}`"

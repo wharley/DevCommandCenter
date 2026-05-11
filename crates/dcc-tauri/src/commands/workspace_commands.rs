@@ -38,8 +38,7 @@ use crate::{
     events::TauriEventBus,
     git::{
         git_command_succeeds, git_output_err, parse_name_status_z, parse_numstat_z,
-        run_git_network_output, run_git_output, run_git_output_owned,
-        split_null_terminated_fields,
+        run_git_network_output, run_git_output, run_git_output_owned, split_null_terminated_fields,
     },
     state::WorkspaceCommandState,
     workspace_setup::run_detected_workspace_setup,
@@ -292,7 +291,6 @@ async fn persist_workspace_setup_outcome(
         .map_err(|error| error.to_string())
 }
 
-
 fn validate_git_relative_path(path: &str) -> Result<String, String> {
     let p = normalize_git_relative_path(path);
     if p.is_empty() {
@@ -303,7 +301,6 @@ fn validate_git_relative_path(path: &str) -> Result<String, String> {
     }
     Ok(p)
 }
-
 
 fn resolve_default_branch_name(root: &str) -> Result<String, String> {
     let output = run_git_output(
@@ -371,7 +368,6 @@ fn push_current_branch(
     let branch = ensure_pushable_branch(root, protected_branch)?;
     push_branch_refspec(db_path, root, &branch, forge_login)
 }
-
 
 fn path_is_tracked(root: &str, rel: &str) -> bool {
     git_command_succeeds(root, &["ls-files", "--error-unmatch", "--", rel])

@@ -1,10 +1,12 @@
 import type {
 	ForgeCliAccountsOutput,
+	ForgeCliHostsOutput,
 	ForgeCliProvider,
 	ForgeCliStatusOutput,
 } from "@dcc/contracts";
 import {
 	workspaceForgeCliAccounts,
+	workspaceForgeCliHosts,
 	workspaceForgeCliSelectLogin,
 	workspaceForgeCliStatus,
 } from "./workspace-api";
@@ -77,6 +79,14 @@ function fallbackForgeAccounts(
 	};
 }
 
+function fallbackForgeHosts(provider: ForgeCliProvider): ForgeCliHostsOutput {
+	return {
+		provider,
+		cliName: provider === "github" ? "gh" : "glab",
+		hosts: [],
+	};
+}
+
 export async function getForgeCliStatus(
 	provider: ForgeCliProvider,
 	host?: string | null,
@@ -87,11 +97,11 @@ export async function getForgeCliStatus(
 	}
 
 	try {
-			return await workspaceForgeCliStatus({
-				provider,
-				host: normalizeForgeHost(provider, host),
-				forceRefresh: options?.forceRefresh ?? null,
-			});
+		return await workspaceForgeCliStatus({
+			provider,
+			host: normalizeForgeHost(provider, host),
+			forceRefresh: options?.forceRefresh ?? null,
+		});
 	} catch (error) {
 		return fallbackForgeStatus(
 			provider,
@@ -111,17 +121,35 @@ export async function getForgeCliAccounts(
 	}
 
 	try {
-			return await workspaceForgeCliAccounts({
-				provider,
-				host: normalizeForgeHost(provider, host),
-				forceRefresh: options?.forceRefresh ?? null,
-			});
+		return await workspaceForgeCliAccounts({
+			provider,
+			host: normalizeForgeHost(provider, host),
+			forceRefresh: options?.forceRefresh ?? null,
+		});
 	} catch (error) {
 		return fallbackForgeAccounts(
 			provider,
 			host,
 			error instanceof Error ? error.message : String(error),
 		);
+	}
+}
+
+export async function getForgeCliHosts(
+	provider: ForgeCliProvider,
+	options?: { forceRefresh?: boolean },
+): Promise<ForgeCliHostsOutput> {
+	if (!isTauriRuntime()) {
+		return fallbackForgeHosts(provider);
+	}
+
+	try {
+		return await workspaceForgeCliHosts({
+			provider,
+			forceRefresh: options?.forceRefresh ?? null,
+		});
+	} catch {
+		return fallbackForgeHosts(provider);
 	}
 }
 

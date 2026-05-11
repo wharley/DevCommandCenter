@@ -1,6 +1,6 @@
 use crate::commands::forge::accounts::backend_for;
-use crate::commands::forge::{github, gitlab};
 use crate::commands::forge::remote::resolve_workspace_forge_target;
+use crate::commands::forge::{github, gitlab};
 use crate::commands::forge_commands::ForgeCliProvider;
 
 #[derive(Debug, Clone)]
@@ -56,7 +56,10 @@ pub(crate) fn resolve_forge_cli_status_with_options(
     match result {
         Ok((logins, login)) if !logins.is_empty() => {
             let message = if logins.len() == 1 {
-                format!("Logged in as {}", login.as_deref().unwrap_or(logins[0].as_str()))
+                format!(
+                    "Logged in as {}",
+                    login.as_deref().unwrap_or(logins[0].as_str())
+                )
             } else {
                 format!("{} accounts available: {}", logins.len(), logins.join(", "))
             };
@@ -136,11 +139,26 @@ pub(crate) fn resolve_workspace_change_request_status(
             Ok(Some(ResolvedChangeRequestStatus {
                 provider: "gitlab".to_string(),
                 host: Some(target.remote.host.clone()),
-                number: raw_mr.get("iid").and_then(|value| value.as_u64()).map(|value| value as u32),
-                title: raw_mr.get("title").and_then(|value| value.as_str()).map(ToString::to_string),
-                url: raw_mr.get("web_url").and_then(|value| value.as_str()).map(ToString::to_string),
-                head_branch: raw_mr.get("source_branch").and_then(|value| value.as_str()).map(ToString::to_string),
-                base_branch: raw_mr.get("target_branch").and_then(|value| value.as_str()).map(ToString::to_string),
+                number: raw_mr
+                    .get("iid")
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value as u32),
+                title: raw_mr
+                    .get("title")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string),
+                url: raw_mr
+                    .get("web_url")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string),
+                head_branch: raw_mr
+                    .get("source_branch")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string),
+                base_branch: raw_mr
+                    .get("target_branch")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string),
                 state: gitlab::map_state(raw_mr.get("state").and_then(|value| value.as_str())),
                 mergeable: gitlab::map_mergeable(&raw_mr),
                 merge_state_status: raw_mr
@@ -179,13 +197,31 @@ pub(crate) fn resolve_workspace_change_request_status(
             Ok(Some(ResolvedChangeRequestStatus {
                 provider: "github".to_string(),
                 host: target.as_ref().map(|target| target.remote.host.clone()),
-                number: raw_pr.get("number").and_then(|value| value.as_u64()).map(|value| value as u32),
-                title: raw_pr.get("title").and_then(|value| value.as_str()).map(ToString::to_string),
-                url: raw_pr.get("url").and_then(|value| value.as_str()).map(ToString::to_string),
-                head_branch: raw_pr.get("headRefName").and_then(|value| value.as_str()).map(ToString::to_string),
-                base_branch: raw_pr.get("baseRefName").and_then(|value| value.as_str()).map(ToString::to_string),
+                number: raw_pr
+                    .get("number")
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value as u32),
+                title: raw_pr
+                    .get("title")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string),
+                url: raw_pr
+                    .get("url")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string),
+                head_branch: raw_pr
+                    .get("headRefName")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string),
+                base_branch: raw_pr
+                    .get("baseRefName")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string),
                 state,
-                mergeable: raw_pr.get("mergeable").and_then(|value| value.as_str()).map(ToString::to_string),
+                mergeable: raw_pr
+                    .get("mergeable")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string),
                 merge_state_status: raw_pr
                     .get("mergeStateStatus")
                     .and_then(|value| value.as_str())
@@ -227,11 +263,21 @@ pub(crate) fn create_workspace_change_request(
 ) -> Result<(), String> {
     match resolve_workspace_forge_target(root)? {
         Some(target) if target.provider == ForgeCliProvider::Gitlab => {
-            gitlab::create_change_request(root, base_branch, head_branch, &target.remote.host, login)
+            gitlab::create_change_request(
+                root,
+                base_branch,
+                head_branch,
+                &target.remote.host,
+                login,
+            )
         }
-        Some(target) => {
-            github::create_change_request(root, base_branch, head_branch, &target.remote.host, login)
-        }
+        Some(target) => github::create_change_request(
+            root,
+            base_branch,
+            head_branch,
+            &target.remote.host,
+            login,
+        ),
         None => github::create_change_request(root, base_branch, head_branch, "github.com", login),
     }
 }

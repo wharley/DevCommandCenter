@@ -181,7 +181,8 @@ mod tests {
 
         assert_eq!(resolved, Some("fresh-user".to_string()));
         assert_eq!(
-            repo.get_forge_login_preference("github", "github.com").unwrap(),
+            repo.get_forge_login_preference("github", "github.com")
+                .unwrap(),
             Some("fresh-user".to_string())
         );
 
@@ -205,7 +206,8 @@ mod tests {
 
         assert_eq!(resolved, None);
         assert_eq!(
-            repo.get_forge_login_preference("github", "github.com").unwrap(),
+            repo.get_forge_login_preference("github", "github.com")
+                .unwrap(),
             None
         );
 

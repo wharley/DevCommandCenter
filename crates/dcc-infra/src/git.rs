@@ -14,9 +14,9 @@ use dcc_core::{
 
 pub use crate::git_command::{
     configure_git_command, git_command_succeeds, git_output_detail, git_output_err,
-    run_git_network_output, run_git_network_output_with_env, run_git_output,
-    run_git_output_owned, run_git_output_with_timeout, GIT_CLONE_TIMEOUT,
-    GIT_HARDENED_CONFIG_ARGS, GIT_LOCAL_TIMEOUT, GIT_NETWORK_TIMEOUT,
+    run_git_network_output, run_git_network_output_with_env, run_git_output, run_git_output_owned,
+    run_git_output_with_timeout, GIT_CLONE_TIMEOUT, GIT_HARDENED_CONFIG_ARGS, GIT_LOCAL_TIMEOUT,
+    GIT_NETWORK_TIMEOUT,
 };
 use crate::git_command::{run_git_output_with_timeout_in_dir, run_git_stdout_in_dir};
 pub use crate::git_parsing::{

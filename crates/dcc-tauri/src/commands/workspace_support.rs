@@ -2,10 +2,7 @@ use std::path::Path;
 
 use tauri::State;
 
-use dcc_core::domain::{
-    repository::RepositoryId,
-    workspace::Workspace,
-};
+use dcc_core::domain::{repository::RepositoryId, workspace::Workspace};
 use dcc_core::ports::{RepositoryRepo, WorkspaceRepo};
 use dcc_infra::{
     db::SqliteWorkspaceRepo,
@@ -247,7 +244,14 @@ pub(crate) fn push_branch_refspec(
             base64_encode(&auth.git_http_authorization)
         );
         let config_arg = format!("{extraheader_key}={extraheader_value}");
-        let args = ["-c", config_arg.as_str(), "push", "-u", &remote, &remote_ref];
+        let args = [
+            "-c",
+            config_arg.as_str(),
+            "push",
+            "-u",
+            &remote,
+            &remote_ref,
+        ];
         run_git_network_output_with_env(root, &args, &auth.envs)?
     } else {
         run_git_network_output(root, &["push", "-u", &remote, &remote_ref])?
@@ -330,7 +334,12 @@ pub(crate) fn resolve_branch_diff_base(root: &str, target_branch: Option<&str>) 
         return upstream;
     }
 
-    for fallback in ["origin/HEAD", "origin/main", "origin/master", "origin/develop"] {
+    for fallback in [
+        "origin/HEAD",
+        "origin/main",
+        "origin/master",
+        "origin/develop",
+    ] {
         if git_command_succeeds(root, &["rev-parse", "--verify", fallback]) {
             return Some(fallback.to_string());
         }
@@ -340,7 +349,10 @@ pub(crate) fn resolve_branch_diff_base(root: &str, target_branch: Option<&str>) 
 }
 
 pub(crate) fn next_available_branch_name(root: &str, preferred: &str) -> String {
-    if !git_command_succeeds(root, &["show-ref", "--verify", &format!("refs/heads/{preferred}")]) {
+    if !git_command_succeeds(
+        root,
+        &["show-ref", "--verify", &format!("refs/heads/{preferred}")],
+    ) {
         return preferred.to_string();
     }
 

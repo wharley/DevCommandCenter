@@ -45,6 +45,13 @@ pub struct ForgeCliAccountsInput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ForgeCliHostsInput {
+    pub provider: ForgeCliProvider,
+    pub force_refresh: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct ForgeCliSelectLoginInput {
     pub provider: ForgeCliProvider,
     pub host: Option<String>,
@@ -95,6 +102,14 @@ pub struct ForgeCliAccountsOutput {
     pub accounts: Vec<ForgeCliAccountEntry>,
     pub message: String,
     pub login_command: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ForgeCliHostsOutput {
+    pub provider: ForgeCliProvider,
+    pub cli_name: String,
+    pub hosts: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -199,7 +214,8 @@ fn resolve_forge_cli_snapshot(
     host: &str,
     force_refresh: bool,
 ) -> Result<ForgeCliStatusOutput, String> {
-    let status = forge_provider::resolve_forge_cli_status_with_options(provider, host, force_refresh)?;
+    let status =
+        forge_provider::resolve_forge_cli_status_with_options(provider, host, force_refresh)?;
     let selected_login =
         forge_context::resolve_selected_forge_login(&state.db_path, provider, host, &status)?;
 
@@ -276,6 +292,20 @@ pub async fn workspace_forge_cli_accounts(
 }
 
 #[tauri::command]
+pub async fn workspace_forge_cli_hosts(
+    _state: State<'_, WorkspaceCommandState>,
+    input: ForgeCliHostsInput,
+) -> Result<ForgeCliHostsOutput, String> {
+    let backend = crate::commands::forge::accounts::backend_for(input.provider);
+    let hosts = backend.list_hosts(input.force_refresh.unwrap_or(false))?;
+    Ok(ForgeCliHostsOutput {
+        provider: input.provider,
+        cli_name: backend.cli_name().to_string(),
+        hosts,
+    })
+}
+
+#[tauri::command]
 pub async fn workspace_forge_cli_select_login(
     state: State<'_, WorkspaceCommandState>,
     input: ForgeCliSelectLoginInput,
@@ -323,7 +353,8 @@ pub async fn workspace_forge_context(
         &state.db_path,
         root,
         input.forge_login.as_deref(),
-    )? else {
+    )?
+    else {
         return Ok(empty_workspace_forge_context());
     };
 
@@ -399,8 +430,8 @@ pub async fn workspace_change_request_create(
 
     let protected_branch = resolve_workspace_target_branch(&state, root).await;
     let head_branch = ensure_pushable_branch(root, protected_branch.as_deref())?;
-    let base_ref =
-        resolve_branch_diff_base(root, protected_branch.as_deref()).unwrap_or_else(|| "main".to_string());
+    let base_ref = resolve_branch_diff_base(root, protected_branch.as_deref())
+        .unwrap_or_else(|| "main".to_string());
     let base_stripped = base_ref
         .split_once('/')
         .map(|(_, branch)| branch)
@@ -475,8 +506,11 @@ pub async fn workspace_pr_status(
         });
     }
 
-    let forge_context =
-        forge_context::resolve_workspace_forge_context(&state.db_path, root, input.forge_login.as_deref())?;
+    let forge_context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?;
     let effective_login = forge_context
         .as_ref()
         .and_then(|context| context.effective_login.as_deref());
@@ -516,10 +550,12 @@ pub async fn workspace_pr_status(
     )?;
     let Some(resolved) = resolved else {
         return Ok(WorkspacePrStatusOutput {
-            provider: forge_context.as_ref().map(|context| match context.provider {
-                ForgeCliProvider::Github => "github".to_string(),
-                ForgeCliProvider::Gitlab => "gitlab".to_string(),
-            }),
+            provider: forge_context
+                .as_ref()
+                .map(|context| match context.provider {
+                    ForgeCliProvider::Github => "github".to_string(),
+                    ForgeCliProvider::Gitlab => "gitlab".to_string(),
+                }),
             host: forge_context.as_ref().map(|context| context.host.clone()),
             number: None,
             title: None,

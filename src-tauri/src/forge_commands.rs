@@ -2,10 +2,10 @@ use tauri::State;
 
 use dcc_tauri::{
     commands::forge_commands::{
-        WorkspaceForgeContextInput, WorkspaceForgeContextOutput, WorkspacePrStatusInput,
-        WorkspacePrStatusOutput,
-        ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliSelectLoginInput,
-        ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput, GithubCliStatusOutput,
+        ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliHostsInput, ForgeCliHostsOutput,
+        ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput,
+        GithubCliStatusOutput, WorkspaceForgeContextInput, WorkspaceForgeContextOutput,
+        WorkspacePrStatusInput, WorkspacePrStatusOutput,
     },
     commands::workspace_commands::WorkspaceGitPushInput,
     state::WorkspaceCommandState,
@@ -33,6 +33,14 @@ pub async fn workspace_forge_cli_accounts(
     input: ForgeCliAccountsInput,
 ) -> Result<ForgeCliAccountsOutput, String> {
     dcc_tauri::commands::forge_commands::workspace_forge_cli_accounts(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_forge_cli_hosts(
+    state: State<'_, WorkspaceCommandState>,
+    input: ForgeCliHostsInput,
+) -> Result<ForgeCliHostsOutput, String> {
+    dcc_tauri::commands::forge_commands::workspace_forge_cli_hosts(state, input).await
 }
 
 #[tauri::command]

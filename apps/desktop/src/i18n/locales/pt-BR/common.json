@@ -132,6 +132,7 @@
       "workspace": "Workspace",
       "composer": "Seleção do composer",
       "runtime": "Runtime da sessão",
+      "forge": "Contexto de forge",
       "providers": "Catálogo de provedores"
     },
     "fields": {
@@ -140,6 +141,10 @@
       "branch": "Branch",
       "path": "Caminho",
       "provider": "Provedor",
+      "host": "Host",
+      "remote": "Remoto",
+      "account": "Conta",
+      "forgeStatus": "Forge CLI",
       "model": "Modelo",
       "state": "Estado",
       "turns": "Turnos",
@@ -271,6 +276,7 @@
       "hostLabel": "Host",
       "githubHint": "Use `github.com` ou a hostname da sua instância GitHub Enterprise.",
       "gitlabHint": "Use `gitlab.com` ou a hostname da sua instância GitLab self-hosted.",
+      "knownHosts": "Hosts autenticados detectados: {{hosts}}",
       "accountsConnected": "{{count}} contas: {{logins}}",
       "loadingError": "Não foi possível verificar o CLI do {{provider}}.",
       "command": "Comando sugerido: `{{command}}`"

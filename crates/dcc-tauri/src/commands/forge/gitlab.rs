@@ -23,8 +23,9 @@ struct CachedGitlabAuthStatus {
 
 const GITLAB_AUTH_STATUS_CACHE_TTL: Duration = Duration::from_secs(2);
 
-static GITLAB_AUTH_STATUS_CACHE: LazyLock<Mutex<std::collections::HashMap<String, CachedGitlabAuthStatus>>> =
-    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+static GITLAB_AUTH_STATUS_CACHE: LazyLock<
+    Mutex<std::collections::HashMap<String, CachedGitlabAuthStatus>>,
+> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 #[derive(Clone)]
 struct CachedGitlabProfile {
@@ -32,8 +33,9 @@ struct CachedGitlabProfile {
     cached_at: Instant,
 }
 
-static GITLAB_PROFILE_CACHE: LazyLock<Mutex<std::collections::HashMap<String, CachedGitlabProfile>>> =
-    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+static GITLAB_PROFILE_CACHE: LazyLock<
+    Mutex<std::collections::HashMap<String, CachedGitlabProfile>>,
+> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 #[derive(Debug, Clone)]
 pub(crate) struct GitlabAuthContext {
@@ -73,6 +75,16 @@ fn parse_glab_logged_in_pairs(text: &str) -> Vec<(String, String)> {
         }
     }
     out
+}
+
+fn parse_glab_authenticated_hosts(text: &str) -> Vec<String> {
+    let mut hosts = parse_glab_logged_in_pairs(text)
+        .into_iter()
+        .map(|(host, _)| host)
+        .collect::<Vec<_>>();
+    hosts.sort();
+    hosts.dedup();
+    hosts
 }
 
 fn looks_like_gitlab_unauthenticated(message: &str) -> bool {
@@ -115,8 +127,8 @@ fn canonical_gitlab_username(host: &str) -> Option<String> {
 fn encode_percent(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
-        let is_unreserved = byte.is_ascii_alphanumeric()
-            || matches!(byte, b'-' | b'_' | b'.' | b'~');
+        let is_unreserved =
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~');
         if is_unreserved {
             out.push(byte as char);
         } else {
@@ -140,6 +152,40 @@ fn last_commit_title(root: &str) -> Result<String, String> {
 
 pub(crate) fn auth_status(host: &str) -> Result<GitlabCliAuthStatus, String> {
     auth_status_with_options(host, false)
+}
+
+pub(crate) fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
+    let glab = resolve_cli_binary("glab")?;
+    let output = Command::new(glab)
+        .args(["auth", "status"])
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let combined = format!("{stdout}\n{stderr}");
+
+    if !output.status.success() {
+        if looks_like_gitlab_unauthenticated(&combined) {
+            return Ok(Vec::new());
+        }
+
+        let trimmed = combined.trim();
+        return Err(if trimmed.is_empty() {
+            "GitLab CLI authentication failed.".to_string()
+        } else {
+            trimmed.to_string()
+        });
+    }
+
+    let hosts = parse_glab_authenticated_hosts(&combined);
+    if force_refresh {
+        for host in &hosts {
+            auth_status_cache::invalidate(host);
+            profile_cache::invalidate(host);
+        }
+    }
+    Ok(hosts)
 }
 
 pub(crate) fn auth_status_with_options(
@@ -191,7 +237,10 @@ pub(crate) fn auth_status_with_options(
     }
     logins.dedup();
     let active_login = logins.first().cloned();
-    let status = GitlabCliAuthStatus { logins, active_login };
+    let status = GitlabCliAuthStatus {
+        logins,
+        active_login,
+    };
     auth_status_cache::put(host, status.clone());
     Ok(status)
 }
@@ -396,7 +445,12 @@ pub(crate) fn resolve_change_request_json(
     let list_output = {
         let glab = resolve_cli_binary("glab")?;
         let mut command = Command::new(glab);
-        command.current_dir(root).args(["api", "--hostname", &target.remote.host, endpoint.as_str()]);
+        command.current_dir(root).args([
+            "api",
+            "--hostname",
+            &target.remote.host,
+            endpoint.as_str(),
+        ]);
         if let Some(auth) = auth.as_ref() {
             command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
         }
@@ -406,7 +460,8 @@ pub(crate) fn resolve_change_request_json(
         return Ok(None);
     }
 
-    let items: Value = serde_json::from_slice(&list_output.stdout).map_err(|error| error.to_string())?;
+    let items: Value =
+        serde_json::from_slice(&list_output.stdout).map_err(|error| error.to_string())?;
     let Some(first) = items.as_array().and_then(|entries| entries.first()) else {
         return Ok(None);
     };
@@ -421,7 +476,12 @@ pub(crate) fn resolve_change_request_json(
     let detail_output = {
         let glab = resolve_cli_binary("glab")?;
         let mut command = Command::new(glab);
-        command.current_dir(root).args(["api", "--hostname", &target.remote.host, detail_endpoint.as_str()]);
+        command.current_dir(root).args([
+            "api",
+            "--hostname",
+            &target.remote.host,
+            detail_endpoint.as_str(),
+        ]);
         if let Some(auth) = auth.as_ref() {
             command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
         }
@@ -478,7 +538,8 @@ pub(crate) fn view_change_request_web(
     if let Some(auth) = auth.as_ref() {
         output.envs(auth.envs.iter().map(|(key, value)| (key, value)));
     }
-    let output = output.args(["mr", "view", "--web"])
+    let output = output
+        .args(["mr", "view", "--web"])
         .output()
         .map_err(|e| e.to_string())?;
     if output.status.success() {
@@ -512,9 +573,14 @@ pub(crate) fn merge_change_request(
     let output = {
         let glab = resolve_cli_binary("glab")?;
         let mut command = Command::new(glab);
-        command
-            .current_dir(root)
-            .args(["api", "--hostname", &target.remote.host, "--method", "PUT", endpoint.as_str()]);
+        command.current_dir(root).args([
+            "api",
+            "--hostname",
+            &target.remote.host,
+            "--method",
+            "PUT",
+            endpoint.as_str(),
+        ]);
         if let Some(auth) = auth.as_ref() {
             command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
         }
@@ -544,7 +610,8 @@ pub(crate) fn create_change_request(
     if let Some(auth) = auth.as_ref() {
         output.envs(auth.envs.iter().map(|(key, value)| (key, value)));
     }
-    let output = output.args([
+    let output = output
+        .args([
             "mr",
             "create",
             "--fill",
@@ -568,7 +635,7 @@ pub(crate) fn create_change_request(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_glab_logged_in_pairs;
+    use super::{parse_glab_authenticated_hosts, parse_glab_logged_in_pairs};
 
     #[test]
     fn parses_gitlab_logged_in_pairs() {
@@ -576,6 +643,20 @@ mod tests {
         assert_eq!(
             parse_glab_logged_in_pairs(output),
             vec![("gitlab.com".to_string(), "octo".to_string())]
+        );
+    }
+
+    #[test]
+    fn parses_gitlab_authenticated_hosts() {
+        let output = "\
+gitlab.com\n  ✓ Logged in to gitlab.com as octo (/path/to/config)\n\
+self.gitlab.example.com\n  ✓ Logged in to self.gitlab.example.com as team-user (/path/to/config)\n";
+        assert_eq!(
+            parse_glab_authenticated_hosts(output),
+            vec![
+                "gitlab.com".to_string(),
+                "self.gitlab.example.com".to_string()
+            ]
         );
     }
 }

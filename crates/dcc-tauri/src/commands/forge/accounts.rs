@@ -27,6 +27,7 @@ pub(crate) trait ForgeCliBackend: Sync {
     fn provider_label(&self) -> &'static str;
     fn login_command(&self, host: &str) -> String;
     fn auth_status(&self, host: &str, force_refresh: bool) -> Result<ForgeCliAuthStatus, String>;
+    fn list_hosts(&self, force_refresh: bool) -> Result<Vec<String>, String>;
     fn list_accounts(
         &self,
         host: &str,
@@ -73,6 +74,10 @@ impl ForgeCliBackend for GithubCliBackend {
         })
     }
 
+    fn list_hosts(&self, force_refresh: bool) -> Result<Vec<String>, String> {
+        github::list_authenticated_hosts(force_refresh)
+    }
+
     fn list_accounts(
         &self,
         host: &str,
@@ -117,6 +122,10 @@ impl ForgeCliBackend for GitlabCliBackend {
             active_login: status.active_login,
             logins: status.logins,
         })
+    }
+
+    fn list_hosts(&self, force_refresh: bool) -> Result<Vec<String>, String> {
+        gitlab::list_authenticated_hosts(force_refresh)
     }
 
     fn list_accounts(

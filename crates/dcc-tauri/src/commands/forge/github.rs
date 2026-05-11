@@ -22,8 +22,9 @@ struct CachedGithubAuthStatus {
 
 const GITHUB_AUTH_STATUS_CACHE_TTL: Duration = Duration::from_secs(2);
 
-static GITHUB_AUTH_STATUS_CACHE: LazyLock<Mutex<std::collections::HashMap<String, CachedGithubAuthStatus>>> =
-    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+static GITHUB_AUTH_STATUS_CACHE: LazyLock<
+    Mutex<std::collections::HashMap<String, CachedGithubAuthStatus>>,
+> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 #[derive(Clone)]
 struct CachedGithubProfile {
@@ -80,6 +81,29 @@ fn parse_github_logins_for_host(stdout: &str, host: &str) -> Result<Vec<String>,
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default())
+}
+
+fn parse_github_authenticated_hosts(stdout: &str) -> Result<Vec<String>, String> {
+    let parsed: GhAuthStatusResponse = serde_json::from_str(stdout)
+        .map_err(|error| format!("Failed to decode `gh auth status --json hosts`: {error}"))?;
+    let mut hosts = parsed
+        .hosts
+        .into_iter()
+        .filter_map(|(host, entries)| {
+            let authenticated = entries.iter().any(|entry| {
+                entry.state.as_deref() != Some("failure")
+                    && entry
+                        .login
+                        .as_deref()
+                        .map(str::trim)
+                        .is_some_and(|login| !login.is_empty())
+            });
+            authenticated.then_some(host)
+        })
+        .collect::<Vec<_>>();
+    hosts.sort();
+    hosts.dedup();
+    Ok(hosts)
 }
 
 fn parse_github_active_login_for_host(stdout: &str, host: &str) -> Result<Option<String>, String> {
@@ -169,11 +193,7 @@ pub(crate) fn resolve_auth_context(
     let Some(token) = trim_token(&output.stdout) else {
         return Err("GitHub CLI returned an empty token for the selected account.".to_string());
     };
-    let auth = format!(
-        "{}:{}",
-        github_http_username(requested_login),
-        token
-    );
+    let auth = format!("{}:{}", github_http_username(requested_login), token);
     Ok(Some(GithubAuthContext {
         envs: vec![
             ("GH_HOST".to_string(), host.to_string()),
@@ -188,6 +208,40 @@ pub(crate) fn resolve_auth_context(
 
 pub(crate) fn auth_status(host: &str) -> Result<GithubCliAuthStatus, String> {
     auth_status_with_options(host, false)
+}
+
+pub(crate) fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
+    let gh = resolve_cli_binary("gh")?;
+    let output = Command::new(gh)
+        .args(["auth", "status", "--json", "hosts"])
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let combined = format!("{stdout}\n{stderr}");
+
+    if !output.status.success() {
+        if looks_like_github_unauthenticated(&combined) {
+            return Ok(Vec::new());
+        }
+
+        let trimmed = combined.trim();
+        return Err(if trimmed.is_empty() {
+            "GitHub CLI authentication failed.".to_string()
+        } else {
+            trimmed.to_string()
+        });
+    }
+
+    let hosts = parse_github_authenticated_hosts(&stdout)?;
+    if force_refresh {
+        for host in &hosts {
+            auth_status_cache::invalidate(host);
+            profile_cache::invalidate_host(host);
+        }
+    }
+    Ok(hosts)
 }
 
 pub(crate) fn auth_status_with_options(
@@ -484,7 +538,11 @@ pub(crate) fn resolve_change_request_json(
     Ok(pr.cloned())
 }
 
-pub(crate) fn view_change_request_web(root: &str, host: &str, login: Option<&str>) -> Result<(), String> {
+pub(crate) fn view_change_request_web(
+    root: &str,
+    host: &str,
+    login: Option<&str>,
+) -> Result<(), String> {
     let gh = resolve_cli_binary("gh")?;
     let auth = resolve_auth_context(host, login)?;
     let mut output = Command::new(gh);
@@ -492,7 +550,8 @@ pub(crate) fn view_change_request_web(root: &str, host: &str, login: Option<&str
     if let Some(auth) = auth.as_ref() {
         output.envs(auth.envs.iter().map(|(key, value)| (key, value)));
     }
-    let output = output.args(["pr", "view", "--web"])
+    let output = output
+        .args(["pr", "view", "--web"])
         .output()
         .map_err(|e| e.to_string())?;
     if output.status.success() {
@@ -504,7 +563,11 @@ pub(crate) fn view_change_request_web(root: &str, host: &str, login: Option<&str
     ))
 }
 
-pub(crate) fn merge_change_request(root: &str, host: &str, login: Option<&str>) -> Result<(), String> {
+pub(crate) fn merge_change_request(
+    root: &str,
+    host: &str,
+    login: Option<&str>,
+) -> Result<(), String> {
     let gh = resolve_cli_binary("gh")?;
     let auth = resolve_auth_context(host, login)?;
     let mut output = Command::new(gh);
@@ -512,7 +575,8 @@ pub(crate) fn merge_change_request(root: &str, host: &str, login: Option<&str>) 
     if let Some(auth) = auth.as_ref() {
         output.envs(auth.envs.iter().map(|(key, value)| (key, value)));
     }
-    let output = output.args(["pr", "merge", "--merge"])
+    let output = output
+        .args(["pr", "merge", "--merge"])
         .output()
         .map_err(|e| e.to_string())?;
     if output.status.success() {
@@ -538,7 +602,8 @@ pub(crate) fn create_change_request(
     if let Some(auth) = auth.as_ref() {
         output.envs(auth.envs.iter().map(|(key, value)| (key, value)));
     }
-    let output = output.args([
+    let output = output
+        .args([
             "pr",
             "create",
             "--fill",
@@ -560,7 +625,10 @@ pub(crate) fn create_change_request(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_github_active_login_for_host, parse_github_logins_for_host};
+    use super::{
+        parse_github_active_login_for_host, parse_github_authenticated_hosts,
+        parse_github_logins_for_host,
+    };
 
     #[test]
     fn parses_active_github_login_from_json() {
@@ -594,6 +662,27 @@ mod tests {
         assert_eq!(
             parse_github_logins_for_host(output, "github.com").unwrap(),
             vec!["demo-user".to_string()]
+        );
+    }
+
+    #[test]
+    fn parses_github_authenticated_hosts_only() {
+        let output = r#"{
+            "hosts": {
+                "github.com": [
+                    {"state":"success","login":"demo-user","active":true}
+                ],
+                "ghe.example.com": [
+                    {"state":"success","login":"enterprise-user","active":true}
+                ],
+                "stale.example.com": [
+                    {"state":"failure","login":"old-user","active":false}
+                ]
+            }
+        }"#;
+        assert_eq!(
+            parse_github_authenticated_hosts(output).unwrap(),
+            vec!["ghe.example.com".to_string(), "github.com".to_string()]
         );
     }
 }

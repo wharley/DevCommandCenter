@@ -7,6 +7,8 @@ import type {
 	CreateWorkspaceFromUrlOutput,
 	ForgeCliAccountsInput,
 	ForgeCliAccountsOutput,
+	ForgeCliHostsInput,
+	ForgeCliHostsOutput,
 	ForgeCliSelectLoginInput,
 	ForgeCliStatusInput,
 	ForgeCliStatusOutput,
@@ -81,6 +83,12 @@ export function workspaceForgeCliStatus(input: ForgeCliStatusInput) {
 
 export function workspaceForgeCliAccounts(input: ForgeCliAccountsInput) {
 	return invoke<ForgeCliAccountsOutput>(WORKSPACE_METHODS.workspaceForgeCliAccounts, {
+		input,
+	});
+}
+
+export function workspaceForgeCliHosts(input: ForgeCliHostsInput) {
+	return invoke<ForgeCliHostsOutput>(WORKSPACE_METHODS.workspaceForgeCliHosts, {
 		input,
 	});
 }

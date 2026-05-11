@@ -25,9 +25,9 @@ use dcc_core::{
 use dcc_tauri::commands::{
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
-        ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput,
-        GithubCliStatusInput, GithubCliStatusOutput, WorkspaceForgeContextInput,
-        WorkspaceForgeContextOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
+        ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput,
+        GithubCliStatusOutput, WorkspaceForgeContextInput, WorkspaceForgeContextOutput,
+        WorkspacePrStatusInput, WorkspacePrStatusOutput,
     },
     provider_commands::ListProvidersOutput,
     session_commands::{
@@ -35,15 +35,15 @@ use dcc_tauri::commands::{
         RespondToUserInputOutput,
     },
     workspace_commands::{
-        CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput,
-        ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
-        ListGitTrackedFilesOutput, ListLocalBranchesInput, ListLocalBranchesOutput,
-        ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
-        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
-        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
-        WorkspaceGitCommitPushInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
-        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceRunSetupInput,
-        WorkspaceRunSetupOutput, WorkspaceSetupHint,
+        CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
+        ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
+        ListLocalBranchesInput, ListLocalBranchesOutput, ListRepositoriesOutput,
+        ListWorkspacesOutput, RepositoryIdInput, WorkspaceContinueFromBaseBranchInput,
+        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
+        WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput,
+        WorkspaceGitPathInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
+        WorkspaceGitStatusOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspaceSetupHint,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,7 @@ struct WorkspaceMethods {
     workspace_github_cli_status: String,
     workspace_forge_cli_status: String,
     workspace_forge_cli_accounts: String,
+    workspace_forge_cli_hosts: String,
     workspace_forge_cli_select_login: String,
     workspace_forge_context: String,
     list_local_branches: String,
@@ -169,6 +170,8 @@ fn main() {
         .typ::<ForgeCliAccountsInput>()
         .typ::<ForgeCliAccountEntry>()
         .typ::<ForgeCliAccountsOutput>()
+        .typ::<dcc_tauri::commands::forge_commands::ForgeCliHostsInput>()
+        .typ::<dcc_tauri::commands::forge_commands::ForgeCliHostsOutput>()
         .typ::<ForgeCliSelectLoginInput>()
         .typ::<ForgeCliStatusInput>()
         .typ::<ForgeCliStatusOutput>()
@@ -219,6 +222,7 @@ fn main() {
                 workspace_github_cli_status: "workspace_github_cli_status".to_string(),
                 workspace_forge_cli_status: "workspace_forge_cli_status".to_string(),
                 workspace_forge_cli_accounts: "workspace_forge_cli_accounts".to_string(),
+                workspace_forge_cli_hosts: "workspace_forge_cli_hosts".to_string(),
                 workspace_forge_cli_select_login: "workspace_forge_cli_select_login".to_string(),
                 workspace_forge_context: "workspace_forge_context".to_string(),
                 list_local_branches: "list_local_branches".to_string(),

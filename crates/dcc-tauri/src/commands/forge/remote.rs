@@ -98,7 +98,9 @@ fn resolve_workspace_remote(root: &str) -> Result<Option<(String, String)>, Stri
     Ok(Some((remote, remote_url)))
 }
 
-pub(crate) fn resolve_workspace_forge_target(root: &str) -> Result<Option<WorkspaceForgeTarget>, String> {
+pub(crate) fn resolve_workspace_forge_target(
+    root: &str,
+) -> Result<Option<WorkspaceForgeTarget>, String> {
     let workspace_remote = resolve_workspace_remote(root)?;
     let remote_url = workspace_remote.as_ref().map(|(_, url)| url.as_str());
     let provider = detect_provider_for_repo(remote_url.as_deref(), Some(Path::new(root)));
@@ -134,7 +136,10 @@ mod tests {
     #[test]
     fn detects_github_from_well_known_host() {
         assert_eq!(
-            detect_provider_for_repo(Some("https://github.com/acme/demo.git"), Some(Path::new("."))),
+            detect_provider_for_repo(
+                Some("https://github.com/acme/demo.git"),
+                Some(Path::new("."))
+            ),
             Some(ForgeCliProvider::Github)
         );
     }
