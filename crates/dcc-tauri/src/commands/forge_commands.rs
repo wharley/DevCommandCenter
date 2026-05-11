@@ -65,6 +65,14 @@ pub enum ForgeCliStatusState {
     Error,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceForgeRemoteState {
+    Ok,
+    Unauthenticated,
+    Unavailable,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ForgeCliStatusOutput {
@@ -170,6 +178,8 @@ pub struct WorkspaceForgeContextOutput {
     pub repo: Option<String>,
     pub cli_name: Option<String>,
     pub status: Option<ForgeCliStatusState>,
+    pub remote_state: Option<WorkspaceForgeRemoteState>,
+    pub bound_login: Option<String>,
     pub login: Option<String>,
     pub selected_login: Option<String>,
     pub effective_login: Option<String>,
@@ -187,6 +197,8 @@ fn empty_workspace_forge_context() -> WorkspaceForgeContextOutput {
         repo: None,
         cli_name: None,
         status: None,
+        remote_state: None,
+        bound_login: None,
         login: None,
         selected_login: None,
         effective_login: None,
@@ -393,6 +405,16 @@ pub async fn workspace_forge_context(
         } else {
             ForgeCliStatusState::Error
         }),
+        remote_state: Some(match context.remote_state {
+            forge_context::WorkspaceForgeRemoteState::Ok => WorkspaceForgeRemoteState::Ok,
+            forge_context::WorkspaceForgeRemoteState::Unauthenticated => {
+                WorkspaceForgeRemoteState::Unauthenticated
+            }
+            forge_context::WorkspaceForgeRemoteState::Unavailable => {
+                WorkspaceForgeRemoteState::Unavailable
+            }
+        }),
+        bound_login: context.bound_login,
         login: context.login,
         selected_login: context.selected_login,
         effective_login: context.effective_login,

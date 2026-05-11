@@ -22,6 +22,8 @@ export function useWorkspaceForgeContext(
 					repo: null,
 					cliName: null,
 					status: null,
+					remoteState: null,
+					boundLogin: null,
 					login: null,
 					selectedLogin: null,
 					effectiveLogin: null,

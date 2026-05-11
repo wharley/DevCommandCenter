@@ -120,6 +120,20 @@ function resolveForgeContext(
 	};
 }
 
+function forgeIdentityInitials(value: string): string {
+	return value
+		.split(/[\s@._/-]+/)
+		.map((part) => part.trim())
+		.filter(Boolean)
+		.slice(0, 2)
+		.map((part) => part[0]?.toUpperCase() ?? "")
+		.join("") || "FG";
+}
+
+function forgeProviderDotClass(provider: ForgeCliProvider): string {
+	return provider === "gitlab" ? "bg-[#FC6D26]" : "bg-foreground";
+}
+
 function inspectorActionTitle(mode: string, requestLabel: "PR" | "MR") {
 	switch (mode) {
 		case "create-pr":
@@ -281,7 +295,6 @@ export function WorkspaceInspectorSidebar({
 			? gitStatusQuery.data.currentBranch
 			: null;
 	const currentBranch = gitBranch ?? workspaceBranch ?? "";
-	const persistedForgeLogin = currentRepository?.forgeLogin?.trim() || null;
 	const repositoryId = currentRepository?.id?.trim() || null;
 	const workspaceForgeContextQuery = useWorkspaceForgeContext(workspacePath);
 	const workspaceForgeContext = workspaceForgeContextQuery.data ?? null;
@@ -292,17 +305,20 @@ export function WorkspaceInspectorSidebar({
 	const forgeAccountsQuery = useForgeCliAccounts(forgeContext.provider, forgeContext.host, {
 		enabled: Boolean(workspaceForgeContext?.provider && workspaceForgeContext?.host),
 	});
-	const forgeLoginsHealthQuery = useForgeCliLoginsHealth(forgeContext.provider, forgeContext.host, {
+	useForgeCliLoginsHealth(forgeContext.provider, forgeContext.host, {
 		enabled: Boolean(workspaceForgeContext?.provider && workspaceForgeContext?.host),
 	});
-	const liveLogins = forgeLoginsHealthQuery.data;
-	const activeBoundForgeLogin =
-		persistedForgeLogin &&
-		(liveLogins === undefined || liveLogins.includes(persistedForgeLogin))
-			? persistedForgeLogin
-			: null;
-	const selectedForgeLogin = activeBoundForgeLogin ?? workspaceForgeContext?.effectiveLogin ?? null;
+	const selectedForgeLogin = workspaceForgeContext?.effectiveLogin ?? null;
 	const forgeAccounts = forgeAccountsQuery.data?.accounts ?? [];
+	const boundForgeLogin = workspaceForgeContext?.boundLogin?.trim() || null;
+	const boundForgeAccount = useMemo(() => {
+		if (!boundForgeLogin) {
+			return null;
+		}
+		return (
+			forgeAccounts.find((account) => account.login === boundForgeLogin) ?? null
+		);
+	}, [boundForgeLogin, forgeAccounts]);
 	const prStatusQuery = useWorkspacePrStatus(
 		workspacePath,
 		gitBranch,
@@ -317,25 +333,19 @@ export function WorkspaceInspectorSidebar({
 		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
 		(gitStatusQuery.data?.unstaged.length ?? 0) > 0;
 	const forgeCliReady = workspaceForgeContext?.status === "ready";
-	const forgeNeedsConnect = Boolean(
-		workspaceForgeContext?.provider && (!forgeCliReady || !activeBoundForgeLogin),
-	);
+	const forgeNeedsConnect = workspaceForgeContext?.remoteState === "unauthenticated";
+	const forgeUnavailable = workspaceForgeContext?.remoteState === "unavailable";
+	const forgeConnected = workspaceForgeContext?.remoteState === "ok";
+	const forgeIdentityLabel =
+		boundForgeAccount?.name?.trim() || boundForgeLogin || forgeContext.providerLabel;
+	const forgeIdentitySubtitle = boundForgeLogin ? `@${boundForgeLogin}` : null;
 	const isSetupPending = workspaceStatus === "setup_pending";
 	const setupReportSummary =
 		workspaceSetupReport == null
 			? null
 			: setupReportDescription(t, workspaceSetupReport, []);
 	const forgeCliMessage =
-		(activeBoundForgeLogin == null && forgeCliReady
-			? persistedForgeLogin
-				? t("settings.account.repoBindingExpired", {
-						login: persistedForgeLogin,
-						provider: forgeContext.providerLabel,
-					})
-				: t("settings.account.repoNotBound", {
-						provider: forgeContext.providerLabel,
-					})
-			: workspaceForgeContext?.message) ??
+		workspaceForgeContext?.message ??
 		(workspaceForgeContextQuery.isPending
 			? `Checking ${forgeContext.providerLabel} CLI...`
 			: null);
@@ -901,12 +911,54 @@ export function WorkspaceInspectorSidebar({
 									<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
 										{t("inspector.groups.forge")}
 									</p>
-									<div className="rounded-md border border-border/50 bg-muted/10 px-2">
-										<DetailRow label={t("inspector.fields.provider")}>
-											{workspaceForgeContext?.provider
-												? forgeProviderLabel(workspaceForgeContext.provider)
-												: "—"}
-										</DetailRow>
+									<div className="rounded-md border border-border/50 bg-muted/10 p-3">
+										<div className="flex items-center gap-3">
+											<span
+												aria-hidden
+												className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border/60 bg-background text-[13px] font-semibold uppercase text-foreground"
+											>
+												{forgeIdentityInitials(forgeIdentityLabel)}
+											</span>
+											<div className="min-w-0 flex-1">
+												<div className="flex items-center gap-2">
+													<span className="truncate text-[13px] font-semibold text-foreground">
+														{forgeConnected
+															? forgeIdentityLabel
+															: `${forgeContext.providerLabel} ${t("settings.account.notReadyBadge").toLowerCase()}`}
+													</span>
+													{workspaceForgeContext?.provider ? (
+														<span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+															<span
+																aria-hidden
+																className={`size-1.5 rounded-full ${forgeProviderDotClass(
+																	workspaceForgeContext.provider,
+																)}`}
+															/>
+															{forgeProviderLabel(workspaceForgeContext.provider)}
+														</span>
+													) : null}
+												</div>
+												<div className="mt-0.5 text-[12px] text-muted-foreground">
+													{forgeConnected
+														? forgeIdentitySubtitle
+														: forgeCliMessage ?? "—"}
+												</div>
+											</div>
+											{workspaceForgeContext?.provider && workspaceForgeContext.host ? (
+												<Button
+													type="button"
+													variant={forgeConnected ? "outline" : "default"}
+													size="sm"
+													onClick={() => setForgeConnectOpen(true)}
+													className={!forgeConnected ? "px-4" : undefined}
+												>
+													{forgeConnected
+														? t("settings.account.switchAccount")
+														: t("settings.account.connect")}
+												</Button>
+											) : null}
+										</div>
+										<div className="mt-3 border-t border-border/45" />
 										<DetailRow label={t("inspector.fields.host")}>
 											{workspaceForgeContext?.host ?? "—"}
 										</DetailRow>
@@ -961,28 +1013,16 @@ export function WorkspaceInspectorSidebar({
 										<DetailRow label={t("inspector.fields.forgeStatus")}>
 											<div className="flex flex-wrap items-center gap-2">
 												<Badge
-													variant={!forgeNeedsConnect ? "success" : "outline"}
+													variant={!forgeNeedsConnect && !forgeUnavailable ? "success" : "outline"}
 													className="text-[10px] font-normal"
 												>
-													{!forgeNeedsConnect
+													{!forgeNeedsConnect && !forgeUnavailable
 														? t("settings.account.readyBadge")
 														: t("settings.account.notReadyBadge")}
 												</Badge>
 												<span className="text-muted-foreground">
-													{forgeCliMessage ?? "—"}
+													{forgeConnected ? t("settings.account.accountLabel") : forgeCliMessage ?? "—"}
 												</span>
-												{workspaceForgeContext?.provider && workspaceForgeContext.host ? (
-													<Button
-														type="button"
-														variant="outline"
-														size="sm"
-														onClick={() => setForgeConnectOpen(true)}
-													>
-														{!forgeNeedsConnect
-															? t("settings.account.switchAccount")
-															: t("settings.account.connect")}
-													</Button>
-												) : null}
 											</div>
 										</DetailRow>
 									</div>

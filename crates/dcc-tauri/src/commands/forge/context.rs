@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use dcc_core::ports::RepositoryRepo;
 use dcc_infra::db::SqliteWorkspaceRepo;
 
 use crate::commands::forge::{
@@ -18,12 +19,21 @@ pub(crate) struct ResolvedWorkspaceForgeContext {
     pub(crate) repo: String,
     pub(crate) cli_name: String,
     pub(crate) ready: bool,
+    pub(crate) remote_state: WorkspaceForgeRemoteState,
+    pub(crate) bound_login: Option<String>,
     pub(crate) login: Option<String>,
     pub(crate) selected_login: Option<String>,
     pub(crate) effective_login: Option<String>,
     pub(crate) known_hosts: Vec<String>,
     pub(crate) message: String,
     pub(crate) login_command: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkspaceForgeRemoteState {
+    Ok,
+    Unauthenticated,
+    Unavailable,
 }
 
 pub(crate) fn forge_provider_key(provider: ForgeCliProvider) -> &'static str {
@@ -104,6 +114,45 @@ fn resolve_workspace_forge_message(
     )
 }
 
+fn resolve_workspace_remote_state(
+    provider_label: &str,
+    target_host: &str,
+    status: &ResolvedCliStatus,
+    known_hosts: &[String],
+    bound_login: Option<&str>,
+) -> (WorkspaceForgeRemoteState, String) {
+    let bound_login_active = bound_login
+        .filter(|login| status.logins.iter().any(|candidate| candidate == *login))
+        .is_some();
+    if bound_login_active {
+        return (
+            WorkspaceForgeRemoteState::Ok,
+            resolve_workspace_forge_message(provider_label, target_host, status, known_hosts),
+        );
+    }
+
+    if !status.ready && !known_hosts.iter().any(|host| host == target_host) {
+        return (
+            WorkspaceForgeRemoteState::Unavailable,
+            resolve_workspace_forge_message(provider_label, target_host, status, known_hosts),
+        );
+    }
+
+    (
+        WorkspaceForgeRemoteState::Unauthenticated,
+        match bound_login {
+            Some(login) => format!(
+                "The bound {provider_label} account `@{login}` is no longer authenticated for `{target_host}`. Run `{}` to reconnect.",
+                status.login_command
+            ),
+            None => format!(
+                "No {provider_label} account is bound to this repository yet. Run `{}` to connect and bind one.",
+                status.login_command
+            ),
+        },
+    )
+}
+
 pub(crate) fn resolve_workspace_forge_context(
     db_path: &Path,
     root: &str,
@@ -116,6 +165,17 @@ pub(crate) fn resolve_workspace_forge_context(
     let status = forge_provider::resolve_forge_cli_status(target.provider, &target.remote.host)?;
     let backend = backend_for(target.provider);
     let known_hosts = backend.list_hosts(false).unwrap_or_default();
+    let repo = SqliteWorkspaceRepo::open(db_path).map_err(|error| error.to_string())?;
+    let repository = futures::executor::block_on(repo.get_repository(
+        &dcc_core::domain::repository::RepositoryId(root.to_string()),
+    ))
+    .map_err(|error| error.to_string())?;
+    let bound_login = repository
+        .as_ref()
+        .and_then(|repository| repository.forge_login.as_deref())
+        .map(str::trim)
+        .filter(|login| !login.is_empty())
+        .map(ToString::to_string);
     let selected_login =
         resolve_selected_forge_login(db_path, target.provider, &target.remote.host, &status)?;
     let requested_login = requested_login
@@ -124,11 +184,12 @@ pub(crate) fn resolve_workspace_forge_context(
         .filter(|login| status.logins.iter().any(|candidate| candidate == login))
         .map(ToString::to_string);
     let effective_login = requested_login.or_else(|| selected_login.clone());
-    let message = resolve_workspace_forge_message(
+    let (remote_state, message) = resolve_workspace_remote_state(
         backend.provider_label(),
         &target.remote.host,
         &status,
         &known_hosts,
+        bound_login.as_deref(),
     );
 
     Ok(Some(ResolvedWorkspaceForgeContext {
@@ -139,6 +200,8 @@ pub(crate) fn resolve_workspace_forge_context(
         repo: target.remote.repo,
         cli_name: status.cli_name,
         ready: status.ready,
+        remote_state,
+        bound_login,
         login: status.login,
         selected_login,
         effective_login,
@@ -290,5 +353,57 @@ mod tests {
         );
 
         assert_eq!(message, "base message");
+    }
+
+    #[test]
+    fn remote_state_is_ok_when_bound_login_is_still_authenticated() {
+        let status = sample_status(&["octocat"], Some("octocat"));
+        let (state, message) =
+            resolve_workspace_remote_state("GitHub", "github.com", &status, &[], Some("octocat"));
+
+        assert_eq!(state, WorkspaceForgeRemoteState::Ok);
+        assert_eq!(message, "");
+    }
+
+    #[test]
+    fn remote_state_is_unauthenticated_when_repo_has_no_bound_login() {
+        let status = sample_status(&["octocat"], Some("octocat"));
+        let (state, message) = resolve_workspace_remote_state(
+            "GitHub",
+            "github.com",
+            &status,
+            &["github.com".to_string()],
+            None,
+        );
+
+        assert_eq!(state, WorkspaceForgeRemoteState::Unauthenticated);
+        assert!(message.contains("No GitHub account is bound"));
+    }
+
+    #[test]
+    fn remote_state_is_unavailable_when_repo_host_is_not_authenticated() {
+        let status = ResolvedCliStatus {
+            provider: ForgeCliProvider::Gitlab,
+            cli_name: "glab".to_string(),
+            hostname: "gitlab.company.com".to_string(),
+            ready: false,
+            login: None,
+            logins: Vec::new(),
+            message:
+                "Run `glab auth login --hostname gitlab.company.com` to connect GitLab locally."
+                    .to_string(),
+            login_command: "glab auth login --hostname gitlab.company.com".to_string(),
+        };
+        let (state, message) = resolve_workspace_remote_state(
+            "GitLab",
+            "gitlab.company.com",
+            &status,
+            &["gitlab.com".to_string()],
+            Some("team-user"),
+        );
+
+        assert_eq!(state, WorkspaceForgeRemoteState::Unavailable);
+        assert!(message.contains("gitlab.company.com"));
+        assert!(message.contains("gitlab.com"));
     }
 }

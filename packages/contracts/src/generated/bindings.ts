@@ -550,6 +550,8 @@ export type WorkspaceForgeContextOutput = {
 	repo: string | null,
 	cliName: string | null,
 	status: ForgeCliStatusState | null,
+	remoteState: WorkspaceForgeRemoteState | null,
+	boundLogin: string | null,
 	login: string | null,
 	selectedLogin: string | null,
 	effectiveLogin: string | null,
@@ -557,6 +559,8 @@ export type WorkspaceForgeContextOutput = {
 	message: string | null,
 	loginCommand: string | null,
 };
+
+export type WorkspaceForgeRemoteState = "ok" | "unauthenticated" | "unavailable";
 
 export type WorkspaceGitBranchDiffInput = {
 	workspaceRoot: string,

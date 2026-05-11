@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import type { ForgeCliProvider } from "@dcc/contracts";
-import { X, TerminalSquare } from "lucide-react";
+import { X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
 	backfillForgeRepoBindings,
-	buildForgeCliDisplayCommand,
 	buildForgeCliShellCommand,
 	getForgeCliStatus,
 	normalizeForgeHost,
@@ -20,6 +19,8 @@ import {
 import { invalidateForgeCliQueries } from "@/features/settings/forge-cli-queries";
 import { WORKSPACE_FORGE_CONTEXT_QUERY_KEY } from "@/features/inspector/use-workspace-forge-context";
 import { WORKSPACE_PR_STATUS_QUERY_KEY } from "@/features/inspector/use-workspace-pr-status";
+import { ShortcutDisplay } from "@/features/shortcuts/shortcut-display";
+import { cn } from "@/lib/utils";
 import {
 	getDefaultShell,
 	killTerminal,
@@ -55,6 +56,10 @@ const sleep = (ms: number) =>
 
 function providerLabel(provider: ForgeCliProvider): string {
 	return provider === "gitlab" ? "GitLab" : "GitHub";
+}
+
+function providerDotClass(provider: ForgeCliProvider): string {
+	return provider === "gitlab" ? "bg-[#FC6D26]" : "bg-foreground";
 }
 
 function connectedToastMessage(provider: ForgeCliProvider, login: string): string {
@@ -340,21 +345,24 @@ export function ForgeConnectDialog({
 		<Dialog open={open} onOpenChange={handleOpenChange}>
 			<DialogContent
 				showCloseButton={false}
-				className="w-[720px] max-w-[calc(100vw-3rem)] gap-0 overflow-hidden p-0 sm:max-w-[720px]"
+				className="w-[640px] max-w-[calc(100vw-4rem)] gap-0 overflow-hidden p-0 sm:max-w-[640px]"
 			>
 				<DialogTitle className="sr-only">
 					Conectar {providerLabel(provider)}
 				</DialogTitle>
-				<header className="flex h-11 items-center gap-3 border-b border-border/60 px-4">
-					<div className="flex min-w-0 items-center gap-2 text-[12px] font-medium text-foreground">
-						<TerminalSquare className="size-3.5 shrink-0" />
+				<header className="flex h-10 items-center gap-2 border-b border-border/55 px-3">
+					<div className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-foreground">
+						<span
+							aria-hidden
+							className={cn(
+								"size-2 shrink-0 rounded-full",
+								providerDotClass(provider),
+							)}
+						/>
 						<span>Conectar {providerLabel(provider)}</span>
-						<span className="truncate text-muted-foreground/80">{hostValue}</span>
+						<span className="truncate text-muted-foreground/80">· {hostValue}</span>
 					</div>
-					<div className="ml-auto flex items-center gap-3">
-						<span className="hidden text-[11px] text-muted-foreground sm:inline">
-							{buildForgeCliDisplayCommand(provider, hostValue)}
-						</span>
+					<div className="ml-auto">
 						<Button
 							type="button"
 							variant="ghost"
@@ -363,6 +371,7 @@ export function ForgeConnectDialog({
 							aria-label="Close"
 							className="gap-1.5 px-2 text-muted-foreground hover:text-foreground"
 						>
+							<ShortcutDisplay hotkey="Escape" />
 							<X className="size-3.5" strokeWidth={1.8} />
 						</Button>
 					</div>
@@ -370,7 +379,7 @@ export function ForgeConnectDialog({
 				<div className="bg-card">
 					<TerminalOutput
 						terminalRef={termRef}
-						className="h-[380px]"
+						className="h-[360px]"
 						detectLinks
 						fontSize={12}
 						lineHeight={1.35}
