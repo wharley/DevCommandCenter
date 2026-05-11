@@ -279,6 +279,8 @@
       "gitlabHint": "Use `gitlab.com` or your self-hosted GitLab hostname.",
       "knownHosts": "Detected authenticated hosts: {{hosts}}",
       "accountsConnected": "{{count}} accounts: {{logins}}",
+      "repoNotBound": "No {{provider}} account is bound to this repository yet.",
+      "repoBindingExpired": "The @{{login}} account bound to this repository is no longer authenticated in the {{provider}} CLI.",
       "loadingError": "Could not verify the {{provider}} CLI.",
       "command": "Suggested command: `{{command}}`"
     }

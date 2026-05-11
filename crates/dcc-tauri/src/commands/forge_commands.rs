@@ -7,7 +7,7 @@ use dcc_infra::db::SqliteWorkspaceRepo;
 use crate::{
     commands::forge::context as forge_context,
     commands::forge::provider as forge_provider,
-    commands::workspace_commands::WorkspaceGitPushInput,
+    commands::workspace_commands::{RepositoryIdInput, WorkspaceGitPushInput},
     commands::workspace_support::{
         ensure_pushable_branch, preflight_workspace_root, push_branch_refspec,
         resolve_branch_diff_base, resolve_current_branch_name, resolve_current_commit_sha,
@@ -329,6 +329,18 @@ pub async fn workspace_backfill_forge_repo_bindings(
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let summary = crate::commands::forge::accounts::backfill_repository_bindings(&repo)?;
     Ok(summary.bound)
+}
+
+#[tauri::command]
+pub async fn workspace_retry_repository_forge_binding(
+    state: State<'_, WorkspaceCommandState>,
+    input: RepositoryIdInput,
+) -> Result<Option<String>, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    crate::commands::forge::accounts::auto_bind_repository(
+        &repo,
+        &dcc_core::domain::repository::RepositoryId(input.repository_id),
+    )
 }
 
 #[tauri::command]

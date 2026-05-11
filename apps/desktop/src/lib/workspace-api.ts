@@ -103,6 +103,12 @@ export function workspaceBackfillForgeRepoBindings() {
 	return invoke<number>(WORKSPACE_METHODS.workspaceBackfillForgeRepoBindings);
 }
 
+export function workspaceRetryRepositoryForgeBinding(repositoryId: string) {
+	return invoke<string | null>(WORKSPACE_METHODS.workspaceRetryRepositoryForgeBinding, {
+		input: { repositoryId },
+	});
+}
+
 export function workspaceForgeContext(input: WorkspaceForgeContextInput) {
 	return invoke<WorkspaceForgeContextOutput>(WORKSPACE_METHODS.workspaceForgeContext, {
 		input,

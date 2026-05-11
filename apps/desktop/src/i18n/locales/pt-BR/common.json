@@ -279,6 +279,8 @@
       "gitlabHint": "Use `gitlab.com` ou a hostname da sua instância GitLab self-hosted.",
       "knownHosts": "Hosts autenticados detectados: {{hosts}}",
       "accountsConnected": "{{count}} contas: {{logins}}",
+      "repoNotBound": "Nenhuma conta {{provider}} está associada a este repositório ainda.",
+      "repoBindingExpired": "A conta @{{login}} vinculada a este repositório não está mais autenticada no {{provider}} CLI.",
       "loadingError": "Não foi possível verificar o CLI do {{provider}}.",
       "command": "Comando sugerido: `{{command}}`"
     }

@@ -1588,6 +1588,14 @@ export default function App() {
 								providerCatalog={providerCatalog}
 								sessionSnapshot={selectedSessionSnapshot}
 								sessionEvents={sessionEvents}
+								currentRepository={
+									selectedWorkspacePath?.trim()
+										? repositoriesFromBackend.find(
+												(repository) =>
+													repository.rootPath.trim() === selectedWorkspacePath.trim(),
+											) ?? null
+										: null
+								}
 								workspaceId={selectedWorkspace?.id ?? null}
 								workspaceName={selectedWorkspace?.name ?? null}
 								workspaceBranch={selectedWorkspace?.branch ?? null}

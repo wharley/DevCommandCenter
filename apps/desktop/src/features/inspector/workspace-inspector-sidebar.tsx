@@ -40,7 +40,7 @@ import {
 	WORKSPACE_FORGE_CONTEXT_QUERY_KEY,
 } from "./use-workspace-forge-context";
 import { EmptyState } from "@/features/panel";
-import type { CoreEvent, ProviderCatalog, WorkspaceSetupReport } from "@dcc/contracts";
+import type { CoreEvent, ProviderCatalog, Repository, WorkspaceSetupReport } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
@@ -58,6 +58,7 @@ import type { ForgeCliProvider } from "@dcc/contracts";
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
 	sessionSnapshot: RuntimeSessionSnapshot | null;
+	currentRepository: Repository | null;
 	workspaceId: string | null;
 	workspaceName: string | null;
 	workspaceBranch: string | null;
@@ -247,6 +248,7 @@ function ResizeHandle({
 export function WorkspaceInspectorSidebar({
 	providerCatalog,
 	sessionSnapshot,
+	currentRepository,
 	workspaceId,
 	workspaceName,
 	workspaceBranch,
@@ -279,6 +281,8 @@ export function WorkspaceInspectorSidebar({
 			? gitStatusQuery.data.currentBranch
 			: null;
 	const currentBranch = gitBranch ?? workspaceBranch ?? "";
+	const persistedForgeLogin = currentRepository?.forgeLogin?.trim() || null;
+	const repositoryId = currentRepository?.id?.trim() || null;
 	const workspaceForgeContextQuery = useWorkspaceForgeContext(workspacePath);
 	const workspaceForgeContext = workspaceForgeContextQuery.data ?? null;
 	const forgeContext = resolveForgeContext(
@@ -288,10 +292,16 @@ export function WorkspaceInspectorSidebar({
 	const forgeAccountsQuery = useForgeCliAccounts(forgeContext.provider, forgeContext.host, {
 		enabled: Boolean(workspaceForgeContext?.provider && workspaceForgeContext?.host),
 	});
-	useForgeCliLoginsHealth(forgeContext.provider, forgeContext.host, {
+	const forgeLoginsHealthQuery = useForgeCliLoginsHealth(forgeContext.provider, forgeContext.host, {
 		enabled: Boolean(workspaceForgeContext?.provider && workspaceForgeContext?.host),
 	});
-	const selectedForgeLogin = workspaceForgeContext?.effectiveLogin ?? null;
+	const liveLogins = forgeLoginsHealthQuery.data;
+	const activeBoundForgeLogin =
+		persistedForgeLogin &&
+		(liveLogins === undefined || liveLogins.includes(persistedForgeLogin))
+			? persistedForgeLogin
+			: null;
+	const selectedForgeLogin = activeBoundForgeLogin ?? workspaceForgeContext?.effectiveLogin ?? null;
 	const forgeAccounts = forgeAccountsQuery.data?.accounts ?? [];
 	const prStatusQuery = useWorkspacePrStatus(
 		workspacePath,
@@ -307,13 +317,25 @@ export function WorkspaceInspectorSidebar({
 		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
 		(gitStatusQuery.data?.unstaged.length ?? 0) > 0;
 	const forgeCliReady = workspaceForgeContext?.status === "ready";
+	const forgeNeedsConnect = Boolean(
+		workspaceForgeContext?.provider && (!forgeCliReady || !activeBoundForgeLogin),
+	);
 	const isSetupPending = workspaceStatus === "setup_pending";
 	const setupReportSummary =
 		workspaceSetupReport == null
 			? null
 			: setupReportDescription(t, workspaceSetupReport, []);
 	const forgeCliMessage =
-		workspaceForgeContext?.message ??
+		(activeBoundForgeLogin == null && forgeCliReady
+			? persistedForgeLogin
+				? t("settings.account.repoBindingExpired", {
+						login: persistedForgeLogin,
+						provider: forgeContext.providerLabel,
+					})
+				: t("settings.account.repoNotBound", {
+						provider: forgeContext.providerLabel,
+					})
+			: workspaceForgeContext?.message) ??
 		(workspaceForgeContextQuery.isPending
 			? `Checking ${forgeContext.providerLabel} CLI...`
 			: null);
@@ -334,7 +356,7 @@ export function WorkspaceInspectorSidebar({
 			`${inspectorActionTitle(commitMode, forgeContext.requestLabel)}...`,
 		);
 
-		if (commitMode === "create-pr" && !forgeCliReady) {
+		if (commitMode === "create-pr" && forgeNeedsConnect) {
 			toast.dismiss(loadingToast);
 			const reason =
 				forgeCliMessage ??
@@ -939,10 +961,10 @@ export function WorkspaceInspectorSidebar({
 										<DetailRow label={t("inspector.fields.forgeStatus")}>
 											<div className="flex flex-wrap items-center gap-2">
 												<Badge
-													variant={forgeCliReady ? "success" : "outline"}
+													variant={!forgeNeedsConnect ? "success" : "outline"}
 													className="text-[10px] font-normal"
 												>
-													{forgeCliReady
+													{!forgeNeedsConnect
 														? t("settings.account.readyBadge")
 														: t("settings.account.notReadyBadge")}
 												</Badge>
@@ -956,7 +978,7 @@ export function WorkspaceInspectorSidebar({
 														size="sm"
 														onClick={() => setForgeConnectOpen(true)}
 													>
-														{forgeCliReady
+														{!forgeNeedsConnect
 															? t("settings.account.switchAccount")
 															: t("settings.account.connect")}
 													</Button>
@@ -1028,7 +1050,11 @@ export function WorkspaceInspectorSidebar({
 				onOpenChange={setForgeConnectOpen}
 				provider={forgeContext.provider}
 				host={forgeContext.host}
+				repositoryId={repositoryId}
 				onConnected={() => {
+					void queryClient.invalidateQueries({
+						queryKey: ["repositories"],
+					});
 					void queryClient.invalidateQueries({
 						queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, workspacePath?.trim() ?? ""],
 					});

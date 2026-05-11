@@ -66,6 +66,7 @@ struct WorkspaceMethods {
     workspace_forge_cli_hosts: String,
     workspace_forge_cli_select_login: String,
     workspace_backfill_forge_repo_bindings: String,
+    workspace_retry_repository_forge_binding: String,
     workspace_forge_context: String,
     list_local_branches: String,
     list_git_tracked_files: String,
@@ -227,6 +228,8 @@ fn main() {
                 workspace_forge_cli_select_login: "workspace_forge_cli_select_login".to_string(),
                 workspace_backfill_forge_repo_bindings: "workspace_backfill_forge_repo_bindings"
                     .to_string(),
+                workspace_retry_repository_forge_binding:
+                    "workspace_retry_repository_forge_binding".to_string(),
                 workspace_forge_context: "workspace_forge_context".to_string(),
                 list_local_branches: "list_local_branches".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),

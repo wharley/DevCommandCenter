@@ -15,6 +15,7 @@ import {
 	buildForgeCliShellCommand,
 	getForgeCliStatus,
 	normalizeForgeHost,
+	retryRepositoryForgeBinding,
 } from "@/lib/forge-cli";
 import { invalidateForgeCliQueries } from "@/features/settings/forge-cli-queries";
 import { WORKSPACE_FORGE_CONTEXT_QUERY_KEY } from "@/features/inspector/use-workspace-forge-context";
@@ -34,6 +35,7 @@ type ForgeConnectDialogProps = {
 	onOpenChange: (open: boolean) => void;
 	provider: ForgeCliProvider;
 	host: string;
+	repositoryId?: string | null;
 	onConnected?: (info: {
 		provider: ForgeCliProvider;
 		host: string;
@@ -96,6 +98,7 @@ export function ForgeConnectDialog({
 	onOpenChange,
 	provider,
 	host,
+	repositoryId,
 	onConnected,
 }: ForgeConnectDialogProps) {
 	const queryClient = useQueryClient();
@@ -150,6 +153,10 @@ export function ForgeConnectDialog({
 
 		const probe = await detectLoginAfterClose(provider, hostValue, baselineRef.current);
 		if (probe.login) {
+			const normalizedRepositoryId = repositoryId?.trim();
+			if (normalizedRepositoryId) {
+				await retryRepositoryForgeBinding(normalizedRepositoryId);
+			}
 			await backfillForgeRepoBindings();
 		}
 		await invalidateForgeCliQueries(queryClient, provider, hostValue);
@@ -167,7 +174,7 @@ export function ForgeConnectDialog({
 			toast.success(connectedToastMessage(provider, probe.login));
 			onConnected?.({ provider, host: hostValue, login: probe.login });
 		}
-	}, [hostValue, onConnected, onOpenChange, provider, queryClient]);
+	}, [hostValue, onConnected, onOpenChange, provider, queryClient, repositoryId]);
 
 	useEffect(() => {
 		onOpenChangeRef.current = (next) => {

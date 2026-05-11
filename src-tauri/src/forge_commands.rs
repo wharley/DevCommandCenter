@@ -7,7 +7,7 @@ use dcc_tauri::{
         GithubCliStatusOutput, WorkspaceForgeContextInput, WorkspaceForgeContextOutput,
         WorkspacePrStatusInput, WorkspacePrStatusOutput,
     },
-    commands::workspace_commands::WorkspaceGitPushInput,
+    commands::workspace_commands::{RepositoryIdInput, WorkspaceGitPushInput},
     state::WorkspaceCommandState,
 };
 
@@ -56,6 +56,15 @@ pub async fn workspace_backfill_forge_repo_bindings(
     state: State<'_, WorkspaceCommandState>,
 ) -> Result<usize, String> {
     dcc_tauri::commands::forge_commands::workspace_backfill_forge_repo_bindings(state).await
+}
+
+#[tauri::command]
+pub async fn workspace_retry_repository_forge_binding(
+    state: State<'_, WorkspaceCommandState>,
+    input: RepositoryIdInput,
+) -> Result<Option<String>, String> {
+    dcc_tauri::commands::forge_commands::workspace_retry_repository_forge_binding(state, input)
+        .await
 }
 
 #[tauri::command]

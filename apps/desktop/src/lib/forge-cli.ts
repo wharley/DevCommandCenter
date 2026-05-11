@@ -10,6 +10,7 @@ import {
 	workspaceForgeCliHosts,
 	workspaceForgeCliSelectLogin,
 	workspaceForgeCliStatus,
+	workspaceRetryRepositoryForgeBinding,
 } from "./workspace-api";
 
 export const DEFAULT_FORGE_HOSTS: Record<ForgeCliProvider, string> = {
@@ -163,6 +164,20 @@ export async function backfillForgeRepoBindings(): Promise<number> {
 		return await workspaceBackfillForgeRepoBindings();
 	} catch {
 		return 0;
+	}
+}
+
+export async function retryRepositoryForgeBinding(
+	repositoryId: string,
+): Promise<string | null> {
+	if (!isTauriRuntime()) {
+		return null;
+	}
+
+	try {
+		return await workspaceRetryRepositoryForgeBinding(repositoryId);
+	} catch {
+		return null;
 	}
 }
 
