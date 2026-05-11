@@ -1,6 +1,8 @@
 use std::path::Path;
 
+use dcc_core::domain::repository::RepositoryId;
 use dcc_core::ports::RepositoryRepo;
+use dcc_core::ports::WorkspaceRepo;
 use dcc_infra::db::SqliteWorkspaceRepo;
 
 use crate::commands::forge::{
@@ -96,6 +98,24 @@ pub(crate) fn resolve_selected_forge_login(
     Ok(resolved_login)
 }
 
+fn resolve_workspace_repository_id(
+    repo: &SqliteWorkspaceRepo,
+    root: &str,
+) -> Result<RepositoryId, String> {
+    let workspace = futures::executor::block_on(repo.list_workspaces())
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|workspace| {
+            workspace.root_path == root || workspace.worktree_path.as_deref() == Some(root)
+        });
+
+    Ok(RepositoryId(
+        workspace
+            .map(|workspace| workspace.root_path)
+            .unwrap_or_else(|| root.to_string()),
+    ))
+}
+
 fn resolve_workspace_forge_message(
     provider_label: &str,
     target_host: &str,
@@ -120,11 +140,15 @@ fn resolve_workspace_remote_state(
     status: &ResolvedCliStatus,
     known_hosts: &[String],
     bound_login: Option<&str>,
+    effective_login: Option<&str>,
 ) -> (WorkspaceForgeRemoteState, String) {
     let bound_login_active = bound_login
         .filter(|login| status.logins.iter().any(|candidate| candidate == *login))
         .is_some();
-    if bound_login_active {
+    let effective_login_active = effective_login
+        .filter(|login| status.logins.iter().any(|candidate| candidate == *login))
+        .is_some();
+    if bound_login_active || effective_login_active {
         return (
             WorkspaceForgeRemoteState::Ok,
             resolve_workspace_forge_message(provider_label, target_host, status, known_hosts),
@@ -166,8 +190,9 @@ pub(crate) fn resolve_workspace_forge_context(
     let backend = backend_for(target.provider);
     let known_hosts = backend.list_hosts(false).unwrap_or_default();
     let repo = SqliteWorkspaceRepo::open(db_path).map_err(|error| error.to_string())?;
+    let repository_id = resolve_workspace_repository_id(&repo, root)?;
     let repository = futures::executor::block_on(repo.get_repository(
-        &dcc_core::domain::repository::RepositoryId(root.to_string()),
+        &repository_id,
     ))
     .map_err(|error| error.to_string())?;
     let bound_login = repository
@@ -190,6 +215,7 @@ pub(crate) fn resolve_workspace_forge_context(
         &status,
         &known_hosts,
         bound_login.as_deref(),
+        effective_login.as_deref(),
     );
 
     Ok(Some(ResolvedWorkspaceForgeContext {
@@ -231,6 +257,10 @@ pub(crate) fn resolve_workspace_git_auth(
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use dcc_core::domain::{
+        project::ProjectId,
+        workspace::{Workspace, WorkspaceId, WorkspaceState},
+    };
     use crate::commands::forge::provider::ResolvedCliStatus;
 
     use super::*;
@@ -307,6 +337,34 @@ mod tests {
     }
 
     #[test]
+    fn resolves_repository_id_from_workspace_root_for_worktree_paths() {
+        let db_path = temp_db_path("worktree-repository-id");
+        let repo = SqliteWorkspaceRepo::open(&db_path).unwrap();
+
+        let workspace = Workspace {
+            id: WorkspaceId("workspace-1".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            name: Some("Workspace".to_string()),
+            root_path: "/tmp/repo".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: Some("/tmp/repo/.dcc-worktrees/main-123".to_string()),
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        futures::executor::block_on(repo.save_workspace(&workspace)).unwrap();
+
+        let resolved =
+            resolve_workspace_repository_id(&repo, "/tmp/repo/.dcc-worktrees/main-123").unwrap();
+
+        assert_eq!(resolved, RepositoryId("/tmp/repo".to_string()));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
     fn rewrites_message_when_repo_host_differs_from_authenticated_hosts() {
         let status = ResolvedCliStatus {
             provider: ForgeCliProvider::Gitlab,
@@ -358,15 +416,21 @@ mod tests {
     #[test]
     fn remote_state_is_ok_when_bound_login_is_still_authenticated() {
         let status = sample_status(&["octocat"], Some("octocat"));
-        let (state, message) =
-            resolve_workspace_remote_state("GitHub", "github.com", &status, &[], Some("octocat"));
+        let (state, message) = resolve_workspace_remote_state(
+            "GitHub",
+            "github.com",
+            &status,
+            &[],
+            Some("octocat"),
+            Some("octocat"),
+        );
 
         assert_eq!(state, WorkspaceForgeRemoteState::Ok);
         assert_eq!(message, "");
     }
 
     #[test]
-    fn remote_state_is_unauthenticated_when_repo_has_no_bound_login() {
+    fn remote_state_is_ok_when_effective_login_is_authenticated_even_without_binding() {
         let status = sample_status(&["octocat"], Some("octocat"));
         let (state, message) = resolve_workspace_remote_state(
             "GitHub",
@@ -374,10 +438,11 @@ mod tests {
             &status,
             &["github.com".to_string()],
             None,
+            Some("octocat"),
         );
 
-        assert_eq!(state, WorkspaceForgeRemoteState::Unauthenticated);
-        assert!(message.contains("No GitHub account is bound"));
+        assert_eq!(state, WorkspaceForgeRemoteState::Ok);
+        assert_eq!(message, "");
     }
 
     #[test]
@@ -400,6 +465,7 @@ mod tests {
             &status,
             &["gitlab.com".to_string()],
             Some("team-user"),
+            None,
         );
 
         assert_eq!(state, WorkspaceForgeRemoteState::Unavailable);

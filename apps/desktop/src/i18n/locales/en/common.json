@@ -160,6 +160,7 @@
     },
     "setupRetry": {
       "button": "Retry setup",
+      "details": "View setup details",
       "loading": "Retrying setup...",
       "successTitle": "Setup completed",
       "pendingTitle": "Workspace still has setup pending",
