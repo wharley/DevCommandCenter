@@ -19,6 +19,13 @@ pub(crate) struct WorkspaceForgeTarget {
     pub(crate) remote: ParsedRemote,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct WorkspaceRemoteInfo {
+    pub(crate) remote_name: String,
+    pub(crate) remote_url: String,
+    pub(crate) provider: ForgeCliProvider,
+}
+
 pub(crate) fn parse_remote(remote: &str) -> Option<ParsedRemote> {
     let remote = remote.trim();
     if remote.is_empty() {
@@ -61,21 +68,49 @@ fn parsed_remote_from_host_path(host: &str, path: &str) -> Option<ParsedRemote> 
     })
 }
 
-fn resolve_default_remote_name(root: &str) -> Result<String, String> {
+fn list_remote_names(root: &str) -> Result<Vec<String>, String> {
     let output = run_git_output(root, &["remote"])?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
 
-    let remotes: Vec<String> = String::from_utf8_lossy(&output.stdout)
+    Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(|line| line.to_string())
-        .collect();
+        .collect())
+}
+
+fn parse_upstream_remote_name(upstream: &str) -> Option<String> {
+    let upstream = upstream.trim();
+    if upstream.is_empty() {
+        return None;
+    }
+
+    upstream
+        .split_once('/')
+        .map(|(remote, _)| remote.trim())
+        .filter(|remote| !remote.is_empty())
+        .map(ToString::to_string)
+}
+
+fn resolve_default_remote_name(root: &str) -> Result<String, String> {
+    let remotes = list_remote_names(root)?;
     if remotes.is_empty() {
         return Ok("origin".to_string());
     }
+
+    let upstream = run_git_output(root, &["rev-parse", "--abbrev-ref", "@{upstream}"])
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|stdout| parse_upstream_remote_name(&stdout))
+        .filter(|remote| remotes.iter().any(|candidate| candidate == remote));
+    if let Some(remote) = upstream {
+        return Ok(remote);
+    }
+
     if remotes.iter().any(|remote| remote == "origin") {
         return Ok("origin".to_string());
     }
@@ -96,6 +131,23 @@ fn resolve_workspace_remote(root: &str) -> Result<Option<(String, String)>, Stri
     }
 
     Ok(Some((remote, remote_url)))
+}
+
+pub(crate) fn resolve_workspace_remote_info(
+    root: &str,
+) -> Result<Option<WorkspaceRemoteInfo>, String> {
+    let Some((remote_name, remote_url)) = resolve_workspace_remote(root)? else {
+        return Ok(None);
+    };
+    let Some(provider) = detect_provider_for_repo(Some(remote_url.as_str()), Some(Path::new(root)))
+    else {
+        return Ok(None);
+    };
+    Ok(Some(WorkspaceRemoteInfo {
+        remote_name,
+        remote_url,
+        provider,
+    }))
 }
 
 pub(crate) fn resolve_workspace_forge_target(
@@ -124,6 +176,18 @@ pub(crate) fn resolve_workspace_forge_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_upstream_remote_name() {
+        assert_eq!(
+            parse_upstream_remote_name("fork/main"),
+            Some("fork".to_string())
+        );
+        assert_eq!(
+            parse_upstream_remote_name("origin/feature/test"),
+            Some("origin".to_string())
+        );
+    }
 
     #[test]
     fn parses_nested_gitlab_remote() {

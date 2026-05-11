@@ -59,6 +59,10 @@ fn repository_from_workspace(workspace: &Workspace) -> Repository {
         name: repository_name_from_root_path(&root_path),
         root_path,
         base_branch: workspace.base_branch.clone(),
+        remote: None,
+        remote_url: None,
+        forge_provider: None,
+        forge_login: None,
         created_at: workspace.created_at.clone(),
         updated_at: workspace.updated_at.clone(),
     }

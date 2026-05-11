@@ -356,6 +356,10 @@ export type Repository = {
 	name: string,
 	rootPath: string,
 	baseBranch: string,
+	remote: string | null,
+	remoteUrl: string | null,
+	forgeProvider: string | null,
+	forgeLogin: string | null,
 	createdAt: string,
 	updatedAt: string,
 };

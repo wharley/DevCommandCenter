@@ -28,6 +28,7 @@ use dcc_infra::{
 };
 
 use crate::{
+    commands::forge::remote::resolve_workspace_remote_info,
     commands::workspace_support::{
         broken_workspace_message, ensure_pushable_branch, find_workspace_by_root,
         next_available_branch_name, preflight_workspace_root, purge_broken_workspace_by_root,
@@ -357,6 +358,31 @@ fn resolve_conflict_count(root: &str) -> Result<u32, String> {
         .filter(|line| !line.is_empty())
         .count();
     Ok(count as u32)
+}
+
+async fn refresh_repository_forge_metadata(
+    repo: &SqliteWorkspaceRepo,
+    workspace: &Workspace,
+) -> Result<(), String> {
+    let repository_id = RepositoryId(workspace.root_path.clone());
+    let Some(mut repository) = repo
+        .get_repository(&repository_id)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(());
+    };
+
+    let remote_info = resolve_workspace_remote_info(&workspace.root_path)?;
+    repository.remote = remote_info.as_ref().map(|info| info.remote_name.clone());
+    repository.remote_url = remote_info.as_ref().map(|info| info.remote_url.clone());
+    repository.forge_provider = remote_info.as_ref().map(|info| match info.provider {
+        crate::commands::forge_commands::ForgeCliProvider::Github => "github".to_string(),
+        crate::commands::forge_commands::ForgeCliProvider::Gitlab => "gitlab".to_string(),
+    });
+    repo.save_repository(&repository)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 fn push_current_branch(
@@ -1023,6 +1049,7 @@ pub async fn create_workspace_for_repo(
     let finalized = run_create_workspace_for_repo(&repo, &git, &events, input)
         .await
         .map_err(|error| error.to_string())?;
+    refresh_repository_forge_metadata(&repo, &finalized.workspace).await?;
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
     let setup_report = execute_workspace_setup_report(&finalized.workspace).await;
     let mut workspace = finalized.workspace;
@@ -1048,6 +1075,7 @@ pub async fn create_workspace_from_url(
     let finalized = run_create_workspace_from_url(&repo, &git, &events, input)
         .await
         .map_err(|error| error.to_string())?;
+    refresh_repository_forge_metadata(&repo, &finalized.workspace).await?;
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
     let setup_report = execute_workspace_setup_report(&finalized.workspace).await;
     let mut workspace = finalized.workspace;

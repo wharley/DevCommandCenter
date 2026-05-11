@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS dcc_repositories (
 	name TEXT NOT NULL,
 	root_path TEXT NOT NULL UNIQUE,
 	base_branch TEXT NOT NULL,
+	remote TEXT NULL,
+	remote_url TEXT NULL,
+	forge_provider TEXT NULL,
+	forge_login TEXT NULL,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
@@ -142,6 +146,10 @@ impl SqliteWorkspaceRepo {
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
+        Self::ensure_column(&conn, "dcc_repositories", "remote", "TEXT NULL")?;
+        Self::ensure_column(&conn, "dcc_repositories", "remote_url", "TEXT NULL")?;
+        Self::ensure_column(&conn, "dcc_repositories", "forge_provider", "TEXT NULL")?;
+        Self::ensure_column(&conn, "dcc_repositories", "forge_login", "TEXT NULL")?;
         Ok(())
     }
 
@@ -271,8 +279,12 @@ impl SqliteWorkspaceRepo {
             name: row.get::<_, String>(2)?,
             root_path: row.get::<_, String>(3)?,
             base_branch: row.get::<_, String>(4)?,
-            created_at: row.get::<_, String>(5)?,
-            updated_at: row.get::<_, String>(6)?,
+            remote: row.get::<_, Option<String>>(5)?,
+            remote_url: row.get::<_, Option<String>>(6)?,
+            forge_provider: row.get::<_, Option<String>>(7)?,
+            forge_login: row.get::<_, Option<String>>(8)?,
+            created_at: row.get::<_, String>(9)?,
+            updated_at: row.get::<_, String>(10)?,
         })
     }
 }
@@ -676,13 +688,17 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         conn.execute(
             r#"
 			INSERT INTO dcc_repositories (
-				id, project_id, name, root_path, base_branch, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+				id, project_id, name, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
 			ON CONFLICT(root_path) DO UPDATE SET
 				id = excluded.id,
 				project_id = excluded.project_id,
 				name = excluded.name,
 				base_branch = excluded.base_branch,
+				remote = excluded.remote,
+				remote_url = excluded.remote_url,
+				forge_provider = excluded.forge_provider,
+				forge_login = excluded.forge_login,
 				created_at = excluded.created_at,
 				updated_at = excluded.updated_at
 			"#,
@@ -692,6 +708,10 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
                 repository.name.clone(),
                 repository.root_path.clone(),
                 repository.base_branch.clone(),
+                repository.remote.clone(),
+                repository.remote_url.clone(),
+                repository.forge_provider.clone(),
+                repository.forge_login.clone(),
                 repository.created_at.clone(),
                 repository.updated_at.clone(),
             ],
@@ -709,7 +729,7 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         let repository = conn
             .query_row(
                 r#"
-				SELECT id, project_id, name, root_path, base_branch, created_at, updated_at
+				SELECT id, project_id, name, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
 				  FROM dcc_repositories
 				 WHERE id = ?1
 				"#,
@@ -730,7 +750,7 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         let mut stmt = conn
             .prepare(
                 r#"
-				SELECT id, project_id, name, root_path, base_branch, created_at, updated_at
+				SELECT id, project_id, name, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
 				  FROM dcc_repositories
 				 ORDER BY updated_at DESC, created_at DESC, name ASC
 				"#,
@@ -1056,6 +1076,10 @@ mod tests {
             name: "repo".to_string(),
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
+            remote: Some("origin".to_string()),
+            remote_url: Some("git@github.com:acme/repo.git".to_string()),
+            forge_provider: Some("github".to_string()),
+            forge_login: Some("octocat".to_string()),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -1079,6 +1103,8 @@ mod tests {
             futures::executor::block_on(repo.list_repositories()).expect("list repositories");
         assert_eq!(repositories.len(), 1);
         assert_eq!(repositories[0].root_path, "/tmp/repo");
+        assert_eq!(repositories[0].remote.as_deref(), Some("origin"));
+        assert_eq!(repositories[0].forge_login.as_deref(), Some("octocat"));
 
         futures::executor::block_on(repo.delete_repository(&RepositoryId("/tmp/repo".to_string())))
             .expect("delete repository");

@@ -14,6 +14,10 @@ pub struct Repository {
     pub name: String,
     pub root_path: String,
     pub base_branch: String,
+    pub remote: Option<String>,
+    pub remote_url: Option<String>,
+    pub forge_provider: Option<String>,
+    pub forge_login: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
