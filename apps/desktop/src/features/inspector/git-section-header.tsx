@@ -1,4 +1,5 @@
 import { ChevronsRight, ExternalLink, RotateCcw } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceCommitButton } from "@/features/commit";
 import type { CommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import { INSPECTOR_SECTION_HEADER_CLASS, INSPECTOR_SECTION_TITLE_CLASS } from "@/shell/layout";
@@ -63,7 +64,7 @@ export function GitSectionHeader({
     <div
       className={cn(
         INSPECTOR_SECTION_HEADER_CLASS,
-        "relative gap-1.5 overflow-hidden border-b-0 shadow-[inset_0_-1px_0_color-mix(in_oklch,var(--border)_60%,transparent)]",
+        "relative gap-2 overflow-hidden border-b-0 shadow-[inset_0_-1px_0_color-mix(in_oklch,var(--border)_60%,transparent)]",
         "transition-[background-color,border-color,color,box-shadow] duration-300 ease-out",
         highlightClass,
         className,
@@ -81,61 +82,72 @@ export function GitSectionHeader({
           }}
         />
       )}
-      <span className={cn(INSPECTOR_SECTION_TITLE_CLASS, "translate-y-px")}>Git</span>
-      {showPrLink ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px] font-medium text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            if (prUrl) {
-              void openExternal(prUrl);
-            }
-          }}
-        >
-          <ExternalLink className="size-3.5" />
-          {prLabel}
-          {prNumber ? ` #${prNumber}` : ""}
-        </Button>
-      ) : null}
-      {showContinue ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px] font-medium"
-          disabled={isContinuingWorkspace}
-          onClick={() => {
-            void onContinueWorkspace?.();
-          }}
-        >
-          <ChevronsRight className="size-3.5" />
-          Continue
-        </Button>
-      ) : null}
-      {showRetrySetup ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px] font-medium"
-          disabled={isRetryingSetup}
-          onClick={() => {
-            void onRetrySetup?.();
-          }}
-        >
-          <RotateCcw className="size-3.5" />
-          {retrySetupLabel}
-        </Button>
-      ) : null}
-      {!showContinue ? (
-        <WorkspaceCommitButton
-          mode={commitMode}
-          prProvider={prProvider}
-          onCommit={onCommit}
-        />
-      ) : null}
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className={cn(INSPECTOR_SECTION_TITLE_CLASS, "translate-y-px")}>Git</span>
+        {showPrLink ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 shrink-0 gap-1.5 rounded-[9px] px-2.5 text-[12px] font-medium text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              if (prUrl) {
+                void openExternal(prUrl);
+              }
+            }}
+          >
+            <ExternalLink className="size-3.5" />
+            {prLabel}
+            {prNumber ? ` #${prNumber}` : ""}
+          </Button>
+        ) : null}
+      </div>
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {showContinue ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px] font-medium"
+            disabled={isContinuingWorkspace}
+            onClick={() => {
+              void onContinueWorkspace?.();
+            }}
+          >
+            <ChevronsRight className="size-3.5" />
+            Continue
+          </Button>
+        ) : null}
+        {showRetrySetup ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className="rounded-[9px] border-amber-500/25 bg-amber-500/10 text-amber-950 hover:bg-amber-500/14 hover:text-amber-950 dark:text-amber-100 dark:hover:bg-amber-400/12"
+                disabled={isRetryingSetup}
+                aria-label={retrySetupLabel}
+                onClick={() => {
+                  void onRetrySetup?.();
+                }}
+              >
+                <RotateCcw
+                  className={cn("size-3.5", isRetryingSetup ? "animate-spin" : undefined)}
+                />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{retrySetupLabel}</TooltipContent>
+          </Tooltip>
+        ) : null}
+        {!showContinue ? (
+          <WorkspaceCommitButton
+            mode={commitMode}
+            prProvider={prProvider}
+            onCommit={onCommit}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
