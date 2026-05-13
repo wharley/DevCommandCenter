@@ -270,22 +270,22 @@ export function CreateWorkspaceDialog({
 				onOpenChange(nextOpen);
 			}}
 		>
-			<DialogContent className="gap-3 p-4 sm:max-w-sm">
-				<DialogHeader className="space-y-1">
+			<DialogContent className="w-[min(calc(100vw-2rem),30rem)] max-w-[30rem] gap-3 overflow-hidden p-4 sm:w-[30rem] sm:max-w-[30rem]">
+				<DialogHeader className="min-w-0 space-y-1">
 					<DialogTitle className="text-[13px] font-medium tracking-[-0.01em]">
 						{mode === "clone" ? t("workspaceDialog.cloneTitle") : t("workspaceDialog.createTitle")}
 					</DialogTitle>
-					<p className="text-[12px] leading-snug text-muted-foreground">
+					<p className="min-w-0 text-[12px] leading-snug text-muted-foreground">
 						{mode === "clone" ? t("workspaceDialog.cloneDescription") : t("workspaceDialog.createDescription")}
 					</p>
 					{mode === "open" && repositoryContext ? (
-						<div className="rounded-md border border-border/70 bg-muted/30 px-2.5 py-2 text-[11.5px] leading-5 text-muted-foreground">
+						<div className="min-w-0 overflow-hidden rounded-md border border-border/70 bg-muted/30 px-2.5 py-2 text-[11.5px] leading-5 text-muted-foreground">
 							<span className="font-medium text-foreground">
 								{t("workspaceDialog.usingTrackedRepository", {
 									label: repositoryContext.label,
 								})}
 							</span>
-							<span className="block font-mono text-[11px]">
+							<span className="block break-all font-mono text-[11px] [overflow-wrap:anywhere]">
 								{repositoryContext.workspaceRoot}
 							</span>
 						</div>
@@ -294,10 +294,10 @@ export function CreateWorkspaceDialog({
 
 				<form
 					onSubmit={handleSubmit}
-					className="flex flex-col gap-3"
+					className="flex min-w-0 flex-col gap-3 overflow-x-hidden"
 				>
 					{mode === "clone" ? (
-						<div className="flex flex-col gap-1">
+						<div className="flex min-w-0 flex-col gap-1">
 							<Label
 								htmlFor="workspace-repository-url"
 								className="text-[12px] font-medium tracking-[-0.01em]"
@@ -317,20 +317,20 @@ export function CreateWorkspaceDialog({
 								autoComplete="off"
 								spellCheck={false}
 								disabled={isSubmitting}
-								className="h-7 font-mono text-[13px] md:text-[13px]"
+								className="h-7 min-w-0 font-mono text-[13px] md:text-[13px]"
 							/>
 						</div>
 					) : null}
 
-					<div className="flex flex-col gap-1">
-						<div className="flex items-center justify-between gap-2">
+					<div className="flex min-w-0 flex-col gap-1">
+						<div className="flex min-w-0 flex-wrap items-start justify-between gap-1.5 sm:flex-nowrap sm:items-center sm:gap-2">
 							<Label
 								htmlFor="workspace-project-id"
 								className="text-[12px] font-medium tracking-[-0.01em]"
 							>
 								{t("workspaceDialog.projectId")}
 							</Label>
-							<span className="text-[11px] text-muted-foreground">
+							<span className="max-w-full text-[11px] leading-snug text-muted-foreground sm:max-w-[11rem] sm:text-right">
 								{t("workspaceDialog.autoFilledFromFolder")}
 							</span>
 						</div>
@@ -344,12 +344,12 @@ export function CreateWorkspaceDialog({
 							autoComplete="off"
 							spellCheck={false}
 							disabled={isSubmitting || (mode === "open" && repositoryContext !== null)}
-							className="h-7 text-[13px] md:text-[13px]"
+							className="h-7 min-w-0 text-[13px] md:text-[13px]"
 						/>
 					</div>
 
-					<div className="flex flex-col gap-1">
-						<div className="flex items-center justify-between gap-2">
+					<div className="flex min-w-0 flex-col gap-1">
+						<div className="flex min-w-0 flex-wrap items-start justify-between gap-1.5 sm:flex-nowrap sm:items-center sm:gap-2">
 							<Label
 								htmlFor="workspace-root"
 								className="text-[12px] font-medium tracking-[-0.01em]"
@@ -362,7 +362,7 @@ export function CreateWorkspaceDialog({
 								type="button"
 								variant="ghost"
 								size="sm"
-								className="h-6 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+								className="h-6 shrink-0 self-start gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground sm:self-auto"
 								disabled={isSubmitting || (mode === "open" && repositoryContext !== null)}
 								onClick={handlePickWorkspaceRoot}
 							>
@@ -390,11 +390,11 @@ export function CreateWorkspaceDialog({
 							autoComplete="off"
 							spellCheck={false}
 							disabled={isSubmitting || (mode === "open" && repositoryContext !== null)}
-							className="h-7 font-mono text-[13px] md:text-[13px]"
+							className="h-7 min-w-0 font-mono text-[13px] md:text-[13px]"
 						/>
 					</div>
 
-					<div className="flex flex-col gap-1">
+					<div className="flex min-w-0 flex-col gap-1">
 						<Label
 							htmlFor="workspace-branch"
 							className="text-[12px] font-medium tracking-[-0.01em]"
@@ -411,7 +411,7 @@ export function CreateWorkspaceDialog({
 									setForm((current) => ({ ...current, baseBranch: event.target.value }))
 								}
 								disabled={isSubmitting || isLoadingBranches || availableBranches.length === 0}
-								className="h-7 rounded-md border border-input bg-background px-2 text-[13px] text-foreground shadow-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+								className="h-7 w-full min-w-0 rounded-md border border-input bg-background px-2 text-[13px] text-foreground shadow-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
 							>
 								{isLoadingBranches ? (
 									<option value="">{t("workspaceDialog.loadingBranches")}</option>
@@ -435,12 +435,12 @@ export function CreateWorkspaceDialog({
 								autoComplete="off"
 								spellCheck={false}
 								disabled={isSubmitting}
-								className="h-7 text-[13px] md:text-[13px]"
+								className="h-7 min-w-0 text-[13px] md:text-[13px]"
 							/>
 						)}
 					</div>
 
-					<div className="flex flex-col gap-1">
+					<div className="flex min-w-0 flex-col gap-1">
 						<Label
 							htmlFor="workspace-name"
 							className="text-[12px] font-medium tracking-[-0.01em]"
@@ -460,11 +460,11 @@ export function CreateWorkspaceDialog({
 							autoComplete="off"
 							spellCheck={false}
 							disabled={isSubmitting}
-							className="h-7 text-[13px] md:text-[13px]"
+							className="h-7 min-w-0 text-[13px] md:text-[13px]"
 						/>
 					</div>
 
-					<div className="flex flex-wrap items-center justify-end gap-2 pt-0.5">
+					<div className="flex flex-wrap items-center justify-stretch gap-2 pt-0.5 sm:justify-end">
 						<Button
 							type="button"
 							variant="outline"
