@@ -191,10 +191,8 @@ pub(crate) fn resolve_workspace_forge_context(
     let known_hosts = backend.list_hosts(false).unwrap_or_default();
     let repo = SqliteWorkspaceRepo::open(db_path).map_err(|error| error.to_string())?;
     let repository_id = resolve_workspace_repository_id(&repo, root)?;
-    let repository = futures::executor::block_on(repo.get_repository(
-        &repository_id,
-    ))
-    .map_err(|error| error.to_string())?;
+    let repository = futures::executor::block_on(repo.get_repository(&repository_id))
+        .map_err(|error| error.to_string())?;
     let bound_login = repository
         .as_ref()
         .and_then(|repository| repository.forge_login.as_deref())
@@ -257,11 +255,11 @@ pub(crate) fn resolve_workspace_git_auth(
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use crate::commands::forge::provider::ResolvedCliStatus;
     use dcc_core::domain::{
         project::ProjectId,
         workspace::{Workspace, WorkspaceId, WorkspaceState},
     };
-    use crate::commands::forge::provider::ResolvedCliStatus;
 
     use super::*;
 

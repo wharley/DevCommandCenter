@@ -30,11 +30,12 @@ use dcc_infra::{
 use crate::{
     commands::forge::remote::resolve_workspace_remote_info,
     commands::workspace_support::{
-        broken_workspace_message, ensure_pushable_branch, find_workspace_by_root,
-        next_available_branch_name, preflight_workspace_root, purge_broken_workspace_by_root,
-        push_branch_refspec, resolve_branch_diff_base, resolve_current_branch_name,
-        resolve_workspace_active_root, resolve_workspace_broken_reason,
-        resolve_workspace_setup_root, resolve_workspace_target_branch,
+        broken_workspace_message, cleanup_workspace_files, ensure_pushable_branch,
+        find_workspace_by_root, next_available_branch_name, preflight_workspace_root,
+        purge_broken_workspace_by_root, push_branch_refspec, resolve_branch_diff_base,
+        resolve_current_branch_name, resolve_workspace_active_root,
+        resolve_workspace_broken_reason, resolve_workspace_setup_root,
+        resolve_workspace_target_branch,
     },
     events::TauriEventBus,
     git::{
@@ -1371,6 +1372,12 @@ pub async fn delete_workspace(
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = WorkspaceId(input.workspace_id);
+    let workspace = repo
+        .get_workspace(&id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    cleanup_workspace_files(&workspace)?;
     repo.delete_workspace(&id).await.map_err(|e| e.to_string())
 }
 
