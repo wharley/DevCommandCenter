@@ -7,6 +7,8 @@ import {
 	isComposerSubmitEnabled,
 	isSendDisabled,
 	isSteerDisabled,
+	resolvePlanModeState,
+	setPlanModeState,
 } from "./WorkspaceComposer.logic";
 
 describe("WorkspaceComposer.logic", () => {
@@ -68,5 +70,46 @@ describe("WorkspaceComposer.logic", () => {
 		expect(
 			canSendPrompt({ disabled: false, hasContent: false, isSubmitting: false }),
 		).toBe(false);
+	});
+
+	it("scopes plan mode by workspace before a session exists", () => {
+		const state = setPlanModeState({}, {
+			workspaceId: "workspace-a",
+			sessionId: null,
+			enabled: true,
+		});
+
+		expect(
+			resolvePlanModeState(state, {
+				workspaceId: "workspace-a",
+				sessionId: null,
+			}),
+		).toBe(true);
+		expect(
+			resolvePlanModeState(state, {
+				workspaceId: "workspace-b",
+				sessionId: null,
+			}),
+		).toBe(false);
+	});
+
+	it("prefers session-scoped plan mode over the workspace fallback", () => {
+		const state = {
+			"workspace:workspace-a": true,
+			"session:session-a": false,
+		};
+
+		expect(
+			resolvePlanModeState(state, {
+				workspaceId: "workspace-a",
+				sessionId: "session-a",
+			}),
+		).toBe(false);
+		expect(
+			resolvePlanModeState(state, {
+				workspaceId: "workspace-a",
+				sessionId: "session-b",
+			}),
+		).toBe(true);
 	});
 });

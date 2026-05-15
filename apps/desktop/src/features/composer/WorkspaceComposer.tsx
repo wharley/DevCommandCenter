@@ -49,6 +49,8 @@ import {
 	isComposerSubmitEnabled,
 	isSendDisabled,
 	isSteerDisabled,
+	resolvePlanModeState,
+	setPlanModeState,
 } from "./WorkspaceComposer.logic";
 import { DEFAULT_SLASH_COMMANDS } from "./default-slash-commands";
 import {
@@ -125,8 +127,7 @@ export function WorkspaceComposer({
 	const [isFastMode, setIsFastMode] = useState(true);
 	const [effort, setEffort] = useState(DEFAULT_EFFORT_LEVEL);
 	const [ultrathinkSelected, setUltrathinkSelected] = useState(false);
-	const [isPlanMode, setIsPlanMode] = useState(false);
-	const [lastSubmittedWithPlanMode, setLastSubmittedWithPlanMode] = useState(false);
+	const [planModeByScope, setPlanModeByScope] = useState<Record<string, boolean>>({});
 	const [contextDirectories, setContextDirectories] = useState(() =>
 		buildComposerContextDirectories({ workspacePath, workspaceBranch }),
 	);
@@ -157,6 +158,15 @@ export function WorkspaceComposer({
 		() => selectedModel?.effortLevels ?? DEFAULT_EFFORT_LEVELS,
 		[selectedModel],
 	);
+	const sessionId = sessionSnapshot?.sessionId ?? null;
+	const isPlanMode = useMemo(
+		() =>
+			resolvePlanModeState(planModeByScope, {
+				workspaceId: draftKey,
+				sessionId,
+			}),
+		[planModeByScope, draftKey, sessionId],
+	);
 
 	// Clamp effort when the model changes and no longer supports the current level.
 	useEffect(() => {
@@ -171,7 +181,6 @@ export function WorkspaceComposer({
 				ultrathinkSelected,
 				rawPrompt,
 			});
-			setLastSubmittedWithPlanMode(isPlanMode);
 			await onSubmitPrompt({
 				rawPrompt,
 				envelope: {
@@ -274,7 +283,6 @@ export function WorkspaceComposer({
 	const inputDisabled = disabled;
 	const toolbarDisabled = disabled;
 	const hasProvider = Boolean(selectedProviderId);
-	const sessionId = sessionSnapshot?.sessionId ?? null;
 	const turnCount = sessionSnapshot?.turnCount ?? 0;
 	const checkpointCount = sessionSnapshot?.checkpointCount ?? 0;
 	const contextUsageValue = Math.min(100, turnCount * 12 + checkpointCount * 8);
@@ -318,7 +326,7 @@ export function WorkspaceComposer({
 				inputDisabled && "cursor-not-allowed opacity-60",
 			)}
 		>
-			{showPlanFollowUpPrompt && lastSubmittedWithPlanMode ? (
+			{showPlanFollowUpPrompt ? (
 				<ComposerPlanFollowUpBanner
 					planTitle={planTitle}
 					onImplementInNewThread={() => {
@@ -520,7 +528,15 @@ export function WorkspaceComposer({
 								? "text-[color:var(--plan)] hover:text-[color:var(--plan)]"
 								: "text-muted-foreground/70 hover:text-muted-foreground/70",
 						)}
-						onClick={() => setIsPlanMode((c) => !c)}
+						onClick={() =>
+							setPlanModeByScope((current) =>
+								setPlanModeState(current, {
+									workspaceId: draftKey,
+									sessionId,
+									enabled: !isPlanMode,
+								}),
+							)
+						}
 					>
 						<ClipboardList className="size-[13px]" strokeWidth={1.8} />
 						<span>Plan</span>
