@@ -187,6 +187,8 @@ function WorkspaceRepoPicker({
 type WorkspacesSidebarProps = {
 	collapsed: boolean;
 	isCreatingWorkspace?: boolean;
+	showAgentStates?: boolean;
+	sessionQueryScope?: string;
 	onSelectWorkspace: (workspaceId: string) => void;
 	onCreateWorkspace: () => void;
 	onCloneWorkspace: () => void;
@@ -220,6 +222,8 @@ type ProjectRemovalTarget = {
 export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	collapsed,
 	isCreatingWorkspace = false,
+	showAgentStates = true,
+	sessionQueryScope = "local",
 	onSelectWorkspace,
 	onCreateWorkspace,
 	onCloneWorkspace,
@@ -235,7 +239,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	workspaces,
 }: WorkspacesSidebarProps) {
 	const { t } = useTranslation("common");
-	const workspaceAgentStates = useWorkspaceAgentStates(workspaces);
+	const workspaceAgentStates = useWorkspaceAgentStates(workspaces, {
+		enabled: showAgentStates,
+		scope: sessionQueryScope,
+	});
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const { activeGroups, archivedRows } = useMemo(
 		() => projectWorkspaceRailGroups(workspaces, repositories),

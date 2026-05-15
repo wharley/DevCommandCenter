@@ -12,6 +12,14 @@ export type SavedRemoteEnvironment = {
 
 export const REMOTE_ENV_STORAGE_KEY = "dcc.remote.environments.v1";
 export const ACTIVE_REMOTE_ENV_STORAGE_KEY = "dcc.remote.environments.active.v1";
+export const REMOTE_ENVIRONMENTS_CHANGED_EVENT = "dcc:remote-environments-changed";
+
+function emitRemoteEnvironmentsChanged() {
+	if (typeof window === "undefined") {
+		return;
+	}
+	window.dispatchEvent(new CustomEvent(REMOTE_ENVIRONMENTS_CHANGED_EVENT));
+}
 
 export function readRemoteEnvironments(): SavedRemoteEnvironment[] {
 	if (typeof window === "undefined") {
@@ -40,6 +48,7 @@ export function writeRemoteEnvironments(next: SavedRemoteEnvironment[]) {
 		return;
 	}
 	window.localStorage.setItem(REMOTE_ENV_STORAGE_KEY, JSON.stringify(next));
+	emitRemoteEnvironmentsChanged();
 }
 
 export function normalizeRemoteEnvironment(value: unknown): SavedRemoteEnvironment | null {
@@ -91,9 +100,22 @@ export function writeActiveRemoteEnvironmentId(environmentId: string | null) {
 	}
 	if (environmentId && environmentId.trim()) {
 		window.localStorage.setItem(ACTIVE_REMOTE_ENV_STORAGE_KEY, environmentId);
+		emitRemoteEnvironmentsChanged();
 		return;
 	}
 	window.localStorage.removeItem(ACTIVE_REMOTE_ENV_STORAGE_KEY);
+	emitRemoteEnvironmentsChanged();
+}
+
+export function subscribeRemoteEnvironmentStore(onStoreChange: () => void) {
+	if (typeof window === "undefined") {
+		return () => {};
+	}
+	const handleChange = () => onStoreChange();
+	window.addEventListener(REMOTE_ENVIRONMENTS_CHANGED_EVENT, handleChange);
+	return () => {
+		window.removeEventListener(REMOTE_ENVIRONMENTS_CHANGED_EVENT, handleChange);
+	};
 }
 
 export function getActiveRemoteEnvironment(): SavedRemoteEnvironment | null {

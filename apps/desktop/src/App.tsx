@@ -3,6 +3,7 @@ import {
 	useEffect,
 	useMemo,
 	useState,
+	useSyncExternalStore,
 	type KeyboardEventHandler,
 	type MouseEventHandler,
 } from "react";
@@ -64,6 +65,7 @@ import {
 	workspaceSessionsQueryOptions,
 } from "./features/sessions/workspace-sessions-query";
 import { FALLBACK_PROVIDER_CATALOG } from "./lib/fallback-provider-catalog";
+import { daemonListCombs } from "./lib/daemon-api";
 import { listProviders } from "./lib/provider-api";
 import { deleteRepository, listRepositories, listWorkspaces } from "./lib/workspace-api";
 import {
@@ -85,7 +87,10 @@ import {
 	setSessionComposerSelection,
 } from "./features/providers/provider-selection.logic";
 import type { ComposerSubmittedTurn } from "./features/composer/composer-turn";
-import { workspaceToSummary } from "./features/workspaces/use-workspaces";
+import {
+	daemonCombToWorkspaceSummary,
+	workspaceToSummary,
+} from "./features/workspaces/use-workspaces";
 import type { WorkspaceSummary } from "./features/workspaces/types";
 import {
 	canAbortRun,
@@ -114,9 +119,18 @@ import {
 	type ProviderRuntimeSettings,
 	writeProviderRuntimeSettings,
 } from "./features/providers/provider-runtime-settings";
+import {
+	getActiveRemoteEnvironment,
+	subscribeRemoteEnvironmentStore,
+} from "./features/settings/remote-environments-store";
 
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 const EMPTY_WORKSPACES: WorkspaceSummary[] = [];
+const LOCAL_BACKEND_CACHE_KEY = "local";
+
+function getWorkspaceSessionsCacheKey(scope: string, workspaceId: string) {
+	return ["workspaceSessions", scope, workspaceId] as const;
+}
 
 type PendingSessionClose = {
 	sessionId: string;
@@ -273,6 +287,17 @@ function applyCoreEventToSnapshot(
 export default function App() {
 	const { t } = useTranslation("common");
 	useZoom(1);
+	const activeRemoteEnvironment = useSyncExternalStore(
+		subscribeRemoteEnvironmentStore,
+		getActiveRemoteEnvironment,
+		() => null,
+	);
+	const isRemoteBackend =
+		Boolean(activeRemoteEnvironment?.endpoint) &&
+		Boolean(activeRemoteEnvironment?.bearerToken);
+	const backendCacheKey = isRemoteBackend
+		? `remote:${activeRemoteEnvironment!.id}`
+		: LOCAL_BACKEND_CACHE_KEY;
 
 	const {
 		handleResizeKeyDown,
@@ -287,8 +312,12 @@ export default function App() {
 		setSidebarCollapsed,
 	} = useShellPanels();
 	const workspacesQuery = useQuery({
-		queryKey: ["workspaces"],
+		queryKey: ["workspaces", backendCacheKey],
 		queryFn: async () => {
+			if (isRemoteBackend && activeRemoteEnvironment) {
+				const combs = await daemonListCombs(null, activeRemoteEnvironment);
+				return combs.map(daemonCombToWorkspaceSummary);
+			}
 			const result = await listWorkspaces();
 			return result.workspaces.map(workspaceToSummary);
 		},
@@ -296,8 +325,11 @@ export default function App() {
 		refetchOnWindowFocus: false,
 	});
 	const repositoriesQuery = useQuery({
-		queryKey: ["repositories"],
+		queryKey: ["repositories", backendCacheKey],
 		queryFn: async () => {
+			if (isRemoteBackend) {
+				return [];
+			}
 			const result = await listRepositories();
 			return result.repositories;
 		},
@@ -354,7 +386,10 @@ export default function App() {
 	const providerCatalog =
 		providersQuery.data?.catalog ?? FALLBACK_PROVIDER_CATALOG;
 	const workspaceSessionsQuery = useQuery(
-		workspaceSessionsQueryOptions(selectedWorkspace?.id ?? null),
+		workspaceSessionsQueryOptions(selectedWorkspace?.id ?? null, {
+			enabled: !isRemoteBackend,
+			scope: backendCacheKey,
+		}),
 	);
 	const workspaceSessions = workspaceSessionsQuery.data ?? [];
 	const [selectedProviderId, setSelectedProviderId] = useState<string | null>(() => {
@@ -400,6 +435,17 @@ export default function App() {
 	const providerChoices = providerCatalog.providers;
 	const selectedWorkspacePath =
 		selectedWorkspace?.worktreePath ?? selectedWorkspace?.rootPath ?? null;
+	const selectedLocalWorkspacePath = isRemoteBackend ? null : selectedWorkspacePath;
+	const showRemoteUnsupported = useCallback(
+		(kind: "sessions" | "workspaces") => {
+			toast.info(
+				kind === "sessions"
+					? t("remoteMode.sessionsUnavailable")
+					: t("remoteMode.workspaceActionsUnavailable"),
+			);
+		},
+		[t],
+	);
 	const selectedProvider = useMemo(
 		() =>
 			providerChoices.find((provider) => provider.id === selectedProviderId) ??
@@ -598,6 +644,21 @@ export default function App() {
 	}, [selectedWorkspace?.id]);
 
 	useEffect(() => {
+		setIsCommandPaletteOpen(false);
+		setIsCreateWorkspaceOpen(false);
+		setSelectedSessionId(null);
+		setPendingSessionNavigation(null);
+		setPendingSessionClose(null);
+		setSessionActionSessionId(null);
+		setSessionSnapshotsById({});
+		setPendingPrompt(null);
+		setPendingPromptSessionId(null);
+		setEditorSelection(null);
+		setWorkspaceRepositoryContext(null);
+		setIsSessionSearchOpen(false);
+	}, [backendCacheKey]);
+
+	useEffect(() => {
 		if (!pendingSessionNavigation) {
 			return;
 		}
@@ -678,6 +739,10 @@ export default function App() {
 	}, [effectiveSelectedSessionId, sessionEvents]);
 
 	const handleStartSession = useCallback(async () => {
+		if (isRemoteBackend) {
+			showRemoteUnsupported("sessions");
+			return;
+		}
 		if (!selectedProvider || !selectedWorkspace) {
 			return;
 		}
@@ -715,7 +780,7 @@ export default function App() {
 			}));
 			setSelectedSessionId(result.session.id);
 			queryClient.setQueryData<WorkspaceSessionSummary[]>(
-				["workspaceSessions", selectedWorkspace.id],
+				getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 				(current = []) => {
 					const nextSummary: WorkspaceSessionSummary = {
 						session: result.session,
@@ -743,18 +808,25 @@ export default function App() {
 			toast.error(message);
 		}
 	}, [
+		backendCacheKey,
+		isRemoteBackend,
 		selectedModel,
 		selectedProvider,
 		selectedProviderBlockReason,
 		selectedProviderRuntime,
 		selectedWorkspace,
 		queryClient,
+		showRemoteUnsupported,
 	]);
 
 	const handleImplementPlanInNewThread = useCallback(
 		async (input: { planMarkdown: string; planTitle: string | null }) => {
 			const planMarkdown = input.planMarkdown.trim();
 			if (!planMarkdown) {
+				return;
+			}
+			if (isRemoteBackend) {
+				showRemoteUnsupported("sessions");
 				return;
 			}
 			if (!selectedProvider || !selectedWorkspace) {
@@ -804,7 +876,7 @@ export default function App() {
 				}));
 				setSelectedSessionId(startedSessionId);
 				queryClient.setQueryData<WorkspaceSessionSummary[]>(
-					["workspaceSessions", selectedWorkspace.id],
+					getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 					(current = []) => {
 						const nextSummary: WorkspaceSessionSummary = {
 							session: started.session,
@@ -851,7 +923,10 @@ export default function App() {
 					[result.session.id]: resultSnapshot,
 				}));
 				queryClient.setQueryData<WorkspaceSessionSummary[]>(
-					["workspaceSessions", result.session.workspaceId],
+					getWorkspaceSessionsCacheKey(
+						backendCacheKey,
+						result.session.workspaceId,
+					),
 					(current = []) =>
 						current.map((summary) =>
 							summary.session.id === result.session.id
@@ -882,6 +957,8 @@ export default function App() {
 			}
 		},
 		[
+			backendCacheKey,
+			isRemoteBackend,
 			openPlanSidebar,
 			queryClient,
 			selectedModel,
@@ -889,12 +966,17 @@ export default function App() {
 			selectedProviderBlockReason,
 			selectedProviderRuntime,
 			selectedWorkspace,
+			showRemoteUnsupported,
 		],
 	);
 
 	const handleSubmitPrompt = useCallback(async (turn: ComposerSubmittedTurn) => {
 		const trimmedPrompt = turn.rawPrompt.trim();
 		if (trimmedPrompt.length === 0) {
+			return;
+		}
+		if (isRemoteBackend) {
+			showRemoteUnsupported("sessions");
 			return;
 		}
 		if (selectedProviderBlockReason) {
@@ -942,7 +1024,7 @@ export default function App() {
 					[startedSessionId]: startedSnapshot,
 				}));
 				queryClient.setQueryData<WorkspaceSessionSummary[]>(
-					["workspaceSessions", selectedWorkspace.id],
+					getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 					(current = []) => {
 						const nextSummary: WorkspaceSessionSummary = {
 							session: started.session,
@@ -997,7 +1079,7 @@ export default function App() {
 				[result.session.id]: resultSnapshot,
 			}));
 			queryClient.setQueryData<WorkspaceSessionSummary[]>(
-				["workspaceSessions", result.session.workspaceId],
+				getWorkspaceSessionsCacheKey(backendCacheKey, result.session.workspaceId),
 				(current = []) =>
 					current.map((summary) =>
 						summary.session.id === result.session.id
@@ -1029,6 +1111,8 @@ export default function App() {
 			);
 		}
 	}, [
+		backendCacheKey,
+		isRemoteBackend,
 		queryClient,
 		selectedModel,
 		selectedProvider,
@@ -1037,6 +1121,7 @@ export default function App() {
 		selectedSessionId,
 		selectedSessionSnapshot,
 		selectedWorkspace,
+		showRemoteUnsupported,
 	]);
 
 	const handleSelectProvider = useCallback(
@@ -1081,11 +1166,19 @@ export default function App() {
 	}, []);
 
 	const handleOpenSessionSearch = useCallback(() => {
+		if (isRemoteBackend) {
+			showRemoteUnsupported("sessions");
+			return;
+		}
 		setIsSessionSearchOpen(true);
-	}, []);
+	}, [isRemoteBackend, showRemoteUnsupported]);
 
 	const handleSelectSessionSearchResult = useCallback(
 		async (result: SessionSearchResult) => {
+			if (isRemoteBackend) {
+				showRemoteUnsupported("sessions");
+				return;
+			}
 			try {
 				if (result.archivedAt) {
 					await restoreSession({ sessionId: result.sessionId });
@@ -1096,7 +1189,10 @@ export default function App() {
 				});
 				setSelectedWorkspaceId(result.workspaceId);
 				void queryClient.invalidateQueries({
-					queryKey: ["workspaceSessions", result.workspaceId],
+					queryKey: getWorkspaceSessionsCacheKey(
+						backendCacheKey,
+						result.workspaceId,
+					),
 				});
 				if (selectedWorkspace?.id === result.workspaceId) {
 					setSelectedSessionId(result.sessionId);
@@ -1112,10 +1208,21 @@ export default function App() {
 				toast.error(message);
 			}
 		},
-		[queryClient, selectedWorkspace?.id, setSelectedWorkspaceId],
+		[
+			backendCacheKey,
+			isRemoteBackend,
+			queryClient,
+			selectedWorkspace?.id,
+			setSelectedWorkspaceId,
+			showRemoteUnsupported,
+		],
 	);
 
 	const handleResumeSession = useCallback(async () => {
+		if (isRemoteBackend) {
+			showRemoteUnsupported("sessions");
+			return;
+		}
 		if (!selectedSessionSnapshot || !canResumeSession(selectedSessionSnapshot)) {
 			return;
 		}
@@ -1139,7 +1246,10 @@ export default function App() {
 			};
 		});
 		queryClient.setQueryData<WorkspaceSessionSummary[]>(
-			["workspaceSessions", selectedSessionSnapshot.workspaceId],
+			getWorkspaceSessionsCacheKey(
+				backendCacheKey,
+				selectedSessionSnapshot.workspaceId,
+			),
 			(current = []) =>
 				current.map((summary) =>
 					summary.session.id === selectedSessionSnapshot.sessionId
@@ -1151,7 +1261,7 @@ export default function App() {
 						: summary,
 				),
 		);
-	}, [queryClient, selectedSessionSnapshot]);
+	}, [backendCacheKey, isRemoteBackend, queryClient, selectedSessionSnapshot, showRemoteUnsupported]);
 
 	const handleOpenEditorFile = useCallback(
 		(selection: WorkspaceGitPreviewSelection | null) => {
@@ -1165,6 +1275,10 @@ export default function App() {
 	}, []);
 
 	const handleAbortSession = useCallback(async () => {
+		if (isRemoteBackend) {
+			showRemoteUnsupported("sessions");
+			return;
+		}
 		const visiblePendingPrompt =
 			pendingPromptSessionId === effectiveSelectedSessionId ? pendingPrompt : null;
 		if (
@@ -1196,7 +1310,10 @@ export default function App() {
 			};
 		});
 		queryClient.setQueryData<WorkspaceSessionSummary[]>(
-			["workspaceSessions", selectedSessionSnapshot.workspaceId],
+			getWorkspaceSessionsCacheKey(
+				backendCacheKey,
+				selectedSessionSnapshot.workspaceId,
+			),
 			(current = []) =>
 				current.map((summary) =>
 					summary.session.id === selectedSessionSnapshot.sessionId
@@ -1215,15 +1332,22 @@ export default function App() {
 			current === selectedSessionSnapshot.sessionId ? null : current,
 		);
 	}, [
+		backendCacheKey,
 		effectiveSelectedSessionId,
+		isRemoteBackend,
 		pendingPrompt,
 		pendingPromptSessionId,
 		queryClient,
 		selectedSessionSnapshot,
+		showRemoteUnsupported,
 	]);
 
 	const performCloseSession = useCallback(
 		async (request: PendingSessionClose) => {
+			if (isRemoteBackend) {
+				showRemoteUnsupported("sessions");
+				return;
+			}
 			if (!selectedWorkspace) {
 				return;
 			}
@@ -1270,7 +1394,7 @@ export default function App() {
 						},
 					}));
 					queryClient.setQueryData<WorkspaceSessionSummary[]>(
-						["workspaceSessions", selectedWorkspace.id],
+						getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 						(current = []) =>
 							current.map((summary) =>
 								summary.session.id === request.sessionId
@@ -1290,7 +1414,7 @@ export default function App() {
 				});
 
 				queryClient.setQueryData<WorkspaceSessionSummary[]>(
-					["workspaceSessions", selectedWorkspace.id],
+					getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 					(current = []) =>
 						result.deletedHistory
 							? current.filter(
@@ -1349,13 +1473,16 @@ export default function App() {
 			}
 		},
 		[
+			backendCacheKey,
 			effectiveSelectedSessionId,
 			handleStartSession,
+			isRemoteBackend,
 			pendingPrompt,
 			pendingPromptSessionId,
 			queryClient,
 			selectedWorkspace,
 			sessionSnapshotsById,
+			showRemoteUnsupported,
 			workspaceSessions,
 		],
 	);
@@ -1412,6 +1539,10 @@ export default function App() {
 
 	const handleRestoreSession = useCallback(
 		async (sessionId: string) => {
+			if (isRemoteBackend) {
+				showRemoteUnsupported("sessions");
+				return;
+			}
 			if (!selectedWorkspace) {
 				return;
 			}
@@ -1431,7 +1562,7 @@ export default function App() {
 			try {
 				await restoreSession({ sessionId });
 				queryClient.setQueryData<WorkspaceSessionSummary[]>(
-					["workspaceSessions", selectedWorkspace.id],
+					getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 					(current = []) =>
 						current.map((candidate) =>
 							candidate.session.id === sessionId
@@ -1461,7 +1592,14 @@ export default function App() {
 				);
 			}
 		},
-		[queryClient, selectedWorkspace, workspaceSessions],
+		[
+			backendCacheKey,
+			isRemoteBackend,
+			queryClient,
+			selectedWorkspace,
+			showRemoteUnsupported,
+			workspaceSessions,
+		],
 	);
 
 	const handleCompleteOnboarding = useCallback(() => {
@@ -1478,11 +1616,15 @@ export default function App() {
 			mode: "open" | "clone",
 			repositoryContext: ExistingRepositoryContext | null = null,
 		) => {
+			if (isRemoteBackend) {
+				showRemoteUnsupported("workspaces");
+				return;
+			}
 			setWorkspaceCreationMode(mode);
 			setWorkspaceRepositoryContext(mode === "open" ? repositoryContext : null);
 			setIsCreateWorkspaceOpen(true);
 		},
-		[],
+		[isRemoteBackend, showRemoteUnsupported],
 	);
 
 	const handleWorkspaceDialogOpenChange = useCallback((open: boolean) => {
@@ -1494,12 +1636,19 @@ export default function App() {
 
 	const handleDeleteProject = useCallback(
 		async (input: { repositoryId: string; workspaceIds: string[] }) => {
+			if (isRemoteBackend) {
+				showRemoteUnsupported("workspaces");
+				return;
+			}
 			await deleteRepository(input.repositoryId);
 			await deleteWorkspaces(input.workspaceIds);
 			void queryClient.invalidateQueries({ queryKey: ["repositories"] });
 		},
-		[deleteWorkspaces, queryClient],
+		[deleteWorkspaces, isRemoteBackend, queryClient, showRemoteUnsupported],
 	);
+	const handleRemoteWorkspaceMutation = useCallback(() => {
+		showRemoteUnsupported("workspaces");
+	}, [showRemoteUnsupported]);
 
 	const visiblePendingPrompt =
 		effectiveSelectedSessionId === pendingPromptSessionId ? pendingPrompt : null;
@@ -1522,18 +1671,28 @@ export default function App() {
 						<WorkspacesSidebar
 							collapsed={sidebarCollapsed}
 							isCreatingWorkspace={isCreatingWorkspace}
+							showAgentStates={!isRemoteBackend}
+							sessionQueryScope={backendCacheKey}
 							onSelectWorkspace={setSelectedWorkspaceId}
 							onCreateWorkspace={() => openWorkspaceDialog("open")}
 							onCloneWorkspace={() => openWorkspaceDialog("clone")}
-							onCreateWorkspaceFromProject={(repository) =>
-								openWorkspaceDialog("open", repository)
+							onCreateWorkspaceFromProject={
+								isRemoteBackend
+									? undefined
+									: (repository) => openWorkspaceDialog("open", repository)
 							}
 							onOpenSettings={() => setIsSettingsOpen(true)}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
-							onArchiveWorkspace={archiveWorkspace}
-							onRestoreWorkspace={restoreWorkspace}
-							onDeleteWorkspace={deleteWorkspace}
-							onDeleteProject={handleDeleteProject}
+							onArchiveWorkspace={
+								isRemoteBackend ? handleRemoteWorkspaceMutation : archiveWorkspace
+							}
+							onRestoreWorkspace={
+								isRemoteBackend ? handleRemoteWorkspaceMutation : restoreWorkspace
+							}
+							onDeleteWorkspace={
+								isRemoteBackend ? handleRemoteWorkspaceMutation : deleteWorkspace
+							}
+							onDeleteProject={isRemoteBackend ? undefined : handleDeleteProject}
 							repositories={repositoriesFromBackend}
 							selectedWorkspaceId={selectedWorkspaceId}
 							workspaces={filteredWorkspaces}
@@ -1598,7 +1757,7 @@ export default function App() {
 									workspaceId={selectedWorkspace.id}
 									workspaceName={selectedWorkspace.name}
 									workspaceBranch={selectedWorkspace.branch}
-									workspacePath={selectedWorkspacePath}
+									workspacePath={selectedLocalWorkspacePath}
 									selectedProviderLabel={selectedProvider?.label ?? null}
 									selectedModelLabel={selectedModel?.label ?? null}
 									selectedProviderId={selectedProviderId}
@@ -1674,7 +1833,7 @@ export default function App() {
 								workspaceId={selectedWorkspace?.id ?? null}
 								workspaceName={selectedWorkspace?.name ?? null}
 								workspaceBranch={selectedWorkspace?.branch ?? null}
-								workspacePath={selectedWorkspacePath}
+								workspacePath={selectedLocalWorkspacePath}
 								workspaceStatus={selectedWorkspace?.status ?? null}
 								workspaceSetupReport={selectedWorkspace?.setupReport ?? null}
 								selectedProviderLabel={selectedProvider?.label ?? null}

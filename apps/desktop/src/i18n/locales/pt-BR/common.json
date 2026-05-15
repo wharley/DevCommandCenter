@@ -109,6 +109,10 @@
     "commandPalette": "Paleta de comandos",
     "currentProvider": "Provedor atual: {{provider}}{{model}}"
   },
+  "remoteMode": {
+    "sessionsUnavailable": "O backend remoto está conectado, mas os controles de sessão ainda funcionam apenas no runtime local.",
+    "workspaceActionsUnavailable": "Esta ação de workspace ainda não está disponível enquanto um backend remoto estiver ativo."
+  },
   "inspector": {
     "empty": {
       "title": "Nenhum workspace selecionado",

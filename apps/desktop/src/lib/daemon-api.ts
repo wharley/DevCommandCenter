@@ -18,6 +18,28 @@ type RpcResponse<T> = {
 	error?: string | null;
 };
 
+export type DaemonCombStatus =
+	| "active"
+	| "ready_for_review"
+	| "applied"
+	| "discarded"
+	| "archived"
+	| "error";
+
+export type DaemonComb = {
+	id: string;
+	projectId: string | null;
+	name: string | null;
+	description: string | null;
+	baseBranch: string | null;
+	branch: string | null;
+	worktreePath: string | null;
+	status: DaemonCombStatus | null;
+	lastOpenedAt: string | null;
+	lastGitActivityAt: string | null;
+	isPinned?: boolean | null;
+};
+
 export type BackendTarget =
 	| { kind: "local" }
 	| { kind: "remote"; environment: SavedRemoteEnvironment };
@@ -151,7 +173,7 @@ export function daemonListCombs(
 	projectId?: string | null,
 	environment?: SavedRemoteEnvironment | null,
 ) {
-	return daemonCall<unknown>(
+	return daemonCall<DaemonComb[]>(
 		"daemon_list_combs",
 		"combs.list",
 		{ projectId: projectId ?? null },

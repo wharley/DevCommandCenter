@@ -32,8 +32,8 @@ export const dccQueryKeys = {
 	sessions: ["sessions"] as const,
 	sessionThreads: (sessionId: string) => ["sessionThreads", sessionId] as const,
 	sessionSearch: (query: string) => ["sessionSearch", query] as const,
-	workspaceSessions: (workspaceId: string) =>
-		["workspaceSessions", workspaceId] as const,
+	workspaceSessions: (workspaceId: string, scope = "local") =>
+		["workspaceSessions", scope, workspaceId] as const,
 } as const;
 
 function shouldRefreshInspectorGitQueries(payload: unknown) {

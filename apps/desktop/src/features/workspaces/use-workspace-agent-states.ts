@@ -44,14 +44,20 @@ export function deriveAgentStateFromSessions(
 
 export function useWorkspaceAgentStates(
 	workspaces: Pick<WorkspaceSummary, "id" | "status">[],
+	input?: { enabled?: boolean; scope?: string },
 ): Record<string, AgentState> {
+	const isEnabled = input?.enabled ?? true;
+	const scope = input?.scope ?? "local";
 	const trackedWorkspaces = useMemo(
-		() => workspaces.filter((workspace) => workspace.status !== "archived"),
-		[workspaces],
+		() =>
+			isEnabled
+				? workspaces.filter((workspace) => workspace.status !== "archived")
+				: [],
+		[isEnabled, workspaces],
 	);
 	const sessionQueries = useQueries({
 		queries: trackedWorkspaces.map((workspace) =>
-			workspaceSessionsQueryOptions(workspace.id),
+			workspaceSessionsQueryOptions(workspace.id, { enabled: isEnabled, scope }),
 		),
 	});
 
