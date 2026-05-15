@@ -60,6 +60,17 @@ pub const GEMINI_ALIASES: &[(&str, &str)] = &[
     ("2.5-flash", "gemini-2.5-flash"),
 ];
 
+pub const DROID_ALIASES: &[(&str, &str)] = &[
+    ("auto", "auto"),
+    ("sonnet", "claude-sonnet-4-6"),
+    ("claude-sonnet-4-6", "claude-sonnet-4-6"),
+    ("gpt-5.4", "gpt-5.4"),
+    ("5.4", "gpt-5.4"),
+    ("gpt-5.5", "gpt-5.5"),
+    ("5.5", "gpt-5.5"),
+    ("gemini-3-flash-preview", "gemini-3-flash-preview"),
+];
+
 /// Resolves a model alias or legacy ID to its canonical form for the given provider.
 /// Returns the input unchanged if no alias matches (pass-through for already-canonical IDs).
 pub fn resolve_alias(provider_id: &str, model: &str) -> String {
@@ -67,6 +78,7 @@ pub fn resolve_alias(provider_id: &str, model: &str) -> String {
         "claude_code" => CLAUDE_CODE_ALIASES,
         "codex" => CODEX_ALIASES,
         "gemini" => GEMINI_ALIASES,
+        "droid" => DROID_ALIASES,
         _ => return model.to_string(),
     };
     aliases
@@ -150,6 +162,44 @@ pub const GEMINI: &[ModelEntry] = &[
         id: "gemini-3-flash-preview",
         label: "Gemini 3 Flash Preview",
         description: "Preview Gemini 3 coding model. Availability may vary by account.",
+        recommended: false,
+        effort_levels: &["low", "medium", "high"],
+    },
+];
+
+pub const DROID: &[ModelEntry] = &[
+    ModelEntry {
+        id: "auto",
+        label: "Auto",
+        description: "Use Droid's default model selection for this account.",
+        recommended: true,
+        effort_levels: &["low", "medium", "high"],
+    },
+    ModelEntry {
+        id: "claude-sonnet-4-6",
+        label: "Claude Sonnet 4.6",
+        description: "Balanced default with strong coding capability through Droid.",
+        recommended: false,
+        effort_levels: &["low", "medium", "high"],
+    },
+    ModelEntry {
+        id: "gpt-5.4",
+        label: "GPT-5.4",
+        description: "High capability coding model routed through Droid.",
+        recommended: false,
+        effort_levels: &["low", "medium", "high"],
+    },
+    ModelEntry {
+        id: "gpt-5.5",
+        label: "GPT-5.5",
+        description: "Latest high-reasoning OpenAI option exposed by Droid.",
+        recommended: false,
+        effort_levels: &["low", "medium", "high"],
+    },
+    ModelEntry {
+        id: "gemini-3-flash-preview",
+        label: "Gemini 3 Flash Preview",
+        description: "Fast Gemini option when available in the local Droid account.",
         recommended: false,
         effort_levels: &["low", "medium", "high"],
     },

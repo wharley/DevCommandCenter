@@ -74,6 +74,21 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 			stable: true,
 		},
 		{
+			id: "droid",
+			label: "Droid",
+			description: "Factory Droid exec provider for workspace coding workflows.",
+			models: PROVIDER_MODEL_REGISTRY.droid.map((m) => ({
+				id: m.id,
+				label: m.label,
+				description: m.description,
+				recommended: m.recommended,
+				effortLevels: m.effortLevels,
+			})),
+			capabilities: { ...stableCapabilities },
+			health: stableHealth,
+			stable: true,
+		},
+		{
 			id: "cursor",
 			label: "Cursor",
 			description: "Cursor Agent CLI provider with CLI-native session resume.",

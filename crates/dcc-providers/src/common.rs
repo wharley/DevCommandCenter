@@ -949,6 +949,9 @@ pub(crate) fn apply_cli_spawn_environment(
                 }
             }
         }
+        "droid" => {
+            command.env("DCC_AGENT_RUNTIME", "droid");
+        }
         "cursor" => {
             command.env("DCC_AGENT_RUNTIME", "cursor");
             command.env("DCC_CURSOR_ADAPTER", "experimental");

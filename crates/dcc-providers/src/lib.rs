@@ -4,6 +4,7 @@ pub mod codex;
 pub mod codex_app_server;
 pub mod common;
 pub mod cursor;
+pub mod droid;
 pub mod gemini;
 pub mod headless_cli;
 
@@ -17,15 +18,16 @@ use futures::future::join_all;
 use dcc_core::domain::provider::{HealthStatus, ProviderCatalog, ProviderDescriptor};
 use dcc_core::ports::Provider;
 
-pub const PROVIDER_IDS: [&str; 4] = ["claude_code", "codex", "gemini", "cursor"];
+pub const PROVIDER_IDS: [&str; 5] = ["claude_code", "codex", "gemini", "droid", "cursor"];
 
 fn provider_registry() -> &'static HashMap<String, Arc<dyn Provider>> {
     static REGISTRY: OnceLock<HashMap<String, Arc<dyn Provider>>> = OnceLock::new();
     REGISTRY.get_or_init(|| {
-        let providers: [Arc<dyn Provider>; 4] = [
+        let providers: [Arc<dyn Provider>; 5] = [
             Arc::new(claude_code::adapter()),
             Arc::new(codex::adapter()),
             Arc::new(gemini::adapter()),
+            Arc::new(droid::adapter()),
             Arc::new(cursor::adapter()),
         ];
 
@@ -65,8 +67,9 @@ pub async fn provider_catalog() -> ProviderCatalog {
     providers.push(claude_code::descriptor(health[0].clone()));
     providers.push(codex::descriptor(health[1].clone()));
     providers.push(gemini::descriptor(health[2].clone()));
+    providers.push(droid::descriptor(health[3].clone()));
     let cursor_models = cursor::discover_models().await;
-    providers.push(cursor::descriptor(health[3].clone(), cursor_models));
+    providers.push(cursor::descriptor(health[4].clone(), cursor_models));
     ProviderCatalog { providers }
 }
 
