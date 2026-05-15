@@ -47,8 +47,10 @@ async fn main() {
     println!("[DCC HTTP]   GET  /health       - Health check");
     println!("[DCC HTTP]   GET  /openapi.json - OpenAPI document");
     println!("[DCC HTTP]   POST /rpc          - Compatibility RPC endpoint");
+    println!("[DCC HTTP]   GET  /api/v1/shell/default");
     println!("[DCC HTTP]   GET  /api/v1/status");
     println!("[DCC HTTP]   GET  /api/v1/events/stream");
+    println!("[DCC HTTP]   GET  /api/v1/terminals/events/stream");
     println!("[DCC HTTP]   GET  /api/v1/tasks");
     println!("[DCC HTTP]   POST /api/v1/tasks/:task_id/run");
     println!("[DCC HTTP]   POST /api/v1/tasks/:task_id/attach");
@@ -60,6 +62,10 @@ async fn main() {
     println!("[DCC HTTP]   GET  /api/v1/combs");
     println!("[DCC HTTP]   GET  /api/v1/panes");
     println!("[DCC HTTP]   POST /api/v1/diffs/bundle");
+    println!("[DCC HTTP]   POST /api/v1/terminals/spawn");
+    println!("[DCC HTTP]   POST /api/v1/terminals/:pty_id/write");
+    println!("[DCC HTTP]   POST /api/v1/terminals/:pty_id/resize");
+    println!("[DCC HTTP]   POST /api/v1/terminals/:pty_id/kill");
     println!("[DCC HTTP]   POST /api/v1/sessions/start");
     println!("[DCC HTTP]   GET  /api/v1/sessions");
     println!("[DCC HTTP]   GET  /api/v1/sessions/search");

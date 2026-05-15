@@ -31,18 +31,25 @@ use dcc_tauri::{
     },
     state::SessionCommandState,
 };
-use serde::Deserialize;
+use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::io::{Read, Write};
 use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{Arc, Mutex, OnceLock},
+    collections::{HashMap, VecDeque},
+    path::{Path as FsPath, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
+    thread::{self, JoinHandle},
+    time::Duration,
 };
 use tokio::sync::RwLock;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
+use uuid::Uuid;
 
 use crate::daemon_client::{default_app_data_dir, rpc_with_db_path_timeout};
 use crate::http_auth::auth_middleware;
@@ -56,6 +63,15 @@ static HEADLESS_SESSION_STATES: OnceLock<Mutex<HashMap<PathBuf, Arc<SessionComma
 static HEADLESS_EVENT_SENDERS: OnceLock<
     Mutex<HashMap<PathBuf, tokio::sync::broadcast::Sender<CoreEvent>>>,
 > = OnceLock::new();
+static HEADLESS_TERMINALS: OnceLock<Mutex<HashMap<String, HeadlessManagedTerminal>>> =
+    OnceLock::new();
+static HEADLESS_TERMINAL_EVENT_SENDER: OnceLock<
+    tokio::sync::broadcast::Sender<HeadlessTerminalEvent>,
+> = OnceLock::new();
+static HEADLESS_TERMINAL_SWEEPER: OnceLock<()> = OnceLock::new();
+
+const TERMINAL_OUTPUT_MAX_LINES: usize = 3000;
+const PTY_INPUT_CHUNK_BYTES: usize = 8192;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -122,6 +138,69 @@ impl EventBus for HeadlessEventBus {
         let _ = self.sender.send(event);
         Ok(())
     }
+}
+
+#[allow(dead_code)]
+struct HeadlessManagedTerminal {
+    pty_master: Box<dyn MasterPty + Send>,
+    child: Box<dyn PtyChild + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    cwd: String,
+    command: String,
+    args: Vec<String>,
+    started_at: String,
+    stop_flag: Arc<AtomicBool>,
+    output_buffer: Arc<Mutex<VecDeque<String>>>,
+    reader_thread: Option<JoinHandle<()>>,
+    exit_notified: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+enum HeadlessTerminalEvent {
+    Output {
+        pty_id: String,
+        data: String,
+        stream: String,
+    },
+    Exit {
+        pty_id: String,
+        code: Option<i32>,
+    },
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalSpawnRequest {
+    cwd: String,
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    cols: Option<u16>,
+    #[serde(default)]
+    rows: Option<u16>,
+    #[serde(default)]
+    pane_id: Option<String>,
+    #[serde(default)]
+    pty_owner_key: Option<String>,
+    #[serde(default)]
+    restart: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalWriteRequest {
+    data: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalResizeRequest {
+    cols: u16,
+    rows: u16,
 }
 
 #[derive(Debug)]
@@ -211,7 +290,12 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
     let cors_config = config.blocking_read().clone();
     let protected_routes = Router::new()
         .route("/rpc", post(handle_json_rpc))
+        .route("/api/v1/shell/default", get(shell_default_handler))
         .route("/api/v1/events/stream", get(events_stream_handler))
+        .route(
+            "/api/v1/terminals/events/stream",
+            get(terminals_stream_handler),
+        )
         .route("/api/v1/status", get(status_handler))
         .route("/api/v1/tasks", get(list_tasks_handler))
         .route("/api/v1/tasks/:task_id/run", post(run_task_handler))
@@ -235,6 +319,19 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         .route("/api/v1/combs", get(list_combs_handler))
         .route("/api/v1/panes", get(list_panes_handler))
         .route("/api/v1/diffs/bundle", post(diffs_bundle_handler))
+        .route("/api/v1/terminals/spawn", post(terminal_spawn_handler))
+        .route(
+            "/api/v1/terminals/:pty_id/write",
+            post(terminal_write_handler),
+        )
+        .route(
+            "/api/v1/terminals/:pty_id/resize",
+            post(terminal_resize_handler),
+        )
+        .route(
+            "/api/v1/terminals/:pty_id/kill",
+            post(terminal_kill_handler),
+        )
         .route("/api/v1/sessions/start", post(start_thread_handler))
         .route("/api/v1/sessions", get(list_workspace_sessions_handler))
         .route("/api/v1/sessions/search", get(search_sessions_handler))
@@ -441,6 +538,273 @@ fn headless_event_sender_for_db(
     Ok(sender)
 }
 
+fn headless_terminal_sender() -> tokio::sync::broadcast::Sender<HeadlessTerminalEvent> {
+    HEADLESS_TERMINAL_EVENT_SENDER
+        .get_or_init(|| {
+            let (sender, _) = tokio::sync::broadcast::channel(512);
+            sender
+        })
+        .clone()
+}
+
+fn headless_terminals() -> &'static Mutex<HashMap<String, HeadlessManagedTerminal>> {
+    HEADLESS_TERMINALS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn headless_terminal_output_buffer() -> Arc<Mutex<VecDeque<String>>> {
+    Arc::new(Mutex::new(VecDeque::with_capacity(
+        TERMINAL_OUTPUT_MAX_LINES.min(256),
+    )))
+}
+
+fn append_headless_terminal_output(buffer: &Arc<Mutex<VecDeque<String>>>, chunk: &str) {
+    if let Ok(mut guard) = buffer.lock() {
+        while guard.len() >= TERMINAL_OUTPUT_MAX_LINES {
+            guard.pop_front();
+        }
+        guard.push_back(chunk.to_string());
+    }
+}
+
+fn headless_default_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| {
+        if cfg!(windows) {
+            "powershell".to_string()
+        } else {
+            "/bin/zsh".to_string()
+        }
+    })
+}
+
+fn iso_now() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+fn pty_write_all_chunked(writer: &mut dyn Write, data: &[u8]) -> std::io::Result<()> {
+    if data.is_empty() {
+        return Ok(());
+    }
+    for chunk in data.chunks(PTY_INPUT_CHUNK_BYTES) {
+        writer.write_all(chunk)?;
+    }
+    Ok(())
+}
+
+fn spawn_headless_terminal_reader_thread(
+    mut reader: Box<dyn Read + Send>,
+    pty_id: String,
+    sender: tokio::sync::broadcast::Sender<HeadlessTerminalEvent>,
+    stop_flag: Arc<AtomicBool>,
+    output_buffer: Arc<Mutex<VecDeque<String>>>,
+) -> JoinHandle<()> {
+    const FLUSH_INTERVAL: Duration = Duration::from_millis(16);
+    const MAX_BATCH_BYTES: usize = 128 * 1024;
+
+    thread::spawn(move || {
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let read_thread = thread::spawn(move || {
+            let mut buffer = [0u8; 8192];
+            loop {
+                if stop_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if tx.send(buffer[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let mut pending: Vec<u8> = Vec::new();
+        let flush_pending = |pending: &mut Vec<u8>| {
+            if pending.is_empty() {
+                return;
+            }
+            let data = String::from_utf8_lossy(pending).to_string();
+            pending.clear();
+            append_headless_terminal_output(&output_buffer, &data);
+            let _ = sender.send(HeadlessTerminalEvent::Output {
+                pty_id: pty_id.clone(),
+                data,
+                stream: "stdout".to_string(),
+            });
+        };
+
+        loop {
+            match rx.recv_timeout(FLUSH_INTERVAL) {
+                Ok(chunk) => {
+                    pending.extend_from_slice(&chunk);
+                    while let Ok(more) = rx.try_recv() {
+                        pending.extend_from_slice(&more);
+                        if pending.len() >= MAX_BATCH_BYTES {
+                            flush_pending(&mut pending);
+                        }
+                    }
+                    if pending.len() >= MAX_BATCH_BYTES {
+                        flush_pending(&mut pending);
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if !pending.is_empty() {
+                        flush_pending(&mut pending);
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    if !pending.is_empty() {
+                        flush_pending(&mut pending);
+                    }
+                    break;
+                }
+            }
+        }
+
+        let _ = read_thread.join();
+    })
+}
+
+fn ensure_headless_terminal_sweeper() {
+    HEADLESS_TERMINAL_SWEEPER.get_or_init(|| {
+        let sender = headless_terminal_sender();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+
+                let exited = {
+                    let mut guard = match headless_terminals().lock() {
+                        Ok(guard) => guard,
+                        Err(_) => continue,
+                    };
+                    let mut exited = Vec::new();
+                    for (pty_id, terminal) in guard.iter_mut() {
+                        if terminal.exit_notified {
+                            continue;
+                        }
+                        let Some(status) = terminal.child.try_wait().ok().flatten() else {
+                            continue;
+                        };
+                        terminal.exit_notified = true;
+                        terminal.stop_flag.store(true, Ordering::Relaxed);
+                        let _ = terminal.reader_thread.take();
+                        exited.push((pty_id.clone(), status.exit_code()));
+                    }
+                    exited
+                };
+
+                for (pty_id, code) in exited {
+                    let _ = sender.send(HeadlessTerminalEvent::Exit {
+                        pty_id,
+                        code: Some(code as i32),
+                    });
+                }
+            }
+        });
+    });
+}
+
+fn spawn_headless_terminal(options: TerminalSpawnRequest) -> Result<Value, HttpApiError> {
+    ensure_headless_terminal_sweeper();
+
+    let cwd = options.cwd.trim();
+    if cwd.is_empty() {
+        return Err(HttpApiError::bad_request("cwd is required"));
+    }
+
+    let shell = headless_default_shell();
+    let command = options.command.unwrap_or_else(|| shell.clone());
+    let cols = options.cols.unwrap_or(120);
+    let rows = options.rows.unwrap_or(32);
+
+    let pty_pair = native_pty_system()
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| HttpApiError::internal(error.to_string()))?;
+
+    let mut cmd = CommandBuilder::new(&command);
+    cmd.args(&options.args);
+    cmd.cwd(cwd);
+
+    #[cfg(unix)]
+    {
+        cmd.env("TERM", "xterm-256color");
+        let git_file_path = FsPath::new(cwd).join(".git");
+        if git_file_path.is_file() {
+            if let Ok(git_content) = std::fs::read_to_string(&git_file_path) {
+                if let Some(gitdir_line) =
+                    git_content.lines().find(|line| line.starts_with("gitdir:"))
+                {
+                    let gitdir = gitdir_line.trim_start_matches("gitdir:").trim();
+                    cmd.env("GIT_DIR", gitdir);
+                    cmd.env("GIT_WORK_TREE", cwd);
+                }
+            }
+        }
+    }
+
+    let child = pty_pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|error| HttpApiError::internal(error.to_string()))?;
+    let reader = pty_pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| HttpApiError::internal(error.to_string()))?;
+    let writer = pty_pair
+        .master
+        .take_writer()
+        .map_err(|error| HttpApiError::internal(error.to_string()))?;
+
+    let pty_id = format!("pty-{}", Uuid::new_v4().simple());
+    let sender = headless_terminal_sender();
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let output_buffer = headless_terminal_output_buffer();
+    let reader_thread = Some(spawn_headless_terminal_reader_thread(
+        reader,
+        pty_id.clone(),
+        sender,
+        stop_flag.clone(),
+        output_buffer.clone(),
+    ));
+
+    let terminal = HeadlessManagedTerminal {
+        pty_master: pty_pair.master,
+        child,
+        writer: Arc::new(Mutex::new(writer)),
+        cwd: cwd.to_string(),
+        command,
+        args: options.args,
+        started_at: iso_now(),
+        stop_flag,
+        output_buffer,
+        reader_thread,
+        exit_notified: false,
+    };
+
+    headless_terminals()
+        .lock()
+        .map_err(|error| {
+            HttpApiError::internal(format!("terminal runtime cache poisoned: {error}"))
+        })?
+        .insert(pty_id.clone(), terminal);
+
+    Ok(json!({ "ptyId": pty_id }))
+}
+
+fn terminal_event_name(event: &HeadlessTerminalEvent) -> &'static str {
+    match event {
+        HeadlessTerminalEvent::Output { .. } => "terminal-output",
+        HeadlessTerminalEvent::Exit { .. } => "terminal-exit",
+    }
+}
+
 fn filter_by_string_field(
     value: Value,
     field: &str,
@@ -489,7 +853,13 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "GET /api/v1/combs",
             "GET /api/v1/panes",
             "POST /api/v1/diffs/bundle",
+            "GET /api/v1/shell/default",
             "GET /api/v1/events/stream",
+            "GET /api/v1/terminals/events/stream",
+            "POST /api/v1/terminals/spawn",
+            "POST /api/v1/terminals/:pty_id/write",
+            "POST /api/v1/terminals/:pty_id/resize",
+            "POST /api/v1/terminals/:pty_id/kill",
             "POST /api/v1/sessions/start",
             "GET /api/v1/sessions",
             "GET /api/v1/sessions/search",
@@ -545,6 +915,12 @@ async fn openapi_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<
     Json(build_openapi_document(&config))
 }
 
+async fn shell_default_handler() -> Json<Value> {
+    Json(json!({
+        "shell": headless_default_shell(),
+    }))
+}
+
 async fn events_stream_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
 ) -> Result<
@@ -559,6 +935,29 @@ async fn events_stream_handler(
     let stream = BroadcastStream::new(sender.subscribe()).filter_map(|message| match message {
         Ok(event) => match serde_json::to_string(&event) {
             Ok(payload) => Some(Ok(Event::default().event("core-event").data(payload))),
+            Err(_) => None,
+        },
+        Err(_) => None,
+    });
+
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    ))
+}
+
+async fn terminals_stream_handler() -> Result<
+    Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>,
+    HttpApiError,
+> {
+    ensure_headless_terminal_sweeper();
+    let sender = headless_terminal_sender();
+    let stream = BroadcastStream::new(sender.subscribe()).filter_map(|message| match message {
+        Ok(event) => match serde_json::to_string(&event) {
+            Ok(payload) => Some(Ok(Event::default()
+                .event(terminal_event_name(&event))
+                .data(payload))),
             Err(_) => None,
         },
         Err(_) => None,
@@ -1147,6 +1546,76 @@ async fn diffs_bundle_handler(
     )
     .await?;
     Ok(Json(payload))
+}
+
+async fn terminal_spawn_handler(
+    Json(input): Json<TerminalSpawnRequest>,
+) -> Result<Json<Value>, HttpApiError> {
+    Ok(Json(spawn_headless_terminal(input)?))
+}
+
+async fn terminal_write_handler(
+    Path(pty_id): Path<String>,
+    Json(input): Json<TerminalWriteRequest>,
+) -> Result<Json<Value>, HttpApiError> {
+    let terminals = headless_terminals()
+        .lock()
+        .map_err(|error| HttpApiError::internal(format!("terminals lock poisoned: {error}")))?;
+    let Some(terminal) = terminals.get(&pty_id) else {
+        return Ok(Json(json!({ "ok": false })));
+    };
+    let mut writer = terminal
+        .writer
+        .lock()
+        .map_err(|error| HttpApiError::internal(format!("writer lock poisoned: {error}")))?;
+    pty_write_all_chunked(&mut *writer, input.data.as_bytes())
+        .map_err(|error| HttpApiError::internal(error.to_string()))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn terminal_resize_handler(
+    Path(pty_id): Path<String>,
+    Json(input): Json<TerminalResizeRequest>,
+) -> Result<Json<Value>, HttpApiError> {
+    let terminals = headless_terminals()
+        .lock()
+        .map_err(|error| HttpApiError::internal(format!("terminals lock poisoned: {error}")))?;
+    let Some(terminal) = terminals.get(&pty_id) else {
+        return Ok(Json(json!({ "ok": false })));
+    };
+    terminal
+        .pty_master
+        .resize(PtySize {
+            rows: input.rows,
+            cols: input.cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| HttpApiError::internal(error.to_string()))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn terminal_kill_handler(Path(pty_id): Path<String>) -> Result<Json<Value>, HttpApiError> {
+    let terminal = {
+        let mut terminals = headless_terminals()
+            .lock()
+            .map_err(|error| HttpApiError::internal(format!("terminals lock poisoned: {error}")))?;
+        terminals.remove(&pty_id)
+    };
+
+    let Some(mut terminal) = terminal else {
+        return Ok(Json(json!({ "ok": false })));
+    };
+
+    terminal.stop_flag.store(true, Ordering::Relaxed);
+    let _ = terminal.child.kill();
+    drop(terminal.pty_master);
+    let _ = terminal.reader_thread.take();
+    let _ = headless_terminal_sender().send(HeadlessTerminalEvent::Exit {
+        pty_id,
+        code: Some(-1),
+    });
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn start_thread_handler(

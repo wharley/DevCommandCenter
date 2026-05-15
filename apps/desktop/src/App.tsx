@@ -1709,6 +1709,7 @@ export default function App() {
 									workspaceName={selectedWorkspace.name}
 									workspaceBranch={selectedWorkspace.branch}
 									workspacePath={selectedLocalWorkspacePath}
+									terminalWorkspacePath={selectedWorkspacePath}
 									sessionQueryScope={backendCacheKey}
 									selectedProviderLabel={selectedProvider?.label ?? null}
 									selectedModelLabel={selectedModel?.label ?? null}
