@@ -388,6 +388,7 @@ export default function App() {
 	const workspaceSessionsQuery = useQuery(
 		workspaceSessionsQueryOptions(selectedWorkspace?.id ?? null, {
 			scope: backendCacheKey,
+			refetchInterval: false,
 		}),
 	);
 	const workspaceSessions = workspaceSessionsQuery.data ?? [];
@@ -738,10 +739,6 @@ export default function App() {
 	}, [effectiveSelectedSessionId, sessionEvents]);
 
 	const handleStartSession = useCallback(async () => {
-		if (isRemoteBackend) {
-			showRemoteUnsupported("sessions");
-			return;
-		}
 		if (!selectedProvider || !selectedWorkspace) {
 			return;
 		}
@@ -808,24 +805,18 @@ export default function App() {
 		}
 	}, [
 		backendCacheKey,
-		isRemoteBackend,
 		selectedModel,
 		selectedProvider,
 		selectedProviderBlockReason,
 		selectedProviderRuntime,
 		selectedWorkspace,
 		queryClient,
-		showRemoteUnsupported,
 	]);
 
 	const handleImplementPlanInNewThread = useCallback(
 		async (input: { planMarkdown: string; planTitle: string | null }) => {
 			const planMarkdown = input.planMarkdown.trim();
 			if (!planMarkdown) {
-				return;
-			}
-			if (isRemoteBackend) {
-				showRemoteUnsupported("sessions");
 				return;
 			}
 			if (!selectedProvider || !selectedWorkspace) {
@@ -957,7 +948,6 @@ export default function App() {
 		},
 		[
 			backendCacheKey,
-			isRemoteBackend,
 			openPlanSidebar,
 			queryClient,
 			selectedModel,
@@ -965,17 +955,12 @@ export default function App() {
 			selectedProviderBlockReason,
 			selectedProviderRuntime,
 			selectedWorkspace,
-			showRemoteUnsupported,
 		],
 	);
 
 	const handleSubmitPrompt = useCallback(async (turn: ComposerSubmittedTurn) => {
 		const trimmedPrompt = turn.rawPrompt.trim();
 		if (trimmedPrompt.length === 0) {
-			return;
-		}
-		if (isRemoteBackend) {
-			showRemoteUnsupported("sessions");
 			return;
 		}
 		if (selectedProviderBlockReason) {
@@ -1111,7 +1096,6 @@ export default function App() {
 		}
 	}, [
 		backendCacheKey,
-		isRemoteBackend,
 		queryClient,
 		selectedModel,
 		selectedProvider,
@@ -1120,7 +1104,6 @@ export default function App() {
 		selectedSessionId,
 		selectedSessionSnapshot,
 		selectedWorkspace,
-		showRemoteUnsupported,
 	]);
 
 	const handleSelectProvider = useCallback(

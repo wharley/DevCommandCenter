@@ -7,7 +7,7 @@ use std::{
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
@@ -31,7 +31,7 @@ use dcc_core::{
 };
 use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 
-use crate::events::core_event_name;
+use crate::events::TauriEventBus;
 use dcc_providers::provider_runtime;
 
 #[derive(Clone, Debug)]
@@ -47,9 +47,10 @@ impl WorkspaceCommandState {
 
 #[derive(Clone)]
 pub struct SessionCommandState {
-    app: AppHandle,
+    app_data_dir: PathBuf,
     db_path: PathBuf,
     session_repo: SqliteSessionRepo,
+    event_bus: Arc<dyn EventBus>,
     store: Arc<Mutex<SessionStore>>,
 }
 
@@ -65,13 +66,44 @@ struct SessionStore {
     provider_sessions: HashMap<SessionId, ProviderSessionBinding>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct NoopEventBus;
+
+#[async_trait]
+impl EventBus for NoopEventBus {
+    async fn publish(&self, _event: dcc_core::ports::events::CoreEvent) -> Result<()> {
+        Ok(())
+    }
+}
+
 impl SessionCommandState {
     pub fn new(app: AppHandle, db_path: PathBuf) -> Self {
+        let app_data_dir = app
+            .path()
+            .app_data_dir()
+            .unwrap_or_else(|_| PathBuf::from("."));
+        Self::from_parts(db_path, app_data_dir, Arc::new(TauriEventBus::new(app)))
+    }
+
+    pub fn new_headless(db_path: PathBuf, app_data_dir: PathBuf) -> Self {
+        Self::from_parts(db_path, app_data_dir, Arc::new(NoopEventBus))
+    }
+
+    pub fn new_with_event_bus(
+        db_path: PathBuf,
+        app_data_dir: PathBuf,
+        event_bus: Arc<dyn EventBus>,
+    ) -> Self {
+        Self::from_parts(db_path, app_data_dir, event_bus)
+    }
+
+    fn from_parts(db_path: PathBuf, app_data_dir: PathBuf, event_bus: Arc<dyn EventBus>) -> Self {
         Self {
-            app,
+            app_data_dir,
             session_repo: SqliteSessionRepo::open(&db_path)
                 .expect("failed to open sqlite session repo"),
             db_path,
+            event_bus,
             store: Arc::new(Mutex::new(SessionStore::default())),
         }
     }
@@ -100,11 +132,7 @@ impl SessionCommandState {
     }
 
     fn provider_home_root(&self) -> PathBuf {
-        self.app
-            .path()
-            .app_data_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join("provider-homes")
+        self.app_data_dir.join("provider-homes")
     }
 
     fn is_legacy_managed_provider_home(
@@ -127,22 +155,18 @@ impl SessionCommandState {
         PathBuf::from(home_path) == self.provider_home_root().join(provider_id)
     }
 
-    pub(crate) async fn peek_session(&self, session_id: &SessionId) -> Result<Option<Session>> {
+    pub async fn peek_session(&self, session_id: &SessionId) -> Result<Option<Session>> {
         SessionRepo::get_session(&self.session_repo, session_id).await
     }
 
-    pub(crate) fn list_workspace_sessions(
+    pub fn list_workspace_sessions(
         &self,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<WorkspaceSessionSummary>> {
         self.session_repo.list_workspace_sessions(workspace_id)
     }
 
-    pub(crate) fn search_sessions(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<SessionSearchResult>> {
+    pub fn search_sessions(&self, query: &str, limit: usize) -> Result<Vec<SessionSearchResult>> {
         self.session_repo.search_sessions(query, limit)
     }
 
@@ -176,7 +200,7 @@ impl SessionCommandState {
         Ok(())
     }
 
-    pub(crate) async fn emit_turn_aborted(
+    pub async fn emit_turn_aborted(
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
@@ -197,7 +221,7 @@ impl SessionCommandState {
         .await
     }
 
-    pub(crate) async fn attach_provider_session(&self, session: &Session) -> Result<()> {
+    pub async fn attach_provider_session(&self, session: &Session) -> Result<()> {
         if self.provider_binding(&session.id)?.is_some() {
             return Ok(());
         }
@@ -598,7 +622,7 @@ impl SessionCommandState {
         });
     }
 
-    pub(crate) async fn set_active_turn(
+    pub async fn set_active_turn(
         &self,
         session_id: &SessionId,
         turn_id: Option<String>,
@@ -613,11 +637,7 @@ impl SessionCommandState {
         Ok(())
     }
 
-    pub(crate) async fn send_provider_input(
-        &self,
-        session_id: &SessionId,
-        input: Input,
-    ) -> Result<()> {
+    pub async fn send_provider_input(&self, session_id: &SessionId, input: Input) -> Result<()> {
         let binding = self.provider_binding(session_id)?.ok_or_else(|| {
             dcc_core::CoreError::Provider(format!(
                 "no provider binding for session {}",
@@ -633,7 +653,7 @@ impl SessionCommandState {
         provider.send_input(&binding.handle, input).await
     }
 
-    pub(crate) async fn cancel_provider_session(&self, session_id: &SessionId) -> Result<()> {
+    pub async fn cancel_provider_session(&self, session_id: &SessionId) -> Result<()> {
         let binding = self.provider_binding(session_id)?.ok_or_else(|| {
             dcc_core::CoreError::Provider(format!(
                 "no provider binding for session {}",
@@ -764,13 +784,6 @@ impl SessionEventRepo for SessionCommandState {
 #[async_trait]
 impl EventBus for SessionCommandState {
     async fn publish(&self, event: dcc_core::ports::events::CoreEvent) -> Result<()> {
-        let event_name = core_event_name(&event);
-        self.app
-            .emit(&event_name, &event)
-            .map_err(|error| dcc_core::CoreError::EventBus(error.to_string()))?;
-        self.app
-            .emit("dcc:core-event", &event)
-            .map_err(|error| dcc_core::CoreError::EventBus(error.to_string()))?;
-        Ok(())
+        self.event_bus.publish(event).await
     }
 }

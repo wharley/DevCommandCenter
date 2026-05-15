@@ -38,6 +38,7 @@ flate2 = "1"
 libc = "0.2"
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 tauri-plugin-updater = "2"

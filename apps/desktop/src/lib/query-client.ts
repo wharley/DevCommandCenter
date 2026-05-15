@@ -1,5 +1,6 @@
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
 import { focusManager, QueryClient } from "@tanstack/react-query";
+import { REMOTE_CORE_EVENT_NAME } from "./session-api";
 
 const STORAGE_KEY = "dcc-query-cache";
 
@@ -67,6 +68,27 @@ export function createDccQueryClient() {
 		},
 	});
 
+	const invalidateCoreEventQueries = (payload: unknown) => {
+		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.repositories });
+		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.workspaces });
+		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.sessions });
+		void queryClient.invalidateQueries({ queryKey: ["sessionThreads"] });
+		void queryClient.invalidateQueries({ queryKey: ["sessionSearch"] });
+		void queryClient.invalidateQueries({ queryKey: ["workspaceSessions"] });
+		if (shouldRefreshInspectorGitQueries(payload)) {
+			void queryClient.invalidateQueries({
+				predicate: (query) => {
+					const queryKey = query.queryKey[0];
+					return (
+						queryKey === "workspaceGitStatus" ||
+						queryKey === "workspacePrStatus" ||
+						queryKey === "workspaceGitBranchDiff"
+					);
+				},
+			});
+		}
+	};
+
 	focusManager.setEventListener((handleFocus) => {
 		let unlistenFocus: (() => void) | undefined;
 		let unlistenBlur: (() => void) | undefined;
@@ -88,26 +110,14 @@ export function createDccQueryClient() {
 
 	void import("@tauri-apps/api/event").then(({ listen }) => {
 		void listen("dcc:core-event", (event) => {
-			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.repositories });
-			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.workspaces });
-			void queryClient.invalidateQueries({ queryKey: dccQueryKeys.sessions });
-			void queryClient.invalidateQueries({ queryKey: ["sessionThreads"] });
-			void queryClient.invalidateQueries({ queryKey: ["sessionSearch"] });
-			void queryClient.invalidateQueries({ queryKey: ["workspaceSessions"] });
-			if (shouldRefreshInspectorGitQueries(event.payload)) {
-				void queryClient.invalidateQueries({
-					predicate: (query) => {
-						const queryKey = query.queryKey[0];
-						return (
-							queryKey === "workspaceGitStatus" ||
-							queryKey === "workspacePrStatus" ||
-							queryKey === "workspaceGitBranchDiff"
-						);
-					},
-				});
-			}
+			invalidateCoreEventQueries(event.payload);
 		});
 	});
+	if (typeof window !== "undefined") {
+		window.addEventListener(REMOTE_CORE_EVENT_NAME, (event) => {
+			invalidateCoreEventQueries((event as CustomEvent).detail);
+		});
+	}
 
 	return queryClient;
 }

@@ -92,7 +92,10 @@ export function WorkspacePanel({
 }: WorkspacePanelProps) {
 	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
 	const threadHistoryQuery = useQuery(
-		sessionThreadHistoryQueryOptions(effectiveSessionId, { scope: sessionQueryScope }),
+		sessionThreadHistoryQueryOptions(effectiveSessionId, {
+			scope: sessionQueryScope,
+			refetchInterval: false,
+		}),
 	);
 	const selectedSessionTitle =
 		sessions.find((session) => session.session.id === effectiveSessionId)?.thread

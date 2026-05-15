@@ -5,10 +5,11 @@ import { loadSessionThreadEvents } from "@/lib/session-api";
 
 export function sessionThreadHistoryQueryOptions(
 	sessionId: string | null,
-	input?: { scope?: string; enabled?: boolean },
+	input?: { scope?: string; enabled?: boolean; refetchInterval?: number | false },
 ) {
 	const scope = input?.scope ?? "local";
 	const isEnabled = input?.enabled ?? true;
+	const refetchInterval = input?.refetchInterval;
 	return queryOptions<SessionEventRecord[]>({
 		queryKey: sessionId
 			? dccQueryKeys.sessionThreads(sessionId, scope)
@@ -22,5 +23,6 @@ export function sessionThreadHistoryQueryOptions(
 		},
 		enabled: isEnabled && Boolean(sessionId),
 		staleTime: 0,
+		refetchInterval,
 	});
 }

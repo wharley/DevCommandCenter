@@ -11,10 +11,11 @@ type SessionSnapshotSource = Pick<
 
 export function workspaceSessionsQueryOptions(
 	workspaceId: string | null,
-	input?: { enabled?: boolean; scope?: string },
+	input?: { enabled?: boolean; scope?: string; refetchInterval?: number | false },
 ) {
 	const scope = input?.scope ?? "local";
 	const isEnabled = input?.enabled ?? true;
+	const refetchInterval = input?.refetchInterval;
 	return queryOptions<WorkspaceSessionSummary[]>({
 		queryKey: workspaceId
 			? dccQueryKeys.workspaceSessions(workspaceId, scope)
@@ -28,6 +29,7 @@ export function workspaceSessionsQueryOptions(
 		},
 		enabled: isEnabled && Boolean(workspaceId),
 		staleTime: 0,
+		refetchInterval,
 	});
 }
 
