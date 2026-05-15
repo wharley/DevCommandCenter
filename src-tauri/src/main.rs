@@ -27,10 +27,11 @@ use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -82,6 +83,7 @@ struct AppState {
     app_data_dir: Arc<PathBuf>,
     conn: Arc<Mutex<Connection>>,
     terminals: Arc<Mutex<HashMap<String, ManagedTerminal>>>,
+    remote_tunnels: Arc<Mutex<HashMap<String, ManagedRemoteTunnel>>>,
     daemon: Arc<DaemonState>,
     daemon_endpoint: Arc<Mutex<Option<DaemonRuntimeInfo>>>,
 }
@@ -480,6 +482,47 @@ struct ManagedTerminal {
     /// Buffer circular compartilhado entre as threads de leitura (lock curto só aqui).
     output_buffer: Arc<Mutex<VecDeque<String>>>,
     reader_thread: Option<JoinHandle<()>>,
+}
+
+struct ManagedRemoteTunnel {
+    child: Child,
+    ssh_target: String,
+    local_port: u16,
+    remote_port: u16,
+    endpoint: String,
+    bearer_token: String,
+    started_at: String,
+    remote_command: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteSshTunnelLaunchInput {
+    environment_id: String,
+    ssh_target: String,
+    #[serde(default)]
+    remote_command: Option<String>,
+    #[serde(default)]
+    local_port: Option<u16>,
+    #[serde(default)]
+    remote_port: Option<u16>,
+    #[serde(default)]
+    bearer_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteSshTunnelSnapshot {
+    environment_id: String,
+    ssh_target: String,
+    local_port: u16,
+    remote_port: u16,
+    endpoint: String,
+    bearer_token: String,
+    started_at: String,
+    remote_command: String,
+    status: String,
+    exit_code: Option<i32>,
 }
 
 #[cfg(windows)]
@@ -3666,6 +3709,251 @@ fn shell_open_terminal_at_path(
     }))
 }
 
+fn remote_shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn remote_pick_free_loopback_port() -> Result<u16, String> {
+    TcpListener::bind(("127.0.0.1", 0))
+        .and_then(|listener| listener.local_addr())
+        .map(|addr| addr.port())
+        .map_err(|e| e.to_string())
+}
+
+fn remote_wait_for_local_port(port: u16, timeout: Duration) -> bool {
+    let start = Instant::now();
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    while start.elapsed() < timeout {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(120));
+    }
+    false
+}
+
+fn remote_tunnel_snapshot(
+    environment_id: &str,
+    tunnel: &ManagedRemoteTunnel,
+    status: &str,
+    exit_code: Option<i32>,
+) -> RemoteSshTunnelSnapshot {
+    RemoteSshTunnelSnapshot {
+        environment_id: environment_id.to_string(),
+        ssh_target: tunnel.ssh_target.clone(),
+        local_port: tunnel.local_port,
+        remote_port: tunnel.remote_port,
+        endpoint: tunnel.endpoint.clone(),
+        bearer_token: tunnel.bearer_token.clone(),
+        started_at: tunnel.started_at.clone(),
+        remote_command: tunnel.remote_command.clone(),
+        status: status.to_string(),
+        exit_code,
+    }
+}
+
+fn remote_stop_tunnel_child(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[tauri::command]
+fn remote_list_ssh_tunnels(state: State<'_, AppState>) -> ApiResult<Value> {
+    let mut tunnels = state
+        .remote_tunnels
+        .lock()
+        .map_err(|_| db_error("remote tunnels lock poisoned"))?;
+
+    let mut exited_ids = Vec::new();
+    let mut snapshots = Vec::with_capacity(tunnels.len());
+    for (environment_id, tunnel) in tunnels.iter_mut() {
+        match tunnel.child.try_wait() {
+            Ok(Some(status)) => {
+                snapshots.push(remote_tunnel_snapshot(
+                    environment_id,
+                    tunnel,
+                    "exited",
+                    status.code(),
+                ));
+                exited_ids.push(environment_id.clone());
+            }
+            Ok(None) => snapshots.push(remote_tunnel_snapshot(
+                environment_id,
+                tunnel,
+                "running",
+                None,
+            )),
+            Err(error) => snapshots.push(remote_tunnel_snapshot(
+                environment_id,
+                tunnel,
+                "error",
+                Some(error.raw_os_error().unwrap_or(-1)),
+            )),
+        }
+    }
+
+    for environment_id in exited_ids {
+        tunnels.remove(&environment_id);
+    }
+
+    Ok(serde_json::json!({ "tunnels": snapshots }))
+}
+
+#[tauri::command]
+fn remote_stop_ssh_tunnel(state: State<'_, AppState>, environment_id: String) -> ApiResult<Value> {
+    let tunnel = {
+        let mut tunnels = state
+            .remote_tunnels
+            .lock()
+            .map_err(|_| db_error("remote tunnels lock poisoned"))?;
+        tunnels.remove(environment_id.trim())
+    };
+
+    if let Some(mut tunnel) = tunnel {
+        remote_stop_tunnel_child(&mut tunnel.child);
+        return Ok(serde_json::json!({ "ok": true }));
+    }
+
+    Ok(serde_json::json!({ "ok": false }))
+}
+
+#[tauri::command]
+fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResult<Value> {
+    let input: RemoteSshTunnelLaunchInput =
+        serde_json::from_value(input).map_err(|e| db_error(e.to_string()))?;
+
+    let environment_id = input.environment_id.trim().to_string();
+    if environment_id.is_empty() {
+        return Err(db_error("environmentId is required"));
+    }
+
+    let ssh_target = input.ssh_target.trim().to_string();
+    if ssh_target.is_empty() {
+        return Err(db_error("sshTarget is required"));
+    }
+
+    let remote_command = input
+        .remote_command
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("dccd-http")
+        .to_string();
+    let remote_port = input.remote_port.unwrap_or(9876);
+    let local_port = input
+        .local_port
+        .filter(|port| *port > 0)
+        .unwrap_or(remote_pick_free_loopback_port().map_err(db_error)?);
+    let bearer_token = input
+        .bearer_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
+
+    let bootstrap_script = format!(
+        "mkdir -p \"$HOME/.dcc\" && if command -v {remote_command} >/dev/null 2>&1; then nohup env DCC_HTTP_HOST=127.0.0.1 DCC_HTTP_PORT={remote_port} DCC_HTTP_AUTH_MODE=remote DCC_HTTP_BEARER_TOKEN={bearer_token} {remote_command} > \"$HOME/.dcc/dccd-http.log\" 2>&1 < /dev/null & else echo \"dccd-http not found on remote PATH\" >&2; exit 127; fi",
+        remote_command = remote_shell_single_quote(&remote_command),
+        remote_port = remote_port,
+        bearer_token = remote_shell_single_quote(&bearer_token),
+    );
+
+    let bootstrap_status = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(&ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg(&bootstrap_script)
+        .status()
+        .map_err(|e| db_error(format!("failed to start remote launcher: {e}")))?;
+
+    if !bootstrap_status.success() {
+        return Err(db_error(format!(
+            "remote bootstrap failed for {ssh_target}; ensure key-based SSH access and `dccd-http` on PATH"
+        )));
+    }
+
+    {
+        let previous = {
+            let mut tunnels = state
+                .remote_tunnels
+                .lock()
+                .map_err(|_| db_error("remote tunnels lock poisoned"))?;
+            tunnels.remove(&environment_id)
+        };
+        if let Some(mut previous) = previous {
+            remote_stop_tunnel_child(&mut previous.child);
+        }
+    }
+
+    let tunnel_spec = format!("{local_port}:127.0.0.1:{remote_port}");
+    let mut child = Command::new("ssh")
+        .arg("-N")
+        .arg("-L")
+        .arg(&tunnel_spec)
+        .args([
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-o",
+            "ServerAliveInterval=30",
+            "-o",
+            "ServerAliveCountMax=3",
+            "-o",
+            "BatchMode=yes",
+        ])
+        .arg(&ssh_target)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| db_error(format!("failed to spawn ssh tunnel: {e}")))?;
+
+    if !remote_wait_for_local_port(local_port, Duration::from_secs(5)) {
+        remote_stop_tunnel_child(&mut child);
+        return Err(db_error(format!(
+            "ssh tunnel to {ssh_target} did not become ready on 127.0.0.1:{local_port}"
+        )));
+    }
+
+    let endpoint = format!("http://127.0.0.1:{local_port}");
+    let started_at = iso_now();
+    let snapshot = RemoteSshTunnelSnapshot {
+        environment_id: environment_id.clone(),
+        ssh_target: ssh_target.clone(),
+        local_port,
+        remote_port,
+        endpoint: endpoint.clone(),
+        bearer_token: bearer_token.clone(),
+        started_at: started_at.clone(),
+        remote_command: remote_command.clone(),
+        status: "running".to_string(),
+        exit_code: None,
+    };
+
+    let tunnel = ManagedRemoteTunnel {
+        child,
+        ssh_target,
+        local_port,
+        remote_port,
+        endpoint,
+        bearer_token,
+        started_at,
+        remote_command,
+    };
+
+    state
+        .remote_tunnels
+        .lock()
+        .map_err(|_| db_error("remote tunnels lock poisoned"))?
+        .insert(environment_id, tunnel);
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "tunnel": snapshot,
+    }))
+}
+
 #[tauri::command]
 async fn terminal_save_temp_image(image_data: Vec<u8>, extension: String) -> ApiResult<Value> {
     use uuid::Uuid;
@@ -6380,6 +6668,9 @@ pub fn run() {
             terminal_get_backlog,
             terminal_clear_persisted_scrollback,
             terminal_get_project_activity,
+            remote_list_ssh_tunnels,
+            remote_launch_ssh_tunnel,
+            remote_stop_ssh_tunnel,
             terminal_save_temp_image,
             create_workspace_for_repo,
             create_workspace_from_url,
@@ -6465,6 +6756,7 @@ pub fn run() {
                 app_data_dir: Arc::new(app_data_dir.clone()),
                 conn: Arc::new(Mutex::new(conn)),
                 terminals: Arc::new(Mutex::new(HashMap::new())),
+                remote_tunnels: Arc::new(Mutex::new(HashMap::new())),
                 daemon: Arc::new(DaemonState {
                     started_at: local_now_string(),
                     last_tick_at: Arc::new(Mutex::new(None)),

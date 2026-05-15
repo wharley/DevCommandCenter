@@ -205,6 +205,7 @@
       "general": { "label": "Geral", "description": "Padrões do app e comportamento do shell." },
       "appearance": { "label": "Aparência", "description": "Tema, idioma e contraste da interface." },
       "model": { "label": "Modelo", "description": "Provedor e modelo padrão." },
+      "connections": { "label": "Conexões", "description": "Ambientes remotos por túnel SSH." },
       "shortcuts": { "label": "Atalhos", "description": "Atalhos ativos e cheatsheet disponível." },
       "git": { "label": "Git", "description": "Chrome do Git no inspetor, ajustes em breve." },
       "experimental": { "label": "Experimental", "description": "Espaço reservado para opções futuras." },
@@ -240,6 +241,42 @@
       "runtimeHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex",
       "runtimeShadowHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex-shadow",
       "runtimeNoSupportedProviders": "Nenhum provedor suportado está disponível no catálogo atual."
+    },
+    "connections": {
+      "title": "Ambientes remotos",
+      "body": "Launch gerenciado pelo desktop via SSH para um `dccd-http` remoto, inspirado no fluxo de pairing do T3 Code.",
+      "requirements": "Premissas do MVP atual: SSH com chave, `dccd-http` disponível no PATH remoto e backend remoto preso em loopback com bearer token gerado pelo DCC.",
+      "activeBadge": "{{count}} ativos",
+      "add": "Adicionar ambiente",
+      "refresh": "Atualizar",
+      "empty": "Ainda não há ambientes remotos salvos.",
+      "addValidation": "Preencha nome, alvo SSH e uma porta remota válida.",
+      "connectedToast": "{{label}} conectado por túnel SSH local.",
+      "connectError": "Não foi possível conectar {{label}}.",
+      "copyMissing": "Ainda não há endpoint local disponível.",
+      "copySuccess": "Endpoint local copiado.",
+      "connect": "Conectar",
+      "disconnect": "Desconectar",
+      "copy": "Copiar endpoint",
+      "delete": "Excluir",
+      "notConnected": "Não conectado",
+      "autoPort": "Automática",
+      "placeholders": {
+        "label": "Workbox",
+        "localPort": "Auto"
+      },
+      "fields": {
+        "label": "Nome",
+        "sshTarget": "Alvo SSH",
+        "remoteCommand": "Comando remoto",
+        "remotePort": "Porta remota",
+        "localPort": "Porta local",
+        "endpoint": "Endpoint encaminhado"
+      },
+      "status": {
+        "running": "Executando",
+        "idle": "Parado"
+      }
     },
     "shortcuts": {
       "keyboardShortcuts": "Atalhos de teclado",

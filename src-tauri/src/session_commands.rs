@@ -5,9 +5,7 @@ use dcc_core::application::{
     RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput,
     StartThreadInput, StartThreadOutput,
 };
-use dcc_core::domain::session::{
-    SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary,
-};
+use dcc_core::domain::session::{SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary};
 use dcc_tauri::{
     commands::session_commands::{
         self as session_command_impl, RespondToPermissionRequestInput,

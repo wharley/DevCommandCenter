@@ -8,6 +8,7 @@ import {
 	Moon,
 	Package,
 	Loader2,
+	Server,
 	Sparkles,
 	TerminalSquare,
 	SunMedium,
@@ -28,6 +29,7 @@ import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
 import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
+import { RemoteEnvironmentsPanel } from "@/features/settings/remote-environments";
 import { getOpenPreferredEditorShortcutKeys } from "@/features/shortcuts/shortcut-utils";
 import type {
 	ProviderRuntimeDraft,
@@ -67,6 +69,7 @@ export type SettingsSectionId =
 	| "general"
 	| "appearance"
 	| "model"
+	| "connections"
 	| "shortcuts"
 	| "git"
 	| "experimental"
@@ -458,6 +461,12 @@ export function SettingsDialog({
 				icon: Sparkles,
 			},
 			{
+				id: "connections",
+				label: t("settings.sections.connections.label"),
+				description: t("settings.sections.connections.description"),
+				icon: Server,
+			},
+			{
 				id: "shortcuts",
 				label: t("settings.sections.shortcuts.label"),
 				description: t("settings.sections.shortcuts.description"),
@@ -687,6 +696,8 @@ export function SettingsDialog({
 									/>
 								</section>
 							) : null}
+
+							{activeSection === "connections" ? <RemoteEnvironmentsPanel /> : null}
 
 							{activeSection === "shortcuts" ? (
 								<section className="space-y-4">

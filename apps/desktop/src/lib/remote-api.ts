@@ -1,0 +1,39 @@
+import { invoke } from "@tauri-apps/api/core";
+
+export type RemoteTunnelSnapshot = {
+	environmentId: string;
+	sshTarget: string;
+	localPort: number;
+	remotePort: number;
+	endpoint: string;
+	bearerToken: string;
+	startedAt: string;
+	remoteCommand: string;
+	status: "running" | "exited" | "error" | string;
+	exitCode: number | null;
+};
+
+export type RemoteTunnelLaunchInput = {
+	environmentId: string;
+	sshTarget: string;
+	remoteCommand?: string | null;
+	localPort?: number | null;
+	remotePort?: number | null;
+	bearerToken?: string | null;
+};
+
+export function listRemoteSshTunnels() {
+	return invoke<{ tunnels: RemoteTunnelSnapshot[] }>("remote_list_ssh_tunnels");
+}
+
+export function launchRemoteSshTunnel(input: RemoteTunnelLaunchInput) {
+	return invoke<{ ok: boolean; tunnel: RemoteTunnelSnapshot }>("remote_launch_ssh_tunnel", {
+		input,
+	});
+}
+
+export function stopRemoteSshTunnel(environmentId: string) {
+	return invoke<{ ok: boolean }>("remote_stop_ssh_tunnel", {
+		environmentId,
+	});
+}
