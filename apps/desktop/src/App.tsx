@@ -10,7 +10,11 @@ import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Toaster } from "sonner";
-import type { CoreEvent, WorkspaceSessionSummary } from "@dcc/contracts";
+import type {
+	CoreEvent,
+	SessionSearchResult,
+	WorkspaceSessionSummary,
+} from "@dcc/contracts";
 import {
 	Dialog,
 	DialogContent,
@@ -52,6 +56,7 @@ import {
 	SessionWorkbench,
 	type RuntimeSessionSnapshot,
 } from "./features/sessions/session-workbench";
+import { SessionSearchDialog } from "./features/sessions/session-search-dialog";
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
 import {
@@ -118,6 +123,11 @@ type PendingSessionClose = {
 	title: string;
 	deleteHistory: boolean;
 	requiresAbort: boolean;
+};
+
+type PendingSessionNavigation = {
+	sessionId: string;
+	workspaceId: string;
 };
 
 function ResizeSeparator({
@@ -319,6 +329,7 @@ export default function App() {
 	const [workspaceRepositoryContext, setWorkspaceRepositoryContext] =
 		useState<ExistingRepositoryContext | null>(null);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+	const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
 	const [isOnboardingOpen, setIsOnboardingOpen] = useState(() => {
 		if (typeof window === "undefined") {
 			return false;
@@ -365,6 +376,8 @@ export default function App() {
 	const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 	const [pendingSessionClose, setPendingSessionClose] =
 		useState<PendingSessionClose | null>(null);
+	const [pendingSessionNavigation, setPendingSessionNavigation] =
+		useState<PendingSessionNavigation | null>(null);
 	const [sessionActionSessionId, setSessionActionSessionId] = useState<string | null>(null);
 	const [inspectorTab, setInspectorTab] = useState<"activity" | "context" | "plan">(
 		"activity",
@@ -583,6 +596,26 @@ export default function App() {
 		setPendingPromptSessionId(null);
 		setEditorSelection(null);
 	}, [selectedWorkspace?.id]);
+
+	useEffect(() => {
+		if (!pendingSessionNavigation) {
+			return;
+		}
+
+		if (selectedWorkspace?.id !== pendingSessionNavigation.workspaceId) {
+			return;
+		}
+
+		const hasTargetSession = workspaceSessions.some(
+			(summary) => summary.session.id === pendingSessionNavigation.sessionId,
+		);
+		if (!hasTargetSession) {
+			return;
+		}
+
+		setSelectedSessionId(pendingSessionNavigation.sessionId);
+		setPendingSessionNavigation(null);
+	}, [pendingSessionNavigation, selectedWorkspace?.id, workspaceSessions]);
 
 	useEffect(() => {
 		if (!selectedWorkspace?.id) {
@@ -1047,6 +1080,41 @@ export default function App() {
 		setSelectedSessionId(sessionId);
 	}, []);
 
+	const handleOpenSessionSearch = useCallback(() => {
+		setIsSessionSearchOpen(true);
+	}, []);
+
+	const handleSelectSessionSearchResult = useCallback(
+		async (result: SessionSearchResult) => {
+			try {
+				if (result.archivedAt) {
+					await restoreSession({ sessionId: result.sessionId });
+				}
+				setPendingSessionNavigation({
+					sessionId: result.sessionId,
+					workspaceId: result.workspaceId,
+				});
+				setSelectedWorkspaceId(result.workspaceId);
+				void queryClient.invalidateQueries({
+					queryKey: ["workspaceSessions", result.workspaceId],
+				});
+				if (selectedWorkspace?.id === result.workspaceId) {
+					setSelectedSessionId(result.sessionId);
+				}
+			} catch (error) {
+				const message =
+					error instanceof Error
+						? error.message
+						: typeof error === "string"
+							? error
+							: "Failed to open session search result";
+				console.error("[dcc] open session search result failed:", error);
+				toast.error(message);
+			}
+		},
+		[queryClient, selectedWorkspace?.id, setSelectedWorkspaceId],
+	);
+
 	const handleResumeSession = useCallback(async () => {
 		if (!selectedSessionSnapshot || !canResumeSession(selectedSessionSnapshot)) {
 			return;
@@ -1510,6 +1578,12 @@ export default function App() {
 								onOpenOnboarding={() => setIsOnboardingOpen(true)}
 								onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
 							/>
+							<SessionSearchDialog
+								open={isSessionSearchOpen}
+								onOpenChange={setIsSessionSearchOpen}
+								selectedWorkspaceId={selectedWorkspaceId}
+								onSelectResult={handleSelectSessionSearchResult}
+							/>
 							<CreateWorkspaceDialog
 								open={isCreateWorkspaceOpen}
 								mode={workspaceCreationMode}
@@ -1542,6 +1616,7 @@ export default function App() {
 									onSelectSession={handleSelectSession}
 									onCloseSession={handleCloseSession}
 									onRestoreSession={handleRestoreSession}
+									onOpenSessionSearch={handleOpenSessionSearch}
 									onSubmitPrompt={handleSubmitPrompt}
 									onResumeSession={handleResumeSession}
 									onAbortSession={handleAbortSession}

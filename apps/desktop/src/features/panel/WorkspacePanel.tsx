@@ -36,6 +36,7 @@ type WorkspacePanelProps = {
 	onSelectSession: (sessionId: string) => void;
 	onCloseSession: (sessionId: string) => void;
 	onRestoreSession: (sessionId: string) => void;
+	onOpenSessionSearch: () => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
@@ -74,6 +75,7 @@ export function WorkspacePanel({
 	onSelectSession,
 	onCloseSession,
 	onRestoreSession,
+	onOpenSessionSearch,
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
@@ -158,6 +160,7 @@ export function WorkspacePanel({
 					onStartSession={onStartSession}
 					onCloseSession={onCloseSession}
 					onRestoreSession={onRestoreSession}
+					onOpenSessionSearch={onOpenSessionSearch}
 					onResumeSession={onResumeSession}
 					onAbortSession={onAbortSession}
 					sessionActionSessionId={sessionActionSessionId}

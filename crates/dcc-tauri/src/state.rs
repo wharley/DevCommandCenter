@@ -17,7 +17,7 @@ use dcc_core::{
         provider::{ProviderEvent, SessionHandle},
         repository::{Repository, RepositoryId},
         session::{
-            Session, SessionEventKind, SessionEventRecord, SessionId, TurnId,
+            Session, SessionEventKind, SessionEventRecord, SessionId, SessionSearchResult, TurnId,
             WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
@@ -136,6 +136,14 @@ impl SessionCommandState {
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<WorkspaceSessionSummary>> {
         self.session_repo.list_workspace_sessions(workspace_id)
+    }
+
+    pub(crate) fn search_sessions(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<SessionSearchResult>> {
+        self.session_repo.search_sessions(query, limit)
     }
 
     async fn append_session_event(

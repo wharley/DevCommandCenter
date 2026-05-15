@@ -4,6 +4,7 @@ import { SESSION_METHODS } from "@dcc/contracts";
 import type {
 	CoreEvent,
 	SessionEventRecord,
+	SessionSearchResult,
 	WorkspaceSessionSummary,
 } from "@dcc/contracts";
 import type {
@@ -71,6 +72,15 @@ export function loadWorkspaceSessions(workspaceId: string) {
 		SESSION_METHODS.listWorkspaceSessions,
 		{ workspaceId },
 	);
+}
+
+export function searchSessionHistory(query: string, limit = 40) {
+	return invoke<SessionSearchResult[]>(SESSION_METHODS.searchSessions, {
+		input: {
+			query,
+			limit,
+		},
+	});
 }
 
 const SESSION_EVENT_NAMES = [

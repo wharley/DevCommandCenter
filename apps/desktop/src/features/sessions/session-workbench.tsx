@@ -32,6 +32,7 @@ type SessionWorkbenchProps = {
 	onSelectSession: (sessionId: string) => void;
 	onCloseSession: (sessionId: string) => void;
 	onRestoreSession: (sessionId: string) => void;
+	onOpenSessionSearch: () => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
@@ -70,6 +71,7 @@ export function SessionWorkbench({
 	onSelectSession,
 	onCloseSession,
 	onRestoreSession,
+	onOpenSessionSearch,
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
@@ -110,6 +112,7 @@ export function SessionWorkbench({
 				onSelectSession={onSelectSession}
 				onCloseSession={onCloseSession}
 				onRestoreSession={onRestoreSession}
+				onOpenSessionSearch={onOpenSessionSearch}
 				onSubmitPrompt={onSubmitPrompt}
 				onResumeSession={onResumeSession}
 				onAbortSession={onAbortSession}

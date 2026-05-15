@@ -13,7 +13,8 @@ use dcc_core::{
         repository::{Repository, RepositoryId},
         session::{
             Checkpoint, CheckpointId, Session, SessionEventKind, SessionEventRecord, SessionId,
-            SessionProjection, SessionState, Turn, TurnId, TurnState, WorkspaceSessionSummary,
+            SessionProjection, SessionSearchResult, SessionState, Turn, TurnId, TurnState,
+            WorkspaceSessionSummary,
         },
         workspace::{
             Workspace, WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus,
@@ -32,7 +33,7 @@ use dcc_tauri::commands::{
     provider_commands::ListProvidersOutput,
     session_commands::{
         RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput,
+        RespondToUserInputOutput, SearchSessionsInput,
     },
     workspace_commands::{
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
@@ -105,6 +106,7 @@ struct SessionMethods {
     restore_session: String,
     list_thread_events: String,
     list_workspace_sessions: String,
+    search_sessions: String,
     respond_to_user_input: String,
     respond_to_permission_request: String,
 }
@@ -146,6 +148,7 @@ fn main() {
         .typ::<SessionEventKind>()
         .typ::<SessionEventRecord>()
         .typ::<SessionProjection>()
+        .typ::<SessionSearchResult>()
         .typ::<WorkspaceSessionSummary>()
         .typ::<CreateWorkspaceForRepoInput>()
         .typ::<CreateWorkspaceForRepoOutput>()
@@ -211,6 +214,7 @@ fn main() {
         .typ::<RespondToUserInputOutput>()
         .typ::<RespondToPermissionRequestInput>()
         .typ::<RespondToPermissionRequestOutput>()
+        .typ::<SearchSessionsInput>()
         .typ::<CoreEvent>()
         .constant(
             "WORKSPACE_METHODS",
@@ -271,6 +275,7 @@ fn main() {
             restore_session: "restore_session".to_string(),
             list_thread_events: "list_thread_events".to_string(),
             list_workspace_sessions: "list_workspace_sessions".to_string(),
+            search_sessions: "search_sessions".to_string(),
             respond_to_user_input: "respond_to_user_input".to_string(),
             respond_to_permission_request: "respond_to_permission_request".to_string(),
         },

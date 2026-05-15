@@ -348,6 +348,24 @@ pub struct WorkspaceSessionSummary {
     pub last_turn_state: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSearchResult {
+    pub session_id: SessionId,
+    pub workspace_id: WorkspaceId,
+    pub project_id: ProjectId,
+    pub thread_title: String,
+    pub workspace_name: Option<String>,
+    pub workspace_branch: Option<String>,
+    pub workspace_root_path: Option<String>,
+    pub provider_id: String,
+    pub model: Option<String>,
+    pub archived_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub snippet: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

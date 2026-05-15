@@ -6427,6 +6427,7 @@ pub fn run() {
             session_commands::restore_session,
             session_commands::list_thread_events,
             session_commands::list_workspace_sessions,
+            session_commands::search_sessions,
             session_commands::respond_to_user_input,
             session_commands::respond_to_permission_request
         ])
