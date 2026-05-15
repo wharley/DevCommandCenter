@@ -257,6 +257,8 @@
       "copySuccess": "Local endpoint copied.",
       "connect": "Connect",
       "disconnect": "Disconnect",
+      "setActive": "Set active",
+      "clearActive": "Clear active",
       "copy": "Copy endpoint",
       "delete": "Delete",
       "notConnected": "Not connected",
@@ -271,9 +273,17 @@
         "remoteCommand": "Remote command",
         "remotePort": "Remote port",
         "localPort": "Local port",
-        "endpoint": "Forwarded endpoint"
+        "endpoint": "Forwarded endpoint",
+        "health": "Health",
+        "backend": "Backend status"
+      },
+      "health": {
+        "ok": "Healthy",
+        "degraded": "Degraded",
+        "unknown": "Unknown"
       },
       "status": {
+        "active": "Active",
         "running": "Running",
         "idle": "Idle"
       }

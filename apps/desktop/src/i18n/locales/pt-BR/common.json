@@ -257,6 +257,8 @@
       "copySuccess": "Endpoint local copiado.",
       "connect": "Conectar",
       "disconnect": "Desconectar",
+      "setActive": "Definir ativa",
+      "clearActive": "Remover ativa",
       "copy": "Copiar endpoint",
       "delete": "Excluir",
       "notConnected": "Não conectado",
@@ -271,9 +273,17 @@
         "remoteCommand": "Comando remoto",
         "remotePort": "Porta remota",
         "localPort": "Porta local",
-        "endpoint": "Endpoint encaminhado"
+        "endpoint": "Endpoint encaminhado",
+        "health": "Saúde",
+        "backend": "Estado do backend"
+      },
+      "health": {
+        "ok": "Saudável",
+        "degraded": "Degradado",
+        "unknown": "Desconhecida"
       },
       "status": {
+        "active": "Ativa",
         "running": "Executando",
         "idle": "Parado"
       }

@@ -1,28 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
-import { Copy, Loader2, Play, RefreshCw, Square, Trash2 } from "lucide-react";
+import {
+	CheckCircle2,
+	Copy,
+	Loader2,
+	Play,
+	RefreshCw,
+	Square,
+	Trash2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+	fetchRemoteBackendHealth,
+	fetchRemoteBackendStatus,
+} from "@/lib/remote-backend-api";
+import {
 	launchRemoteSshTunnel,
 	listRemoteSshTunnels,
 	stopRemoteSshTunnel,
 	type RemoteTunnelSnapshot,
 } from "@/lib/remote-api";
-
-type SavedRemoteEnvironment = {
-	id: string;
-	label: string;
-	sshTarget: string;
-	remoteCommand: string;
-	localPort: number | null;
-	remotePort: number;
-	bearerToken: string | null;
-	endpoint: string | null;
-	lastStartedAt: string | null;
-};
+import {
+	readActiveRemoteEnvironmentId,
+	readRemoteEnvironments,
+	writeActiveRemoteEnvironmentId,
+	writeRemoteEnvironments,
+	type SavedRemoteEnvironment,
+} from "./remote-environments-store";
 
 type DraftEnvironment = {
 	label: string;
@@ -32,7 +39,13 @@ type DraftEnvironment = {
 	remotePort: string;
 };
 
-const REMOTE_ENV_STORAGE_KEY = "dcc.remote.environments.v1";
+type RemoteProbe = {
+	healthStatus: "ok" | "degraded" | "unknown";
+	daemonStatus: string | null;
+	statusSummary: string | null;
+	errorMessage: string | null;
+	checkedAt: string | null;
+};
 
 function defaultDraft(): DraftEnvironment {
 	return {
@@ -41,70 +54,6 @@ function defaultDraft(): DraftEnvironment {
 		remoteCommand: "dccd-http",
 		localPort: "",
 		remotePort: "9876",
-	};
-}
-
-function readRemoteEnvironments(): SavedRemoteEnvironment[] {
-	if (typeof window === "undefined") {
-		return [];
-	}
-
-	try {
-		const raw = window.localStorage.getItem(REMOTE_ENV_STORAGE_KEY);
-		if (!raw) {
-			return [];
-		}
-		const parsed = JSON.parse(raw);
-		if (!Array.isArray(parsed)) {
-			return [];
-		}
-		return parsed
-			.map((value) => normalizeRemoteEnvironment(value))
-			.filter((value): value is SavedRemoteEnvironment => value !== null);
-	} catch {
-		return [];
-	}
-}
-
-function writeRemoteEnvironments(next: SavedRemoteEnvironment[]) {
-	if (typeof window === "undefined") {
-		return;
-	}
-	window.localStorage.setItem(REMOTE_ENV_STORAGE_KEY, JSON.stringify(next));
-}
-
-function normalizeRemoteEnvironment(value: unknown): SavedRemoteEnvironment | null {
-	if (!value || typeof value !== "object") {
-		return null;
-	}
-
-	const record = value as Record<string, unknown>;
-	const id = typeof record.id === "string" ? record.id : "";
-	const label = typeof record.label === "string" ? record.label : "";
-	const sshTarget = typeof record.sshTarget === "string" ? record.sshTarget : "";
-	if (!id || !label || !sshTarget) {
-		return null;
-	}
-
-	return {
-		id,
-		label,
-		sshTarget,
-		remoteCommand:
-			typeof record.remoteCommand === "string" && record.remoteCommand.trim()
-				? record.remoteCommand
-				: "dccd-http",
-		localPort:
-			typeof record.localPort === "number" && Number.isFinite(record.localPort)
-				? record.localPort
-				: null,
-		remotePort:
-			typeof record.remotePort === "number" && Number.isFinite(record.remotePort)
-				? record.remotePort
-				: 9876,
-		bearerToken: typeof record.bearerToken === "string" ? record.bearerToken : null,
-		endpoint: typeof record.endpoint === "string" ? record.endpoint : null,
-		lastStartedAt: typeof record.lastStartedAt === "string" ? record.lastStartedAt : null,
 	};
 }
 
@@ -134,12 +83,76 @@ export function RemoteEnvironmentsPanel() {
 		readRemoteEnvironments(),
 	);
 	const [tunnels, setTunnels] = useState<Record<string, RemoteTunnelSnapshot>>({});
+	const [activeEnvironmentId, setActiveEnvironmentId] = useState<string | null>(() =>
+		readActiveRemoteEnvironmentId(),
+	);
+	const [probes, setProbes] = useState<Record<string, RemoteProbe>>({});
 	const [busyId, setBusyId] = useState<string | null>(null);
 	const [isRefreshing, setIsRefreshing] = useState(false);
 
 	const persistEnvironments = (next: SavedRemoteEnvironment[]) => {
 		setEnvironments(next);
 		writeRemoteEnvironments(next);
+	};
+
+	const setActiveEnvironment = (environmentId: string | null) => {
+		setActiveEnvironmentId(environmentId);
+		writeActiveRemoteEnvironmentId(environmentId);
+	};
+
+	const probeEnvironment = async (environment: SavedRemoteEnvironment) => {
+		try {
+			const [health, status] = await Promise.all([
+				fetchRemoteBackendHealth(environment),
+				fetchRemoteBackendStatus(environment),
+			]);
+
+			let statusSummary: string | null = null;
+			if (status && typeof status === "object") {
+				const record = status as Record<string, unknown>;
+				const totalRunningPanes =
+					typeof record.totalRunningPanes === "number" ? record.totalRunningPanes : null;
+				const workingAgents =
+					typeof record.workingAgents === "number" ? record.workingAgents : null;
+				const waitingAgents =
+					typeof record.waitingAgents === "number" ? record.waitingAgents : null;
+				if (
+					totalRunningPanes !== null ||
+					workingAgents !== null ||
+					waitingAgents !== null
+				) {
+					statusSummary = [
+						totalRunningPanes !== null ? `${totalRunningPanes} panes` : null,
+						workingAgents !== null ? `${workingAgents} working` : null,
+						waitingAgents !== null ? `${waitingAgents} waiting` : null,
+					]
+						.filter(Boolean)
+						.join(" · ");
+				}
+			}
+
+			setProbes((current) => ({
+				...current,
+				[environment.id]: {
+					healthStatus: health.status === "ok" ? "ok" : "degraded",
+					daemonStatus: health.daemon ?? null,
+					statusSummary,
+					errorMessage: null,
+					checkedAt: new Date().toISOString(),
+				},
+			}));
+		} catch (error) {
+			setProbes((current) => ({
+				...current,
+				[environment.id]: {
+					healthStatus: "degraded",
+					daemonStatus: null,
+					statusSummary: null,
+					errorMessage: String(error),
+					checkedAt: new Date().toISOString(),
+				},
+			}));
+		}
 	};
 
 	const refreshTunnels = async () => {
@@ -160,6 +173,21 @@ export function RemoteEnvironmentsPanel() {
 	useEffect(() => {
 		void refreshTunnels();
 	}, []);
+
+	useEffect(() => {
+		const activeEnvironment = environments.find(
+			(environment) => environment.id === activeEnvironmentId,
+		);
+		if (!activeEnvironment?.endpoint || !activeEnvironment.bearerToken) {
+			return;
+		}
+
+		void probeEnvironment(activeEnvironment);
+		const intervalId = window.setInterval(() => {
+			void probeEnvironment(activeEnvironment);
+		}, 15000);
+		return () => window.clearInterval(intervalId);
+	}, [activeEnvironmentId, environments]);
 
 	const activeCount = useMemo(
 		() => Object.values(tunnels).filter((tunnel) => tunnel.status === "running").length,
@@ -189,7 +217,11 @@ export function RemoteEnvironmentsPanel() {
 			endpoint: null,
 			lastStartedAt: null,
 		};
-		persistEnvironments([next, ...environments]);
+		const updated = [next, ...environments];
+		persistEnvironments(updated);
+		if (activeEnvironmentId && !updated.some((environment) => environment.id === activeEnvironmentId)) {
+			setActiveEnvironment(null);
+		}
 		setDraft(defaultDraft());
 	};
 
@@ -203,7 +235,15 @@ export function RemoteEnvironmentsPanel() {
 		}
 		const next = environments.filter((candidate) => candidate.id !== environment.id);
 		persistEnvironments(next);
+		if (activeEnvironmentId === environment.id) {
+			setActiveEnvironment(null);
+		}
 		setTunnels((current) => {
+			const copy = { ...current };
+			delete copy[environment.id];
+			return copy;
+		});
+		setProbes((current) => {
 			const copy = { ...current };
 			delete copy[environment.id];
 			return copy;
@@ -223,20 +263,20 @@ export function RemoteEnvironmentsPanel() {
 			});
 			const tunnel = result.tunnel;
 			setTunnels((current) => ({ ...current, [environment.id]: tunnel }));
+			const updatedEnvironment: SavedRemoteEnvironment = {
+				...environment,
+				localPort: tunnel.localPort,
+				remotePort: tunnel.remotePort,
+				bearerToken: tunnel.bearerToken,
+				endpoint: tunnel.endpoint,
+				lastStartedAt: tunnel.startedAt,
+			};
 			persistEnvironments(
 				environments.map((candidate) =>
-					candidate.id === environment.id
-						? {
-								...candidate,
-								localPort: tunnel.localPort,
-								remotePort: tunnel.remotePort,
-								bearerToken: tunnel.bearerToken,
-								endpoint: tunnel.endpoint,
-								lastStartedAt: tunnel.startedAt,
-							}
-						: candidate,
+					candidate.id === environment.id ? updatedEnvironment : candidate,
 				),
 			);
+			void probeEnvironment(updatedEnvironment);
 			toast.success(
 				t("settings.connections.connectedToast", {
 					label: environment.label,
@@ -296,7 +336,10 @@ export function RemoteEnvironmentsPanel() {
 							{t("settings.connections.body")}
 						</p>
 					</div>
-					<Badge variant={activeCount > 0 ? "success" : "outline"} className="h-8 px-3 text-[12px] font-normal">
+					<Badge
+						variant={activeCount > 0 ? "success" : "outline"}
+						className="h-8 px-3 text-[12px] font-normal"
+					>
 						{t("settings.connections.activeBadge", { count: activeCount })}
 					</Badge>
 				</div>
@@ -313,7 +356,9 @@ export function RemoteEnvironmentsPanel() {
 						</label>
 						<Input
 							value={draft.label}
-							onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
+							onChange={(event) =>
+								setDraft((current) => ({ ...current, label: event.target.value }))
+							}
 							placeholder={t("settings.connections.placeholders.label")}
 						/>
 					</div>
@@ -336,7 +381,10 @@ export function RemoteEnvironmentsPanel() {
 						<Input
 							value={draft.remoteCommand}
 							onChange={(event) =>
-								setDraft((current) => ({ ...current, remoteCommand: event.target.value }))
+								setDraft((current) => ({
+									...current,
+									remoteCommand: event.target.value,
+								}))
 							}
 							placeholder="dccd-http"
 						/>
@@ -389,9 +437,12 @@ export function RemoteEnvironmentsPanel() {
 
 				{environments.map((environment) => {
 					const tunnel = tunnels[environment.id] ?? null;
+					const probe = probes[environment.id] ?? null;
 					const isBusy = busyId === environment.id;
 					const isRunning = tunnel?.status === "running";
+					const isActive = environment.id === activeEnvironmentId;
 					const endpoint = tunnel?.endpoint ?? environment.endpoint;
+
 					return (
 						<div key={environment.id} className="rounded-xl border border-border/60 p-4">
 							<div className="flex flex-wrap items-start justify-between gap-3">
@@ -400,6 +451,11 @@ export function RemoteEnvironmentsPanel() {
 										<h3 className="text-[14px] font-medium text-foreground">
 											{environment.label}
 										</h3>
+										{isActive ? (
+											<Badge variant="secondary">
+												{t("settings.connections.status.active")}
+											</Badge>
+										) : null}
 										<Badge variant={isRunning ? "success" : "outline"}>
 											{isRunning
 												? t("settings.connections.status.running")
@@ -412,6 +468,17 @@ export function RemoteEnvironmentsPanel() {
 								</div>
 
 								<div className="flex flex-wrap gap-2">
+									<Button
+										type="button"
+										variant={isActive ? "default" : "outline"}
+										size="sm"
+										onClick={() => setActiveEnvironment(isActive ? null : environment.id)}
+									>
+										<CheckCircle2 className="size-3.5" />
+										{isActive
+											? t("settings.connections.clearActive")
+											: t("settings.connections.setActive")}
+									</Button>
 									{isRunning ? (
 										<Button
 											type="button"
@@ -420,7 +487,11 @@ export function RemoteEnvironmentsPanel() {
 											disabled={isBusy}
 											onClick={() => void handleDisconnect(environment)}
 										>
-											{isBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}
+											{isBusy ? (
+												<Loader2 className="size-3.5 animate-spin" />
+											) : (
+												<Square className="size-3.5" />
+											)}
 											{t("settings.connections.disconnect")}
 										</Button>
 									) : (
@@ -430,7 +501,11 @@ export function RemoteEnvironmentsPanel() {
 											disabled={isBusy}
 											onClick={() => void handleConnect(environment)}
 										>
-											{isBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+											{isBusy ? (
+												<Loader2 className="size-3.5 animate-spin" />
+											) : (
+												<Play className="size-3.5" />
+											)}
 											{t("settings.connections.connect")}
 										</Button>
 									)}
@@ -457,24 +532,60 @@ export function RemoteEnvironmentsPanel() {
 
 							<div className="mt-3 grid gap-2 text-[12px] text-muted-foreground md:grid-cols-2">
 								<p>
-									<strong className="text-foreground">{t("settings.connections.fields.remoteCommand")}:</strong>{" "}
+									<strong className="text-foreground">
+										{t("settings.connections.fields.remoteCommand")}:
+									</strong>{" "}
 									<span className="font-mono">{environment.remoteCommand}</span>
 								</p>
 								<p>
-									<strong className="text-foreground">{t("settings.connections.fields.endpoint")}:</strong>{" "}
-									<span className="font-mono">{endpoint ?? t("settings.connections.notConnected")}</span>
+									<strong className="text-foreground">
+										{t("settings.connections.fields.endpoint")}:
+									</strong>{" "}
+									<span className="font-mono">
+										{endpoint ?? t("settings.connections.notConnected")}
+									</span>
 								</p>
 								<p>
-									<strong className="text-foreground">{t("settings.connections.fields.remotePort")}:</strong>{" "}
+									<strong className="text-foreground">
+										{t("settings.connections.fields.remotePort")}:
+									</strong>{" "}
 									<span className="font-mono">{environment.remotePort}</span>
 								</p>
 								<p>
-									<strong className="text-foreground">{t("settings.connections.fields.localPort")}:</strong>{" "}
+									<strong className="text-foreground">
+										{t("settings.connections.fields.localPort")}:
+									</strong>{" "}
 									<span className="font-mono">
 										{environment.localPort ?? t("settings.connections.autoPort")}
 									</span>
 								</p>
+								<p>
+									<strong className="text-foreground">
+										{t("settings.connections.fields.health")}:
+									</strong>{" "}
+									<span className="font-mono">
+										{probe?.healthStatus === "ok"
+											? t("settings.connections.health.ok")
+											: probe?.healthStatus === "degraded"
+												? t("settings.connections.health.degraded")
+												: t("settings.connections.health.unknown")}
+									</span>
+								</p>
+								<p>
+									<strong className="text-foreground">
+										{t("settings.connections.fields.backend")}:
+									</strong>{" "}
+									<span className="font-mono">
+										{probe?.statusSummary ??
+											probe?.daemonStatus ??
+											t("settings.connections.notConnected")}
+									</span>
+								</p>
 							</div>
+
+							{probe?.errorMessage ? (
+								<p className="mt-3 text-[11px] text-destructive">{probe.errorMessage}</p>
+							) : null}
 						</div>
 					);
 				})}
