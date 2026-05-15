@@ -246,6 +246,8 @@
       "title": "Ambientes remotos",
       "body": "Launch gerenciado pelo desktop via SSH para um `dccd-http` remoto, inspirado no fluxo de pairing do T3 Code.",
       "requirements": "Premissas do MVP atual: SSH com chave, `dccd-http` disponível no PATH remoto e backend remoto preso em loopback com bearer token gerado pelo DCC.",
+      "currentBackend": "Backend atual",
+      "localBackend": "Backend local do desktop",
       "activeBadge": "{{count}} ativos",
       "add": "Adicionar ambiente",
       "refresh": "Atualizar",

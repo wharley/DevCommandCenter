@@ -14,9 +14,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-	fetchRemoteBackendHealth,
-	fetchRemoteBackendStatus,
-} from "@/lib/remote-backend-api";
+	daemonGetStatus,
+	daemonHealth,
+	getCurrentBackendTarget,
+} from "@/lib/daemon-api";
 import {
 	launchRemoteSshTunnel,
 	listRemoteSshTunnels,
@@ -89,6 +90,7 @@ export function RemoteEnvironmentsPanel() {
 	const [probes, setProbes] = useState<Record<string, RemoteProbe>>({});
 	const [busyId, setBusyId] = useState<string | null>(null);
 	const [isRefreshing, setIsRefreshing] = useState(false);
+	const [localBackendProbe, setLocalBackendProbe] = useState<RemoteProbe | null>(null);
 
 	const persistEnvironments = (next: SavedRemoteEnvironment[]) => {
 		setEnvironments(next);
@@ -103,8 +105,8 @@ export function RemoteEnvironmentsPanel() {
 	const probeEnvironment = async (environment: SavedRemoteEnvironment) => {
 		try {
 			const [health, status] = await Promise.all([
-				fetchRemoteBackendHealth(environment),
-				fetchRemoteBackendStatus(environment),
+				daemonHealth(environment),
+				daemonGetStatus(environment),
 			]);
 
 			let statusSummary: string | null = null;
@@ -131,11 +133,25 @@ export function RemoteEnvironmentsPanel() {
 				}
 			}
 
+			let healthStatus: "ok" | "degraded" | "unknown" = "unknown";
+			let daemonStatus: string | null = null;
+			if (health && typeof health === "object") {
+				const record = health as Record<string, unknown>;
+				if (record.status === "ok") {
+					healthStatus = "ok";
+				} else if (typeof record.status === "string") {
+					healthStatus = "degraded";
+				}
+				if (typeof record.daemon === "string") {
+					daemonStatus = record.daemon;
+				}
+			}
+
 			setProbes((current) => ({
 				...current,
 				[environment.id]: {
-					healthStatus: health.status === "ok" ? "ok" : "degraded",
-					daemonStatus: health.daemon ?? null,
+					healthStatus,
+					daemonStatus,
 					statusSummary,
 					errorMessage: null,
 					checkedAt: new Date().toISOString(),
@@ -178,6 +194,64 @@ export function RemoteEnvironmentsPanel() {
 		const activeEnvironment = environments.find(
 			(environment) => environment.id === activeEnvironmentId,
 		);
+		const target = getCurrentBackendTarget();
+		if (target.kind === "local") {
+			void (async () => {
+				try {
+					const [health, status] = await Promise.all([daemonHealth(), daemonGetStatus()]);
+					let statusSummary: string | null = null;
+					if (status && typeof status === "object") {
+						const record = status as Record<string, unknown>;
+						const totalRunningPanes =
+							typeof record.totalRunningPanes === "number"
+								? record.totalRunningPanes
+								: null;
+						const workingAgents =
+							typeof record.workingAgents === "number" ? record.workingAgents : null;
+						const waitingAgents =
+							typeof record.waitingAgents === "number" ? record.waitingAgents : null;
+						statusSummary = [
+							totalRunningPanes !== null ? `${totalRunningPanes} panes` : null,
+							workingAgents !== null ? `${workingAgents} working` : null,
+							waitingAgents !== null ? `${waitingAgents} waiting` : null,
+						]
+							.filter(Boolean)
+							.join(" · ");
+					}
+					let healthStatus: "ok" | "degraded" | "unknown" = "unknown";
+					let daemonStatus: string | null = null;
+					if (health && typeof health === "object") {
+						const record = health as Record<string, unknown>;
+						if (record.status === "ok") {
+							healthStatus = "ok";
+						} else if (typeof record.status === "string") {
+							healthStatus = "degraded";
+						}
+						if (typeof record.daemon === "string") {
+							daemonStatus = record.daemon;
+						}
+					}
+					setLocalBackendProbe({
+						healthStatus,
+						daemonStatus,
+						statusSummary,
+						errorMessage: null,
+						checkedAt: new Date().toISOString(),
+					});
+				} catch (error) {
+					setLocalBackendProbe({
+						healthStatus: "degraded",
+						daemonStatus: null,
+						statusSummary: null,
+						errorMessage: String(error),
+						checkedAt: new Date().toISOString(),
+					});
+				}
+			})();
+			return;
+		}
+
+		setLocalBackendProbe(null);
 		if (!activeEnvironment?.endpoint || !activeEnvironment.bearerToken) {
 			return;
 		}
@@ -346,6 +420,32 @@ export function RemoteEnvironmentsPanel() {
 				<p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
 					{t("settings.connections.requirements")}
 				</p>
+				<div className="mt-3 rounded-lg border border-border/50 bg-background/70 p-3 text-[12px] text-muted-foreground">
+					<p>
+						<strong className="text-foreground">
+							{t("settings.connections.currentBackend")}:
+						</strong>{" "}
+						{activeEnvironmentId
+							? environments.find((environment) => environment.id === activeEnvironmentId)
+									?.label ?? t("settings.connections.notConnected")
+							: t("settings.connections.localBackend")}
+					</p>
+					{!activeEnvironmentId && localBackendProbe ? (
+						<p className="mt-1">
+							<strong className="text-foreground">
+								{t("settings.connections.fields.health")}:
+							</strong>{" "}
+							{localBackendProbe.healthStatus === "ok"
+								? t("settings.connections.health.ok")
+								: localBackendProbe.healthStatus === "degraded"
+									? t("settings.connections.health.degraded")
+									: t("settings.connections.health.unknown")}
+							{localBackendProbe.statusSummary
+								? ` · ${localBackendProbe.statusSummary}`
+								: ""}
+						</p>
+					) : null}
+				</div>
 			</div>
 
 			<div className="rounded-xl border border-border/60 p-4">

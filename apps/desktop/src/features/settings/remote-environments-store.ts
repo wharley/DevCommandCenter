@@ -95,3 +95,13 @@ export function writeActiveRemoteEnvironmentId(environmentId: string | null) {
 	}
 	window.localStorage.removeItem(ACTIVE_REMOTE_ENV_STORAGE_KEY);
 }
+
+export function getActiveRemoteEnvironment(): SavedRemoteEnvironment | null {
+	const activeId = readActiveRemoteEnvironmentId();
+	if (!activeId) {
+		return null;
+	}
+	return (
+		readRemoteEnvironments().find((environment) => environment.id === activeId) ?? null
+	);
+}
