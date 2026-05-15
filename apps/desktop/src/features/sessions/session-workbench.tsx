@@ -15,6 +15,7 @@ type SessionWorkbenchProps = {
 	workspaceName: string;
 	workspaceBranch: string;
 	workspacePath: string | null;
+	sessionQueryScope?: string;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
 	selectedProviderId: string | null;
@@ -54,6 +55,7 @@ export function SessionWorkbench({
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
+	sessionQueryScope = "local",
 	selectedProviderLabel,
 	selectedModelLabel,
 	selectedProviderId,
@@ -95,6 +97,7 @@ export function SessionWorkbench({
 				workspaceName={workspaceName}
 				workspaceBranch={workspaceBranch}
 				workspacePath={workspacePath}
+				sessionQueryScope={sessionQueryScope}
 				selectedProviderLabel={selectedProviderLabel}
 				selectedModelLabel={selectedModelLabel}
 				selectedProviderId={selectedProviderId}

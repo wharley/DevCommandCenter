@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use axum::{
     extract::{Path, Query, State},
     http::{header::CONTENT_TYPE, HeaderName, HeaderValue, Method, StatusCode},
@@ -6,6 +7,16 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use dcc_core::{
+    application::{
+        abort_run, close_session, restore_session, resume_session, AbortRunInput,
+        CloseSessionInput, RestoreSessionInput, ResumeSessionInput,
+    },
+    domain::session::SessionId,
+    domain::workspace::WorkspaceId,
+    ports::{CoreEvent, EventBus, SessionEventRepo},
+};
+use dcc_infra::db::SqliteSessionRepo;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -43,11 +54,47 @@ struct ProjectTaskActionQuery {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct WorkspaceSessionsQuery {
+    workspace_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionSearchQuery {
+    #[serde(default)]
+    query: String,
+    #[serde(default = "default_session_search_limit")]
+    limit: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloseSessionRequest {
+    #[serde(default)]
+    delete_history: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BundleRequest {
     #[serde(default)]
     worktree_paths: Vec<String>,
     #[serde(default)]
     comb_ids: Vec<String>,
+}
+
+fn default_session_search_limit() -> usize {
+    40
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct NoopEventBus;
+
+#[async_trait]
+impl EventBus for NoopEventBus {
+    async fn publish(&self, _event: CoreEvent) -> dcc_core::Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -160,6 +207,28 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         .route("/api/v1/combs", get(list_combs_handler))
         .route("/api/v1/panes", get(list_panes_handler))
         .route("/api/v1/diffs/bundle", post(diffs_bundle_handler))
+        .route("/api/v1/sessions", get(list_workspace_sessions_handler))
+        .route("/api/v1/sessions/search", get(search_sessions_handler))
+        .route(
+            "/api/v1/sessions/:session_id/events",
+            get(list_session_events_handler),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/abort",
+            post(abort_session_handler),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/resume",
+            post(resume_session_handler),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/close",
+            post(close_session_handler),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/restore",
+            post(restore_session_handler),
+        )
         .route(
             "/api/v1/auth/bearer/rotate",
             post(rotate_bearer_token_handler),
@@ -250,6 +319,44 @@ fn classify_rpc_error(error: String) -> HttpApiError {
     } else {
         HttpApiError::bad_gateway(error)
     }
+}
+
+fn classify_session_error(error: String) -> HttpApiError {
+    let normalized = error.to_lowercase();
+
+    if normalized.contains("not found") {
+        HttpApiError::not_found(error)
+    } else if normalized.contains("missing ")
+        || normalized.contains("must be ")
+        || normalized.contains("history is empty")
+        || normalized.contains("no active turn")
+    {
+        HttpApiError::bad_request(error)
+    } else {
+        HttpApiError::internal(error)
+    }
+}
+
+async fn session_repo_operation<T, F>(
+    config: Arc<RwLock<HttpConfig>>,
+    op: F,
+) -> Result<T, HttpApiError>
+where
+    T: Send + 'static,
+    F: FnOnce(SqliteSessionRepo) -> Result<T, String> + Send + 'static,
+{
+    let db_path = {
+        let config = config.read().await;
+        config.db_path.clone()
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let repo = SqliteSessionRepo::open(&db_path).map_err(|error| error.to_string())?;
+        op(repo)
+    })
+    .await
+    .map_err(|error| HttpApiError::internal(format!("failed to join session worker: {error}")))?
+    .map_err(classify_session_error)
 }
 
 fn filter_by_string_field(
@@ -918,6 +1025,159 @@ async fn diffs_bundle_handler(
         }),
         DEFAULT_TIMEOUT,
     )
+    .await?;
+    Ok(Json(payload))
+}
+
+async fn list_workspace_sessions_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Query(query): Query<WorkspaceSessionsQuery>,
+) -> Result<Json<Value>, HttpApiError> {
+    let workspace_id = query.workspace_id;
+    let payload = session_repo_operation(config, move |repo| {
+        let items = repo
+            .list_workspace_sessions(&WorkspaceId(workspace_id))
+            .map_err(|error| error.to_string())?;
+        serde_json::to_value(items).map_err(|error| error.to_string())
+    })
+    .await?;
+    Ok(Json(payload))
+}
+
+async fn search_sessions_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Query(query): Query<SessionSearchQuery>,
+) -> Result<Json<Value>, HttpApiError> {
+    let payload = session_repo_operation(config, move |repo| {
+        let items = repo
+            .search_sessions(&query.query, query.limit)
+            .map_err(|error| error.to_string())?;
+        serde_json::to_value(items).map_err(|error| error.to_string())
+    })
+    .await?;
+    Ok(Json(payload))
+}
+
+async fn list_session_events_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    let payload = session_repo_operation(config, move |repo| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?;
+        let items = runtime
+            .block_on(SessionEventRepo::list_events_by_session(
+                &repo,
+                &SessionId(session_id),
+            ))
+            .map_err(|error| error.to_string())?;
+        serde_json::to_value(items).map_err(|error| error.to_string())
+    })
+    .await?;
+    Ok(Json(payload))
+}
+
+async fn abort_session_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    let payload = session_repo_operation(config, move |repo| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?;
+        let output = runtime
+            .block_on(abort_run(
+                &repo,
+                &repo,
+                &NoopEventBus,
+                AbortRunInput {
+                    session_id: SessionId(session_id),
+                    reason: Some("Stopped from remote HTTP".to_string()),
+                },
+            ))
+            .map_err(|error| error.to_string())?;
+        serde_json::to_value(output).map_err(|error| error.to_string())
+    })
+    .await?;
+    Ok(Json(payload))
+}
+
+async fn resume_session_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    let payload = session_repo_operation(config, move |repo| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?;
+        let output = runtime
+            .block_on(resume_session(
+                &repo,
+                &repo,
+                &NoopEventBus,
+                ResumeSessionInput {
+                    session_id: SessionId(session_id),
+                },
+            ))
+            .map_err(|error| error.to_string())?;
+        serde_json::to_value(output).map_err(|error| error.to_string())
+    })
+    .await?;
+    Ok(Json(payload))
+}
+
+async fn close_session_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Path(session_id): Path<String>,
+    body: Option<Json<CloseSessionRequest>>,
+) -> Result<Json<Value>, HttpApiError> {
+    let delete_history = body.map(|Json(body)| body.delete_history).unwrap_or(false);
+    let payload = session_repo_operation(config, move |repo| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?;
+        let output = runtime
+            .block_on(close_session(
+                &repo,
+                &repo,
+                &repo,
+                CloseSessionInput {
+                    session_id: SessionId(session_id),
+                    delete_history,
+                },
+            ))
+            .map_err(|error| error.to_string())?;
+        serde_json::to_value(output).map_err(|error| error.to_string())
+    })
+    .await?;
+    Ok(Json(payload))
+}
+
+async fn restore_session_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    let payload = session_repo_operation(config, move |repo| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?;
+        let output = runtime
+            .block_on(restore_session(
+                &repo,
+                &repo,
+                RestoreSessionInput {
+                    session_id: SessionId(session_id),
+                },
+            ))
+            .map_err(|error| error.to_string())?;
+        serde_json::to_value(output).map_err(|error| error.to_string())
+    })
     .await?;
     Ok(Json(payload))
 }

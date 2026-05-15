@@ -59,6 +59,13 @@ async fn main() {
     println!("[DCC HTTP]   GET  /api/v1/combs");
     println!("[DCC HTTP]   GET  /api/v1/panes");
     println!("[DCC HTTP]   POST /api/v1/diffs/bundle");
+    println!("[DCC HTTP]   GET  /api/v1/sessions");
+    println!("[DCC HTTP]   GET  /api/v1/sessions/search");
+    println!("[DCC HTTP]   GET  /api/v1/sessions/:session_id/events");
+    println!("[DCC HTTP]   POST /api/v1/sessions/:session_id/abort");
+    println!("[DCC HTTP]   POST /api/v1/sessions/:session_id/resume");
+    println!("[DCC HTTP]   POST /api/v1/sessions/:session_id/close");
+    println!("[DCC HTTP]   POST /api/v1/sessions/:session_id/restore");
 
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => listener,

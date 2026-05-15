@@ -19,6 +19,7 @@ type WorkspacePanelProps = {
 	workspaceName: string;
 	workspaceBranch: string;
 	workspacePath: string | null;
+	sessionQueryScope?: string;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
 	selectedProviderId: string | null;
@@ -58,6 +59,7 @@ export function WorkspacePanel({
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
+	sessionQueryScope = "local",
 	selectedProviderLabel,
 	selectedModelLabel,
 	selectedProviderId,
@@ -90,7 +92,7 @@ export function WorkspacePanel({
 }: WorkspacePanelProps) {
 	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
 	const threadHistoryQuery = useQuery(
-		sessionThreadHistoryQueryOptions(effectiveSessionId),
+		sessionThreadHistoryQueryOptions(effectiveSessionId, { scope: sessionQueryScope }),
 	);
 	const selectedSessionTitle =
 		sessions.find((session) => session.session.id === effectiveSessionId)?.thread

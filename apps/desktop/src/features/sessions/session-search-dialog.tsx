@@ -18,6 +18,7 @@ type SessionSearchDialogProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	selectedWorkspaceId: string | null;
+	queryScope?: string;
 	onSelectResult: (result: SessionSearchResult) => void;
 };
 
@@ -52,13 +53,14 @@ export function SessionSearchDialog({
 	open,
 	onOpenChange,
 	selectedWorkspaceId,
+	queryScope = "local",
 	onSelectResult,
 }: SessionSearchDialogProps) {
 	const { t } = useTranslation("common");
 	const [query, setQuery] = useState("");
 	const deferredQuery = useDeferredValue(query.trim());
 	const resultsQuery = useQuery(
-		sessionSearchQueryOptions(open ? deferredQuery : null),
+		sessionSearchQueryOptions(open ? deferredQuery : null, { scope: queryScope }),
 	);
 	const results = resultsQuery.data ?? [];
 

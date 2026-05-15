@@ -30,8 +30,10 @@ export const dccQueryKeys = {
 	repositories: ["repositories"] as const,
 	workspaces: ["workspaces"] as const,
 	sessions: ["sessions"] as const,
-	sessionThreads: (sessionId: string) => ["sessionThreads", sessionId] as const,
-	sessionSearch: (query: string) => ["sessionSearch", query] as const,
+	sessionThreads: (sessionId: string, scope = "local") =>
+		["sessionThreads", scope, sessionId] as const,
+	sessionSearch: (query: string, scope = "local") =>
+		["sessionSearch", scope, query] as const,
 	workspaceSessions: (workspaceId: string, scope = "local") =>
 		["workspaceSessions", scope, workspaceId] as const,
 } as const;
