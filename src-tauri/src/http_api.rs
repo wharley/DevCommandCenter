@@ -2186,6 +2186,10 @@ fn pairing_error_to_http(err: PairingError) -> HttpApiError {
         P::Expired => HttpApiError::bad_request("pairing expired"),
         P::AlreadyConsumed => HttpApiError::bad_request("pairing already used"),
         P::NonceLocked => HttpApiError::bad_request("too many invalid PIN attempts"),
+        P::DeviceLimitReached => HttpApiError::bad_request(
+            "device limit reached; revoke an existing device first",
+        ),
+        P::SessionExpired => HttpApiError::bad_request("device session expired"),
         P::InvalidPublicKey => HttpApiError::bad_request("invalid public key"),
         P::InvalidSignature => HttpApiError::bad_request("invalid signature"),
         P::SignatureMismatch => HttpApiError::bad_request("signature verification failed"),

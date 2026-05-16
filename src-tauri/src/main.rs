@@ -2430,6 +2430,67 @@ fn daemon_tick_internal(app: &AppHandle, state: &AppState) -> Result<(), String>
     Ok(())
 }
 
+/// Polls `pair_audit_log` and emits a Tauri event for each new entry so the
+/// desktop UI can show a toast / notification. Polling avoids needing
+/// dccd-http to push events back into the Tauri process.
+fn start_pair_audit_watcher(app: AppHandle, db_path: PathBuf) {
+    thread::spawn(move || {
+        // Establish the high-water mark we have already seen — we never replay
+        // historical entries on startup, only new ones.
+        let mut last_id: i64 = match Connection::open(&db_path) {
+            Ok(conn) => conn
+                .query_row("SELECT IFNULL(MAX(id), 0) FROM pair_audit_log", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap_or(0),
+            Err(_) => 0,
+        };
+
+        loop {
+            thread::sleep(Duration::from_secs(3));
+            let Ok(conn) = Connection::open(&db_path) else {
+                continue;
+            };
+
+            let mut stmt = match conn.prepare(
+                "SELECT id, event, device_id, ip, user_agent, details_json, created_at
+                 FROM pair_audit_log
+                 WHERE id > ?1
+                 ORDER BY id ASC",
+            ) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            let mut highest = last_id;
+            let rows = stmt.query_map(rusqlite::params![last_id], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "event": row.get::<_, String>(1)?,
+                    "deviceId": row.get::<_, Option<String>>(2)?,
+                    "ip": row.get::<_, Option<String>>(3)?,
+                    "userAgent": row.get::<_, Option<String>>(4)?,
+                    "detailsJson": row.get::<_, Option<String>>(5)?,
+                    "createdAt": row.get::<_, String>(6)?,
+                }))
+            });
+
+            if let Ok(iter) = rows {
+                for entry in iter.flatten() {
+                    if let Some(id) = entry.get("id").and_then(|v| v.as_i64()) {
+                        if id > highest {
+                            highest = id;
+                        }
+                    }
+                    let _ = app.emit("pair-audit-event", entry);
+                }
+            }
+
+            last_id = highest;
+        }
+    });
+}
+
 fn start_daemon_worker(app: AppHandle, state: AppState) {
     state.daemon.running.store(true, Ordering::Relaxed);
     thread::spawn(move || {
@@ -7941,7 +8002,7 @@ pub fn run() {
                 db_path.clone(),
             ));
             let state = AppState {
-                db_path: Arc::new(db_path),
+                db_path: Arc::new(db_path.clone()),
                 app_data_dir: Arc::new(app_data_dir.clone()),
                 conn: Arc::new(Mutex::new(conn)),
                 terminals: Arc::new(Mutex::new(HashMap::new())),
@@ -7975,7 +8036,9 @@ pub fn run() {
                     start_daemon_worker(app_handle, state_for_daemon);
                 }
             }
+            let audit_db_path = db_path.clone();
             app.manage(state);
+            start_pair_audit_watcher(app.handle().clone(), audit_db_path);
             Ok(())
         })
         .run(tauri::generate_context!())

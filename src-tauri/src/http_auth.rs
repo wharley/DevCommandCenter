@@ -102,6 +102,7 @@ async fn validate_signed_request(
         }
         Err(pairing::PairingError::UnknownDevice) => Err(AuthError::SignedRequestUnknownDevice),
         Err(pairing::PairingError::DeviceRevoked) => Err(AuthError::SignedRequestRevokedDevice),
+        Err(pairing::PairingError::SessionExpired) => Err(AuthError::SignedRequestSessionExpired),
         Err(pairing::PairingError::TimestampOutOfWindow)
         | Err(pairing::PairingError::InvalidTimestamp) => {
             Err(AuthError::SignedRequestStaleTimestamp)
@@ -193,6 +194,7 @@ pub enum AuthError {
     SignedRequestRevokedDevice,
     SignedRequestStaleTimestamp,
     SignedRequestInvalidSignature,
+    SignedRequestSessionExpired,
 }
 
 impl IntoResponse for AuthError {
@@ -250,6 +252,11 @@ impl IntoResponse for AuthError {
             AuthError::SignedRequestInvalidSignature => (
                 StatusCode::FORBIDDEN,
                 "Signature verification failed",
+                None,
+            ),
+            AuthError::SignedRequestSessionExpired => (
+                StatusCode::FORBIDDEN,
+                "Device session expired; please re-pair",
                 None,
             ),
         };

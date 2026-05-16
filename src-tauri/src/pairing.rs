@@ -26,6 +26,8 @@ const REPLAY_WINDOW_SECS: i64 = 60;
 const PIN_DIGITS: usize = 6;
 const MAX_PIN_ATTEMPTS: i64 = 5;
 const NONCE_GARBAGE_KEEP_SECS: i64 = 600;
+const MAX_ACTIVE_DEVICES: i64 = 10;
+const SESSION_MAX_AGE_DAYS: i64 = 30;
 
 /// Created when the desktop initiates a pairing flow.
 #[derive(Debug, Clone, Serialize)]
@@ -83,6 +85,10 @@ pub enum PairingError {
     TimestampOutOfWindow,
     #[error("invalid timestamp")]
     InvalidTimestamp,
+    #[error("device limit reached; revoke an existing device first")]
+    DeviceLimitReached,
+    #[error("device session expired; please pair again")]
+    SessionExpired,
 }
 
 // ---------- schema ----------
@@ -353,6 +359,28 @@ pub fn complete_pairing(
         return Err(PairingError::InvalidPin);
     }
 
+    // Cap active devices to avoid runaway accumulation. Revoked rows do not
+    // count — the user is expected to revoke an old device before adding a new
+    // one when this hits.
+    let active_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM paired_devices WHERE revoked_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+    if active_count >= MAX_ACTIVE_DEVICES {
+        record_audit(
+            conn,
+            "limit_reached",
+            None,
+            client_ip,
+            user_agent,
+            Some(&format!("{{\"active\":{}}}", active_count)),
+        );
+        return Err(PairingError::DeviceLimitReached);
+    }
+
     let device_id = Uuid::new_v4().to_string();
     let device_name = sanitize_device_name(device_name);
 
@@ -467,6 +495,15 @@ pub fn verify_signed_request(
 
     if revoked_at.is_some() {
         return Err(PairingError::DeviceRevoked);
+    }
+
+    // Soft-expire devices older than SESSION_MAX_AGE_DAYS. Forces a re-pair
+    // periodically so leaked phones don't keep API access forever.
+    if let Ok(created_dt) = chrono::DateTime::parse_from_rfc3339(&created_at) {
+        let age = chrono::Utc::now() - created_dt.with_timezone(&chrono::Utc);
+        if age.num_days() > SESSION_MAX_AGE_DAYS {
+            return Err(PairingError::SessionExpired);
+        }
     }
 
     let verifying_key =
@@ -858,6 +895,103 @@ mod tests {
             None,
         );
         assert!(matches!(result, Err(PairingError::DeviceRevoked)));
+    }
+
+    #[test]
+    fn complete_pairing_rejects_when_at_device_limit() {
+        let conn = fresh_db();
+
+        // Fill the table up to the cap with already-paired devices.
+        for i in 0..MAX_ACTIVE_DEVICES {
+            let challenge = create_pairing_nonce(&conn).unwrap();
+            let (_, spki_b64) = fresh_keypair();
+            complete_pairing(
+                &conn,
+                &challenge.nonce,
+                &challenge.pin,
+                &spki_b64,
+                &format!("device-{i}"),
+                None,
+                None,
+            )
+            .unwrap();
+        }
+
+        // The next pairing attempt must be rejected.
+        let challenge = create_pairing_nonce(&conn).unwrap();
+        let (_, spki_b64) = fresh_keypair();
+        let res = complete_pairing(
+            &conn,
+            &challenge.nonce,
+            &challenge.pin,
+            &spki_b64,
+            "over-the-limit",
+            None,
+            None,
+        );
+        assert!(matches!(res, Err(PairingError::DeviceLimitReached)));
+
+        // Revoking any of the existing devices makes room again.
+        let devices = list_paired_devices(&conn, false).unwrap();
+        revoke_device(&conn, &devices[0].device_id, None).unwrap();
+
+        let challenge = create_pairing_nonce(&conn).unwrap();
+        let (_, spki_b64) = fresh_keypair();
+        let ok = complete_pairing(
+            &conn,
+            &challenge.nonce,
+            &challenge.pin,
+            &spki_b64,
+            "back-under-limit",
+            None,
+            None,
+        );
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn signature_rejects_aged_session() {
+        let conn = fresh_db();
+        let challenge = create_pairing_nonce(&conn).unwrap();
+        let (signing, spki_b64) = fresh_keypair();
+        let device_id = complete_pairing(
+            &conn,
+            &challenge.nonce,
+            &challenge.pin,
+            &spki_b64,
+            "old-iphone",
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Backdate created_at past the SESSION_MAX_AGE_DAYS cap.
+        let way_back = (chrono::Utc::now() - chrono::Duration::days(SESSION_MAX_AGE_DAYS + 1))
+            .to_rfc3339();
+        conn.execute(
+            "UPDATE paired_devices SET created_at = ?1 WHERE device_id = ?2",
+            rusqlite::params![way_back, device_id],
+        )
+        .unwrap();
+
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let canonical = canonical_request_bytes("GET", "/api/v1/status", &timestamp, b"");
+        let sig: Signature = signing.sign(&canonical);
+        let sig_b64 = BASE64.encode(sig.to_der().as_bytes());
+
+        let result = verify_signed_request(
+            &conn,
+            SignedRequestHeaders {
+                device_id: &device_id,
+                timestamp: &timestamp,
+                signature_b64: &sig_b64,
+            },
+            "GET",
+            "/api/v1/status",
+            b"",
+            None,
+        );
+        assert!(matches!(result, Err(PairingError::SessionExpired)));
     }
 
     #[test]

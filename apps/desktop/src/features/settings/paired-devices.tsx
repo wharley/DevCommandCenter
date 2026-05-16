@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
 	AlertTriangle,
 	CheckCircle2,
@@ -88,6 +89,36 @@ export function PairedDevicesPanel({
 
 	useEffect(() => {
 		void refresh();
+	}, []);
+
+	useEffect(() => {
+		let unlisten: UnlistenFn | undefined;
+		void (async () => {
+			unlisten = await listen<AuditEntry>("pair-audit-event", (event) => {
+				const payload = event.payload;
+				switch (payload.event) {
+					case "pair":
+						toast.success("Novo dispositivo pareado", {
+							description: payload.userAgent ?? payload.deviceId ?? undefined,
+						});
+						void refresh();
+						break;
+					case "pin_locked":
+						toast.warning("Tentativa de brute-force detectada", {
+							description: payload.ip
+								? `Nonce travado para IP ${payload.ip}`
+								: "Nonce travado após 5 PINs incorretos",
+						});
+						break;
+					case "revoke":
+						void refresh();
+						break;
+				}
+			});
+		})();
+		return () => {
+			unlisten?.();
+		};
 	}, []);
 
 	const handleRevoke = async (device: PairedDevice) => {
