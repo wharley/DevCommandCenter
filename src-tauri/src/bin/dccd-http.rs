@@ -1,12 +1,14 @@
+use dev_command_center_tauri::daemon_client::default_app_data_dir;
 use dev_command_center_tauri::http_api::build_router;
 use dev_command_center_tauri::http_config::HttpConfig;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[tokio::main]
 async fn main() {
-    let config = match HttpConfig::load() {
+    let mut config = match HttpConfig::load() {
         Ok(config) => {
             if !config.enabled {
                 eprintln!("[DCC HTTP] Server disabled in configuration");
@@ -19,6 +21,19 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    // If db_path is the default relative "dcc.db" or doesn't exist, fall back to
+    // the platform app data dir where the local dccd daemon stores its database.
+    if std::env::var("DCC_HTTP_DB_PATH").is_err() {
+        let is_relative_default = config.db_path == PathBuf::from("dcc.db");
+        if is_relative_default || !config.db_path.exists() {
+            let candidate = default_app_data_dir().join("database.sqlite");
+            if candidate.exists() {
+                println!("[DCC HTTP] Using app data database: {candidate:?}");
+                config.db_path = candidate;
+            }
+        }
+    }
 
     println!("[DCC HTTP] Starting server...");
     println!("[DCC HTTP] Database: {:?}", config.db_path);

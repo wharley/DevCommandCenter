@@ -304,7 +304,10 @@ impl IntoResponse for HttpApiError {
 }
 
 pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
-    let cors_config = config.blocking_read().clone();
+    let cors_config = config
+        .try_read()
+        .expect("config lock must be uncontended at router build time")
+        .clone();
     let protected_routes = Router::new()
         .route("/rpc", post(handle_json_rpc))
         .route("/api/v1/shell/default", get(shell_default_handler))
