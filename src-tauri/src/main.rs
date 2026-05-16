@@ -3780,6 +3780,46 @@ fn remote_detect_tmux_support(ssh_target: &str) -> Option<bool> {
     Some(status.success())
 }
 
+fn remote_upload_file_via_ssh_stdin(
+    ssh_target: &str,
+    local_path: &Path,
+    remote_path: &str,
+) -> Result<(), String> {
+    let bytes = fs::read(local_path).map_err(|e| e.to_string())?;
+    let remote_script = format!(
+        "cat > {remote_path}",
+        remote_path = remote_command_shell_expr(remote_path),
+    );
+
+    let mut child = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg(&remote_script)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(&bytes).map_err(|e| e.to_string())?;
+    }
+
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if stderr.is_empty() {
+        format!("ssh stdin upload failed for {ssh_target}")
+    } else {
+        stderr
+    })
+}
+
 fn remote_command_shell_expr(remote_command: &str) -> String {
     let trimmed = remote_command.trim();
     if let Some(path) = trimmed.strip_prefix("~/") {
@@ -3992,9 +4032,12 @@ fn remote_bootstrap_ssh_binary(input: Value) -> ApiResult<Value> {
         .map_err(|e| db_error(format!("failed to upload dccd-http: {e}")))?;
 
     if !scp_status.success() {
-        return Err(db_error(format!(
-            "remote bootstrap failed for {ssh_target}; scp upload was unsuccessful"
-        )));
+        remote_upload_file_via_ssh_stdin(&ssh_target, &local_binary, "~/.dcc/bin/dccd-http")
+            .map_err(|error| {
+                db_error(format!(
+                    "remote bootstrap failed for {ssh_target}; scp upload was unsuccessful and ssh stdin fallback also failed: {error}"
+                ))
+            })?;
     }
 
     let chmod_status = Command::new("ssh")
