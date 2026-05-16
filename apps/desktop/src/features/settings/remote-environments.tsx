@@ -21,7 +21,9 @@ import {
 import {
 	launchRemoteSshTunnel,
 	listRemoteSshTunnels,
+	preflightRemoteSsh,
 	stopRemoteSshTunnel,
+	type RemotePreflightSnapshot,
 	type RemoteTunnelSnapshot,
 } from "@/lib/remote-api";
 import {
@@ -47,6 +49,51 @@ type RemoteProbe = {
 	errorMessage: string | null;
 	checkedAt: string | null;
 };
+
+function tmuxInstallCommand(platformName: string | null) {
+	switch ((platformName ?? "").trim()) {
+		case "Darwin":
+			return "brew install tmux";
+		case "Linux":
+			return "sudo apt-get install -y tmux";
+		default:
+			return "install tmux with your system package manager";
+	}
+}
+
+function remotePreflightRecommendations(
+	t: (key: string, options?: Record<string, unknown>) => string,
+	preflight: RemotePreflightSnapshot | null,
+	remoteCommand: string,
+) {
+	if (!preflight) {
+		return [];
+	}
+
+	const items: string[] = [];
+	if (!preflight.sshReachable) {
+		items.push(t("settings.connections.recommendationItems.sshUnavailable"));
+		return items;
+	}
+	if (!preflight.remoteCommandFound) {
+		items.push(
+			t("settings.connections.recommendationItems.remoteCommandMissing", {
+				remoteCommand,
+			}),
+		);
+	}
+	if (preflight.tmuxAvailable === false) {
+		items.push(
+			t("settings.connections.recommendationItems.tmuxMissing", {
+				command: tmuxInstallCommand(preflight.platformName),
+			}),
+		);
+	}
+	if (items.length === 0) {
+		items.push(t("settings.connections.recommendationItems.ready"));
+	}
+	return items;
+}
 
 function defaultDraft(): DraftEnvironment {
 	return {
@@ -89,6 +136,8 @@ export function RemoteEnvironmentsPanel() {
 	);
 	const [probes, setProbes] = useState<Record<string, RemoteProbe>>({});
 	const [busyId, setBusyId] = useState<string | null>(null);
+	const [preflightBusyId, setPreflightBusyId] = useState<string | null>(null);
+	const [preflights, setPreflights] = useState<Record<string, RemotePreflightSnapshot>>({});
 	const [isRefreshing, setIsRefreshing] = useState(false);
 	const [localBackendProbe, setLocalBackendProbe] = useState<RemoteProbe | null>(null);
 
@@ -400,6 +449,48 @@ export function RemoteEnvironmentsPanel() {
 		}
 	};
 
+	const handlePreflight = async (environment: SavedRemoteEnvironment) => {
+		setPreflightBusyId(environment.id);
+		try {
+			const result = await preflightRemoteSsh({
+				sshTarget: environment.sshTarget,
+				remoteCommand: environment.remoteCommand,
+			});
+			setPreflights((current) => ({
+				...current,
+				[environment.id]: result,
+			}));
+			if (result.tmuxAvailable !== null) {
+				const updatedEnvironment: SavedRemoteEnvironment = {
+					...environment,
+					tmuxAvailable: result.tmuxAvailable,
+				};
+				persistEnvironments(
+					environments.map((candidate) =>
+						candidate.id === environment.id ? updatedEnvironment : candidate,
+					),
+				);
+			}
+			if (result.sshReachable && result.remoteCommandFound) {
+				toast.success(
+					t("settings.connections.preflightOk", {
+						label: environment.label,
+					}),
+				);
+			} else {
+				toast.error(
+					t("settings.connections.preflightError", {
+						label: environment.label,
+					}),
+				);
+			}
+		} catch (error) {
+			toast.error(String(error));
+		} finally {
+			setPreflightBusyId(null);
+		}
+	};
+
 	return (
 		<section className="space-y-4">
 			<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
@@ -541,9 +632,11 @@ export function RemoteEnvironmentsPanel() {
 					const tunnel = tunnels[environment.id] ?? null;
 					const probe = probes[environment.id] ?? null;
 					const isBusy = busyId === environment.id;
+					const isPreflightBusy = preflightBusyId === environment.id;
 					const isRunning = tunnel?.status === "running";
 					const isActive = environment.id === activeEnvironmentId;
 					const endpoint = tunnel?.endpoint ?? environment.endpoint;
+					const preflight = preflights[environment.id] ?? null;
 					const tmuxAvailable = tunnel?.tmuxAvailable ?? environment.tmuxAvailable;
 					const terminalPersistenceLabel =
 						tmuxAvailable === true
@@ -551,6 +644,11 @@ export function RemoteEnvironmentsPanel() {
 							: tmuxAvailable === false
 								? t("settings.connections.persistence.pty")
 								: t("settings.connections.persistence.unknown");
+					const recommendations = remotePreflightRecommendations(
+						t,
+						preflight,
+						environment.remoteCommand,
+					);
 
 					return (
 						<div key={environment.id} className="rounded-xl border border-border/60 p-4">
@@ -621,6 +719,20 @@ export function RemoteEnvironmentsPanel() {
 											{t("settings.connections.connect")}
 										</Button>
 									)}
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										disabled={isPreflightBusy}
+										onClick={() => void handlePreflight(environment)}
+									>
+										{isPreflightBusy ? (
+											<Loader2 className="size-3.5 animate-spin" />
+										) : (
+											<RefreshCw className="size-3.5" />
+										)}
+										{t("settings.connections.check")}
+									</Button>
 									<Button
 										type="button"
 										variant="outline"
@@ -699,10 +811,45 @@ export function RemoteEnvironmentsPanel() {
 									</strong>{" "}
 									<span className="font-mono">{terminalPersistenceLabel}</span>
 								</p>
+								<p>
+									<strong className="text-foreground">
+										{t("settings.connections.fields.preflight")}:
+									</strong>{" "}
+									<span className="font-mono">
+										{preflight
+											? [
+													preflight.sshReachable ? "ssh" : "ssh-fail",
+													preflight.remoteCommandFound ? "dccd-http" : "missing-cmd",
+													preflight.tmuxAvailable === true
+														? "tmux"
+														: preflight.tmuxAvailable === false
+															? "no-tmux"
+															: "tmux-unknown",
+												].join(" · ")
+											: t("settings.connections.health.unknown")}
+									</span>
+								</p>
 							</div>
 
 							{probe?.errorMessage ? (
 								<p className="mt-3 text-[11px] text-destructive">{probe.errorMessage}</p>
+							) : null}
+							{preflight?.errorMessage ? (
+								<p className="mt-2 text-[11px] text-destructive">
+									{preflight.errorMessage}
+								</p>
+							) : null}
+							{preflight ? (
+								<div className="mt-3 rounded-lg border border-border/50 bg-muted/20 p-3 text-[11px] text-muted-foreground">
+									<p className="font-medium text-foreground">
+										{t("settings.connections.recommendations")}
+									</p>
+									<div className="mt-1 space-y-1">
+										{recommendations.map((recommendation) => (
+											<p key={recommendation}>{recommendation}</p>
+										))}
+									</div>
+								</div>
 							) : null}
 						</div>
 					);

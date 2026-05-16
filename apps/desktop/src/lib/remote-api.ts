@@ -23,6 +23,26 @@ export type RemoteTunnelLaunchInput = {
 	bearerToken?: string | null;
 };
 
+export type RemotePreflightInput = {
+	sshTarget: string;
+	remoteCommand?: string | null;
+};
+
+export type RemotePreflightSnapshot = {
+	sshReachable: boolean;
+	remoteCommandFound: boolean;
+	tmuxAvailable: boolean | null;
+	platformName: string | null;
+	errorMessage: string | null;
+	checkedAt: string;
+};
+
+export function preflightRemoteSsh(input: RemotePreflightInput) {
+	return invoke<RemotePreflightSnapshot>("remote_preflight_ssh", {
+		input,
+	});
+}
+
 export function listRemoteSshTunnels() {
 	return invoke<{ tunnels: RemoteTunnelSnapshot[] }>("remote_list_ssh_tunnels");
 }

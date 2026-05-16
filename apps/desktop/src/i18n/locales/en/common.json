@@ -259,10 +259,14 @@
       "addValidation": "Fill label, SSH target, and a valid remote port.",
       "connectedToast": "{{label}} connected through a local SSH tunnel.",
       "connectError": "Could not connect {{label}}.",
+      "preflightOk": "Preflight completed for {{label}}.",
+      "preflightError": "Preflight found issues on {{label}}.",
+      "recommendations": "Recommendations",
       "copyMissing": "No local endpoint available yet.",
       "copySuccess": "Local endpoint copied.",
       "connect": "Connect",
       "disconnect": "Disconnect",
+      "check": "Preflight",
       "setActive": "Set active",
       "clearActive": "Clear active",
       "copy": "Copy endpoint",
@@ -282,12 +286,19 @@
         "endpoint": "Forwarded endpoint",
         "health": "Health",
         "backend": "Backend status",
-        "terminalPersistence": "Terminal persistence"
+        "terminalPersistence": "Terminal persistence",
+        "preflight": "Preflight"
       },
       "persistence": {
         "tmux": "persistent tmux",
         "pty": "PTY fallback",
         "unknown": "unknown"
+      },
+      "recommendationItems": {
+        "sshUnavailable": "SSH unavailable. Confirm key-based access and test with `ssh <target> 'sh -lc \"echo ok\"'`.",
+        "remoteCommandMissing": "Remote command `{{remoteCommand}}` is not on PATH. Install it on the host or point this environment at the correct binary.",
+        "tmuxMissing": "Install `tmux` for stronger terminal persistence: `{{command}}`.",
+        "ready": "The host looks ready for remote sessions and strong terminal persistence."
       },
       "health": {
         "ok": "Healthy",

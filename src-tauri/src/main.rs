@@ -511,6 +511,14 @@ struct RemoteSshTunnelLaunchInput {
     bearer_token: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteSshPreflightInput {
+    ssh_target: String,
+    #[serde(default)]
+    remote_command: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteSshTunnelSnapshot {
@@ -525,6 +533,17 @@ struct RemoteSshTunnelSnapshot {
     tmux_available: Option<bool>,
     status: String,
     exit_code: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteSshPreflightSnapshot {
+    ssh_reachable: bool,
+    remote_command_found: bool,
+    tmux_available: Option<bool>,
+    platform_name: Option<String>,
+    error_message: Option<String>,
+    checked_at: String,
 }
 
 #[cfg(windows)]
@@ -3773,6 +3792,86 @@ fn remote_stop_tunnel_child(child: &mut Child) {
 }
 
 #[tauri::command]
+fn remote_preflight_ssh(input: Value) -> ApiResult<Value> {
+    let input: RemoteSshPreflightInput =
+        serde_json::from_value(input).map_err(|e| db_error(e.to_string()))?;
+
+    let ssh_target = input.ssh_target.trim().to_string();
+    if ssh_target.is_empty() {
+        return Err(db_error("sshTarget is required"));
+    }
+
+    let remote_command = input
+        .remote_command
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("dccd-http")
+        .to_string();
+
+    let script = format!(
+        "if command -v {remote_command} >/dev/null 2>&1; then printf 'remote_command=1\\n'; else printf 'remote_command=0\\n'; fi; if command -v tmux >/dev/null 2>&1; then printf 'tmux=1\\n'; else printf 'tmux=0\\n'; fi; printf 'platform='; uname -s 2>/dev/null || printf 'unknown'; printf '\\n'",
+        remote_command = remote_shell_single_quote(&remote_command),
+    );
+
+    let output = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(&ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg(&script)
+        .output()
+        .map_err(|e| db_error(format!("failed to run ssh preflight: {e}")))?;
+
+    let checked_at = iso_now();
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stderr.is_empty() {
+            format!("SSH preflight failed for {ssh_target}")
+        } else {
+            stderr
+        };
+        let snapshot = RemoteSshPreflightSnapshot {
+            ssh_reachable: false,
+            remote_command_found: false,
+            tmux_available: None,
+            platform_name: None,
+            error_message: Some(message),
+            checked_at,
+        };
+        return Ok(serde_json::to_value(snapshot).map_err(|e| db_error(e.to_string()))?);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let remote_command_found = stdout.lines().any(|line| line.trim() == "remote_command=1");
+    let tmux_available = if stdout.lines().any(|line| line.trim() == "tmux=1") {
+        Some(true)
+    } else if stdout.lines().any(|line| line.trim() == "tmux=0") {
+        Some(false)
+    } else {
+        None
+    };
+    let platform_name = stdout.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("platform=")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    });
+
+    let snapshot = RemoteSshPreflightSnapshot {
+        ssh_reachable: true,
+        remote_command_found,
+        tmux_available,
+        platform_name,
+        error_message: None,
+        checked_at,
+    };
+
+    Ok(serde_json::to_value(snapshot).map_err(|e| db_error(e.to_string()))?)
+}
+
+#[tauri::command]
 fn remote_list_ssh_tunnels(state: State<'_, AppState>) -> ApiResult<Value> {
     let mut tunnels = state
         .remote_tunnels
@@ -6686,6 +6785,7 @@ pub fn run() {
             terminal_get_backlog,
             terminal_clear_persisted_scrollback,
             terminal_get_project_activity,
+            remote_preflight_ssh,
             remote_list_ssh_tunnels,
             remote_launch_ssh_tunnel,
             remote_stop_ssh_tunnel,

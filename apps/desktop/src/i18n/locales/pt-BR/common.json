@@ -259,10 +259,14 @@
       "addValidation": "Preencha nome, alvo SSH e uma porta remota válida.",
       "connectedToast": "{{label}} conectado por túnel SSH local.",
       "connectError": "Não foi possível conectar {{label}}.",
+      "preflightOk": "Pré-checagem concluída para {{label}}.",
+      "preflightError": "A pré-checagem encontrou problemas em {{label}}.",
+      "recommendations": "Recomendações",
       "copyMissing": "Ainda não há endpoint local disponível.",
       "copySuccess": "Endpoint local copiado.",
       "connect": "Conectar",
       "disconnect": "Desconectar",
+      "check": "Pré-checar",
       "setActive": "Definir ativa",
       "clearActive": "Remover ativa",
       "copy": "Copiar endpoint",
@@ -282,12 +286,19 @@
         "endpoint": "Endpoint encaminhado",
         "health": "Saúde",
         "backend": "Estado do backend",
-        "terminalPersistence": "Persistência do terminal"
+        "terminalPersistence": "Persistência do terminal",
+        "preflight": "Pré-checagem"
       },
       "persistence": {
         "tmux": "tmux persistente",
         "pty": "fallback PTY",
         "unknown": "desconhecida"
+      },
+      "recommendationItems": {
+        "sshUnavailable": "SSH indisponível. Confirme acesso por chave e teste com `ssh <target> 'sh -lc \"echo ok\"'`.",
+        "remoteCommandMissing": "O comando remoto `{{remoteCommand}}` não está no PATH. Instale-o no host ou aponte este ambiente para o binário correto.",
+        "tmuxMissing": "Instale `tmux` para persistência mais forte do terminal: `{{command}}`.",
+        "ready": "O host parece pronto para sessões remotas e persistência forte do terminal."
       },
       "health": {
         "ok": "Saudável",
