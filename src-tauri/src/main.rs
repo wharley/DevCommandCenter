@@ -4433,19 +4433,26 @@ fn remote_install_local_http_binary(
 
     remote_ensure_service_script(ssh_target)?;
 
-    let mkdir_status = Command::new("ssh")
+    let mkdir_output = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .arg(ssh_target)
         .arg("sh")
         .arg("-lc")
         .arg("mkdir -p \"$HOME/.dcc/bin\"")
-        .status()
+        .output()
         .map_err(|e| format!("failed to create remote bootstrap directory: {e}"))?;
 
-    if !mkdir_status.success() {
-        return Err(format!(
-            "remote bootstrap failed for {ssh_target}; could not create ~/.dcc/bin"
-        ));
+    if !mkdir_output.status.success() {
+        let stderr = String::from_utf8_lossy(&mkdir_output.stderr)
+            .trim()
+            .to_string();
+        return Err(if stderr.is_empty() {
+            format!("remote bootstrap failed for {ssh_target}; could not create ~/.dcc/bin")
+        } else {
+            format!(
+                "remote bootstrap failed for {ssh_target}; could not create ~/.dcc/bin: {stderr}"
+            )
+        });
     }
 
     let remote_target = remote_command.trim();

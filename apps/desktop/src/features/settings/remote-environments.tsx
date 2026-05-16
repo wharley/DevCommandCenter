@@ -204,6 +204,49 @@ function parsePort(value: string): number | null {
 	return port;
 }
 
+function getRemoteEnvironmentErrorMessage(error: unknown): string {
+	if (typeof error === "string" && error.trim().length > 0) {
+		return error.trim();
+	}
+	if (error && typeof error === "object") {
+		const candidate = error as {
+			message?: unknown;
+			error?: unknown;
+			data?: { message?: unknown; error?: unknown } | null;
+			toString?: () => string;
+		};
+		if (typeof candidate.message === "string" && candidate.message.trim().length > 0) {
+			return candidate.message.trim();
+		}
+		if (typeof candidate.error === "string" && candidate.error.trim().length > 0) {
+			return candidate.error.trim();
+		}
+		if (
+			candidate.data &&
+			typeof candidate.data === "object" &&
+			typeof candidate.data.message === "string" &&
+			candidate.data.message.trim().length > 0
+		) {
+			return candidate.data.message.trim();
+		}
+		if (
+			candidate.data &&
+			typeof candidate.data === "object" &&
+			typeof candidate.data.error === "string" &&
+			candidate.data.error.trim().length > 0
+		) {
+			return candidate.data.error.trim();
+		}
+		if (typeof candidate.toString === "function") {
+			const text = candidate.toString();
+			if (typeof text === "string" && text !== "[object Object]" && text.trim().length > 0) {
+				return text.trim();
+			}
+		}
+	}
+	return "Operation failed";
+}
+
 export function RemoteEnvironmentsPanel() {
 	const { t } = useTranslation("common");
 	const [draft, setDraft] = useState<DraftEnvironment>(() => defaultDraft());
@@ -292,34 +335,34 @@ export function RemoteEnvironmentsPanel() {
 					checkedAt: new Date().toISOString(),
 				},
 			}));
-		} catch (error) {
-			setProbes((current) => ({
-				...current,
-				[environment.id]: {
-					healthStatus: "degraded",
-					daemonStatus: null,
-					statusSummary: null,
-					errorMessage: String(error),
-					checkedAt: new Date().toISOString(),
-				},
-			}));
-		}
-	};
+			} catch (error) {
+				setProbes((current) => ({
+					...current,
+					[environment.id]: {
+						healthStatus: "degraded",
+						daemonStatus: null,
+						statusSummary: null,
+						errorMessage: getRemoteEnvironmentErrorMessage(error),
+						checkedAt: new Date().toISOString(),
+					},
+				}));
+			}
+		};
 
 	const refreshTunnels = async () => {
 		setIsRefreshing(true);
-		try {
-			const response = await listRemoteSshTunnels();
+			try {
+				const response = await listRemoteSshTunnels();
 			const next = Object.fromEntries(
 				response.tunnels.map((tunnel) => [tunnel.environmentId, tunnel]),
 			);
-			setTunnels(next);
-		} catch (error) {
-			toast.error(String(error));
-		} finally {
-			setIsRefreshing(false);
-		}
-	};
+				setTunnels(next);
+			} catch (error) {
+				toast.error(getRemoteEnvironmentErrorMessage(error));
+			} finally {
+				setIsRefreshing(false);
+			}
+		};
 
 	useEffect(() => {
 		void refreshTunnels();
@@ -373,15 +416,15 @@ export function RemoteEnvironmentsPanel() {
 						errorMessage: null,
 						checkedAt: new Date().toISOString(),
 					});
-				} catch (error) {
-					setLocalBackendProbe({
-						healthStatus: "degraded",
-						daemonStatus: null,
-						statusSummary: null,
-						errorMessage: String(error),
-						checkedAt: new Date().toISOString(),
-					});
-				}
+					} catch (error) {
+						setLocalBackendProbe({
+							healthStatus: "degraded",
+							daemonStatus: null,
+							statusSummary: null,
+							errorMessage: getRemoteEnvironmentErrorMessage(error),
+							checkedAt: new Date().toISOString(),
+						});
+					}
 			})();
 			return;
 		}
@@ -503,17 +546,17 @@ export function RemoteEnvironmentsPanel() {
 					label: environment.label,
 				}),
 			);
-		} catch (error) {
-			toast.error(
-				t("settings.connections.connectError", {
-					label: environment.label,
-				}),
-			);
-			toast.error(String(error));
-		} finally {
-			setBusyId(null);
-		}
-	};
+			} catch (error) {
+				toast.error(
+					t("settings.connections.connectError", {
+						label: environment.label,
+					}),
+				);
+				toast.error(getRemoteEnvironmentErrorMessage(error));
+			} finally {
+				setBusyId(null);
+			}
+		};
 
 	const handleDisconnect = async (environment: SavedRemoteEnvironment) => {
 		setBusyId(environment.id);
@@ -527,12 +570,12 @@ export function RemoteEnvironmentsPanel() {
 				delete copy[environment.id];
 				return copy;
 			});
-		} catch (error) {
-			toast.error(String(error));
-		} finally {
-			setBusyId(null);
-		}
-	};
+			} catch (error) {
+				toast.error(getRemoteEnvironmentErrorMessage(error));
+			} finally {
+				setBusyId(null);
+			}
+		};
 
 	const copyEndpoint = async (environment: SavedRemoteEnvironment) => {
 		const endpoint = tunnels[environment.id]?.endpoint ?? environment.endpoint;
@@ -543,19 +586,19 @@ export function RemoteEnvironmentsPanel() {
 		try {
 			await navigator.clipboard.writeText(endpoint);
 			toast.success(t("settings.connections.copySuccess"));
-		} catch (error) {
-			toast.error(String(error));
-		}
-	};
+			} catch (error) {
+				toast.error(getRemoteEnvironmentErrorMessage(error));
+			}
+		};
 
 	const copyText = async (value: string, successMessage: string) => {
 		try {
 			await navigator.clipboard.writeText(value);
 			toast.success(successMessage);
-		} catch (error) {
-			toast.error(String(error));
-		}
-	};
+			} catch (error) {
+				toast.error(getRemoteEnvironmentErrorMessage(error));
+			}
+		};
 
 	const copyFixCommand = async (
 		environment: SavedRemoteEnvironment,
@@ -577,10 +620,10 @@ export function RemoteEnvironmentsPanel() {
 		}
 		try {
 			await closeRemoteMobileAccess(current.environmentId);
-		} catch (error) {
-			toast.error(String(error));
-		}
-	};
+			} catch (error) {
+				toast.error(getRemoteEnvironmentErrorMessage(error));
+			}
+		};
 
 	const handleOpenMobileAccess = async (environment: SavedRemoteEnvironment) => {
 		if (mobileAccessSession && mobileAccessSession.environmentId !== environment.id) {
@@ -595,12 +638,12 @@ export function RemoteEnvironmentsPanel() {
 				label: environment.label,
 				info,
 			});
-		} catch (error) {
-			toast.error(String(error));
-		} finally {
-			setMobileAccessBusyId(null);
-		}
-	};
+			} catch (error) {
+				toast.error(getRemoteEnvironmentErrorMessage(error));
+			} finally {
+				setMobileAccessBusyId(null);
+			}
+		};
 
 	const handlePreflight = async (environment: SavedRemoteEnvironment) => {
 		setPreflightBusyId(environment.id);
@@ -641,12 +684,12 @@ export function RemoteEnvironmentsPanel() {
 					}),
 				);
 			}
-		} catch (error) {
-			toast.error(String(error));
-		} finally {
-			setPreflightBusyId(null);
-		}
-	};
+			} catch (error) {
+				toast.error(getRemoteEnvironmentErrorMessage(error));
+			} finally {
+				setPreflightBusyId(null);
+			}
+		};
 
 	const handleBootstrapRuntime = async (environment: SavedRemoteEnvironment) => {
 		setBootstrapBusyId(environment.id);
@@ -680,17 +723,17 @@ export function RemoteEnvironmentsPanel() {
 				...current,
 				[environment.id]: refreshedPreflight,
 			}));
-		} catch (error) {
-			toast.error(
-				t("settings.connections.bootstrapError", {
-					label: environment.label,
-				}),
-			);
-			toast.error(String(error));
-		} finally {
-			setBootstrapBusyId(null);
-		}
-	};
+			} catch (error) {
+				toast.error(
+					t("settings.connections.bootstrapError", {
+						label: environment.label,
+					}),
+				);
+				toast.error(getRemoteEnvironmentErrorMessage(error));
+			} finally {
+				setBootstrapBusyId(null);
+			}
+		};
 
 	const mobileAccessEndpoint = mobileAccessSession?.info.lanEndpoint ?? null;
 	const mobileAccessPayload =
