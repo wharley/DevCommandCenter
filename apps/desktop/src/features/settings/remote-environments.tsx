@@ -95,6 +95,22 @@ function remotePreflightRecommendations(
 	return items;
 }
 
+function remotePreflightFixCommand(
+	preflight: RemotePreflightSnapshot | null,
+	remoteCommand: string,
+) {
+	if (!preflight || !preflight.sshReachable) {
+		return null;
+	}
+	if (!preflight.remoteCommandFound) {
+		return `command -v ${remoteCommand} || echo "${remoteCommand} is missing from PATH"`;
+	}
+	if (preflight.tmuxAvailable === false) {
+		return tmuxInstallCommand(preflight.platformName);
+	}
+	return null;
+}
+
 function defaultDraft(): DraftEnvironment {
 	return {
 		label: "",
@@ -449,6 +465,22 @@ export function RemoteEnvironmentsPanel() {
 		}
 	};
 
+	const copyFixCommand = async (
+		environment: SavedRemoteEnvironment,
+		command: string,
+	) => {
+		try {
+			await navigator.clipboard.writeText(command);
+			toast.success(
+				t("settings.connections.copyFixCommandSuccess", {
+					label: environment.label,
+				}),
+			);
+		} catch (error) {
+			toast.error(String(error));
+		}
+	};
+
 	const handlePreflight = async (environment: SavedRemoteEnvironment) => {
 		setPreflightBusyId(environment.id);
 		try {
@@ -649,6 +681,10 @@ export function RemoteEnvironmentsPanel() {
 						preflight,
 						environment.remoteCommand,
 					);
+					const fixCommand = remotePreflightFixCommand(
+						preflight,
+						environment.remoteCommand,
+					);
 
 					return (
 						<div key={environment.id} className="rounded-xl border border-border/60 p-4">
@@ -841,14 +877,32 @@ export function RemoteEnvironmentsPanel() {
 							) : null}
 							{preflight ? (
 								<div className="mt-3 rounded-lg border border-border/50 bg-muted/20 p-3 text-[11px] text-muted-foreground">
-									<p className="font-medium text-foreground">
-										{t("settings.connections.recommendations")}
-									</p>
+									<div className="flex flex-wrap items-center justify-between gap-2">
+										<p className="font-medium text-foreground">
+											{t("settings.connections.recommendations")}
+										</p>
+										{fixCommand ? (
+											<Button
+												type="button"
+												variant="outline"
+												size="xs"
+												onClick={() => void copyFixCommand(environment, fixCommand)}
+											>
+												<Copy className="size-3.5" />
+												{t("settings.connections.copyFixCommand")}
+											</Button>
+										) : null}
+									</div>
 									<div className="mt-1 space-y-1">
 										{recommendations.map((recommendation) => (
 											<p key={recommendation}>{recommendation}</p>
 										))}
 									</div>
+									{fixCommand ? (
+										<p className="mt-2 font-mono text-[10px] text-foreground/80">
+											{fixCommand}
+										</p>
+									) : null}
 								</div>
 							) : null}
 						</div>

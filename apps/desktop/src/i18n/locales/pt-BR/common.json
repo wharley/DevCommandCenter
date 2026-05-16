@@ -262,6 +262,8 @@
       "preflightOk": "Pré-checagem concluída para {{label}}.",
       "preflightError": "A pré-checagem encontrou problemas em {{label}}.",
       "recommendations": "Recomendações",
+      "copyFixCommand": "Copiar correção",
+      "copyFixCommandSuccess": "Comando de correção copiado para {{label}}.",
       "copyMissing": "Ainda não há endpoint local disponível.",
       "copySuccess": "Endpoint local copiado.",
       "connect": "Conectar",

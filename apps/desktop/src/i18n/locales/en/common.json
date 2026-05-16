@@ -262,6 +262,8 @@
       "preflightOk": "Preflight completed for {{label}}.",
       "preflightError": "Preflight found issues on {{label}}.",
       "recommendations": "Recommendations",
+      "copyFixCommand": "Copy fix",
+      "copyFixCommandSuccess": "Fix command copied for {{label}}.",
       "copyMissing": "No local endpoint available yet.",
       "copySuccess": "Local endpoint copied.",
       "connect": "Connect",
