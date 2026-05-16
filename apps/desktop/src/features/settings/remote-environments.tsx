@@ -1,14 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
 	CheckCircle2,
 	CircleHelp,
 	Copy,
+	HeartPulse,
+	KeyRound,
 	Loader2,
 	Play,
 	QrCode,
 	RefreshCw,
+	Server,
 	Square,
+	TerminalSquare,
 	Trash2,
+	Wifi,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -245,6 +250,58 @@ function getRemoteEnvironmentErrorMessage(error: unknown): string {
 		}
 	}
 	return "Operation failed";
+}
+
+type InfoRowProps = {
+	icon?: ReactNode;
+	label: string;
+	value: string;
+	monoFamily?: boolean;
+	onCopy?: () => void;
+	copyLabel?: string;
+};
+
+function InfoRow({
+	icon,
+	label,
+	value,
+	monoFamily,
+	onCopy,
+	copyLabel,
+}: InfoRowProps) {
+	return (
+		<div className="rounded-lg border border-border/60 bg-background">
+			<div className="flex items-center justify-between gap-2 px-3 py-1.5">
+				<div className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+					{icon}
+					<span className="truncate">{label}</span>
+				</div>
+				{onCopy ? (
+					<Button
+						type="button"
+						variant="ghost"
+						size="xs"
+						className="shrink-0 text-[11px]"
+						onClick={onCopy}
+					>
+						<Copy className="size-3" />
+						{copyLabel}
+					</Button>
+				) : null}
+			</div>
+			<div className="border-t border-border/50 px-3 py-2">
+				<p
+					className={
+						monoFamily
+							? "break-all font-mono text-[11px] leading-relaxed text-foreground/90"
+							: "break-all text-[12px] leading-relaxed text-foreground/90"
+					}
+				>
+					{value}
+				</p>
+			</div>
+		</div>
+	);
 }
 
 export function RemoteEnvironmentsPanel() {
@@ -1264,127 +1321,37 @@ export function RemoteEnvironmentsPanel() {
 					}
 				}}
 			>
-				<DialogContent className="max-w-3xl">
-					<DialogHeader>
-						<DialogTitle>
+				<DialogContent className="flex max-h-[90vh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+					<DialogHeader className="border-b border-border/50 px-6 py-4">
+						<DialogTitle className="text-[15px]">
 							{t("settings.connections.mobileAccessTitle", {
 								label: mobileAccessSession?.label ?? "",
 							})}
 						</DialogTitle>
-						<DialogDescription>
+						<DialogDescription className="text-[12px]">
 							{t("settings.connections.mobileAccessBody")}
 						</DialogDescription>
 					</DialogHeader>
 					{mobileAccessSession ? (
-						<div className="grid gap-4 md:grid-cols-[260px_minmax(0,1fr)]">
-							<div className="space-y-3">
-								{mobileAccessPayload ? (
-									<RemoteAccessQr
-										value={mobileAccessPayload}
-										size={236}
-										className="mx-auto"
-									/>
-								) : (
-									<div className="flex min-h-[236px] items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 p-4 text-center text-[11px] text-muted-foreground">
-										{t("settings.connections.mobileAccessNoLan")}
-									</div>
-								)}
-								<p className="text-center text-[11px] leading-relaxed text-muted-foreground">
-									{t("settings.connections.mobileAccessQrHint")}
-								</p>
-							</div>
-							<div className="space-y-3">
-								<div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-[12px] text-muted-foreground">
-									<p className="font-medium text-foreground">
-										{t("settings.connections.mobileAccessWhileOpen")}
+						<div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+							<div className="grid gap-6 md:grid-cols-[240px_minmax(0,1fr)]">
+								<div className="flex flex-col items-center gap-3">
+									{mobileAccessPayload ? (
+										<RemoteAccessQr value={mobileAccessPayload} size={220} />
+									) : (
+										<div className="flex h-[220px] w-[220px] items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 p-4 text-center text-[11px] leading-relaxed text-muted-foreground">
+											{t("settings.connections.mobileAccessNoLan")}
+										</div>
+									)}
+									<p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+										{t("settings.connections.mobileAccessQrHint")}
 									</p>
-									<p className="mt-1">
-										{t("settings.connections.mobileAccessWhileOpenBody")}
-									</p>
-								</div>
-								<div className="grid gap-2 text-[12px] text-muted-foreground">
-									<p>
-										<strong className="text-foreground">
-											{t("settings.connections.mobileAccessLanEndpoint")}:
-										</strong>{" "}
-										<span className="break-all font-mono">
-											{mobileAccessEndpoint ??
-												t("settings.connections.mobileAccessNoLan")}
-										</span>
-									</p>
-									{mobileAccessSession.info.lanEndpoints.length > 1 ? (
-										<p>
-											<strong className="text-foreground">
-												{t("settings.connections.mobileAccessAlternateEndpoints")}:
-											</strong>{" "}
-											<span className="font-mono">
-												{mobileAccessSession.info.lanEndpoints.join(" · ")}
-											</span>
-										</p>
-									) : null}
-									<p>
-										<strong className="text-foreground">
-											{t("settings.connections.mobileAccessLocalEndpoint")}:
-										</strong>{" "}
-										<span className="break-all font-mono">
-											{mobileAccessSession.info.localEndpoint}
-										</span>
-									</p>
-									<p>
-										<strong className="text-foreground">
-											{t("settings.connections.mobileAccessToken")}:
-										</strong>{" "}
-										<span className="break-all font-mono">
-											{mobileAccessSession.info.bearerToken}
-										</span>
-									</p>
-									<p>
-										<strong className="text-foreground">
-											{t("settings.connections.mobileAccessHealth")}:
-										</strong>{" "}
-										<span className="break-all font-mono">
-											{mobileAccessEndpoint
-												? buildRemoteHealthUrl(mobileAccessEndpoint)
-												: t("settings.connections.mobileAccessNoLan")}
-										</span>
-									</p>
-								</div>
-								<div className="flex flex-wrap gap-2">
-									{mobileAccessEndpoint ? (
-										<Button
-											type="button"
-											variant="outline"
-											size="sm"
-											onClick={() =>
-												void copyText(
-													mobileAccessEndpoint,
-													t("settings.connections.copyLanEndpointSuccess"),
-												)
-											}
-										>
-											<Copy className="size-3.5" />
-											{t("settings.connections.copyLanEndpoint")}
-										</Button>
-									) : null}
-									<Button
-										type="button"
-										variant="outline"
-										size="sm"
-										onClick={() =>
-											void copyText(
-												mobileAccessSession.info.bearerToken,
-												t("settings.connections.copyTokenSuccess"),
-											)
-										}
-									>
-										<Copy className="size-3.5" />
-										{t("settings.connections.copyToken")}
-									</Button>
 									{mobileAccessPayload ? (
 										<Button
 											type="button"
 											variant="outline"
 											size="sm"
+											className="w-full"
 											onClick={() =>
 												void copyText(
 													mobileAccessPayload,
@@ -1396,38 +1363,115 @@ export function RemoteEnvironmentsPanel() {
 											{t("settings.connections.copyPayload")}
 										</Button>
 									) : null}
-									{mobileAccessCurl ? (
-										<Button
-											type="button"
-											variant="outline"
-											size="sm"
-											onClick={() =>
-												void copyText(
-													mobileAccessCurl,
-													t("settings.connections.copyCurlSuccess"),
-												)
-											}
-										>
-											<Copy className="size-3.5" />
-											{t("settings.connections.copyCurl")}
-										</Button>
-									) : null}
 								</div>
-								{mobileAccessCurl ? (
-									<div className="rounded-lg border border-border/60 bg-background p-3 text-[11px] text-muted-foreground">
+								<div className="min-w-0 space-y-3">
+									<div className="rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
 										<p className="font-medium text-foreground">
-											{t("settings.connections.mobileAccessCurl")}
+											{t("settings.connections.mobileAccessWhileOpen")}
 										</p>
-										<p className="mt-2 break-all font-mono text-[10px] text-foreground/80">
-											{mobileAccessCurl}
+										<p className="mt-1">
+											{t("settings.connections.mobileAccessWhileOpenBody")}
 										</p>
 									</div>
-								) : null}
+
+									<InfoRow
+										icon={<Wifi className="size-3.5" />}
+										label={t("settings.connections.mobileAccessLanEndpoint")}
+										value={
+											mobileAccessEndpoint ??
+											t("settings.connections.mobileAccessNoLan")
+										}
+										onCopy={
+											mobileAccessEndpoint
+												? () =>
+														void copyText(
+															mobileAccessEndpoint,
+															t("settings.connections.copyLanEndpointSuccess"),
+														)
+												: undefined
+										}
+										copyLabel={t("settings.connections.copyLanEndpoint")}
+									/>
+
+									{mobileAccessSession.info.lanEndpoints.length > 1 ? (
+										<InfoRow
+											label={t(
+												"settings.connections.mobileAccessAlternateEndpoints",
+											)}
+											value={mobileAccessSession.info.lanEndpoints.join(" · ")}
+										/>
+									) : null}
+
+									<InfoRow
+										icon={<Server className="size-3.5" />}
+										label={t("settings.connections.mobileAccessLocalEndpoint")}
+										value={mobileAccessSession.info.localEndpoint}
+									/>
+
+									<InfoRow
+										icon={<KeyRound className="size-3.5" />}
+										label={t("settings.connections.mobileAccessToken")}
+										value={mobileAccessSession.info.bearerToken}
+										monoFamily
+										onCopy={() =>
+											void copyText(
+												mobileAccessSession.info.bearerToken,
+												t("settings.connections.copyTokenSuccess"),
+											)
+										}
+										copyLabel={t("settings.connections.copyToken")}
+									/>
+
+									<InfoRow
+										icon={<HeartPulse className="size-3.5" />}
+										label={t("settings.connections.mobileAccessHealth")}
+										value={
+											mobileAccessEndpoint
+												? buildRemoteHealthUrl(mobileAccessEndpoint)
+												: t("settings.connections.mobileAccessNoLan")
+										}
+									/>
+
+									{mobileAccessCurl ? (
+										<div className="overflow-hidden rounded-lg border border-border/60 bg-background">
+											<div className="flex items-center justify-between gap-2 px-3 py-1.5">
+												<div className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+													<TerminalSquare className="size-3.5" />
+													<span className="truncate">
+														{t("settings.connections.mobileAccessCurl")}
+													</span>
+												</div>
+												<Button
+													type="button"
+													variant="ghost"
+													size="xs"
+													className="shrink-0 text-[11px]"
+													onClick={() =>
+														void copyText(
+															mobileAccessCurl,
+															t("settings.connections.copyCurlSuccess"),
+														)
+													}
+												>
+													<Copy className="size-3" />
+													{t("settings.connections.copyCurl")}
+												</Button>
+											</div>
+											<pre className="m-0 max-h-32 overflow-auto border-t border-border/50 px-3 py-2 font-mono text-[10px] leading-relaxed whitespace-pre-wrap break-all text-foreground/80">
+												{mobileAccessCurl}
+											</pre>
+										</div>
+									) : null}
+								</div>
 							</div>
 						</div>
 					) : null}
-					<DialogFooter>
-						<Button type="button" variant="outline" onClick={() => void closeMobileAccessSession()}>
+					<DialogFooter className="border-t border-border/50 px-6 py-3">
+						<Button
+							type="button"
+							variant="outline"
+							onClick={() => void closeMobileAccessSession()}
+						>
 							{t("settings.connections.mobileAccessClose")}
 						</Button>
 					</DialogFooter>
