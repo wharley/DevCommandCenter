@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+	AlertTriangle,
+	CheckCircle2,
 	Copy,
 	KeyRound,
 	Loader2,
@@ -7,6 +9,7 @@ import {
 	RefreshCw,
 	Smartphone,
 	Trash2,
+	XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -21,9 +24,11 @@ import {
 } from "@/components/ui/dialog";
 import { RemoteAccessQr } from "./remote-access-qr";
 import {
+	pairAuditLog,
 	pairInit,
 	pairListDevices,
 	pairRevokeDevice,
+	type AuditEntry,
 	type PairedDevice,
 	type PairingChallenge,
 } from "@/lib/pairing-api";
@@ -215,8 +220,132 @@ export function PairedDevicesPanel({
 				}}
 				backendUrl={defaultBackendUrl}
 			/>
+
+			<AuditLogSection />
 		</section>
 	);
+}
+
+function AuditLogSection() {
+	const [entries, setEntries] = useState<AuditEntry[]>([]);
+	const [loading, setLoading] = useState(false);
+	const [expanded, setExpanded] = useState(false);
+
+	const refresh = async () => {
+		setLoading(true);
+		try {
+			const res = await pairAuditLog(50);
+			setEntries(res.entries);
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "Falha ao carregar log");
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	useEffect(() => {
+		if (expanded) {
+			void refresh();
+		}
+	}, [expanded]);
+
+	if (!expanded) {
+		return (
+			<button
+				type="button"
+				onClick={() => setExpanded(true)}
+				className="w-full rounded-xl border border-border/60 bg-muted/10 px-4 py-2.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted/20"
+			>
+				Ver log de auditoria de pareamentos →
+			</button>
+		);
+	}
+
+	return (
+		<div className="rounded-xl border border-border/60">
+			<div className="flex items-center justify-between border-b border-border/40 px-4 py-2.5">
+				<p className="text-[12px] font-medium text-foreground">
+					Log de auditoria
+				</p>
+				<div className="flex items-center gap-1.5">
+					<Button
+						type="button"
+						variant="ghost"
+						size="xs"
+						onClick={() => void refresh()}
+					>
+						<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+					</Button>
+					<Button type="button" variant="ghost" size="xs" onClick={() => setExpanded(false)}>
+						Fechar
+					</Button>
+				</div>
+			</div>
+			{entries.length === 0 ? (
+				<p className="px-4 py-6 text-center text-[12px] text-muted-foreground">
+					{loading ? "Carregando…" : "Nenhum evento registrado."}
+				</p>
+			) : (
+				<ul className="max-h-72 divide-y divide-border/40 overflow-y-auto text-[11px]">
+					{entries.map((entry) => (
+						<AuditEntryRow key={entry.id} entry={entry} />
+					))}
+				</ul>
+			)}
+		</div>
+	);
+}
+
+function AuditEntryRow({ entry }: { entry: AuditEntry }) {
+	const meta = describeEvent(entry.event);
+	return (
+		<li className="flex items-start gap-3 px-4 py-2">
+			<meta.icon className={`mt-0.5 size-3.5 shrink-0 ${meta.tone}`} aria-hidden />
+			<div className="min-w-0 flex-1">
+				<div className="flex items-center gap-2">
+					<p className="font-medium text-foreground">{meta.label}</p>
+					<span className="text-muted-foreground/70">{formatTime(entry.createdAt)}</span>
+				</div>
+				<div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
+					{entry.deviceId ? (
+						<span className="font-mono">device {entry.deviceId.slice(0, 8)}…</span>
+					) : null}
+					{entry.ip ? <span className="font-mono">ip {entry.ip}</span> : null}
+					{entry.userAgent ? (
+						<span className="truncate">{entry.userAgent}</span>
+					) : null}
+				</div>
+			</div>
+		</li>
+	);
+}
+
+function describeEvent(event: string): {
+	label: string;
+	icon: typeof CheckCircle2;
+	tone: string;
+} {
+	switch (event) {
+		case "pair":
+			return { label: "Pareamento concluído", icon: CheckCircle2, tone: "text-emerald-500" };
+		case "revoke":
+			return { label: "Dispositivo revogado", icon: XCircle, tone: "text-amber-500" };
+		case "pin_failure":
+			return { label: "PIN incorreto", icon: AlertTriangle, tone: "text-amber-500" };
+		case "pin_locked":
+			return { label: "Nonce travado por brute-force", icon: AlertTriangle, tone: "text-red-500" };
+		default:
+			return { label: event, icon: CheckCircle2, tone: "text-muted-foreground" };
+	}
+}
+
+function formatTime(iso: string): string {
+	try {
+		const d = new Date(iso);
+		return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" });
+	} catch {
+		return iso;
+	}
 }
 
 function PairDeviceDialog({

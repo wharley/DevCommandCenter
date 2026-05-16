@@ -24,6 +24,8 @@ const NONCE_BYTES: usize = 32;
 const PAIRING_TTL_SECS: i64 = 60;
 const REPLAY_WINDOW_SECS: i64 = 60;
 const PIN_DIGITS: usize = 6;
+const MAX_PIN_ATTEMPTS: i64 = 5;
+const NONCE_GARBAGE_KEEP_SECS: i64 = 600;
 
 /// Created when the desktop initiates a pairing flow.
 #[derive(Debug, Clone, Serialize)]
@@ -65,6 +67,8 @@ pub enum PairingError {
     Expired,
     #[error("pairing already consumed")]
     AlreadyConsumed,
+    #[error("too many invalid PIN attempts; nonce locked")]
+    NonceLocked,
     #[error("invalid public key encoding")]
     InvalidPublicKey,
     #[error("invalid signature encoding")]
@@ -79,6 +83,89 @@ pub enum PairingError {
     TimestampOutOfWindow,
     #[error("invalid timestamp")]
     InvalidTimestamp,
+}
+
+// ---------- schema ----------
+
+/// Idempotently creates pairing tables and applies forward migrations.
+///
+/// Safe to call repeatedly: it never drops data, only adds missing columns
+/// for old installations that pre-date the lockout / hardening fields.
+pub fn ensure_pairing_schema(conn: &Connection) -> Result<(), PairingError> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS pairing_nonces (
+            nonce            TEXT PRIMARY KEY,
+            pin_hash         TEXT NOT NULL,
+            expires_at       TEXT NOT NULL,
+            consumed_at      TEXT,
+            failed_attempts  INTEGER NOT NULL DEFAULT 0,
+            locked_at        TEXT,
+            created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_pairing_nonces_expires ON pairing_nonces(expires_at);
+
+        CREATE TABLE IF NOT EXISTS paired_devices (
+            device_id        TEXT PRIMARY KEY,
+            device_name      TEXT NOT NULL,
+            public_key_spki  BLOB NOT NULL,
+            user_agent       TEXT,
+            created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used_at     TEXT,
+            last_ip          TEXT,
+            revoked_at       TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_paired_devices_revoked ON paired_devices(revoked_at);
+
+        CREATE TABLE IF NOT EXISTS pair_audit_log (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            event         TEXT NOT NULL,
+            device_id     TEXT,
+            ip            TEXT,
+            user_agent    TEXT,
+            details_json  TEXT,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_pair_audit_log_device ON pair_audit_log(device_id);
+        CREATE INDEX IF NOT EXISTS idx_pair_audit_log_created ON pair_audit_log(created_at);
+        "#,
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))?;
+
+    // Forward-migrate: add lockout columns on installs that pre-date Phase 5.
+    add_column_if_missing(
+        conn,
+        "pairing_nonces",
+        "failed_attempts",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(conn, "pairing_nonces", "locked_at", "TEXT")?;
+
+    Ok(())
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    column_def: &str,
+) -> Result<(), PairingError> {
+    let pragma = format!("PRAGMA table_info({table})");
+    let mut stmt = conn
+        .prepare(&pragma)
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+    let names: Result<Vec<String>, _> = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| PairingError::Database(e.to_string()))?
+        .collect();
+    let names = names.map_err(|e| PairingError::Database(e.to_string()))?;
+    if names.iter().any(|n| n == column) {
+        return Ok(());
+    }
+    let sql = format!("ALTER TABLE {table} ADD COLUMN {column} {column_def}");
+    conn.execute(&sql, [])
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+    Ok(())
 }
 
 // ---------- crypto helpers ----------
@@ -126,6 +213,9 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 // ---------- pairing lifecycle ----------
 
 /// Inserts a fresh nonce+PIN and returns the challenge to display.
+///
+/// Also opportunistically deletes pairing rows older than NONCE_GARBAGE_KEEP_SECS
+/// — keeps the table tidy without needing a background sweeper.
 pub fn create_pairing_nonce(conn: &Connection) -> Result<PairingChallenge, PairingError> {
     let nonce = generate_nonce_base64url();
     let pin = generate_numeric_pin();
@@ -133,6 +223,13 @@ pub fn create_pairing_nonce(conn: &Connection) -> Result<PairingChallenge, Pairi
     let now = chrono::Utc::now();
     let expires_at = now + chrono::Duration::seconds(PAIRING_TTL_SECS);
     let expires_at_iso = expires_at.to_rfc3339();
+
+    // Garbage-collect old rows on the way in.
+    let cutoff = (now - chrono::Duration::seconds(NONCE_GARBAGE_KEEP_SECS)).to_rfc3339();
+    let _ = conn.execute(
+        "DELETE FROM pairing_nonces WHERE created_at < ?1",
+        params![cutoff],
+    );
 
     conn.execute(
         "INSERT INTO pairing_nonces (nonce, pin_hash, expires_at) VALUES (?1, ?2, ?3)",
@@ -145,6 +242,20 @@ pub fn create_pairing_nonce(conn: &Connection) -> Result<PairingChallenge, Pairi
         pin,
         expires_at: expires_at_iso,
     })
+}
+
+/// Number of expired/consumed/locked nonces purged since installation.
+/// Exposed for the maintenance Tauri command.
+pub fn purge_expired_nonces(conn: &Connection) -> Result<usize, PairingError> {
+    let cutoff =
+        (chrono::Utc::now() - chrono::Duration::seconds(NONCE_GARBAGE_KEEP_SECS)).to_rfc3339();
+    let n = conn
+        .execute(
+            "DELETE FROM pairing_nonces WHERE created_at < ?1",
+            params![cutoff],
+        )
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+    Ok(n)
 }
 
 /// Validates a `(nonce, pin)` pair, registers the device pubkey and returns its id.
@@ -163,19 +274,43 @@ pub fn complete_pairing(
         .map_err(|_| PairingError::InvalidPublicKey)?;
     VerifyingKey::from_public_key_der(&spki_bytes).map_err(|_| PairingError::InvalidPublicKey)?;
 
-    let row: Option<(String, String, Option<String>)> = conn
+    let row: Option<(String, String, Option<String>, i64, Option<String>)> = conn
         .query_row(
-            "SELECT pin_hash, expires_at, consumed_at FROM pairing_nonces WHERE nonce = ?1",
+            "SELECT pin_hash, expires_at, consumed_at, failed_attempts, locked_at
+             FROM pairing_nonces WHERE nonce = ?1",
             params![nonce],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .optional()
         .map_err(|e| PairingError::Database(e.to_string()))?;
 
-    let (stored_pin_hash, expires_at_iso, consumed_at) = row.ok_or(PairingError::InvalidNonce)?;
+    let (stored_pin_hash, expires_at_iso, consumed_at, failed_attempts, locked_at) =
+        row.ok_or(PairingError::InvalidNonce)?;
 
     if consumed_at.is_some() {
         return Err(PairingError::AlreadyConsumed);
+    }
+    if locked_at.is_some() || failed_attempts >= MAX_PIN_ATTEMPTS {
+        record_audit(
+            conn,
+            "pin_locked",
+            None,
+            client_ip,
+            user_agent,
+            Some(&format!(
+                "{{\"nonce\":\"{}\",\"attempts\":{}}}",
+                nonce, failed_attempts
+            )),
+        );
+        return Err(PairingError::NonceLocked);
     }
 
     let expires_at = chrono::DateTime::parse_from_rfc3339(&expires_at_iso)
@@ -187,14 +322,34 @@ pub fn complete_pairing(
 
     let candidate_hash = hash_pin(pin, nonce);
     if !constant_time_eq(&candidate_hash, &stored_pin_hash) {
+        // Increment failed_attempts; if we just hit the cap, lock the nonce.
+        let next_attempts = failed_attempts + 1;
+        let new_lock = if next_attempts >= MAX_PIN_ATTEMPTS {
+            Some(now_iso())
+        } else {
+            None
+        };
+        let _ = conn.execute(
+            "UPDATE pairing_nonces
+             SET failed_attempts = ?1,
+                 locked_at = COALESCE(locked_at, ?2)
+             WHERE nonce = ?3",
+            params![next_attempts, new_lock, nonce],
+        );
         record_audit(
             conn,
             "pin_failure",
             None,
             client_ip,
             user_agent,
-            Some(&format!("{{\"nonce\":\"{}\"}}", nonce)),
+            Some(&format!(
+                "{{\"nonce\":\"{}\",\"attempts\":{}}}",
+                nonce, next_attempts
+            )),
         );
+        if new_lock.is_some() {
+            return Err(PairingError::NonceLocked);
+        }
         return Err(PairingError::InvalidPin);
     }
 
@@ -394,6 +549,48 @@ pub fn revoke_device(
     Ok(affected > 0)
 }
 
+/// Read recent audit-log entries, newest first.
+#[derive(Debug, Clone, Serialize)]
+pub struct AuditEntry {
+    pub id: i64,
+    pub event: String,
+    pub device_id: Option<String>,
+    pub ip: Option<String>,
+    pub user_agent: Option<String>,
+    pub details_json: Option<String>,
+    pub created_at: String,
+}
+
+pub fn list_audit_log(conn: &Connection, limit: i64) -> Result<Vec<AuditEntry>, PairingError> {
+    let limit = limit.clamp(1, 500);
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, event, device_id, ip, user_agent, details_json, created_at
+             FROM pair_audit_log ORDER BY id DESC LIMIT ?1",
+        )
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+
+    let rows = stmt
+        .query_map(params![limit], |row| {
+            Ok(AuditEntry {
+                id: row.get(0)?,
+                event: row.get(1)?,
+                device_id: row.get(2)?,
+                ip: row.get(3)?,
+                user_agent: row.get(4)?,
+                details_json: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| PairingError::Database(e.to_string()))?);
+    }
+    Ok(out)
+}
+
 fn record_audit(
     conn: &Connection,
     event: &str,
@@ -472,6 +669,51 @@ mod tests {
             None,
         );
         assert!(matches!(result, Err(PairingError::InvalidPin)));
+    }
+
+    #[test]
+    fn pin_brute_force_locks_after_max_attempts() {
+        let conn = fresh_db();
+        let challenge = create_pairing_nonce(&conn).unwrap();
+        let (_, spki_b64) = fresh_keypair();
+
+        // 4 wrong attempts return InvalidPin
+        for _ in 0..(MAX_PIN_ATTEMPTS - 1) {
+            let res = complete_pairing(
+                &conn,
+                &challenge.nonce,
+                "000000",
+                &spki_b64,
+                "iPhone",
+                None,
+                None,
+            );
+            assert!(matches!(res, Err(PairingError::InvalidPin)));
+        }
+
+        // 5th wrong attempt locks the nonce
+        let res = complete_pairing(
+            &conn,
+            &challenge.nonce,
+            "000000",
+            &spki_b64,
+            "iPhone",
+            None,
+            None,
+        );
+        assert!(matches!(res, Err(PairingError::NonceLocked)));
+
+        // Even the correct PIN cannot rescue it now
+        let res = complete_pairing(
+            &conn,
+            &challenge.nonce,
+            &challenge.pin,
+            &spki_b64,
+            "iPhone",
+            None,
+            None,
+        );
+        assert!(matches!(res, Err(PairingError::NonceLocked)));
     }
 
     #[test]

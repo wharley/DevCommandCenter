@@ -4921,6 +4921,45 @@ async fn pair_revoke_device(app: AppHandle, device_id: String) -> ApiResult<Valu
 }
 
 #[tauri::command]
+async fn pair_audit_log(app: AppHandle, limit: Option<i64>) -> ApiResult<Value> {
+    let limit = limit.unwrap_or(100);
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_pairing_conn(&app)?;
+        let entries = dev_command_center_tauri::pairing::list_audit_log(&conn, limit)
+            .map_err(pairing_error_to_api)?;
+        let json_entries: Vec<Value> = entries
+            .into_iter()
+            .map(|e| {
+                serde_json::json!({
+                    "id": e.id,
+                    "event": e.event,
+                    "deviceId": e.device_id,
+                    "ip": e.ip,
+                    "userAgent": e.user_agent,
+                    "detailsJson": e.details_json,
+                    "createdAt": e.created_at,
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({ "entries": json_entries }))
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_audit_log task failed: {e}")))?
+}
+
+#[tauri::command]
+async fn pair_purge_expired(app: AppHandle) -> ApiResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_pairing_conn(&app)?;
+        let n = dev_command_center_tauri::pairing::purge_expired_nonces(&conn)
+            .map_err(pairing_error_to_api)?;
+        Ok(serde_json::json!({ "purged": n }))
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_purge_expired task failed: {e}")))?
+}
+
+#[tauri::command]
 async fn remote_preflight_ssh(input: Value) -> ApiResult<Value> {
     let input: RemoteSshPreflightInput =
         serde_json::from_value(input).map_err(|e| db_error(e.to_string()))?;
@@ -7814,6 +7853,8 @@ pub fn run() {
             pair_init,
             pair_list_devices,
             pair_revoke_device,
+            pair_audit_log,
+            pair_purge_expired,
             remote_list_ssh_tunnels,
             remote_launch_ssh_tunnel,
             remote_stop_ssh_tunnel,

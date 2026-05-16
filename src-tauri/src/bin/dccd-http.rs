@@ -117,39 +117,5 @@ async fn main() {
 
 fn ensure_pairing_schema(db_path: &std::path::Path) -> Result<(), String> {
     let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS pairing_nonces (
-            nonce        TEXT PRIMARY KEY,
-            pin_hash     TEXT NOT NULL,
-            expires_at   TEXT NOT NULL,
-            consumed_at  TEXT,
-            created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-         );
-         CREATE INDEX IF NOT EXISTS idx_pairing_nonces_expires ON pairing_nonces(expires_at);
-
-         CREATE TABLE IF NOT EXISTS paired_devices (
-            device_id        TEXT PRIMARY KEY,
-            device_name      TEXT NOT NULL,
-            public_key_spki  BLOB NOT NULL,
-            user_agent       TEXT,
-            created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-            last_used_at     TEXT,
-            last_ip          TEXT,
-            revoked_at       TEXT
-         );
-         CREATE INDEX IF NOT EXISTS idx_paired_devices_revoked ON paired_devices(revoked_at);
-
-         CREATE TABLE IF NOT EXISTS pair_audit_log (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            event         TEXT NOT NULL,
-            device_id     TEXT,
-            ip            TEXT,
-            user_agent    TEXT,
-            details_json  TEXT,
-            created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-         );
-         CREATE INDEX IF NOT EXISTS idx_pair_audit_log_device ON pair_audit_log(device_id);
-         CREATE INDEX IF NOT EXISTS idx_pair_audit_log_created ON pair_audit_log(created_at);",
-    )
-    .map_err(|e| e.to_string())
+    dev_command_center_tauri::pairing::ensure_pairing_schema(&conn).map_err(|e| e.to_string())
 }

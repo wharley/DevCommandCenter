@@ -2185,6 +2185,7 @@ fn pairing_error_to_http(err: PairingError) -> HttpApiError {
         P::InvalidNonce | P::InvalidPin => HttpApiError::bad_request("invalid pairing credentials"),
         P::Expired => HttpApiError::bad_request("pairing expired"),
         P::AlreadyConsumed => HttpApiError::bad_request("pairing already used"),
+        P::NonceLocked => HttpApiError::bad_request("too many invalid PIN attempts"),
         P::InvalidPublicKey => HttpApiError::bad_request("invalid public key"),
         P::InvalidSignature => HttpApiError::bad_request("invalid signature"),
         P::SignatureMismatch => HttpApiError::bad_request("signature verification failed"),
@@ -2233,6 +2234,41 @@ async fn pair_init_handler(
     }))
 }
 
+// --- per-IP rate limit on /auth/pair (anti brute force) ---
+
+const PAIR_RATE_WINDOW_SECS: u64 = 60;
+const PAIR_RATE_MAX_PER_WINDOW: usize = 20;
+
+static PAIR_RATE_LIMITER: OnceLock<Mutex<HashMap<String, VecDeque<std::time::Instant>>>> =
+    OnceLock::new();
+
+fn pair_rate_limit_check(client_ip: &str) -> bool {
+    let store = PAIR_RATE_LIMITER.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = match store.lock() {
+        Ok(g) => g,
+        Err(_) => return true, // never reject because a lock got poisoned
+    };
+    let now = std::time::Instant::now();
+    let window = Duration::from_secs(PAIR_RATE_WINDOW_SECS);
+    let entry = guard.entry(client_ip.to_string()).or_default();
+    while let Some(front) = entry.front() {
+        if now.duration_since(*front) > window {
+            entry.pop_front();
+        } else {
+            break;
+        }
+    }
+    if entry.len() >= PAIR_RATE_MAX_PER_WINDOW {
+        return false;
+    }
+    entry.push_back(now);
+    // opportunistic shrink to keep the map small
+    if guard.len() > 1024 {
+        guard.retain(|_, q| !q.is_empty());
+    }
+    true
+}
+
 async fn complete_pairing_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     headers: axum::http::HeaderMap,
@@ -2247,6 +2283,13 @@ async fn complete_pairing_handler(
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.split(',').next())
         .map(|s| s.trim().to_string());
+
+    let rate_key = forwarded_ip.clone().unwrap_or_else(|| "unknown".to_string());
+    if !pair_rate_limit_check(&rate_key) {
+        return Err(HttpApiError::bad_request(
+            "rate limit exceeded for /auth/pair",
+        ));
+    }
 
     let device_id = with_pairing_db(config, move |conn| {
         pairing::complete_pairing(

@@ -220,13 +220,16 @@ END;
 -- Mobile / remote pairing (signed-request auth, ECDSA P-256)
 -- =============================================================================
 
--- Pareamento efêmero: nonce + PIN-hash, 60s, 1-use
+-- Pareamento efêmero: nonce + PIN-hash, 60s, 1-use.
+-- failed_attempts/locked_at bloqueiam brute-force do PIN.
 CREATE TABLE IF NOT EXISTS pairing_nonces (
-  nonce        TEXT PRIMARY KEY,
-  pin_hash     TEXT NOT NULL,
-  expires_at   TEXT NOT NULL,
-  consumed_at  TEXT,
-  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  nonce            TEXT PRIMARY KEY,
+  pin_hash         TEXT NOT NULL,
+  expires_at       TEXT NOT NULL,
+  consumed_at      TEXT,
+  failed_attempts  INTEGER NOT NULL DEFAULT 0,
+  locked_at        TEXT,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_pairing_nonces_expires ON pairing_nonces(expires_at);

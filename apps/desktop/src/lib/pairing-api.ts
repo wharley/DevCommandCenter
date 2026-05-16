@@ -16,6 +16,16 @@ export type PairedDevice = {
 	revoked: boolean;
 };
 
+export type AuditEntry = {
+	id: number;
+	event: string;
+	deviceId: string | null;
+	ip: string | null;
+	userAgent: string | null;
+	detailsJson: string | null;
+	createdAt: string;
+};
+
 export function pairInit() {
 	return invoke<PairingChallenge>("pair_init");
 }
@@ -28,4 +38,12 @@ export function pairListDevices(includeRevoked = false) {
 
 export function pairRevokeDevice(deviceId: string) {
 	return invoke<{ revoked: boolean }>("pair_revoke_device", { deviceId });
+}
+
+export function pairAuditLog(limit = 100) {
+	return invoke<{ entries: AuditEntry[] }>("pair_audit_log", { limit });
+}
+
+export function pairPurgeExpired() {
+	return invoke<{ purged: number }>("pair_purge_expired");
 }
