@@ -28,7 +28,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{IpAddr, TcpListener, TcpStream, UdpSocket};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -85,6 +85,7 @@ struct AppState {
     conn: Arc<Mutex<Connection>>,
     terminals: Arc<Mutex<HashMap<String, ManagedTerminal>>>,
     remote_tunnels: Arc<Mutex<HashMap<String, ManagedRemoteTunnel>>>,
+    remote_mobile_relays: Arc<Mutex<HashMap<String, ManagedRemoteMobileRelay>>>,
     daemon: Arc<DaemonState>,
     daemon_endpoint: Arc<Mutex<Option<DaemonRuntimeInfo>>>,
 }
@@ -500,6 +501,13 @@ struct ManagedRemoteTunnel {
     protocol_compatible: Option<bool>,
 }
 
+struct ManagedRemoteMobileRelay {
+    share_port: u16,
+    started_at: String,
+    stop_flag: Arc<AtomicBool>,
+    accept_thread: Option<JoinHandle<()>>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteSshTunnelLaunchInput {
@@ -527,6 +535,12 @@ struct RemoteSshPreflightInput {
 #[serde(rename_all = "camelCase")]
 struct RemoteSshBootstrapInput {
     ssh_target: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteMobileAccessInput {
+    environment_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -569,6 +583,18 @@ struct RemoteSshBootstrapSnapshot {
     tmux_available: Option<bool>,
     binary_compatible: Option<bool>,
     checked_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteMobileAccessSnapshot {
+    environment_id: String,
+    local_endpoint: String,
+    lan_endpoint: Option<String>,
+    lan_endpoints: Vec<String>,
+    share_port: u16,
+    bearer_token: String,
+    started_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -3798,6 +3824,87 @@ fn remote_wait_for_local_port(port: u16, timeout: Duration) -> bool {
     false
 }
 
+fn remote_detect_lan_ipv4_candidates() -> Vec<String> {
+    let mut candidates = Vec::new();
+    for probe in ["1.1.1.1:80", "8.8.8.8:80", "192.168.0.1:80", "10.0.0.1:80"] {
+        let Ok(socket) = UdpSocket::bind(("0.0.0.0", 0)) else {
+            continue;
+        };
+        if socket.connect(probe).is_err() {
+            continue;
+        }
+        let Ok(addr) = socket.local_addr() else {
+            continue;
+        };
+        let IpAddr::V4(ipv4) = addr.ip() else {
+            continue;
+        };
+        if ipv4.is_loopback() || ipv4.is_unspecified() {
+            continue;
+        }
+        let value = ipv4.to_string();
+        if !candidates.iter().any(|candidate| candidate == &value) {
+            candidates.push(value);
+        }
+    }
+    candidates
+}
+
+fn remote_proxy_connection(mut incoming: TcpStream, target_port: u16) {
+    let Ok(mut outbound) = TcpStream::connect(("127.0.0.1", target_port)) else {
+        return;
+    };
+    let Ok(mut incoming_read) = incoming.try_clone() else {
+        return;
+    };
+    let Ok(mut outbound_read) = outbound.try_clone() else {
+        return;
+    };
+
+    let upstream = thread::spawn(move || {
+        let _ = std::io::copy(&mut incoming_read, &mut outbound);
+    });
+    let _ = std::io::copy(&mut outbound_read, &mut incoming);
+    let _ = upstream.join();
+}
+
+fn remote_spawn_mobile_relay(listener: TcpListener, target_port: u16) -> ManagedRemoteMobileRelay {
+    let share_port = listener.local_addr().map(|addr| addr.port()).unwrap_or(0);
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let stop_signal = Arc::clone(&stop_flag);
+
+    let accept_thread = thread::spawn(move || {
+        let _ = listener.set_nonblocking(true);
+        while !stop_signal.load(Ordering::Relaxed) {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    thread::spawn(move || {
+                        remote_proxy_connection(stream, target_port);
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(120));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    ManagedRemoteMobileRelay {
+        share_port,
+        started_at: iso_now(),
+        stop_flag,
+        accept_thread: Some(accept_thread),
+    }
+}
+
+fn remote_stop_mobile_relay(relay: &mut ManagedRemoteMobileRelay) {
+    relay.stop_flag.store(true, Ordering::Relaxed);
+    if let Some(thread) = relay.accept_thread.take() {
+        let _ = thread.join();
+    }
+}
+
 fn remote_detect_tmux_support(ssh_target: &str) -> Option<bool> {
     let status = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
@@ -4444,6 +4551,8 @@ fn remote_spawn_ssh_tunnel(
             "-o",
             "ExitOnForwardFailure=yes",
             "-o",
+            "ConnectTimeout=10",
+            "-o",
             "ServerAliveInterval=30",
             "-o",
             "ServerAliveCountMax=3",
@@ -4487,11 +4596,18 @@ fn remote_stop_tunnel_child(child: &mut Child) {
     let _ = child.wait();
 }
 
-#[tauri::command]
-fn remote_preflight_ssh(input: Value) -> ApiResult<Value> {
-    let input: RemoteSshPreflightInput =
-        serde_json::from_value(input).map_err(|e| db_error(e.to_string()))?;
+fn remote_remove_mobile_relay(
+    state: &AppState,
+    environment_id: &str,
+) -> Result<Option<ManagedRemoteMobileRelay>, String> {
+    state
+        .remote_mobile_relays
+        .lock()
+        .map_err(|_| "remote mobile relays lock poisoned".to_string())
+        .map(|mut relays| relays.remove(environment_id))
+}
 
+fn remote_preflight_ssh_impl(input: RemoteSshPreflightInput) -> ApiResult<Value> {
     let ssh_target = input.ssh_target.trim().to_string();
     if ssh_target.is_empty() {
         return Err(db_error("sshTarget is required"));
@@ -4537,11 +4653,7 @@ fn remote_preflight_ssh(input: Value) -> ApiResult<Value> {
     Ok(serde_json::to_value(snapshot).map_err(|e| db_error(e.to_string()))?)
 }
 
-#[tauri::command]
-fn remote_bootstrap_ssh_binary(input: Value) -> ApiResult<Value> {
-    let input: RemoteSshBootstrapInput =
-        serde_json::from_value(input).map_err(|e| db_error(e.to_string()))?;
-
+fn remote_bootstrap_ssh_binary_impl(input: RemoteSshBootstrapInput) -> ApiResult<Value> {
     let ssh_target = input.ssh_target.trim().to_string();
     if ssh_target.is_empty() {
         return Err(db_error("sshTarget is required"));
@@ -4562,71 +4674,10 @@ fn remote_bootstrap_ssh_binary(input: Value) -> ApiResult<Value> {
     Ok(serde_json::to_value(snapshot).map_err(|e| db_error(e.to_string()))?)
 }
 
-#[tauri::command]
-fn remote_list_ssh_tunnels(state: State<'_, AppState>) -> ApiResult<Value> {
-    let mut tunnels = state
-        .remote_tunnels
-        .lock()
-        .map_err(|_| db_error("remote tunnels lock poisoned"))?;
-
-    let mut exited_ids = Vec::new();
-    let mut snapshots = Vec::with_capacity(tunnels.len());
-    for (environment_id, tunnel) in tunnels.iter_mut() {
-        match tunnel.child.try_wait() {
-            Ok(Some(status)) => {
-                snapshots.push(remote_tunnel_snapshot(
-                    environment_id,
-                    tunnel,
-                    "exited",
-                    status.code(),
-                ));
-                exited_ids.push(environment_id.clone());
-            }
-            Ok(None) => snapshots.push(remote_tunnel_snapshot(
-                environment_id,
-                tunnel,
-                "running",
-                None,
-            )),
-            Err(error) => snapshots.push(remote_tunnel_snapshot(
-                environment_id,
-                tunnel,
-                "error",
-                Some(error.raw_os_error().unwrap_or(-1)),
-            )),
-        }
-    }
-
-    for environment_id in exited_ids {
-        tunnels.remove(&environment_id);
-    }
-
-    Ok(serde_json::json!({ "tunnels": snapshots }))
-}
-
-#[tauri::command]
-fn remote_stop_ssh_tunnel(state: State<'_, AppState>, environment_id: String) -> ApiResult<Value> {
-    let tunnel = {
-        let mut tunnels = state
-            .remote_tunnels
-            .lock()
-            .map_err(|_| db_error("remote tunnels lock poisoned"))?;
-        tunnels.remove(environment_id.trim())
-    };
-
-    if let Some(mut tunnel) = tunnel {
-        remote_stop_tunnel_child(&mut tunnel.child);
-        return Ok(serde_json::json!({ "ok": true }));
-    }
-
-    Ok(serde_json::json!({ "ok": false }))
-}
-
-#[tauri::command]
-fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResult<Value> {
-    let input: RemoteSshTunnelLaunchInput =
-        serde_json::from_value(input).map_err(|e| db_error(e.to_string()))?;
-
+fn remote_launch_ssh_tunnel_impl(
+    state: AppState,
+    input: RemoteSshTunnelLaunchInput,
+) -> ApiResult<Value> {
     let environment_id = input.environment_id.trim().to_string();
     if environment_id.is_empty() {
         return Err(db_error("environmentId is required"));
@@ -4660,6 +4711,12 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
     let mut launch_remote_command = remote_command;
 
     {
+        if let Some(mut relay) =
+            remote_remove_mobile_relay(&state, &environment_id).map_err(db_error)?
+        {
+            remote_stop_mobile_relay(&mut relay);
+        }
+
         let previous = {
             let mut tunnels = state
                 .remote_tunnels
@@ -4768,6 +4825,181 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
         "ok": true,
         "tunnel": snapshot,
     }))
+}
+
+#[tauri::command]
+async fn remote_preflight_ssh(input: Value) -> ApiResult<Value> {
+    let input: RemoteSshPreflightInput =
+        serde_json::from_value(input).map_err(|e| db_error(e.to_string()))?;
+    tauri::async_runtime::spawn_blocking(move || remote_preflight_ssh_impl(input))
+        .await
+        .map_err(|e| db_error(format!("remote preflight task failed: {e}")))?
+}
+
+#[tauri::command]
+async fn remote_bootstrap_ssh_binary(input: Value) -> ApiResult<Value> {
+    let input: RemoteSshBootstrapInput =
+        serde_json::from_value(input).map_err(|e| db_error(e.to_string()))?;
+    tauri::async_runtime::spawn_blocking(move || remote_bootstrap_ssh_binary_impl(input))
+        .await
+        .map_err(|e| db_error(format!("remote bootstrap task failed: {e}")))?
+}
+
+#[tauri::command]
+fn remote_list_ssh_tunnels(state: State<'_, AppState>) -> ApiResult<Value> {
+    let mut tunnels = state
+        .remote_tunnels
+        .lock()
+        .map_err(|_| db_error("remote tunnels lock poisoned"))?;
+
+    let mut exited_ids = Vec::new();
+    let mut snapshots = Vec::with_capacity(tunnels.len());
+    for (environment_id, tunnel) in tunnels.iter_mut() {
+        match tunnel.child.try_wait() {
+            Ok(Some(status)) => {
+                snapshots.push(remote_tunnel_snapshot(
+                    environment_id,
+                    tunnel,
+                    "exited",
+                    status.code(),
+                ));
+                exited_ids.push(environment_id.clone());
+            }
+            Ok(None) => snapshots.push(remote_tunnel_snapshot(
+                environment_id,
+                tunnel,
+                "running",
+                None,
+            )),
+            Err(error) => snapshots.push(remote_tunnel_snapshot(
+                environment_id,
+                tunnel,
+                "error",
+                Some(error.raw_os_error().unwrap_or(-1)),
+            )),
+        }
+    }
+
+    for environment_id in exited_ids {
+        tunnels.remove(&environment_id);
+        if let Ok(Some(mut relay)) = remote_remove_mobile_relay(state.inner(), &environment_id) {
+            remote_stop_mobile_relay(&mut relay);
+        }
+    }
+
+    Ok(serde_json::json!({ "tunnels": snapshots }))
+}
+
+#[tauri::command]
+fn remote_stop_ssh_tunnel(state: State<'_, AppState>, environment_id: String) -> ApiResult<Value> {
+    if let Some(mut relay) =
+        remote_remove_mobile_relay(state.inner(), environment_id.trim()).map_err(db_error)?
+    {
+        remote_stop_mobile_relay(&mut relay);
+    }
+
+    let tunnel = {
+        let mut tunnels = state
+            .remote_tunnels
+            .lock()
+            .map_err(|_| db_error("remote tunnels lock poisoned"))?;
+        tunnels.remove(environment_id.trim())
+    };
+
+    if let Some(mut tunnel) = tunnel {
+        remote_stop_tunnel_child(&mut tunnel.child);
+        return Ok(serde_json::json!({ "ok": true }));
+    }
+
+    Ok(serde_json::json!({ "ok": false }))
+}
+
+#[tauri::command]
+async fn remote_launch_ssh_tunnel(
+    state: State<'_, AppState>,
+    input: Value,
+) -> ApiResult<Value> {
+    let state = state.inner().clone();
+    let input: RemoteSshTunnelLaunchInput =
+        serde_json::from_value(input).map_err(|e| db_error(e.to_string()))?;
+    tauri::async_runtime::spawn_blocking(move || remote_launch_ssh_tunnel_impl(state, input))
+        .await
+        .map_err(|e| db_error(format!("remote launch task failed: {e}")))?
+}
+
+#[tauri::command]
+fn remote_open_mobile_access(
+    state: State<'_, AppState>,
+    input: Value,
+) -> ApiResult<Value> {
+    let input: RemoteMobileAccessInput =
+        serde_json::from_value(input).map_err(|e| db_error(e.to_string()))?;
+    let environment_id = input.environment_id.trim().to_string();
+    if environment_id.is_empty() {
+        return Err(db_error("environmentId is required"));
+    }
+
+    let (local_endpoint, local_port, bearer_token) = {
+        let tunnels = state
+            .remote_tunnels
+            .lock()
+            .map_err(|_| db_error("remote tunnels lock poisoned"))?;
+        let Some(tunnel) = tunnels.get(&environment_id) else {
+            return Err(db_error("remote tunnel is not running for this environment"));
+        };
+        (
+            tunnel.endpoint.clone(),
+            tunnel.local_port,
+            tunnel.bearer_token.clone(),
+        )
+    };
+
+    if let Some(mut relay) =
+        remote_remove_mobile_relay(state.inner(), &environment_id).map_err(db_error)?
+    {
+        remote_stop_mobile_relay(&mut relay);
+    }
+
+    let listener = TcpListener::bind(("0.0.0.0", 0)).map_err(|e| db_error(e.to_string()))?;
+    let relay = remote_spawn_mobile_relay(listener, local_port);
+    let started_at = relay.started_at.clone();
+    let share_port = relay.share_port;
+
+    state
+        .remote_mobile_relays
+        .lock()
+        .map_err(|_| db_error("remote mobile relays lock poisoned"))?
+        .insert(environment_id.clone(), relay);
+
+    let lan_endpoints = remote_detect_lan_ipv4_candidates()
+        .into_iter()
+        .map(|host| format!("http://{host}:{share_port}"))
+        .collect::<Vec<_>>();
+    let snapshot = RemoteMobileAccessSnapshot {
+        environment_id,
+        local_endpoint,
+        lan_endpoint: lan_endpoints.first().cloned(),
+        lan_endpoints,
+        share_port,
+        bearer_token,
+        started_at,
+    };
+
+    Ok(serde_json::to_value(snapshot).map_err(|e| db_error(e.to_string()))?)
+}
+
+#[tauri::command]
+fn remote_close_mobile_access(
+    state: State<'_, AppState>,
+    environment_id: String,
+) -> ApiResult<Value> {
+    let removed =
+        remote_remove_mobile_relay(state.inner(), environment_id.trim()).map_err(db_error)?;
+    if let Some(mut relay) = removed {
+        remote_stop_mobile_relay(&mut relay);
+        return Ok(serde_json::json!({ "ok": true }));
+    }
+    Ok(serde_json::json!({ "ok": false }))
 }
 
 #[tauri::command]
@@ -7489,6 +7721,8 @@ pub fn run() {
             remote_list_ssh_tunnels,
             remote_launch_ssh_tunnel,
             remote_stop_ssh_tunnel,
+            remote_open_mobile_access,
+            remote_close_mobile_access,
             terminal_save_temp_image,
             create_workspace_for_repo,
             create_workspace_from_url,
@@ -7575,6 +7809,7 @@ pub fn run() {
                 conn: Arc::new(Mutex::new(conn)),
                 terminals: Arc::new(Mutex::new(HashMap::new())),
                 remote_tunnels: Arc::new(Mutex::new(HashMap::new())),
+                remote_mobile_relays: Arc::new(Mutex::new(HashMap::new())),
                 daemon: Arc::new(DaemonState {
                     started_at: local_now_string(),
                     last_tick_at: Arc::new(Mutex::new(None)),

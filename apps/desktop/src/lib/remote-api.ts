@@ -54,6 +54,16 @@ export type RemoteBootstrapSnapshot = {
 	checkedAt: string;
 };
 
+export type RemoteMobileAccessSnapshot = {
+	environmentId: string;
+	localEndpoint: string;
+	lanEndpoint: string | null;
+	lanEndpoints: string[];
+	sharePort: number;
+	bearerToken: string;
+	startedAt: string;
+};
+
 export function preflightRemoteSsh(input: RemotePreflightInput) {
 	return invoke<RemotePreflightSnapshot>("remote_preflight_ssh", {
 		input,
@@ -78,6 +88,18 @@ export function launchRemoteSshTunnel(input: RemoteTunnelLaunchInput) {
 
 export function stopRemoteSshTunnel(environmentId: string) {
 	return invoke<{ ok: boolean }>("remote_stop_ssh_tunnel", {
+		environmentId,
+	});
+}
+
+export function openRemoteMobileAccess(environmentId: string) {
+	return invoke<RemoteMobileAccessSnapshot>("remote_open_mobile_access", {
+		input: { environmentId },
+	});
+}
+
+export function closeRemoteMobileAccess(environmentId: string) {
+	return invoke<{ ok: boolean }>("remote_close_mobile_access", {
 		environmentId,
 	});
 }

@@ -18,6 +18,22 @@ export const REMOTE_ENV_STORAGE_KEY = "dcc.remote.environments.v1";
 export const ACTIVE_REMOTE_ENV_STORAGE_KEY = "dcc.remote.environments.active.v1";
 export const REMOTE_ENVIRONMENTS_CHANGED_EVENT = "dcc:remote-environments-changed";
 
+let cachedRemoteEnvironmentsRaw: string | null | undefined;
+let cachedRemoteEnvironments: SavedRemoteEnvironment[] = [];
+let cachedActiveRemoteEnvironmentIdRaw: string | null | undefined;
+let cachedActiveRemoteEnvironmentId: string | null = null;
+let cachedActiveRemoteEnvironmentKey: string | null | undefined;
+let cachedActiveRemoteEnvironment: SavedRemoteEnvironment | null = null;
+
+function invalidateRemoteEnvironmentCache() {
+	cachedRemoteEnvironmentsRaw = undefined;
+	cachedRemoteEnvironments = [];
+	cachedActiveRemoteEnvironmentIdRaw = undefined;
+	cachedActiveRemoteEnvironmentId = null;
+	cachedActiveRemoteEnvironmentKey = undefined;
+	cachedActiveRemoteEnvironment = null;
+}
+
 function emitRemoteEnvironmentsChanged() {
 	if (typeof window === "undefined") {
 		return;
@@ -32,17 +48,32 @@ export function readRemoteEnvironments(): SavedRemoteEnvironment[] {
 
 	try {
 		const raw = window.localStorage.getItem(REMOTE_ENV_STORAGE_KEY);
+		if (raw === cachedRemoteEnvironmentsRaw) {
+			return cachedRemoteEnvironments;
+		}
+
+		cachedRemoteEnvironmentsRaw = raw;
 		if (!raw) {
+			cachedRemoteEnvironments = [];
+			cachedActiveRemoteEnvironmentKey = undefined;
+			cachedActiveRemoteEnvironment = null;
 			return [];
 		}
 		const parsed = JSON.parse(raw);
 		if (!Array.isArray(parsed)) {
+			cachedRemoteEnvironments = [];
+			cachedActiveRemoteEnvironmentKey = undefined;
+			cachedActiveRemoteEnvironment = null;
 			return [];
 		}
-		return parsed
+		cachedRemoteEnvironments = parsed
 			.map((value) => normalizeRemoteEnvironment(value))
 			.filter((value): value is SavedRemoteEnvironment => value !== null);
+		cachedActiveRemoteEnvironmentKey = undefined;
+		cachedActiveRemoteEnvironment = null;
+		return cachedRemoteEnvironments;
 	} catch {
+		invalidateRemoteEnvironmentCache();
 		return [];
 	}
 }
@@ -51,7 +82,12 @@ export function writeRemoteEnvironments(next: SavedRemoteEnvironment[]) {
 	if (typeof window === "undefined") {
 		return;
 	}
-	window.localStorage.setItem(REMOTE_ENV_STORAGE_KEY, JSON.stringify(next));
+	const raw = JSON.stringify(next);
+	window.localStorage.setItem(REMOTE_ENV_STORAGE_KEY, raw);
+	cachedRemoteEnvironmentsRaw = raw;
+	cachedRemoteEnvironments = next;
+	cachedActiveRemoteEnvironmentKey = undefined;
+	cachedActiveRemoteEnvironment = null;
 	emitRemoteEnvironmentsChanged();
 }
 
@@ -103,20 +139,33 @@ export function readActiveRemoteEnvironmentId(): string | null {
 	if (typeof window === "undefined") {
 		return null;
 	}
-	const value = window.localStorage.getItem(ACTIVE_REMOTE_ENV_STORAGE_KEY)?.trim();
-	return value ? value : null;
+	const raw = window.localStorage.getItem(ACTIVE_REMOTE_ENV_STORAGE_KEY);
+	if (raw === cachedActiveRemoteEnvironmentIdRaw) {
+		return cachedActiveRemoteEnvironmentId;
+	}
+
+	cachedActiveRemoteEnvironmentIdRaw = raw;
+	const value = raw?.trim();
+	cachedActiveRemoteEnvironmentId = value ? value : null;
+	cachedActiveRemoteEnvironmentKey = undefined;
+	cachedActiveRemoteEnvironment = null;
+	return cachedActiveRemoteEnvironmentId;
 }
 
 export function writeActiveRemoteEnvironmentId(environmentId: string | null) {
 	if (typeof window === "undefined") {
 		return;
 	}
-	if (environmentId && environmentId.trim()) {
-		window.localStorage.setItem(ACTIVE_REMOTE_ENV_STORAGE_KEY, environmentId);
-		emitRemoteEnvironmentsChanged();
-		return;
+	const normalizedEnvironmentId = environmentId?.trim() ? environmentId.trim() : null;
+	if (normalizedEnvironmentId) {
+		window.localStorage.setItem(ACTIVE_REMOTE_ENV_STORAGE_KEY, normalizedEnvironmentId);
+	} else {
+		window.localStorage.removeItem(ACTIVE_REMOTE_ENV_STORAGE_KEY);
 	}
-	window.localStorage.removeItem(ACTIVE_REMOTE_ENV_STORAGE_KEY);
+	cachedActiveRemoteEnvironmentIdRaw = normalizedEnvironmentId;
+	cachedActiveRemoteEnvironmentId = normalizedEnvironmentId;
+	cachedActiveRemoteEnvironmentKey = undefined;
+	cachedActiveRemoteEnvironment = null;
 	emitRemoteEnvironmentsChanged();
 }
 
@@ -125,9 +174,21 @@ export function subscribeRemoteEnvironmentStore(onStoreChange: () => void) {
 		return () => {};
 	}
 	const handleChange = () => onStoreChange();
+	const handleStorage = (event: StorageEvent) => {
+		if (
+			event.key === null ||
+			event.key === REMOTE_ENV_STORAGE_KEY ||
+			event.key === ACTIVE_REMOTE_ENV_STORAGE_KEY
+		) {
+			invalidateRemoteEnvironmentCache();
+			onStoreChange();
+		}
+	};
 	window.addEventListener(REMOTE_ENVIRONMENTS_CHANGED_EVENT, handleChange);
+	window.addEventListener("storage", handleStorage);
 	return () => {
 		window.removeEventListener(REMOTE_ENVIRONMENTS_CHANGED_EVENT, handleChange);
+		window.removeEventListener("storage", handleStorage);
 	};
 }
 
@@ -136,7 +197,14 @@ export function getActiveRemoteEnvironment(): SavedRemoteEnvironment | null {
 	if (!activeId) {
 		return null;
 	}
-	return (
-		readRemoteEnvironments().find((environment) => environment.id === activeId) ?? null
-	);
+
+	const cacheKey = `${cachedRemoteEnvironmentsRaw ?? ""}:${activeId}`;
+	if (cacheKey === cachedActiveRemoteEnvironmentKey) {
+		return cachedActiveRemoteEnvironment;
+	}
+
+	cachedActiveRemoteEnvironmentKey = cacheKey;
+	cachedActiveRemoteEnvironment =
+		readRemoteEnvironments().find((environment) => environment.id === activeId) ?? null;
+	return cachedActiveRemoteEnvironment;
 }

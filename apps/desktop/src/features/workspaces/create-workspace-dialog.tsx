@@ -7,6 +7,7 @@ import { Button } from "../../components/ui/button";
 import {
 	Dialog,
 	DialogContent,
+	DialogDescription,
 	DialogHeader,
 	DialogTitle,
 } from "../../components/ui/dialog";
@@ -275,9 +276,9 @@ export function CreateWorkspaceDialog({
 					<DialogTitle className="text-[13px] font-medium tracking-[-0.01em]">
 						{mode === "clone" ? t("workspaceDialog.cloneTitle") : t("workspaceDialog.createTitle")}
 					</DialogTitle>
-					<p className="min-w-0 text-[12px] leading-snug text-muted-foreground">
+					<DialogDescription className="min-w-0 text-[12px] leading-snug text-muted-foreground">
 						{mode === "clone" ? t("workspaceDialog.cloneDescription") : t("workspaceDialog.createDescription")}
-					</p>
+					</DialogDescription>
 					{mode === "open" && repositoryContext ? (
 						<div className="min-w-0 overflow-hidden rounded-md border border-border/70 bg-muted/30 px-2.5 py-2 text-[11.5px] leading-5 text-muted-foreground">
 							<span className="font-medium text-foreground">

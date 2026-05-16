@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
 	CheckCircle2,
+	CircleHelp,
 	Copy,
 	Loader2,
 	Play,
+	QrCode,
 	RefreshCw,
 	Square,
 	Trash2,
@@ -12,7 +14,21 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
 	daemonGetStatus,
 	daemonHealth,
@@ -20,13 +36,17 @@ import {
 } from "@/lib/daemon-api";
 import {
 	bootstrapRemoteSshBinary,
+	closeRemoteMobileAccess,
 	launchRemoteSshTunnel,
 	listRemoteSshTunnels,
+	openRemoteMobileAccess,
 	preflightRemoteSsh,
 	stopRemoteSshTunnel,
+	type RemoteMobileAccessSnapshot,
 	type RemotePreflightSnapshot,
 	type RemoteTunnelSnapshot,
 } from "@/lib/remote-api";
+import { RemoteAccessQr } from "./remote-access-qr";
 import {
 	readActiveRemoteEnvironmentId,
 	readRemoteEnvironments,
@@ -50,6 +70,38 @@ type RemoteProbe = {
 	errorMessage: string | null;
 	checkedAt: string | null;
 };
+
+type MobileAccessSession = {
+	environmentId: string;
+	label: string;
+	info: RemoteMobileAccessSnapshot;
+};
+
+function trimTrailingSlash(value: string) {
+	return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+function buildRemoteHealthUrl(endpoint: string) {
+	return `${trimTrailingSlash(endpoint)}/health`;
+}
+
+function buildRemoteRpcUrl(endpoint: string) {
+	return `${trimTrailingSlash(endpoint)}/rpc`;
+}
+
+function buildMobileAccessPayload(endpoint: string, bearerToken: string) {
+	return [
+		"DCC remote access",
+		`endpoint=${endpoint}`,
+		`bearerToken=${bearerToken}`,
+		`health=${buildRemoteHealthUrl(endpoint)}`,
+		`rpc=${buildRemoteRpcUrl(endpoint)}`,
+	].join("\n");
+}
+
+function buildMobileAccessCurl(endpoint: string, bearerToken: string) {
+	return `curl -H "Authorization: Bearer ${bearerToken}" -H "Content-Type: application/json" -d '{"method":"daemon.health","params":{}}' ${buildRemoteRpcUrl(endpoint)}`;
+}
 
 function tmuxInstallCommand(platformName: string | null) {
 	switch ((platformName ?? "").trim()) {
@@ -169,6 +221,11 @@ export function RemoteEnvironmentsPanel() {
 	const [preflights, setPreflights] = useState<Record<string, RemotePreflightSnapshot>>({});
 	const [isRefreshing, setIsRefreshing] = useState(false);
 	const [localBackendProbe, setLocalBackendProbe] = useState<RemoteProbe | null>(null);
+	const [docsOpen, setDocsOpen] = useState(false);
+	const [mobileAccessBusyId, setMobileAccessBusyId] = useState<string | null>(null);
+	const [mobileAccessSession, setMobileAccessSession] = useState<MobileAccessSession | null>(
+		null,
+	);
 
 	const persistEnvironments = (next: SavedRemoteEnvironment[]) => {
 		setEnvironments(next);
@@ -382,6 +439,9 @@ export function RemoteEnvironmentsPanel() {
 	};
 
 	const handleDelete = async (environment: SavedRemoteEnvironment) => {
+		if (mobileAccessSession?.environmentId === environment.id) {
+			await closeMobileAccessSession();
+		}
 		if (tunnels[environment.id]?.status === "running") {
 			try {
 				await stopRemoteSshTunnel(environment.id);
@@ -458,6 +518,9 @@ export function RemoteEnvironmentsPanel() {
 	const handleDisconnect = async (environment: SavedRemoteEnvironment) => {
 		setBusyId(environment.id);
 		try {
+			if (mobileAccessSession?.environmentId === environment.id) {
+				await closeMobileAccessSession();
+			}
 			await stopRemoteSshTunnel(environment.id);
 			setTunnels((current) => {
 				const copy = { ...current };
@@ -485,19 +548,57 @@ export function RemoteEnvironmentsPanel() {
 		}
 	};
 
+	const copyText = async (value: string, successMessage: string) => {
+		try {
+			await navigator.clipboard.writeText(value);
+			toast.success(successMessage);
+		} catch (error) {
+			toast.error(String(error));
+		}
+	};
+
 	const copyFixCommand = async (
 		environment: SavedRemoteEnvironment,
 		command: string,
 	) => {
+		await copyText(
+			command,
+			t("settings.connections.copyFixCommandSuccess", {
+				label: environment.label,
+			}),
+		);
+	};
+
+	const closeMobileAccessSession = async () => {
+		const current = mobileAccessSession;
+		setMobileAccessSession(null);
+		if (!current) {
+			return;
+		}
 		try {
-			await navigator.clipboard.writeText(command);
-			toast.success(
-				t("settings.connections.copyFixCommandSuccess", {
-					label: environment.label,
-				}),
-			);
+			await closeRemoteMobileAccess(current.environmentId);
 		} catch (error) {
 			toast.error(String(error));
+		}
+	};
+
+	const handleOpenMobileAccess = async (environment: SavedRemoteEnvironment) => {
+		if (mobileAccessSession && mobileAccessSession.environmentId !== environment.id) {
+			await closeMobileAccessSession();
+		}
+
+		setMobileAccessBusyId(environment.id);
+		try {
+			const info = await openRemoteMobileAccess(environment.id);
+			setMobileAccessSession({
+				environmentId: environment.id,
+				label: environment.label,
+				info,
+			});
+		} catch (error) {
+			toast.error(String(error));
+		} finally {
+			setMobileAccessBusyId(null);
 		}
 	};
 
@@ -591,14 +692,47 @@ export function RemoteEnvironmentsPanel() {
 		}
 	};
 
+	const mobileAccessEndpoint = mobileAccessSession?.info.lanEndpoint ?? null;
+	const mobileAccessPayload =
+		mobileAccessEndpoint && mobileAccessSession
+			? buildMobileAccessPayload(
+					mobileAccessEndpoint,
+					mobileAccessSession.info.bearerToken,
+				)
+			: null;
+	const mobileAccessCurl =
+		mobileAccessEndpoint && mobileAccessSession
+			? buildMobileAccessCurl(mobileAccessEndpoint, mobileAccessSession.info.bearerToken)
+			: null;
+
 	return (
 		<section className="space-y-4">
 			<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
 				<div className="flex items-start justify-between gap-4">
 					<div className="min-w-0">
-						<h3 className="text-[14px] font-medium text-foreground">
-							{t("settings.connections.title")}
-						</h3>
+						<div className="flex items-center gap-2">
+							<h3 className="text-[14px] font-medium text-foreground">
+								{t("settings.connections.title")}
+							</h3>
+							<TooltipProvider>
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon-xs"
+											onClick={() => setDocsOpen(true)}
+											aria-label={t("settings.connections.helpTooltip")}
+										>
+											<CircleHelp className="size-3.5" />
+										</Button>
+									</TooltipTrigger>
+									<TooltipContent>
+										{t("settings.connections.helpTooltip")}
+									</TooltipContent>
+								</Tooltip>
+							</TooltipProvider>
+						</div>
 						<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
 							{t("settings.connections.body")}
 						</p>
@@ -861,6 +995,20 @@ export function RemoteEnvironmentsPanel() {
 										type="button"
 										variant="outline"
 										size="sm"
+										disabled={mobileAccessBusyId === environment.id || !isRunning}
+										onClick={() => void handleOpenMobileAccess(environment)}
+									>
+										{mobileAccessBusyId === environment.id ? (
+											<Loader2 className="size-3.5 animate-spin" />
+										) : (
+											<QrCode className="size-3.5" />
+										)}
+										{t("settings.connections.mobileAccess")}
+									</Button>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
 										onClick={() => void copyEndpoint(environment)}
 									>
 										<Copy className="size-3.5" />
@@ -1025,6 +1173,223 @@ export function RemoteEnvironmentsPanel() {
 					);
 				})}
 			</div>
+
+			<Dialog open={docsOpen} onOpenChange={setDocsOpen}>
+				<DialogContent className="max-w-xl">
+					<DialogHeader>
+						<DialogTitle>{t("settings.connections.helpTitle")}</DialogTitle>
+						<DialogDescription>
+							{t("settings.connections.helpBody")}
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-3 text-[12px] leading-relaxed text-muted-foreground">
+						<div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+							<p className="font-medium text-foreground">
+								{t("settings.connections.helpCreateTitle")}
+							</p>
+							<p className="mt-1">{t("settings.connections.helpCreateBody")}</p>
+						</div>
+						<div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+							<p className="font-medium text-foreground">
+								{t("settings.connections.helpCheckTitle")}
+							</p>
+							<p className="mt-1">{t("settings.connections.helpCheckBody")}</p>
+						</div>
+						<div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+							<p className="font-medium text-foreground">
+								{t("settings.connections.helpConnectTitle")}
+							</p>
+							<p className="mt-1">{t("settings.connections.helpConnectBody")}</p>
+						</div>
+						<div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+							<p className="font-medium text-foreground">
+								{t("settings.connections.helpMobileTitle")}
+							</p>
+							<p className="mt-1">{t("settings.connections.helpMobileBody")}</p>
+						</div>
+						<p className="text-[11px]">{t("settings.connections.helpSecurity")}</p>
+					</div>
+					<DialogFooter showCloseButton />
+				</DialogContent>
+			</Dialog>
+
+			<Dialog
+				open={mobileAccessSession !== null}
+				onOpenChange={(open) => {
+					if (!open) {
+						void closeMobileAccessSession();
+					}
+				}}
+			>
+				<DialogContent className="max-w-3xl">
+					<DialogHeader>
+						<DialogTitle>
+							{t("settings.connections.mobileAccessTitle", {
+								label: mobileAccessSession?.label ?? "",
+							})}
+						</DialogTitle>
+						<DialogDescription>
+							{t("settings.connections.mobileAccessBody")}
+						</DialogDescription>
+					</DialogHeader>
+					{mobileAccessSession ? (
+						<div className="grid gap-4 md:grid-cols-[260px_minmax(0,1fr)]">
+							<div className="space-y-3">
+								{mobileAccessPayload ? (
+									<RemoteAccessQr
+										value={mobileAccessPayload}
+										size={236}
+										className="mx-auto"
+									/>
+								) : (
+									<div className="flex min-h-[236px] items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 p-4 text-center text-[11px] text-muted-foreground">
+										{t("settings.connections.mobileAccessNoLan")}
+									</div>
+								)}
+								<p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+									{t("settings.connections.mobileAccessQrHint")}
+								</p>
+							</div>
+							<div className="space-y-3">
+								<div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-[12px] text-muted-foreground">
+									<p className="font-medium text-foreground">
+										{t("settings.connections.mobileAccessWhileOpen")}
+									</p>
+									<p className="mt-1">
+										{t("settings.connections.mobileAccessWhileOpenBody")}
+									</p>
+								</div>
+								<div className="grid gap-2 text-[12px] text-muted-foreground">
+									<p>
+										<strong className="text-foreground">
+											{t("settings.connections.mobileAccessLanEndpoint")}:
+										</strong>{" "}
+										<span className="break-all font-mono">
+											{mobileAccessEndpoint ??
+												t("settings.connections.mobileAccessNoLan")}
+										</span>
+									</p>
+									{mobileAccessSession.info.lanEndpoints.length > 1 ? (
+										<p>
+											<strong className="text-foreground">
+												{t("settings.connections.mobileAccessAlternateEndpoints")}:
+											</strong>{" "}
+											<span className="font-mono">
+												{mobileAccessSession.info.lanEndpoints.join(" · ")}
+											</span>
+										</p>
+									) : null}
+									<p>
+										<strong className="text-foreground">
+											{t("settings.connections.mobileAccessLocalEndpoint")}:
+										</strong>{" "}
+										<span className="break-all font-mono">
+											{mobileAccessSession.info.localEndpoint}
+										</span>
+									</p>
+									<p>
+										<strong className="text-foreground">
+											{t("settings.connections.mobileAccessToken")}:
+										</strong>{" "}
+										<span className="break-all font-mono">
+											{mobileAccessSession.info.bearerToken}
+										</span>
+									</p>
+									<p>
+										<strong className="text-foreground">
+											{t("settings.connections.mobileAccessHealth")}:
+										</strong>{" "}
+										<span className="break-all font-mono">
+											{mobileAccessEndpoint
+												? buildRemoteHealthUrl(mobileAccessEndpoint)
+												: t("settings.connections.mobileAccessNoLan")}
+										</span>
+									</p>
+								</div>
+								<div className="flex flex-wrap gap-2">
+									{mobileAccessEndpoint ? (
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											onClick={() =>
+												void copyText(
+													mobileAccessEndpoint,
+													t("settings.connections.copyLanEndpointSuccess"),
+												)
+											}
+										>
+											<Copy className="size-3.5" />
+											{t("settings.connections.copyLanEndpoint")}
+										</Button>
+									) : null}
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										onClick={() =>
+											void copyText(
+												mobileAccessSession.info.bearerToken,
+												t("settings.connections.copyTokenSuccess"),
+											)
+										}
+									>
+										<Copy className="size-3.5" />
+										{t("settings.connections.copyToken")}
+									</Button>
+									{mobileAccessPayload ? (
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											onClick={() =>
+												void copyText(
+													mobileAccessPayload,
+													t("settings.connections.copyPayloadSuccess"),
+												)
+											}
+										>
+											<Copy className="size-3.5" />
+											{t("settings.connections.copyPayload")}
+										</Button>
+									) : null}
+									{mobileAccessCurl ? (
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											onClick={() =>
+												void copyText(
+													mobileAccessCurl,
+													t("settings.connections.copyCurlSuccess"),
+												)
+											}
+										>
+											<Copy className="size-3.5" />
+											{t("settings.connections.copyCurl")}
+										</Button>
+									) : null}
+								</div>
+								{mobileAccessCurl ? (
+									<div className="rounded-lg border border-border/60 bg-background p-3 text-[11px] text-muted-foreground">
+										<p className="font-medium text-foreground">
+											{t("settings.connections.mobileAccessCurl")}
+										</p>
+										<p className="mt-2 break-all font-mono text-[10px] text-foreground/80">
+											{mobileAccessCurl}
+										</p>
+									</div>
+								) : null}
+							</div>
+						</div>
+					) : null}
+					<DialogFooter>
+						<Button type="button" variant="outline" onClick={() => void closeMobileAccessSession()}>
+							{t("settings.connections.mobileAccessClose")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</section>
 	);
 }

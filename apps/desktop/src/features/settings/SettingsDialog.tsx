@@ -18,7 +18,13 @@ import {
 import type { ForgeCliProvider } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -559,9 +565,9 @@ export function SettingsDialog({
 								<DialogTitle className="text-[15px] font-semibold text-foreground">
 									{activeMeta.label}
 								</DialogTitle>
-								<p className="mt-0.5 text-[12px] text-muted-foreground">
+								<DialogDescription className="mt-0.5 text-[12px] text-muted-foreground">
 									{activeMeta.description}
-								</p>
+								</DialogDescription>
 							</div>
 							{activeMeta.status ? <SectionHeaderBadge>{t("settings.statusComingSoon")}</SectionHeaderBadge> : null}
 						</div>
