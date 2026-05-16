@@ -56,6 +56,9 @@ use crate::daemon_client::{default_app_data_dir, rpc_with_db_path_timeout};
 use crate::http_auth::auth_middleware;
 use crate::http_config::{HttpAuthMode, HttpConfig};
 use crate::http_rpc_handler::handle_rpc as handle_json_rpc;
+use crate::pairing::{
+    self, PairedDeviceSummary, PairingChallenge, PairingError, SignedRequestHeaders,
+};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -395,6 +398,9 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
             "/api/v1/auth/bearer/rotate",
             post(rotate_bearer_token_handler),
         )
+        .route("/auth/pair-init", post(pair_init_handler))
+        .route("/auth/devices", get(list_paired_devices_handler))
+        .route("/auth/devices/:device_id", axum::routing::delete(revoke_device_handler))
         .route_layer(middleware::from_fn_with_state(
             config.clone(),
             auth_middleware,
@@ -404,6 +410,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         .route("/", get(root_handler))
         .route("/health", get(health_handler))
         .route("/openapi.json", get(openapi_handler))
+        .route("/auth/pair", post(complete_pairing_handler))
         .merge(protected_routes)
         .layer(build_cors_layer(&cors_config))
         .layer(TraceLayer::new_for_http())
@@ -2108,6 +2115,228 @@ fn authentication_descriptor(config: &HttpConfig) -> Value {
             "bearerTokenPreviousExpiresAt": config.bearer_token_previous_expires_at,
         }
     })
+}
+
+// =============================================================================
+// Mobile pairing handlers (ECDSA P-256 signed-request auth)
+// =============================================================================
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletePairingRequest {
+    nonce: String,
+    pin: String,
+    public_key_spki: String,
+    device_name: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletePairingResponse {
+    ok: bool,
+    device_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PairInitResponse {
+    ok: bool,
+    nonce: String,
+    pin: String,
+    expires_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ListDevicesResponse {
+    ok: bool,
+    devices: Vec<PairedDeviceJson>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PairedDeviceJson {
+    device_id: String,
+    device_name: String,
+    user_agent: Option<String>,
+    created_at: String,
+    last_used_at: Option<String>,
+    last_ip: Option<String>,
+    revoked: bool,
+}
+
+impl From<PairedDeviceSummary> for PairedDeviceJson {
+    fn from(summary: PairedDeviceSummary) -> Self {
+        Self {
+            device_id: summary.device_id,
+            device_name: summary.device_name,
+            user_agent: summary.user_agent,
+            created_at: summary.created_at,
+            last_used_at: summary.last_used_at,
+            last_ip: summary.last_ip,
+            revoked: summary.revoked,
+        }
+    }
+}
+
+fn pairing_error_to_http(err: PairingError) -> HttpApiError {
+    use PairingError as P;
+    match err {
+        P::InvalidNonce | P::InvalidPin => HttpApiError::bad_request("invalid pairing credentials"),
+        P::Expired => HttpApiError::bad_request("pairing expired"),
+        P::AlreadyConsumed => HttpApiError::bad_request("pairing already used"),
+        P::InvalidPublicKey => HttpApiError::bad_request("invalid public key"),
+        P::InvalidSignature => HttpApiError::bad_request("invalid signature"),
+        P::SignatureMismatch => HttpApiError::bad_request("signature verification failed"),
+        P::UnknownDevice => HttpApiError::not_found("device not found"),
+        P::DeviceRevoked => HttpApiError::bad_request("device revoked"),
+        P::TimestampOutOfWindow => HttpApiError::bad_request("timestamp outside replay window"),
+        P::InvalidTimestamp => HttpApiError::bad_request("invalid timestamp"),
+        P::Database(message) => HttpApiError::internal(message),
+    }
+}
+
+async fn with_pairing_db<T, F>(
+    config: Arc<RwLock<HttpConfig>>,
+    op: F,
+) -> Result<T, HttpApiError>
+where
+    T: Send + 'static,
+    F: FnOnce(&rusqlite::Connection) -> Result<T, PairingError> + Send + 'static,
+{
+    let db_path = {
+        let config = config.read().await;
+        config.db_path.clone()
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let conn = rusqlite::Connection::open(&db_path)
+            .map_err(|e| PairingError::Database(e.to_string()))?;
+        op(&conn)
+    })
+    .await
+    .map_err(|e| HttpApiError::internal(format!("pairing worker join failed: {e}")))?
+    .map_err(pairing_error_to_http)
+}
+
+async fn pair_init_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+) -> Result<Json<PairInitResponse>, HttpApiError> {
+    let challenge: PairingChallenge =
+        with_pairing_db(config, |conn| pairing::create_pairing_nonce(conn)).await?;
+
+    Ok(Json(PairInitResponse {
+        ok: true,
+        nonce: challenge.nonce,
+        pin: challenge.pin,
+        expires_at: challenge.expires_at,
+    }))
+}
+
+async fn complete_pairing_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<CompletePairingRequest>,
+) -> Result<Json<CompletePairingResponse>, HttpApiError> {
+    let user_agent = headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let forwarded_ip = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string());
+
+    let device_id = with_pairing_db(config, move |conn| {
+        pairing::complete_pairing(
+            conn,
+            &body.nonce,
+            &body.pin,
+            &body.public_key_spki,
+            &body.device_name,
+            user_agent.as_deref(),
+            forwarded_ip.as_deref(),
+        )
+    })
+    .await?;
+
+    Ok(Json(CompletePairingResponse {
+        ok: true,
+        device_id,
+    }))
+}
+
+async fn list_paired_devices_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<ListDevicesResponse>, HttpApiError> {
+    let include_revoked = query
+        .get("includeRevoked")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
+    let devices = with_pairing_db(config, move |conn| {
+        pairing::list_paired_devices(conn, include_revoked)
+    })
+    .await?;
+
+    Ok(Json(ListDevicesResponse {
+        ok: true,
+        devices: devices.into_iter().map(PairedDeviceJson::from).collect(),
+    }))
+}
+
+async fn revoke_device_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    headers: axum::http::HeaderMap,
+    Path(device_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    let ip = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string());
+
+    let revoked = with_pairing_db(config, move |conn| {
+        pairing::revoke_device(conn, &device_id, ip.as_deref())
+    })
+    .await?;
+
+    if !revoked {
+        return Err(HttpApiError::not_found("device not found or already revoked"));
+    }
+
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// Validates a signed mobile request. To be wired in as a tower middleware in a follow-up step.
+#[allow(dead_code)]
+async fn verify_signed_request_for_path(
+    config: Arc<RwLock<HttpConfig>>,
+    method: String,
+    path: String,
+    body: Vec<u8>,
+    device_id: String,
+    timestamp: String,
+    signature_b64: String,
+    client_ip: Option<String>,
+) -> Result<PairedDeviceSummary, HttpApiError> {
+    with_pairing_db(config, move |conn| {
+        pairing::verify_signed_request(
+            conn,
+            SignedRequestHeaders {
+                device_id: &device_id,
+                timestamp: &timestamp,
+                signature_b64: &signature_b64,
+            },
+            &method,
+            &path,
+            &body,
+            client_ip.as_deref(),
+        )
+    })
+    .await
 }
 
 #[cfg(test)]

@@ -215,3 +215,46 @@ AFTER UPDATE ON daemon_processes
 BEGIN
   UPDATE daemon_processes SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
+
+-- =============================================================================
+-- Mobile / remote pairing (signed-request auth, ECDSA P-256)
+-- =============================================================================
+
+-- Pareamento efêmero: nonce + PIN-hash, 60s, 1-use
+CREATE TABLE IF NOT EXISTS pairing_nonces (
+  nonce        TEXT PRIMARY KEY,
+  pin_hash     TEXT NOT NULL,
+  expires_at   TEXT NOT NULL,
+  consumed_at  TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pairing_nonces_expires ON pairing_nonces(expires_at);
+
+-- Dispositivos pareados com pubkey ECDSA P-256 (SPKI DER, base64)
+CREATE TABLE IF NOT EXISTS paired_devices (
+  device_id        TEXT PRIMARY KEY,
+  device_name      TEXT NOT NULL,
+  public_key_spki  BLOB NOT NULL,
+  user_agent       TEXT,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at     TEXT,
+  last_ip          TEXT,
+  revoked_at       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_paired_devices_revoked ON paired_devices(revoked_at);
+
+-- Trilha de auditoria
+CREATE TABLE IF NOT EXISTS pair_audit_log (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  event         TEXT NOT NULL,
+  device_id     TEXT,
+  ip            TEXT,
+  user_agent    TEXT,
+  details_json  TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pair_audit_log_device ON pair_audit_log(device_id);
+CREATE INDEX IF NOT EXISTS idx_pair_audit_log_created ON pair_audit_log(created_at);
