@@ -59,6 +59,7 @@ use crate::http_rpc_handler::handle_rpc as handle_json_rpc;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DCC_HTTP_PROTOCOL_VERSION: &str = "2026-05-15";
 static HEADLESS_SESSION_STATES: OnceLock<Mutex<HashMap<PathBuf, Arc<SessionCommandState>>>> =
     OnceLock::new();
 static HEADLESS_EVENT_SENDERS: OnceLock<
@@ -935,6 +936,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
     Json(json!({
         "name": "DCC HTTP API",
         "version": env!("CARGO_PKG_VERSION"),
+        "protocolVersion": DCC_HTTP_PROTOCOL_VERSION,
         "documentation": "/openapi.json",
         "guide": "docs/GUIA_HTTP_API.md",
         "authentication": authentication_descriptor(&config),
@@ -993,6 +995,11 @@ async fn health_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Respon
             Json(json!({
                 "status": "ok",
                 "daemon": "connected",
+                "api": {
+                    "name": "DCC HTTP API",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "protocolVersion": DCC_HTTP_PROTOCOL_VERSION,
+                },
                 "database": database,
                 "daemonHealth": payload,
             })),
@@ -1003,6 +1010,11 @@ async fn health_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Respon
             Json(json!({
                 "status": "degraded",
                 "daemon": "disconnected",
+                "api": {
+                    "name": "DCC HTTP API",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "protocolVersion": DCC_HTTP_PROTOCOL_VERSION,
+                },
                 "database": database,
                 "error": {
                     "code": error.code(),
@@ -1086,7 +1098,8 @@ fn build_openapi_document(config: &HttpConfig) -> Value {
         "info": {
             "title": "DCC HTTP API",
             "version": env!("CARGO_PKG_VERSION"),
-            "description": "REST facade over the DCC daemon RPC store."
+            "description": "REST facade over the DCC daemon RPC store.",
+            "x-protocolVersion": DCC_HTTP_PROTOCOL_VERSION
         },
         "servers": [
             {

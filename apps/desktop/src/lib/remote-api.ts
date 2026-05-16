@@ -10,6 +10,9 @@ export type RemoteTunnelSnapshot = {
 	startedAt: string;
 	remoteCommand: string;
 	tmuxAvailable: boolean | null;
+	remoteVersion: string | null;
+	remoteProtocolVersion: string | null;
+	protocolCompatible: boolean | null;
 	status: "running" | "exited" | "error" | string;
 	exitCode: number | null;
 };
@@ -33,6 +36,8 @@ export type RemotePreflightSnapshot = {
 	remoteCommandFound: boolean;
 	tmuxAvailable: boolean | null;
 	platformName: string | null;
+	platformArch: string | null;
+	binaryCompatible: boolean | null;
 	errorMessage: string | null;
 	checkedAt: string;
 };
@@ -45,6 +50,7 @@ export type RemoteBootstrapSnapshot = {
 	installedPath: string;
 	remoteCommand: string;
 	tmuxAvailable: boolean | null;
+	binaryCompatible: boolean | null;
 	checkedAt: string;
 };
 

@@ -291,6 +291,7 @@
         "endpoint": "Forwarded endpoint",
         "health": "Health",
         "backend": "Backend status",
+        "runtime": "Runtime",
         "terminalPersistence": "Terminal persistence",
         "preflight": "Preflight"
       },
@@ -302,6 +303,7 @@
       "recommendationItems": {
         "sshUnavailable": "SSH unavailable. Confirm key-based access and test with `ssh <target> 'sh -lc \"echo ok\"'`.",
         "remoteCommandMissing": "Remote command `{{remoteCommand}}` is not on PATH. Install it on the host or point this environment at the correct binary.",
+        "binaryIncompatible": "Remote host `{{platform}}/{{arch}}` is not compatible with the local binary. Run bootstrap from a machine that matches this host or build `dccd-http` natively on it.",
         "tmuxMissing": "Install `tmux` for stronger terminal persistence: `{{command}}`.",
         "ready": "The host looks ready for remote sessions and strong terminal persistence."
       },

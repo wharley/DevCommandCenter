@@ -9,6 +9,9 @@ export type SavedRemoteEnvironment = {
 	endpoint: string | null;
 	lastStartedAt: string | null;
 	tmuxAvailable: boolean | null;
+	remoteVersion: string | null;
+	remoteProtocolVersion: string | null;
+	protocolCompatible: boolean | null;
 };
 
 export const REMOTE_ENV_STORAGE_KEY = "dcc.remote.environments.v1";
@@ -86,6 +89,13 @@ export function normalizeRemoteEnvironment(value: unknown): SavedRemoteEnvironme
 		lastStartedAt: typeof record.lastStartedAt === "string" ? record.lastStartedAt : null,
 		tmuxAvailable:
 			typeof record.tmuxAvailable === "boolean" ? record.tmuxAvailable : null,
+		remoteVersion: typeof record.remoteVersion === "string" ? record.remoteVersion : null,
+		remoteProtocolVersion:
+			typeof record.remoteProtocolVersion === "string"
+				? record.remoteProtocolVersion
+				: null,
+		protocolCompatible:
+			typeof record.protocolCompatible === "boolean" ? record.protocolCompatible : null,
 	};
 }
 

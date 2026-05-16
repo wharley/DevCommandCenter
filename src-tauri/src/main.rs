@@ -10,6 +10,7 @@ use dcc_tauri::state::{SessionCommandState, WorkspaceCommandState};
 use dev_command_center_tauri::daemon_client::{
     ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo,
 };
+use dev_command_center_tauri::http_api::DCC_HTTP_PROTOCOL_VERSION;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -494,6 +495,9 @@ struct ManagedRemoteTunnel {
     started_at: String,
     remote_command: String,
     tmux_available: Option<bool>,
+    remote_version: Option<String>,
+    remote_protocol_version: Option<String>,
+    protocol_compatible: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -537,6 +541,9 @@ struct RemoteSshTunnelSnapshot {
     started_at: String,
     remote_command: String,
     tmux_available: Option<bool>,
+    remote_version: Option<String>,
+    remote_protocol_version: Option<String>,
+    protocol_compatible: Option<bool>,
     status: String,
     exit_code: Option<i32>,
 }
@@ -548,6 +555,8 @@ struct RemoteSshPreflightSnapshot {
     remote_command_found: bool,
     tmux_available: Option<bool>,
     platform_name: Option<String>,
+    platform_arch: Option<String>,
+    binary_compatible: Option<bool>,
     error_message: Option<String>,
     checked_at: String,
 }
@@ -558,7 +567,24 @@ struct RemoteSshBootstrapSnapshot {
     installed_path: String,
     remote_command: String,
     tmux_available: Option<bool>,
+    binary_compatible: Option<bool>,
     checked_at: String,
+}
+
+#[derive(Debug, Clone)]
+struct RemoteHostFacts {
+    remote_command_found: bool,
+    tmux_available: Option<bool>,
+    platform_name: Option<String>,
+    platform_arch: Option<String>,
+    binary_compatible: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+struct RemoteBackendHandshake {
+    remote_version: Option<String>,
+    remote_protocol_version: Option<String>,
+    protocol_compatible: Option<bool>,
 }
 
 #[cfg(windows)]
@@ -3780,6 +3806,195 @@ fn remote_detect_tmux_support(ssh_target: &str) -> Option<bool> {
     Some(status.success())
 }
 
+fn normalize_remote_platform_name(platform_name: &str) -> Option<&'static str> {
+    let normalized = platform_name.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "darwin" | "macos" | "mac os x" => Some("darwin"),
+        "linux" => Some("linux"),
+        "windows" | "mingw64_nt" | "mingw32_nt" | "msys_nt" | "cygwin_nt" => Some("windows"),
+        value if value.starts_with("mingw") => Some("windows"),
+        value if value.starts_with("msys") => Some("windows"),
+        value if value.starts_with("cygwin") => Some("windows"),
+        _ => None,
+    }
+}
+
+fn normalize_remote_arch(platform_arch: &str) -> Option<&'static str> {
+    let normalized = platform_arch.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "x86_64" | "amd64" => Some("x86_64"),
+        "aarch64" | "arm64" => Some("arm64"),
+        "x86" | "i386" | "i486" | "i586" | "i686" => Some("x86"),
+        "arm" | "armv7" | "armv7l" | "armv6l" => Some("arm"),
+        _ => None,
+    }
+}
+
+fn normalized_local_platform_name() -> Option<&'static str> {
+    match std::env::consts::OS {
+        "macos" => Some("darwin"),
+        "linux" => Some("linux"),
+        "windows" => Some("windows"),
+        _ => None,
+    }
+}
+
+fn normalized_local_arch() -> Option<&'static str> {
+    match std::env::consts::ARCH {
+        "x86_64" => Some("x86_64"),
+        "aarch64" => Some("arm64"),
+        "x86" => Some("x86"),
+        "arm" => Some("arm"),
+        _ => None,
+    }
+}
+
+fn remote_binary_compatible(
+    platform_name: Option<&str>,
+    platform_arch: Option<&str>,
+) -> Option<bool> {
+    let remote_os = normalize_remote_platform_name(platform_name?)?;
+    let remote_arch = normalize_remote_arch(platform_arch?)?;
+    let local_os = normalized_local_platform_name()?;
+    let local_arch = normalized_local_arch()?;
+    Some(remote_os == local_os && remote_arch == local_arch)
+}
+
+fn remote_collect_host_facts(
+    ssh_target: &str,
+    remote_command: &str,
+) -> Result<RemoteHostFacts, String> {
+    let script = format!(
+        "if {remote_command_probe}; then printf 'remote_command=1\\n'; else printf 'remote_command=0\\n'; fi; if command -v tmux >/dev/null 2>&1; then printf 'tmux=1\\n'; else printf 'tmux=0\\n'; fi; printf 'platform='; uname -s 2>/dev/null || printf 'unknown'; printf '\\n'; printf 'arch='; uname -m 2>/dev/null || printf 'unknown'; printf '\\n'",
+        remote_command_probe = remote_command_probe_clause(remote_command),
+    );
+
+    let output = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("failed to run ssh preflight: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("SSH preflight failed for {ssh_target}")
+        } else {
+            stderr
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let remote_command_found = stdout.lines().any(|line| line.trim() == "remote_command=1");
+    let tmux_available = if stdout.lines().any(|line| line.trim() == "tmux=1") {
+        Some(true)
+    } else if stdout.lines().any(|line| line.trim() == "tmux=0") {
+        Some(false)
+    } else {
+        None
+    };
+    let platform_name = stdout.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("platform=")
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != "unknown")
+            .map(str::to_string)
+    });
+    let platform_arch = stdout.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("arch=")
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != "unknown")
+            .map(str::to_string)
+    });
+    let binary_compatible =
+        remote_binary_compatible(platform_name.as_deref(), platform_arch.as_deref());
+
+    Ok(RemoteHostFacts {
+        remote_command_found,
+        tmux_available,
+        platform_name,
+        platform_arch,
+        binary_compatible,
+    })
+}
+
+fn remote_fetch_backend_handshake(
+    endpoint: &str,
+    timeout: Duration,
+) -> Result<RemoteBackendHandshake, String> {
+    let deadline = Instant::now() + timeout;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .map_err(|e| format!("failed to build health client: {e}"))?;
+    let health_url = format!("{}/health", endpoint.trim_end_matches('/'));
+    let mut last_error: Option<String> = None;
+
+    while Instant::now() < deadline {
+        match client.get(&health_url).send() {
+            Ok(response) => {
+                let status = response.status();
+                match response.json::<Value>() {
+                    Ok(payload) => {
+                        let api = payload.get("api").and_then(Value::as_object);
+                        let remote_version = api
+                            .and_then(|record| record.get("version"))
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                        let remote_protocol_version = api
+                            .and_then(|record| record.get("protocolVersion"))
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                        let protocol_compatible = remote_protocol_version
+                            .as_deref()
+                            .map(|value| value == DCC_HTTP_PROTOCOL_VERSION);
+
+                        if status.is_success() && protocol_compatible == Some(true) {
+                            return Ok(RemoteBackendHandshake {
+                                remote_version,
+                                remote_protocol_version,
+                                protocol_compatible,
+                            });
+                        }
+
+                        let reason = if !status.is_success() {
+                            format!("remote health returned HTTP {status}")
+                        } else if protocol_compatible == Some(false) {
+                            format!(
+                                "remote protocol mismatch: expected {expected}, got {actual}",
+                                expected = DCC_HTTP_PROTOCOL_VERSION,
+                                actual = remote_protocol_version.as_deref().unwrap_or("unknown"),
+                            )
+                        } else {
+                            format!(
+                                "remote health response is missing protocolVersion {expected}",
+                                expected = DCC_HTTP_PROTOCOL_VERSION,
+                            )
+                        };
+                        last_error = Some(reason);
+                    }
+                    Err(error) => {
+                        last_error =
+                            Some(format!("failed to parse remote health response: {error}"));
+                    }
+                }
+            }
+            Err(error) => {
+                last_error = Some(format!("failed to request remote health: {error}"));
+            }
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+
+    Err(last_error.unwrap_or_else(|| {
+        format!("remote backend at {health_url} did not complete a compatible health handshake")
+    }))
+}
+
 fn remote_upload_file_via_ssh_stdin(
     ssh_target: &str,
     local_path: &Path,
@@ -3903,6 +4118,9 @@ fn remote_tunnel_snapshot(
         started_at: tunnel.started_at.clone(),
         remote_command: tunnel.remote_command.clone(),
         tmux_available: tunnel.tmux_available,
+        remote_version: tunnel.remote_version.clone(),
+        remote_protocol_version: tunnel.remote_protocol_version.clone(),
+        protocol_compatible: tunnel.protocol_compatible,
         status: status.to_string(),
         exit_code,
     }
@@ -3931,61 +4149,31 @@ fn remote_preflight_ssh(input: Value) -> ApiResult<Value> {
         .unwrap_or("dccd-http")
         .to_string();
 
-    let script = format!(
-        "if {remote_command_probe}; then printf 'remote_command=1\\n'; else printf 'remote_command=0\\n'; fi; if command -v tmux >/dev/null 2>&1; then printf 'tmux=1\\n'; else printf 'tmux=0\\n'; fi; printf 'platform='; uname -s 2>/dev/null || printf 'unknown'; printf '\\n'",
-        remote_command_probe = remote_command_probe_clause(&remote_command),
-    );
-
-    let output = Command::new("ssh")
-        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
-        .arg(&ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg(&script)
-        .output()
-        .map_err(|e| db_error(format!("failed to run ssh preflight: {e}")))?;
-
     let checked_at = iso_now();
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let message = if stderr.is_empty() {
-            format!("SSH preflight failed for {ssh_target}")
-        } else {
-            stderr
-        };
-        let snapshot = RemoteSshPreflightSnapshot {
-            ssh_reachable: false,
-            remote_command_found: false,
-            tmux_available: None,
-            platform_name: None,
-            error_message: Some(message),
-            checked_at,
-        };
-        return Ok(serde_json::to_value(snapshot).map_err(|e| db_error(e.to_string()))?);
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let remote_command_found = stdout.lines().any(|line| line.trim() == "remote_command=1");
-    let tmux_available = if stdout.lines().any(|line| line.trim() == "tmux=1") {
-        Some(true)
-    } else if stdout.lines().any(|line| line.trim() == "tmux=0") {
-        Some(false)
-    } else {
-        None
+    let facts = match remote_collect_host_facts(&ssh_target, &remote_command) {
+        Ok(facts) => facts,
+        Err(message) => {
+            let snapshot = RemoteSshPreflightSnapshot {
+                ssh_reachable: false,
+                remote_command_found: false,
+                tmux_available: None,
+                platform_name: None,
+                platform_arch: None,
+                binary_compatible: None,
+                error_message: Some(message),
+                checked_at,
+            };
+            return Ok(serde_json::to_value(snapshot).map_err(|e| db_error(e.to_string()))?);
+        }
     };
-    let platform_name = stdout.lines().find_map(|line| {
-        line.trim()
-            .strip_prefix("platform=")
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    });
 
     let snapshot = RemoteSshPreflightSnapshot {
         ssh_reachable: true,
-        remote_command_found,
-        tmux_available,
-        platform_name,
+        remote_command_found: facts.remote_command_found,
+        tmux_available: facts.tmux_available,
+        platform_name: facts.platform_name,
+        platform_arch: facts.platform_arch,
+        binary_compatible: facts.binary_compatible,
         error_message: None,
         checked_at,
     };
@@ -4007,6 +4195,15 @@ fn remote_bootstrap_ssh_binary(input: Value) -> ApiResult<Value> {
         .ok_or_else(|| db_error("local dccd-http binary not found"))?;
     let remote_dir = "~/.dcc/bin";
     let remote_command = "~/.dcc/bin/dccd-http".to_string();
+    let host_facts = remote_collect_host_facts(&ssh_target, "dccd-http").map_err(db_error)?;
+
+    if host_facts.binary_compatible != Some(true) {
+        let platform_name = host_facts.platform_name.as_deref().unwrap_or("unknown");
+        let platform_arch = host_facts.platform_arch.as_deref().unwrap_or("unknown");
+        return Err(db_error(format!(
+            "remote bootstrap refused for {ssh_target}; local dccd-http binary is not compatible with remote host {platform_name}/{platform_arch}"
+        )));
+    }
 
     let mkdir_status = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
@@ -4058,7 +4255,8 @@ fn remote_bootstrap_ssh_binary(input: Value) -> ApiResult<Value> {
     let snapshot = RemoteSshBootstrapSnapshot {
         installed_path: remote_command.clone(),
         remote_command,
-        tmux_available: remote_detect_tmux_support(&ssh_target),
+        tmux_available: host_facts.tmux_available,
+        binary_compatible: host_facts.binary_compatible,
         checked_at: iso_now(),
     };
 
@@ -4229,6 +4427,15 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
     }
 
     let endpoint = format!("http://127.0.0.1:{local_port}");
+    let handshake = match remote_fetch_backend_handshake(&endpoint, Duration::from_secs(8)) {
+        Ok(handshake) => handshake,
+        Err(error) => {
+            remote_stop_tunnel_child(&mut child);
+            return Err(db_error(format!(
+                "remote backend handshake failed for {ssh_target}: {error}"
+            )));
+        }
+    };
     let started_at = iso_now();
     let snapshot = RemoteSshTunnelSnapshot {
         environment_id: environment_id.clone(),
@@ -4240,6 +4447,9 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
         started_at: started_at.clone(),
         remote_command: remote_command.clone(),
         tmux_available,
+        remote_version: handshake.remote_version.clone(),
+        remote_protocol_version: handshake.remote_protocol_version.clone(),
+        protocol_compatible: handshake.protocol_compatible,
         status: "running".to_string(),
         exit_code: None,
     };
@@ -4254,6 +4464,9 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
         started_at,
         remote_command,
         tmux_available,
+        remote_version: handshake.remote_version,
+        remote_protocol_version: handshake.remote_protocol_version,
+        protocol_compatible: handshake.protocol_compatible,
     };
 
     state

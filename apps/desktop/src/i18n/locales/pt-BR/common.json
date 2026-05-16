@@ -291,6 +291,7 @@
         "endpoint": "Endpoint encaminhado",
         "health": "Saúde",
         "backend": "Estado do backend",
+        "runtime": "Runtime",
         "terminalPersistence": "Persistência do terminal",
         "preflight": "Pré-checagem"
       },
@@ -302,6 +303,7 @@
       "recommendationItems": {
         "sshUnavailable": "SSH indisponível. Confirme acesso por chave e teste com `ssh <target> 'sh -lc \"echo ok\"'`.",
         "remoteCommandMissing": "O comando remoto `{{remoteCommand}}` não está no PATH. Instale-o no host ou aponte este ambiente para o binário correto.",
+        "binaryIncompatible": "O host remoto `{{platform}}/{{arch}}` não é compatível com o binário local. Faça o bootstrap a partir de uma máquina compatível com esse host ou compile o `dccd-http` nativamente nele.",
         "tmuxMissing": "Instale `tmux` para persistência mais forte do terminal: `{{command}}`.",
         "ready": "O host parece pronto para sessões remotas e persistência forte do terminal."
       },

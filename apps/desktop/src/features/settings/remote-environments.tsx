@@ -83,6 +83,14 @@ function remotePreflightRecommendations(
 			}),
 		);
 	}
+	if (preflight.binaryCompatible === false) {
+		items.push(
+			t("settings.connections.recommendationItems.binaryIncompatible", {
+				platform: preflight.platformName ?? "unknown",
+				arch: preflight.platformArch ?? "unknown",
+			}),
+		);
+	}
 	if (preflight.tmuxAvailable === false) {
 		items.push(
 			t("settings.connections.recommendationItems.tmuxMissing", {
@@ -101,6 +109,9 @@ function remotePreflightFixCommand(
 	remoteCommand: string,
 ) {
 	if (!preflight || !preflight.sshReachable) {
+		return null;
+	}
+	if (preflight.binaryCompatible === false) {
 		return null;
 	}
 	if (!preflight.remoteCommandFound) {
@@ -358,6 +369,9 @@ export function RemoteEnvironmentsPanel() {
 			endpoint: null,
 			lastStartedAt: null,
 			tmuxAvailable: null,
+			remoteVersion: null,
+			remoteProtocolVersion: null,
+			protocolCompatible: null,
 		};
 		const updated = [next, ...environments];
 		persistEnvironments(updated);
@@ -413,6 +427,9 @@ export function RemoteEnvironmentsPanel() {
 				endpoint: tunnel.endpoint,
 				lastStartedAt: tunnel.startedAt,
 				tmuxAvailable: tunnel.tmuxAvailable,
+				remoteVersion: tunnel.remoteVersion,
+				remoteProtocolVersion: tunnel.remoteProtocolVersion,
+				protocolCompatible: tunnel.protocolCompatible,
 			};
 			persistEnvironments(
 				environments.map((candidate) =>
@@ -505,7 +522,11 @@ export function RemoteEnvironmentsPanel() {
 					),
 				);
 			}
-			if (result.sshReachable && result.remoteCommandFound) {
+			if (
+				result.sshReachable &&
+				result.remoteCommandFound &&
+				result.binaryCompatible !== false
+			) {
 				toast.success(
 					t("settings.connections.preflightOk", {
 						label: environment.label,
@@ -535,6 +556,9 @@ export function RemoteEnvironmentsPanel() {
 				...environment,
 				remoteCommand: result.remoteCommand,
 				tmuxAvailable: result.tmuxAvailable,
+				remoteVersion: null,
+				remoteProtocolVersion: null,
+				protocolCompatible: null,
 			};
 			persistEnvironments(
 				environments.map((candidate) =>
@@ -714,6 +738,11 @@ export function RemoteEnvironmentsPanel() {
 					const endpoint = tunnel?.endpoint ?? environment.endpoint;
 					const preflight = preflights[environment.id] ?? null;
 					const tmuxAvailable = tunnel?.tmuxAvailable ?? environment.tmuxAvailable;
+					const remoteVersion = tunnel?.remoteVersion ?? environment.remoteVersion;
+					const remoteProtocolVersion =
+						tunnel?.remoteProtocolVersion ?? environment.remoteProtocolVersion;
+					const protocolCompatible =
+						tunnel?.protocolCompatible ?? environment.protocolCompatible;
 					const terminalPersistenceLabel =
 						tmuxAvailable === true
 							? t("settings.connections.persistence.tmux")
@@ -901,6 +930,24 @@ export function RemoteEnvironmentsPanel() {
 								</p>
 								<p>
 									<strong className="text-foreground">
+										{t("settings.connections.fields.runtime")}:
+									</strong>{" "}
+									<span className="font-mono">
+										{remoteVersion || remoteProtocolVersion
+											? [
+													remoteVersion ? `v${remoteVersion}` : null,
+													remoteProtocolVersion
+														? `proto ${remoteProtocolVersion}`
+														: null,
+													protocolCompatible === false ? "mismatch" : null,
+												]
+													.filter(Boolean)
+													.join(" · ")
+											: t("settings.connections.notConnected")}
+									</span>
+								</p>
+								<p>
+									<strong className="text-foreground">
 										{t("settings.connections.fields.terminalPersistence")}:
 									</strong>{" "}
 									<span className="font-mono">{terminalPersistenceLabel}</span>
@@ -919,7 +966,17 @@ export function RemoteEnvironmentsPanel() {
 														: preflight.tmuxAvailable === false
 															? "no-tmux"
 															: "tmux-unknown",
-												].join(" · ")
+													preflight.platformName && preflight.platformArch
+														? `${preflight.platformName}/${preflight.platformArch}`
+														: null,
+													preflight.binaryCompatible === true
+														? "bin-ok"
+														: preflight.binaryCompatible === false
+															? "bin-mismatch"
+															: null,
+												]
+													.filter(Boolean)
+													.join(" · ")
 											: t("settings.connections.health.unknown")}
 									</span>
 								</p>
