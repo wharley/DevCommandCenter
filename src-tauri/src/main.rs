@@ -3805,6 +3805,10 @@ fn remote_shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
+fn remote_ssh_lc_arg(script: &str) -> String {
+    format!("sh -lc {}", remote_shell_single_quote(script))
+}
+
 fn remote_pick_free_loopback_port() -> Result<u16, String> {
     TcpListener::bind(("127.0.0.1", 0))
         .and_then(|listener| listener.local_addr())
@@ -3909,9 +3913,7 @@ fn remote_detect_tmux_support(ssh_target: &str) -> Option<bool> {
     let status = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .arg(ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg("command -v tmux >/dev/null 2>&1")
+        .arg(remote_ssh_lc_arg("command -v tmux >/dev/null 2>&1 || [ -x /opt/homebrew/bin/tmux ] || [ -x /usr/local/bin/tmux ]"))
         .status()
         .ok()?;
     Some(status.success())
@@ -3976,16 +3978,14 @@ fn remote_collect_host_facts(
     remote_command: &str,
 ) -> Result<RemoteHostFacts, String> {
     let script = format!(
-        "if {remote_command_probe}; then printf 'remote_command=1\\n'; else printf 'remote_command=0\\n'; fi; if command -v tmux >/dev/null 2>&1; then printf 'tmux=1\\n'; else printf 'tmux=0\\n'; fi; printf 'platform='; uname -s 2>/dev/null || printf 'unknown'; printf '\\n'; printf 'arch='; uname -m 2>/dev/null || printf 'unknown'; printf '\\n'",
+        "if {remote_command_probe}; then printf 'remote_command=1\\n'; else printf 'remote_command=0\\n'; fi; if command -v tmux >/dev/null 2>&1 || [ -x /opt/homebrew/bin/tmux ] || [ -x /usr/local/bin/tmux ]; then printf 'tmux=1\\n'; else printf 'tmux=0\\n'; fi; printf 'platform='; uname -s 2>/dev/null || printf 'unknown'; printf '\\n'; printf 'arch='; uname -m 2>/dev/null || printf 'unknown'; printf '\\n'",
         remote_command_probe = remote_command_probe_clause(remote_command),
     );
 
     let output = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .arg(ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg(&script)
+        .arg(remote_ssh_lc_arg(&script))
         .output()
         .map_err(|e| format!("failed to run ssh preflight: {e}"))?;
 
@@ -4120,9 +4120,7 @@ fn remote_upload_file_via_ssh_stdin(
     let mut child = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .arg(ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg(&remote_script)
+        .arg(remote_ssh_lc_arg(&remote_script))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -4159,9 +4157,7 @@ fn remote_write_text_via_ssh_stdin(
     let mut child = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .arg(ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg(&remote_script)
+        .arg(remote_ssh_lc_arg(&remote_script))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -4308,9 +4304,7 @@ fn remote_ensure_service_script(ssh_target: &str) -> Result<(), String> {
     let mkdir_status = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .arg(ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg("mkdir -p \"$HOME/.dcc/bin\"")
+        .arg(remote_ssh_lc_arg("mkdir -p $HOME/.dcc/bin"))
         .status()
         .map_err(|e| format!("failed to create remote service directory: {e}"))?;
 
@@ -4333,9 +4327,7 @@ fn remote_ensure_service_script(ssh_target: &str) -> Result<(), String> {
     let chmod_status = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .arg(ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg(&chmod_script)
+        .arg(remote_ssh_lc_arg(&chmod_script))
         .status()
         .map_err(|e| format!("failed to chmod remote service script: {e}"))?;
 
@@ -4436,9 +4428,7 @@ fn remote_install_local_http_binary(
     let mkdir_output = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .arg(ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg("mkdir -p \"$HOME/.dcc/bin\"")
+        .arg(remote_ssh_lc_arg("mkdir -p $HOME/.dcc/bin"))
         .output()
         .map_err(|e| format!("failed to create remote bootstrap directory: {e}"))?;
 
@@ -4478,9 +4468,7 @@ fn remote_install_local_http_binary(
     let chmod_status = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .arg(ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg(&chmod_script)
+        .arg(remote_ssh_lc_arg(&chmod_script))
         .status()
         .map_err(|e| format!("failed to chmod uploaded dccd-http: {e}"))?;
 
@@ -4529,9 +4517,7 @@ fn remote_start_backend_over_ssh(
     let service_status = Command::new("ssh")
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         .arg(ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg(&bootstrap_script)
+        .arg(remote_ssh_lc_arg(&bootstrap_script))
         .status()
         .map_err(|e| format!("failed to start remote launcher: {e}"))?;
 
