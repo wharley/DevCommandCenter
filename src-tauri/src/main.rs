@@ -4522,6 +4522,10 @@ fn remote_start_backend_over_ssh(
         .map_err(|e| format!("failed to start remote launcher: {e}"))?;
 
     if !service_status.success() {
+        // Exit code 127 = binary not found by the service script
+        if service_status.code() == Some(127) {
+            return Err(format!("binary-not-found:{remote_command}"));
+        }
         return Err(format!(
             "remote service start failed for {ssh_target}; ensure key-based SSH access and a valid backend binary"
         ));
@@ -4724,15 +4728,29 @@ fn remote_launch_ssh_tunnel_impl(
 
     let (child, handshake) = {
         let mut attempted_repair = false;
+        let mut attempted_auto_install = false;
         loop {
-            remote_start_backend_over_ssh(
+            match remote_start_backend_over_ssh(
                 &ssh_target,
                 &launch_remote_command,
                 remote_port,
                 &bearer_token,
                 attempted_repair,
-            )
-            .map_err(db_error)?;
+            ) {
+                Ok(()) => {}
+                Err(ref error) if error.starts_with("binary-not-found:") && !attempted_auto_install => {
+                    let install_command = REMOTE_BOOTSTRAP_COMMAND.to_string();
+                    let host_facts = remote_install_local_http_binary(&ssh_target, &install_command)
+                        .map_err(|install_err| db_error(format!(
+                            "dccd-http not found on {ssh_target}; auto-install also failed: {install_err}"
+                        )))?;
+                    tmux_available = host_facts.tmux_available;
+                    launch_remote_command = install_command;
+                    attempted_auto_install = true;
+                    continue;
+                }
+                Err(error) => return Err(db_error(error)),
+            }
 
             let mut child =
                 remote_spawn_ssh_tunnel(&ssh_target, local_port, remote_port).map_err(db_error)?;
