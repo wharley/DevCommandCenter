@@ -37,8 +37,25 @@ export type RemotePreflightSnapshot = {
 	checkedAt: string;
 };
 
+export type RemoteBootstrapInput = {
+	sshTarget: string;
+};
+
+export type RemoteBootstrapSnapshot = {
+	installedPath: string;
+	remoteCommand: string;
+	tmuxAvailable: boolean | null;
+	checkedAt: string;
+};
+
 export function preflightRemoteSsh(input: RemotePreflightInput) {
 	return invoke<RemotePreflightSnapshot>("remote_preflight_ssh", {
+		input,
+	});
+}
+
+export function bootstrapRemoteSshBinary(input: RemoteBootstrapInput) {
+	return invoke<RemoteBootstrapSnapshot>("remote_bootstrap_ssh_binary", {
 		input,
 	});
 }

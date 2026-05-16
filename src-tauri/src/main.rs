@@ -519,6 +519,12 @@ struct RemoteSshPreflightInput {
     remote_command: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteSshBootstrapInput {
+    ssh_target: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteSshTunnelSnapshot {
@@ -543,6 +549,15 @@ struct RemoteSshPreflightSnapshot {
     tmux_available: Option<bool>,
     platform_name: Option<String>,
     error_message: Option<String>,
+    checked_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteSshBootstrapSnapshot {
+    installed_path: String,
+    remote_command: String,
+    tmux_available: Option<bool>,
     checked_at: String,
 }
 
@@ -3765,6 +3780,73 @@ fn remote_detect_tmux_support(ssh_target: &str) -> Option<bool> {
     Some(status.success())
 }
 
+fn remote_command_shell_expr(remote_command: &str) -> String {
+    let trimmed = remote_command.trim();
+    if let Some(path) = trimmed.strip_prefix("~/") {
+        return format!("\"$HOME/{}\"", path);
+    }
+    remote_shell_single_quote(trimmed)
+}
+
+fn remote_command_probe_clause(remote_command: &str) -> String {
+    let trimmed = remote_command.trim();
+    if trimmed.contains('/') {
+        format!("[ -x {} ]", remote_command_shell_expr(trimmed))
+    } else {
+        format!(
+            "command -v {} >/dev/null 2>&1",
+            remote_shell_single_quote(trimmed)
+        )
+    }
+}
+
+fn remote_binary_candidates(binary_stem: &str) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let extension = if cfg!(windows) { ".exe" } else { "" };
+    let arch = std::env::consts::ARCH;
+    let os = std::env::consts::OS;
+    let target = format!("{arch}-{os}");
+    let names = [
+        format!("{binary_stem}{extension}"),
+        format!("{binary_stem}-{target}{extension}"),
+    ];
+
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            for name in &names {
+                candidates.push(parent.join(name));
+            }
+            if let Some(grand_parent) = parent.parent() {
+                for name in &names {
+                    candidates.push(grand_parent.join(name));
+                }
+            }
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        for profile in ["debug", "release"] {
+            for name in &names {
+                candidates.push(cwd.join("target").join(profile).join(name));
+                candidates.push(
+                    cwd.join("src-tauri")
+                        .join("target")
+                        .join(profile)
+                        .join(name),
+                );
+            }
+        }
+    }
+
+    candidates
+}
+
+fn locate_local_remote_http_binary() -> Option<PathBuf> {
+    remote_binary_candidates("dccd-http")
+        .into_iter()
+        .find(|candidate| candidate.exists() && candidate.is_file())
+}
+
 fn remote_tunnel_snapshot(
     environment_id: &str,
     tunnel: &ManagedRemoteTunnel,
@@ -3810,8 +3892,8 @@ fn remote_preflight_ssh(input: Value) -> ApiResult<Value> {
         .to_string();
 
     let script = format!(
-        "if command -v {remote_command} >/dev/null 2>&1; then printf 'remote_command=1\\n'; else printf 'remote_command=0\\n'; fi; if command -v tmux >/dev/null 2>&1; then printf 'tmux=1\\n'; else printf 'tmux=0\\n'; fi; printf 'platform='; uname -s 2>/dev/null || printf 'unknown'; printf '\\n'",
-        remote_command = remote_shell_single_quote(&remote_command),
+        "if {remote_command_probe}; then printf 'remote_command=1\\n'; else printf 'remote_command=0\\n'; fi; if command -v tmux >/dev/null 2>&1; then printf 'tmux=1\\n'; else printf 'tmux=0\\n'; fi; printf 'platform='; uname -s 2>/dev/null || printf 'unknown'; printf '\\n'",
+        remote_command_probe = remote_command_probe_clause(&remote_command),
     );
 
     let output = Command::new("ssh")
@@ -3866,6 +3948,75 @@ fn remote_preflight_ssh(input: Value) -> ApiResult<Value> {
         platform_name,
         error_message: None,
         checked_at,
+    };
+
+    Ok(serde_json::to_value(snapshot).map_err(|e| db_error(e.to_string()))?)
+}
+
+#[tauri::command]
+fn remote_bootstrap_ssh_binary(input: Value) -> ApiResult<Value> {
+    let input: RemoteSshBootstrapInput =
+        serde_json::from_value(input).map_err(|e| db_error(e.to_string()))?;
+
+    let ssh_target = input.ssh_target.trim().to_string();
+    if ssh_target.is_empty() {
+        return Err(db_error("sshTarget is required"));
+    }
+
+    let local_binary = locate_local_remote_http_binary()
+        .ok_or_else(|| db_error("local dccd-http binary not found"))?;
+    let remote_dir = "~/.dcc/bin";
+    let remote_command = "~/.dcc/bin/dccd-http".to_string();
+
+    let mkdir_status = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(&ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg("mkdir -p \"$HOME/.dcc/bin\"")
+        .status()
+        .map_err(|e| db_error(format!("failed to create remote bootstrap directory: {e}")))?;
+
+    if !mkdir_status.success() {
+        return Err(db_error(format!(
+            "remote bootstrap failed for {ssh_target}; could not create ~/.dcc/bin"
+        )));
+    }
+
+    let scp_target = format!("{ssh_target}:{remote_dir}/dccd-http");
+    let scp_status = Command::new("scp")
+        .args(["-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(&local_binary)
+        .arg(&scp_target)
+        .status()
+        .map_err(|e| db_error(format!("failed to upload dccd-http: {e}")))?;
+
+    if !scp_status.success() {
+        return Err(db_error(format!(
+            "remote bootstrap failed for {ssh_target}; scp upload was unsuccessful"
+        )));
+    }
+
+    let chmod_status = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(&ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg("chmod +x \"$HOME/.dcc/bin/dccd-http\"")
+        .status()
+        .map_err(|e| db_error(format!("failed to chmod uploaded dccd-http: {e}")))?;
+
+    if !chmod_status.success() {
+        return Err(db_error(format!(
+            "remote bootstrap failed for {ssh_target}; chmod on ~/.dcc/bin/dccd-http failed"
+        )));
+    }
+
+    let snapshot = RemoteSshBootstrapSnapshot {
+        installed_path: remote_command.clone(),
+        remote_command,
+        tmux_available: remote_detect_tmux_support(&ssh_target),
+        checked_at: iso_now(),
     };
 
     Ok(serde_json::to_value(snapshot).map_err(|e| db_error(e.to_string()))?)
@@ -3966,10 +4117,13 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
         .map(str::to_string)
         .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
     let tmux_available = remote_detect_tmux_support(&ssh_target);
+    let remote_command_probe = remote_command_probe_clause(&remote_command);
+    let remote_command_exec = remote_command_shell_expr(&remote_command);
 
     let bootstrap_script = format!(
-        "mkdir -p \"$HOME/.dcc\" && if command -v {remote_command} >/dev/null 2>&1; then nohup env DCC_HTTP_HOST=127.0.0.1 DCC_HTTP_PORT={remote_port} DCC_HTTP_AUTH_MODE=remote DCC_HTTP_BEARER_TOKEN={bearer_token} {remote_command} > \"$HOME/.dcc/dccd-http.log\" 2>&1 < /dev/null & else echo \"dccd-http not found on remote PATH\" >&2; exit 127; fi",
-        remote_command = remote_shell_single_quote(&remote_command),
+        "mkdir -p \"$HOME/.dcc\" && if {remote_command_probe}; then nohup env DCC_HTTP_HOST=127.0.0.1 DCC_HTTP_PORT={remote_port} DCC_HTTP_AUTH_MODE=remote DCC_HTTP_BEARER_TOKEN={bearer_token} {remote_command_exec} > \"$HOME/.dcc/dccd-http.log\" 2>&1 < /dev/null & else echo \"dccd-http not found on remote PATH\" >&2; exit 127; fi",
+        remote_command_probe = remote_command_probe,
+        remote_command_exec = remote_command_exec,
         remote_port = remote_port,
         bearer_token = remote_shell_single_quote(&bearer_token),
     );
@@ -6786,6 +6940,7 @@ pub fn run() {
             terminal_clear_persisted_scrollback,
             terminal_get_project_activity,
             remote_preflight_ssh,
+            remote_bootstrap_ssh_binary,
             remote_list_ssh_tunnels,
             remote_launch_ssh_tunnel,
             remote_stop_ssh_tunnel,

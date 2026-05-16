@@ -19,6 +19,7 @@ import {
 	getCurrentBackendTarget,
 } from "@/lib/daemon-api";
 import {
+	bootstrapRemoteSshBinary,
 	launchRemoteSshTunnel,
 	listRemoteSshTunnels,
 	preflightRemoteSsh,
@@ -153,6 +154,7 @@ export function RemoteEnvironmentsPanel() {
 	const [probes, setProbes] = useState<Record<string, RemoteProbe>>({});
 	const [busyId, setBusyId] = useState<string | null>(null);
 	const [preflightBusyId, setPreflightBusyId] = useState<string | null>(null);
+	const [bootstrapBusyId, setBootstrapBusyId] = useState<string | null>(null);
 	const [preflights, setPreflights] = useState<Record<string, RemotePreflightSnapshot>>({});
 	const [isRefreshing, setIsRefreshing] = useState(false);
 	const [localBackendProbe, setLocalBackendProbe] = useState<RemoteProbe | null>(null);
@@ -523,6 +525,47 @@ export function RemoteEnvironmentsPanel() {
 		}
 	};
 
+	const handleBootstrapRuntime = async (environment: SavedRemoteEnvironment) => {
+		setBootstrapBusyId(environment.id);
+		try {
+			const result = await bootstrapRemoteSshBinary({
+				sshTarget: environment.sshTarget,
+			});
+			const updatedEnvironment: SavedRemoteEnvironment = {
+				...environment,
+				remoteCommand: result.remoteCommand,
+				tmuxAvailable: result.tmuxAvailable,
+			};
+			persistEnvironments(
+				environments.map((candidate) =>
+					candidate.id === environment.id ? updatedEnvironment : candidate,
+				),
+			);
+			toast.success(
+				t("settings.connections.bootstrapSuccess", {
+					label: environment.label,
+				}),
+			);
+			const refreshedPreflight = await preflightRemoteSsh({
+				sshTarget: environment.sshTarget,
+				remoteCommand: result.remoteCommand,
+			});
+			setPreflights((current) => ({
+				...current,
+				[environment.id]: refreshedPreflight,
+			}));
+		} catch (error) {
+			toast.error(
+				t("settings.connections.bootstrapError", {
+					label: environment.label,
+				}),
+			);
+			toast.error(String(error));
+		} finally {
+			setBootstrapBusyId(null);
+		}
+	};
+
 	return (
 		<section className="space-y-4">
 			<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
@@ -665,6 +708,7 @@ export function RemoteEnvironmentsPanel() {
 					const probe = probes[environment.id] ?? null;
 					const isBusy = busyId === environment.id;
 					const isPreflightBusy = preflightBusyId === environment.id;
+					const isBootstrapBusy = bootstrapBusyId === environment.id;
 					const isRunning = tunnel?.status === "running";
 					const isActive = environment.id === activeEnvironmentId;
 					const endpoint = tunnel?.endpoint ?? environment.endpoint;
@@ -768,6 +812,20 @@ export function RemoteEnvironmentsPanel() {
 											<RefreshCw className="size-3.5" />
 										)}
 										{t("settings.connections.check")}
+									</Button>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										disabled={isBootstrapBusy}
+										onClick={() => void handleBootstrapRuntime(environment)}
+									>
+										{isBootstrapBusy ? (
+											<Loader2 className="size-3.5 animate-spin" />
+										) : (
+											<Play className="size-3.5" />
+										)}
+										{t("settings.connections.bootstrapRuntime")}
 									</Button>
 									<Button
 										type="button"
