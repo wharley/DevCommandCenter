@@ -196,8 +196,8 @@ export function TerminalPanel({
 
 			setTerminalSnapshot(next);
 			const replay = [
-				...(initial.truncated ? [TERMINAL_OUTPUT_TRUNCATION] : []),
-				...initial.chunks,
+				...(next.truncated ? [TERMINAL_OUTPUT_TRUNCATION] : []),
+				...next.chunks,
 				...bootstrappingWritesRef.current.splice(0),
 			];
 			pendingWritesRef.current = [];

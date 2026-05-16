@@ -9,6 +9,7 @@ export type RemoteTunnelSnapshot = {
 	bearerToken: string;
 	startedAt: string;
 	remoteCommand: string;
+	tmuxAvailable: boolean | null;
 	status: "running" | "exited" | "error" | string;
 	exitCode: number | null;
 };

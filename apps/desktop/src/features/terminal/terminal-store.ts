@@ -1,11 +1,11 @@
 import {
 	getDefaultShell,
+	getOrCreateTerminalByOwner,
 	getTerminalBackendScope,
 	killTerminal,
 	listenTerminalExit,
 	listenTerminalOutput,
 	resizeTerminal,
-	spawnTerminal,
 	writeTerminalStdin,
 } from "@/lib/terminal-api";
 
@@ -221,35 +221,45 @@ export async function ensureWorkspaceTerminal(
 		try {
 			const { shell } = await getDefaultShell();
 			const shouldUseLoginArgs = /[\\/](zsh|bash|sh)$/i.test(shell);
-			const result = await spawnTerminal({
+			const ownerKey = `workspace:${workspaceId}`;
+			const result = await getOrCreateTerminalByOwner(ownerKey, {
 				cwd: workspacePath,
 				command: shell,
 				args: shouldUseLoginArgs ? ["-l"] : [],
 				cols: 120,
 				rows: 32,
-				ptyOwnerKey: `workspace:${workspaceId}`,
+				ptyOwnerKey: ownerKey,
 			});
 
 			entry.ptyId = result.ptyId;
 			entry.shell = shell;
-			entry.status = "running";
-			entry.exitCode = null;
+			entry.status = result.session.status === "exited" ? "exited" : "running";
+			entry.exitCode = result.session.lastExitCode ?? null;
 			ptyToWorkspace.set(result.ptyId, workspaceEntryKey(workspaceId));
 
-			appendChunk(
-				entry,
-				[
-					"\x1b[2mDev Command Center terminal\x1b[0m",
-					"",
-					`workspace: ${context.workspaceName}`,
-					`branch: ${context.workspaceBranch}`,
-					`cwd: ${workspacePath}`,
-					`provider: ${context.providerLabel ?? "none"}`,
-					`session: ${context.sessionState}`,
-					`shell: ${shell}`,
-					"",
-				].join("\r\n") + "\r\n",
-			);
+			if (result.chunks.length > 0) {
+				entry.chunks = [...result.chunks];
+				entry.bufferedBytes = result.chunks.reduce(
+					(total, chunk) => total + chunk.length,
+					0,
+				);
+				entry.truncated = result.truncated;
+			} else if (!result.existing) {
+				appendChunk(
+					entry,
+					[
+						"\x1b[2mDev Command Center terminal\x1b[0m",
+						"",
+						`workspace: ${context.workspaceName}`,
+						`branch: ${context.workspaceBranch}`,
+						`cwd: ${workspacePath}`,
+						`provider: ${context.providerLabel ?? "none"}`,
+						`session: ${context.sessionState}`,
+						`shell: ${shell}`,
+						"",
+					].join("\r\n") + "\r\n",
+				);
+			}
 			notifyStatus(entry);
 			return snapshot(entry);
 		} catch (error) {

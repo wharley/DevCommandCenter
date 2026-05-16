@@ -63,6 +63,7 @@ async fn main() {
     println!("[DCC HTTP]   GET  /api/v1/panes");
     println!("[DCC HTTP]   POST /api/v1/diffs/bundle");
     println!("[DCC HTTP]   POST /api/v1/terminals/spawn");
+    println!("[DCC HTTP]   POST /api/v1/terminals/by-owner/:owner_key");
     println!("[DCC HTTP]   POST /api/v1/terminals/:pty_id/write");
     println!("[DCC HTTP]   POST /api/v1/terminals/:pty_id/resize");
     println!("[DCC HTTP]   POST /api/v1/terminals/:pty_id/kill");

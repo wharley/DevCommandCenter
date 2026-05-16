@@ -249,7 +249,7 @@
     "connections": {
       "title": "Ambientes remotos",
       "body": "Launch gerenciado pelo desktop via SSH para um `dccd-http` remoto, inspirado no fluxo de pairing do T3 Code.",
-      "requirements": "Premissas do MVP atual: SSH com chave, `dccd-http` disponível no PATH remoto e backend remoto preso em loopback com bearer token gerado pelo DCC.",
+      "requirements": "Premissas do MVP atual: SSH com chave, `dccd-http` disponível no PATH remoto e backend remoto preso em loopback com bearer token gerado pelo DCC. `tmux` no host remoto é opcional, mas recomendado para persistência forte do terminal.",
       "currentBackend": "Backend atual",
       "localBackend": "Backend local do desktop",
       "activeBadge": "{{count}} ativos",
@@ -281,7 +281,13 @@
         "localPort": "Porta local",
         "endpoint": "Endpoint encaminhado",
         "health": "Saúde",
-        "backend": "Estado do backend"
+        "backend": "Estado do backend",
+        "terminalPersistence": "Persistência do terminal"
+      },
+      "persistence": {
+        "tmux": "tmux persistente",
+        "pty": "fallback PTY",
+        "unknown": "desconhecida"
       },
       "health": {
         "ok": "Saudável",

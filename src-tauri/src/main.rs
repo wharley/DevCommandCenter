@@ -493,6 +493,7 @@ struct ManagedRemoteTunnel {
     bearer_token: String,
     started_at: String,
     remote_command: String,
+    tmux_available: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -521,6 +522,7 @@ struct RemoteSshTunnelSnapshot {
     bearer_token: String,
     started_at: String,
     remote_command: String,
+    tmux_available: Option<bool>,
     status: String,
     exit_code: Option<i32>,
 }
@@ -3732,6 +3734,18 @@ fn remote_wait_for_local_port(port: u16, timeout: Duration) -> bool {
     false
 }
 
+fn remote_detect_tmux_support(ssh_target: &str) -> Option<bool> {
+    let status = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg("command -v tmux >/dev/null 2>&1")
+        .status()
+        .ok()?;
+    Some(status.success())
+}
+
 fn remote_tunnel_snapshot(
     environment_id: &str,
     tunnel: &ManagedRemoteTunnel,
@@ -3747,6 +3761,7 @@ fn remote_tunnel_snapshot(
         bearer_token: tunnel.bearer_token.clone(),
         started_at: tunnel.started_at.clone(),
         remote_command: tunnel.remote_command.clone(),
+        tmux_available: tunnel.tmux_available,
         status: status.to_string(),
         exit_code,
     }
@@ -3851,6 +3866,7 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
+    let tmux_available = remote_detect_tmux_support(&ssh_target);
 
     let bootstrap_script = format!(
         "mkdir -p \"$HOME/.dcc\" && if command -v {remote_command} >/dev/null 2>&1; then nohup env DCC_HTTP_HOST=127.0.0.1 DCC_HTTP_PORT={remote_port} DCC_HTTP_AUTH_MODE=remote DCC_HTTP_BEARER_TOKEN={bearer_token} {remote_command} > \"$HOME/.dcc/dccd-http.log\" 2>&1 < /dev/null & else echo \"dccd-http not found on remote PATH\" >&2; exit 127; fi",
@@ -3927,6 +3943,7 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
         bearer_token: bearer_token.clone(),
         started_at: started_at.clone(),
         remote_command: remote_command.clone(),
+        tmux_available,
         status: "running".to_string(),
         exit_code: None,
     };
@@ -3940,6 +3957,7 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
         bearer_token,
         started_at,
         remote_command,
+        tmux_available,
     };
 
     state

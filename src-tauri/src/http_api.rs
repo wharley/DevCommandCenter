@@ -34,6 +34,7 @@ use dcc_tauri::{
 use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::{
     collections::{HashMap, VecDeque},
@@ -145,6 +146,7 @@ struct HeadlessManagedTerminal {
     pty_master: Box<dyn MasterPty + Send>,
     child: Box<dyn PtyChild + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    pty_owner_key: Option<String>,
     cwd: String,
     command: String,
     args: Vec<String>,
@@ -201,6 +203,20 @@ struct TerminalWriteRequest {
 struct TerminalResizeRequest {
     cols: u16,
     rows: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HeadlessTerminalSession {
+    pty_id: String,
+    cwd: String,
+    command: String,
+    args: Vec<String>,
+    pty_owner_key: Option<String>,
+    status: String,
+    started_at: String,
+    exited_at: Option<String>,
+    last_exit_code: Option<i32>,
 }
 
 #[derive(Debug)]
@@ -320,6 +336,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         .route("/api/v1/panes", get(list_panes_handler))
         .route("/api/v1/diffs/bundle", post(diffs_bundle_handler))
         .route("/api/v1/terminals/spawn", post(terminal_spawn_handler))
+        .route(
+            "/api/v1/terminals/by-owner/:owner_key",
+            post(terminal_get_or_create_by_owner_handler),
+        )
         .route(
             "/api/v1/terminals/:pty_id/write",
             post(terminal_write_handler),
@@ -576,6 +596,26 @@ fn headless_default_shell() -> String {
     })
 }
 
+fn tmux_session_name(owner_key: &str) -> String {
+    let digest = Sha256::digest(owner_key.as_bytes());
+    let suffix = hex::encode(&digest[..8]);
+    format!("dcc-{suffix}")
+}
+
+#[cfg(unix)]
+fn tmux_is_available() -> bool {
+    std::process::Command::new("sh")
+        .args(["-lc", "command -v tmux >/dev/null 2>&1"])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn tmux_is_available() -> bool {
+    false
+}
+
 fn iso_now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
@@ -709,15 +749,47 @@ fn ensure_headless_terminal_sweeper() {
 fn spawn_headless_terminal(options: TerminalSpawnRequest) -> Result<Value, HttpApiError> {
     ensure_headless_terminal_sweeper();
 
-    let cwd = options.cwd.trim();
+    let TerminalSpawnRequest {
+        cwd,
+        command,
+        args,
+        cols,
+        rows,
+        pane_id: _,
+        pty_owner_key,
+        restart: _,
+    } = options;
+
+    let cwd = cwd.trim();
     if cwd.is_empty() {
         return Err(HttpApiError::bad_request("cwd is required"));
     }
 
     let shell = headless_default_shell();
-    let command = options.command.unwrap_or_else(|| shell.clone());
-    let cols = options.cols.unwrap_or(120);
-    let rows = options.rows.unwrap_or(32);
+    let requested_command = command.unwrap_or_else(|| shell.clone());
+    let requested_args = args;
+    let use_tmux_persistence = pty_owner_key
+        .as_deref()
+        .is_some_and(|owner_key| !owner_key.trim().is_empty() && tmux_is_available());
+    let (command, args, uses_tmux_transport) = if use_tmux_persistence {
+        let owner_key = pty_owner_key.as_deref().unwrap_or_default();
+        (
+            "tmux".to_string(),
+            vec![
+                "new-session".to_string(),
+                "-A".to_string(),
+                "-s".to_string(),
+                tmux_session_name(owner_key),
+                "-c".to_string(),
+                cwd.to_string(),
+            ],
+            true,
+        )
+    } else {
+        (requested_command, requested_args, false)
+    };
+    let cols = cols.unwrap_or(120);
+    let rows = rows.unwrap_or(32);
 
     let pty_pair = native_pty_system()
         .openpty(PtySize {
@@ -729,21 +801,23 @@ fn spawn_headless_terminal(options: TerminalSpawnRequest) -> Result<Value, HttpA
         .map_err(|error| HttpApiError::internal(error.to_string()))?;
 
     let mut cmd = CommandBuilder::new(&command);
-    cmd.args(&options.args);
+    cmd.args(&args);
     cmd.cwd(cwd);
 
     #[cfg(unix)]
     {
         cmd.env("TERM", "xterm-256color");
-        let git_file_path = FsPath::new(cwd).join(".git");
-        if git_file_path.is_file() {
-            if let Ok(git_content) = std::fs::read_to_string(&git_file_path) {
-                if let Some(gitdir_line) =
-                    git_content.lines().find(|line| line.starts_with("gitdir:"))
-                {
-                    let gitdir = gitdir_line.trim_start_matches("gitdir:").trim();
-                    cmd.env("GIT_DIR", gitdir);
-                    cmd.env("GIT_WORK_TREE", cwd);
+        if !uses_tmux_transport {
+            let git_file_path = FsPath::new(cwd).join(".git");
+            if git_file_path.is_file() {
+                if let Ok(git_content) = std::fs::read_to_string(&git_file_path) {
+                    if let Some(gitdir_line) =
+                        git_content.lines().find(|line| line.starts_with("gitdir:"))
+                    {
+                        let gitdir = gitdir_line.trim_start_matches("gitdir:").trim();
+                        cmd.env("GIT_DIR", gitdir);
+                        cmd.env("GIT_WORK_TREE", cwd);
+                    }
                 }
             }
         }
@@ -778,9 +852,10 @@ fn spawn_headless_terminal(options: TerminalSpawnRequest) -> Result<Value, HttpA
         pty_master: pty_pair.master,
         child,
         writer: Arc::new(Mutex::new(writer)),
+        pty_owner_key,
         cwd: cwd.to_string(),
         command,
-        args: options.args,
+        args,
         started_at: iso_now(),
         stop_flag,
         output_buffer,
@@ -802,6 +877,34 @@ fn terminal_event_name(event: &HeadlessTerminalEvent) -> &'static str {
     match event {
         HeadlessTerminalEvent::Output { .. } => "terminal-output",
         HeadlessTerminalEvent::Exit { .. } => "terminal-exit",
+    }
+}
+
+fn headless_terminal_session_snapshot(
+    pty_id: &str,
+    terminal: &mut HeadlessManagedTerminal,
+) -> HeadlessTerminalSession {
+    let wait = terminal.child.try_wait().ok().flatten();
+    let (status, exited_at, last_exit_code) = if let Some(status) = wait {
+        (
+            "exited".to_string(),
+            Some(iso_now()),
+            Some(status.exit_code() as i32),
+        )
+    } else {
+        ("running".to_string(), None, None)
+    };
+
+    HeadlessTerminalSession {
+        pty_id: pty_id.to_string(),
+        cwd: terminal.cwd.clone(),
+        command: terminal.command.clone(),
+        args: terminal.args.clone(),
+        pty_owner_key: terminal.pty_owner_key.clone(),
+        status,
+        started_at: terminal.started_at.clone(),
+        exited_at,
+        last_exit_code,
     }
 }
 
@@ -857,6 +960,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "GET /api/v1/events/stream",
             "GET /api/v1/terminals/events/stream",
             "POST /api/v1/terminals/spawn",
+            "POST /api/v1/terminals/by-owner/:owner_key",
             "POST /api/v1/terminals/:pty_id/write",
             "POST /api/v1/terminals/:pty_id/resize",
             "POST /api/v1/terminals/:pty_id/kill",
@@ -1552,6 +1656,64 @@ async fn terminal_spawn_handler(
     Json(input): Json<TerminalSpawnRequest>,
 ) -> Result<Json<Value>, HttpApiError> {
     Ok(Json(spawn_headless_terminal(input)?))
+}
+
+async fn terminal_get_or_create_by_owner_handler(
+    Path(owner_key): Path<String>,
+    Json(mut input): Json<TerminalSpawnRequest>,
+) -> Result<Json<Value>, HttpApiError> {
+    ensure_headless_terminal_sweeper();
+
+    {
+        let mut terminals = headless_terminals()
+            .lock()
+            .map_err(|error| HttpApiError::internal(format!("terminals lock poisoned: {error}")))?;
+        if let Some((pty_id, terminal)) = terminals
+            .iter_mut()
+            .find(|(_, terminal)| terminal.pty_owner_key.as_deref() == Some(owner_key.as_str()))
+        {
+            let session = headless_terminal_session_snapshot(pty_id, terminal);
+            let chunks = terminal
+                .output_buffer
+                .lock()
+                .map(|buffer| buffer.iter().cloned().collect::<Vec<_>>())
+                .unwrap_or_default();
+            return Ok(Json(json!({
+                "ptyId": pty_id,
+                "existing": true,
+                "session": session,
+                "chunks": chunks,
+                "truncated": false,
+            })));
+        }
+    }
+
+    input.pty_owner_key = Some(owner_key);
+    let spawn = spawn_headless_terminal(input)?;
+    let pty_id = spawn
+        .get("ptyId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| HttpApiError::internal("spawned terminal missing ptyId"))?
+        .to_string();
+    let mut terminals = headless_terminals()
+        .lock()
+        .map_err(|error| HttpApiError::internal(format!("terminals lock poisoned: {error}")))?;
+    let terminal = terminals
+        .get_mut(&pty_id)
+        .ok_or_else(|| HttpApiError::internal("spawned terminal not found in runtime"))?;
+    let session = headless_terminal_session_snapshot(&pty_id, terminal);
+    let chunks = terminal
+        .output_buffer
+        .lock()
+        .map(|buffer| buffer.iter().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    Ok(Json(json!({
+        "ptyId": pty_id,
+        "existing": false,
+        "session": session,
+        "chunks": chunks,
+        "truncated": false,
+    })))
 }
 
 async fn terminal_write_handler(

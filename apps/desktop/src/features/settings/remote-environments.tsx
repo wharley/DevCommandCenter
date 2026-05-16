@@ -290,6 +290,7 @@ export function RemoteEnvironmentsPanel() {
 			bearerToken: null,
 			endpoint: null,
 			lastStartedAt: null,
+			tmuxAvailable: null,
 		};
 		const updated = [next, ...environments];
 		persistEnvironments(updated);
@@ -344,6 +345,7 @@ export function RemoteEnvironmentsPanel() {
 				bearerToken: tunnel.bearerToken,
 				endpoint: tunnel.endpoint,
 				lastStartedAt: tunnel.startedAt,
+				tmuxAvailable: tunnel.tmuxAvailable,
 			};
 			persistEnvironments(
 				environments.map((candidate) =>
@@ -542,6 +544,13 @@ export function RemoteEnvironmentsPanel() {
 					const isRunning = tunnel?.status === "running";
 					const isActive = environment.id === activeEnvironmentId;
 					const endpoint = tunnel?.endpoint ?? environment.endpoint;
+					const tmuxAvailable = tunnel?.tmuxAvailable ?? environment.tmuxAvailable;
+					const terminalPersistenceLabel =
+						tmuxAvailable === true
+							? t("settings.connections.persistence.tmux")
+							: tmuxAvailable === false
+								? t("settings.connections.persistence.pty")
+								: t("settings.connections.persistence.unknown");
 
 					return (
 						<div key={environment.id} className="rounded-xl border border-border/60 p-4">
@@ -560,6 +569,9 @@ export function RemoteEnvironmentsPanel() {
 											{isRunning
 												? t("settings.connections.status.running")
 												: t("settings.connections.status.idle")}
+										</Badge>
+										<Badge variant={tmuxAvailable ? "secondary" : "outline"}>
+											{terminalPersistenceLabel}
 										</Badge>
 									</div>
 									<p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
@@ -680,6 +692,12 @@ export function RemoteEnvironmentsPanel() {
 											probe?.daemonStatus ??
 											t("settings.connections.notConnected")}
 									</span>
+								</p>
+								<p>
+									<strong className="text-foreground">
+										{t("settings.connections.fields.terminalPersistence")}:
+									</strong>{" "}
+									<span className="font-mono">{terminalPersistenceLabel}</span>
 								</p>
 							</div>
 

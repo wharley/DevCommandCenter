@@ -8,6 +8,7 @@ export type SavedRemoteEnvironment = {
 	bearerToken: string | null;
 	endpoint: string | null;
 	lastStartedAt: string | null;
+	tmuxAvailable: boolean | null;
 };
 
 export const REMOTE_ENV_STORAGE_KEY = "dcc.remote.environments.v1";
@@ -83,6 +84,8 @@ export function normalizeRemoteEnvironment(value: unknown): SavedRemoteEnvironme
 		bearerToken: typeof record.bearerToken === "string" ? record.bearerToken : null,
 		endpoint: typeof record.endpoint === "string" ? record.endpoint : null,
 		lastStartedAt: typeof record.lastStartedAt === "string" ? record.lastStartedAt : null,
+		tmuxAvailable:
+			typeof record.tmuxAvailable === "boolean" ? record.tmuxAvailable : null,
 	};
 }
 

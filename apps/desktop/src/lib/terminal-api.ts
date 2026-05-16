@@ -20,6 +20,26 @@ export type TerminalSpawnResult = {
 	ptyId: string;
 };
 
+export type TerminalSessionResult = {
+	ptyId: string;
+	cwd: string;
+	command: string;
+	args: string[];
+	ptyOwnerKey?: string | null;
+	status: string;
+	startedAt: string;
+	exitedAt?: string | null;
+	lastExitCode?: number | null;
+};
+
+export type TerminalEnsureResult = {
+	ptyId: string;
+	existing: boolean;
+	session: TerminalSessionResult;
+	chunks: string[];
+	truncated: boolean;
+};
+
 export type TerminalOutputEvent = {
 	ptyId: string;
 	data: string;
@@ -280,6 +300,56 @@ export function spawnTerminal(options: TerminalSpawnOptions) {
 		);
 	}
 	return invoke<TerminalSpawnResult>("terminal_spawn", { options });
+}
+
+export async function getOrCreateTerminalByOwner(
+	ownerKey: string,
+	options: TerminalSpawnOptions,
+): Promise<TerminalEnsureResult> {
+	const target = getTerminalBackendTarget();
+	if (target.kind === "remote") {
+		return remoteTerminalRequest<TerminalEnsureResult>(
+			target.environment,
+			`/api/v1/terminals/by-owner/${encodeURIComponent(ownerKey)}`,
+			{
+				method: "POST",
+				body: JSON.stringify({
+					...options,
+					ptyOwnerKey: ownerKey,
+				}),
+			},
+		);
+	}
+
+	const payload = await invoke<{
+		ptyId: string;
+		session?: TerminalSessionResult | null;
+	}>("terminal_get_or_create", {
+		missionId: ownerKey,
+		options: {
+			...options,
+			ptyOwnerKey: ownerKey,
+		},
+	});
+
+	return {
+		ptyId: payload.ptyId,
+		existing: false,
+		session:
+			payload.session ?? {
+				ptyId: payload.ptyId,
+				cwd: options.cwd,
+				command: options.command ?? "",
+				args: options.args ?? [],
+				ptyOwnerKey: ownerKey,
+				status: "running",
+				startedAt: new Date().toISOString(),
+				exitedAt: null,
+				lastExitCode: null,
+			},
+		chunks: [],
+		truncated: false,
+	};
 }
 
 export function writeTerminalStdin(ptyId: string, data: string) {
