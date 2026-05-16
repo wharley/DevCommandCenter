@@ -421,6 +421,7 @@ export function RemoteEnvironmentsPanel() {
 			setTunnels((current) => ({ ...current, [environment.id]: tunnel }));
 			const updatedEnvironment: SavedRemoteEnvironment = {
 				...environment,
+				remoteCommand: tunnel.remoteCommand,
 				localPort: tunnel.localPort,
 				remotePort: tunnel.remotePort,
 				bearerToken: tunnel.bearerToken,

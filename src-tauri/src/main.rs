@@ -587,6 +587,10 @@ struct RemoteBackendHandshake {
     protocol_compatible: Option<bool>,
 }
 
+const REMOTE_BOOTSTRAP_DIR: &str = "~/.dcc/bin";
+const REMOTE_BOOTSTRAP_COMMAND: &str = "~/.dcc/bin/dccd-http";
+const REMOTE_SERVICE_COMMAND: &str = "~/.dcc/bin/dccd-http-service";
+
 #[cfg(windows)]
 fn attach_windows_job_object(
     child: &Box<dyn PtyChild + Send>,
@@ -4035,6 +4039,208 @@ fn remote_upload_file_via_ssh_stdin(
     })
 }
 
+fn remote_write_text_via_ssh_stdin(
+    ssh_target: &str,
+    remote_path: &str,
+    content: &str,
+) -> Result<(), String> {
+    let remote_script = format!(
+        "cat > {remote_path}",
+        remote_path = remote_command_shell_expr(remote_path),
+    );
+
+    let mut child = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg(&remote_script)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(content.as_bytes())
+            .map_err(|e| e.to_string())?;
+    }
+
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if stderr.is_empty() {
+        format!("ssh stdin text upload failed for {ssh_target}")
+    } else {
+        stderr
+    })
+}
+
+fn remote_service_script_contents() -> String {
+    r#"#!/bin/sh
+set -eu
+
+ACTION="${1:-}"
+PORT="${2:-}"
+TOKEN="${3:-}"
+BIN_SPEC="${4:-$HOME/.dcc/bin/dccd-http}"
+ROOT="$HOME/.dcc"
+PIDFILE="$ROOT/dccd-http-${PORT}.pid"
+LOGFILE="$ROOT/dccd-http.log"
+
+if [ -z "$ACTION" ] || [ -z "$PORT" ]; then
+  echo "usage: dccd-http-service <start|restart|stop|status> <port> [token] [binary]" >&2
+  exit 2
+fi
+
+resolve_bin() {
+  if printf '%s' "$BIN_SPEC" | grep -q '/'; then
+    printf '%s\n' "$BIN_SPEC"
+    return 0
+  fi
+  command -v "$BIN_SPEC" 2>/dev/null || true
+}
+
+running_pid() {
+  if [ ! -f "$PIDFILE" ]; then
+    return 1
+  fi
+  pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+  if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
+    printf '%s\n' "$pid"
+    return 0
+  fi
+  rm -f "$PIDFILE"
+  return 1
+}
+
+kill_port_listener() {
+  pids=""
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -ti tcp:${PORT} -sTCP:LISTEN 2>/dev/null || true)"
+  elif command -v fuser >/dev/null 2>&1; then
+    pids="$(fuser ${PORT}/tcp 2>/dev/null || true)"
+  fi
+  for pid in $pids; do
+    kill "$pid" 2>/dev/null || true
+    sleep 0.2
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  done
+}
+
+stop_backend() {
+  if pid="$(running_pid)"; then
+    kill "$pid" 2>/dev/null || true
+    sleep 0.3
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$PIDFILE"
+}
+
+start_backend() {
+  mkdir -p "$ROOT" "$ROOT/bin"
+  BIN="$(resolve_bin)"
+  if [ -z "$BIN" ] || [ ! -x "$BIN" ]; then
+    echo "binary not executable: $BIN_SPEC" >&2
+    exit 127
+  fi
+  if pid="$(running_pid)"; then
+    echo "$pid"
+    exit 0
+  fi
+  if [ -z "$TOKEN" ]; then
+    echo "token is required for start/restart" >&2
+    exit 2
+  fi
+  env DCC_HTTP_HOST=127.0.0.1 \
+    DCC_HTTP_PORT="$PORT" \
+    DCC_HTTP_AUTH_MODE=remote \
+    DCC_HTTP_BEARER_TOKEN="$TOKEN" \
+    nohup "$BIN" > "$LOGFILE" 2>&1 < /dev/null &
+  echo $! > "$PIDFILE"
+}
+
+case "$ACTION" in
+  start)
+    start_backend
+    ;;
+  restart)
+    stop_backend
+    kill_port_listener
+    start_backend
+    ;;
+  stop)
+    stop_backend
+    kill_port_listener
+    ;;
+  status)
+    if pid="$(running_pid)"; then
+      printf 'running %s\n' "$pid"
+    else
+      printf 'stopped\n'
+    fi
+    ;;
+  *)
+    echo "unknown action: $ACTION" >&2
+    exit 2
+    ;;
+esac
+"#
+    .to_string()
+}
+
+fn remote_ensure_service_script(ssh_target: &str) -> Result<(), String> {
+    let mkdir_status = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg("mkdir -p \"$HOME/.dcc/bin\"")
+        .status()
+        .map_err(|e| format!("failed to create remote service directory: {e}"))?;
+
+    if !mkdir_status.success() {
+        return Err(format!(
+            "remote bootstrap failed for {ssh_target}; could not create ~/.dcc/bin"
+        ));
+    }
+
+    remote_write_text_via_ssh_stdin(
+        ssh_target,
+        REMOTE_SERVICE_COMMAND,
+        &remote_service_script_contents(),
+    )?;
+
+    let chmod_script = format!(
+        "chmod +x {}",
+        remote_command_shell_expr(REMOTE_SERVICE_COMMAND)
+    );
+    let chmod_status = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg(&chmod_script)
+        .status()
+        .map_err(|e| format!("failed to chmod remote service script: {e}"))?;
+
+    if !chmod_status.success() {
+        return Err(format!(
+            "remote bootstrap failed for {ssh_target}; chmod on {REMOTE_SERVICE_COMMAND} failed"
+        ));
+    }
+
+    Ok(())
+}
+
 fn remote_command_shell_expr(remote_command: &str) -> String {
     let trimmed = remote_command.trim();
     if let Some(path) = trimmed.strip_prefix("~/") {
@@ -4100,6 +4306,156 @@ fn locate_local_remote_http_binary() -> Option<PathBuf> {
     remote_binary_candidates("dccd-http")
         .into_iter()
         .find(|candidate| candidate.exists() && candidate.is_file())
+}
+
+fn remote_install_local_http_binary(
+    ssh_target: &str,
+    remote_command: &str,
+) -> Result<RemoteHostFacts, String> {
+    let local_binary = locate_local_remote_http_binary()
+        .ok_or_else(|| "local dccd-http binary not found".to_string())?;
+    let host_facts = remote_collect_host_facts(ssh_target, "dccd-http")?;
+
+    if host_facts.binary_compatible != Some(true) {
+        let platform_name = host_facts.platform_name.as_deref().unwrap_or("unknown");
+        let platform_arch = host_facts.platform_arch.as_deref().unwrap_or("unknown");
+        return Err(format!(
+            "local dccd-http binary is not compatible with remote host {platform_name}/{platform_arch}"
+        ));
+    }
+
+    remote_ensure_service_script(ssh_target)?;
+
+    let mkdir_status = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg("mkdir -p \"$HOME/.dcc/bin\"")
+        .status()
+        .map_err(|e| format!("failed to create remote bootstrap directory: {e}"))?;
+
+    if !mkdir_status.success() {
+        return Err(format!(
+            "remote bootstrap failed for {ssh_target}; could not create ~/.dcc/bin"
+        ));
+    }
+
+    let remote_target = remote_command.trim();
+    let scp_target = format!("{ssh_target}:{REMOTE_BOOTSTRAP_DIR}/dccd-http");
+    let scp_status = Command::new("scp")
+        .args(["-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(&local_binary)
+        .arg(&scp_target)
+        .status()
+        .map_err(|e| format!("failed to upload dccd-http: {e}"))?;
+
+    if !scp_status.success() {
+        remote_upload_file_via_ssh_stdin(ssh_target, &local_binary, remote_target).map_err(
+            |error| {
+                format!(
+                    "remote bootstrap failed for {ssh_target}; scp upload was unsuccessful and ssh stdin fallback also failed: {error}"
+                )
+            },
+        )?;
+    }
+
+    let chmod_script = format!("chmod +x {}", remote_command_shell_expr(remote_target));
+    let chmod_status = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg(&chmod_script)
+        .status()
+        .map_err(|e| format!("failed to chmod uploaded dccd-http: {e}"))?;
+
+    if !chmod_status.success() {
+        return Err(format!(
+            "remote bootstrap failed for {ssh_target}; chmod on {remote_target} failed"
+        ));
+    }
+
+    Ok(host_facts)
+}
+
+fn remote_protocol_repair_command(remote_command: &str) -> String {
+    let trimmed = remote_command.trim();
+    if trimmed == REMOTE_BOOTSTRAP_COMMAND {
+        return trimmed.to_string();
+    }
+    REMOTE_BOOTSTRAP_COMMAND.to_string()
+}
+
+fn remote_is_protocol_handshake_failure(message: &str) -> bool {
+    message.contains("remote protocol mismatch")
+        || message.contains("missing protocolVersion")
+        || message.contains("compatible health handshake")
+}
+
+fn remote_start_backend_over_ssh(
+    ssh_target: &str,
+    remote_command: &str,
+    remote_port: u16,
+    bearer_token: &str,
+    force_restart: bool,
+) -> Result<(), String> {
+    remote_ensure_service_script(ssh_target)?;
+
+    let action = if force_restart { "restart" } else { "start" };
+    let bootstrap_script = format!(
+        "{service} {action} {remote_port} {bearer_token} {remote_command}",
+        service = remote_command_shell_expr(REMOTE_SERVICE_COMMAND),
+        action = action,
+        remote_port = remote_port,
+        bearer_token = remote_shell_single_quote(bearer_token),
+        remote_command = remote_shell_single_quote(remote_command),
+    );
+
+    let service_status = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(ssh_target)
+        .arg("sh")
+        .arg("-lc")
+        .arg(&bootstrap_script)
+        .status()
+        .map_err(|e| format!("failed to start remote launcher: {e}"))?;
+
+    if !service_status.success() {
+        return Err(format!(
+            "remote service start failed for {ssh_target}; ensure key-based SSH access and a valid backend binary"
+        ));
+    }
+
+    Ok(())
+}
+
+fn remote_spawn_ssh_tunnel(
+    ssh_target: &str,
+    local_port: u16,
+    remote_port: u16,
+) -> Result<Child, String> {
+    let tunnel_spec = format!("{local_port}:127.0.0.1:{remote_port}");
+    Command::new("ssh")
+        .arg("-N")
+        .arg("-L")
+        .arg(&tunnel_spec)
+        .args([
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-o",
+            "ServerAliveInterval=30",
+            "-o",
+            "ServerAliveCountMax=3",
+            "-o",
+            "BatchMode=yes",
+        ])
+        .arg(ssh_target)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to spawn ssh tunnel: {e}"))
 }
 
 fn remote_tunnel_snapshot(
@@ -4191,66 +4547,9 @@ fn remote_bootstrap_ssh_binary(input: Value) -> ApiResult<Value> {
         return Err(db_error("sshTarget is required"));
     }
 
-    let local_binary = locate_local_remote_http_binary()
-        .ok_or_else(|| db_error("local dccd-http binary not found"))?;
-    let remote_dir = "~/.dcc/bin";
-    let remote_command = "~/.dcc/bin/dccd-http".to_string();
-    let host_facts = remote_collect_host_facts(&ssh_target, "dccd-http").map_err(db_error)?;
-
-    if host_facts.binary_compatible != Some(true) {
-        let platform_name = host_facts.platform_name.as_deref().unwrap_or("unknown");
-        let platform_arch = host_facts.platform_arch.as_deref().unwrap_or("unknown");
-        return Err(db_error(format!(
-            "remote bootstrap refused for {ssh_target}; local dccd-http binary is not compatible with remote host {platform_name}/{platform_arch}"
-        )));
-    }
-
-    let mkdir_status = Command::new("ssh")
-        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
-        .arg(&ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg("mkdir -p \"$HOME/.dcc/bin\"")
-        .status()
-        .map_err(|e| db_error(format!("failed to create remote bootstrap directory: {e}")))?;
-
-    if !mkdir_status.success() {
-        return Err(db_error(format!(
-            "remote bootstrap failed for {ssh_target}; could not create ~/.dcc/bin"
-        )));
-    }
-
-    let scp_target = format!("{ssh_target}:{remote_dir}/dccd-http");
-    let scp_status = Command::new("scp")
-        .args(["-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
-        .arg(&local_binary)
-        .arg(&scp_target)
-        .status()
-        .map_err(|e| db_error(format!("failed to upload dccd-http: {e}")))?;
-
-    if !scp_status.success() {
-        remote_upload_file_via_ssh_stdin(&ssh_target, &local_binary, "~/.dcc/bin/dccd-http")
-            .map_err(|error| {
-                db_error(format!(
-                    "remote bootstrap failed for {ssh_target}; scp upload was unsuccessful and ssh stdin fallback also failed: {error}"
-                ))
-            })?;
-    }
-
-    let chmod_status = Command::new("ssh")
-        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
-        .arg(&ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg("chmod +x \"$HOME/.dcc/bin/dccd-http\"")
-        .status()
-        .map_err(|e| db_error(format!("failed to chmod uploaded dccd-http: {e}")))?;
-
-    if !chmod_status.success() {
-        return Err(db_error(format!(
-            "remote bootstrap failed for {ssh_target}; chmod on ~/.dcc/bin/dccd-http failed"
-        )));
-    }
+    let remote_command = REMOTE_BOOTSTRAP_COMMAND.to_string();
+    let host_facts =
+        remote_install_local_http_binary(&ssh_target, &remote_command).map_err(db_error)?;
 
     let snapshot = RemoteSshBootstrapSnapshot {
         installed_path: remote_command.clone(),
@@ -4357,32 +4656,8 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
-    let tmux_available = remote_detect_tmux_support(&ssh_target);
-    let remote_command_probe = remote_command_probe_clause(&remote_command);
-    let remote_command_exec = remote_command_shell_expr(&remote_command);
-
-    let bootstrap_script = format!(
-        "mkdir -p \"$HOME/.dcc\" && if {remote_command_probe}; then nohup env DCC_HTTP_HOST=127.0.0.1 DCC_HTTP_PORT={remote_port} DCC_HTTP_AUTH_MODE=remote DCC_HTTP_BEARER_TOKEN={bearer_token} {remote_command_exec} > \"$HOME/.dcc/dccd-http.log\" 2>&1 < /dev/null & else echo \"dccd-http not found on remote PATH\" >&2; exit 127; fi",
-        remote_command_probe = remote_command_probe,
-        remote_command_exec = remote_command_exec,
-        remote_port = remote_port,
-        bearer_token = remote_shell_single_quote(&bearer_token),
-    );
-
-    let bootstrap_status = Command::new("ssh")
-        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
-        .arg(&ssh_target)
-        .arg("sh")
-        .arg("-lc")
-        .arg(&bootstrap_script)
-        .status()
-        .map_err(|e| db_error(format!("failed to start remote launcher: {e}")))?;
-
-    if !bootstrap_status.success() {
-        return Err(db_error(format!(
-            "remote bootstrap failed for {ssh_target}; ensure key-based SSH access and `dccd-http` on PATH"
-        )));
-    }
+    let mut tmux_available = remote_detect_tmux_support(&ssh_target);
+    let mut launch_remote_command = remote_command;
 
     {
         let previous = {
@@ -4397,45 +4672,59 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
         }
     }
 
-    let tunnel_spec = format!("{local_port}:127.0.0.1:{remote_port}");
-    let mut child = Command::new("ssh")
-        .arg("-N")
-        .arg("-L")
-        .arg(&tunnel_spec)
-        .args([
-            "-o",
-            "ExitOnForwardFailure=yes",
-            "-o",
-            "ServerAliveInterval=30",
-            "-o",
-            "ServerAliveCountMax=3",
-            "-o",
-            "BatchMode=yes",
-        ])
-        .arg(&ssh_target)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| db_error(format!("failed to spawn ssh tunnel: {e}")))?;
+    let (child, handshake) = {
+        let mut attempted_repair = false;
+        loop {
+            remote_start_backend_over_ssh(
+                &ssh_target,
+                &launch_remote_command,
+                remote_port,
+                &bearer_token,
+                attempted_repair,
+            )
+            .map_err(db_error)?;
 
-    if !remote_wait_for_local_port(local_port, Duration::from_secs(5)) {
-        remote_stop_tunnel_child(&mut child);
-        return Err(db_error(format!(
-            "ssh tunnel to {ssh_target} did not become ready on 127.0.0.1:{local_port}"
-        )));
-    }
+            let mut child =
+                remote_spawn_ssh_tunnel(&ssh_target, local_port, remote_port).map_err(db_error)?;
 
-    let endpoint = format!("http://127.0.0.1:{local_port}");
-    let handshake = match remote_fetch_backend_handshake(&endpoint, Duration::from_secs(8)) {
-        Ok(handshake) => handshake,
-        Err(error) => {
-            remote_stop_tunnel_child(&mut child);
-            return Err(db_error(format!(
-                "remote backend handshake failed for {ssh_target}: {error}"
-            )));
+            if !remote_wait_for_local_port(local_port, Duration::from_secs(5)) {
+                remote_stop_tunnel_child(&mut child);
+                return Err(db_error(format!(
+                    "ssh tunnel to {ssh_target} did not become ready on 127.0.0.1:{local_port}"
+                )));
+            }
+
+            let endpoint = format!("http://127.0.0.1:{local_port}");
+            match remote_fetch_backend_handshake(&endpoint, Duration::from_secs(8)) {
+                Ok(handshake) => break (child, handshake),
+                Err(error) => {
+                    remote_stop_tunnel_child(&mut child);
+                    if !attempted_repair && remote_is_protocol_handshake_failure(&error) {
+                        let repaired_command =
+                            remote_protocol_repair_command(&launch_remote_command);
+                        let host_facts = remote_install_local_http_binary(
+                            &ssh_target,
+                            &repaired_command,
+                        )
+                        .map_err(|repair_error| {
+                            db_error(format!(
+                                "remote backend handshake failed for {ssh_target}: {error}; automatic runtime repair also failed: {repair_error}"
+                            ))
+                        })?;
+                        tmux_available = host_facts.tmux_available;
+                        launch_remote_command = repaired_command;
+                        attempted_repair = true;
+                        continue;
+                    }
+                    return Err(db_error(format!(
+                        "remote backend handshake failed for {ssh_target}: {error}"
+                    )));
+                }
+            }
         }
     };
+
+    let endpoint = format!("http://127.0.0.1:{local_port}");
     let started_at = iso_now();
     let snapshot = RemoteSshTunnelSnapshot {
         environment_id: environment_id.clone(),
@@ -4445,7 +4734,7 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
         endpoint: endpoint.clone(),
         bearer_token: bearer_token.clone(),
         started_at: started_at.clone(),
-        remote_command: remote_command.clone(),
+        remote_command: launch_remote_command.clone(),
         tmux_available,
         remote_version: handshake.remote_version.clone(),
         remote_protocol_version: handshake.remote_protocol_version.clone(),
@@ -4462,7 +4751,7 @@ fn remote_launch_ssh_tunnel(state: State<'_, AppState>, input: Value) -> ApiResu
         endpoint,
         bearer_token,
         started_at,
-        remote_command,
+        remote_command: launch_remote_command,
         tmux_available,
         remote_version: handshake.remote_version,
         remote_protocol_version: handshake.remote_protocol_version,
