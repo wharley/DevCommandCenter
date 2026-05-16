@@ -1,0 +1,369 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+	Copy,
+	KeyRound,
+	Loader2,
+	QrCode,
+	RefreshCw,
+	Smartphone,
+	Trash2,
+} from "lucide-react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { RemoteAccessQr } from "./remote-access-qr";
+import {
+	pairInit,
+	pairListDevices,
+	pairRevokeDevice,
+	type PairedDevice,
+	type PairingChallenge,
+} from "@/lib/pairing-api";
+
+/**
+ * The hosted landing URL where the mobile client lives. Override at build
+ * time via `VITE_PAIR_LANDING_URL` for staging / preview deployments.
+ */
+const LANDING_BASE =
+	(import.meta as unknown as { env?: Record<string, string> }).env
+		?.VITE_PAIR_LANDING_URL ?? "https://dev-command-center.com";
+
+function buildPairUrl(backendUrl: string, nonce: string): string {
+	const params = new URLSearchParams({ be: backendUrl, nonce });
+	return `${LANDING_BASE}/m/pair#${params.toString()}`;
+}
+
+function formatRelative(iso: string | null): string {
+	if (!iso) return "—";
+	try {
+		const date = new Date(iso);
+		const diff = (Date.now() - date.getTime()) / 1000;
+		if (diff < 60) return "agora";
+		if (diff < 3600) return `${Math.floor(diff / 60)} min`;
+		if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+		const days = Math.floor(diff / 86400);
+		if (days < 30) return `${days}d`;
+		return date.toLocaleDateString("pt-BR");
+	} catch {
+		return iso;
+	}
+}
+
+export function PairedDevicesPanel({
+	defaultBackendUrl,
+}: {
+	defaultBackendUrl: string;
+}) {
+	const [devices, setDevices] = useState<PairedDevice[]>([]);
+	const [loading, setLoading] = useState(false);
+	const [revokingId, setRevokingId] = useState<string | null>(null);
+	const [pairDialogOpen, setPairDialogOpen] = useState(false);
+
+	const refresh = async () => {
+		setLoading(true);
+		try {
+			const response = await pairListDevices(false);
+			setDevices(response.devices);
+		} catch (err) {
+			toast.error(
+				err instanceof Error ? err.message : "Falha ao carregar dispositivos",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	useEffect(() => {
+		void refresh();
+	}, []);
+
+	const handleRevoke = async (device: PairedDevice) => {
+		setRevokingId(device.deviceId);
+		try {
+			await pairRevokeDevice(device.deviceId);
+			toast.success(`${device.deviceName} desvinculado`);
+			await refresh();
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "Falha ao revogar");
+		} finally {
+			setRevokingId(null);
+		}
+	};
+
+	return (
+		<section className="space-y-3">
+			<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+				<div className="flex items-start justify-between gap-3">
+					<div className="min-w-0">
+						<div className="flex items-center gap-2">
+							<Smartphone className="size-4 text-muted-foreground" strokeWidth={1.9} />
+							<h3 className="text-[14px] font-medium text-foreground">
+								Dispositivos pareados
+							</h3>
+						</div>
+						<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+							Celulares e tablets autenticam por chave pública (ECDSA P-256). A chave
+							privada nunca sai do dispositivo. Você pode revogar individualmente a
+							qualquer momento.
+						</p>
+					</div>
+					<Badge variant={devices.length > 0 ? "success" : "outline"} className="h-7 shrink-0 px-2.5 text-[11px] font-normal">
+						{devices.length}
+					</Badge>
+				</div>
+
+				<div className="mt-3 flex flex-wrap gap-2">
+					<Button
+						type="button"
+						size="sm"
+						onClick={() => setPairDialogOpen(true)}
+					>
+						<QrCode className="size-3.5" />
+						Parear novo dispositivo
+					</Button>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						onClick={() => void refresh()}
+					>
+						<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+						Atualizar
+					</Button>
+				</div>
+			</div>
+
+			{devices.length === 0 && !loading ? (
+				<div className="rounded-xl border border-dashed border-border/70 p-4 text-center text-[12px] text-muted-foreground">
+					Nenhum dispositivo pareado ainda.
+				</div>
+			) : (
+				<div className="overflow-hidden rounded-xl border border-border/60">
+					<table className="w-full text-[12px]">
+						<thead className="bg-muted/30 text-[11px] text-muted-foreground">
+							<tr>
+								<th className="px-3 py-2 text-left font-medium">Dispositivo</th>
+								<th className="px-3 py-2 text-left font-medium">Último uso</th>
+								<th className="px-3 py-2 text-left font-medium">Pareado em</th>
+								<th className="px-3 py-2 text-right font-medium" />
+							</tr>
+						</thead>
+						<tbody>
+							{devices.map((device) => (
+								<tr
+									key={device.deviceId}
+									className="border-t border-border/40 transition-colors hover:bg-muted/10"
+								>
+									<td className="px-3 py-2.5">
+										<div className="flex items-center gap-2">
+											<KeyRound className="size-3.5 shrink-0 text-muted-foreground" />
+											<div className="min-w-0">
+												<p className="truncate font-medium text-foreground">
+													{device.deviceName}
+												</p>
+												{device.userAgent ? (
+													<p className="truncate text-[10px] text-muted-foreground">
+														{device.userAgent}
+													</p>
+												) : null}
+											</div>
+										</div>
+									</td>
+									<td className="px-3 py-2.5 text-muted-foreground">
+										{formatRelative(device.lastUsedAt)}
+									</td>
+									<td className="px-3 py-2.5 text-muted-foreground">
+										{formatRelative(device.createdAt)}
+									</td>
+									<td className="px-3 py-2.5 text-right">
+										<Button
+											type="button"
+											variant="ghost"
+											size="xs"
+											disabled={revokingId === device.deviceId}
+											onClick={() => void handleRevoke(device)}
+											className="text-destructive hover:text-destructive"
+										>
+											{revokingId === device.deviceId ? (
+												<Loader2 className="size-3.5 animate-spin" />
+											) : (
+												<Trash2 className="size-3.5" />
+											)}
+											Revogar
+										</Button>
+									</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			)}
+
+			<PairDeviceDialog
+				open={pairDialogOpen}
+				onClose={() => {
+					setPairDialogOpen(false);
+					void refresh();
+				}}
+				backendUrl={defaultBackendUrl}
+			/>
+		</section>
+	);
+}
+
+function PairDeviceDialog({
+	open,
+	onClose,
+	backendUrl,
+}: {
+	open: boolean;
+	onClose: () => void;
+	backendUrl: string;
+}) {
+	const [challenge, setChallenge] = useState<PairingChallenge | null>(null);
+	const [generating, setGenerating] = useState(false);
+	const [remainingSecs, setRemainingSecs] = useState(0);
+
+	const generate = async () => {
+		setGenerating(true);
+		try {
+			const result = await pairInit();
+			setChallenge(result);
+		} catch (err) {
+			toast.error(
+				err instanceof Error ? err.message : "Falha ao gerar pareamento",
+			);
+		} finally {
+			setGenerating(false);
+		}
+	};
+
+	useEffect(() => {
+		if (open && !challenge) {
+			void generate();
+		}
+		if (!open) {
+			setChallenge(null);
+			setRemainingSecs(0);
+		}
+	}, [open]);
+
+	useEffect(() => {
+		if (!challenge) return;
+		const expires = new Date(challenge.expiresAt).getTime();
+		const tick = () => {
+			const secs = Math.max(0, Math.floor((expires - Date.now()) / 1000));
+			setRemainingSecs(secs);
+		};
+		tick();
+		const id = window.setInterval(tick, 1000);
+		return () => window.clearInterval(id);
+	}, [challenge]);
+
+	const pairUrl = useMemo(() => {
+		if (!challenge) return null;
+		return buildPairUrl(backendUrl, challenge.nonce);
+	}, [challenge, backendUrl]);
+
+	const copyPairUrl = async () => {
+		if (!pairUrl) return;
+		try {
+			await navigator.clipboard.writeText(pairUrl);
+			toast.success("Link copiado");
+		} catch {
+			toast.error("Falha ao copiar");
+		}
+	};
+
+	const expired = challenge !== null && remainingSecs <= 0;
+
+	return (
+		<Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+			<DialogContent className="flex max-h-[90vh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+				<DialogHeader className="border-b border-border/50 px-6 py-4">
+					<DialogTitle className="text-[15px]">Parear novo dispositivo</DialogTitle>
+					<DialogDescription className="text-[12px]">
+						Escaneie o QR code no celular e digite o PIN abaixo. O pareamento expira em 60 segundos.
+					</DialogDescription>
+				</DialogHeader>
+
+				<div className="flex-1 overflow-y-auto px-6 py-5">
+					{generating || !challenge ? (
+						<div className="flex h-[280px] items-center justify-center">
+							<Loader2 className="size-5 animate-spin text-muted-foreground" />
+						</div>
+					) : expired ? (
+						<div className="flex h-[280px] flex-col items-center justify-center gap-3 text-center">
+							<p className="text-[13px] font-medium text-foreground">
+								PIN expirado
+							</p>
+							<p className="text-[12px] text-muted-foreground">
+								Gere um novo para tentar novamente.
+							</p>
+							<Button
+								type="button"
+								size="sm"
+								onClick={() => void generate()}
+								disabled={generating}
+							>
+								<RefreshCw className="size-3.5" />
+								Gerar novo
+							</Button>
+						</div>
+					) : (
+						<div className="flex flex-col items-center gap-4">
+							{pairUrl ? (
+								<RemoteAccessQr value={pairUrl} size={224} />
+							) : null}
+
+							<div className="w-full rounded-xl border border-border/60 bg-muted/15 p-4 text-center">
+								<p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+									PIN
+								</p>
+								<p className="mt-1 font-mono text-[34px] font-semibold tracking-[0.35em] text-foreground">
+									{challenge.pin}
+								</p>
+								<p className="mt-1 text-[11px] text-muted-foreground">
+									expira em{" "}
+									<span className="font-mono text-foreground/80">
+										{remainingSecs}s
+									</span>
+								</p>
+							</div>
+
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-full"
+								onClick={() => void copyPairUrl()}
+							>
+								<Copy className="size-3.5" />
+								Copiar link do pareamento
+							</Button>
+
+							<p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+								No celular: escaneie o QR ou abra o link copiado em qualquer
+								navegador.
+							</p>
+						</div>
+					)}
+				</div>
+
+				<DialogFooter className="border-t border-border/50 px-6 py-3">
+					<Button type="button" variant="outline" onClick={onClose}>
+						Fechar
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
+}

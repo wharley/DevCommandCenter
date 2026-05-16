@@ -4842,6 +4842,84 @@ fn remote_launch_ssh_tunnel_impl(
     }))
 }
 
+// =============================================================================
+// Mobile pairing Tauri commands (ECDSA P-256 signed-request auth)
+// =============================================================================
+
+fn pairing_db_path(app: &AppHandle) -> Result<PathBuf, ApiError> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| db_error(format!("app data dir unavailable: {e}")))?;
+    Ok(dir.join("database.sqlite"))
+}
+
+fn open_pairing_conn(app: &AppHandle) -> Result<Connection, ApiError> {
+    let path = pairing_db_path(app)?;
+    Connection::open(&path).map_err(|e| db_error(e.to_string()))
+}
+
+fn pairing_error_to_api(err: dev_command_center_tauri::pairing::PairingError) -> ApiError {
+    db_error(err.to_string())
+}
+
+#[tauri::command]
+async fn pair_init(app: AppHandle) -> ApiResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_pairing_conn(&app)?;
+        let challenge = dev_command_center_tauri::pairing::create_pairing_nonce(&conn)
+            .map_err(pairing_error_to_api)?;
+        Ok(serde_json::json!({
+            "nonce": challenge.nonce,
+            "pin": challenge.pin,
+            "expiresAt": challenge.expires_at,
+        }))
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_init task failed: {e}")))?
+}
+
+#[tauri::command]
+async fn pair_list_devices(app: AppHandle, include_revoked: Option<bool>) -> ApiResult<Value> {
+    let include_revoked = include_revoked.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_pairing_conn(&app)?;
+        let devices =
+            dev_command_center_tauri::pairing::list_paired_devices(&conn, include_revoked)
+                .map_err(pairing_error_to_api)?;
+        let json_devices: Vec<Value> = devices
+            .into_iter()
+            .map(|d| {
+                serde_json::json!({
+                    "deviceId": d.device_id,
+                    "deviceName": d.device_name,
+                    "userAgent": d.user_agent,
+                    "createdAt": d.created_at,
+                    "lastUsedAt": d.last_used_at,
+                    "lastIp": d.last_ip,
+                    "revoked": d.revoked,
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({ "devices": json_devices }))
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_list_devices task failed: {e}")))?
+}
+
+#[tauri::command]
+async fn pair_revoke_device(app: AppHandle, device_id: String) -> ApiResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_pairing_conn(&app)?;
+        let revoked =
+            dev_command_center_tauri::pairing::revoke_device(&conn, &device_id, None)
+                .map_err(pairing_error_to_api)?;
+        Ok(serde_json::json!({ "revoked": revoked }))
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_revoke_device task failed: {e}")))?
+}
+
 #[tauri::command]
 async fn remote_preflight_ssh(input: Value) -> ApiResult<Value> {
     let input: RemoteSshPreflightInput =
@@ -7733,6 +7811,9 @@ pub fn run() {
             terminal_get_project_activity,
             remote_preflight_ssh,
             remote_bootstrap_ssh_binary,
+            pair_init,
+            pair_list_devices,
+            pair_revoke_device,
             remote_list_ssh_tunnels,
             remote_launch_ssh_tunnel,
             remote_stop_ssh_tunnel,
