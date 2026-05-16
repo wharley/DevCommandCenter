@@ -4191,6 +4191,10 @@ ACTION="${1:-}"
 PORT="${2:-}"
 TOKEN="${3:-}"
 BIN_SPEC="${4:-$HOME/.dcc/bin/dccd-http}"
+case "$BIN_SPEC" in
+  "~/"*) BIN_SPEC="$HOME/${BIN_SPEC#\~/}" ;;
+  "~") BIN_SPEC="$HOME" ;;
+esac
 ROOT="$HOME/.dcc"
 PIDFILE="$ROOT/dccd-http-${PORT}.pid"
 LOGFILE="$ROOT/dccd-http.log"
