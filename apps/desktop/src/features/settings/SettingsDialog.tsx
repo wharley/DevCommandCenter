@@ -36,7 +36,6 @@ import { ProviderSelectionPanel } from "@/features/providers/provider-selection-
 import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
 import { PairedDevicesPanel } from "@/features/settings/paired-devices";
-import { RemoteEnvironmentsPanel } from "@/features/settings/remote-environments";
 import { getOpenPreferredEditorShortcutKeys } from "@/features/shortcuts/shortcut-utils";
 import type {
 	ProviderRuntimeDraft,
@@ -705,10 +704,7 @@ export function SettingsDialog({
 							) : null}
 
 							{activeSection === "connections" ? (
-								<div className="space-y-6">
-									<RemoteEnvironmentsPanel />
-									<PairedDevicesPanel defaultBackendUrl="http://127.0.0.1:9876" />
-								</div>
+								<PairedDevicesPanel defaultBackendUrl="http://127.0.0.1:9876" />
 							) : null}
 
 							{activeSection === "shortcuts" ? (
