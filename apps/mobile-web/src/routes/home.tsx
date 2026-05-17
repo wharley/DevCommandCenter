@@ -8,11 +8,14 @@ import {
 	LogOut,
 	Plus,
 	RefreshCw,
+	ShieldAlert,
 	Smartphone,
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { clearSession, loadSession, type PairingSession } from "@/lib/session";
+import { openEventStream } from "@/lib/sseClient";
+import type { RawSessionEvent } from "@/lib/threadEvents";
 
 type DaemonStatus = {
 	running: boolean;
@@ -105,6 +108,7 @@ function PairedHome({
 }) {
 	const [status, setStatus] = useState<DaemonStatus | null>(null);
 	const [sessions, setSessions] = useState<SessionSearchResult[] | null>(null);
+	const [pendingPermissions, setPendingPermissions] = useState<number>(0);
 	const [error, setError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
 
@@ -120,7 +124,10 @@ function PairedHome({
 				),
 			]);
 			setStatus(s);
-			setSessions(sess.filter((s) => !s.archivedAt));
+			const visible = sess.filter((s) => !s.archivedAt);
+			setSessions(visible);
+			// Fire-and-forget badge update; never blocks the Home rendering.
+			void countPendingPermissions(session, visible).then(setPendingPermissions);
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 401) {
 				setError("Sessão expirada. Pareie de novo no desktop.");
@@ -138,6 +145,24 @@ function PairedHome({
 		return () => window.clearInterval(id);
 	}, []);
 
+	// Live-update the badge when a permission request comes in / gets resolved
+	// without waiting for the 15s poll.
+	useEffect(() => {
+		const stop = openEventStream(session, "/api/v1/events/stream", {
+			onMessage: (payload) => {
+				const event = payload as RawSessionEvent;
+				const kind = event?.kind?.type;
+				if (
+					kind === "turn_permission_requested" ||
+					kind === "turn_permission_resolved"
+				) {
+					void refresh();
+				}
+			},
+		});
+		return stop;
+	}, []);
+
 	return (
 		<Shell>
 			<header className="flex items-center justify-between gap-3 px-1 pb-5">
@@ -148,6 +173,23 @@ function PairedHome({
 					</p>
 				</div>
 				<div className="flex items-center gap-1">
+					<Link
+						to="/permissions"
+						className={cn(
+							"relative rounded-lg p-2",
+							pendingPermissions > 0
+								? "text-amber-500"
+								: "text-mute hover:text-foreground",
+						)}
+						title="Permissões"
+					>
+						<ShieldAlert className="size-4" />
+						{pendingPermissions > 0 ? (
+							<span className="absolute -right-0.5 -top-0.5 grid min-w-[16px] place-items-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-[#241500]">
+								{pendingPermissions}
+							</span>
+						) : null}
+					</Link>
 					<Link
 						to="/new"
 						className="rounded-lg p-2 text-mute hover:text-foreground"
@@ -329,4 +371,54 @@ function Shell({ children }: { children: React.ReactNode }) {
 	return (
 		<main className="mx-auto flex min-h-dvh max-w-md flex-col px-5 py-8">{children}</main>
 	);
+}
+
+const PERMISSION_SCAN_WINDOW_MS = 48 * 3600 * 1000;
+
+/**
+ * Cheap pending-permission count for the Home badge: looks at the most
+ * recently-touched threads, fans out /events fetches in parallel, and sums
+ * `turn_permission_requested` minus matching `turn_permission_resolved`.
+ * Failures on individual threads degrade silently — the badge is an
+ * affordance, not a contract.
+ */
+async function countPendingPermissions(
+	session: PairingSession,
+	threads: SessionSearchResult[],
+): Promise<number> {
+	const cutoff = Date.now() - PERMISSION_SCAN_WINDOW_MS;
+	const recent = threads
+		.filter((t) => {
+			const ts = Date.parse(t.updatedAt);
+			return Number.isFinite(ts) && ts > cutoff;
+		})
+		.slice(0, 20);
+	if (recent.length === 0) return 0;
+	const lists = await Promise.all(
+		recent.map((thread) =>
+			apiFetch<RawSessionEvent[]>(
+				session,
+				`/api/v1/sessions/${encodeURIComponent(thread.sessionId)}/events`,
+			).catch(() => [] as RawSessionEvent[]),
+		),
+	);
+	let count = 0;
+	for (const events of lists) {
+		const requested = new Set<string>();
+		const resolved = new Set<string>();
+		for (const ev of events) {
+			const k = ev.kind;
+			if (k?.type === "turn_permission_requested") {
+				const id = typeof k.requestId === "string" ? k.requestId : ev.eventId;
+				requested.add(id);
+			} else if (k?.type === "turn_permission_resolved") {
+				const id = typeof k.requestId === "string" ? k.requestId : "";
+				resolved.add(id);
+			}
+		}
+		for (const id of requested) {
+			if (!resolved.has(id)) count++;
+		}
+	}
+	return count;
 }

@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/re
 import { HomeRoute } from "./routes/home";
 import { NewThreadRoute } from "./routes/new";
 import { PairRoute } from "./routes/pair";
+import { PermissionsRoute } from "./routes/permissions";
 import { ThreadRoute } from "./routes/thread";
 
 const rootRoute = createRootRoute({
@@ -32,11 +33,18 @@ const newThreadRoute = createRoute({
 	component: NewThreadRoute,
 });
 
+const permissionsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/permissions",
+	component: PermissionsRoute,
+});
+
 const routeTree = rootRoute.addChildren([
 	indexRoute,
 	pairRoute,
 	threadRoute,
 	newThreadRoute,
+	permissionsRoute,
 ]);
 
 // The SPA is mounted at /m/ in production (served by dccd-http) and at / in

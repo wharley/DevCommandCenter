@@ -11,6 +11,7 @@ import {
 	StopCircle,
 	Wrench,
 } from "lucide-react";
+import { Markdown } from "@/components/Markdown";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { loadSession, type PairingSession } from "@/lib/session";
@@ -362,8 +363,12 @@ function AssistantBubble({
 }) {
 	return (
 		<div className="flex justify-start">
-			<div className="max-w-[90%] rounded-2xl rounded-bl-md border border-border bg-panel px-3.5 py-2 text-[14px] leading-relaxed text-foreground">
-				{text || <Loader2 className="size-3.5 animate-spin text-mute" />}
+			<div className="max-w-[90%] rounded-2xl rounded-bl-md border border-border bg-panel px-3.5 py-2 text-foreground">
+				{text ? (
+					<Markdown text={text} />
+				) : (
+					<Loader2 className="size-3.5 animate-spin text-mute" />
+				)}
 				{!completed && text ? (
 					<span className="ml-1 inline-block size-2 animate-pulse rounded-full bg-accent align-middle" />
 				) : null}
