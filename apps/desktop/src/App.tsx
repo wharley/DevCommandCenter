@@ -119,11 +119,6 @@ import {
 	type ProviderRuntimeSettings,
 	writeProviderRuntimeSettings,
 } from "./features/providers/provider-runtime-settings";
-import {
-	getActiveRemoteEnvironment,
-	subscribeRemoteEnvironmentStore,
-} from "./features/settings/remote-environments-store";
-
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 const EMPTY_WORKSPACES: WorkspaceSummary[] = [];
 const LOCAL_BACKEND_CACHE_KEY = "local";
@@ -287,17 +282,12 @@ function applyCoreEventToSnapshot(
 export default function App() {
 	const { t } = useTranslation("common");
 	useZoom(1);
-	const activeRemoteEnvironment = useSyncExternalStore(
-		subscribeRemoteEnvironmentStore,
-		getActiveRemoteEnvironment,
-		() => null,
-	);
-	const isRemoteBackend =
-		Boolean(activeRemoteEnvironment?.endpoint) &&
-		Boolean(activeRemoteEnvironment?.bearerToken);
-	const backendCacheKey = isRemoteBackend
-		? `remote:${activeRemoteEnvironment!.id}`
-		: LOCAL_BACKEND_CACHE_KEY;
+	// Remote SSH backends were removed in the Connections cleanup. Keep the
+	// query keys stable (still LOCAL_BACKEND_CACHE_KEY) so cached data lives
+	// across mounts; the remote branches below are unreachable now.
+	const activeRemoteEnvironment = null;
+	const isRemoteBackend = false;
+	const backendCacheKey = LOCAL_BACKEND_CACHE_KEY;
 
 	const {
 		handleResizeKeyDown,
@@ -314,10 +304,6 @@ export default function App() {
 	const workspacesQuery = useQuery({
 		queryKey: ["workspaces", backendCacheKey],
 		queryFn: async () => {
-			if (isRemoteBackend && activeRemoteEnvironment) {
-				const combs = await daemonListCombs(null, activeRemoteEnvironment);
-				return combs.map(daemonCombToWorkspaceSummary);
-			}
 			const result = await listWorkspaces();
 			return result.workspaces.map(workspaceToSummary);
 		},
