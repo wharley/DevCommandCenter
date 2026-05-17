@@ -47,6 +47,26 @@ async fn main() {
         std::process::exit(1);
     }
 
+    // Auto-open LAN bind when there's at least one paired (or pairing-in-progress)
+    // mobile device, so the phone can actually reach this backend. Loopback bind
+    // is the safe default for headless / API-only deployments. The user can
+    // force loopback by setting DCC_HTTP_HOST=127.0.0.1 explicitly.
+    let host_was_explicit = std::env::var("DCC_HTTP_HOST").is_ok();
+    let pair_demand = count_pairing_demand(&config.db_path).unwrap_or(0);
+    if !host_was_explicit && is_loopback(&config.host) && pair_demand > 0 {
+        config.host = "0.0.0.0".to_string();
+        println!(
+            "[DCC HTTP] Detected {pair_demand} mobile device(s) — switching bind to 0.0.0.0 so the phone(s) can connect."
+        );
+        if let Some(lan_ip) = dev_command_center_tauri::net_info::detect_lan_ip() {
+            println!("[DCC HTTP] LAN reachable at:  http://{lan_ip}:{}", config.port);
+        }
+    } else if is_loopback(&config.host) {
+        println!(
+            "[DCC HTTP] Bound to loopback only. To pair a mobile device, set DCC_HTTP_HOST=0.0.0.0 or pair a device first (LAN bind enables itself)."
+        );
+    }
+
     let addr = match config.host.parse::<IpAddr>() {
         Ok(ip) => SocketAddr::from((ip, config.port)),
         Err(error) => {
@@ -118,4 +138,31 @@ async fn main() {
 fn ensure_pairing_schema(db_path: &std::path::Path) -> Result<(), String> {
     let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
     dev_command_center_tauri::pairing::ensure_pairing_schema(&conn).map_err(|e| e.to_string())
+}
+
+fn is_loopback(host: &str) -> bool {
+    matches!(host, "127.0.0.1" | "localhost" | "::1")
+}
+
+/// Counts active paired devices plus unconsumed (still-valid) pairing nonces.
+/// Returns 0 — instead of bubbling errors — if the DB cannot be opened, since
+/// this only affects whether LAN bind auto-engages.
+fn count_pairing_demand(db_path: &std::path::Path) -> Result<i64, String> {
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    let devices: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM paired_devices WHERE revoked_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let pending: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pairing_nonces
+             WHERE consumed_at IS NULL AND locked_at IS NULL AND expires_at > datetime('now')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    Ok(devices + pending)
 }

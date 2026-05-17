@@ -47,3 +47,13 @@ export function pairAuditLog(limit = 100) {
 export function pairPurgeExpired() {
 	return invoke<{ purged: number }>("pair_purge_expired");
 }
+
+export type LanEndpoint = {
+	ip: string | null;
+	port: number;
+	url: string | null;
+};
+
+export function pairGetLanUrl() {
+	return invoke<LanEndpoint>("pair_get_lan_url");
+}

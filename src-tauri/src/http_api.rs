@@ -411,10 +411,40 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         .route("/health", get(health_handler))
         .route("/openapi.json", get(openapi_handler))
         .route("/auth/pair", post(complete_pairing_handler))
+        .route("/m/pair", get(mobile_pair_landing_handler))
         .merge(protected_routes)
         .layer(build_cors_layer(&cors_config))
         .layer(TraceLayer::new_for_http())
         .with_state(config)
+}
+
+/// Embedded mobile pairing client (HTML+JS).
+///
+/// Served from the same origin as the API so the browser does not block the
+/// pair-completion XHR with mixed-content / CORS errors. Bundled at compile
+/// time via `include_str!` so it always matches the backend it talks to.
+const MOBILE_PAIR_HTML: &str = include_str!("../assets/m_pair.html");
+
+async fn mobile_pair_landing_handler() -> Response {
+    (
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+            // Conservative CSP: page is fully self-contained (no remote
+            // assets), so block everything except its own inline script/style.
+            (
+                axum::http::header::HeaderName::from_static("content-security-policy"),
+                "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src *; img-src 'self' data:; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+            ),
+            (
+                axum::http::header::HeaderName::from_static("referrer-policy"),
+                "no-referrer",
+            ),
+        ],
+        MOBILE_PAIR_HTML,
+    )
+        .into_response()
 }
 
 pub fn build_cors_layer(config: &HttpConfig) -> CorsLayer {

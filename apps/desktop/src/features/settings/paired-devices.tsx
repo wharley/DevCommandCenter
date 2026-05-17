@@ -26,25 +26,25 @@ import {
 import { RemoteAccessQr } from "./remote-access-qr";
 import {
 	pairAuditLog,
+	pairGetLanUrl,
 	pairInit,
 	pairListDevices,
 	pairRevokeDevice,
 	type AuditEntry,
+	type LanEndpoint,
 	type PairedDevice,
 	type PairingChallenge,
 } from "@/lib/pairing-api";
 
 /**
- * The hosted landing URL where the mobile client lives. Override at build
- * time via `VITE_PAIR_LANDING_URL` for staging / preview deployments.
+ * Builds the pairing URL the QR encodes. The landing page is served by the
+ * desktop backend itself (same origin as the API) so the phone never hits a
+ * mixed-content / CORS wall. `backendUrl` should already be the LAN URL of
+ * the desktop, e.g. http://192.168.1.42:9876.
  */
-const LANDING_BASE =
-	(import.meta as unknown as { env?: Record<string, string> }).env
-		?.VITE_PAIR_LANDING_URL ?? "https://dev-command-center.com";
-
 function buildPairUrl(backendUrl: string, nonce: string): string {
 	const params = new URLSearchParams({ be: backendUrl, nonce });
-	return `${LANDING_BASE}/m/pair#${params.toString()}`;
+	return `${backendUrl.replace(/\/$/, "")}/m/pair#${params.toString()}`;
 }
 
 function formatRelative(iso: string | null): string {
@@ -66,12 +66,18 @@ function formatRelative(iso: string | null): string {
 export function PairedDevicesPanel({
 	defaultBackendUrl,
 }: {
+	/**
+	 * Loopback URL kept as a last-resort fallback (e.g. tests, dev shells).
+	 * The real backend URL shown to mobile clients comes from `pair_get_lan_url`
+	 * and is the LAN address of this machine.
+	 */
 	defaultBackendUrl: string;
 }) {
 	const [devices, setDevices] = useState<PairedDevice[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [revokingId, setRevokingId] = useState<string | null>(null);
 	const [pairDialogOpen, setPairDialogOpen] = useState(false);
+	const [lan, setLan] = useState<LanEndpoint | null>(null);
 
 	const refresh = async () => {
 		setLoading(true);
@@ -89,6 +95,9 @@ export function PairedDevicesPanel({
 
 	useEffect(() => {
 		void refresh();
+		void pairGetLanUrl()
+			.then((endpoint) => setLan(endpoint))
+			.catch(() => setLan({ ip: null, port: 9876, url: null }));
 	}, []);
 
 	useEffect(() => {
@@ -249,7 +258,8 @@ export function PairedDevicesPanel({
 					setPairDialogOpen(false);
 					void refresh();
 				}}
-				backendUrl={defaultBackendUrl}
+				backendUrl={lan?.url ?? defaultBackendUrl}
+				lanUnavailable={lan !== null && lan.url === null}
 			/>
 
 			<AuditLogSection />
@@ -383,10 +393,12 @@ function PairDeviceDialog({
 	open,
 	onClose,
 	backendUrl,
+	lanUnavailable,
 }: {
 	open: boolean;
 	onClose: () => void;
 	backendUrl: string;
+	lanUnavailable: boolean;
 }) {
 	const [challenge, setChallenge] = useState<PairingChallenge | null>(null);
 	const [generating, setGenerating] = useState(false);
@@ -407,14 +419,14 @@ function PairDeviceDialog({
 	};
 
 	useEffect(() => {
-		if (open && !challenge) {
+		if (open && !challenge && !lanUnavailable) {
 			void generate();
 		}
 		if (!open) {
 			setChallenge(null);
 			setRemainingSecs(0);
 		}
-	}, [open]);
+	}, [open, lanUnavailable]);
 
 	useEffect(() => {
 		if (!challenge) return;
@@ -456,7 +468,19 @@ function PairDeviceDialog({
 				</DialogHeader>
 
 				<div className="flex-1 overflow-y-auto px-6 py-5">
-					{generating || !challenge ? (
+					{lanUnavailable ? (
+						<div className="flex h-[280px] flex-col items-center justify-center gap-3 px-4 text-center">
+							<AlertTriangle className="size-6 text-amber-500" strokeWidth={1.8} />
+							<p className="text-[13px] font-medium text-foreground">
+								Sem conexão de rede local
+							</p>
+							<p className="text-[12px] leading-relaxed text-muted-foreground">
+								Não consegui detectar um IP LAN neste computador. Conecte ao
+								Wi-Fi (ou cabo) e tente de novo. O celular precisa estar na
+								mesma rede.
+							</p>
+						</div>
+					) : generating || !challenge ? (
 						<div className="flex h-[280px] items-center justify-center">
 							<Loader2 className="size-5 animate-spin text-muted-foreground" />
 						</div>
@@ -512,7 +536,10 @@ function PairDeviceDialog({
 
 							<p className="text-center text-[11px] leading-relaxed text-muted-foreground">
 								No celular: escaneie o QR ou abra o link copiado em qualquer
-								navegador.
+								navegador. Mesma WiFi do desktop.
+							</p>
+							<p className="text-center font-mono text-[10px] text-muted-foreground/70">
+								{backendUrl}
 							</p>
 						</div>
 					)}

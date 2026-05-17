@@ -42,7 +42,7 @@ Verifique no browser:
 
 ### 1.3 Apontar o QR do desktop para a landing local
 
-Por default o QR codifica `https://dev-command-center.com/...`. Para teste
+Por default o QR codifica `https://www.devcommandcenter.com/...`. Para teste
 local, exporte a variável antes de iniciar o app desktop:
 
 ```bash

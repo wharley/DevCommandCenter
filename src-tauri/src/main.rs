@@ -5020,6 +5020,22 @@ async fn pair_purge_expired(app: AppHandle) -> ApiResult<Value> {
     .map_err(|e| db_error(format!("pair_purge_expired task failed: {e}")))?
 }
 
+/// Discovers the LAN URL the mobile companion should connect to.
+///
+/// The QR code embeds this URL so the phone reaches dccd-http over the same
+/// WiFi as the desktop (no public internet exposure required). Returns
+/// `ip: null` when no usable interface is up — the UI uses that to show
+/// "no LAN detected" rather than rendering a broken QR.
+#[tauri::command]
+async fn pair_get_lan_url() -> ApiResult<Value> {
+    let port = std::env::var("DCC_HTTP_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(9876);
+    let endpoint = dev_command_center_tauri::net_info::lan_endpoint(port);
+    Ok(serde_json::to_value(endpoint).map_err(|e| db_error(e.to_string()))?)
+}
+
 #[tauri::command]
 async fn remote_preflight_ssh(input: Value) -> ApiResult<Value> {
     let input: RemoteSshPreflightInput =
@@ -7916,6 +7932,7 @@ pub fn run() {
             pair_revoke_device,
             pair_audit_log,
             pair_purge_expired,
+            pair_get_lan_url,
             remote_list_ssh_tunnels,
             remote_launch_ssh_tunnel,
             remote_stop_ssh_tunnel,
