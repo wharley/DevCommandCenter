@@ -234,19 +234,23 @@ CREATE TABLE IF NOT EXISTS pairing_nonces (
 
 CREATE INDEX IF NOT EXISTS idx_pairing_nonces_expires ON pairing_nonces(expires_at);
 
--- Dispositivos pareados com pubkey ECDSA P-256 (SPKI DER, base64)
+-- Dispositivos pareados. Dois modos de auth:
+--   1. ECDSA P-256: public_key_spki preenchido, session_token_hash NULL — native clients
+--   2. Bearer token: session_token_hash preenchido, public_key_spki = blob vazio — browser clients
 CREATE TABLE IF NOT EXISTS paired_devices (
-  device_id        TEXT PRIMARY KEY,
-  device_name      TEXT NOT NULL,
-  public_key_spki  BLOB NOT NULL,
-  user_agent       TEXT,
-  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-  last_used_at     TEXT,
-  last_ip          TEXT,
-  revoked_at       TEXT
+  device_id            TEXT PRIMARY KEY,
+  device_name          TEXT NOT NULL,
+  public_key_spki      BLOB NOT NULL,
+  user_agent           TEXT,
+  created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at         TEXT,
+  last_ip              TEXT,
+  revoked_at           TEXT,
+  session_token_hash   TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_paired_devices_revoked ON paired_devices(revoked_at);
+CREATE INDEX IF NOT EXISTS idx_paired_devices_token ON paired_devices(session_token_hash);
 
 -- Trilha de auditoria
 CREATE TABLE IF NOT EXISTS pair_audit_log (

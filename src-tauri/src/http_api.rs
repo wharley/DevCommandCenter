@@ -2156,7 +2156,12 @@ fn authentication_descriptor(config: &HttpConfig) -> Value {
 struct CompletePairingRequest {
     nonce: String,
     pin: String,
-    public_key_spki: String,
+    /// SPKI-encoded ECDSA P-256 pubkey for native clients that can sign each
+    /// request. Omit to fall back to bearer-token auth — required for browser
+    /// clients reaching the backend over `http://<lan-ip>:...` where
+    /// `crypto.subtle` is unavailable.
+    #[serde(default)]
+    public_key_spki: Option<String>,
     device_name: String,
 }
 
@@ -2165,6 +2170,11 @@ struct CompletePairingRequest {
 struct CompletePairingResponse {
     ok: bool,
     device_id: String,
+    /// Issued exactly once when `public_key_spki` was not provided. The client
+    /// stores it and sends `Authorization: Bearer <token>` on every subsequent
+    /// request. Only the SHA-256 of this value is persisted server-side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_token: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2325,22 +2335,39 @@ async fn complete_pairing_handler(
         ));
     }
 
-    let device_id = with_pairing_db(config, move |conn| {
-        pairing::complete_pairing(
-            conn,
-            &body.nonce,
-            &body.pin,
-            &body.public_key_spki,
-            &body.device_name,
-            user_agent.as_deref(),
-            forwarded_ip.as_deref(),
-        )
-    })
-    .await?;
+    let (device_id, session_token) = if let Some(pubkey) = body.public_key_spki.clone() {
+        let device_id = with_pairing_db(config, move |conn| {
+            pairing::complete_pairing(
+                conn,
+                &body.nonce,
+                &body.pin,
+                &pubkey,
+                &body.device_name,
+                user_agent.as_deref(),
+                forwarded_ip.as_deref(),
+            )
+        })
+        .await?;
+        (device_id, None)
+    } else {
+        let (device_id, token) = with_pairing_db(config, move |conn| {
+            pairing::complete_pairing_bearer(
+                conn,
+                &body.nonce,
+                &body.pin,
+                &body.device_name,
+                user_agent.as_deref(),
+                forwarded_ip.as_deref(),
+            )
+        })
+        .await?;
+        (device_id, Some(token))
+    };
 
     Ok(Json(CompletePairingResponse {
         ok: true,
         device_id,
+        session_token,
     }))
 }
 

@@ -18,14 +18,19 @@ const MAX_SIGNED_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 /// Middleware to validate HTTP auth.
 ///
-/// Three accepted credentials, in this priority order:
-///   1. Signed request (X-Device-Id + X-Timestamp + X-Signature) — mobile clients
-///   2. X-API-Key — desktop / Local mode
-///   3. Authorization: Bearer — remote tunnel clients
+/// Accepted credentials, tried in this priority order:
+///   1. Signed request (X-Device-Id + X-Timestamp + X-Signature) — native
+///      mobile clients with ECDSA P-256 keypairs
+///   2. Authorization: Bearer <paired-session-token> — browser clients paired
+///      via the bearer flow (no WebCrypto needed)
+///   3. X-API-Key — desktop / Local mode
+///   4. Authorization: Bearer <config-token> — remote tunnel clients with the
+///      operator-configured shared bearer
 ///
-/// When signed-request headers are present, we commit to verifying them: failure
-/// returns 401 without falling back. This prevents an attacker from confusing
-/// us with bogus signed headers + a valid API key.
+/// When signed-request headers are present, we commit to verifying them:
+/// failure returns 401 without falling back. Same for paired-session bearers
+/// — once a token starts with a recognized shape we don't silently treat its
+/// failure as "try another method," which would let an attacker probe.
 pub async fn auth_middleware(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     request: Request<Body>,
@@ -35,10 +40,77 @@ pub async fn auth_middleware(
         return validate_signed_request(config, request, next).await;
     }
 
+    // Try paired-device bearer token before falling back to legacy auth modes.
+    // We only attempt this when a Bearer header is present *and* the token is
+    // not the configured shared bearer (so we never double-validate it).
+    if let Some(token) = bearer_from_headers(request.headers()) {
+        let configured = config.read().await.bearer_token.clone();
+        if configured.as_deref() != Some(token.as_str()) {
+            match try_paired_session_bearer(&config, &token, request.headers()).await {
+                Some(Ok(())) => return Ok(next.run(request).await),
+                Some(Err(err)) => return Err(err),
+                None => {
+                    // Not a known paired-session token. Fall through to legacy
+                    // auth (X-API-Key or operator-configured shared bearer).
+                }
+            }
+        }
+    }
+
     let headers = request.headers().clone();
     let config = config.read().await;
     validate_auth(&config, &headers)?;
     Ok(next.run(request).await)
+}
+
+fn bearer_from_headers(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(AUTHORIZATION)?.to_str().ok()?;
+    let trimmed = raw
+        .strip_prefix("Bearer ")
+        .or_else(|| raw.strip_prefix("bearer "))?
+        .trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Looks the bearer up as a paired-device session token. Returns:
+/// - `Some(Ok(()))` — token matched an active paired device, request is authorized
+/// - `Some(Err(_))` — token had a paired-device shape but failed validation
+///   (revoked / expired) — caller should propagate this error, not silently fall back
+/// - `None` — no row matched; caller should keep trying other auth methods
+async fn try_paired_session_bearer(
+    config: &Arc<RwLock<HttpConfig>>,
+    token: &str,
+    headers: &HeaderMap,
+) -> Option<Result<(), AuthError>> {
+    let db_path: PathBuf = config.read().await.db_path.clone();
+    let client_ip = header_str(headers, "x-forwarded-for")
+        .and_then(|v| v.split(',').next().map(|s| s.trim().to_string()));
+
+    let token = token.to_string();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let conn = rusqlite::Connection::open(&db_path).ok()?;
+        Some(pairing::verify_bearer_session(
+            &conn,
+            &token,
+            client_ip.as_deref(),
+        ))
+    })
+    .await
+    .ok()??;
+
+    match outcome {
+        Ok(_) => Some(Ok(())),
+        Err(pairing::PairingError::UnknownDevice) => None,
+        Err(pairing::PairingError::DeviceRevoked) => Some(Err(AuthError::SignedRequestRevokedDevice)),
+        Err(pairing::PairingError::SessionExpired) => {
+            Some(Err(AuthError::SignedRequestSessionExpired))
+        }
+        Err(_) => Some(Err(AuthError::InvalidBearerToken)),
+    }
 }
 
 fn has_signed_request_headers(headers: &HeaderMap) -> bool {

@@ -112,14 +112,15 @@ pub fn ensure_pairing_schema(conn: &Connection) -> Result<(), PairingError> {
         CREATE INDEX IF NOT EXISTS idx_pairing_nonces_expires ON pairing_nonces(expires_at);
 
         CREATE TABLE IF NOT EXISTS paired_devices (
-            device_id        TEXT PRIMARY KEY,
-            device_name      TEXT NOT NULL,
-            public_key_spki  BLOB NOT NULL,
-            user_agent       TEXT,
-            created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-            last_used_at     TEXT,
-            last_ip          TEXT,
-            revoked_at       TEXT
+            device_id            TEXT PRIMARY KEY,
+            device_name          TEXT NOT NULL,
+            public_key_spki      BLOB NOT NULL,
+            user_agent           TEXT,
+            created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used_at         TEXT,
+            last_ip              TEXT,
+            revoked_at           TEXT,
+            session_token_hash   TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_paired_devices_revoked ON paired_devices(revoked_at);
 
@@ -146,6 +147,17 @@ pub fn ensure_pairing_schema(conn: &Connection) -> Result<(), PairingError> {
         "INTEGER NOT NULL DEFAULT 0",
     )?;
     add_column_if_missing(conn, "pairing_nonces", "locked_at", "TEXT")?;
+
+    // Phase 6.3: bearer-token auth for browser clients that cannot do WebCrypto.
+    // Order matters: add the column before creating its index, otherwise the
+    // CREATE INDEX fails on databases that pre-date this column (where the
+    // CREATE TABLE IF NOT EXISTS is a no-op and the column is still missing).
+    add_column_if_missing(conn, "paired_devices", "session_token_hash", "TEXT")?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_paired_devices_token ON paired_devices(session_token_hash)",
+        [],
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))?;
 
     Ok(())
 }
@@ -423,6 +435,242 @@ fn sanitize_device_name(name: &str) -> String {
     } else {
         trimmed.chars().take(80).collect()
     }
+}
+
+const BEARER_TOKEN_BYTES: usize = 32;
+
+fn generate_session_token() -> String {
+    let mut bytes = [0u8; BEARER_TOKEN_BYTES];
+    OsRng.fill_bytes(&mut bytes);
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn hash_session_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"dcc-pair-session\0");
+    hasher.update(token.as_bytes());
+    BASE64.encode(hasher.finalize())
+}
+
+/// Pairing variant for clients that cannot perform WebCrypto (browsers reaching
+/// the backend over `http://<lan-ip>:...` lose `crypto.subtle` because the
+/// origin isn't a secure context). Same nonce + PIN gate, same lockout, same
+/// device cap — but the device is identified by a server-issued bearer token
+/// instead of an ECDSA P-256 pubkey. The raw token is returned only here and
+/// never persisted: only its SHA-256 lives in `paired_devices.session_token_hash`.
+pub fn complete_pairing_bearer(
+    conn: &Connection,
+    nonce: &str,
+    pin: &str,
+    device_name: &str,
+    user_agent: Option<&str>,
+    client_ip: Option<&str>,
+) -> Result<(String, String), PairingError> {
+    let row: Option<(String, String, Option<String>, i64, Option<String>)> = conn
+        .query_row(
+            "SELECT pin_hash, expires_at, consumed_at, failed_attempts, locked_at
+             FROM pairing_nonces WHERE nonce = ?1",
+            params![nonce],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+
+    let (stored_pin_hash, expires_at_iso, consumed_at, failed_attempts, locked_at) =
+        row.ok_or(PairingError::InvalidNonce)?;
+
+    if consumed_at.is_some() {
+        return Err(PairingError::AlreadyConsumed);
+    }
+    if locked_at.is_some() || failed_attempts >= MAX_PIN_ATTEMPTS {
+        record_audit(
+            conn,
+            "pin_locked",
+            None,
+            client_ip,
+            user_agent,
+            Some(&format!(
+                "{{\"nonce\":\"{}\",\"attempts\":{}}}",
+                nonce, failed_attempts
+            )),
+        );
+        return Err(PairingError::NonceLocked);
+    }
+
+    let expires_at = chrono::DateTime::parse_from_rfc3339(&expires_at_iso)
+        .map_err(|_| PairingError::Database("invalid expires_at".into()))?
+        .with_timezone(&chrono::Utc);
+    if chrono::Utc::now() > expires_at {
+        return Err(PairingError::Expired);
+    }
+
+    let candidate_hash = hash_pin(pin, nonce);
+    if !constant_time_eq(&candidate_hash, &stored_pin_hash) {
+        let next_attempts = failed_attempts + 1;
+        let new_lock = if next_attempts >= MAX_PIN_ATTEMPTS {
+            Some(now_iso())
+        } else {
+            None
+        };
+        let _ = conn.execute(
+            "UPDATE pairing_nonces
+             SET failed_attempts = ?1,
+                 locked_at = COALESCE(locked_at, ?2)
+             WHERE nonce = ?3",
+            params![next_attempts, new_lock, nonce],
+        );
+        record_audit(
+            conn,
+            "pin_failure",
+            None,
+            client_ip,
+            user_agent,
+            Some(&format!(
+                "{{\"nonce\":\"{}\",\"attempts\":{}}}",
+                nonce, next_attempts
+            )),
+        );
+        if new_lock.is_some() {
+            return Err(PairingError::NonceLocked);
+        }
+        return Err(PairingError::InvalidPin);
+    }
+
+    let active_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM paired_devices WHERE revoked_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+    if active_count >= MAX_ACTIVE_DEVICES {
+        record_audit(
+            conn,
+            "limit_reached",
+            None,
+            client_ip,
+            user_agent,
+            Some(&format!("{{\"active\":{}}}", active_count)),
+        );
+        return Err(PairingError::DeviceLimitReached);
+    }
+
+    let device_id = Uuid::new_v4().to_string();
+    let device_name = sanitize_device_name(device_name);
+    let session_token = generate_session_token();
+    let token_hash = hash_session_token(&session_token);
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+
+    tx.execute(
+        "UPDATE pairing_nonces SET consumed_at = ?1 WHERE nonce = ?2",
+        params![now_iso(), nonce],
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))?;
+
+    // public_key_spki is NOT NULL in legacy schemas; we store an empty blob
+    // for bearer-paired devices and rely on session_token_hash IS NOT NULL
+    // to disambiguate.
+    tx.execute(
+        "INSERT INTO paired_devices (device_id, device_name, public_key_spki, user_agent, last_ip, session_token_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![device_id, device_name, Vec::<u8>::new(), user_agent, client_ip, token_hash],
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))?;
+
+    tx.commit()
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+
+    record_audit(
+        conn,
+        "pair",
+        Some(&device_id),
+        client_ip,
+        user_agent,
+        Some(&format!(
+            "{{\"device_name\":{:?},\"mode\":\"bearer\"}}",
+            device_name
+        )),
+    );
+
+    Ok((device_id, session_token))
+}
+
+/// Bearer-token counterpart of `verify_signed_request`. Looks the device up by
+/// the SHA-256 of the presented token, applies the same revocation / session-age
+/// checks, and bumps `last_used_at`. Constant-time comparison is implicit
+/// because we look up by hash, not by raw token.
+pub fn verify_bearer_session(
+    conn: &Connection,
+    token: &str,
+    client_ip: Option<&str>,
+) -> Result<PairedDeviceSummary, PairingError> {
+    let token_hash = hash_session_token(token);
+
+    let row: Option<(
+        String,
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+    )> = conn
+        .query_row(
+            "SELECT device_id, device_name, user_agent, created_at, revoked_at
+             FROM paired_devices
+             WHERE session_token_hash = ?1",
+            params![token_hash],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+
+    let (device_id, device_name, user_agent, created_at, revoked_at) =
+        row.ok_or(PairingError::UnknownDevice)?;
+
+    if revoked_at.is_some() {
+        return Err(PairingError::DeviceRevoked);
+    }
+
+    if let Ok(created_dt) = chrono::DateTime::parse_from_rfc3339(&created_at) {
+        let age = chrono::Utc::now() - created_dt.with_timezone(&chrono::Utc);
+        if age.num_days() > SESSION_MAX_AGE_DAYS {
+            return Err(PairingError::SessionExpired);
+        }
+    }
+
+    let now = now_iso();
+    let _ = conn.execute(
+        "UPDATE paired_devices SET last_used_at = ?1, last_ip = ?2 WHERE device_id = ?3",
+        params![now, client_ip, device_id],
+    );
+
+    Ok(PairedDeviceSummary {
+        device_id,
+        device_name,
+        user_agent,
+        created_at,
+        last_used_at: Some(now),
+        last_ip: client_ip.map(str::to_string),
+        revoked: false,
+    })
 }
 
 // ---------- signature verification ----------
@@ -992,6 +1240,65 @@ mod tests {
             None,
         );
         assert!(matches!(result, Err(PairingError::SessionExpired)));
+    }
+
+    #[test]
+    fn bearer_pair_round_trip() {
+        let conn = fresh_db();
+        let challenge = create_pairing_nonce(&conn).unwrap();
+
+        let (device_id, token) = complete_pairing_bearer(
+            &conn,
+            &challenge.nonce,
+            &challenge.pin,
+            "browser-test",
+            Some("Mozilla/5.0"),
+            Some("192.168.1.20"),
+        )
+        .unwrap();
+
+        assert!(!device_id.is_empty());
+        assert!(token.len() > 30);
+
+        let summary = verify_bearer_session(&conn, &token, Some("192.168.1.20")).unwrap();
+        assert_eq!(summary.device_id, device_id);
+        assert_eq!(summary.device_name, "browser-test");
+        assert_eq!(summary.last_ip.as_deref(), Some("192.168.1.20"));
+    }
+
+    #[test]
+    fn bearer_session_rejects_unknown_token() {
+        let conn = fresh_db();
+        let result = verify_bearer_session(&conn, "definitely-not-a-real-token", None);
+        assert!(matches!(result, Err(PairingError::UnknownDevice)));
+    }
+
+    #[test]
+    fn bearer_session_rejects_revoked_device() {
+        let conn = fresh_db();
+        let challenge = create_pairing_nonce(&conn).unwrap();
+        let (device_id, token) = complete_pairing_bearer(
+            &conn,
+            &challenge.nonce,
+            &challenge.pin,
+            "phone",
+            None,
+            None,
+        )
+        .unwrap();
+
+        revoke_device(&conn, &device_id, None).unwrap();
+        let result = verify_bearer_session(&conn, &token, None);
+        assert!(matches!(result, Err(PairingError::DeviceRevoked)));
+    }
+
+    #[test]
+    fn bearer_pair_rejects_wrong_pin() {
+        let conn = fresh_db();
+        let challenge = create_pairing_nonce(&conn).unwrap();
+        let result =
+            complete_pairing_bearer(&conn, &challenge.nonce, "000000", "phone", None, None);
+        assert!(matches!(result, Err(PairingError::InvalidPin)));
     }
 
     #[test]
