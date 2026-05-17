@@ -19,6 +19,7 @@ type WorkspacePanelProps = {
 	workspaceName: string;
 	workspaceBranch: string;
 	workspacePath: string | null;
+	sessionQueryScope?: string;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
 	selectedProviderId: string | null;
@@ -36,6 +37,7 @@ type WorkspacePanelProps = {
 	onSelectSession: (sessionId: string) => void;
 	onCloseSession: (sessionId: string) => void;
 	onRestoreSession: (sessionId: string) => void;
+	onOpenSessionSearch: () => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
@@ -57,6 +59,7 @@ export function WorkspacePanel({
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
+	sessionQueryScope = "local",
 	selectedProviderLabel,
 	selectedModelLabel,
 	selectedProviderId,
@@ -74,6 +77,7 @@ export function WorkspacePanel({
 	onSelectSession,
 	onCloseSession,
 	onRestoreSession,
+	onOpenSessionSearch,
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
@@ -88,7 +92,10 @@ export function WorkspacePanel({
 }: WorkspacePanelProps) {
 	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
 	const threadHistoryQuery = useQuery(
-		sessionThreadHistoryQueryOptions(effectiveSessionId),
+		sessionThreadHistoryQueryOptions(effectiveSessionId, {
+			scope: sessionQueryScope,
+			refetchInterval: false,
+		}),
 	);
 	const selectedSessionTitle =
 		sessions.find((session) => session.session.id === effectiveSessionId)?.thread
@@ -158,6 +165,7 @@ export function WorkspacePanel({
 					onStartSession={onStartSession}
 					onCloseSession={onCloseSession}
 					onRestoreSession={onRestoreSession}
+					onOpenSessionSearch={onOpenSessionSearch}
 					onResumeSession={onResumeSession}
 					onAbortSession={onAbortSession}
 					sessionActionSessionId={sessionActionSessionId}

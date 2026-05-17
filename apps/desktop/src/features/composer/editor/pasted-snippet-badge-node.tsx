@@ -3,6 +3,8 @@ import {
 	$applyNodeReplacement,
 	$getNodeByKey,
 	DecoratorNode,
+	type DOMConversionMap,
+	type DOMConversionOutput,
 	type DOMExportOutput,
 	type LexicalNode,
 	type NodeKey,
@@ -63,6 +65,22 @@ export class PastedSnippetBadgeNode extends DecoratorNode<ReactNode> {
 		return "pasted-snippet";
 	}
 
+	static importDOM(): DOMConversionMap | null {
+		return {
+			span: (domNode: HTMLElement) => {
+				if (domNode.dataset.dccPastedSnippet !== "true") {
+					return null;
+				}
+				return {
+					conversion: (element): DOMConversionOutput => ({
+						node: $createPastedSnippetBadgeNode(element.textContent ?? ""),
+					}),
+					priority: 2,
+				};
+			},
+		};
+	}
+
 	static clone(node: PastedSnippetBadgeNode): PastedSnippetBadgeNode {
 		return new PastedSnippetBadgeNode(node.__body, node.__key);
 	}
@@ -98,6 +116,7 @@ export class PastedSnippetBadgeNode extends DecoratorNode<ReactNode> {
 
 	exportDOM(): DOMExportOutput {
 		const span = document.createElement("span");
+		span.dataset.dccPastedSnippet = "true";
 		span.textContent = this.__body;
 		return { element: span };
 	}

@@ -1,8 +1,61 @@
 export const composerToolbarTriggerClassName =
 	"cursor-pointer rounded-[9px] px-1 py-0.5 text-[13px] font-medium transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50";
 
+export type PlanModeStateMap = Record<string, boolean>;
+
 export function getComposerDraftKey(workspaceId: string) {
 	return `dcc.workspace.composer.draft.${workspaceId}`;
+}
+
+function getWorkspacePlanModeScopeKey(workspaceId: string | null) {
+	return workspaceId ? `workspace:${workspaceId}` : null;
+}
+
+function getSessionPlanModeScopeKey(sessionId: string | null) {
+	return sessionId ? `session:${sessionId}` : null;
+}
+
+export function resolvePlanModeState(
+	stateMap: PlanModeStateMap,
+	input: {
+		workspaceId: string | null;
+		sessionId: string | null;
+	},
+) {
+	const sessionKey = getSessionPlanModeScopeKey(input.sessionId);
+	if (sessionKey && sessionKey in stateMap) {
+		return stateMap[sessionKey] === true;
+	}
+
+	const workspaceKey = getWorkspacePlanModeScopeKey(input.workspaceId);
+	if (workspaceKey && workspaceKey in stateMap) {
+		return stateMap[workspaceKey] === true;
+	}
+
+	return false;
+}
+
+export function setPlanModeState(
+	stateMap: PlanModeStateMap,
+	input: {
+		workspaceId: string | null;
+		sessionId: string | null;
+		enabled: boolean;
+	},
+) {
+	const next = { ...stateMap };
+	const workspaceKey = getWorkspacePlanModeScopeKey(input.workspaceId);
+	const sessionKey = getSessionPlanModeScopeKey(input.sessionId);
+
+	if (workspaceKey) {
+		next[workspaceKey] = input.enabled;
+	}
+
+	if (sessionKey) {
+		next[sessionKey] = input.enabled;
+	}
+
+	return next;
 }
 
 /** Matches `docs/UX_UI_BLUEPRINT.md` §15.4 and helmor `submitEnabled` / send vs steer. */

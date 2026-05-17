@@ -2295,6 +2295,67 @@ fn daemon_tick_internal(app: &AppHandle, state: &AppState) -> Result<(), String>
     Ok(())
 }
 
+/// Polls `pair_audit_log` and emits a Tauri event for each new entry so the
+/// desktop UI can show a toast / notification. Polling avoids needing
+/// dccd-http to push events back into the Tauri process.
+fn start_pair_audit_watcher(app: AppHandle, db_path: PathBuf) {
+    thread::spawn(move || {
+        // Establish the high-water mark we have already seen — we never replay
+        // historical entries on startup, only new ones.
+        let mut last_id: i64 = match Connection::open(&db_path) {
+            Ok(conn) => conn
+                .query_row("SELECT IFNULL(MAX(id), 0) FROM pair_audit_log", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap_or(0),
+            Err(_) => 0,
+        };
+
+        loop {
+            thread::sleep(Duration::from_secs(3));
+            let Ok(conn) = Connection::open(&db_path) else {
+                continue;
+            };
+
+            let mut stmt = match conn.prepare(
+                "SELECT id, event, device_id, ip, user_agent, details_json, created_at
+                 FROM pair_audit_log
+                 WHERE id > ?1
+                 ORDER BY id ASC",
+            ) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            let mut highest = last_id;
+            let rows = stmt.query_map(rusqlite::params![last_id], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "event": row.get::<_, String>(1)?,
+                    "deviceId": row.get::<_, Option<String>>(2)?,
+                    "ip": row.get::<_, Option<String>>(3)?,
+                    "userAgent": row.get::<_, Option<String>>(4)?,
+                    "detailsJson": row.get::<_, Option<String>>(5)?,
+                    "createdAt": row.get::<_, String>(6)?,
+                }))
+            });
+
+            if let Ok(iter) = rows {
+                for entry in iter.flatten() {
+                    if let Some(id) = entry.get("id").and_then(|v| v.as_i64()) {
+                        if id > highest {
+                            highest = id;
+                        }
+                    }
+                    let _ = app.emit("pair-audit-event", entry);
+                }
+            }
+
+            last_id = highest;
+        }
+    });
+}
+
 fn start_daemon_worker(app: AppHandle, state: AppState) {
     state.daemon.running.store(true, Ordering::Relaxed);
     thread::spawn(move || {
@@ -3664,6 +3725,157 @@ fn shell_open_terminal_at_path(
         "success": false,
         "error": "Plataforma não suportada para abertura de terminal"
     }))
+}
+
+// =============================================================================
+// Mobile pairing Tauri commands (ECDSA P-256 signed-request auth)
+// =============================================================================
+
+fn pairing_db_path(app: &AppHandle) -> Result<PathBuf, ApiError> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| db_error(format!("app data dir unavailable: {e}")))?;
+    Ok(dir.join("database.sqlite"))
+}
+
+fn open_pairing_conn(app: &AppHandle) -> Result<Connection, ApiError> {
+    let path = pairing_db_path(app)?;
+    Connection::open(&path).map_err(|e| db_error(e.to_string()))
+}
+
+fn pairing_error_to_api(err: dev_command_center_tauri::pairing::PairingError) -> ApiError {
+    db_error(err.to_string())
+}
+
+#[tauri::command]
+async fn pair_init(app: AppHandle) -> ApiResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_pairing_conn(&app)?;
+        let challenge = dev_command_center_tauri::pairing::create_pairing_nonce(&conn)
+            .map_err(pairing_error_to_api)?;
+        Ok(serde_json::json!({
+            "nonce": challenge.nonce,
+            "pin": challenge.pin,
+            "expiresAt": challenge.expires_at,
+        }))
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_init task failed: {e}")))?
+}
+
+#[tauri::command]
+async fn pair_list_devices(app: AppHandle, include_revoked: Option<bool>) -> ApiResult<Value> {
+    let include_revoked = include_revoked.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_pairing_conn(&app)?;
+        let devices =
+            dev_command_center_tauri::pairing::list_paired_devices(&conn, include_revoked)
+                .map_err(pairing_error_to_api)?;
+        let json_devices: Vec<Value> = devices
+            .into_iter()
+            .map(|d| {
+                serde_json::json!({
+                    "deviceId": d.device_id,
+                    "deviceName": d.device_name,
+                    "userAgent": d.user_agent,
+                    "createdAt": d.created_at,
+                    "lastUsedAt": d.last_used_at,
+                    "lastIp": d.last_ip,
+                    "revoked": d.revoked,
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({ "devices": json_devices }))
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_list_devices task failed: {e}")))?
+}
+
+#[tauri::command]
+async fn pair_revoke_device(app: AppHandle, device_id: String) -> ApiResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_pairing_conn(&app)?;
+        let revoked =
+            dev_command_center_tauri::pairing::revoke_device(&conn, &device_id, None)
+                .map_err(pairing_error_to_api)?;
+        Ok(serde_json::json!({ "revoked": revoked }))
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_revoke_device task failed: {e}")))?
+}
+
+#[tauri::command]
+async fn pair_audit_log(app: AppHandle, limit: Option<i64>) -> ApiResult<Value> {
+    let limit = limit.unwrap_or(100);
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_pairing_conn(&app)?;
+        let entries = dev_command_center_tauri::pairing::list_audit_log(&conn, limit)
+            .map_err(pairing_error_to_api)?;
+        let json_entries: Vec<Value> = entries
+            .into_iter()
+            .map(|e| {
+                serde_json::json!({
+                    "id": e.id,
+                    "event": e.event,
+                    "deviceId": e.device_id,
+                    "ip": e.ip,
+                    "userAgent": e.user_agent,
+                    "detailsJson": e.details_json,
+                    "createdAt": e.created_at,
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({ "entries": json_entries }))
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_audit_log task failed: {e}")))?
+}
+
+#[tauri::command]
+async fn pair_purge_expired(app: AppHandle) -> ApiResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_pairing_conn(&app)?;
+        let n = dev_command_center_tauri::pairing::purge_expired_nonces(&conn)
+            .map_err(pairing_error_to_api)?;
+        Ok(serde_json::json!({ "purged": n }))
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_purge_expired task failed: {e}")))?
+}
+
+/// Discovers the LAN URL the mobile companion should connect to.
+///
+/// The QR code embeds this URL so the phone reaches dccd-http over the same
+/// WiFi as the desktop (no public internet exposure required). Returns
+/// `ip: null` when no usable interface is up — the UI uses that to show
+/// "no LAN detected" rather than rendering a broken QR.
+#[tauri::command]
+async fn pair_get_lan_url() -> ApiResult<Value> {
+    let port = std::env::var("DCC_HTTP_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(9876);
+    let endpoint = dev_command_center_tauri::net_info::lan_endpoint(port);
+    Ok(serde_json::to_value(endpoint).map_err(|e| db_error(e.to_string()))?)
+}
+
+/// Lists every base URL the mobile companion could use to reach the backend:
+/// Tailscale IPs (and MagicDNS HTTPS when configured), LAN IPv4, and loopback.
+/// Detection runs synchronously inside a spawn_blocking so the (short) shell-out
+/// to `tailscale status` does not block the Tauri runtime.
+#[tauri::command]
+async fn pair_get_endpoints() -> ApiResult<Value> {
+    let port = std::env::var("DCC_HTTP_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(9876);
+    let endpoints = tauri::async_runtime::spawn_blocking(move || {
+        dev_command_center_tauri::net_info::discover_endpoints(port)
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_get_endpoints task failed: {e}")))?;
+    Ok(serde_json::json!({ "endpoints": endpoints }))
 }
 
 #[tauri::command]
@@ -6380,6 +6592,13 @@ pub fn run() {
             terminal_get_backlog,
             terminal_clear_persisted_scrollback,
             terminal_get_project_activity,
+            pair_init,
+            pair_list_devices,
+            pair_revoke_device,
+            pair_audit_log,
+            pair_purge_expired,
+            pair_get_lan_url,
+            pair_get_endpoints,
             terminal_save_temp_image,
             create_workspace_for_repo,
             create_workspace_from_url,
@@ -6427,6 +6646,7 @@ pub fn run() {
             session_commands::restore_session,
             session_commands::list_thread_events,
             session_commands::list_workspace_sessions,
+            session_commands::search_sessions,
             session_commands::respond_to_user_input,
             session_commands::respond_to_permission_request
         ])
@@ -6460,7 +6680,7 @@ pub fn run() {
                 db_path.clone(),
             ));
             let state = AppState {
-                db_path: Arc::new(db_path),
+                db_path: Arc::new(db_path.clone()),
                 app_data_dir: Arc::new(app_data_dir.clone()),
                 conn: Arc::new(Mutex::new(conn)),
                 terminals: Arc::new(Mutex::new(HashMap::new())),
@@ -6492,7 +6712,9 @@ pub fn run() {
                     start_daemon_worker(app_handle, state_for_daemon);
                 }
             }
+            let audit_db_path = db_path.clone();
             app.manage(state);
+            start_pair_audit_watcher(app.handle().clone(), audit_db_path);
             Ok(())
         })
         .run(tauri::generate_context!())

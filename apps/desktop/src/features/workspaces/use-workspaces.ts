@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DaemonComb } from "@/lib/daemon-api";
 import type { WorkspaceStatus, WorkspaceSummary } from "./types";
 import {
 	archiveWorkspace as apiArchiveWorkspace,
@@ -115,6 +116,31 @@ export function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
 		setupReport: workspace.setupReport,
 		createdAt: workspace.createdAt,
 		updatedAt: workspace.updatedAt,
+	};
+}
+
+export function daemonCombToWorkspaceSummary(comb: DaemonComb): WorkspaceSummary {
+	const status: WorkspaceStatus =
+		comb.status === "archived" || comb.status === "discarded"
+			? "archived"
+			: comb.status === "error"
+				? "setup_pending"
+				: "ready";
+	const branch =
+		comb.branch?.trim() || comb.baseBranch?.trim() || comb.name?.trim() || comb.id;
+	const name = comb.name?.trim() || branch;
+	const updatedAt = comb.lastGitActivityAt ?? comb.lastOpenedAt ?? undefined;
+
+	return {
+		id: comb.id,
+		name,
+		branch,
+		status,
+		projectId: comb.projectId,
+		rootPath: null,
+		worktreePath: comb.worktreePath,
+		createdAt: comb.lastOpenedAt ?? undefined,
+		updatedAt,
 	};
 }
 

@@ -1,10 +1,11 @@
 import {
 	getDefaultShell,
+	getOrCreateTerminalByOwner,
+	getTerminalBackendScope,
 	killTerminal,
 	listenTerminalExit,
 	listenTerminalOutput,
 	resizeTerminal,
-	spawnTerminal,
 	writeTerminalStdin,
 } from "@/lib/terminal-api";
 
@@ -48,9 +49,16 @@ type TerminalEntry = TerminalSnapshot & {
 const entries = new Map<string, TerminalEntry>();
 const ptyToWorkspace = new Map<string, string>();
 let bridgePromise: Promise<void> | null = null;
+let bridgeScope: string | null = null;
+let bridgeCleanup: (() => void) | null = null;
+
+function workspaceEntryKey(workspaceId: string) {
+	return `${getTerminalBackendScope()}:${workspaceId}`;
+}
 
 function getOrCreateEntry(workspaceId: string): TerminalEntry {
-	const existing = entries.get(workspaceId);
+	const entryKey = workspaceEntryKey(workspaceId);
+	const existing = entries.get(entryKey);
 	if (existing) {
 		return existing;
 	}
@@ -68,7 +76,7 @@ function getOrCreateEntry(workspaceId: string): TerminalEntry {
 		listeners: new Set(),
 		spawnPromise: null,
 	};
-	entries.set(workspaceId, created);
+	entries.set(entryKey, created);
 	return created;
 }
 
@@ -111,18 +119,23 @@ function notifyStatus(entry: TerminalEntry) {
 }
 
 async function ensureTerminalBridge() {
-	if (bridgePromise) {
+	const scope = getTerminalBackendScope();
+	if (bridgeScope === scope && bridgePromise) {
 		return bridgePromise;
 	}
 
+	bridgeCleanup?.();
+	bridgeCleanup = null;
+	bridgeScope = scope;
+
 	bridgePromise = (async () => {
-		await listenTerminalOutput((event) => {
-			const workspaceId = ptyToWorkspace.get(event.ptyId);
-			if (!workspaceId) {
+		const unlistenOutput = await listenTerminalOutput((event) => {
+			const entryKey = ptyToWorkspace.get(event.ptyId);
+			if (!entryKey) {
 				return;
 			}
 
-			const entry = entries.get(workspaceId);
+			const entry = entries.get(entryKey);
 			if (!entry) {
 				return;
 			}
@@ -130,13 +143,13 @@ async function ensureTerminalBridge() {
 			appendChunk(entry, event.data);
 		});
 
-		await listenTerminalExit((event) => {
-			const workspaceId = ptyToWorkspace.get(event.ptyId);
-			if (!workspaceId) {
+		const unlistenExit = await listenTerminalExit((event) => {
+			const entryKey = ptyToWorkspace.get(event.ptyId);
+			if (!entryKey) {
 				return;
 			}
 
-			const entry = entries.get(workspaceId);
+			const entry = entries.get(entryKey);
 			if (!entry) {
 				return;
 			}
@@ -151,6 +164,11 @@ async function ensureTerminalBridge() {
 			);
 			notifyStatus(entry);
 		});
+
+		bridgeCleanup = () => {
+			unlistenOutput();
+			unlistenExit();
+		};
 	})();
 
 	return bridgePromise;
@@ -171,7 +189,7 @@ export function detachWorkspaceTerminal(
 	workspaceId: string,
 	listener: TerminalListener,
 ) {
-	const entry = entries.get(workspaceId);
+	const entry = entries.get(workspaceEntryKey(workspaceId));
 	if (!entry) {
 		return;
 	}
@@ -203,34 +221,45 @@ export async function ensureWorkspaceTerminal(
 		try {
 			const { shell } = await getDefaultShell();
 			const shouldUseLoginArgs = /[\\/](zsh|bash|sh)$/i.test(shell);
-			const result = await spawnTerminal({
+			const ownerKey = `workspace:${workspaceId}`;
+			const result = await getOrCreateTerminalByOwner(ownerKey, {
 				cwd: workspacePath,
 				command: shell,
 				args: shouldUseLoginArgs ? ["-l"] : [],
 				cols: 120,
 				rows: 32,
+				ptyOwnerKey: ownerKey,
 			});
 
 			entry.ptyId = result.ptyId;
 			entry.shell = shell;
-			entry.status = "running";
-			entry.exitCode = null;
-			ptyToWorkspace.set(result.ptyId, workspaceId);
+			entry.status = result.session.status === "exited" ? "exited" : "running";
+			entry.exitCode = result.session.lastExitCode ?? null;
+			ptyToWorkspace.set(result.ptyId, workspaceEntryKey(workspaceId));
 
-			appendChunk(
-				entry,
-				[
-					"\x1b[2mDev Command Center terminal\x1b[0m",
-					"",
-					`workspace: ${context.workspaceName}`,
-					`branch: ${context.workspaceBranch}`,
-					`cwd: ${workspacePath}`,
-					`provider: ${context.providerLabel ?? "none"}`,
-					`session: ${context.sessionState}`,
-					`shell: ${shell}`,
-					"",
-				].join("\r\n") + "\r\n",
-			);
+			if (result.chunks.length > 0) {
+				entry.chunks = [...result.chunks];
+				entry.bufferedBytes = result.chunks.reduce(
+					(total, chunk) => total + chunk.length,
+					0,
+				);
+				entry.truncated = result.truncated;
+			} else if (!result.existing) {
+				appendChunk(
+					entry,
+					[
+						"\x1b[2mDev Command Center terminal\x1b[0m",
+						"",
+						`workspace: ${context.workspaceName}`,
+						`branch: ${context.workspaceBranch}`,
+						`cwd: ${workspacePath}`,
+						`provider: ${context.providerLabel ?? "none"}`,
+						`session: ${context.sessionState}`,
+						`shell: ${shell}`,
+						"",
+					].join("\r\n") + "\r\n",
+				);
+			}
 			notifyStatus(entry);
 			return snapshot(entry);
 		} catch (error) {
@@ -253,12 +282,12 @@ export async function ensureWorkspaceTerminal(
 export function getWorkspaceTerminalSnapshot(
 	workspaceId: string,
 ): TerminalSnapshot | null {
-	const entry = entries.get(workspaceId);
+	const entry = entries.get(workspaceEntryKey(workspaceId));
 	return entry ? snapshot(entry) : null;
 }
 
 export function clearWorkspaceTerminal(workspaceId: string) {
-	const entry = entries.get(workspaceId);
+	const entry = entries.get(workspaceEntryKey(workspaceId));
 	if (!entry) {
 		return;
 	}
@@ -276,7 +305,7 @@ export function clearWorkspaceTerminal(workspaceId: string) {
 }
 
 export function writeWorkspaceTerminalInput(workspaceId: string, data: string) {
-	const entry = entries.get(workspaceId);
+	const entry = entries.get(workspaceEntryKey(workspaceId));
 	if (!entry?.ptyId) {
 		return;
 	}
@@ -289,7 +318,7 @@ export function resizeWorkspaceTerminal(
 	cols: number,
 	rows: number,
 ) {
-	const entry = entries.get(workspaceId);
+	const entry = entries.get(workspaceEntryKey(workspaceId));
 	if (!entry?.ptyId) {
 		return;
 	}
@@ -298,7 +327,7 @@ export function resizeWorkspaceTerminal(
 }
 
 export function killWorkspaceTerminal(workspaceId: string) {
-	const entry = entries.get(workspaceId);
+	const entry = entries.get(workspaceEntryKey(workspaceId));
 	if (!entry?.ptyId) {
 		return;
 	}

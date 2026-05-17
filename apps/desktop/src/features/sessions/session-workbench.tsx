@@ -15,6 +15,8 @@ type SessionWorkbenchProps = {
 	workspaceName: string;
 	workspaceBranch: string;
 	workspacePath: string | null;
+	terminalWorkspacePath?: string | null;
+	sessionQueryScope?: string;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
 	selectedProviderId: string | null;
@@ -32,6 +34,7 @@ type SessionWorkbenchProps = {
 	onSelectSession: (sessionId: string) => void;
 	onCloseSession: (sessionId: string) => void;
 	onRestoreSession: (sessionId: string) => void;
+	onOpenSessionSearch: () => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
@@ -53,6 +56,8 @@ export function SessionWorkbench({
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
+	terminalWorkspacePath,
+	sessionQueryScope = "local",
 	selectedProviderLabel,
 	selectedModelLabel,
 	selectedProviderId,
@@ -70,6 +75,7 @@ export function SessionWorkbench({
 	onSelectSession,
 	onCloseSession,
 	onRestoreSession,
+	onOpenSessionSearch,
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
@@ -93,6 +99,7 @@ export function SessionWorkbench({
 				workspaceName={workspaceName}
 				workspaceBranch={workspaceBranch}
 				workspacePath={workspacePath}
+				sessionQueryScope={sessionQueryScope}
 				selectedProviderLabel={selectedProviderLabel}
 				selectedModelLabel={selectedModelLabel}
 				selectedProviderId={selectedProviderId}
@@ -110,6 +117,7 @@ export function SessionWorkbench({
 				onSelectSession={onSelectSession}
 				onCloseSession={onCloseSession}
 				onRestoreSession={onRestoreSession}
+				onOpenSessionSearch={onOpenSessionSearch}
 				onSubmitPrompt={onSubmitPrompt}
 				onResumeSession={onResumeSession}
 				onAbortSession={onAbortSession}
@@ -129,7 +137,7 @@ export function SessionWorkbench({
 				workspaceId={workspaceId}
 				workspaceName={workspaceName}
 				workspaceBranch={workspaceBranch}
-				workspacePath={workspacePath}
+				workspacePath={terminalWorkspacePath ?? workspacePath}
 				providerLabel={selectedProviderLabel}
 				sessionState={sessionState}
 				sessionId={sessionId}

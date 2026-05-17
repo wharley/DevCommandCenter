@@ -3,6 +3,8 @@ import {
 	$applyNodeReplacement,
 	$getNodeByKey,
 	DecoratorNode,
+	type DOMConversionMap,
+	type DOMConversionOutput,
 	type DOMExportOutput,
 	type LexicalNode,
 	type NodeKey,
@@ -51,6 +53,23 @@ export class FileBadgeNode extends DecoratorNode<ReactNode> {
 		return "file-badge";
 	}
 
+	static importDOM(): DOMConversionMap | null {
+		return {
+			span: (domNode: HTMLElement) => {
+				const filePath = domNode.dataset.dccFileBadgePath;
+				if (!filePath) {
+					return null;
+				}
+				return {
+					conversion: (): DOMConversionOutput => ({
+						node: $createFileBadgeNode(filePath),
+					}),
+					priority: 2,
+				};
+			},
+		};
+	}
+
 	static clone(node: FileBadgeNode): FileBadgeNode {
 		return new FileBadgeNode(node.__filePath, node.__key);
 	}
@@ -84,6 +103,7 @@ export class FileBadgeNode extends DecoratorNode<ReactNode> {
 
 	exportDOM(): DOMExportOutput {
 		const span = document.createElement("span");
+		span.dataset.dccFileBadgePath = this.__filePath;
 		span.textContent = `@${this.__filePath}`;
 		return { element: span };
 	}

@@ -8,6 +8,7 @@ import {
 	Moon,
 	Package,
 	Loader2,
+	Server,
 	Sparkles,
 	TerminalSquare,
 	SunMedium,
@@ -17,7 +18,13 @@ import {
 import type { ForgeCliProvider } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -28,6 +35,7 @@ import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
 import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
+import { PairedDevicesPanel } from "@/features/settings/paired-devices";
 import { getOpenPreferredEditorShortcutKeys } from "@/features/shortcuts/shortcut-utils";
 import type {
 	ProviderRuntimeDraft,
@@ -67,6 +75,7 @@ export type SettingsSectionId =
 	| "general"
 	| "appearance"
 	| "model"
+	| "connections"
 	| "shortcuts"
 	| "git"
 	| "experimental"
@@ -458,6 +467,12 @@ export function SettingsDialog({
 				icon: Sparkles,
 			},
 			{
+				id: "connections",
+				label: t("settings.sections.connections.label"),
+				description: t("settings.sections.connections.description"),
+				icon: Server,
+			},
+			{
 				id: "shortcuts",
 				label: t("settings.sections.shortcuts.label"),
 				description: t("settings.sections.shortcuts.description"),
@@ -550,9 +565,9 @@ export function SettingsDialog({
 								<DialogTitle className="text-[15px] font-semibold text-foreground">
 									{activeMeta.label}
 								</DialogTitle>
-								<p className="mt-0.5 text-[12px] text-muted-foreground">
+								<DialogDescription className="mt-0.5 text-[12px] text-muted-foreground">
 									{activeMeta.description}
-								</p>
+								</DialogDescription>
 							</div>
 							{activeMeta.status ? <SectionHeaderBadge>{t("settings.statusComingSoon")}</SectionHeaderBadge> : null}
 						</div>
@@ -686,6 +701,10 @@ export function SettingsDialog({
 										onClearRuntime={onClearProviderRuntime}
 									/>
 								</section>
+							) : null}
+
+							{activeSection === "connections" ? (
+								<PairedDevicesPanel defaultBackendUrl="http://127.0.0.1:9876" />
 							) : null}
 
 							{activeSection === "shortcuts" ? (

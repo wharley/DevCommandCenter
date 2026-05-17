@@ -1,5 +1,5 @@
 use axum::{
-    body::Body,
+    body::{to_bytes, Body},
     extract::State,
     http::{header::AUTHORIZATION, HeaderMap, Request, StatusCode},
     middleware::Next,
@@ -7,21 +7,187 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::http_config::{HttpAuthMode, HttpConfig};
+use crate::pairing::{self, SignedRequestHeaders};
 
-/// Middleware to validate HTTP auth according to the configured mode.
+const MAX_SIGNED_BODY_BYTES: usize = 32 * 1024 * 1024;
+
+/// Middleware to validate HTTP auth.
+///
+/// Accepted credentials, tried in this priority order:
+///   1. Signed request (X-Device-Id + X-Timestamp + X-Signature) — native
+///      mobile clients with ECDSA P-256 keypairs
+///   2. Authorization: Bearer <paired-session-token> — browser clients paired
+///      via the bearer flow (no WebCrypto needed)
+///   3. X-API-Key — desktop / Local mode
+///   4. Authorization: Bearer <config-token> — remote tunnel clients with the
+///      operator-configured shared bearer
+///
+/// When signed-request headers are present, we commit to verifying them:
+/// failure returns 401 without falling back. Same for paired-session bearers
+/// — once a token starts with a recognized shape we don't silently treat its
+/// failure as "try another method," which would let an attacker probe.
 pub async fn auth_middleware(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, AuthError> {
+    if has_signed_request_headers(request.headers()) {
+        return validate_signed_request(config, request, next).await;
+    }
+
+    // Try paired-device bearer token before falling back to legacy auth modes.
+    // We only attempt this when a Bearer header is present *and* the token is
+    // not the configured shared bearer (so we never double-validate it).
+    if let Some(token) = bearer_from_headers(request.headers()) {
+        let configured = config.read().await.bearer_token.clone();
+        if configured.as_deref() != Some(token.as_str()) {
+            match try_paired_session_bearer(&config, &token, request.headers()).await {
+                Some(Ok(())) => return Ok(next.run(request).await),
+                Some(Err(err)) => return Err(err),
+                None => {
+                    // Not a known paired-session token. Fall through to legacy
+                    // auth (X-API-Key or operator-configured shared bearer).
+                }
+            }
+        }
+    }
+
     let headers = request.headers().clone();
     let config = config.read().await;
     validate_auth(&config, &headers)?;
     Ok(next.run(request).await)
+}
+
+fn bearer_from_headers(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(AUTHORIZATION)?.to_str().ok()?;
+    let trimmed = raw
+        .strip_prefix("Bearer ")
+        .or_else(|| raw.strip_prefix("bearer "))?
+        .trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Looks the bearer up as a paired-device session token. Returns:
+/// - `Some(Ok(()))` — token matched an active paired device, request is authorized
+/// - `Some(Err(_))` — token had a paired-device shape but failed validation
+///   (revoked / expired) — caller should propagate this error, not silently fall back
+/// - `None` — no row matched; caller should keep trying other auth methods
+async fn try_paired_session_bearer(
+    config: &Arc<RwLock<HttpConfig>>,
+    token: &str,
+    headers: &HeaderMap,
+) -> Option<Result<(), AuthError>> {
+    let db_path: PathBuf = config.read().await.db_path.clone();
+    let client_ip = header_str(headers, "x-forwarded-for")
+        .and_then(|v| v.split(',').next().map(|s| s.trim().to_string()));
+
+    let token = token.to_string();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let conn = rusqlite::Connection::open(&db_path).ok()?;
+        Some(pairing::verify_bearer_session(
+            &conn,
+            &token,
+            client_ip.as_deref(),
+        ))
+    })
+    .await
+    .ok()??;
+
+    match outcome {
+        Ok(_) => Some(Ok(())),
+        Err(pairing::PairingError::UnknownDevice) => None,
+        Err(pairing::PairingError::DeviceRevoked) => Some(Err(AuthError::SignedRequestRevokedDevice)),
+        Err(pairing::PairingError::SessionExpired) => {
+            Some(Err(AuthError::SignedRequestSessionExpired))
+        }
+        Err(_) => Some(Err(AuthError::InvalidBearerToken)),
+    }
+}
+
+fn has_signed_request_headers(headers: &HeaderMap) -> bool {
+    headers.contains_key("X-Device-Id")
+        && headers.contains_key("X-Timestamp")
+        && headers.contains_key("X-Signature")
+}
+
+async fn validate_signed_request(
+    config: Arc<RwLock<HttpConfig>>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<Response, AuthError> {
+    let db_path: PathBuf = { config.read().await.db_path.clone() };
+
+    let method = request.method().as_str().to_string();
+    let path = request.uri().path().to_string();
+    let device_id = header_str(request.headers(), "X-Device-Id")
+        .ok_or(AuthError::SignedRequestMissingHeader)?;
+    let timestamp = header_str(request.headers(), "X-Timestamp")
+        .ok_or(AuthError::SignedRequestMissingHeader)?;
+    let signature = header_str(request.headers(), "X-Signature")
+        .ok_or(AuthError::SignedRequestMissingHeader)?;
+    let client_ip = header_str(request.headers(), "x-forwarded-for")
+        .and_then(|v| v.split(',').next().map(|s| s.trim().to_string()));
+
+    let (parts, body) = request.into_parts();
+    let body_bytes = to_bytes(body, MAX_SIGNED_BODY_BYTES)
+        .await
+        .map_err(|_| AuthError::SignedRequestBodyTooLarge)?
+        .to_vec();
+
+    let verify_method = method.clone();
+    let verify_path = path.clone();
+    let verify_body = body_bytes.clone();
+    let verify_ip = client_ip.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        let conn = rusqlite::Connection::open(&db_path)
+            .map_err(|e| pairing::PairingError::Database(e.to_string()))?;
+        pairing::verify_signed_request(
+            &conn,
+            SignedRequestHeaders {
+                device_id: &device_id,
+                timestamp: &timestamp,
+                signature_b64: &signature,
+            },
+            &verify_method,
+            &verify_path,
+            &verify_body,
+            verify_ip.as_deref(),
+        )
+    })
+    .await
+    .map_err(|_| AuthError::SignedRequestInternal)?;
+
+    match result {
+        Ok(_) => {
+            let new_request = Request::from_parts(parts, Body::from(body_bytes));
+            Ok(next.run(new_request).await)
+        }
+        Err(pairing::PairingError::UnknownDevice) => Err(AuthError::SignedRequestUnknownDevice),
+        Err(pairing::PairingError::DeviceRevoked) => Err(AuthError::SignedRequestRevokedDevice),
+        Err(pairing::PairingError::SessionExpired) => Err(AuthError::SignedRequestSessionExpired),
+        Err(pairing::PairingError::TimestampOutOfWindow)
+        | Err(pairing::PairingError::InvalidTimestamp) => {
+            Err(AuthError::SignedRequestStaleTimestamp)
+        }
+        Err(_) => Err(AuthError::SignedRequestInvalidSignature),
+    }
+}
+
+fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
 }
 
 /// Validates either API key or bearer token, depending on the active auth mode.
@@ -93,6 +259,14 @@ pub enum AuthError {
     MissingBearerToken,
     InvalidBearerScheme,
     InvalidBearerToken,
+    SignedRequestMissingHeader,
+    SignedRequestBodyTooLarge,
+    SignedRequestInternal,
+    SignedRequestUnknownDevice,
+    SignedRequestRevokedDevice,
+    SignedRequestStaleTimestamp,
+    SignedRequestInvalidSignature,
+    SignedRequestSessionExpired,
 }
 
 impl IntoResponse for AuthError {
@@ -116,6 +290,46 @@ impl IntoResponse for AuthError {
                 StatusCode::FORBIDDEN,
                 "Invalid or expired bearer token",
                 Some("Bearer"),
+            ),
+            AuthError::SignedRequestMissingHeader => (
+                StatusCode::BAD_REQUEST,
+                "Signed request missing X-Device-Id / X-Timestamp / X-Signature",
+                None,
+            ),
+            AuthError::SignedRequestBodyTooLarge => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Signed request body exceeds maximum size",
+                None,
+            ),
+            AuthError::SignedRequestInternal => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Signed request verification failed (internal)",
+                None,
+            ),
+            AuthError::SignedRequestUnknownDevice => (
+                StatusCode::UNAUTHORIZED,
+                "Device not paired",
+                None,
+            ),
+            AuthError::SignedRequestRevokedDevice => (
+                StatusCode::FORBIDDEN,
+                "Device has been revoked",
+                None,
+            ),
+            AuthError::SignedRequestStaleTimestamp => (
+                StatusCode::FORBIDDEN,
+                "Timestamp outside the replay window",
+                None,
+            ),
+            AuthError::SignedRequestInvalidSignature => (
+                StatusCode::FORBIDDEN,
+                "Signature verification failed",
+                None,
+            ),
+            AuthError::SignedRequestSessionExpired => (
+                StatusCode::FORBIDDEN,
+                "Device session expired; please re-pair",
+                None,
             ),
         };
 
@@ -196,5 +410,231 @@ mod tests {
             HeaderValue::from_static("Bearer bearer-current"),
         );
         assert!(validate_auth(&config, &bearer_headers).is_ok());
+    }
+
+    // ----- signed-request middleware (end-to-end through an axum router) -----
+
+    use axum::{
+        body::Body,
+        http::{Request as AxumRequest, StatusCode as AxumStatus},
+        middleware as axum_middleware,
+        routing::{get, post},
+        Router,
+    };
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use p256::ecdsa::{signature::Signer, Signature, SigningKey};
+    use p256::pkcs8::EncodePublicKey;
+    use rand::rngs::OsRng;
+    use tempfile::NamedTempFile;
+    use tower::util::ServiceExt;
+
+    use crate::pairing;
+
+    struct SignedTestSetup {
+        _tmp: NamedTempFile,
+        config: Arc<RwLock<HttpConfig>>,
+        signing: SigningKey,
+        device_id: String,
+    }
+
+    fn build_signed_setup() -> SignedTestSetup {
+        let tmp = NamedTempFile::new().expect("tempfile");
+        let db_path = tmp.path().to_path_buf();
+
+        let conn = rusqlite::Connection::open(&db_path).expect("open db");
+        conn.execute_batch(include_str!("../sql/schema.sql"))
+            .expect("schema");
+
+        let challenge = pairing::create_pairing_nonce(&conn).expect("nonce");
+        let signing = SigningKey::random(&mut OsRng);
+        let pubkey_der = signing
+            .verifying_key()
+            .to_public_key_der()
+            .expect("spki");
+        let pubkey_b64 = BASE64.encode(pubkey_der.as_bytes());
+
+        let device_id = pairing::complete_pairing(
+            &conn,
+            &challenge.nonce,
+            &challenge.pin,
+            &pubkey_b64,
+            "test-device",
+            None,
+            None,
+        )
+        .expect("complete_pairing");
+
+        let mut config = HttpConfig::default();
+        config.db_path = db_path;
+        let config = Arc::new(RwLock::new(config));
+
+        SignedTestSetup {
+            _tmp: tmp,
+            config,
+            signing,
+            device_id,
+        }
+    }
+
+    fn make_router(config: Arc<RwLock<HttpConfig>>) -> Router {
+        Router::new()
+            .route("/protected", get(|| async { "ok" }))
+            .route("/echo", post(|body: String| async move { body }))
+            .route_layer(axum_middleware::from_fn_with_state(config.clone(), auth_middleware))
+            .with_state(config)
+    }
+
+    fn sign_for(
+        signing: &SigningKey,
+        method: &str,
+        path: &str,
+        timestamp: &str,
+        body: &[u8],
+    ) -> String {
+        let canonical = pairing::canonical_request_bytes(method, path, timestamp, body);
+        let sig: Signature = signing.sign(&canonical);
+        BASE64.encode(sig.to_der().as_bytes())
+    }
+
+    #[tokio::test]
+    async fn signed_request_passes_through_middleware() {
+        let setup = build_signed_setup();
+        let app = make_router(setup.config.clone());
+
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let signature = sign_for(&setup.signing, "GET", "/protected", &timestamp, b"");
+
+        let response = app
+            .oneshot(
+                AxumRequest::builder()
+                    .method("GET")
+                    .uri("/protected")
+                    .header("X-Device-Id", &setup.device_id)
+                    .header("X-Timestamp", &timestamp)
+                    .header("X-Signature", &signature)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), AxumStatus::OK);
+    }
+
+    #[tokio::test]
+    async fn signed_request_preserves_body_for_handler() {
+        let setup = build_signed_setup();
+        let app = make_router(setup.config.clone());
+
+        let body = b"hello mobile";
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let signature = sign_for(&setup.signing, "POST", "/echo", &timestamp, body);
+
+        let response = app
+            .oneshot(
+                AxumRequest::builder()
+                    .method("POST")
+                    .uri("/echo")
+                    .header("X-Device-Id", &setup.device_id)
+                    .header("X-Timestamp", &timestamp)
+                    .header("X-Signature", &signature)
+                    .body(Body::from(body.as_slice()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), AxumStatus::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(&bytes[..], body);
+    }
+
+    #[tokio::test]
+    async fn signed_request_rejects_revoked_device() {
+        let setup = build_signed_setup();
+        {
+            let path = setup.config.read().await.db_path.clone();
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            pairing::revoke_device(&conn, &setup.device_id, None).unwrap();
+        }
+
+        let app = make_router(setup.config.clone());
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let signature = sign_for(&setup.signing, "GET", "/protected", &timestamp, b"");
+
+        let response = app
+            .oneshot(
+                AxumRequest::builder()
+                    .method("GET")
+                    .uri("/protected")
+                    .header("X-Device-Id", &setup.device_id)
+                    .header("X-Timestamp", &timestamp)
+                    .header("X-Signature", &signature)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), AxumStatus::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn signed_request_rejects_tampered_body() {
+        let setup = build_signed_setup();
+        let app = make_router(setup.config.clone());
+
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let signed_body = b"signed body";
+        let tampered_body = b"tampered body";
+        let signature = sign_for(&setup.signing, "POST", "/echo", &timestamp, signed_body);
+
+        let response = app
+            .oneshot(
+                AxumRequest::builder()
+                    .method("POST")
+                    .uri("/echo")
+                    .header("X-Device-Id", &setup.device_id)
+                    .header("X-Timestamp", &timestamp)
+                    .header("X-Signature", &signature)
+                    .body(Body::from(tampered_body.as_slice()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), AxumStatus::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn signed_headers_skip_api_key_fallback() {
+        // Even if a valid API key is present, an invalid signature must NOT fall back.
+        let setup = build_signed_setup();
+        {
+            let mut cfg = setup.config.write().await;
+            cfg.api_key = "valid-key".to_string();
+        }
+        let app = make_router(setup.config.clone());
+
+        let timestamp = chrono::Utc::now().to_rfc3339();
+
+        let response = app
+            .oneshot(
+                AxumRequest::builder()
+                    .method("GET")
+                    .uri("/protected")
+                    .header("X-Device-Id", &setup.device_id)
+                    .header("X-Timestamp", &timestamp)
+                    .header("X-Signature", "INVALIDSIG")
+                    .header("X-API-Key", "valid-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(response.status(), AxumStatus::OK);
     }
 }

@@ -9,11 +9,17 @@ type SessionSnapshotSource = Pick<
 	"session" | "projection" | "lastTurnPrompt" | "lastTurnState"
 >;
 
-export function workspaceSessionsQueryOptions(workspaceId: string | null) {
+export function workspaceSessionsQueryOptions(
+	workspaceId: string | null,
+	input?: { enabled?: boolean; scope?: string; refetchInterval?: number | false },
+) {
+	const scope = input?.scope ?? "local";
+	const isEnabled = input?.enabled ?? true;
+	const refetchInterval = input?.refetchInterval;
 	return queryOptions<WorkspaceSessionSummary[]>({
 		queryKey: workspaceId
-			? dccQueryKeys.workspaceSessions(workspaceId)
-			: dccQueryKeys.workspaceSessions("__none__"),
+			? dccQueryKeys.workspaceSessions(workspaceId, scope)
+			: dccQueryKeys.workspaceSessions("__none__", scope),
 		queryFn: async () => {
 			if (!workspaceId) {
 				return [];
@@ -21,8 +27,9 @@ export function workspaceSessionsQueryOptions(workspaceId: string | null) {
 
 			return loadWorkspaceSessions(workspaceId);
 		},
-		enabled: Boolean(workspaceId),
+		enabled: isEnabled && Boolean(workspaceId),
 		staleTime: 0,
+		refetchInterval,
 	});
 }
 

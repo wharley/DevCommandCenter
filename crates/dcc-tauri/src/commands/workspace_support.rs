@@ -6,7 +6,7 @@ use dcc_core::domain::{repository::RepositoryId, workspace::Workspace};
 use dcc_core::ports::{RepositoryRepo, WorkspaceRepo};
 use dcc_infra::{
     db::SqliteWorkspaceRepo,
-    git::{broken_worktree_reason, is_git_repo},
+    git::{broken_worktree_reason, is_git_repo, remove_worktree},
 };
 
 use crate::{
@@ -45,6 +45,56 @@ pub(crate) fn resolve_workspace_broken_reason(workspace: &Workspace) -> Option<S
     }
 
     broken_worktree_reason(active_root)
+}
+
+pub(crate) fn cleanup_workspace_files(workspace: &Workspace) -> Result<(), String> {
+    let Some(worktree_root) = workspace.worktree_path.as_deref().map(str::trim) else {
+        return Ok(());
+    };
+    if worktree_root.is_empty() {
+        return Ok(());
+    }
+
+    let root_path = workspace.root_path.trim();
+    if !root_path.is_empty() && Path::new(root_path) == Path::new(worktree_root) {
+        return Ok(());
+    }
+
+    let worktree_path = Path::new(worktree_root);
+    if !worktree_path.exists() {
+        return Ok(());
+    }
+
+    let repo_root = Path::new(root_path);
+    let should_use_git_worktree_removal =
+        !root_path.is_empty() && is_git_repo(repo_root) && worktree_path.join(".git").exists();
+
+    if should_use_git_worktree_removal {
+        match remove_worktree(repo_root, worktree_path) {
+            Ok(()) => return Ok(()),
+            Err(error) if broken_worktree_reason(worktree_path).is_none() => {
+                return Err(error.to_string());
+            }
+            Err(_) => {
+                // Fall back to removing the directory directly when the worktree metadata
+                // is already broken. A later `git worktree prune` clears stale metadata.
+            }
+        }
+    }
+
+    std::fs::remove_dir_all(worktree_path).map_err(|error| {
+        format!(
+            "failed to remove workspace path {}: {}",
+            worktree_path.display(),
+            error
+        )
+    })?;
+
+    if !root_path.is_empty() && is_git_repo(repo_root) {
+        let _ = run_git_output(root_path, &["worktree", "prune"]);
+    }
+
+    Ok(())
 }
 
 pub(crate) async fn find_workspace_by_root(
@@ -93,6 +143,71 @@ pub(crate) async fn preflight_workspace_root(
         return Err(broken_workspace_message(&reason));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cleanup_workspace_files;
+    use dcc_core::domain::{
+        project::ProjectId,
+        workspace::{Workspace, WorkspaceId, WorkspaceState},
+    };
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn temp_path(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("dcc-{name}-{unique}"))
+    }
+
+    fn test_workspace(root_path: &Path, worktree_path: Option<&Path>) -> Workspace {
+        Workspace {
+            id: WorkspaceId("workspace-1".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            name: Some("Workspace".to_string()),
+            root_path: root_path.to_string_lossy().to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: worktree_path.map(|path| path.to_string_lossy().to_string()),
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn cleanup_workspace_files_removes_plain_worktree_directory() {
+        let root_path = temp_path("workspace-root");
+        let worktree_path = root_path.join(".dcc-worktrees").join("main-123");
+
+        fs::create_dir_all(&worktree_path).expect("create worktree dir");
+        fs::write(worktree_path.join("package.json"), "{}").expect("create worktree file");
+
+        let workspace = test_workspace(&root_path, Some(&worktree_path));
+        cleanup_workspace_files(&workspace).expect("cleanup should succeed");
+
+        assert!(!worktree_path.exists(), "worktree path should be removed");
+    }
+
+    #[test]
+    fn cleanup_workspace_files_never_removes_root_path() {
+        let root_path = temp_path("workspace-root-guard");
+
+        fs::create_dir_all(&root_path).expect("create root dir");
+        fs::write(root_path.join("README.md"), "root").expect("create root file");
+
+        let workspace = test_workspace(&root_path, Some(&root_path));
+        cleanup_workspace_files(&workspace).expect("cleanup should skip root path");
+
+        assert!(root_path.exists(), "root path must be preserved");
+        fs::remove_dir_all(&root_path).expect("remove root dir");
+    }
 }
 
 pub(crate) fn resolve_current_branch_name(root: &str) -> Result<String, String> {

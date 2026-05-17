@@ -4,6 +4,7 @@ import { SESSION_METHODS } from "@dcc/contracts";
 import type {
 	CoreEvent,
 	SessionEventRecord,
+	SessionSearchResult,
 	WorkspaceSessionSummary,
 } from "@dcc/contracts";
 import type {
@@ -24,6 +25,10 @@ import type {
 	StartThreadInput,
 	StartThreadOutput,
 } from "@dcc/contracts";
+
+// Re-exported only because a few consumers still listen for it. Safe to drop
+// once the remote-core-event listeners are removed.
+export const REMOTE_CORE_EVENT_NAME = "dcc:remote-core-event";
 
 export function startThread(input: StartThreadInput) {
 	return invoke<StartThreadOutput>(SESSION_METHODS.startThread, { input });
@@ -50,7 +55,9 @@ export function restoreSession(input: RestoreSessionInput) {
 }
 
 export function respondToUserInput(input: RespondToUserInputInput) {
-	return invoke<RespondToUserInputOutput>(SESSION_METHODS.respondToUserInput, { input });
+	return invoke<RespondToUserInputOutput>(SESSION_METHODS.respondToUserInput, {
+		input,
+	});
 }
 
 export function respondToPermissionRequest(input: RespondToPermissionRequestInput) {
@@ -71,6 +78,12 @@ export function loadWorkspaceSessions(workspaceId: string) {
 		SESSION_METHODS.listWorkspaceSessions,
 		{ workspaceId },
 	);
+}
+
+export function searchSessionHistory(query: string, limit = 40) {
+	return invoke<SessionSearchResult[]>(SESSION_METHODS.searchSessions, {
+		input: { query, limit },
+	});
 }
 
 const SESSION_EVENT_NAMES = [
@@ -100,9 +113,11 @@ export async function listenSessionEvents(
 	handler: (event: CoreEvent) => void,
 ) {
 	const unlistenFns = await Promise.all(
-		SESSION_EVENT_NAMES.map((eventName) => listen<CoreEvent>(eventName, (event) => {
-			handler(event.payload);
-		})),
+		SESSION_EVENT_NAMES.map((eventName) =>
+			listen<CoreEvent>(eventName, (event) => {
+				handler(event.payload);
+			}),
+		),
 	);
 
 	return () => {

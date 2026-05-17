@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#0a0a0a" />
+<title>Parear com Dev Command Center</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0a0a;
+    --panel: #151515;
+    --border: #262626;
+    --fg: #f5f5f5;
+    --mute: #8a8a8a;
+    --accent: #10b981;
+    --danger: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; min-height: 100vh; }
+  body { padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: center; }
+  main { width: 100%; max-width: 420px; }
+  h1 { font-size: 20px; margin: 0 0 4px; font-weight: 600; }
+  .sub { color: var(--mute); font-size: 13px; margin-bottom: 28px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  label { display: block; font-size: 12px; color: var(--mute); margin-bottom: 8px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; }
+  input[type="text"], input[type="tel"] {
+    width: 100%; padding: 14px; background: #0a0a0a; border: 1px solid var(--border);
+    border-radius: 10px; color: var(--fg); font: 600 22px/1 ui-monospace, SFMono-Regular, monospace;
+    text-align: center; letter-spacing: 0.4em; -webkit-appearance: none; appearance: none;
+  }
+  input[type="text"]:focus, input[type="tel"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  button {
+    width: 100%; padding: 14px; background: var(--accent); border: 0; border-radius: 10px;
+    color: #04231b; font: 600 15px/1 inherit; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+  .row { display: flex; gap: 10px; margin-top: 12px; }
+  .row > * { flex: 1; }
+  .status { font-size: 13px; margin-top: 14px; min-height: 18px; }
+  .status.error { color: var(--danger); }
+  .status.success { color: var(--accent); }
+  .meta { font-size: 12px; color: var(--mute); margin-top: 18px; word-break: break-all; }
+  .meta code { background: #0a0a0a; padding: 2px 6px; border-radius: 4px; color: #d4d4d4; }
+  .hidden { display: none !important; }
+  .check { width: 56px; height: 56px; margin: 8px auto 16px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; color: #04231b; font-size: 28px; font-weight: 700; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Parear este celular</h1>
+  <p class="sub">Confirme o PIN exibido no seu app desktop.</p>
+
+  <section id="pair-card" class="card">
+    <label for="pin">PIN de 6 dígitos</label>
+    <input id="pin" type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="000000" />
+    <div class="row">
+      <button id="pair-btn" type="button">Parear</button>
+    </div>
+    <div id="status" class="status" aria-live="polite"></div>
+    <div id="meta" class="meta hidden">
+      Backend: <code id="meta-be"></code><br/>
+      Nonce: <code id="meta-nonce"></code>
+    </div>
+  </section>
+
+  <section id="done-card" class="card hidden">
+    <div class="check">✓</div>
+    <h1 style="text-align:center;">Pareado!</h1>
+    <p class="sub" style="text-align:center;">Você já pode fechar essa página. O desktop foi notificado.</p>
+  </section>
+
+  <section id="fatal-card" class="card hidden">
+    <h1>Não foi possível parear</h1>
+    <p id="fatal-msg" class="sub"></p>
+    <button class="secondary" type="button" onclick="location.reload()">Tentar de novo</button>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- parse hash params ----------
+  const hash = location.hash.startsWith("#") ? location.hash.slice(1) : "";
+  const params = new URLSearchParams(hash);
+  const be = params.get("be");      // backend URL, e.g. http://192.168.1.42:9876
+  const nonce = params.get("nonce"); // single-use pairing nonce
+
+  const $ = (id) => document.getElementById(id);
+  const status = $("status");
+  const showStatus = (msg, kind) => {
+    status.className = "status" + (kind ? " " + kind : "");
+    status.textContent = msg || "";
+  };
+  const fatal = (msg) => {
+    $("pair-card").classList.add("hidden");
+    $("done-card").classList.add("hidden");
+    $("fatal-card").classList.remove("hidden");
+    $("fatal-msg").textContent = msg;
+  };
+
+  if (!be || !nonce) {
+    fatal("Link de pareamento incompleto. Gere um novo QR no app desktop.");
+    return;
+  }
+  if (!/^https?:\/\//.test(be)) {
+    fatal("URL de backend inválida no link de pareamento.");
+    return;
+  }
+
+  $("meta-be").textContent = be;
+  $("meta-nonce").textContent = nonce.slice(0, 12) + "…";
+  $("meta").classList.remove("hidden");
+
+  // ---------- helpers ----------
+  function detectDeviceName() {
+    const ua = navigator.userAgent || "";
+    if (/iPhone/.test(ua)) return "iPhone";
+    if (/iPad/.test(ua)) return "iPad";
+    if (/Android/.test(ua)) {
+      const m = ua.match(/Android.*; ([^);]+)\)/);
+      return m ? m[1].trim() : "Android";
+    }
+    return "Mobile";
+  }
+
+  function storeSession(deviceId, sessionToken) {
+    // Best-effort persistence so the user does not have to re-pair on every
+    // visit. We accept that IndexedDB may not be available (private browsing,
+    // very old engines) — pairing itself still completes.
+    return new Promise((resolve) => {
+      try {
+        const req = indexedDB.open("dcc-pair", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("device");
+        req.onerror = () => resolve();
+        req.onsuccess = () => {
+          try {
+            const tx = req.result.transaction("device", "readwrite");
+            tx.objectStore("device").put(
+              {
+                deviceId,
+                sessionToken,
+                be,
+                createdAt: new Date().toISOString(),
+              },
+              "current",
+            );
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => resolve();
+          } catch (_) {
+            resolve();
+          }
+        };
+      } catch (_) {
+        resolve();
+      }
+    });
+  }
+
+  // ---------- pair action ----------
+  const pinInput = $("pin");
+  const pairBtn = $("pair-btn");
+  pinInput.focus();
+
+  pinInput.addEventListener("input", () => {
+    pinInput.value = pinInput.value.replace(/\D+/g, "").slice(0, 6);
+  });
+
+  async function doPair() {
+    const pin = pinInput.value.trim();
+    if (!/^\d{6}$/.test(pin)) {
+      showStatus("Digite os 6 dígitos do PIN.", "error");
+      pinInput.focus();
+      return;
+    }
+    pairBtn.disabled = true;
+    showStatus("Conectando ao desktop…", "");
+
+    const body = {
+      nonce,
+      pin,
+      deviceName: detectDeviceName(),
+      // No publicKeySpki → backend issues a bearer session token.
+    };
+
+    let res, json;
+    try {
+      res = await fetch(be.replace(/\/$/, "") + "/auth/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      json = await res.json().catch(() => ({}));
+    } catch (e) {
+      pairBtn.disabled = false;
+      showStatus(
+        "Não consegui falar com o desktop. Mesma WiFi? " + (e && e.message || ""),
+        "error",
+      );
+      return;
+    }
+
+    if (!res.ok) {
+      pairBtn.disabled = false;
+      const msg = (json && json.error && json.error.message) || ("HTTP " + res.status);
+      showStatus(msg, "error");
+      return;
+    }
+
+    const deviceId = json && json.deviceId;
+    const sessionToken = json && json.sessionToken;
+    if (!deviceId || !sessionToken) {
+      pairBtn.disabled = false;
+      showStatus("Resposta inesperada do servidor.", "error");
+      return;
+    }
+
+    await storeSession(deviceId, sessionToken);
+
+    showStatus("", "");
+    $("pair-card").classList.add("hidden");
+    $("done-card").classList.remove("hidden");
+  }
+
+  pairBtn.addEventListener("click", doPair);
+  pinInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") doPair();
+  });
+})();
+</script>
+</body>
+</html>

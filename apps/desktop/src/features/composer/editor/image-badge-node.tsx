@@ -3,6 +3,8 @@ import {
 	$applyNodeReplacement,
 	$getNodeByKey,
 	DecoratorNode,
+	type DOMConversionMap,
+	type DOMConversionOutput,
 	type DOMExportOutput,
 	type LexicalNode,
 	type NodeKey,
@@ -51,6 +53,23 @@ export class ImageBadgeNode extends DecoratorNode<ReactNode> {
 		return "image-badge";
 	}
 
+	static importDOM(): DOMConversionMap | null {
+		return {
+			span: (domNode: HTMLElement) => {
+				const imagePath = domNode.dataset.dccImageBadgePath;
+				if (!imagePath) {
+					return null;
+				}
+				return {
+					conversion: (): DOMConversionOutput => ({
+						node: $createImageBadgeNode(imagePath),
+					}),
+					priority: 2,
+				};
+			},
+		};
+	}
+
 	static clone(node: ImageBadgeNode): ImageBadgeNode {
 		return new ImageBadgeNode(node.__imagePath, node.__key);
 	}
@@ -84,6 +103,7 @@ export class ImageBadgeNode extends DecoratorNode<ReactNode> {
 
 	exportDOM(): DOMExportOutput {
 		const span = document.createElement("span");
+		span.dataset.dccImageBadgePath = this.__imagePath;
 		span.textContent = `@${this.__imagePath}`;
 		return { element: span };
 	}

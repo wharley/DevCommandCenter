@@ -3,6 +3,7 @@ import {
 	useEffect,
 	useMemo,
 	useState,
+	useSyncExternalStore,
 	type KeyboardEventHandler,
 	type MouseEventHandler,
 } from "react";
@@ -10,7 +11,11 @@ import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Toaster } from "sonner";
-import type { CoreEvent, WorkspaceSessionSummary } from "@dcc/contracts";
+import type {
+	CoreEvent,
+	SessionSearchResult,
+	WorkspaceSessionSummary,
+} from "@dcc/contracts";
 import {
 	Dialog,
 	DialogContent,
@@ -52,6 +57,7 @@ import {
 	SessionWorkbench,
 	type RuntimeSessionSnapshot,
 } from "./features/sessions/session-workbench";
+import { SessionSearchDialog } from "./features/sessions/session-search-dialog";
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
 import {
@@ -59,6 +65,7 @@ import {
 	workspaceSessionsQueryOptions,
 } from "./features/sessions/workspace-sessions-query";
 import { FALLBACK_PROVIDER_CATALOG } from "./lib/fallback-provider-catalog";
+import { daemonListCombs } from "./lib/daemon-api";
 import { listProviders } from "./lib/provider-api";
 import { deleteRepository, listRepositories, listWorkspaces } from "./lib/workspace-api";
 import {
@@ -80,7 +87,10 @@ import {
 	setSessionComposerSelection,
 } from "./features/providers/provider-selection.logic";
 import type { ComposerSubmittedTurn } from "./features/composer/composer-turn";
-import { workspaceToSummary } from "./features/workspaces/use-workspaces";
+import {
+	daemonCombToWorkspaceSummary,
+	workspaceToSummary,
+} from "./features/workspaces/use-workspaces";
 import type { WorkspaceSummary } from "./features/workspaces/types";
 import {
 	canAbortRun,
@@ -109,15 +119,24 @@ import {
 	type ProviderRuntimeSettings,
 	writeProviderRuntimeSettings,
 } from "./features/providers/provider-runtime-settings";
-
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 const EMPTY_WORKSPACES: WorkspaceSummary[] = [];
+const LOCAL_BACKEND_CACHE_KEY = "local";
+
+function getWorkspaceSessionsCacheKey(scope: string, workspaceId: string) {
+	return ["workspaceSessions", scope, workspaceId] as const;
+}
 
 type PendingSessionClose = {
 	sessionId: string;
 	title: string;
 	deleteHistory: boolean;
 	requiresAbort: boolean;
+};
+
+type PendingSessionNavigation = {
+	sessionId: string;
+	workspaceId: string;
 };
 
 function ResizeSeparator({
@@ -263,6 +282,12 @@ function applyCoreEventToSnapshot(
 export default function App() {
 	const { t } = useTranslation("common");
 	useZoom(1);
+	// Remote SSH backends were removed in the Connections cleanup. Keep the
+	// query keys stable (still LOCAL_BACKEND_CACHE_KEY) so cached data lives
+	// across mounts; the remote branches below are unreachable now.
+	const activeRemoteEnvironment = null;
+	const isRemoteBackend = false;
+	const backendCacheKey = LOCAL_BACKEND_CACHE_KEY;
 
 	const {
 		handleResizeKeyDown,
@@ -277,7 +302,7 @@ export default function App() {
 		setSidebarCollapsed,
 	} = useShellPanels();
 	const workspacesQuery = useQuery({
-		queryKey: ["workspaces"],
+		queryKey: ["workspaces", backendCacheKey],
 		queryFn: async () => {
 			const result = await listWorkspaces();
 			return result.workspaces.map(workspaceToSummary);
@@ -286,8 +311,11 @@ export default function App() {
 		refetchOnWindowFocus: false,
 	});
 	const repositoriesQuery = useQuery({
-		queryKey: ["repositories"],
+		queryKey: ["repositories", backendCacheKey],
 		queryFn: async () => {
+			if (isRemoteBackend) {
+				return [];
+			}
 			const result = await listRepositories();
 			return result.repositories;
 		},
@@ -319,6 +347,7 @@ export default function App() {
 	const [workspaceRepositoryContext, setWorkspaceRepositoryContext] =
 		useState<ExistingRepositoryContext | null>(null);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+	const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
 	const [isOnboardingOpen, setIsOnboardingOpen] = useState(() => {
 		if (typeof window === "undefined") {
 			return false;
@@ -343,7 +372,10 @@ export default function App() {
 	const providerCatalog =
 		providersQuery.data?.catalog ?? FALLBACK_PROVIDER_CATALOG;
 	const workspaceSessionsQuery = useQuery(
-		workspaceSessionsQueryOptions(selectedWorkspace?.id ?? null),
+		workspaceSessionsQueryOptions(selectedWorkspace?.id ?? null, {
+			scope: backendCacheKey,
+			refetchInterval: false,
+		}),
 	);
 	const workspaceSessions = workspaceSessionsQuery.data ?? [];
 	const [selectedProviderId, setSelectedProviderId] = useState<string | null>(() => {
@@ -365,6 +397,8 @@ export default function App() {
 	const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 	const [pendingSessionClose, setPendingSessionClose] =
 		useState<PendingSessionClose | null>(null);
+	const [pendingSessionNavigation, setPendingSessionNavigation] =
+		useState<PendingSessionNavigation | null>(null);
 	const [sessionActionSessionId, setSessionActionSessionId] = useState<string | null>(null);
 	const [inspectorTab, setInspectorTab] = useState<"activity" | "context" | "plan">(
 		"activity",
@@ -387,6 +421,17 @@ export default function App() {
 	const providerChoices = providerCatalog.providers;
 	const selectedWorkspacePath =
 		selectedWorkspace?.worktreePath ?? selectedWorkspace?.rootPath ?? null;
+	const selectedLocalWorkspacePath = isRemoteBackend ? null : selectedWorkspacePath;
+	const showRemoteUnsupported = useCallback(
+		(kind: "sessions" | "workspaces") => {
+			toast.info(
+				kind === "sessions"
+					? t("remoteMode.sessionsUnavailable")
+					: t("remoteMode.workspaceActionsUnavailable"),
+			);
+		},
+		[t],
+	);
 	const selectedProvider = useMemo(
 		() =>
 			providerChoices.find((provider) => provider.id === selectedProviderId) ??
@@ -585,6 +630,41 @@ export default function App() {
 	}, [selectedWorkspace?.id]);
 
 	useEffect(() => {
+		setIsCommandPaletteOpen(false);
+		setIsCreateWorkspaceOpen(false);
+		setSelectedSessionId(null);
+		setPendingSessionNavigation(null);
+		setPendingSessionClose(null);
+		setSessionActionSessionId(null);
+		setSessionSnapshotsById({});
+		setPendingPrompt(null);
+		setPendingPromptSessionId(null);
+		setEditorSelection(null);
+		setWorkspaceRepositoryContext(null);
+		setIsSessionSearchOpen(false);
+	}, [backendCacheKey]);
+
+	useEffect(() => {
+		if (!pendingSessionNavigation) {
+			return;
+		}
+
+		if (selectedWorkspace?.id !== pendingSessionNavigation.workspaceId) {
+			return;
+		}
+
+		const hasTargetSession = workspaceSessions.some(
+			(summary) => summary.session.id === pendingSessionNavigation.sessionId,
+		);
+		if (!hasTargetSession) {
+			return;
+		}
+
+		setSelectedSessionId(pendingSessionNavigation.sessionId);
+		setPendingSessionNavigation(null);
+	}, [pendingSessionNavigation, selectedWorkspace?.id, workspaceSessions]);
+
+	useEffect(() => {
 		if (!selectedWorkspace?.id) {
 			return;
 		}
@@ -682,7 +762,7 @@ export default function App() {
 			}));
 			setSelectedSessionId(result.session.id);
 			queryClient.setQueryData<WorkspaceSessionSummary[]>(
-				["workspaceSessions", selectedWorkspace.id],
+				getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 				(current = []) => {
 					const nextSummary: WorkspaceSessionSummary = {
 						session: result.session,
@@ -710,6 +790,7 @@ export default function App() {
 			toast.error(message);
 		}
 	}, [
+		backendCacheKey,
 		selectedModel,
 		selectedProvider,
 		selectedProviderBlockReason,
@@ -771,7 +852,7 @@ export default function App() {
 				}));
 				setSelectedSessionId(startedSessionId);
 				queryClient.setQueryData<WorkspaceSessionSummary[]>(
-					["workspaceSessions", selectedWorkspace.id],
+					getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 					(current = []) => {
 						const nextSummary: WorkspaceSessionSummary = {
 							session: started.session,
@@ -818,7 +899,10 @@ export default function App() {
 					[result.session.id]: resultSnapshot,
 				}));
 				queryClient.setQueryData<WorkspaceSessionSummary[]>(
-					["workspaceSessions", result.session.workspaceId],
+					getWorkspaceSessionsCacheKey(
+						backendCacheKey,
+						result.session.workspaceId,
+					),
 					(current = []) =>
 						current.map((summary) =>
 							summary.session.id === result.session.id
@@ -849,6 +933,7 @@ export default function App() {
 			}
 		},
 		[
+			backendCacheKey,
 			openPlanSidebar,
 			queryClient,
 			selectedModel,
@@ -909,7 +994,7 @@ export default function App() {
 					[startedSessionId]: startedSnapshot,
 				}));
 				queryClient.setQueryData<WorkspaceSessionSummary[]>(
-					["workspaceSessions", selectedWorkspace.id],
+					getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 					(current = []) => {
 						const nextSummary: WorkspaceSessionSummary = {
 							session: started.session,
@@ -964,7 +1049,7 @@ export default function App() {
 				[result.session.id]: resultSnapshot,
 			}));
 			queryClient.setQueryData<WorkspaceSessionSummary[]>(
-				["workspaceSessions", result.session.workspaceId],
+				getWorkspaceSessionsCacheKey(backendCacheKey, result.session.workspaceId),
 				(current = []) =>
 					current.map((summary) =>
 						summary.session.id === result.session.id
@@ -996,6 +1081,7 @@ export default function App() {
 			);
 		}
 	}, [
+		backendCacheKey,
 		queryClient,
 		selectedModel,
 		selectedProvider,
@@ -1047,6 +1133,49 @@ export default function App() {
 		setSelectedSessionId(sessionId);
 	}, []);
 
+	const handleOpenSessionSearch = useCallback(() => {
+		setIsSessionSearchOpen(true);
+	}, []);
+
+	const handleSelectSessionSearchResult = useCallback(
+		async (result: SessionSearchResult) => {
+			try {
+				if (result.archivedAt) {
+					await restoreSession({ sessionId: result.sessionId });
+				}
+				setPendingSessionNavigation({
+					sessionId: result.sessionId,
+					workspaceId: result.workspaceId,
+				});
+				setSelectedWorkspaceId(result.workspaceId);
+				void queryClient.invalidateQueries({
+					queryKey: getWorkspaceSessionsCacheKey(
+						backendCacheKey,
+						result.workspaceId,
+					),
+				});
+				if (selectedWorkspace?.id === result.workspaceId) {
+					setSelectedSessionId(result.sessionId);
+				}
+			} catch (error) {
+				const message =
+					error instanceof Error
+						? error.message
+						: typeof error === "string"
+							? error
+							: "Failed to open session search result";
+				console.error("[dcc] open session search result failed:", error);
+				toast.error(message);
+			}
+		},
+		[
+			backendCacheKey,
+			queryClient,
+			selectedWorkspace?.id,
+			setSelectedWorkspaceId,
+		],
+	);
+
 	const handleResumeSession = useCallback(async () => {
 		if (!selectedSessionSnapshot || !canResumeSession(selectedSessionSnapshot)) {
 			return;
@@ -1071,7 +1200,10 @@ export default function App() {
 			};
 		});
 		queryClient.setQueryData<WorkspaceSessionSummary[]>(
-			["workspaceSessions", selectedSessionSnapshot.workspaceId],
+			getWorkspaceSessionsCacheKey(
+				backendCacheKey,
+				selectedSessionSnapshot.workspaceId,
+			),
 			(current = []) =>
 				current.map((summary) =>
 					summary.session.id === selectedSessionSnapshot.sessionId
@@ -1083,7 +1215,7 @@ export default function App() {
 						: summary,
 				),
 		);
-	}, [queryClient, selectedSessionSnapshot]);
+	}, [backendCacheKey, queryClient, selectedSessionSnapshot]);
 
 	const handleOpenEditorFile = useCallback(
 		(selection: WorkspaceGitPreviewSelection | null) => {
@@ -1128,7 +1260,10 @@ export default function App() {
 			};
 		});
 		queryClient.setQueryData<WorkspaceSessionSummary[]>(
-			["workspaceSessions", selectedSessionSnapshot.workspaceId],
+			getWorkspaceSessionsCacheKey(
+				backendCacheKey,
+				selectedSessionSnapshot.workspaceId,
+			),
 			(current = []) =>
 				current.map((summary) =>
 					summary.session.id === selectedSessionSnapshot.sessionId
@@ -1147,6 +1282,7 @@ export default function App() {
 			current === selectedSessionSnapshot.sessionId ? null : current,
 		);
 	}, [
+		backendCacheKey,
 		effectiveSelectedSessionId,
 		pendingPrompt,
 		pendingPromptSessionId,
@@ -1202,7 +1338,7 @@ export default function App() {
 						},
 					}));
 					queryClient.setQueryData<WorkspaceSessionSummary[]>(
-						["workspaceSessions", selectedWorkspace.id],
+						getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 						(current = []) =>
 							current.map((summary) =>
 								summary.session.id === request.sessionId
@@ -1222,7 +1358,7 @@ export default function App() {
 				});
 
 				queryClient.setQueryData<WorkspaceSessionSummary[]>(
-					["workspaceSessions", selectedWorkspace.id],
+					getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 					(current = []) =>
 						result.deletedHistory
 							? current.filter(
@@ -1281,6 +1417,7 @@ export default function App() {
 			}
 		},
 		[
+			backendCacheKey,
 			effectiveSelectedSessionId,
 			handleStartSession,
 			pendingPrompt,
@@ -1363,7 +1500,7 @@ export default function App() {
 			try {
 				await restoreSession({ sessionId });
 				queryClient.setQueryData<WorkspaceSessionSummary[]>(
-					["workspaceSessions", selectedWorkspace.id],
+					getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 					(current = []) =>
 						current.map((candidate) =>
 							candidate.session.id === sessionId
@@ -1393,7 +1530,12 @@ export default function App() {
 				);
 			}
 		},
-		[queryClient, selectedWorkspace, workspaceSessions],
+		[
+			backendCacheKey,
+			queryClient,
+			selectedWorkspace,
+			workspaceSessions,
+		],
 	);
 
 	const handleCompleteOnboarding = useCallback(() => {
@@ -1410,11 +1552,15 @@ export default function App() {
 			mode: "open" | "clone",
 			repositoryContext: ExistingRepositoryContext | null = null,
 		) => {
+			if (isRemoteBackend) {
+				showRemoteUnsupported("workspaces");
+				return;
+			}
 			setWorkspaceCreationMode(mode);
 			setWorkspaceRepositoryContext(mode === "open" ? repositoryContext : null);
 			setIsCreateWorkspaceOpen(true);
 		},
-		[],
+		[isRemoteBackend, showRemoteUnsupported],
 	);
 
 	const handleWorkspaceDialogOpenChange = useCallback((open: boolean) => {
@@ -1426,12 +1572,19 @@ export default function App() {
 
 	const handleDeleteProject = useCallback(
 		async (input: { repositoryId: string; workspaceIds: string[] }) => {
+			if (isRemoteBackend) {
+				showRemoteUnsupported("workspaces");
+				return;
+			}
 			await deleteRepository(input.repositoryId);
 			await deleteWorkspaces(input.workspaceIds);
 			void queryClient.invalidateQueries({ queryKey: ["repositories"] });
 		},
-		[deleteWorkspaces, queryClient],
+		[deleteWorkspaces, isRemoteBackend, queryClient, showRemoteUnsupported],
 	);
+	const handleRemoteWorkspaceMutation = useCallback(() => {
+		showRemoteUnsupported("workspaces");
+	}, [showRemoteUnsupported]);
 
 	const visiblePendingPrompt =
 		effectiveSelectedSessionId === pendingPromptSessionId ? pendingPrompt : null;
@@ -1454,18 +1607,28 @@ export default function App() {
 						<WorkspacesSidebar
 							collapsed={sidebarCollapsed}
 							isCreatingWorkspace={isCreatingWorkspace}
+							showAgentStates={!isRemoteBackend}
+							sessionQueryScope={backendCacheKey}
 							onSelectWorkspace={setSelectedWorkspaceId}
 							onCreateWorkspace={() => openWorkspaceDialog("open")}
 							onCloneWorkspace={() => openWorkspaceDialog("clone")}
-							onCreateWorkspaceFromProject={(repository) =>
-								openWorkspaceDialog("open", repository)
+							onCreateWorkspaceFromProject={
+								isRemoteBackend
+									? undefined
+									: (repository) => openWorkspaceDialog("open", repository)
 							}
 							onOpenSettings={() => setIsSettingsOpen(true)}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
-							onArchiveWorkspace={archiveWorkspace}
-							onRestoreWorkspace={restoreWorkspace}
-							onDeleteWorkspace={deleteWorkspace}
-							onDeleteProject={handleDeleteProject}
+							onArchiveWorkspace={
+								isRemoteBackend ? handleRemoteWorkspaceMutation : archiveWorkspace
+							}
+							onRestoreWorkspace={
+								isRemoteBackend ? handleRemoteWorkspaceMutation : restoreWorkspace
+							}
+							onDeleteWorkspace={
+								isRemoteBackend ? handleRemoteWorkspaceMutation : deleteWorkspace
+							}
+							onDeleteProject={isRemoteBackend ? undefined : handleDeleteProject}
 							repositories={repositoriesFromBackend}
 							selectedWorkspaceId={selectedWorkspaceId}
 							workspaces={filteredWorkspaces}
@@ -1510,6 +1673,13 @@ export default function App() {
 								onOpenOnboarding={() => setIsOnboardingOpen(true)}
 								onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
 							/>
+							<SessionSearchDialog
+								open={isSessionSearchOpen}
+								onOpenChange={setIsSessionSearchOpen}
+								selectedWorkspaceId={selectedWorkspaceId}
+								queryScope={backendCacheKey}
+								onSelectResult={handleSelectSessionSearchResult}
+							/>
 							<CreateWorkspaceDialog
 								open={isCreateWorkspaceOpen}
 								mode={workspaceCreationMode}
@@ -1524,7 +1694,9 @@ export default function App() {
 									workspaceId={selectedWorkspace.id}
 									workspaceName={selectedWorkspace.name}
 									workspaceBranch={selectedWorkspace.branch}
-									workspacePath={selectedWorkspacePath}
+									workspacePath={selectedLocalWorkspacePath}
+									terminalWorkspacePath={selectedWorkspacePath}
+									sessionQueryScope={backendCacheKey}
 									selectedProviderLabel={selectedProvider?.label ?? null}
 									selectedModelLabel={selectedModel?.label ?? null}
 									selectedProviderId={selectedProviderId}
@@ -1542,6 +1714,7 @@ export default function App() {
 									onSelectSession={handleSelectSession}
 									onCloseSession={handleCloseSession}
 									onRestoreSession={handleRestoreSession}
+									onOpenSessionSearch={handleOpenSessionSearch}
 									onSubmitPrompt={handleSubmitPrompt}
 									onResumeSession={handleResumeSession}
 									onAbortSession={handleAbortSession}
@@ -1599,7 +1772,7 @@ export default function App() {
 								workspaceId={selectedWorkspace?.id ?? null}
 								workspaceName={selectedWorkspace?.name ?? null}
 								workspaceBranch={selectedWorkspace?.branch ?? null}
-								workspacePath={selectedWorkspacePath}
+								workspacePath={selectedLocalWorkspacePath}
 								workspaceStatus={selectedWorkspace?.status ?? null}
 								workspaceSetupReport={selectedWorkspace?.setupReport ?? null}
 								selectedProviderLabel={selectedProvider?.label ?? null}

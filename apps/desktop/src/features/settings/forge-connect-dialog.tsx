@@ -8,7 +8,7 @@ import {
 	TerminalOutput,
 } from "@/components/terminal-output";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
 	backfillForgeRepoBindings,
 	buildForgeCliShellCommand,
@@ -350,6 +350,9 @@ export function ForgeConnectDialog({
 				<DialogTitle className="sr-only">
 					Conectar {providerLabel(provider)}
 				</DialogTitle>
+				<DialogDescription className="sr-only">
+					Use this terminal to authenticate {providerLabel(provider)} on {hostValue}.
+				</DialogDescription>
 				<header className="flex h-10 items-center gap-2 border-b border-border/55 px-3">
 					<div className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-foreground">
 						<span

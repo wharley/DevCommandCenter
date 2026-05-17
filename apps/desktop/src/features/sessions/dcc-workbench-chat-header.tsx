@@ -5,6 +5,7 @@ import {
 	History,
 	Plus,
 	RefreshCw,
+	Search,
 	X,
 } from "lucide-react";
 import { memo } from "react";
@@ -54,6 +55,7 @@ export type DccWorkbenchChatHeaderProps = {
 	onStartSession: () => void;
 	onCloseSession: (sessionId: string) => void;
 	onRestoreSession: (sessionId: string) => void;
+	onOpenSessionSearch: () => void;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	sessionActionSessionId: string | null;
@@ -80,6 +82,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	onStartSession,
 	onCloseSession,
 	onRestoreSession,
+	onOpenSessionSearch,
 	onResumeSession,
 	onAbortSession,
 	sessionActionSessionId,
@@ -298,6 +301,27 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						className="flex h-[24px] items-center gap-2 rounded-md px-2 text-[12px] leading-none"
 					>
 						<span>{t("workbench.newSessionTooltip")}</span>
+					</TooltipContent>
+				</Tooltip>
+
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<Button
+							aria-label={t("workbench.sessionSearch.buttonAria")}
+							onClick={onOpenSessionSearch}
+							variant="ghost"
+							size="icon-sm"
+							className="shrink-0 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+						>
+							<Search className="size-3.5" strokeWidth={1.8} />
+						</Button>
+					</TooltipTrigger>
+					<TooltipContent
+						side="bottom"
+						sideOffset={4}
+						className="flex h-[24px] items-center gap-2 rounded-md px-2 text-[12px] leading-none"
+					>
+						<span>{t("workbench.sessionSearch.buttonTooltip")}</span>
 					</TooltipContent>
 				</Tooltip>
 

@@ -91,6 +91,44 @@ export const PROVIDER_MODEL_REGISTRY = {
 		},
 	] satisfies ModelEntry[],
 
+	droid: [
+		{
+			id: "auto",
+			label: "Auto",
+			description: "Use Droid's default model selection for this account.",
+			recommended: true,
+			effortLevels: ["low", "medium", "high"],
+		},
+		{
+			id: "claude-sonnet-4-6",
+			label: "Claude Sonnet 4.6",
+			description: "Balanced default with strong coding capability through Droid.",
+			recommended: false,
+			effortLevels: ["low", "medium", "high"],
+		},
+		{
+			id: "gpt-5.4",
+			label: "GPT-5.4",
+			description: "High capability coding model routed through Droid.",
+			recommended: false,
+			effortLevels: ["low", "medium", "high"],
+		},
+		{
+			id: "gpt-5.5",
+			label: "GPT-5.5",
+			description: "Latest high-reasoning OpenAI option exposed by Droid.",
+			recommended: false,
+			effortLevels: ["low", "medium", "high"],
+		},
+		{
+			id: "gemini-3-flash-preview",
+			label: "Gemini 3 Flash Preview",
+			description: "Fast Gemini option when available in the local Droid account.",
+			recommended: false,
+			effortLevels: ["low", "medium", "high"],
+		},
+	] satisfies ModelEntry[],
+
 	cursor: [
 		{
 			id: "auto",
@@ -143,6 +181,16 @@ export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, s
 		"gemini-3-flash": "gemini-2.5-flash",
 		"2.5-pro": "gemini-2.5-pro",
 		"2.5-flash": "gemini-2.5-flash",
+	},
+	droid: {
+		auto: "auto",
+		sonnet: "claude-sonnet-4-6",
+		"claude-sonnet-4-6": "claude-sonnet-4-6",
+		"gpt-5.4": "gpt-5.4",
+		"5.4": "gpt-5.4",
+		"gpt-5.5": "gpt-5.5",
+		"5.5": "gpt-5.5",
+		"gemini-3-flash-preview": "gemini-3-flash-preview",
 	},
 };
 

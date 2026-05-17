@@ -7,21 +7,32 @@ export function useSessionEventFeed() {
 
 	useEffect(() => {
 		let disposed = false;
+		let cleanup: (() => void) | null = null;
+
+		setEvents([]);
 
 		void listenSessionEvents((event) => {
 			if (disposed) {
 				return;
 			}
-
 			setEvents((current) => [...current, event].slice(-12));
-		}).then((unlisten) => {
-			if (disposed) {
-				void unlisten();
-			}
-		});
+		})
+			.then((unlisten) => {
+				if (disposed) {
+					void unlisten();
+					return;
+				}
+				cleanup = unlisten;
+			})
+			.catch((error) => {
+				if (!disposed) {
+					console.error("[dcc] failed to subscribe to session events:", error);
+				}
+			});
 
 		return () => {
 			disposed = true;
+			cleanup?.();
 		};
 	}, []);
 

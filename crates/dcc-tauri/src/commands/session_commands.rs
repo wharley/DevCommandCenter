@@ -11,7 +11,7 @@ use dcc_core::{
         CloseSessionOutput, RestoreSessionInput, RestoreSessionOutput, ResumeSessionInput,
         ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
     },
-    domain::session::{SessionEventRecord, WorkspaceSessionSummary},
+    domain::session::{SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary},
     ports::{
         provider::ProviderPermissionResponse, provider::ProviderUserInputAnswer,
         provider::ProviderUserInputResponse, Input, ProviderTurnInput, SessionEventRepo,
@@ -47,6 +47,19 @@ pub struct RespondToPermissionRequestInput {
 #[serde(rename_all = "camelCase")]
 pub struct RespondToPermissionRequestOutput {
     pub ok: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchSessionsInput {
+    #[serde(default)]
+    pub query: String,
+    #[serde(default = "default_search_limit")]
+    pub limit: usize,
+}
+
+fn default_search_limit() -> usize {
+    40
 }
 
 #[tauri::command]
@@ -200,6 +213,16 @@ pub async fn list_workspace_sessions(
     let workspace_id = dcc_core::domain::workspace::WorkspaceId(_workspace_id);
     state
         .list_workspace_sessions(&workspace_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn search_sessions(
+    state: State<'_, SessionCommandState>,
+    input: SearchSessionsInput,
+) -> Result<Vec<SessionSearchResult>, String> {
+    state
+        .search_sessions(&input.query, input.limit)
         .map_err(|error| error.to_string())
 }
 

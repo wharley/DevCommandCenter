@@ -5,11 +5,12 @@ use dcc_core::application::{
     RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput,
     StartThreadInput, StartThreadOutput,
 };
-use dcc_core::domain::session::{SessionEventRecord, WorkspaceSessionSummary};
+use dcc_core::domain::session::{SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary};
 use dcc_tauri::{
     commands::session_commands::{
         self as session_command_impl, RespondToPermissionRequestInput,
         RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
+        SearchSessionsInput,
     },
     state::SessionCommandState,
 };
@@ -83,6 +84,14 @@ pub async fn list_workspace_sessions(
     workspace_id: String,
 ) -> Result<Vec<WorkspaceSessionSummary>, String> {
     session_command_impl::list_workspace_sessions(state, workspace_id).await
+}
+
+#[tauri::command]
+pub async fn search_sessions(
+    state: State<'_, SessionCommandState>,
+    input: SearchSessionsInput,
+) -> Result<Vec<SessionSearchResult>, String> {
+    session_command_impl::search_sessions(state, input).await
 }
 
 #[tauri::command]

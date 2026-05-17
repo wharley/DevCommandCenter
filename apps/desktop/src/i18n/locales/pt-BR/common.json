@@ -32,9 +32,9 @@
     "noWorkspacesHint": "Abra um projeto ou faça clone pela URL para começar.",
     "removeProject": "Remover projeto",
     "removeProjectTitle": "Remover projeto {{label}}?",
-    "removeProjectDescription": "Isso removerá permanentemente todos os workspaces deste projeto do DCC ({{count}}).",
+    "removeProjectDescription": "Isso removerá permanentemente todos os workspaces deste projeto do DCC ({{count}}) e apagará os worktrees locais correspondentes do disco.",
     "removeProjectPathLabel": "Caminho",
-    "removeProjectWarning": "No modelo atual do DCC, conversas e sessões ligadas a esses workspaces também deixam de ficar acessíveis pela interface.",
+    "removeProjectWarning": "No modelo atual do DCC, conversas e sessões ligadas a esses workspaces também deixam de ficar acessíveis pela interface. O repositório raiz continua preservado.",
     "removeProjectConfirm": "Remover projeto",
     "removeProjectError": "Falha ao remover projeto",
     "cancel": "Cancelar",
@@ -108,6 +108,10 @@
     "cloneFromUrl": "Clone from URL",
     "commandPalette": "Paleta de comandos",
     "currentProvider": "Provedor atual: {{provider}}{{model}}"
+  },
+  "remoteMode": {
+    "sessionsUnavailable": "O backend remoto está conectado, mas os controles de sessão ainda funcionam apenas no runtime local.",
+    "workspaceActionsUnavailable": "Esta ação de workspace ainda não está disponível enquanto um backend remoto estiver ativo."
   },
   "inspector": {
     "empty": {
@@ -205,6 +209,7 @@
       "general": { "label": "Geral", "description": "Padrões do app e comportamento do shell." },
       "appearance": { "label": "Aparência", "description": "Tema, idioma e contraste da interface." },
       "model": { "label": "Modelo", "description": "Provedor e modelo padrão." },
+      "connections": { "label": "Conexões", "description": "Celulares e tablets pareados com este desktop." },
       "shortcuts": { "label": "Atalhos", "description": "Atalhos ativos e cheatsheet disponível." },
       "git": { "label": "Git", "description": "Chrome do Git no inspetor, ajustes em breve." },
       "experimental": { "label": "Experimental", "description": "Espaço reservado para opções futuras." },
@@ -427,6 +432,21 @@
     "restoreSessionLabel": "Reabrir",
     "newSessionAria": "Novo chat",
     "newSessionTooltip": "Criar um novo chat",
+    "sessionSearch": {
+      "title": "Sessões passadas",
+      "description": "Busque em conversas anteriores e reabra qualquer thread.",
+      "recentDescription": "Sessões recentes em todos os workspaces.",
+      "searchingDescription": "Busca full-text sobre títulos e conteúdo persistido das sessões.",
+      "placeholder": "Buscar sessões passadas...",
+      "loading": "Buscando sessões...",
+      "empty": "Nenhuma sessão correspondente encontrada.",
+      "buttonAria": "Buscar sessões passadas",
+      "buttonTooltip": "Buscar sessões passadas",
+      "currentWorkspaceGroup": "Workspace atual",
+      "otherWorkspacesGroup": "Outros workspaces",
+      "allSessionsGroup": "Todas as sessões",
+      "archived": "Arquivada"
+    },
     "sessionHistoryAria": "Histórico de chats",
     "sessionHistoryLabel": "Histórico de chats",
     "openInEditorAria": "Abrir workspace no editor preferido",

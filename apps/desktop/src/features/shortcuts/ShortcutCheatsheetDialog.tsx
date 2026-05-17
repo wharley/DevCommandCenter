@@ -1,6 +1,12 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { InlineShortcutDisplay } from "./InlineShortcutDisplay";
 import { getOpenPreferredEditorShortcutKeys } from "./shortcut-utils";
@@ -43,6 +49,9 @@ export function ShortcutCheatsheetDialog({
 						<DialogTitle className="text-[15px] font-semibold text-foreground">
 							{t("shortcutsSheet.title")}
 						</DialogTitle>
+						<DialogDescription className="sr-only">
+							{t("shortcutsSheet.title")}
+						</DialogDescription>
 					</DialogHeader>
 					<div className="mt-5 space-y-2">
 						{shortcutRows.map((row) => (

@@ -32,9 +32,9 @@
     "noWorkspacesHint": "Open a project or clone from URL to start from zero.",
     "removeProject": "Remove project",
     "removeProjectTitle": "Remove project {{label}}?",
-    "removeProjectDescription": "This will permanently remove all workspaces in this project from DCC ({{count}}).",
+    "removeProjectDescription": "This will permanently remove all workspaces in this project from DCC ({{count}}) and delete their local worktrees from disk.",
     "removeProjectPathLabel": "Path",
-    "removeProjectWarning": "In DCC's current model, conversations and sessions tied to those workspaces also become inaccessible from the interface.",
+    "removeProjectWarning": "In DCC's current model, conversations and sessions tied to those workspaces also become inaccessible from the interface. The root repository stays preserved.",
     "removeProjectConfirm": "Remove project",
     "removeProjectError": "Failed to remove project",
     "cancel": "Cancel",
@@ -108,6 +108,10 @@
     "cloneFromUrl": "Clone from URL",
     "commandPalette": "Command palette",
     "currentProvider": "Current provider: {{provider}}{{model}}"
+  },
+  "remoteMode": {
+    "sessionsUnavailable": "Remote backend is connected, but session controls still run only against the local runtime.",
+    "workspaceActionsUnavailable": "This workspace action is not available while a remote backend is active."
   },
   "inspector": {
     "empty": {
@@ -205,6 +209,7 @@
       "general": { "label": "General", "description": "App defaults and shell behavior." },
       "appearance": { "label": "Appearance", "description": "Theme, language, and interface contrast." },
       "model": { "label": "Model", "description": "Default provider and model." },
+      "connections": { "label": "Connections", "description": "Phones and tablets paired with this desktop." },
       "shortcuts": { "label": "Shortcuts", "description": "Active shortcuts and the cheatsheet are available." },
       "git": { "label": "Git", "description": "Git chrome in the inspector, adjustments coming soon." },
       "experimental": { "label": "Experimental", "description": "Reserved space for future options." },
@@ -427,6 +432,21 @@
     "restoreSessionLabel": "Reopen",
     "newSessionAria": "New chat",
     "newSessionTooltip": "Create a new chat",
+    "sessionSearch": {
+      "title": "Past sessions",
+      "description": "Search across previous conversations and reopen any thread.",
+      "recentDescription": "Recent sessions across your workspaces.",
+      "searchingDescription": "Full-text search over thread titles and persisted session content.",
+      "placeholder": "Search past sessions...",
+      "loading": "Searching sessions...",
+      "empty": "No matching sessions found.",
+      "buttonAria": "Search past sessions",
+      "buttonTooltip": "Search past sessions",
+      "currentWorkspaceGroup": "Current workspace",
+      "otherWorkspacesGroup": "Other workspaces",
+      "allSessionsGroup": "All sessions",
+      "archived": "Archived"
+    },
     "sessionHistoryAria": "Chat history",
     "sessionHistoryLabel": "Chat history",
     "openInEditorAria": "Open workspace in preferred editor",
