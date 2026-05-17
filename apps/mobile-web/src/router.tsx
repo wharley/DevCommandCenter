@@ -20,7 +20,12 @@ const pairRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([indexRoute, pairRoute]);
 
-export const router = createRouter({ routeTree });
+// The SPA is mounted at /m/ in production (served by dccd-http) and at / in
+// `vite dev`. Matches Vite's `base: "/m/"` config so links and matches resolve
+// consistently in both modes.
+const basepath = import.meta.env.BASE_URL.replace(/\/$/, "") || "/";
+
+export const router = createRouter({ routeTree, basepath });
 
 declare module "@tanstack/react-router" {
 	interface Register {
