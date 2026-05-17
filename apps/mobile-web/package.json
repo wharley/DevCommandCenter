@@ -12,6 +12,7 @@
   "dependencies": {
     "@tanstack/react-router": "^1.95.0",
     "clsx": "^2.1.1",
+    "highlight.js": "^11.10.0",
     "lucide-react": "^1.7.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",

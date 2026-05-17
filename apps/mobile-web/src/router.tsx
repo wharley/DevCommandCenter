@@ -3,6 +3,7 @@ import { HomeRoute } from "./routes/home";
 import { NewThreadRoute } from "./routes/new";
 import { PairRoute } from "./routes/pair";
 import { PermissionsRoute } from "./routes/permissions";
+import { SettingsRoute } from "./routes/settings";
 import { ThreadRoute } from "./routes/thread";
 
 const rootRoute = createRootRoute({
@@ -39,12 +40,19 @@ const permissionsRoute = createRoute({
 	component: PermissionsRoute,
 });
 
+const settingsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/settings",
+	component: SettingsRoute,
+});
+
 const routeTree = rootRoute.addChildren([
 	indexRoute,
 	pairRoute,
 	threadRoute,
 	newThreadRoute,
 	permissionsRoute,
+	settingsRoute,
 ]);
 
 // The SPA is mounted at /m/ in production (served by dccd-http) and at / in

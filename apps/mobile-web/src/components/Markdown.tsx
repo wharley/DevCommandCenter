@@ -1,12 +1,33 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { highlightCode } from "@/lib/highlight";
 
 /**
- * Minimal markdown renderer tuned for mobile chat bubbles. Tailwind classes are
- * scoped to keep paragraphs tight (no top-margin on the first child, narrow
- * spacing between blocks). No syntax highlighting yet — code blocks render as
- * plain monospace text. Links open in a new tab.
+ * Minimal markdown renderer tuned for mobile chat bubbles. Tailwind classes
+ * are scoped to keep paragraphs tight (no top-margin on the first child,
+ * narrow spacing between blocks). Fenced code blocks are syntax-highlighted
+ * with highlight.js (only a curated language set is registered to keep the
+ * bundle small). Inline `code` stays unstyled-bold to minimize visual noise.
+ * Links open in a new tab.
  */
+function HighlightedBlock({
+	source,
+	language,
+}: {
+	source: string;
+	language: string | null;
+}) {
+	const { html, language: resolved } = highlightCode(source, language);
+	return (
+		<pre className="my-1.5 overflow-x-auto rounded-lg bg-bg/80 p-2.5 first:mt-0 last:mb-0">
+			<code
+				className={resolved ? `hljs language-${resolved}` : "hljs"}
+				dangerouslySetInnerHTML={{ __html: html }}
+			/>
+		</pre>
+	);
+}
+
 export function Markdown({ text }: { text: string }) {
 	return (
 		<div className="markdown-body break-words text-[14px] leading-relaxed">
@@ -34,13 +55,15 @@ export function Markdown({ text }: { text: string }) {
 					strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
 					em: ({ children }) => <em className="italic">{children}</em>,
 					code: ({ children, className }) => {
-						const isBlock = className?.startsWith("language-");
-						if (isBlock) {
-							return (
-								<code className="font-mono text-[12px] text-foreground/90">
-									{children}
-								</code>
-							);
+						const langMatch = /language-([\w-]+)/.exec(className ?? "");
+						if (langMatch) {
+							const language = langMatch[1] ?? null;
+							const source = Array.isArray(children)
+								? children.join("")
+								: typeof children === "string"
+									? children
+									: String(children ?? "");
+							return <HighlightedBlock source={source.replace(/\n$/, "")} language={language} />;
 						}
 						return (
 							<code className="rounded bg-bg/70 px-1 py-0.5 font-mono text-[12px] text-foreground/90">
@@ -48,11 +71,7 @@ export function Markdown({ text }: { text: string }) {
 							</code>
 						);
 					},
-					pre: ({ children }) => (
-						<pre className="my-1.5 overflow-x-auto rounded-lg bg-bg/80 p-2.5 first:mt-0 last:mb-0">
-							{children}
-						</pre>
-					),
+					pre: ({ children }) => <>{children}</>,
 					blockquote: ({ children }) => (
 						<blockquote className="my-1 border-l-2 border-border pl-3 text-mute first:mt-0 last:mb-0">
 							{children}

@@ -1,19 +1,22 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import {
 	Activity,
 	ChevronRight,
 	Cpu,
+	FolderGit2,
 	Loader2,
-	LogOut,
 	Plus,
 	RefreshCw,
+	Search,
+	Settings,
 	ShieldAlert,
 	Smartphone,
+	X,
 } from "lucide-react";
 import { ApiError, apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { clearSession, loadSession, type PairingSession } from "@/lib/session";
+import { loadSession, type PairingSession } from "@/lib/session";
 import { openEventStream } from "@/lib/sseClient";
 import type { RawSessionEvent } from "@/lib/threadEvents";
 
@@ -31,10 +34,23 @@ type SessionSearchResult = {
 	model: string | null;
 	workspaceName: string | null;
 	workspaceBranch: string | null;
+	workspaceId: string | null;
 	projectId: string | null;
 	updatedAt: string;
 	archivedAt: string | null;
 };
+
+type Comb = {
+	id: string;
+	name: string | null;
+	branch: string | null;
+	projectId: string | null;
+	projectName: string | null;
+	status: string | null;
+	lastOpenedAt: string | null;
+};
+
+type Tab = "sessions" | "workspaces";
 
 type Bootstrap =
 	| { state: "loading" }
@@ -42,7 +58,6 @@ type Bootstrap =
 	| { state: "ready"; session: PairingSession };
 
 export function HomeRoute() {
-	const navigate = useNavigate();
 	const [boot, setBoot] = useState<Bootstrap>({ state: "loading" });
 
 	useEffect(() => {
@@ -60,21 +75,8 @@ export function HomeRoute() {
 			</Shell>
 		);
 	}
-
-	if (boot.state === "unpaired") {
-		return <UnpairedView />;
-	}
-
-	return (
-		<PairedHome
-			session={boot.session}
-			onLogout={async () => {
-				await clearSession();
-				setBoot({ state: "unpaired" });
-				void navigate({ to: "/", replace: true });
-			}}
-		/>
-	);
+	if (boot.state === "unpaired") return <UnpairedView />;
+	return <PairedHome session={boot.session} />;
 }
 
 function UnpairedView() {
@@ -87,46 +89,44 @@ function UnpairedView() {
 				<h1 className="text-xl font-semibold">Dev Command Center</h1>
 				<p className="mt-1 text-[13px] text-mute">Mobile</p>
 			</header>
-
 			<section className="rounded-2xl border border-border bg-panel p-5">
 				<h2 className="text-[14px] font-medium">Nenhum desktop pareado</h2>
 				<p className="mt-1 text-[12px] leading-relaxed text-mute">
-					Abra o app desktop, vá em Settings &rarr; Conexões &rarr; Parear
-					novo dispositivo. Escaneie o QR com este celular.
+					Abra o app desktop, vá em Settings &rarr; Conexões &rarr; Parear novo
+					dispositivo. Escaneie o QR com este celular.
 				</p>
 			</section>
 		</Shell>
 	);
 }
 
-function PairedHome({
-	session,
-	onLogout,
-}: {
-	session: PairingSession;
-	onLogout: () => Promise<void>;
-}) {
+function PairedHome({ session }: { session: PairingSession }) {
 	const [status, setStatus] = useState<DaemonStatus | null>(null);
 	const [sessions, setSessions] = useState<SessionSearchResult[] | null>(null);
+	const [combs, setCombs] = useState<Comb[] | null>(null);
 	const [pendingPermissions, setPendingPermissions] = useState<number>(0);
 	const [error, setError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
+	const [tab, setTab] = useState<Tab>("sessions");
+	const [search, setSearch] = useState("");
+	const [workspaceFilter, setWorkspaceFilter] = useState<string | null>(null);
 
 	const refresh = async () => {
 		setRefreshing(true);
 		setError(null);
 		try {
-			const [s, sess] = await Promise.all([
+			const [s, sess, cs] = await Promise.all([
 				apiFetch<DaemonStatus>(session, "/api/v1/status").catch(() => null),
 				apiFetch<SessionSearchResult[]>(
 					session,
-					"/api/v1/sessions/search?limit=30",
+					"/api/v1/sessions/search?limit=60",
 				),
+				apiFetch<Comb[]>(session, "/api/v1/combs").catch(() => [] as Comb[]),
 			]);
 			setStatus(s);
-			const visible = sess.filter((s) => !s.archivedAt);
+			const visible = sess.filter((x) => !x.archivedAt);
 			setSessions(visible);
-			// Fire-and-forget badge update; never blocks the Home rendering.
+			setCombs(cs);
 			void countPendingPermissions(session, visible).then(setPendingPermissions);
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 401) {
@@ -145,8 +145,6 @@ function PairedHome({
 		return () => window.clearInterval(id);
 	}, []);
 
-	// Live-update the badge when a permission request comes in / gets resolved
-	// without waiting for the 15s poll.
 	useEffect(() => {
 		const stop = openEventStream(session, "/api/v1/events/stream", {
 			onMessage: (payload) => {
@@ -162,6 +160,53 @@ function PairedHome({
 		});
 		return stop;
 	}, []);
+
+	const filteredSessions = useMemo(() => {
+		if (!sessions) return null;
+		const q = search.trim().toLowerCase();
+		return sessions.filter((s) => {
+			if (workspaceFilter && s.workspaceId !== workspaceFilter) return false;
+			if (!q) return true;
+			const haystack = [
+				s.threadTitle,
+				s.workspaceName,
+				s.workspaceBranch,
+				s.projectId,
+				s.snippet,
+			]
+				.filter(Boolean)
+				.join(" ")
+				.toLowerCase();
+			return haystack.includes(q);
+		});
+	}, [sessions, search, workspaceFilter]);
+
+	const filteredCombs = useMemo(() => {
+		if (!combs) return null;
+		const q = search.trim().toLowerCase();
+		if (!q) return combs;
+		return combs.filter((c) => {
+			const haystack = [c.name, c.projectName, c.projectId, c.branch]
+				.filter(Boolean)
+				.join(" ")
+				.toLowerCase();
+			return haystack.includes(q);
+		});
+	}, [combs, search]);
+
+	const sessionsByWorkspace = useMemo(() => {
+		const map = new Map<string, number>();
+		for (const s of sessions ?? []) {
+			if (s.workspaceId) {
+				map.set(s.workspaceId, (map.get(s.workspaceId) ?? 0) + 1);
+			}
+		}
+		return map;
+	}, [sessions]);
+
+	const activeWorkspace = workspaceFilter
+		? combs?.find((c) => c.id === workspaceFilter) ?? null
+		: null;
 
 	return (
 		<Shell>
@@ -197,14 +242,13 @@ function PairedHome({
 					>
 						<Plus className="size-4" />
 					</Link>
-					<button
-						type="button"
-						onClick={onLogout}
+					<Link
+						to="/settings"
 						className="-mr-1 rounded-lg p-2 text-mute hover:text-foreground"
-						title="Desconectar"
+						title="Settings"
 					>
-						<LogOut className="size-4" />
-					</button>
+						<Settings className="size-4" />
+					</Link>
 				</div>
 			</header>
 
@@ -217,12 +261,98 @@ function PairedHome({
 			) : null}
 
 			<section className="mt-5">
-				<h2 className="px-1 pb-2 text-[11px] font-medium uppercase tracking-wider text-mute">
-					Sessões recentes
-				</h2>
-				<SessionsList sessions={sessions} />
+				<TabSwitcher
+					tab={tab}
+					onChange={(t) => {
+						setTab(t);
+						setWorkspaceFilter(null);
+					}}
+				/>
+
+				<SearchBar value={search} onChange={setSearch} placeholder={tab === "sessions" ? "Buscar sessões…" : "Buscar workspaces…"} />
+
+				{activeWorkspace && tab === "sessions" ? (
+					<button
+						type="button"
+						onClick={() => setWorkspaceFilter(null)}
+						className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-[11px] text-accent"
+					>
+						<FolderGit2 className="size-3" />
+						{activeWorkspace.name ?? activeWorkspace.projectName ?? activeWorkspace.id}
+						<X className="size-3" />
+					</button>
+				) : null}
+
+				{tab === "sessions" ? (
+					<SessionsList sessions={filteredSessions} />
+				) : (
+					<WorkspacesList
+						combs={filteredCombs}
+						sessionCount={sessionsByWorkspace}
+						onPick={(id) => {
+							setWorkspaceFilter(id);
+							setTab("sessions");
+							setSearch("");
+						}}
+					/>
+				)}
 			</section>
 		</Shell>
+	);
+}
+
+function TabSwitcher({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
+	return (
+		<div className="mb-3 flex rounded-xl border border-border bg-panel p-1 text-[12px]">
+			{(["sessions", "workspaces"] as Tab[]).map((t) => (
+				<button
+					key={t}
+					type="button"
+					onClick={() => onChange(t)}
+					className={cn(
+						"flex-1 rounded-lg py-1.5 transition-colors",
+						tab === t
+							? "bg-bg text-foreground"
+							: "text-mute hover:text-foreground",
+					)}
+				>
+					{t === "sessions" ? "Sessões" : "Workspaces"}
+				</button>
+			))}
+		</div>
+	);
+}
+
+function SearchBar({
+	value,
+	onChange,
+	placeholder,
+}: {
+	value: string;
+	onChange: (v: string) => void;
+	placeholder: string;
+}) {
+	return (
+		<div className="mb-3 flex items-center gap-2 rounded-xl border border-border bg-panel px-3 py-1.5">
+			<Search className="size-3.5 shrink-0 text-mute" />
+			<input
+				type="text"
+				value={value}
+				onChange={(e) => onChange(e.target.value)}
+				placeholder={placeholder}
+				className="flex-1 bg-transparent text-[13px] outline-none placeholder:text-mute/60"
+			/>
+			{value ? (
+				<button
+					type="button"
+					onClick={() => onChange("")}
+					className="rounded p-0.5 text-mute hover:text-foreground"
+					aria-label="limpar busca"
+				>
+					<X className="size-3.5" />
+				</button>
+			) : null}
+		</div>
 	);
 }
 
@@ -267,9 +397,7 @@ function StatusCard({
 					className="rounded-lg p-1.5 text-mute hover:text-foreground disabled:opacity-50"
 					title="Atualizar"
 				>
-					<RefreshCw
-						className={cn("size-3.5", refreshing && "animate-spin")}
-					/>
+					<RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
 				</button>
 			</div>
 		</section>
@@ -287,7 +415,7 @@ function SessionsList({ sessions }: { sessions: SessionSearchResult[] | null }) 
 	if (sessions.length === 0) {
 		return (
 			<div className="rounded-2xl border border-dashed border-border/70 p-6 text-center text-[12px] text-mute">
-				Nenhuma sessão recente.
+				Nenhuma sessão.
 			</div>
 		);
 	}
@@ -342,6 +470,65 @@ function SessionCard({ session }: { session: SessionSearchResult }) {
 	);
 }
 
+function WorkspacesList({
+	combs,
+	sessionCount,
+	onPick,
+}: {
+	combs: Comb[] | null;
+	sessionCount: Map<string, number>;
+	onPick: (id: string) => void;
+}) {
+	if (combs === null) {
+		return (
+			<div className="rounded-2xl border border-dashed border-border/70 p-6 text-center text-[12px] text-mute">
+				Carregando…
+			</div>
+		);
+	}
+	if (combs.length === 0) {
+		return (
+			<div className="rounded-2xl border border-dashed border-border/70 p-6 text-center text-[12px] text-mute">
+				Nenhum workspace.
+			</div>
+		);
+	}
+	const sorted = [...combs].sort((a, b) => {
+		const av = a.lastOpenedAt ?? "";
+		const bv = b.lastOpenedAt ?? "";
+		return bv.localeCompare(av);
+	});
+	return (
+		<ul className="space-y-2">
+			{sorted.map((c) => {
+				const count = sessionCount.get(c.id) ?? 0;
+				return (
+					<li key={c.id}>
+						<button
+							type="button"
+							onClick={() => onPick(c.id)}
+							className="flex w-full items-start gap-3 rounded-2xl border border-border bg-panel px-4 py-3 text-left active:bg-muted/20"
+						>
+							<FolderGit2 className="mt-0.5 size-4 shrink-0 text-mute" />
+							<div className="min-w-0 flex-1">
+								<p className="truncate text-[14px] font-medium">
+									{c.name ?? c.projectName ?? c.id}
+								</p>
+								<p className="mt-0.5 truncate text-[11px] text-mute">
+									{[c.projectName, c.branch].filter(Boolean).join(" · ")}
+								</p>
+							</div>
+							<span className="shrink-0 rounded-full border border-border bg-bg px-2 py-0.5 text-[10px] text-mute">
+								{count} sessão{count === 1 ? "" : "es"}
+							</span>
+						</button>
+					</li>
+				);
+			})}
+		</ul>
+	);
+}
+
 function ProviderBadge({ providerId }: { providerId: string | null }) {
 	if (!providerId) return null;
 	const label = providerId === "claude_code" ? "Claude" : providerId === "codex" ? "Codex" : providerId;
@@ -375,13 +562,6 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 const PERMISSION_SCAN_WINDOW_MS = 48 * 3600 * 1000;
 
-/**
- * Cheap pending-permission count for the Home badge: looks at the most
- * recently-touched threads, fans out /events fetches in parallel, and sums
- * `turn_permission_requested` minus matching `turn_permission_resolved`.
- * Failures on individual threads degrade silently — the badge is an
- * affordance, not a contract.
- */
 async function countPendingPermissions(
 	session: PairingSession,
 	threads: SessionSearchResult[],
