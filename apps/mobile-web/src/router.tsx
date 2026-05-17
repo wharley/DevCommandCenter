@@ -1,5 +1,6 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
 import { HomeRoute } from "./routes/home";
+import { NewThreadRoute } from "./routes/new";
 import { PairRoute } from "./routes/pair";
 import { ThreadRoute } from "./routes/thread";
 
@@ -25,7 +26,18 @@ const threadRoute = createRoute({
 	component: ThreadRoute,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, pairRoute, threadRoute]);
+const newThreadRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/new",
+	component: NewThreadRoute,
+});
+
+const routeTree = rootRoute.addChildren([
+	indexRoute,
+	pairRoute,
+	threadRoute,
+	newThreadRoute,
+]);
 
 // The SPA is mounted at /m/ in production (served by dccd-http) and at / in
 // `vite dev`. Matches Vite's `base: "/m/"` config so links and matches resolve

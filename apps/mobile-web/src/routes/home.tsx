@@ -6,6 +6,7 @@ import {
 	Cpu,
 	Loader2,
 	LogOut,
+	Plus,
 	RefreshCw,
 	Smartphone,
 } from "lucide-react";
@@ -146,14 +147,23 @@ function PairedHome({
 						{session.backendUrl}
 					</p>
 				</div>
-				<button
-					type="button"
-					onClick={onLogout}
-					className="-mr-1 rounded-lg p-2 text-mute hover:text-foreground"
-					title="Desconectar"
-				>
-					<LogOut className="size-4" />
-				</button>
+				<div className="flex items-center gap-1">
+					<Link
+						to="/new"
+						className="rounded-lg p-2 text-mute hover:text-foreground"
+						title="Nova thread"
+					>
+						<Plus className="size-4" />
+					</Link>
+					<button
+						type="button"
+						onClick={onLogout}
+						className="-mr-1 rounded-lg p-2 text-mute hover:text-foreground"
+						title="Desconectar"
+					>
+						<LogOut className="size-4" />
+					</button>
+				</div>
 			</header>
 
 			<StatusCard status={status} refreshing={refreshing} onRefresh={() => void refresh()} />
