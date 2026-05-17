@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0a0a0a;
+  --color-panel: #151515;
+  --color-border: #262626;
+  --color-fg: #f5f5f5;
+  --color-mute: #8a8a8a;
+  --color-accent: #10b981;
+  --color-danger: #ef4444;
+
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-fg);
+}
+
+html,
+body,
+#root {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  min-height: 100vh;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Inter",
+    system-ui,
+    sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+body {
+  padding: max(0px, env(safe-area-inset-top)) 0 max(0px, env(safe-area-inset-bottom));
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Smaller default fonts on phones */
+html {
+  font-size: 15px;
+}

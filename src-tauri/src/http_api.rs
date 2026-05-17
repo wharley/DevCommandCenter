@@ -49,6 +49,7 @@ use std::{
 use tokio::sync::RwLock;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
@@ -406,45 +407,46 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
             auth_middleware,
         ));
 
+    let mobile_spa = mobile_spa_service();
+
     Router::new()
         .route("/", get(root_handler))
         .route("/health", get(health_handler))
         .route("/openapi.json", get(openapi_handler))
         .route("/auth/pair", post(complete_pairing_handler))
-        .route("/m/pair", get(mobile_pair_landing_handler))
+        .nest_service("/m", mobile_spa)
         .merge(protected_routes)
         .layer(build_cors_layer(&cors_config))
         .layer(TraceLayer::new_for_http())
         .with_state(config)
 }
 
-/// Embedded mobile pairing client (HTML+JS).
-///
-/// Served from the same origin as the API so the browser does not block the
-/// pair-completion XHR with mixed-content / CORS errors. Bundled at compile
-/// time via `include_str!` so it always matches the backend it talks to.
-const MOBILE_PAIR_HTML: &str = include_str!("../assets/m_pair.html");
+/// Serves the Vite-built mobile SPA from `apps/mobile-web/dist/` with an
+/// `index.html` fallback so client-side routes (TanStack Router) resolve when
+/// reloaded directly from the phone. Resolution order:
+///   1. `DCC_MOBILE_WEB_DIST` env var
+///   2. `<repo>/apps/mobile-web/dist` (dev: works when running from source)
+///   3. `<exe_dir>/mobile-web` (release: bundled next to the binary)
+fn mobile_spa_service() -> ServeDir<ServeFile> {
+    let candidates: Vec<PathBuf> = [
+        std::env::var("DCC_MOBILE_WEB_DIST").ok().map(PathBuf::from),
+        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../apps/mobile-web/dist")),
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|p| p.join("mobile-web"))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
 
-async fn mobile_pair_landing_handler() -> Response {
-    (
-        StatusCode::OK,
-        [
-            (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
-            (axum::http::header::CACHE_CONTROL, "no-store"),
-            // Conservative CSP: page is fully self-contained (no remote
-            // assets), so block everything except its own inline script/style.
-            (
-                axum::http::header::HeaderName::from_static("content-security-policy"),
-                "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src *; img-src 'self' data:; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
-            ),
-            (
-                axum::http::header::HeaderName::from_static("referrer-policy"),
-                "no-referrer",
-            ),
-        ],
-        MOBILE_PAIR_HTML,
-    )
-        .into_response()
+    let dist = candidates
+        .iter()
+        .find(|p| p.join("index.html").is_file())
+        .cloned()
+        .unwrap_or_else(|| candidates.into_iter().next().unwrap_or_else(|| PathBuf::from(".")));
+
+    let fallback = ServeFile::new(dist.join("index.html"));
+    ServeDir::new(dist).fallback(fallback)
 }
 
 pub fn build_cors_layer(config: &HttpConfig) -> CorsLayer {
