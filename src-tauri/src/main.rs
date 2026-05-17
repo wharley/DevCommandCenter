@@ -5036,6 +5036,24 @@ async fn pair_get_lan_url() -> ApiResult<Value> {
     Ok(serde_json::to_value(endpoint).map_err(|e| db_error(e.to_string()))?)
 }
 
+/// Lists every base URL the mobile companion could use to reach the backend:
+/// Tailscale IPs (and MagicDNS HTTPS when configured), LAN IPv4, and loopback.
+/// Detection runs synchronously inside a spawn_blocking so the (short) shell-out
+/// to `tailscale status` does not block the Tauri runtime.
+#[tauri::command]
+async fn pair_get_endpoints() -> ApiResult<Value> {
+    let port = std::env::var("DCC_HTTP_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(9876);
+    let endpoints = tauri::async_runtime::spawn_blocking(move || {
+        dev_command_center_tauri::net_info::discover_endpoints(port)
+    })
+    .await
+    .map_err(|e| db_error(format!("pair_get_endpoints task failed: {e}")))?;
+    Ok(serde_json::json!({ "endpoints": endpoints }))
+}
+
 #[tauri::command]
 async fn remote_preflight_ssh(input: Value) -> ApiResult<Value> {
     let input: RemoteSshPreflightInput =
@@ -7933,6 +7951,7 @@ pub fn run() {
             pair_audit_log,
             pair_purge_expired,
             pair_get_lan_url,
+            pair_get_endpoints,
             remote_list_ssh_tunnels,
             remote_launch_ssh_tunnel,
             remote_stop_ssh_tunnel,

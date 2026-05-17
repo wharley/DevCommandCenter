@@ -57,3 +57,20 @@ export type LanEndpoint = {
 export function pairGetLanUrl() {
 	return invoke<LanEndpoint>("pair_get_lan_url");
 }
+
+export type Reachability = "loopback" | "lan" | "private-network" | "public";
+export type EndpointStatus = "available" | "unavailable" | "unknown";
+
+export type AdvertisedEndpoint = {
+	id: string;
+	label: string;
+	provider: string;
+	url: string;
+	reachability: Reachability;
+	status: EndpointStatus;
+	description: string;
+};
+
+export function pairGetEndpoints() {
+	return invoke<{ endpoints: AdvertisedEndpoint[] }>("pair_get_endpoints");
+}

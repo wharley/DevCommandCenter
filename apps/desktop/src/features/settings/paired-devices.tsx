@@ -26,12 +26,12 @@ import {
 import { RemoteAccessQr } from "./remote-access-qr";
 import {
 	pairAuditLog,
-	pairGetLanUrl,
+	pairGetEndpoints,
 	pairInit,
 	pairListDevices,
 	pairRevokeDevice,
+	type AdvertisedEndpoint,
 	type AuditEntry,
-	type LanEndpoint,
 	type PairedDevice,
 	type PairingChallenge,
 } from "@/lib/pairing-api";
@@ -77,7 +77,13 @@ export function PairedDevicesPanel({
 	const [loading, setLoading] = useState(false);
 	const [revokingId, setRevokingId] = useState<string | null>(null);
 	const [pairDialogOpen, setPairDialogOpen] = useState(false);
-	const [lan, setLan] = useState<LanEndpoint | null>(null);
+	const [endpoints, setEndpoints] = useState<AdvertisedEndpoint[] | null>(null);
+
+	const refreshEndpoints = () => {
+		void pairGetEndpoints()
+			.then((res) => setEndpoints(res.endpoints))
+			.catch(() => setEndpoints([]));
+	};
 
 	const refresh = async () => {
 		setLoading(true);
@@ -95,9 +101,7 @@ export function PairedDevicesPanel({
 
 	useEffect(() => {
 		void refresh();
-		void pairGetLanUrl()
-			.then((endpoint) => setLan(endpoint))
-			.catch(() => setLan({ ip: null, port: 9876, url: null }));
+		refreshEndpoints();
 	}, []);
 
 	useEffect(() => {
@@ -258,8 +262,9 @@ export function PairedDevicesPanel({
 					setPairDialogOpen(false);
 					void refresh();
 				}}
-				backendUrl={lan?.url ?? defaultBackendUrl}
-				lanUnavailable={lan !== null && lan.url === null}
+				endpoints={endpoints}
+				fallbackUrl={defaultBackendUrl}
+				onRefreshEndpoints={refreshEndpoints}
 			/>
 
 			<AuditLogSection />
@@ -389,20 +394,86 @@ function formatTime(iso: string): string {
 	}
 }
 
+function EndpointOption({
+	endpoint,
+	selected,
+	onSelect,
+}: {
+	endpoint: AdvertisedEndpoint;
+	selected: boolean;
+	onSelect: () => void;
+}) {
+	const badge =
+		endpoint.provider === "tailscale"
+			? { text: "Tailscale", tone: "text-violet-400" }
+			: endpoint.reachability === "lan"
+				? { text: "LAN", tone: "text-emerald-400" }
+				: { text: endpoint.label, tone: "text-muted-foreground" };
+	return (
+		<button
+			type="button"
+			onClick={onSelect}
+			className={`flex w-full flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors ${
+				selected
+					? "border-foreground/40 bg-muted/30"
+					: "border-border/60 hover:bg-muted/15"
+			}`}
+		>
+			<div className="flex w-full items-center justify-between gap-2">
+				<span className="text-[12px] font-medium text-foreground">{endpoint.label}</span>
+				<span className={`text-[10px] font-medium uppercase tracking-wider ${badge.tone}`}>
+					{badge.text}
+				</span>
+			</div>
+			<span className="text-[11px] leading-snug text-muted-foreground">
+				{endpoint.description}
+			</span>
+		</button>
+	);
+}
+
 function PairDeviceDialog({
 	open,
 	onClose,
-	backendUrl,
-	lanUnavailable,
+	endpoints,
+	fallbackUrl,
+	onRefreshEndpoints,
 }: {
 	open: boolean;
 	onClose: () => void;
-	backendUrl: string;
-	lanUnavailable: boolean;
+	/** Null = still loading; empty array = no usable endpoint detected. */
+	endpoints: AdvertisedEndpoint[] | null;
+	/** Last-resort URL (defaults to loopback) when discovery returns nothing. */
+	fallbackUrl: string;
+	onRefreshEndpoints: () => void;
 }) {
 	const [challenge, setChallenge] = useState<PairingChallenge | null>(null);
 	const [generating, setGenerating] = useState(false);
 	const [remainingSecs, setRemainingSecs] = useState(0);
+	const [selectedEndpointId, setSelectedEndpointId] = useState<string | null>(null);
+
+	// Endpoints reachable from a phone, in display order. Loopback is hidden
+	// from the picker but still selectable as a debug fallback.
+	const externalEndpoints = useMemo(
+		() => (endpoints ?? []).filter((e) => e.reachability !== "loopback"),
+		[endpoints],
+	);
+
+	// Pick a sensible default the first time endpoints land: prefer Tailscale
+	// (works from any network) over LAN, but never overwrite a user choice.
+	useEffect(() => {
+		if (selectedEndpointId) return;
+		if (!endpoints || endpoints.length === 0) return;
+		const tailscale = endpoints.find((e) => e.provider === "tailscale" && e.status !== "unavailable");
+		const lan = endpoints.find((e) => e.reachability === "lan");
+		const any = externalEndpoints[0] ?? endpoints[0];
+		setSelectedEndpointId((tailscale ?? lan ?? any)?.id ?? null);
+	}, [endpoints, selectedEndpointId, externalEndpoints]);
+
+	const selectedEndpoint =
+		endpoints?.find((e) => e.id === selectedEndpointId) ?? null;
+	const backendUrl = selectedEndpoint?.url ?? fallbackUrl;
+	const noEndpointsDetected = endpoints !== null && externalEndpoints.length === 0;
 
 	const generate = async () => {
 		setGenerating(true);
@@ -419,14 +490,15 @@ function PairDeviceDialog({
 	};
 
 	useEffect(() => {
-		if (open && !challenge && !lanUnavailable) {
+		if (open && !challenge && !noEndpointsDetected) {
 			void generate();
 		}
 		if (!open) {
 			setChallenge(null);
 			setRemainingSecs(0);
+			setSelectedEndpointId(null);
 		}
-	}, [open, lanUnavailable]);
+	}, [open, noEndpointsDetected]);
 
 	useEffect(() => {
 		if (!challenge) return;
@@ -468,17 +540,26 @@ function PairDeviceDialog({
 				</DialogHeader>
 
 				<div className="flex-1 overflow-y-auto px-6 py-5">
-					{lanUnavailable ? (
+					{noEndpointsDetected ? (
 						<div className="flex h-[280px] flex-col items-center justify-center gap-3 px-4 text-center">
 							<AlertTriangle className="size-6 text-amber-500" strokeWidth={1.8} />
 							<p className="text-[13px] font-medium text-foreground">
-								Sem conexão de rede local
+								Nenhuma rede alcançável detectada
 							</p>
 							<p className="text-[12px] leading-relaxed text-muted-foreground">
-								Não consegui detectar um IP LAN neste computador. Conecte ao
-								Wi-Fi (ou cabo) e tente de novo. O celular precisa estar na
-								mesma rede.
+								O celular precisa de uma rota até este desktop. Conecte ao
+								Wi-Fi (mesma rede do celular), ou instale o Tailscale em ambos
+								para parear de qualquer lugar.
 							</p>
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								onClick={onRefreshEndpoints}
+							>
+								<RefreshCw className="size-3.5" />
+								Verificar novamente
+							</Button>
 						</div>
 					) : generating || !challenge ? (
 						<div className="flex h-[280px] items-center justify-center">
@@ -534,10 +615,27 @@ function PairDeviceDialog({
 								Copiar link do pareamento
 							</Button>
 
-							<p className="text-center text-[11px] leading-relaxed text-muted-foreground">
-								No celular: escaneie o QR ou abra o link copiado em qualquer
-								navegador. Mesma WiFi do desktop.
-							</p>
+							{externalEndpoints.length > 1 ? (
+								<div className="w-full space-y-1.5">
+									<p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+										Como o celular vai conectar
+									</p>
+									<div className="space-y-1.5">
+										{externalEndpoints.map((ep) => (
+											<EndpointOption
+												key={ep.id}
+												endpoint={ep}
+												selected={ep.id === selectedEndpointId}
+												onSelect={() => setSelectedEndpointId(ep.id)}
+											/>
+										))}
+									</div>
+								</div>
+							) : selectedEndpoint ? (
+								<p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+									{selectedEndpoint.description}
+								</p>
+							) : null}
 							<p className="text-center font-mono text-[10px] text-muted-foreground/70">
 								{backendUrl}
 							</p>
