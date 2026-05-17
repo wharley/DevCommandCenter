@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
 	Activity,
+	ChevronRight,
 	Cpu,
 	Loader2,
 	LogOut,
@@ -14,28 +15,21 @@ import { clearSession, loadSession, type PairingSession } from "@/lib/session";
 
 type DaemonStatus = {
 	running: boolean;
-	mode: string;
-	pid: number | null;
 	cpuPercent: number;
 	memoryMb: number;
-	totalTasks: number;
-	enabledTasks: number;
-	runningTasks: number;
-	startedAt: string | null;
-	lastTickAt: string | null;
 };
 
-type Task = {
-	taskId: string;
-	taskName: string;
-	projectName: string;
-	projectId: string;
-	status: "idle" | "running" | "disabled" | string;
-	enabled: boolean;
-	schedule: string | null;
-	command: string;
-	lastRunAt: string | null;
-	nextRunAt: string | null;
+type SessionSearchResult = {
+	sessionId: string;
+	threadTitle: string | null;
+	snippet: string | null;
+	providerId: string | null;
+	model: string | null;
+	workspaceName: string | null;
+	workspaceBranch: string | null;
+	projectId: string | null;
+	updatedAt: string;
+	archivedAt: string | null;
 };
 
 type Bootstrap =
@@ -49,20 +43,9 @@ export function HomeRoute() {
 
 	useEffect(() => {
 		void loadSession().then((s) => {
-			if (!s) {
-				setBoot({ state: "unpaired" });
-				return;
-			}
-			setBoot({ state: "ready", session: s });
+			setBoot(s ? { state: "ready", session: s } : { state: "unpaired" });
 		});
 	}, []);
-
-	useEffect(() => {
-		if (boot.state === "unpaired") {
-			// No saved session — drop the user on a friendlier landing rather
-			// than the bare /pair (which only makes sense from a QR scan).
-		}
-	}, [boot.state]);
 
 	if (boot.state === "loading") {
 		return (
@@ -104,8 +87,8 @@ function UnpairedView() {
 			<section className="rounded-2xl border border-border bg-panel p-5">
 				<h2 className="text-[14px] font-medium">Nenhum desktop pareado</h2>
 				<p className="mt-1 text-[12px] leading-relaxed text-mute">
-					Abra o app desktop, vá em Settings &rarr; Dispositivos pareados &rarr;
-					Parear novo dispositivo. Escaneie o QR com este celular.
+					Abra o app desktop, vá em Settings &rarr; Conexões &rarr; Parear
+					novo dispositivo. Escaneie o QR com este celular.
 				</p>
 			</section>
 		</Shell>
@@ -120,7 +103,7 @@ function PairedHome({
 	onLogout: () => Promise<void>;
 }) {
 	const [status, setStatus] = useState<DaemonStatus | null>(null);
-	const [tasks, setTasks] = useState<Task[] | null>(null);
+	const [sessions, setSessions] = useState<SessionSearchResult[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
 
@@ -128,17 +111,20 @@ function PairedHome({
 		setRefreshing(true);
 		setError(null);
 		try {
-			const [s, t] = await Promise.all([
-				apiFetch<DaemonStatus>(session, "/api/v1/status"),
-				apiFetch<Task[]>(session, "/api/v1/tasks"),
+			const [s, sess] = await Promise.all([
+				apiFetch<DaemonStatus>(session, "/api/v1/status").catch(() => null),
+				apiFetch<SessionSearchResult[]>(
+					session,
+					"/api/v1/sessions/search?limit=30",
+				),
 			]);
 			setStatus(s);
-			setTasks(t);
+			setSessions(sess.filter((s) => !s.archivedAt));
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 401) {
-				setError("Sessão expirada. Pareie novamente no desktop.");
+				setError("Sessão expirada. Pareie de novo no desktop.");
 			} else {
-				setError(err instanceof Error ? err.message : "Falha ao carregar dados.");
+				setError(err instanceof Error ? err.message : "Falha ao carregar.");
 			}
 		} finally {
 			setRefreshing(false);
@@ -147,16 +133,16 @@ function PairedHome({
 
 	useEffect(() => {
 		void refresh();
-		const id = window.setInterval(refresh, 10_000);
+		const id = window.setInterval(refresh, 15_000);
 		return () => window.clearInterval(id);
 	}, []);
 
 	return (
 		<Shell>
 			<header className="flex items-center justify-between gap-3 px-1 pb-5">
-				<div>
+				<div className="min-w-0">
 					<h1 className="text-xl font-semibold">Dev Command Center</h1>
-					<p className="mt-0.5 break-all font-mono text-[11px] text-mute/80">
+					<p className="mt-0.5 break-all font-mono text-[10px] text-mute/80">
 						{session.backendUrl}
 					</p>
 				</div>
@@ -180,9 +166,9 @@ function PairedHome({
 
 			<section className="mt-5">
 				<h2 className="px-1 pb-2 text-[11px] font-medium uppercase tracking-wider text-mute">
-					Tasks
+					Sessões recentes
 				</h2>
-				<TasksList tasks={tasks} />
+				<SessionsList sessions={sessions} />
 			</section>
 		</Shell>
 	);
@@ -212,11 +198,14 @@ function StatusCard({
 						<p className="text-[13px] font-medium">
 							{status?.running ? "Daemon ativo" : status ? "Daemon parado" : "—"}
 						</p>
-						<p className="text-[11px] text-mute">
-							{status
-								? `${status.runningTasks} de ${status.enabledTasks} task(s) rodando`
-								: "Carregando…"}
-						</p>
+						{status ? (
+							<p className="text-[11px] text-mute">
+								<Cpu className="mr-1 inline size-3" />
+								{status.cpuPercent.toFixed(1)}% · {status.memoryMb.toFixed(0)} MB
+							</p>
+						) : (
+							<p className="text-[11px] text-mute">Carregando…</p>
+						)}
 					</div>
 				</div>
 				<button
@@ -231,96 +220,99 @@ function StatusCard({
 					/>
 				</button>
 			</div>
-
-			{status ? (
-				<div className="mt-3 grid grid-cols-2 gap-2 border-t border-border/60 pt-3">
-					<Metric icon={<Cpu className="size-3.5" />} label="CPU" value={`${status.cpuPercent.toFixed(1)}%`} />
-					<Metric label="Memória" value={`${status.memoryMb.toFixed(0)} MB`} />
-				</div>
-			) : null}
 		</section>
 	);
 }
 
-function Metric({
-	icon,
-	label,
-	value,
-}: {
-	icon?: React.ReactNode;
-	label: string;
-	value: string;
-}) {
-	return (
-		<div>
-			<div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-mute">
-				{icon}
-				{label}
-			</div>
-			<div className="mt-0.5 font-mono text-[14px] text-foreground">{value}</div>
-		</div>
-	);
-}
-
-function TasksList({ tasks }: { tasks: Task[] | null }) {
-	if (tasks === null) {
+function SessionsList({ sessions }: { sessions: SessionSearchResult[] | null }) {
+	if (sessions === null) {
 		return (
 			<div className="rounded-2xl border border-dashed border-border/70 p-6 text-center text-[12px] text-mute">
-				Carregando tasks…
+				Carregando…
 			</div>
 		);
 	}
-	if (tasks.length === 0) {
+	if (sessions.length === 0) {
 		return (
 			<div className="rounded-2xl border border-dashed border-border/70 p-6 text-center text-[12px] text-mute">
-				Nenhuma task configurada.
+				Nenhuma sessão recente.
 			</div>
 		);
 	}
 	return (
 		<ul className="space-y-2">
-			{tasks.map((task) => (
-				<li
-					key={task.taskId}
-					className="rounded-2xl border border-border bg-panel px-4 py-3"
-				>
-					<div className="flex items-start justify-between gap-3">
-						<div className="min-w-0">
-							<p className="truncate text-[14px] font-medium">{task.taskName}</p>
-							<p className="mt-0.5 truncate text-[11px] text-mute">
-								{task.projectName} · {task.command}
-							</p>
-						</div>
-						<TaskBadge status={task.status} enabled={task.enabled} />
-					</div>
-					{task.schedule ? (
-						<p className="mt-2 font-mono text-[10px] text-mute/80">
-							cron: {task.schedule}
-						</p>
-					) : null}
+			{sessions.map((s) => (
+				<li key={s.sessionId}>
+					<SessionCard session={s} />
 				</li>
 			))}
 		</ul>
 	);
 }
 
-function TaskBadge({ status, enabled }: { status: string; enabled: boolean }) {
-	const palette = (() => {
-		if (!enabled) return "border-border bg-bg text-mute";
-		if (status === "running") return "border-accent/30 bg-accent/10 text-accent";
-		if (status === "idle") return "border-border bg-panel text-foreground";
-		return "border-border bg-panel text-mute";
-	})();
+function SessionCard({ session }: { session: SessionSearchResult }) {
+	const title =
+		session.threadTitle?.trim() ||
+		session.workspaceName ||
+		session.projectId ||
+		"Sessão sem título";
+	const subtitle = [
+		session.workspaceName ?? session.projectId,
+		session.workspaceBranch,
+	]
+		.filter(Boolean)
+		.join(" · ");
 	return (
-		<span
-			className={cn(
-				"shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-				palette,
-			)}
+		<Link
+			to="/threads/$threadId"
+			params={{ threadId: session.sessionId }}
+			className="flex items-start gap-3 rounded-2xl border border-border bg-panel px-4 py-3 active:bg-muted/20"
 		>
-			{enabled ? status : "off"}
+			<div className="min-w-0 flex-1">
+				<div className="flex items-center gap-2">
+					<p className="truncate text-[14px] font-medium">{title}</p>
+					<ProviderBadge providerId={session.providerId} />
+				</div>
+				{subtitle ? (
+					<p className="mt-0.5 truncate text-[11px] text-mute">{subtitle}</p>
+				) : null}
+				{session.snippet ? (
+					<p className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-mute/80">
+						{session.snippet.replace(/^User:\s*/, "")}
+					</p>
+				) : null}
+				<p className="mt-1.5 text-[10px] uppercase tracking-wider text-mute/60">
+					{formatRelative(session.updatedAt)}
+				</p>
+			</div>
+			<ChevronRight className="mt-1 size-4 shrink-0 text-mute/60" />
+		</Link>
+	);
+}
+
+function ProviderBadge({ providerId }: { providerId: string | null }) {
+	if (!providerId) return null;
+	const label = providerId === "claude_code" ? "Claude" : providerId === "codex" ? "Codex" : providerId;
+	return (
+		<span className="shrink-0 rounded-full border border-border bg-bg px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-mute">
+			{label}
 		</span>
 	);
+}
+
+function formatRelative(iso: string): string {
+	try {
+		const date = new Date(iso);
+		const diffSec = (Date.now() - date.getTime()) / 1000;
+		if (diffSec < 60) return "agora";
+		if (diffSec < 3600) return `${Math.floor(diffSec / 60)} min atrás`;
+		if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} h atrás`;
+		const days = Math.floor(diffSec / 86400);
+		if (days < 30) return `${days} d atrás`;
+		return date.toLocaleDateString("pt-BR");
+	} catch {
+		return iso;
+	}
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
