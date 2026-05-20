@@ -2,8 +2,8 @@ use std::path::Path;
 
 use tauri::State;
 
-use dcc_core::domain::{repository::RepositoryId, workspace::Workspace};
-use dcc_core::ports::{RepositoryRepo, WorkspaceRepo};
+use dcc_core::domain::workspace::Workspace;
+use dcc_core::ports::WorkspaceRepo;
 use dcc_infra::{
     db::SqliteWorkspaceRepo,
     git::{broken_worktree_reason, is_git_repo, remove_worktree},
@@ -226,6 +226,12 @@ pub(crate) fn resolve_current_branch_name(root: &str) -> Result<String, String> 
     Ok(branch)
 }
 
+/// Resolves the base branch a workspace was created from.
+///
+/// Uses the per-workspace `base_branch` field. The repository row's
+/// `base_branch` is shared across every workspace of the same repo and gets
+/// overwritten by the most recently created workspace, so it must NOT be used
+/// here — doing so makes the diff/PR base of one workspace leak into another.
 pub(crate) async fn resolve_workspace_target_branch(
     state: &State<'_, WorkspaceCommandState>,
     workspace_root: &str,
@@ -235,12 +241,7 @@ pub(crate) async fn resolve_workspace_target_branch(
         .await
         .ok()
         .flatten()?;
-    let repository = repo
-        .get_repository(&RepositoryId(workspace.root_path.clone()))
-        .await
-        .ok()
-        .flatten()?;
-    let branch = repository.base_branch.trim();
+    let branch = workspace.base_branch.trim();
     if branch.is_empty() {
         None
     } else {
