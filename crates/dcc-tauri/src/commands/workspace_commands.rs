@@ -827,7 +827,11 @@ pub async fn workspace_continue_from_base_branch(
     }
     let _ = run_git_output(&active_root, &["branch", "--unset-upstream", &new_branch]);
 
-    workspace.base_branch = new_branch.clone();
+    // `base_branch` must stay the PR/diff target branch (e.g. `main`), not the
+    // working branch. Storing `new_branch` here corrupts it: `gh pr create`
+    // then uses the working branch as the PR base, and `ensure_pushable_branch`
+    // sees the current branch as "protected" and materializes a spurious branch.
+    workspace.base_branch = target_branch.clone();
     workspace.updated_at = Utc::now().to_rfc3339();
     if let Err(error) = repo.save_workspace(&workspace).await {
         rollback_continue_branch(&active_root, &old_branch, &new_branch);
