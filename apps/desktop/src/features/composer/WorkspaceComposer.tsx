@@ -145,14 +145,15 @@ export function WorkspaceComposer({
 		[selectedProvider],
 	);
 
+	// Resolve the model within the selected provider — model IDs like "auto"
+	// are not unique across providers (droid and cursor both expose "auto").
 	const selectedModel = useMemo(() => {
-		if (!selectedModelId) return null;
-		for (const p of providerChoices) {
-			const m = p.models.find((model) => model.id === selectedModelId);
-			if (m) return m;
-		}
-		return null;
-	}, [providerChoices, selectedModelId]);
+		if (!selectedModelId || !selectedProvider) return null;
+		return (
+			selectedProvider.models.find((model) => model.id === selectedModelId) ??
+			null
+		);
+	}, [selectedProvider, selectedModelId]);
 
 	const availableEffortLevels = useMemo(
 		() => selectedModel?.effortLevels ?? DEFAULT_EFFORT_LEVELS,

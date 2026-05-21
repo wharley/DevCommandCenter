@@ -53,35 +53,40 @@ export function ComposerProviderModelMenu({
 			window.removeEventListener(DCC_OPEN_MODEL_PICKER_EVENT, openPicker);
 	}, [disabled, providers.length]);
 
-	const owningProviderForModel = useMemo(() => {
-		if (!selectedModelId) {
-			return null;
+	// Model IDs (e.g. "auto") are only unique *within* a provider — droid and
+	// cursor both expose an "auto" model. Always trust the explicit provider
+	// selection first; only derive the provider from the model when the
+	// selected provider id is stale or missing.
+	const selectedProvider = useMemo(() => {
+		const explicit =
+			providers.find((provider) => provider.id === selectedProviderId) ?? null;
+		if (
+			explicit &&
+			(!selectedModelId ||
+				explicit.models.some((model) => model.id === selectedModelId))
+		) {
+			return explicit;
 		}
-		for (const provider of providers) {
-			if (provider.models.some((model) => model.id === selectedModelId)) {
-				return provider;
+		if (selectedModelId) {
+			const owner = providers.find((provider) =>
+				provider.models.some((model) => model.id === selectedModelId),
+			);
+			if (owner) {
+				return owner;
 			}
 		}
-		return null;
-	}, [providers, selectedModelId]);
+		return explicit ?? providers[0] ?? null;
+	}, [providers, selectedProviderId, selectedModelId]);
 
-	const selectedProvider =
-		owningProviderForModel ??
-		providers.find((provider) => provider.id === selectedProviderId) ??
-		providers[0] ??
-		null;
 	const selectedModel = useMemo(() => {
-		if (!selectedModelId) {
+		if (!selectedModelId || !selectedProvider) {
 			return null;
 		}
-		for (const p of providers) {
-			const m = p.models.find((model) => model.id === selectedModelId);
-			if (m) {
-				return m;
-			}
-		}
-		return null;
-	}, [providers, selectedModelId]);
+		return (
+			selectedProvider.models.find((model) => model.id === selectedModelId) ??
+			null
+		);
+	}, [selectedProvider, selectedModelId]);
 
 	const triggerTitle =
 		selectedModel && selectedProvider

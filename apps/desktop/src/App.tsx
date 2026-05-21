@@ -1101,18 +1101,14 @@ export default function App() {
 		[providerChoices],
 	);
 
-	const handleSelectModel = useCallback(
-		(modelId: string) => {
-			const owning = providerChoices.find((provider) =>
-				provider.models.some((model) => model.id === modelId),
-			);
-			if (owning) {
-				setSelectedProviderId(owning.id);
-			}
-			setSelectedModelId(modelId);
-		},
-		[providerChoices],
-	);
+	const handleSelectModel = useCallback((modelId: string) => {
+		// Do NOT re-derive the provider from the model id here: model ids such
+		// as "auto" are not unique across providers (droid and cursor both
+		// expose "auto"), so scanning every provider would pick the wrong one.
+		// The provider is already set explicitly via handleSelectProvider, which
+		// the model picker always calls before onSelectModel.
+		setSelectedModelId(modelId);
+	}, []);
 
 	const handleChangeProviderRuntime = useCallback(
 		(providerId: string, draft: { homePath: string; shadowHomePath: string }) => {
