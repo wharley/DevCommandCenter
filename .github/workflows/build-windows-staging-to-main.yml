@@ -65,7 +65,7 @@ jobs:
         run: yarn install --frozen-lockfile --ignore-engines
 
       - name: Build Tauri for Windows (NSIS)
-        run: yarn exec tauri build --bundles nsis
+        run: yarn tauri build --bundles nsis
 
       - name: Validate NSIS installer artifact
         shell: bash
