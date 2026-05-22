@@ -115,6 +115,49 @@ não invenção de um subsistema.
 
 ---
 
+## 2.1. Evidência de campo — o caso que confirma a tese
+
+Esta seção registra um relato real de um desenvolvedor (fora da equipe do DCC) que, sem
+conhecer este documento, montou *na mão* um fluxo SDD — e esbarrou exatamente nos limites
+que a §2 prevê. É a melhor evidência possível: a dor não é hipótese de roadmap, é prática.
+
+**O setup dele.** Criou agentes conectados ao ClickUp para ler uma task, e fez um agente
+(Claude) gerar a spec da task. Como a task era grande, a spec ficou subdividida em fases,
+cada fase implementada por vez.
+
+**O que deu errado.** No meio de uma fase, o contexto do Claude esgotou. Ele trocou para
+o Codex, reenviou o prompt inicial e mandou o Codex **reler a spec que o Claude havia
+criado** para descobrir onde parar. O Codex retomou a fase corrente — mas **não avançou
+para as fases seguintes**.
+
+**Tradução para este documento:**
+
+| O que ele fez na mão | Onde o DCC já mapeia |
+|---|---|
+| Spec em `.md` gerada a partir da task | §6 — fonte de verdade versionada |
+| Task grande quebrada em fases executadas uma a uma | §1 (estágio TASKS) + §2 item 1 — steps com status |
+| Contexto esgotou no meio → trocou Claude → Codex | §5 item 4 + Fase 5 — portabilidade cross-provider |
+| Reenviou prompt e mandou reler a spec para reancorar | Fase 4 — re-injeção pós-compactação (feita à mão) |
+
+Cada workaround dele é uma Fase do roadmap (§8) executada manualmente porque a ferramenta
+ainda não a oferece. Isso valida o §3: a spec como **arquivo solto** funciona como
+*gerador de prompt*, não como *gerente de estado*.
+
+**O achado mais valioso — o resume cross-fase.** A spec solta fez o novo agente *retomar
+a fase corrente*, mas não o fez *avançar para as próximas*. Reancorar ≠ continuar. Um
+`.md` passivo não garante que o agente leia o status de todas as fases e prossiga da
+próxima pendente. Isso só acontece quando alguém **possui o estado** e o reinjeta de
+forma ativa — exatamente o papel do orquestrador, não do agente nem do arquivo. A §6 item
+6 e a Fase 4 são estendidas abaixo para cobrir isso explicitamente.
+
+**Uma divergência registrada.** Ele usa o ClickUp como fonte da task. Este documento põe
+a fonte de verdade em `.devcommandcenter/specs/<mission>.spec.md` (§6). Não há conflito:
+o tracker externo é o *input a montante* (a task original); a spec no worktree é o
+*artefato durável compilado*. Integração com tracker externo é ponto de extensão natural,
+fora do escopo deste documento.
+
+---
+
 ## 3. `spec-kit` e `compozy` — o que fazem, e onde acoplam
 
 - **`github/spec-kit`** — entrega o SDD como **slash commands** (`/specify`, `/plan`,
@@ -230,7 +273,10 @@ O composer também já tem slash commands extensíveis (`default-slash-commands.
 
 6. **Re-injeção.** Como a spec é um arquivo durável que o DCC possui, após um `/compact`
    o DCC pode reinjetá-la — resolvendo o problema de "o agente esqueceu os requisitos".
-   *Isto* é o valor que nenhum arquivo solto entrega.
+   *Isto* é o valor que nenhum arquivo solto entrega. Mais que reancorar: a re-injeção
+   carrega o **status de todas as fases**, para o agente não só retomar a fase corrente
+   mas *avançar para a próxima pendente* — o **resume cross-fase** que a §2.1 mostrou
+   faltar num arquivo solto.
 
 7. **Compilação cross-provider** — idêntica ao doc de skills §6: cópia/contexto direto
    para Claude; seção marcada (`<!-- dcc:spec:start -->`) em `AGENTS.md`/`GEMINI.md` para
@@ -293,7 +339,9 @@ Slash command nativo que cria/abre a spec da Mission. Aproveita a infra de
 
 **Fase 4 — Re-injeção pós-compactação (custo: médio, é o valor único).**
 O DCC reinjeta a spec após `/compact`. Resolve o esquecimento de requisitos —
-o argumento mais forte e o mais difícil de um arquivo solto replicar.
+o argumento mais forte e o mais difícil de um arquivo solto replicar. Inclui o
+**resume cross-fase**: reinjetar não só os requisitos, mas o status de todas as fases,
+para o agente continuar da próxima pendente — não apenas reancorar na corrente (§2.1).
 
 **Fase 5 — Compilação cross-provider (custo: médio, é o diferencial).**
 Compila a spec para `AGENTS.md`/`GEMINI.md`. Funde-se ao "context compiler" do doc de
