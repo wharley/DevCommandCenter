@@ -390,7 +390,11 @@
     }
   },
   "sessionEventFeed": {
-    "emptyTimeline": "No messages yet. Start a session and send something. Session events appear in this timeline."
+    "emptyTimeline": "No messages yet. Start a session and send something. Session events appear in this timeline.",
+    "emptyForSession": "No recent activity for this session. Switch to \"All\" to see events from other sessions.",
+    "scopeCurrent": "This session",
+    "scopeAll": "All",
+    "thisSessionBadge": "this session"
   },
   "branchToolbar": {
     "noBranch": "No branch",

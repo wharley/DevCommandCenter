@@ -3,7 +3,33 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { CoreEvent } from "@dcc/contracts";
+
+/** Session id that an event belongs to, or null for non-session events. */
+function eventSessionId(event: CoreEvent): string | null {
+	const payload =
+		("sessionStarted" in event && event.sessionStarted) ||
+		("sessionCompleted" in event && event.sessionCompleted) ||
+		("sessionAborted" in event && event.sessionAborted) ||
+		("sessionResumed" in event && event.sessionResumed) ||
+		("sessionTurnStarted" in event && event.sessionTurnStarted) ||
+		("sessionTurnDelta" in event && event.sessionTurnDelta) ||
+		("sessionTurnReasoningStarted" in event && event.sessionTurnReasoningStarted) ||
+		("sessionTurnReasoningDelta" in event && event.sessionTurnReasoningDelta) ||
+		("sessionTurnReasoningCompleted" in event &&
+			event.sessionTurnReasoningCompleted) ||
+		("sessionTurnToolCallStarted" in event && event.sessionTurnToolCallStarted) ||
+		("sessionTurnToolCallDelta" in event && event.sessionTurnToolCallDelta) ||
+		("sessionTurnToolCallCompleted" in event &&
+			event.sessionTurnToolCallCompleted) ||
+		("sessionTurnToolCallFailed" in event && event.sessionTurnToolCallFailed) ||
+		("sessionTurnCompleted" in event && event.sessionTurnCompleted) ||
+		("sessionTurnAborted" in event && event.sessionTurnAborted) ||
+		("sessionCheckpointCreated" in event && event.sessionCheckpointCreated) ||
+		null;
+	return payload ? payload.session_id : null;
+}
 
 function eventLabel(event: CoreEvent): string {
 	if ("sessionStarted" in event) return "session.started";
@@ -132,20 +158,42 @@ function eventPayloadSummary(event: CoreEvent): string {
 	return "No payload summary";
 }
 
+type FeedScope = "current" | "all";
+
 export function SessionEventFeed({
 	events,
 	compact = false,
+	currentSessionId = null,
 }: {
 	events: CoreEvent[];
 	compact?: boolean;
+	/**
+	 * When provided, the feed offers a "This session / All" filter so it is
+	 * clear the underlying stream is cross-session. Defaults to "This session".
+	 */
+	currentSessionId?: string | null;
 }) {
 	const { t } = useTranslation("common");
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+	const [scope, setScope] = useState<FeedScope>("current");
+
+	const canFilterBySession = Boolean(currentSessionId);
+	const effectiveScope: FeedScope = canFilterBySession ? scope : "all";
+	const visibleEvents = useMemo(() => {
+		if (effectiveScope === "all" || !currentSessionId) {
+			return events;
+		}
+		return events.filter((event) => {
+			const id = eventSessionId(event);
+			return id === null || id === currentSessionId;
+		});
+	}, [events, effectiveScope, currentSessionId]);
+
 	const latestEventKey = useMemo(() => {
-		const last = events[events.length - 1];
+		const last = visibleEvents[visibleEvents.length - 1];
 		return last ? eventLabel(last) : "empty";
-	}, [events]);
+	}, [visibleEvents]);
 
 	useEffect(() => {
 		const container = scrollRef.current;
@@ -180,42 +228,88 @@ export function SessionEventFeed({
 		};
 	}, [compact, latestEventKey]);
 
+	const emptyMessage =
+		effectiveScope === "current" && events.length > 0
+			? t("sessionEventFeed.emptyForSession")
+			: t("sessionEventFeed.emptyTimeline");
+
 	const timelineRows =
-		events.length === 0 ? (
+		visibleEvents.length === 0 ? (
 			<div className="flex min-h-full flex-1 items-center justify-center px-8">
 				<p className="m-0 max-w-md text-center text-[13px] leading-relaxed text-muted-foreground">
-					{t("sessionEventFeed.emptyTimeline")}
+					{emptyMessage}
 				</p>
 			</div>
 		) : (
 			<ul className="m-0 list-none p-0">
-				{events.map((event, index) => (
-					<li
-						key={`${eventLabel(event)}-${index}`}
-						className="flow-root px-5 pb-1.5 [content-visibility:auto]"
-					>
-						<div className="dcc-runtime-feed__row dcc-session-event" data-tone={eventTone(event)}>
-							<div className="dcc-session-event__header">
-								<Badge variant={eventTone(event)} className="font-normal">
-									{eventLabel(event)}
-								</Badge>
+				{visibleEvents.map((event, index) => {
+					const sessionId = eventSessionId(event);
+					const isCurrentSession =
+						sessionId !== null && sessionId === currentSessionId;
+					return (
+						<li
+							key={`${eventLabel(event)}-${index}`}
+							className="flow-root px-5 pb-1.5 [content-visibility:auto]"
+						>
+							<div className="dcc-runtime-feed__row dcc-session-event" data-tone={eventTone(event)}>
+								<div className="dcc-session-event__header flex flex-wrap items-center gap-1.5">
+									<Badge variant={eventTone(event)} className="font-normal">
+										{eventLabel(event)}
+									</Badge>
+									{sessionId ? (
+										<Badge
+											variant={isCurrentSession ? "secondary" : "outline"}
+											className="font-normal"
+										>
+											{isCurrentSession
+												? t("sessionEventFeed.thisSessionBadge")
+												: sessionId.slice(0, 8)}
+										</Badge>
+									) : null}
+								</div>
+								<p className="dcc-session-event__copy text-[13px] leading-snug">
+									{eventPayloadSummary(event)}
+								</p>
 							</div>
-							<p className="dcc-session-event__copy text-[13px] leading-snug">
-								{eventPayloadSummary(event)}
-							</p>
-						</div>
-					</li>
-				))}
+						</li>
+					);
+				})}
 			</ul>
 		);
 
+	const scopeToggle = canFilterBySession ? (
+		<ToggleGroup
+			type="single"
+			value={effectiveScope}
+			onValueChange={(value) => {
+				if (value === "current" || value === "all") {
+					setScope(value);
+				}
+			}}
+			className="gap-0.5 rounded-lg border border-border/50 bg-muted/20 p-0.5"
+		>
+			<ToggleGroupItem value="current" className="h-6 px-2 text-[11px]">
+				{t("sessionEventFeed.scopeCurrent")}
+			</ToggleGroupItem>
+			<ToggleGroupItem value="all" className="h-6 px-2 text-[11px]">
+				{t("sessionEventFeed.scopeAll")}
+			</ToggleGroupItem>
+		</ToggleGroup>
+	) : null;
+
 	if (compact) {
 		return (
-			<div className="dcc-conversation-scroll-area relative min-h-0 flex-1 overflow-hidden">
-				<div
-					ref={scrollRef}
-					className="dcc-conversation-scroll-viewport h-full w-full overflow-x-hidden overflow-y-auto overscroll-none"
-				>
+			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+				{scopeToggle ? (
+					<div className="flex shrink-0 items-center justify-end px-3 pb-1 pt-2">
+						{scopeToggle}
+					</div>
+				) : null}
+				<div className="dcc-conversation-scroll-area relative min-h-0 flex-1 overflow-hidden">
+					<div
+						ref={scrollRef}
+						className="dcc-conversation-scroll-viewport h-full w-full overflow-x-hidden overflow-y-auto overscroll-none"
+					>
 					<div className="flex min-h-full min-w-0 flex-col">
 						<div className="h-6 shrink-0" aria-hidden />
 						{timelineRows}
@@ -240,6 +334,7 @@ export function SessionEventFeed({
 						</button>
 					</div>
 				) : null}
+				</div>
 			</div>
 		);
 	}
@@ -249,7 +344,10 @@ export function SessionEventFeed({
 			<CardHeader>
 				<div className="dcc-card__meta-row">
 					<CardTitle>Session events</CardTitle>
-					<Badge variant="outline">{events.length}</Badge>
+					<div className="flex items-center gap-2">
+						{scopeToggle}
+						<Badge variant="outline">{visibleEvents.length}</Badge>
+					</div>
 				</div>
 			</CardHeader>
 			<CardContent className="dcc-runtime-feed__content">{timelineRows}</CardContent>

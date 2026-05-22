@@ -904,7 +904,11 @@ export function WorkspaceInspectorSidebar({
 						value="activity"
 						className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
 					>
-						<SessionEventFeed events={sessionEvents} compact />
+						<SessionEventFeed
+						events={sessionEvents}
+						compact
+						currentSessionId={sessionId}
+					/>
 					</TabsContent>
 
 						<TabsContent

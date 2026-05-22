@@ -390,7 +390,11 @@
     }
   },
   "sessionEventFeed": {
-    "emptyTimeline": "Ainda não há mensagens. Inicie uma sessão e envie algo. Os eventos da sessão aparecem nesta linha do tempo."
+    "emptyTimeline": "Ainda não há mensagens. Inicie uma sessão e envie algo. Os eventos da sessão aparecem nesta linha do tempo.",
+    "emptyForSession": "Sem atividade recente para esta sessão. Mude para \"Todas\" para ver eventos de outras sessões.",
+    "scopeCurrent": "Esta sessão",
+    "scopeAll": "Todas",
+    "thisSessionBadge": "esta sessão"
   },
   "branchToolbar": {
     "noBranch": "Sem branch",

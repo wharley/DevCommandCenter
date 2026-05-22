@@ -362,7 +362,6 @@ export default function App() {
 		});
 	});
 	const [isShortcutSheetOpen, setIsShortcutSheetOpen] = useState(false);
-	const { events: sessionEvents } = useSessionEventFeed();
 	const providersQuery = useQuery({
 		queryKey: ["providers", "catalog"],
 		queryFn: listProviders,
@@ -410,6 +409,31 @@ export default function App() {
 	const [pendingPromptSessionId, setPendingPromptSessionId] = useState<
 		string | null
 	>(null);
+
+	/**
+	 * Apply each live event to the snapshot of the session that owns it — not
+	 * just the selected one — so background sessions (e.g. a plan implementation
+	 * thread opened in another tab) keep advancing while their tab is inactive.
+	 */
+	const handleSessionEvent = useCallback((event: CoreEvent) => {
+		const eventSessionId = getCoreEventSessionId(event);
+		if (!eventSessionId) {
+			return;
+		}
+		setSessionSnapshotsById((current) => {
+			const prev = current[eventSessionId];
+			if (!prev) {
+				return current;
+			}
+			const next = applyCoreEventToSnapshot(prev, event);
+			if (next === prev) {
+				return current;
+			}
+			return { ...current, [eventSessionId]: next };
+		});
+	}, []);
+	const { events: sessionEvents } = useSessionEventFeed(handleSessionEvent);
+
 	const [editorSelection, setEditorSelection] =
 		useState<WorkspaceGitPreviewSelection | null>(null);
 	const { theme, setTheme } = useAppearance();
@@ -693,36 +717,6 @@ export default function App() {
 			return visibleWorkspaceSessions[0]?.session.id ?? null;
 		});
 	}, [selectedWorkspace?.id, visibleWorkspaceSessions, workspaceSessions]);
-
-	/** Keep the selected session snapshot in sync with live stream events from the same session. */
-	useEffect(() => {
-		const last = sessionEvents[sessionEvents.length - 1];
-		if (!last || !effectiveSelectedSessionId) {
-			return;
-		}
-
-		const eventSessionId = getCoreEventSessionId(last);
-		if (eventSessionId !== effectiveSelectedSessionId) {
-			return;
-		}
-
-		setSessionSnapshotsById((current) => {
-			const prev = current[effectiveSelectedSessionId];
-			if (!prev) {
-				return current;
-			}
-
-			const next = applyCoreEventToSnapshot(prev, last);
-			if (next === prev) {
-				return current;
-			}
-
-			return {
-				...current,
-				[effectiveSelectedSessionId]: next,
-			};
-		});
-	}, [effectiveSelectedSessionId, sessionEvents]);
 
 	const handleStartSession = useCallback(async () => {
 		if (!selectedProvider || !selectedWorkspace) {
