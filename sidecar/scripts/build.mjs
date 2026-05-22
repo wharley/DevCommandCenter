@@ -1,26 +1,18 @@
 import { spawnSync } from "node:child_process";
 
-function resolveCommand(command) {
-	if (process.platform !== "win32") {
-		return command;
-	}
-
-	if (command === "yarn") {
-		return "yarn.cmd";
-	}
-
-	return command;
+function shouldUseShell(command) {
+	return process.platform === "win32" && command === "yarn";
 }
 
 function run(command, args) {
-	const resolvedCommand = resolveCommand(command);
-	const result = spawnSync(resolvedCommand, args, {
+	const result = spawnSync(command, args, {
 		stdio: "inherit",
 		env: process.env,
+		shell: shouldUseShell(command),
 	});
 
 	if (result.error) {
-		console.error(`[sidecar] failed to start ${resolvedCommand}:`, result.error);
+		console.error(`[sidecar] failed to start ${command}:`, result.error);
 		process.exit(1);
 	}
 	if (result.status !== 0) {

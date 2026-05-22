@@ -11,21 +11,12 @@ const targetDir = join(srcTauriDir, 'target');
 const releaseDir = join(targetDir, 'release');
 const sidecarDistDir = join(sidecarDir, 'dist');
 
-function resolveCommand(command) {
-  if (process.platform !== 'win32') {
-    return command;
-  }
-
-  if (command === 'yarn') {
-    return 'yarn.cmd';
-  }
-
-  return command;
+function shouldUseShell(command) {
+  return process.platform === 'win32' && command === 'yarn';
 }
 
 function run(command, args, options = {}) {
-  const resolvedCommand = resolveCommand(command);
-  const result = spawnSync(resolvedCommand, args, {
+  const result = spawnSync(command, args, {
     stdio: 'inherit',
     cwd: repoRoot,
     env: {
@@ -33,11 +24,12 @@ function run(command, args, options = {}) {
       CARGO_TARGET_DIR: targetDir,
       ...options.env,
     },
+    shell: shouldUseShell(command),
     ...options,
   });
 
   if (result.error) {
-    console.error(`[build-sidecars] failed to start ${resolvedCommand}:`, result.error);
+    console.error(`[build-sidecars] failed to start ${command}:`, result.error);
     process.exit(1);
   }
 
