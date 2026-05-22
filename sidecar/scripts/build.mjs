@@ -1,13 +1,27 @@
 import { spawnSync } from "node:child_process";
 
+function resolveCommand(command) {
+	if (process.platform !== "win32") {
+		return command;
+	}
+
+	if (command === "yarn") {
+		return "yarn.cmd";
+	}
+
+	return command;
+}
+
 function run(command, args) {
-	const result = spawnSync(command, args, {
+	const resolvedCommand = resolveCommand(command);
+	const result = spawnSync(resolvedCommand, args, {
 		stdio: "inherit",
 		env: process.env,
 	});
 
 	if (result.error) {
-		throw result.error;
+		console.error(`[sidecar] failed to start ${resolvedCommand}:`, result.error);
+		process.exit(1);
 	}
 	if (result.status !== 0) {
 		process.exit(result.status ?? 1);

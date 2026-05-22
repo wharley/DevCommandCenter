@@ -11,8 +11,21 @@ const targetDir = join(srcTauriDir, 'target');
 const releaseDir = join(targetDir, 'release');
 const sidecarDistDir = join(sidecarDir, 'dist');
 
+function resolveCommand(command) {
+  if (process.platform !== 'win32') {
+    return command;
+  }
+
+  if (command === 'yarn') {
+    return 'yarn.cmd';
+  }
+
+  return command;
+}
+
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
+  const resolvedCommand = resolveCommand(command);
+  const result = spawnSync(resolvedCommand, args, {
     stdio: 'inherit',
     cwd: repoRoot,
     env: {
@@ -22,6 +35,11 @@ function run(command, args, options = {}) {
     },
     ...options,
   });
+
+  if (result.error) {
+    console.error(`[build-sidecars] failed to start ${resolvedCommand}:`, result.error);
+    process.exit(1);
+  }
 
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
