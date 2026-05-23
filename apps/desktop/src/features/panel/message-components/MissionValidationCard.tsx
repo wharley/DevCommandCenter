@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { saveMissionValidation } from "@/lib/workspace-api";
 import { WORKSPACE_MISSION_SPECS_QUERY_KEY } from "@/features/inspector/use-workspace-mission-specs";
 import type {
+	MissionValidationCheckStatus,
 	MissionValidationPersistence,
 	MissionValidationStatus,
 	ParsedMissionValidationReport,
@@ -43,6 +44,16 @@ function statusClassName(status: MissionValidationStatus) {
 		return "border-destructive/25 bg-destructive/5";
 	}
 	return "border-amber-500/25 bg-amber-500/5";
+}
+
+function checkStatusClassName(status: MissionValidationCheckStatus) {
+	if (status === "RUN") {
+		return "border-emerald-500/25 bg-emerald-500/5";
+	}
+	if (status === "BLOCKED") {
+		return "border-destructive/25 bg-destructive/5";
+	}
+	return "border-slate-500/25 bg-slate-500/5";
 }
 
 function persistenceBadgeLabel(mode: MissionValidationPersistence) {
@@ -85,6 +96,13 @@ export function MissionValidationCard({
 	const failCount = report.criteria.filter((criterion) => criterion.status === "FAIL").length;
 	const unknownCount = report.criteria.filter(
 		(criterion) => criterion.status === "UNKNOWN",
+	).length;
+	const runChecksCount = report.checks.filter((check) => check.status === "RUN").length;
+	const skippedChecksCount = report.checks.filter(
+		(check) => check.status === "SKIPPED",
+	).length;
+	const blockedChecksCount = report.checks.filter(
+		(check) => check.status === "BLOCKED",
 	).length;
 
 	const handleCopyJson = async () => {
@@ -331,6 +349,39 @@ export function MissionValidationCard({
 					</div>
 				))}
 			</div>
+			{report.checks.length > 0 ? (
+				<div className="mt-4">
+					<p className="text-[11px] font-medium text-muted-foreground">
+						Checks: {runChecksCount} run · {skippedChecksCount} skipped ·{" "}
+						{blockedChecksCount} blocked
+					</p>
+					<div className="mt-2 grid gap-1.5">
+						{report.checks.map((check) => (
+							<div
+								key={`${check.text}-${check.status}`}
+								className={cn(
+									"rounded-xl border px-2.5 py-2",
+									checkStatusClassName(check.status),
+								)}
+							>
+								<div className="flex items-center gap-2">
+									<span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+										{check.status}
+									</span>
+									<span className="text-[12px] font-medium text-foreground">
+										{check.text}
+									</span>
+								</div>
+								{check.evidence ? (
+									<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+										{check.evidence}
+									</p>
+								) : null}
+							</div>
+						))}
+					</div>
+				</div>
+			) : null}
 		</div>
 	);
 }

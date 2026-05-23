@@ -14,6 +14,7 @@ export type MissionAcceptanceCriterionCoverage = MissionAcceptanceCriterion & {
 };
 
 export type MissionValidationStatus = "PASS" | "FAIL" | "UNKNOWN";
+export type MissionValidationCheckStatus = "RUN" | "SKIPPED" | "BLOCKED";
 
 export type MissionValidationCriterionResult = {
 	id: string;
@@ -22,11 +23,18 @@ export type MissionValidationCriterionResult = {
 	nextAction: string;
 };
 
+export type MissionValidationCheckResult = {
+	text: string;
+	status: MissionValidationCheckStatus;
+	evidence: string;
+};
+
 export type ParsedMissionValidationReport = {
 	specRelativePath: string | null;
 	specHash: string | null;
 	summary: string | null;
 	criteria: MissionValidationCriterionResult[];
+	checks: MissionValidationCheckResult[];
 	persistenceMode: MissionValidationPersistence | null;
 	persistedAt: string | null;
 	rawJson: string;
@@ -202,9 +210,13 @@ export function buildMissionValidationPrompt({
 				]
 			: []),
 		"Return a concise validation report with one row per acceptance criterion using: PASS, FAIL, or UNKNOWN.",
+		"Also report validation checks you ran, skipped, or could not run using: RUN, SKIPPED, or BLOCKED.",
+		...(validationChecks.length > 0 || suggestedChecks.length > 0
+			? ["Include one checks[] row for every declared or suggested validation check."]
+			: []),
 		"For every FAIL or UNKNOWN, include the evidence or missing evidence and the smallest next action.",
 		"End with a fenced JSON block that exactly follows this shape:",
-		'{"dccMissionValidation":true,"specRelativePath":"...","specHash":"...","summary":"...","criteria":[{"id":"AC-1","status":"PASS","evidence":"...","nextAction":"..."}]}',
+		'{"dccMissionValidation":true,"specRelativePath":"...","specHash":"...","summary":"...","criteria":[{"id":"AC-1","status":"PASS","evidence":"...","nextAction":"..."}],"checks":[{"text":"Run typecheck","status":"RUN","evidence":"..."}]}',
 		...(normalizedSpecPath
 			? ["", `Spec relative path for the JSON: ${normalizedSpecPath}`]
 			: []),
@@ -485,6 +497,10 @@ function tryParseMissionValidationJson(
 	if (criteria.length === 0) {
 		return null;
 	}
+	const checksInput = Array.isArray(parsed.checks) ? parsed.checks : [];
+	const checks = checksInput
+		.map(normalizeValidationCheckResult)
+		.filter((check): check is MissionValidationCheckResult => Boolean(check));
 
 	return {
 		specRelativePath:
@@ -495,6 +511,7 @@ function tryParseMissionValidationJson(
 			typeof parsed.specHash === "string" ? parsed.specHash.trim() : null,
 		summary: typeof parsed.summary === "string" ? parsed.summary.trim() : null,
 		criteria,
+		checks,
 		persistenceMode: normalizeValidationPersistence(parsed.dccPersistenceMode),
 		persistedAt:
 			typeof parsed.dccSavedAt === "string" ? parsed.dccSavedAt.trim() : null,
@@ -524,6 +541,26 @@ function normalizeValidationCriterionResult(
 	};
 }
 
+function normalizeValidationCheckResult(
+	input: unknown,
+): MissionValidationCheckResult | null {
+	if (!isRecord(input)) {
+		return null;
+	}
+
+	const text = typeof input.text === "string" ? input.text.trim() : "";
+	const status = normalizeValidationCheckStatus(input.status);
+	if (!text || !status) {
+		return null;
+	}
+
+	return {
+		text,
+		status,
+		evidence: typeof input.evidence === "string" ? input.evidence.trim() : "",
+	};
+}
+
 function normalizeValidationStatus(
 	value: unknown,
 ): MissionValidationStatus | null {
@@ -535,6 +572,23 @@ function normalizeValidationStatus(
 		normalized === "PASS" ||
 		normalized === "FAIL" ||
 		normalized === "UNKNOWN"
+	) {
+		return normalized;
+	}
+	return null;
+}
+
+function normalizeValidationCheckStatus(
+	value: unknown,
+): MissionValidationCheckStatus | null {
+	if (typeof value !== "string") {
+		return null;
+	}
+	const normalized = value.trim().toUpperCase();
+	if (
+		normalized === "RUN" ||
+		normalized === "SKIPPED" ||
+		normalized === "BLOCKED"
 	) {
 		return normalized;
 	}

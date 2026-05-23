@@ -128,6 +128,7 @@ describe("mission-spec-content", () => {
 		expect(prompt).toContain("VALIDATE THIS MISSION AGAINST ITS SPEC.");
 		expect(prompt).toContain("Do not modify files.");
 		expect(prompt).toContain("PASS, FAIL, or UNKNOWN");
+		expect(prompt).toContain("RUN, SKIPPED, or BLOCKED");
 		expect(prompt).toContain("dccMissionValidation");
 		expect(prompt).toContain(computeMissionSpecHash(specMarkdown));
 		expect(prompt).toContain(".devcommandcenter/specs/demo.spec.md");
@@ -149,6 +150,9 @@ describe("mission-spec-content", () => {
 
 		expect(prompt).toContain(
 			"Prioritize these validation checks declared by the spec before concluding PASS:",
+		);
+		expect(prompt).toContain(
+			"Include one checks[] row for every declared or suggested validation check.",
 		);
 		expect(prompt).toContain("Run `yarn workspace @dcc/desktop typecheck`.");
 	});
@@ -384,6 +388,13 @@ describe("mission-spec-content", () => {
 						nextAction: "Run the UI flow.",
 					},
 				],
+				checks: [
+					{
+						text: "Run typecheck",
+						status: "RUN",
+						evidence: "yarn workspace @dcc/desktop typecheck",
+					},
+				],
 			}),
 			"```",
 		].join("\n"));
@@ -393,6 +404,13 @@ describe("mission-spec-content", () => {
 			specHash: "fnv1a32:12345678",
 			summary: "One pass, one unknown.",
 			rawJson: expect.stringContaining("dccMissionValidation"),
+			checks: [
+				{
+					text: "Run typecheck",
+					status: "RUN",
+					evidence: "yarn workspace @dcc/desktop typecheck",
+				},
+			],
 			persistenceMode: null,
 			persistedAt: null,
 			criteria: [
