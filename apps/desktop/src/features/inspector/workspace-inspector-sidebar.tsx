@@ -117,6 +117,18 @@ type WorkspaceInspectorSidebarProps = {
 		validationJson: string | null;
 		criterion: MissionResumeCriterion;
 	}) => void;
+	missionSpecAutoCompileFailures: Array<{
+		workspaceRoot: string;
+		specRelativePath: string;
+		trigger: "reanchor" | "continue" | "post_compact" | "setup_reopen";
+		consecutiveFailures: number;
+		lastError: string;
+		lastAttemptAt: string;
+	}>;
+	onClearMissionSpecAutoCompileFailure: (input: {
+		workspaceRoot: string;
+		specRelativePath: string;
+	}) => void;
 	activeTab: InspectorTab;
 	onTabChange: (tab: InspectorTab) => void;
 };
@@ -375,6 +387,8 @@ export function WorkspaceInspectorSidebar({
 	onValidateMissionSpec,
 	onReanchorMissionSpec,
 	onContinueMissionCriterion,
+	missionSpecAutoCompileFailures,
+	onClearMissionSpecAutoCompileFailure,
 	activeTab,
 	onTabChange,
 }: WorkspaceInspectorSidebarProps) {
@@ -858,6 +872,22 @@ export function WorkspaceInspectorSidebar({
 				: null,
 		[activeMissionSpec, savedMissionValidationJson],
 	);
+	const activeMissionSpecAutoCompileFailure = useMemo(() => {
+		const root = workspacePath?.trim();
+		const specRelativePath = activeMissionSpec?.relativePath?.trim();
+		if (!root || !specRelativePath) {
+			return null;
+		}
+		return (
+			missionSpecAutoCompileFailures.find(
+				(failure) =>
+					failure.workspaceRoot.trim() === root &&
+					failure.specRelativePath.trim() === specRelativePath,
+			) ?? null
+		);
+	}, [activeMissionSpec, missionSpecAutoCompileFailures, workspacePath]);
+	const showPersistentMissionSpecAutoCompileFailure =
+		(activeMissionSpecAutoCompileFailure?.consecutiveFailures ?? 0) > 1;
 	const nextMissionResumeCriterion = activeMissionResumeContext?.criteria[0] ?? null;
 	const handleCompileMissionSpecContext = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -869,6 +899,10 @@ export function WorkspaceInspectorSidebar({
 		const loadingToast = toast.loading(t("inspector.spec.compileContextLoading"));
 		try {
 			const result = await compileMissionSpecContext({
+				workspaceRoot: root,
+				specRelativePath: activeMissionSpec.relativePath,
+			});
+			onClearMissionSpecAutoCompileFailure({
 				workspaceRoot: root,
 				specRelativePath: activeMissionSpec.relativePath,
 			});
@@ -901,7 +935,13 @@ export function WorkspaceInspectorSidebar({
 		} finally {
 			setIsCompilingSpecContext(false);
 		}
-	}, [activeMissionSpec, queryClient, t, workspacePath]);
+	}, [
+		activeMissionSpec,
+		onClearMissionSpecAutoCompileFailure,
+		queryClient,
+		t,
+		workspacePath,
+	]);
 
 	useEffect(() => {
 		autoOpenedPlanMessageIdRef.current = null;
@@ -1408,6 +1448,44 @@ export function WorkspaceInspectorSidebar({
 													: t("inspector.spec.compiledContextBadgeStale")}
 											</Badge>
 										</div>
+										{showPersistentMissionSpecAutoCompileFailure &&
+										activeMissionSpecAutoCompileFailure ? (
+											<div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+												<div className="flex items-start gap-2">
+													<Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-300" />
+													<div className="min-w-0">
+														<div className="flex flex-wrap items-center gap-2">
+															<p className="text-[11px] font-medium text-foreground">
+																{t("inspector.spec.autoCompileIssueTitle")}
+															</p>
+															<Badge variant="outline" className="h-5 text-[10px]">
+																{t(
+																	`inspector.spec.autoCompileIssueTrigger.${activeMissionSpecAutoCompileFailure.trigger}`,
+																)}
+															</Badge>
+														</div>
+														<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+															{t("inspector.spec.autoCompileIssueDescription", {
+																count:
+																	activeMissionSpecAutoCompileFailure.consecutiveFailures,
+															})}
+														</p>
+														<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+															{t("inspector.spec.autoCompileIssueLastError", {
+																error: activeMissionSpecAutoCompileFailure.lastError,
+															})}
+														</p>
+														<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+															{t("inspector.spec.autoCompileIssueLastAttempt", {
+																timestamp: new Date(
+																	activeMissionSpecAutoCompileFailure.lastAttemptAt,
+																).toLocaleString(),
+															})}
+														</p>
+													</div>
+												</div>
+											</div>
+										) : null}
 										{missionSpecContextStatusQuery.data?.files.length ? (
 											<div className="mt-3 grid gap-1.5">
 												{missionSpecContextStatusQuery.data.files.map((file) => (

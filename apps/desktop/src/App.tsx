@@ -156,15 +156,49 @@ async function compileMissionSpecContextBestEffort({
 			workspaceRoot,
 			specRelativePath,
 		});
-		return true;
+		return {
+			ok: true as const,
+			errorMessage: null,
+		};
 	} catch (error) {
+		const errorMessage =
+			error instanceof Error
+				? error.message
+				: typeof error === "string"
+					? error
+					: String(error);
 		console.warn("[dcc] mission spec context compile failed:", error);
-		return false;
+		return {
+			ok: false as const,
+			errorMessage,
+		};
 	}
 }
 
 function getWorkspaceSessionsCacheKey(scope: string, workspaceId: string) {
 	return ["workspaceSessions", scope, workspaceId] as const;
+}
+
+type MissionSpecAutoCompileTrigger =
+	| "reanchor"
+	| "continue"
+	| "post_compact"
+	| "setup_reopen";
+
+type MissionSpecAutoCompileFailure = {
+	workspaceRoot: string;
+	specRelativePath: string;
+	trigger: MissionSpecAutoCompileTrigger;
+	consecutiveFailures: number;
+	lastError: string;
+	lastAttemptAt: string;
+};
+
+function getMissionSpecAutoCompileFailureKey(
+	workspaceRoot: string,
+	specRelativePath: string,
+) {
+	return `${workspaceRoot.trim()}::${specRelativePath.trim()}`;
 }
 
 type PendingSessionClose = {
@@ -487,6 +521,82 @@ export default function App() {
 	const selectedWorkspacePath =
 		selectedWorkspace?.worktreePath ?? selectedWorkspace?.rootPath ?? null;
 	const selectedLocalWorkspacePath = isRemoteBackend ? null : selectedWorkspacePath;
+	const [
+		missionSpecAutoCompileFailuresByKey,
+		setMissionSpecAutoCompileFailuresByKey,
+	] = useState<Record<string, MissionSpecAutoCompileFailure>>({});
+	const registerMissionSpecAutoCompileAttempt = useCallback(
+		async ({
+			workspaceRoot,
+			specRelativePath,
+			trigger,
+		}: {
+			workspaceRoot: string;
+			specRelativePath: string;
+			trigger: MissionSpecAutoCompileTrigger;
+		}) => {
+			const result = await compileMissionSpecContextBestEffort({
+				workspaceRoot,
+				specRelativePath,
+			});
+			const failureKey = getMissionSpecAutoCompileFailureKey(
+				workspaceRoot,
+				specRelativePath,
+			);
+			setMissionSpecAutoCompileFailuresByKey((current) => {
+				if (result.ok) {
+					if (!(failureKey in current)) {
+						return current;
+					}
+					const next = { ...current };
+					delete next[failureKey];
+					return next;
+				}
+
+				const previous = current[failureKey];
+				return {
+					...current,
+					[failureKey]: {
+						workspaceRoot,
+						specRelativePath,
+						trigger,
+						consecutiveFailures: (previous?.consecutiveFailures ?? 0) + 1,
+						lastError: result.errorMessage ?? "unknown error",
+						lastAttemptAt: new Date().toISOString(),
+					},
+				};
+			});
+			return result.ok;
+		},
+		[],
+	);
+	const clearMissionSpecAutoCompileFailure = useCallback(
+		({
+			workspaceRoot,
+			specRelativePath,
+		}: {
+			workspaceRoot: string;
+			specRelativePath: string;
+		}) => {
+			const failureKey = getMissionSpecAutoCompileFailureKey(
+				workspaceRoot,
+				specRelativePath,
+			);
+			setMissionSpecAutoCompileFailuresByKey((current) => {
+				if (!(failureKey in current)) {
+					return current;
+				}
+				const next = { ...current };
+				delete next[failureKey];
+				return next;
+			});
+		},
+		[],
+	);
+	const missionSpecAutoCompileFailures = useMemo(
+		() => Object.values(missionSpecAutoCompileFailuresByKey),
+		[missionSpecAutoCompileFailuresByKey],
+	);
 	useEffect(() => {
 		if (!selectedLocalWorkspacePath || !selectedWorkspace) {
 			return;
@@ -514,9 +624,10 @@ export default function App() {
 			if (!activeSpec) {
 				return;
 			}
-			await compileMissionSpecContextBestEffort({
+			await registerMissionSpecAutoCompileAttempt({
 				workspaceRoot: selectedLocalWorkspacePath,
 				specRelativePath: activeSpec.relativePath,
+				trigger: "setup_reopen",
 			});
 			if (!cancelled) {
 				await queryClient.invalidateQueries({
@@ -530,7 +641,12 @@ export default function App() {
 		return () => {
 			cancelled = true;
 		};
-	}, [queryClient, selectedLocalWorkspacePath, selectedWorkspace]);
+	}, [
+		queryClient,
+		registerMissionSpecAutoCompileAttempt,
+		selectedLocalWorkspacePath,
+		selectedWorkspace,
+	]);
 	const showRemoteUnsupported = useCallback(
 		(kind: "sessions" | "workspaces") => {
 			toast.info(
@@ -1159,9 +1275,10 @@ export default function App() {
 					null;
 
 				if (activeSpec) {
-					await compileMissionSpecContextBestEffort({
+					await registerMissionSpecAutoCompileAttempt({
 						workspaceRoot: selectedLocalWorkspacePath,
 						specRelativePath: activeSpec.relativePath,
+						trigger: "post_compact",
 					});
 					await queryClient.invalidateQueries({
 						queryKey: ["missionSpecContextStatus", selectedLocalWorkspacePath],
@@ -1263,6 +1380,7 @@ export default function App() {
 	}, [
 		backendCacheKey,
 		queryClient,
+		registerMissionSpecAutoCompileAttempt,
 		selectedModel,
 		selectedProvider,
 		selectedProviderBlockReason,
@@ -1319,9 +1437,10 @@ export default function App() {
 			validationJson: string | null;
 		}) => {
 			if (selectedLocalWorkspacePath) {
-				await compileMissionSpecContextBestEffort({
+				await registerMissionSpecAutoCompileAttempt({
 					workspaceRoot: selectedLocalWorkspacePath,
 					specRelativePath: input.specRelativePath,
+					trigger: "reanchor",
 				});
 				await queryClient.invalidateQueries({
 					queryKey: ["missionSpecContextStatus", selectedLocalWorkspacePath],
@@ -1340,7 +1459,13 @@ export default function App() {
 				},
 			});
 		},
-		[handleSubmitPrompt, queryClient, selectedLocalWorkspacePath, setInspectorCollapsed],
+		[
+			handleSubmitPrompt,
+			queryClient,
+			registerMissionSpecAutoCompileAttempt,
+			selectedLocalWorkspacePath,
+			setInspectorCollapsed,
+		],
 	);
 
 	const handleContinueMissionCriterion = useCallback(
@@ -1352,9 +1477,10 @@ export default function App() {
 			criterion: MissionResumeCriterion;
 		}) => {
 			if (selectedLocalWorkspacePath) {
-				await compileMissionSpecContextBestEffort({
+				await registerMissionSpecAutoCompileAttempt({
 					workspaceRoot: selectedLocalWorkspacePath,
 					specRelativePath: input.specRelativePath,
+					trigger: "continue",
 				});
 				await queryClient.invalidateQueries({
 					queryKey: ["missionSpecContextStatus", selectedLocalWorkspacePath],
@@ -1373,7 +1499,13 @@ export default function App() {
 				},
 			});
 		},
-		[handleSubmitPrompt, queryClient, selectedLocalWorkspacePath, setInspectorCollapsed],
+		[
+			handleSubmitPrompt,
+			queryClient,
+			registerMissionSpecAutoCompileAttempt,
+			selectedLocalWorkspacePath,
+			setInspectorCollapsed,
+		],
 	);
 
 	const handleSelectProvider = useCallback(
@@ -2065,6 +2197,10 @@ export default function App() {
 								onValidateMissionSpec={handleValidateMissionSpec}
 								onReanchorMissionSpec={handleReanchorMissionSpec}
 								onContinueMissionCriterion={handleContinueMissionCriterion}
+								missionSpecAutoCompileFailures={missionSpecAutoCompileFailures}
+								onClearMissionSpecAutoCompileFailure={
+									clearMissionSpecAutoCompileFailure
+								}
 								activeTab={inspectorTab}
 								onTabChange={setInspectorTab}
 							/>

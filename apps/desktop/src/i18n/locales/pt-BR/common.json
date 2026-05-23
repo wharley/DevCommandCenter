@@ -149,6 +149,16 @@
       "compiledContextStale": "O manifesto ou os alvos nativos do provider estão ausentes ou stale. Use Compilar contexto antes de depender do contexto nativo do provider.",
       "compiledContextBadgeCurrent": "Atual",
       "compiledContextBadgeStale": "Compilar",
+      "autoCompileIssueTitle": "Falha persistente no auto-compile",
+      "autoCompileIssueDescription": "A compilação automática da spec falhou {{count}} vezes seguidas. O re-anchor por prompt continuou sem bloquear a retomada.",
+      "autoCompileIssueLastError": "Último erro: {{error}}",
+      "autoCompileIssueLastAttempt": "Última tentativa: {{timestamp}}",
+      "autoCompileIssueTrigger": {
+        "reanchor": "Antes do re-anchor",
+        "continue": "Antes da continuação",
+        "post_compact": "Pós-/compact",
+        "setup_reopen": "Setup/reopen"
+      },
       "compiledContextState": {
         "current": "Atual",
         "missing": "Ausente",

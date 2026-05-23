@@ -149,6 +149,16 @@
       "compiledContextStale": "The manifest or provider-native targets are missing or stale. Run Compile context before using provider-native repo context.",
       "compiledContextBadgeCurrent": "Current",
       "compiledContextBadgeStale": "Needs compile",
+      "autoCompileIssueTitle": "Persistent auto-compile failure",
+      "autoCompileIssueDescription": "Automatic spec compilation failed {{count}} times in a row. Prompt-based re-anchor still continued so resume stayed unblocked.",
+      "autoCompileIssueLastError": "Last error: {{error}}",
+      "autoCompileIssueLastAttempt": "Last attempt: {{timestamp}}",
+      "autoCompileIssueTrigger": {
+        "reanchor": "Before re-anchor",
+        "continue": "Before continue",
+        "post_compact": "Post-/compact",
+        "setup_reopen": "Setup/reopen"
+      },
       "compiledContextState": {
         "current": "Current",
         "missing": "Missing",

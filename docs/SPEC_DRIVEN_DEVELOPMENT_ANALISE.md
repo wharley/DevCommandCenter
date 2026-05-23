@@ -409,8 +409,9 @@ DCC. A aba exibe se o manifesto e os alvos compilados estão `Current`, `Missing
 `Stale`, `Invalid` ou apontando para symlink, comparando tudo com a spec ativa sem
 escrever nada. O re-anchor manual e o re-anchor automático pós-`/compact` tentam compilar
 a spec antes de reancorar a sessão; se a compilação falhar, o re-anchor por prompt ainda
-segue para preservar a recuperação de contexto. A compilação também roda best-effort após
-setup/criação da Mission e na reabertura/seleção de workspace local.
+segue para preservar a recuperação de contexto, e a aba `Spec` passa a exibir uma falha
+persistente quando o auto-compile falha repetidamente. A compilação também roda
+best-effort após setup/criação da Mission e na reabertura/seleção de workspace local.
 
 **Backlog imediato sugerido para Fase 5:**
 1. **Auto-compile no re-anchor e pós-`/compact`.** Antes de enviar o re-anchor, compilar
@@ -445,7 +446,7 @@ e a Fase 0 custa quase nada para descobrir isso.
 | Resume cross-fase | ✅ | Aba `Spec` resume a próxima fase pendente quando a spec define fases e a continuação carrega esse foco no prompt |
 | Compilação cross-provider | ✅ | `Compile context` gera seção `dcc:spec` idempotente em `AGENTS.md`/`GEMINI.md` e mantém `.devcommandcenter/context.json` com source + provider matrix |
 | Frescor do contexto compilado | ✅ | Aba `Spec` compara manifesto + alvos provider-native com a spec ativa sem escrever arquivos |
-| Auto-compile antes de re-anchor | ✅ Parcial | Re-anchor manual e pós-`/compact` compilam contexto best-effort antes do prompt |
+| Auto-compile antes de re-anchor | ✅ | Re-anchor manual e pós-`/compact` compilam contexto best-effort antes do prompt e a UI expõe falha persistente quando o compile repete erro |
 | Auto-compile setup/reopen | ✅ Parcial | Setup/criação e seleção local de workspace compilam spec ativa best-effort |
 
 ### Ledger dos parciais
@@ -455,7 +456,6 @@ Este ledger existe para não perdermos o que ainda está deliberadamente incompl
 | Parcial | Por que ainda é parcial | Próximo corte recomendado |
 |---|---|---|
 | Re-injeção pós-compactação | Gatilho é conservador e best-effort; não cobre compactação interna do provider não exposta ao DCC | Adicionar eventos de compactação por provider quando existirem sinais confiáveis |
-| Auto-compile antes de re-anchor | Best-effort para não bloquear recuperação por prompt | Exibir falha persistente na UI se houver erro repetido de compilação |
 | Auto-compile setup/reopen | Best-effort e local; não cobre backend remoto | Integrar o manifesto/provider matrix aos eventos de workspace quando o backend remoto suportar escrita |
 
 ---
