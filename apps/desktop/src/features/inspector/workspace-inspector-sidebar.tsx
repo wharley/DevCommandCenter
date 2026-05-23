@@ -33,6 +33,7 @@ import { PlanReviewCard } from "@/features/panel/message-components";
 import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
 import {
 	buildMissionAcceptanceCriteriaCoverage,
+	buildMissionResumeContext,
 	computeMissionSpecHash,
 	parseMissionValidationReport,
 	parseMissionAcceptanceCriteria,
@@ -783,6 +784,16 @@ export function WorkspaceInspectorSidebar({
 		latestPlanMessage?.plan?.markdown ?? latestPlanMessage?.content ?? null;
 	const savedMissionValidationJson =
 		activeMissionSpec?.validation?.content ?? null;
+	const activeMissionResumeContext = useMemo(
+		() =>
+			activeMissionSpec
+				? buildMissionResumeContext({
+						specMarkdown: activeMissionSpec.content,
+						validationJson: savedMissionValidationJson,
+					})
+				: null,
+		[activeMissionSpec, savedMissionValidationJson],
+	);
 
 	useEffect(() => {
 		autoOpenedPlanMessageIdRef.current = null;
@@ -1278,6 +1289,54 @@ export function WorkspaceInspectorSidebar({
 													</div>
 												))}
 											</div>
+										</div>
+									) : null}
+									{activeMissionResumeContext ? (
+										<div className="rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
+											<div className="flex items-start justify-between gap-3">
+												<div>
+													<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+														{t("inspector.spec.resumeTitle")}
+													</p>
+													<p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+														{t(
+															`inspector.spec.resumeState.${activeMissionResumeContext.state}`,
+														)}
+													</p>
+												</div>
+												<Badge variant="secondary" className="shrink-0 text-[10px]">
+													{activeMissionResumeContext.criteria.length}
+												</Badge>
+											</div>
+											{activeMissionResumeContext.criteria.length > 0 ? (
+												<div className="mt-3 grid gap-1.5">
+													{activeMissionResumeContext.criteria.map((criterion) => (
+														<div
+															key={`${criterion.id}-${criterion.status}`}
+															className="rounded-xl border border-border/50 bg-muted/10 px-2.5 py-2"
+														>
+															<div className="flex items-center gap-2">
+																<span className="font-mono text-[11px] font-semibold text-foreground">
+																	{criterion.id}
+																</span>
+																<Badge variant="outline" className="h-5 text-[10px]">
+																	{criterion.status}
+																</Badge>
+															</div>
+															{criterion.description ? (
+																<p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+																	{criterion.description}
+																</p>
+															) : null}
+															{criterion.nextAction ? (
+																<p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+																	{criterion.nextAction}
+																</p>
+															) : null}
+														</div>
+													))}
+												</div>
+											) : null}
 										</div>
 									) : null}
 									{savedMissionValidationReport ? (

@@ -67,7 +67,12 @@ import {
 import { FALLBACK_PROVIDER_CATALOG } from "./lib/fallback-provider-catalog";
 import { daemonListCombs } from "./lib/daemon-api";
 import { listProviders } from "./lib/provider-api";
-import { deleteRepository, listRepositories, listWorkspaces } from "./lib/workspace-api";
+import {
+	deleteRepository,
+	listMissionSpecs,
+	listRepositories,
+	listWorkspaces,
+} from "./lib/workspace-api";
 import {
 	abortRun,
 	closeSession,
@@ -87,6 +92,7 @@ import {
 	setSessionComposerSelection,
 } from "./features/providers/provider-selection.logic";
 import type { ComposerSubmittedTurn } from "./features/composer/composer-turn";
+import { buildMissionSpecFilename } from "./features/composer/WorkspaceComposer.logic";
 import {
 	daemonCombToWorkspaceSummary,
 	workspaceToSummary,
@@ -114,6 +120,8 @@ import {
 	buildMissionReanchorPrompt,
 	buildMissionValidationPrompt,
 } from "./features/spec/mission-spec-content";
+import { derivePlanFollowUpState } from "./features/panel/plan-follow-up";
+import { projectWorkspaceMessages } from "./features/panel/thread-projection";
 import { resolveInitialOnboardingOpen } from "./lib/dev-onboarding-override";
 import {
 	clearProviderRuntimeDraft,
@@ -127,6 +135,10 @@ import {
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 const EMPTY_WORKSPACES: WorkspaceSummary[] = [];
 const LOCAL_BACKEND_CACHE_KEY = "local";
+
+function isCompactCommandPrompt(prompt: string) {
+	return /^\/compact(?:\s+.*)?$/i.test(prompt.trim());
+}
 
 function getWorkspaceSessionsCacheKey(scope: string, workspaceId: string) {
 	return ["workspaceSessions", scope, workspaceId] as const;
@@ -1062,6 +1074,99 @@ export default function App() {
 							: summary,
 					),
 			);
+
+			if (
+				isCompactCommandPrompt(trimmedPrompt) &&
+				result.turn.state === "completed" &&
+				selectedLocalWorkspacePath &&
+				selectedWorkspace
+			) {
+				const specs = await listMissionSpecs({
+					workspaceRoot: selectedLocalWorkspacePath,
+				});
+				const preferredSpecName = buildMissionSpecFilename(selectedWorkspace.branch);
+				const activeSpec =
+					specs.specs.find((spec) => spec.name === preferredSpecName) ??
+					specs.specs[0] ??
+					null;
+
+				if (activeSpec) {
+					const planMessages = projectWorkspaceMessages(
+						[],
+						sessionEvents,
+						currentSessionId,
+						null,
+					);
+					const activePlanState = derivePlanFollowUpState(planMessages);
+					const activePlanMarkdown =
+						activePlanState.activePlanMessage?.plan?.markdown ??
+						activePlanState.activePlanMessage?.content ??
+						null;
+					const reanchorPrompt = buildMissionReanchorPrompt({
+						specMarkdown: activeSpec.content,
+						planMarkdown: activePlanMarkdown,
+						validationJson: activeSpec.validation?.content ?? null,
+					});
+
+					setPendingPrompt(reanchorPrompt);
+					setPendingPromptSessionId(currentSessionId);
+					try {
+						const reanchorResult = await sendTurn({
+							sessionId: currentSessionId,
+							prompt: reanchorPrompt,
+							providerId: selectedProvider?.id ?? null,
+							model: selectedModel?.id ?? null,
+							providerRuntime: selectedProviderRuntime,
+							planMode: false,
+							effort: "medium",
+							fastMode: true,
+						});
+
+						const reanchorSnapshot: RuntimeSessionSnapshot = {
+							sessionId: reanchorResult.session.id,
+							projectId: reanchorResult.session.projectId,
+							workspaceId: reanchorResult.session.workspaceId,
+							providerId: reanchorResult.session.providerId,
+							model: reanchorResult.session.model,
+							state: reanchorResult.projection.state,
+							turnCount: reanchorResult.projection.turnCount,
+							checkpointCount: reanchorResult.projection.checkpointCount,
+							activeTurnId: reanchorResult.projection.activeTurnId ?? null,
+							lastTurnPrompt: reanchorResult.turn.content,
+							lastTurnState: reanchorResult.turn.state,
+						};
+						setSessionSnapshotsById((current) => ({
+							...current,
+							[reanchorResult.session.id]: reanchorSnapshot,
+						}));
+						queryClient.setQueryData<WorkspaceSessionSummary[]>(
+							getWorkspaceSessionsCacheKey(
+								backendCacheKey,
+								reanchorResult.session.workspaceId,
+							),
+							(current = []) =>
+								current.map((summary) =>
+									summary.session.id === reanchorResult.session.id
+										? {
+												...summary,
+												session: reanchorResult.session,
+												projection: reanchorResult.projection,
+												lastTurnPrompt: reanchorResult.turn.content,
+												lastTurnState: reanchorResult.turn.state,
+											}
+										: summary,
+								),
+						);
+					} finally {
+						setPendingPrompt((current) =>
+							current === reanchorPrompt ? null : current,
+						);
+						setPendingPromptSessionId((current) =>
+							current === currentSessionId ? null : current,
+						);
+					}
+				}
+			}
 		} catch (error) {
 			const message =
 				error instanceof Error
@@ -1088,7 +1193,9 @@ export default function App() {
 		selectedProviderRuntime,
 		selectedSessionId,
 		selectedSessionSnapshot,
+		selectedLocalWorkspacePath,
 		selectedWorkspace,
+		sessionEvents,
 	]);
 
 	const handleGeneratePlanFromSpec = useCallback(

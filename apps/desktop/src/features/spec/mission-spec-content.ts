@@ -24,6 +24,18 @@ export type ParsedMissionValidationReport = {
 	rawJson: string;
 };
 
+export type MissionResumeCriterion = MissionAcceptanceCriterion & {
+	status: MissionValidationStatus;
+	evidence: string;
+	nextAction: string;
+};
+
+export type MissionResumeContext = {
+	state: "needs_validation" | "stale_validation" | "pending" | "complete";
+	reason: string | null;
+	criteria: MissionResumeCriterion[];
+};
+
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---(?:\n|$)/;
 const CRITERION_ID_RE = /\b[A-Z]{1,8}-\d+\b/;
 const MARKDOWN_CRITERIA_HEADING_RE =
@@ -120,6 +132,13 @@ export function buildMissionReanchorPrompt({
 	const normalizedSpec = specMarkdown.trim();
 	const normalizedPlan = planMarkdown?.trim() ?? "";
 	const normalizedValidation = validationJson?.trim() ?? "";
+	const resumeContext = buildMissionResumeContext({
+		specMarkdown,
+		validationJson: normalizedValidation,
+	});
+	const renderedResumeContext = resumeContext
+		? renderMissionResumeContext(resumeContext)
+		: null;
 	return [
 		"RE-ANCHOR THIS SESSION TO THE CURRENT MISSION STATE.",
 		"",
@@ -143,6 +162,13 @@ export function buildMissionReanchorPrompt({
 					normalizedValidation,
 				]
 			: []),
+		...(renderedResumeContext
+			? [
+					"",
+					"RESUME CONTEXT:",
+					renderedResumeContext,
+				]
+			: []),
 	].join("\n");
 }
 
@@ -156,6 +182,90 @@ export function parseMissionValidationReport(
 		}
 	}
 	return null;
+}
+
+export function buildMissionResumeContext({
+	specMarkdown,
+	validationJson,
+}: {
+	specMarkdown: string;
+	validationJson?: string | null;
+}): MissionResumeContext | null {
+	const criteria = parseMissionAcceptanceCriteria(specMarkdown);
+	if (criteria.length === 0) {
+		return null;
+	}
+
+	const normalizedValidation = validationJson?.trim() ?? "";
+	const validationReport = normalizedValidation
+		? parseMissionValidationReport(normalizedValidation)
+		: null;
+	const currentSpecHash = computeMissionSpecHash(specMarkdown);
+	const validationIssue = validationReport
+		? getValidationFreshnessIssue(validationReport.specHash, currentSpecHash)
+		: null;
+
+	if (!validationReport || validationIssue) {
+		const reason =
+			validationIssue ?? "No saved validation verdict is available.";
+		return {
+			state: validationIssue ? "stale_validation" : "needs_validation",
+			reason,
+			criteria: criteria.map((criterion) => ({
+				...criterion,
+				status: "UNKNOWN",
+				evidence: "",
+				nextAction: "Validate this acceptance criterion.",
+			})),
+		};
+	}
+
+	const criteriaById = new Map(
+		criteria.map((criterion) => [criterion.id.toLowerCase(), criterion]),
+	);
+	const validationById = new Map(
+		validationReport.criteria.map((criterion) => [
+			criterion.id.toLowerCase(),
+			criterion,
+		]),
+	);
+	const pendingCriteria: MissionResumeCriterion[] = [
+		...validationReport.criteria
+			.filter((criterion) => criterion.status !== "PASS")
+			.map((criterion) => {
+				const specCriterion = criteriaById.get(criterion.id.toLowerCase());
+				return {
+					id: criterion.id,
+					description: specCriterion?.description ?? "",
+					status: criterion.status,
+					evidence: criterion.evidence,
+					nextAction: criterion.nextAction,
+				};
+			}),
+		...criteria
+			.filter((criterion) => !validationById.has(criterion.id.toLowerCase()))
+			.map<MissionResumeCriterion>((criterion) => ({
+				...criterion,
+				status: "UNKNOWN",
+				evidence: "",
+				nextAction: "Validate this acceptance criterion.",
+			})),
+	];
+
+	if (pendingCriteria.length === 0) {
+		return {
+			state: "complete",
+			reason:
+				"Saved validation marks all known acceptance criteria as PASS. Continue only after checking whether the spec defines another phase or new acceptance criteria.",
+			criteria: [],
+		};
+	}
+
+	return {
+		state: "pending",
+		reason: "Next pending acceptance criteria from the saved validation:",
+		criteria: pendingCriteria,
+	};
 }
 
 function extractJsonCandidates(content: string) {
@@ -247,6 +357,46 @@ function normalizeValidationStatus(
 		normalized === "UNKNOWN"
 	) {
 		return normalized;
+	}
+	return null;
+}
+
+function renderMissionResumeContext(context: MissionResumeContext) {
+	return [
+		context.reason,
+		...(context.criteria.length > 0
+			? [
+					context.state === "pending"
+						? "Next pending acceptance criteria:"
+						: "Next pending acceptance criteria to confirm:",
+				]
+			: []),
+		...context.criteria.map((criterion) => {
+			const description = criterion.description
+				? ` ${criterion.description}`
+				: "";
+			const nextAction = criterion.nextAction
+				? ` Next: ${criterion.nextAction}`
+				: "";
+			const evidence = criterion.evidence
+				? ` Evidence: ${criterion.evidence}`
+				: "";
+			return `- ${criterion.id} [${criterion.status}]:${description}${nextAction}${evidence}`;
+		}),
+	]
+		.filter((line): line is string => Boolean(line))
+		.join("\n");
+}
+
+function getValidationFreshnessIssue(
+	specHash: string | null,
+	currentSpecHash: string,
+) {
+	if (!specHash) {
+		return `Saved validation has no spec hash (${currentSpecHash} expected); treat it as historical context only.`;
+	}
+	if (specHash !== currentSpecHash) {
+		return `Saved validation is stale (${specHash} != ${currentSpecHash}); treat it as historical context only.`;
 	}
 	return null;
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildMissionAcceptanceCriteriaCoverage,
 	buildMissionReanchorPrompt,
+	buildMissionResumeContext,
 	buildMissionValidationPrompt,
 	computeMissionSpecHash,
 	parseMissionValidationReport,
@@ -74,6 +75,130 @@ describe("mission-spec-content", () => {
 		expect(prompt).toContain("MISSION SPEC:");
 		expect(prompt).toContain("ACTIVE PLAN:");
 		expect(prompt).toContain("SAVED VALIDATION VERDICT:");
+	});
+
+	it("adds pending acceptance criteria to the re-anchor prompt", () => {
+		const specMarkdown = [
+			"# Spec",
+			"",
+			"## Acceptance Criteria",
+			"- AC-1: Visible spec.",
+			"- AC-2: Persist validation.",
+		].join("\n");
+		const prompt = buildMissionReanchorPrompt({
+			specMarkdown,
+			validationJson: JSON.stringify({
+				dccMissionValidation: true,
+				specHash: computeMissionSpecHash(specMarkdown),
+				criteria: [
+					{
+						id: "AC-1",
+						status: "PASS",
+						evidence: "Spec tab rendered.",
+						nextAction: "",
+					},
+					{
+						id: "AC-2",
+						status: "FAIL",
+						evidence: "No saved file found.",
+						nextAction: "Save validation verdict.",
+					},
+				],
+			}),
+		});
+
+		expect(prompt).toContain("RESUME CONTEXT:");
+		expect(prompt).toContain(
+			"- AC-2 [FAIL]: Persist validation. Next: Save validation verdict.",
+		);
+		expect(prompt).not.toContain("- AC-1 [PASS]");
+	});
+
+	it("builds structured resume context for the inspector", () => {
+		const specMarkdown = [
+			"# Spec",
+			"",
+			"## Acceptance Criteria",
+			"- AC-1: Visible spec.",
+			"- AC-2: Persist validation.",
+			"- AC-3: Re-anchor after compact.",
+		].join("\n");
+
+		expect(
+			buildMissionResumeContext({
+				specMarkdown,
+				validationJson: JSON.stringify({
+					dccMissionValidation: true,
+					specHash: computeMissionSpecHash(specMarkdown),
+					criteria: [
+						{ id: "AC-1", status: "PASS", evidence: "Done.", nextAction: "" },
+						{
+							id: "AC-2",
+							status: "UNKNOWN",
+							evidence: "No saved verdict checked.",
+							nextAction: "Inspect saved validation.",
+						},
+					],
+				}),
+			}),
+		).toMatchObject({
+			state: "pending",
+			criteria: [
+				{
+					id: "AC-2",
+					status: "UNKNOWN",
+					description: "Persist validation.",
+					nextAction: "Inspect saved validation.",
+				},
+				{
+					id: "AC-3",
+					status: "UNKNOWN",
+					description: "Re-anchor after compact.",
+					nextAction: "Validate this acceptance criterion.",
+				},
+			],
+		});
+	});
+
+	it("marks stale validation as historical context in re-anchor prompts", () => {
+		const prompt = buildMissionReanchorPrompt({
+			specMarkdown: "## Acceptance Criteria\n- AC-1: Visible spec changed.",
+			validationJson: JSON.stringify({
+				dccMissionValidation: true,
+				specHash: "fnv1a32:00000000",
+				criteria: [
+					{
+						id: "AC-1",
+						status: "PASS",
+						evidence: "Old evidence.",
+						nextAction: "",
+					},
+				],
+			}),
+		});
+
+		expect(prompt).toContain("Saved validation is stale");
+		expect(prompt).toContain("- AC-1 [UNKNOWN]: Visible spec changed.");
+	});
+
+	it("treats validation without a spec hash as historical context", () => {
+		const prompt = buildMissionReanchorPrompt({
+			specMarkdown: "## Acceptance Criteria\n- AC-1: Visible spec.",
+			validationJson: JSON.stringify({
+				dccMissionValidation: true,
+				criteria: [
+					{
+						id: "AC-1",
+						status: "PASS",
+						evidence: "Old evidence.",
+						nextAction: "",
+					},
+				],
+			}),
+		});
+
+		expect(prompt).toContain("Saved validation has no spec hash");
+		expect(prompt).toContain("- AC-1 [UNKNOWN]: Visible spec.");
 	});
 
 	it("parses a fenced structured validation report", () => {

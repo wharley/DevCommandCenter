@@ -136,6 +136,13 @@
       "validate": "Validate",
       "reanchor": "Re-anchor",
       "criteriaTitle": "Acceptance criteria",
+      "resumeTitle": "Resume context",
+      "resumeState": {
+        "needs_validation": "No saved validation yet. Re-anchor will ask the agent to confirm every acceptance criterion.",
+        "stale_validation": "Saved validation is stale or missing a spec hash. Re-anchor will treat it as historical context.",
+        "pending": "Next unresolved acceptance criteria from the saved validation.",
+        "complete": "Saved validation marks all known acceptance criteria as passing."
+      },
       "savedValidationTitle": "Saved validation",
       "loadingTitle": "Loading mission spec...",
       "emptyTitle": "No mission spec yet.",

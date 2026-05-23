@@ -136,6 +136,13 @@
       "validate": "Validar",
       "reanchor": "Reancorar",
       "criteriaTitle": "Critérios de aceitação",
+      "resumeTitle": "Contexto de retomada",
+      "resumeState": {
+        "needs_validation": "Ainda não há validação salva. O re-anchor vai pedir ao agente para confirmar todos os critérios de aceitação.",
+        "stale_validation": "A validação salva está stale ou sem specHash. O re-anchor vai tratá-la como contexto histórico.",
+        "pending": "Próximos critérios de aceitação não resolvidos pela validação salva.",
+        "complete": "A validação salva marca todos os critérios de aceitação conhecidos como aprovados."
+      },
       "savedValidationTitle": "Validação salva",
       "loadingTitle": "Carregando spec da mission...",
       "emptyTitle": "Ainda não há spec da mission.",

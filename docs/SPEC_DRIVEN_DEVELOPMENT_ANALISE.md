@@ -367,8 +367,14 @@ para o agente continuar da próxima pendente — não apenas reancorar na corren
 
 **Status no DCC atual:** parcialmente implementado como re-injeção manual. A aba `Spec`
 oferece **Re-anchor**, que envia ao agente a spec, o plano ativo e o veredito salvo para
-restaurar contexto sem modificar arquivos. Ainda não há gatilho automático pós-`/compact`
-nem detecção automática da próxima fase pendente.
+restaurar contexto sem modificar arquivos. Também há gatilho automático conservador após
+`/compact`: quando o usuário envia `/compact`, o DCC deixa o provider compactar e, se o
+turno terminar como `completed`, envia um segundo turno de re-anchor com a spec ativa,
+plano ativo e validação salva. Ainda falta detecção automática da
+próxima fase pendente como workflow, mas o prompt de re-anchor já deriva um contexto de
+retomada: lista critérios `FAIL` / `UNKNOWN`, critérios não validados e trata validação
+`stale` ou sem `specHash` como histórico, não como prova. A aba `Spec` também expõe esse
+contexto de retomada para o usuário antes de enviar o re-anchor.
 
 **Fase 5 — Compilação cross-provider (custo: médio, é o diferencial).**
 Compila a spec para `AGENTS.md`/`GEMINI.md`. Funde-se ao "context compiler" do doc de
@@ -391,7 +397,8 @@ e a Fase 0 custa quase nada para descobrir isso.
 | Leitura do veredito salvo | ✅ | Aba `Spec` exibe o `.validation.json` associado à spec |
 | Frescor do veredito | ✅ | `specHash` marca validação salva como `Stale` quando a spec muda |
 | Re-injeção contextual | ✅ Parcial | `Re-anchor` injeta spec + plano + validação salva manualmente |
-| Re-injeção pós-compactação | ❌ | Gatilho automático futuro |
+| Re-injeção pós-compactação | ✅ Parcial | `/compact` concluído dispara re-anchor automático se houver spec ativa |
+| Resume cross-fase | ✅ Parcial | Aba `Spec` e re-anchor destacam critérios pendentes/sem validação e invalidam contexto stale/sem hash |
 | Compilação cross-provider | ❌ | Fase futura |
 
 ---
@@ -416,6 +423,7 @@ plano (`plan-content.ts`) e a abstração multi-provider.
 Recomendação prática atual: como as Fases 0–2 já estão implementadas e a Fase 3 já tem
 cobertura estrutural, validação assistida estruturada, persistência manual do veredito e
 leitura do veredito salvo com checagem de frescor, a Fase 4 começou com re-injeção
-manual. O próximo investimento deve ser gatilho automático pós-`/compact` apenas se o
-uso real de specs confirmar o ROI. Não construir um "motor de SDD" — construir o trilho
-fino e deixar o usuário (e o agente) fazerem a metodologia.
+manual e gatilho pós-`/compact` conservador. O próximo investimento deve ser resume
+cross-fase como UI/automação explícita ou compilação cross-provider apenas se o uso real
+de specs confirmar o ROI. Não construir um "motor de SDD" — construir o trilho fino e
+deixar o usuário (e o agente) fazerem a metodologia.
