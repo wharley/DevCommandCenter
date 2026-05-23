@@ -40,12 +40,13 @@ use dcc_tauri::commands::{
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
         ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
         ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput, MissionSpecEntry,
-        RepositoryIdInput, SaveMissionValidationInput, SaveMissionValidationOutput,
-        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
-        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
-        WorkspaceGitCommitPushInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
-        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceRunSetupInput,
-        WorkspaceRunSetupOutput, WorkspaceSetupHint,
+        MissionValidationEntry, RepositoryIdInput, SaveMissionValidationInput,
+        SaveMissionValidationOutput, WorkspaceContinueFromBaseBranchInput,
+        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
+        WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput,
+        WorkspaceGitPathInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
+        WorkspaceGitStatusOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspaceSetupHint,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -169,6 +170,7 @@ fn main() {
         .typ::<ListGitTrackedFilesOutput>()
         .typ::<ListMissionSpecsInput>()
         .typ::<MissionSpecEntry>()
+        .typ::<MissionValidationEntry>()
         .typ::<ListMissionSpecsOutput>()
         .typ::<SaveMissionValidationInput>()
         .typ::<SaveMissionValidationOutput>()

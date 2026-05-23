@@ -13,6 +13,7 @@ import type {
 type MissionValidationCardProps = {
 	report: ParsedMissionValidationReport;
 	workspacePath?: string | null;
+	showSaveAction?: boolean;
 };
 
 function statusIcon(status: MissionValidationStatus) {
@@ -38,6 +39,7 @@ function statusClassName(status: MissionValidationStatus) {
 export function MissionValidationCard({
 	report,
 	workspacePath,
+	showSaveAction = true,
 }: MissionValidationCardProps) {
 	const [isSaving, setIsSaving] = useState(false);
 	const passCount = report.criteria.filter((criterion) => criterion.status === "PASS").length;
@@ -108,16 +110,18 @@ export function MissionValidationCard({
 					</p>
 				</div>
 				<div className="flex items-center gap-1.5">
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className="h-7 rounded-lg px-2 text-[11px]"
-						disabled={isSaving || !workspacePath || !report.specRelativePath}
-						onClick={() => void handleSave()}
-					>
-						{isSaving ? "Saving..." : "Save verdict"}
-					</Button>
+					{showSaveAction ? (
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="h-7 rounded-lg px-2 text-[11px]"
+							disabled={isSaving || !workspacePath || !report.specRelativePath}
+							onClick={() => void handleSave()}
+						>
+							{isSaving ? "Saving..." : "Save verdict"}
+						</Button>
+					) : null}
 					<Button
 						type="button"
 						variant="outline"

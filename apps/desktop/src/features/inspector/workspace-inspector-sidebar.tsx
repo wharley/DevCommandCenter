@@ -33,9 +33,11 @@ import { PlanReviewCard } from "@/features/panel/message-components";
 import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
 import {
 	buildMissionAcceptanceCriteriaCoverage,
+	parseMissionValidationReport,
 	parseMissionAcceptanceCriteria,
 } from "@/features/spec/mission-spec-content";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
+import { MissionValidationCard } from "@/features/panel/message-components/MissionValidationCard";
 import {
 	workspaceContinueFromBaseBranch,
 	workspaceChangeRequestViewWeb,
@@ -736,6 +738,13 @@ export function WorkspaceInspectorSidebar({
 		missionSpecs.find((spec) => spec.name === preferredSpecName) ??
 		missionSpecs[0] ??
 		null;
+	const savedMissionValidationReport = useMemo(
+		() =>
+			activeMissionSpec?.validation
+				? parseMissionValidationReport(activeMissionSpec.validation.content)
+				: null,
+		[activeMissionSpec],
+	);
 	const activeMissionAcceptanceCriteria = useMemo(
 		() =>
 			activeMissionSpec
@@ -1235,6 +1244,18 @@ export function WorkspaceInspectorSidebar({
 													</div>
 												))}
 											</div>
+										</div>
+									) : null}
+									{savedMissionValidationReport ? (
+										<div className="space-y-2">
+											<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+												{t("inspector.spec.savedValidationTitle")}
+											</p>
+											<MissionValidationCard
+												report={savedMissionValidationReport}
+												workspacePath={workspacePath}
+												showSaveAction={false}
+											/>
 										</div>
 									) : null}
 									<pre className="max-h-[52vh] overflow-auto rounded-2xl border border-border/50 bg-muted/20 p-3 text-[11px] leading-5 text-foreground whitespace-pre-wrap">

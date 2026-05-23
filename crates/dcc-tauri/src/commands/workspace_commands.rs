@@ -133,6 +133,14 @@ pub struct MissionSpecEntry {
     pub relative_path: String,
     pub name: String,
     pub content: String,
+    pub validation: Option<MissionValidationEntry>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MissionValidationEntry {
+    pub relative_path: String,
+    pub content: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1292,16 +1300,47 @@ pub async fn list_mission_specs(
         }
 
         let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        let validation_name = file_name.replace(".spec.md", ".validation.json");
+        let validation_path = specs_canonical.join(&validation_name);
+        let validation =
+            read_mission_validation_entry(&validation_path, &validation_name, &specs_canonical)?;
         specs.push(MissionSpecEntry {
             relative_path: format!(".devcommandcenter/specs/{file_name}"),
             name: file_name.to_string(),
             content,
+            validation,
         });
     }
 
     specs.sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(ListMissionSpecsOutput { specs })
+}
+
+fn read_mission_validation_entry(
+    path: &Path,
+    file_name: &str,
+    specs_canonical: &Path,
+) -> Result<Option<MissionValidationEntry>, String> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    if fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Ok(None);
+    }
+    let file_canonical = path.canonicalize().map_err(|error| error.to_string())?;
+    if !file_canonical.starts_with(specs_canonical) {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    Ok(Some(MissionValidationEntry {
+        relative_path: format!(".devcommandcenter/specs/{file_name}"),
+        content,
+    }))
 }
 
 #[tauri::command]

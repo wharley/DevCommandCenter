@@ -310,6 +310,12 @@ export type MissionSpecEntry = {
 	relativePath: string,
 	name: string,
 	content: string,
+	validation: MissionValidationEntry | null,
+};
+
+export type MissionValidationEntry = {
+	relativePath: string,
+	content: string,
 };
 
 export type ProjectId = string;

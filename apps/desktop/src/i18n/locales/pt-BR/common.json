@@ -135,6 +135,7 @@
       "generatePlan": "Gerar plano",
       "validate": "Validar",
       "criteriaTitle": "Critérios de aceitação",
+      "savedValidationTitle": "Validação salva",
       "loadingTitle": "Carregando spec da mission...",
       "emptyTitle": "Ainda não há spec da mission.",
       "emptyDescription": "Use /spec no composer para criar .devcommandcenter/specs/<branch>.spec.md."
