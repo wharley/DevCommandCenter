@@ -386,13 +386,15 @@ A ação **Compile context** escreve/atualiza uma seção delimitada por
 preservando qualquer conteúdo humano fora dos marcadores e rejeitando alvos symlink.
 A aba também exibe se o contexto compilado está `Current`, `Missing`, `Stale`,
 `Invalid` ou apontando para symlink, comparando os arquivos nativos com a spec ativa sem
-escrever nada. Ainda falta ligar essa compilação ao hook de setup/reabertura da Mission e
-ao futuro manifesto de contexto/provider.
+escrever nada. O re-anchor manual e o re-anchor automático pós-`/compact` tentam compilar
+a spec antes de reancorar a sessão; se a compilação falhar, o re-anchor por prompt ainda
+segue para preservar a recuperação de contexto. Ainda falta ligar essa compilação ao hook
+de setup/reabertura da Mission e ao futuro manifesto de contexto/provider.
 
 **Backlog imediato sugerido para Fase 5:**
 1. **Auto-compile no re-anchor e pós-`/compact`.** Antes de enviar o re-anchor, compilar
    a spec para `AGENTS.md`/`GEMINI.md` para manter o contexto nativo sincronizado sem
-   depender do usuário lembrar do botão.
+   depender do usuário lembrar do botão. **Status: implementado como best-effort.**
 2. **Indicador de contexto compilado stale/current.** Mostrar na aba `Spec` se
    `AGENTS.md`/`GEMINI.md` batem com a spec ativa. **Status: implementado.**
 3. **Hook de setup/reopen da Mission.** Automatizar a compilação ao preparar/reabrir a
@@ -419,6 +421,7 @@ e a Fase 0 custa quase nada para descobrir isso.
 | Resume cross-fase | ✅ Parcial | Aba `Spec` e re-anchor destacam critérios pendentes/sem validação e invalidam contexto stale/sem hash |
 | Compilação cross-provider | ✅ Parcial | `Compile context` gera seção `dcc:spec` idempotente em `AGENTS.md`/`GEMINI.md` |
 | Frescor do contexto compilado | ✅ | Aba `Spec` compara `AGENTS.md`/`GEMINI.md` com a spec ativa sem escrever arquivos |
+| Auto-compile antes de re-anchor | ✅ Parcial | Re-anchor manual e pós-`/compact` compilam contexto best-effort antes do prompt |
 
 ---
 

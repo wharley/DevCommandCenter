@@ -101,6 +101,7 @@ type WorkspaceInspectorSidebarProps = {
 		planMarkdown: string | null;
 	}) => void;
 	onReanchorMissionSpec: (input: {
+		specRelativePath: string;
 		specMarkdown: string;
 		planMarkdown: string | null;
 		validationJson: string | null;
@@ -1320,6 +1321,7 @@ export function WorkspaceInspectorSidebar({
 													className="h-8 rounded-lg px-2.5 text-[11px]"
 													onClick={() =>
 														onReanchorMissionSpec({
+															specRelativePath: activeMissionSpec.relativePath,
 															specMarkdown: activeMissionSpec.content,
 															planMarkdown: activePlanMarkdown,
 															validationJson: savedMissionValidationJson,

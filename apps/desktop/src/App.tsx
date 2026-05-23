@@ -68,6 +68,7 @@ import { FALLBACK_PROVIDER_CATALOG } from "./lib/fallback-provider-catalog";
 import { daemonListCombs } from "./lib/daemon-api";
 import { listProviders } from "./lib/provider-api";
 import {
+	compileMissionSpecContext,
 	deleteRepository,
 	listMissionSpecs,
 	listRepositories,
@@ -138,6 +139,25 @@ const LOCAL_BACKEND_CACHE_KEY = "local";
 
 function isCompactCommandPrompt(prompt: string) {
 	return /^\/compact(?:\s+.*)?$/i.test(prompt.trim());
+}
+
+async function compileMissionSpecContextBestEffort({
+	workspaceRoot,
+	specRelativePath,
+}: {
+	workspaceRoot: string;
+	specRelativePath: string;
+}) {
+	try {
+		await compileMissionSpecContext({
+			workspaceRoot,
+			specRelativePath,
+		});
+		return true;
+	} catch (error) {
+		console.warn("[dcc] mission spec context compile failed:", error);
+		return false;
+	}
 }
 
 function getWorkspaceSessionsCacheKey(scope: string, workspaceId: string) {
@@ -1091,6 +1111,14 @@ export default function App() {
 					null;
 
 				if (activeSpec) {
+					await compileMissionSpecContextBestEffort({
+						workspaceRoot: selectedLocalWorkspacePath,
+						specRelativePath: activeSpec.relativePath,
+					});
+					await queryClient.invalidateQueries({
+						queryKey: ["missionSpecContextStatus", selectedLocalWorkspacePath],
+					});
+
 					const planMessages = projectWorkspaceMessages(
 						[],
 						sessionEvents,
@@ -1236,11 +1264,22 @@ export default function App() {
 	);
 
 	const handleReanchorMissionSpec = useCallback(
-		(input: {
+		async (input: {
+			specRelativePath: string;
 			specMarkdown: string;
 			planMarkdown: string | null;
 			validationJson: string | null;
 		}) => {
+			if (selectedLocalWorkspacePath) {
+				await compileMissionSpecContextBestEffort({
+					workspaceRoot: selectedLocalWorkspacePath,
+					specRelativePath: input.specRelativePath,
+				});
+				await queryClient.invalidateQueries({
+					queryKey: ["missionSpecContextStatus", selectedLocalWorkspacePath],
+				});
+			}
+
 			const prompt = buildMissionReanchorPrompt(input);
 			setInspectorCollapsed(false);
 			setInspectorTab("activity");
@@ -1253,7 +1292,7 @@ export default function App() {
 				},
 			});
 		},
-		[handleSubmitPrompt, setInspectorCollapsed],
+		[handleSubmitPrompt, queryClient, selectedLocalWorkspacePath, setInspectorCollapsed],
 	);
 
 	const handleSelectProvider = useCallback(
