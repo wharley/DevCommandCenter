@@ -14,6 +14,7 @@ type MissionValidationCardProps = {
 	report: ParsedMissionValidationReport;
 	workspacePath?: string | null;
 	showSaveAction?: boolean;
+	isStale?: boolean;
 };
 
 function statusIcon(status: MissionValidationStatus) {
@@ -40,6 +41,7 @@ export function MissionValidationCard({
 	report,
 	workspacePath,
 	showSaveAction = true,
+	isStale = false,
 }: MissionValidationCardProps) {
 	const [isSaving, setIsSaving] = useState(false);
 	const passCount = report.criteria.filter((criterion) => criterion.status === "PASS").length;
@@ -101,6 +103,14 @@ export function MissionValidationCard({
 						>
 							Validation
 						</Badge>
+						{isStale ? (
+							<Badge
+								variant="outline"
+								className="rounded-md border-amber-500/30 px-2 py-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-600 dark:text-amber-400"
+							>
+								Stale
+							</Badge>
+						) : null}
 						<p className="truncate text-sm font-medium text-foreground">
 							Mission acceptance criteria
 						</p>
@@ -137,6 +147,12 @@ export function MissionValidationCard({
 			{report.summary ? (
 				<p className="mt-3 text-[12px] leading-5 text-muted-foreground">
 					{report.summary}
+				</p>
+			) : null}
+			{isStale ? (
+				<p className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/5 px-2.5 py-2 text-[11px] leading-5 text-amber-700 dark:text-amber-300">
+					This verdict was produced for a different spec hash. Re-run validation
+					before relying on it.
 				</p>
 			) : null}
 

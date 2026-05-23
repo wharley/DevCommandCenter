@@ -33,6 +33,7 @@ import { PlanReviewCard } from "@/features/panel/message-components";
 import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
 import {
 	buildMissionAcceptanceCriteriaCoverage,
+	computeMissionSpecHash,
 	parseMissionValidationReport,
 	parseMissionAcceptanceCriteria,
 } from "@/features/spec/mission-spec-content";
@@ -751,6 +752,16 @@ export function WorkspaceInspectorSidebar({
 				: null,
 		[activeMissionSpec],
 	);
+	const activeMissionSpecHash = useMemo(
+		() =>
+			activeMissionSpec ? computeMissionSpecHash(activeMissionSpec.content) : null,
+		[activeMissionSpec],
+	);
+	const isSavedMissionValidationStale = Boolean(
+		savedMissionValidationReport?.specHash &&
+			activeMissionSpecHash &&
+			savedMissionValidationReport.specHash !== activeMissionSpecHash,
+	);
 	const activeMissionAcceptanceCriteria = useMemo(
 		() =>
 			activeMissionSpec
@@ -1278,6 +1289,7 @@ export function WorkspaceInspectorSidebar({
 												report={savedMissionValidationReport}
 												workspacePath={workspacePath}
 												showSaveAction={false}
+												isStale={isSavedMissionValidationStale}
 											/>
 										</div>
 									) : null}

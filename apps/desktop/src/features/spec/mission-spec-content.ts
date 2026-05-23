@@ -18,6 +18,7 @@ export type MissionValidationCriterionResult = {
 
 export type ParsedMissionValidationReport = {
 	specRelativePath: string | null;
+	specHash: string | null;
 	summary: string | null;
 	criteria: MissionValidationCriterionResult[];
 	rawJson: string;
@@ -29,6 +30,15 @@ const MARKDOWN_CRITERIA_HEADING_RE =
 	/^\s{0,3}#{1,6}\s+acceptance criteria\s*$/i;
 const MARKDOWN_HEADING_RE = /^\s{0,3}#{1,6}\s+/;
 const JSON_FENCE_RE = /```(?:json)?\s*([\s\S]*?)```/gi;
+
+export function computeMissionSpecHash(specMarkdown: string) {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < specMarkdown.length; index += 1) {
+		hash ^= specMarkdown.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
 
 export function parseMissionAcceptanceCriteria(
 	specMarkdown: string,
@@ -72,6 +82,7 @@ export function buildMissionValidationPrompt({
 	const normalizedSpec = specMarkdown.trim();
 	const normalizedPlan = planMarkdown?.trim() ?? "";
 	const normalizedSpecPath = specRelativePath?.trim() ?? null;
+	const specHash = computeMissionSpecHash(specMarkdown);
 	return [
 		"VALIDATE THIS MISSION AGAINST ITS SPEC.",
 		"",
@@ -79,10 +90,11 @@ export function buildMissionValidationPrompt({
 		"Return a concise validation report with one row per acceptance criterion using: PASS, FAIL, or UNKNOWN.",
 		"For every FAIL or UNKNOWN, include the evidence or missing evidence and the smallest next action.",
 		"End with a fenced JSON block that exactly follows this shape:",
-		'{"dccMissionValidation":true,"specRelativePath":"...","summary":"...","criteria":[{"id":"AC-1","status":"PASS","evidence":"...","nextAction":"..."}]}',
+		'{"dccMissionValidation":true,"specRelativePath":"...","specHash":"...","summary":"...","criteria":[{"id":"AC-1","status":"PASS","evidence":"...","nextAction":"..."}]}',
 		...(normalizedSpecPath
 			? ["", `Spec relative path for the JSON: ${normalizedSpecPath}`]
 			: []),
+		`Spec hash for the JSON: ${specHash}`,
 		"",
 		"SPEC:",
 		normalizedSpec,
@@ -192,6 +204,8 @@ function tryParseMissionValidationJson(
 			typeof parsed.specRelativePath === "string"
 				? parsed.specRelativePath.trim()
 				: null,
+		specHash:
+			typeof parsed.specHash === "string" ? parsed.specHash.trim() : null,
 		summary: typeof parsed.summary === "string" ? parsed.summary.trim() : null,
 		criteria,
 		rawJson,

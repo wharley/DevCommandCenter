@@ -356,7 +356,8 @@ alterar arquivos. A resposta de validação agora pede um bloco JSON
 O card permite salvar esse veredito como
 `.devcommandcenter/specs/<mission>.validation.json`, mantendo o resultado versionável no
 worktree. A aba `Spec` carrega esse arquivo de volta e exibe a última validação salva
-como estado ativo da Mission.
+como estado ativo da Mission. O JSON inclui `specHash`; se a spec mudar depois da
+validação, o card salvo é marcado como **Stale** para evitar confiar em veredito antigo.
 
 **Fase 4 — Re-injeção pós-compactação (custo: médio, é o valor único).**
 O DCC reinjeta a spec após `/compact`. Resolve o esquecimento de requisitos —
@@ -388,6 +389,7 @@ e a Fase 0 custa quase nada para descobrir isso.
 | Validação assistida | ✅ Parcial | `Validate` pede auditoria e card JSON `dccMissionValidation` |
 | Persistência do veredito | ✅ Parcial | `Save verdict` grava `.devcommandcenter/specs/<mission>.validation.json` |
 | Leitura do veredito salvo | ✅ | Aba `Spec` exibe o `.validation.json` associado à spec |
+| Frescor do veredito | ✅ | `specHash` marca validação salva como `Stale` quando a spec muda |
 | Re-injeção contextual | ✅ Parcial | `Re-anchor` injeta spec + plano + validação salva manualmente |
 | Re-injeção pós-compactação | ❌ | Gatilho automático futuro |
 | Compilação cross-provider | ❌ | Fase futura |
@@ -413,7 +415,7 @@ plano (`plan-content.ts`) e a abstração multi-provider.
 
 Recomendação prática atual: como as Fases 0–2 já estão implementadas e a Fase 3 já tem
 cobertura estrutural, validação assistida estruturada, persistência manual do veredito e
-leitura do veredito salvo, a Fase 4 começou com re-injeção manual. O próximo investimento
-deve ser gatilho automático pós-`/compact` apenas se o uso real de specs confirmar o ROI.
-Não construir um "motor de SDD" — construir o trilho fino e deixar o usuário (e o
-agente) fazerem a metodologia.
+leitura do veredito salvo com checagem de frescor, a Fase 4 começou com re-injeção
+manual. O próximo investimento deve ser gatilho automático pós-`/compact` apenas se o
+uso real de specs confirmar o ROI. Não construir um "motor de SDD" — construir o trilho
+fino e deixar o usuário (e o agente) fazerem a metodologia.
