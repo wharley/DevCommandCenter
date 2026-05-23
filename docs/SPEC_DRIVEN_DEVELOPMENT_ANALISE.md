@@ -468,26 +468,55 @@ Este ledger existe para não perdermos o que ainda está deliberadamente incompl
 
 ## 9. Veredito final
 
-**Faz sentido — e é mais barato e mais natural do que parece**, com uma ressalva central
-de enquadramento:
+**Sim — para o escopo suportado do produto atual, o SDD no DCC está fechado.**
 
-O DCC **não deve "implementar a metodologia SDD"**. Deve fazer o que já é a sua definição
-de produto: **gerenciar um artefato de estado de engenharia** — e a spec é só mais um,
-*a montante* de um fluxo de plano que o DCC **já tem**. A pergunta "é responsabilidade de
-um orquestrador?" tem resposta limpa quando se separam as duas metades do SDD: a
-*disciplina* não é; o *estado* é — e é o core.
+A formulação correta não é "o DCC implementa uma metodologia". É outra: o DCC
+**gerencia o estado durável do fluxo de engenharia**. Nesse enquadramento, a spec virou o
+artefato a montante do plano que faltava ao produto, sem acoplamento a provider e sem
+transformar metodologia em hard gate.
 
-O `spec-kit` provou a demanda mas errou a camada (acoplou ao agente). O diferencial
-defensável do DCC é o mesmo do doc de skills: **escreva o contrato uma vez, rode em
-qualquer agente, e que ele sobreviva à compactação de contexto** — apoiado em quatro
-peças que já existem: o worktree por Mission, o hook `setup-worktree.sh`, o pipeline de
-plano (`plan-content.ts`) e a abstração multi-provider.
+O que está efetivamente entregue nesta branch:
 
-Recomendação prática atual: como as Fases 0–2 já estão implementadas e a Fase 3 já tem
-cobertura estrutural, validação assistida estruturada, persistência manual do veredito e
-leitura do veredito salvo com checagem de frescor, a Fase 4 começou com re-injeção
-manual e gatilho pós-`/compact` conservador, e a Fase 5 começou com compilação manual
-para `AGENTS.md`/`GEMINI.md`. O próximo investimento deve ser automatizar essa
-compilação no setup/reopen da Mission ou unificar com o futuro context compiler de
-skills, apenas se o uso real de specs confirmar o ROI. Não construir um "motor de SDD" —
-construir o trilho fino e deixar o usuário (e o agente) fazerem a metodologia.
+- spec versionada por Mission
+- geração de plano a partir da spec
+- cobertura explícita de critérios no plano
+- validação assistida com checks, perfis e persistência
+- retomada/re-anchor com plano, spec e validação
+- contexto compilado cross-provider com manifesto do DCC
+- auto-compile no ciclo local de re-anchor, setup e reopen
+- visibilidade de frescor, proveniência e falhas persistentes
+
+Em outras palavras: o DCC já entrega um **SDD operacional, seguro e consistente no
+desktop local**.
+
+### Fechamento formal
+
+Podemos dizer que **fechamos o SDD no DCC para o escopo suportado do runtime atual**.
+
+O único ponto ainda deliberadamente parcial não é um buraco conceitual do SDD no DCC. É
+uma limitação externa de automação:
+
+- o DCC reage a `/compact` explícito
+- providers ainda não expõem sinal confiável de compactação interna invisível
+- portanto não vale implementar heurística
+
+Isso **não invalida** o SDD no DCC. Apenas impede dizer que a automação de retomada é
+"total" em qualquer provider. A decisão correta é manter o sistema honesto e sem
+gambiarra.
+
+### Posicionamento recomendado
+
+É válido afirmar:
+
+- **o DCC já suporta SDD de ponta a ponta no desktop local**
+- **a automação restante depende de sinais que os providers hoje não expõem**
+- **o produto escolhe segurança e estado durável acima de heurística frágil**
+
+É melhor evitar afirmar:
+
+- "100% SDD sem ressalvas"
+- "retomada automática total em qualquer provider"
+
+Conclusão prática: **não precisamos de mais implementação local para "provar" o SDD**.
+O próximo investimento só faz sentido se algum provider passar a emitir eventos reais de
+compactação, ou se o runtime remoto voltar a fazer parte do escopo suportado.
