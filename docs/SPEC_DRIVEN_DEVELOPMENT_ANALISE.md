@@ -399,24 +399,27 @@ prompt de continuação.
 Compila a spec para `AGENTS.md`/`GEMINI.md`. Funde-se ao "context compiler" do doc de
 skills — provavelmente o *mesmo* compilador, dois tipos de artefato.
 
-**Status no DCC atual:** parcialmente implementado como compilação manual na aba `Spec`.
-A ação **Compile context** escreve/atualiza uma seção delimitada por
+**Status no DCC atual:** implementado como compilação manual na aba `Spec`, com manifesto
+durável do DCC. A ação **Compile context** escreve/atualiza uma seção delimitada por
 `<!-- dcc:spec:start -->` / `<!-- dcc:spec:end -->` em `AGENTS.md` e `GEMINI.md`,
 preservando qualquer conteúdo humano fora dos marcadores e rejeitando alvos symlink.
-A aba também exibe se o contexto compilado está `Current`, `Missing`, `Stale`,
-`Invalid` ou apontando para symlink, comparando os arquivos nativos com a spec ativa sem
+Também grava `.devcommandcenter/context.json`, que registra a origem da spec ativa
+(`specRelativePath` + `specHash`) e a matrix de targets provider-native compilados pelo
+DCC. A aba exibe se o manifesto e os alvos compilados estão `Current`, `Missing`,
+`Stale`, `Invalid` ou apontando para symlink, comparando tudo com a spec ativa sem
 escrever nada. O re-anchor manual e o re-anchor automático pós-`/compact` tentam compilar
 a spec antes de reancorar a sessão; se a compilação falhar, o re-anchor por prompt ainda
 segue para preservar a recuperação de contexto. A compilação também roda best-effort após
-setup/criação da Mission e na reabertura/seleção de workspace local. Ainda falta ligar ao
-futuro manifesto de contexto/provider.
+setup/criação da Mission e na reabertura/seleção de workspace local.
 
 **Backlog imediato sugerido para Fase 5:**
 1. **Auto-compile no re-anchor e pós-`/compact`.** Antes de enviar o re-anchor, compilar
-   a spec para `AGENTS.md`/`GEMINI.md` para manter o contexto nativo sincronizado sem
-   depender do usuário lembrar do botão. **Status: implementado como best-effort.**
+   a spec para o manifesto e os alvos provider-native para manter o contexto nativo
+   sincronizado sem depender do usuário lembrar do botão. **Status: implementado como
+   best-effort.**
 2. **Indicador de contexto compilado stale/current.** Mostrar na aba `Spec` se
-   `AGENTS.md`/`GEMINI.md` batem com a spec ativa. **Status: implementado.**
+   o manifesto e os alvos provider-native batem com a spec ativa. **Status:
+   implementado.**
 3. **Hook de setup/reopen da Mission.** Automatizar a compilação ao preparar/reabrir a
    Mission, depois que o comando e a visibilidade na UI estiverem estáveis. **Status:
    implementado como best-effort.**
@@ -440,8 +443,8 @@ e a Fase 0 custa quase nada para descobrir isso.
 | Re-injeção contextual | ✅ | `Re-anchor` injeta spec + plano + validação salva, incluindo contexto de retomada e próxima fase quando a spec a define |
 | Re-injeção pós-compactação | ✅ Parcial | `/compact` concluído dispara re-anchor automático se houver spec ativa |
 | Resume cross-fase | ✅ | Aba `Spec` resume a próxima fase pendente quando a spec define fases e a continuação carrega esse foco no prompt |
-| Compilação cross-provider | ✅ Parcial | `Compile context` gera seção `dcc:spec` idempotente em `AGENTS.md`/`GEMINI.md` |
-| Frescor do contexto compilado | ✅ | Aba `Spec` compara `AGENTS.md`/`GEMINI.md` com a spec ativa sem escrever arquivos |
+| Compilação cross-provider | ✅ | `Compile context` gera seção `dcc:spec` idempotente em `AGENTS.md`/`GEMINI.md` e mantém `.devcommandcenter/context.json` com source + provider matrix |
+| Frescor do contexto compilado | ✅ | Aba `Spec` compara manifesto + alvos provider-native com a spec ativa sem escrever arquivos |
 | Auto-compile antes de re-anchor | ✅ Parcial | Re-anchor manual e pós-`/compact` compilam contexto best-effort antes do prompt |
 | Auto-compile setup/reopen | ✅ Parcial | Setup/criação e seleção local de workspace compilam spec ativa best-effort |
 
@@ -452,9 +455,8 @@ Este ledger existe para não perdermos o que ainda está deliberadamente incompl
 | Parcial | Por que ainda é parcial | Próximo corte recomendado |
 |---|---|---|
 | Re-injeção pós-compactação | Gatilho é conservador e best-effort; não cobre compactação interna do provider não exposta ao DCC | Adicionar eventos de compactação por provider quando existirem sinais confiáveis |
-| Compilação cross-provider | Alvos são `AGENTS.md`/`GEMINI.md`; ainda não há manifesto/provider matrix | Unificar com o futuro context compiler de skills e `context.json` |
 | Auto-compile antes de re-anchor | Best-effort para não bloquear recuperação por prompt | Exibir falha persistente na UI se houver erro repetido de compilação |
-| Auto-compile setup/reopen | Best-effort e local; não cobre backend remoto | Integrar ao manifesto/provider e aos eventos de workspace quando o backend remoto suportar escrita |
+| Auto-compile setup/reopen | Best-effort e local; não cobre backend remoto | Integrar o manifesto/provider matrix aos eventos de workspace quando o backend remoto suportar escrita |
 
 ---
 

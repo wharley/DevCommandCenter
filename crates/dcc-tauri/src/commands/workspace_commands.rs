@@ -49,7 +49,38 @@ use crate::{
 
 const DCC_SPEC_CONTEXT_START: &str = "<!-- dcc:spec:start -->";
 const DCC_SPEC_CONTEXT_END: &str = "<!-- dcc:spec:end -->";
-const DCC_SPEC_CONTEXT_TARGETS: [&str; 2] = ["AGENTS.md", "GEMINI.md"];
+const DCC_SPEC_CONTEXT_MANIFEST_PATH: &str = ".devcommandcenter/context.json";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MissionSpecContextTargetKind {
+    MarkdownSection,
+    ManifestJson,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MissionSpecContextTarget {
+    relative_path: &'static str,
+    provider_id: &'static str,
+    kind: MissionSpecContextTargetKind,
+}
+
+const DCC_SPEC_CONTEXT_TARGETS: [MissionSpecContextTarget; 3] = [
+    MissionSpecContextTarget {
+        relative_path: "AGENTS.md",
+        provider_id: "codex",
+        kind: MissionSpecContextTargetKind::MarkdownSection,
+    },
+    MissionSpecContextTarget {
+        relative_path: "GEMINI.md",
+        provider_id: "gemini",
+        kind: MissionSpecContextTargetKind::MarkdownSection,
+    },
+    MissionSpecContextTarget {
+        relative_path: DCC_SPEC_CONTEXT_MANIFEST_PATH,
+        provider_id: "dcc",
+        kind: MissionSpecContextTargetKind::ManifestJson,
+    },
+];
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -1611,32 +1642,38 @@ fn compile_mission_spec_context_for_path(
         return Err("mission spec source must stay inside .devcommandcenter/specs".to_string());
     }
     let spec_markdown = fs::read_to_string(&spec_path).map_err(|error| error.to_string())?;
-    let generated_section =
-        render_mission_spec_context_section(&spec_relative_path, &spec_markdown);
 
     let mut files = Vec::new();
-    for target_name in DCC_SPEC_CONTEXT_TARGETS {
-        let target = root_canonical.join(target_name);
-        if fs::symlink_metadata(&target)
+    for target in DCC_SPEC_CONTEXT_TARGETS {
+        let target_path = root_canonical.join(target.relative_path);
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        if fs::symlink_metadata(&target_path)
             .map(|metadata| metadata.file_type().is_symlink())
             .unwrap_or(false)
         {
-            return Err(format!("{target_name} must not be a symlink"));
+            return Err(format!("{} must not be a symlink", target.relative_path));
         }
 
-        let created = !target.exists();
+        let created = !target_path.exists();
         let current = if created {
             String::new()
         } else {
-            fs::read_to_string(&target).map_err(|error| error.to_string())?
+            fs::read_to_string(&target_path).map_err(|error| error.to_string())?
         };
-        let next = upsert_generated_context_section(&current, &generated_section)?;
+        let next = render_mission_spec_context_target_content(
+            target,
+            &spec_relative_path,
+            &spec_markdown,
+            &current,
+        )?;
         let updated = next != current;
         if updated {
-            fs::write(&target, next).map_err(|error| error.to_string())?;
+            fs::write(&target_path, next).map_err(|error| error.to_string())?;
         }
         files.push(CompiledMissionSpecContextFile {
-            relative_path: target_name.to_string(),
+            relative_path: target.relative_path.to_string(),
             created,
             updated,
         });
@@ -1683,13 +1720,11 @@ pub async fn mission_spec_context_status(
         return Err("mission spec source must stay inside .devcommandcenter/specs".to_string());
     }
     let spec_markdown = fs::read_to_string(&spec_path).map_err(|error| error.to_string())?;
-    let generated_section =
-        render_mission_spec_context_section(&spec_relative_path, &spec_markdown);
 
     let mut files = Vec::new();
-    for target_name in DCC_SPEC_CONTEXT_TARGETS {
-        let target = root_canonical.join(target_name);
-        let symlink = fs::symlink_metadata(&target)
+    for target in DCC_SPEC_CONTEXT_TARGETS {
+        let target_path = root_canonical.join(target.relative_path);
+        let symlink = fs::symlink_metadata(&target_path)
             .map(|metadata| metadata.file_type().is_symlink())
             .unwrap_or(false);
         let (state, message) = if symlink {
@@ -1697,17 +1732,22 @@ pub async fn mission_spec_context_status(
                 MissionSpecContextFileState::Symlink,
                 Some("context file target must not be a symlink".to_string()),
             )
-        } else if !target.exists() {
+        } else if !target_path.exists() {
             (
                 MissionSpecContextFileState::Missing,
                 Some("context file has not been generated yet".to_string()),
             )
         } else {
-            let current = fs::read_to_string(&target).map_err(|error| error.to_string())?;
-            classify_generated_context_section(&current, &generated_section)
+            let current = fs::read_to_string(&target_path).map_err(|error| error.to_string())?;
+            classify_mission_spec_context_target(
+                target,
+                &spec_relative_path,
+                &spec_markdown,
+                &current,
+            )?
         };
         files.push(MissionSpecContextFileStatus {
-            relative_path: target_name.to_string(),
+            relative_path: target.relative_path.to_string(),
             state,
             message,
         });
@@ -1718,6 +1758,24 @@ pub async fn mission_spec_context_status(
         .all(|file| matches!(file.state, MissionSpecContextFileState::Current));
 
     Ok(MissionSpecContextStatusOutput { current, files })
+}
+
+fn render_mission_spec_context_target_content(
+    target: MissionSpecContextTarget,
+    spec_relative_path: &str,
+    spec_markdown: &str,
+    current: &str,
+) -> Result<String, String> {
+    match target.kind {
+        MissionSpecContextTargetKind::MarkdownSection => {
+            let generated_section =
+                render_mission_spec_context_section(spec_relative_path, spec_markdown);
+            upsert_generated_context_section(current, &generated_section)
+        }
+        MissionSpecContextTargetKind::ManifestJson => {
+            render_mission_spec_context_manifest(spec_relative_path, spec_markdown)
+        }
+    }
 }
 
 fn render_mission_spec_context_section(spec_relative_path: &str, spec_markdown: &str) -> String {
@@ -1731,6 +1789,38 @@ Do not edit inside the `dcc:spec` markers; update the source spec instead.\n\n\
 {normalized_spec}\n\
 {DCC_SPEC_CONTEXT_END}\n"
     )
+}
+
+fn render_mission_spec_context_manifest(
+    spec_relative_path: &str,
+    spec_markdown: &str,
+) -> Result<String, String> {
+    let spec_hash = compute_mission_spec_hash(spec_markdown);
+    let manifest = serde_json::json!({
+        "dccContext": true,
+        "version": 1,
+        "kind": "mission_spec",
+        "source": {
+            "specRelativePath": spec_relative_path,
+            "specHash": spec_hash,
+        },
+        "targets": DCC_SPEC_CONTEXT_TARGETS
+            .iter()
+            .filter(|target| target.kind == MissionSpecContextTargetKind::MarkdownSection)
+            .map(|target| {
+                serde_json::json!({
+                    "provider": target.provider_id,
+                    "relativePath": target.relative_path,
+                    "format": "markdown",
+                    "injection": "dcc:spec-section",
+                    "startMarker": DCC_SPEC_CONTEXT_START,
+                    "endMarker": DCC_SPEC_CONTEXT_END,
+                })
+            })
+            .collect::<Vec<_>>(),
+    });
+    let pretty = serde_json::to_string_pretty(&manifest).map_err(|error| error.to_string())?;
+    Ok(format!("{pretty}\n"))
 }
 
 fn select_active_mission_spec_relative_path(
@@ -1840,6 +1930,58 @@ fn classify_generated_context_section(
             Some("context file has incomplete dcc:spec markers".to_string()),
         ),
     }
+}
+
+fn classify_mission_spec_context_target(
+    target: MissionSpecContextTarget,
+    spec_relative_path: &str,
+    spec_markdown: &str,
+    current: &str,
+) -> Result<(MissionSpecContextFileState, Option<String>), String> {
+    match target.kind {
+        MissionSpecContextTargetKind::MarkdownSection => Ok(classify_generated_context_section(
+            current,
+            &render_mission_spec_context_section(spec_relative_path, spec_markdown),
+        )),
+        MissionSpecContextTargetKind::ManifestJson => classify_generated_context_manifest(
+            current,
+            &render_mission_spec_context_manifest(spec_relative_path, spec_markdown)?,
+        ),
+    }
+}
+
+fn classify_generated_context_manifest(
+    current: &str,
+    generated_manifest: &str,
+) -> Result<(MissionSpecContextFileState, Option<String>), String> {
+    let current_json: Value = match serde_json::from_str(current) {
+        Ok(value) => value,
+        Err(_) => {
+            return Ok((
+                MissionSpecContextFileState::Invalid,
+                Some("context manifest is not valid JSON".to_string()),
+            ));
+        }
+    };
+    let generated_json: Value =
+        serde_json::from_str(generated_manifest).map_err(|error| error.to_string())?;
+    if current_json == generated_json {
+        Ok((MissionSpecContextFileState::Current, None))
+    } else {
+        Ok((
+            MissionSpecContextFileState::Stale,
+            Some("context manifest differs from the active spec and provider targets".to_string()),
+        ))
+    }
+}
+
+fn compute_mission_spec_hash(spec_markdown: &str) -> String {
+    let mut hash: u32 = 0x811c9dc5;
+    for byte in spec_markdown.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    format!("fnv1a32:{hash:08x}")
 }
 
 fn upsert_generated_context_section(
