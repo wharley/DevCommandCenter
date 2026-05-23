@@ -157,6 +157,11 @@
         "symlink": "Symlink"
       },
       "criteriaTitle": "Critérios de aceitação",
+      "criteriaCovered": "Coberto",
+      "criteriaUncovered": "Descoberto",
+      "criteriaCoverageSummary": "{{covered}}/{{total}} cobertos",
+      "criteriaCoveragePending": "{{count}} critério(s) ainda não cobertos pelo plano ativo.",
+      "criteriaCoverageComplete": "O plano ativo cobre todos os critérios de aceitação conhecidos.",
       "validationChecksTitle": "Checks mínimos de validação",
       "suggestedValidationChecksTitle": "Checks sugeridos de validação",
       "suggestedValidationChecksDescription": "A spec não declarou checks explícitos. Estes defaults vêm dos perfis de validação da própria spec.",

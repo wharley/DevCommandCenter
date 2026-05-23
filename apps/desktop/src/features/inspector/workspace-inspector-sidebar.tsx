@@ -820,6 +820,11 @@ export function WorkspaceInspectorSidebar({
 	);
 	const activePlanMarkdown =
 		latestPlanMessage?.plan?.markdown ?? latestPlanMessage?.content ?? null;
+	const coveredAcceptanceCriteriaCount = activePlanAcceptanceCriteriaCoverage.filter(
+		(criterion) => criterion.covered,
+	).length;
+	const uncoveredAcceptanceCriteriaCount =
+		activePlanAcceptanceCriteriaCoverage.length - coveredAcceptanceCriteriaCount;
 	const savedMissionValidationJson =
 		activeMissionSpec?.validation?.content ?? null;
 	const missionSpecContextStatusQuery = useQuery({
@@ -1423,18 +1428,52 @@ export function WorkspaceInspectorSidebar({
 									</div>
 									{activeMissionAcceptanceCriteria.length > 0 ? (
 										<div className="rounded-2xl border border-border/50 bg-muted/10 p-3">
-											<p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-												{t("inspector.spec.criteriaTitle")}
-											</p>
+											<div className="mb-2 flex items-center justify-between gap-2">
+												<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+													{t("inspector.spec.criteriaTitle")}
+												</p>
+												{latestPlanMessage ? (
+													<Badge variant="outline" className="h-5 text-[10px]">
+														{t("inspector.spec.criteriaCoverageSummary", {
+															covered: coveredAcceptanceCriteriaCount,
+															total: activePlanAcceptanceCriteriaCoverage.length,
+														})}
+													</Badge>
+												) : null}
+											</div>
+											{latestPlanMessage ? (
+												<p className="mb-3 text-[11px] leading-5 text-muted-foreground">
+													{uncoveredAcceptanceCriteriaCount > 0
+														? t("inspector.spec.criteriaCoveragePending", {
+																count: uncoveredAcceptanceCriteriaCount,
+															})
+														: t("inspector.spec.criteriaCoverageComplete")}
+												</p>
+											) : null}
 											<div className="grid gap-1.5">
-												{activeMissionAcceptanceCriteria.map((criterion) => (
+												{(latestPlanMessage
+													? activePlanAcceptanceCriteriaCoverage
+													: activeMissionAcceptanceCriteria
+												).map((criterion) => (
 													<div
 														key={criterion.id}
 														className="rounded-xl border border-border/50 bg-background/70 px-2.5 py-2"
 													>
-														<span className="font-mono text-[11px] font-semibold text-foreground">
-															{criterion.id}
-														</span>
+														<div className="flex items-center gap-2">
+															<span className="font-mono text-[11px] font-semibold text-foreground">
+																{criterion.id}
+															</span>
+															{"covered" in criterion ? (
+																<Badge
+																	variant="outline"
+																	className="h-5 text-[10px]"
+																>
+																	{criterion.covered
+																		? t("inspector.spec.criteriaCovered")
+																		: t("inspector.spec.criteriaUncovered")}
+																</Badge>
+															) : null}
+														</div>
 														{criterion.description ? (
 															<p className="mt-1 text-[12px] leading-5 text-muted-foreground">
 																{criterion.description}

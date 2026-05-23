@@ -345,11 +345,14 @@ inspector e ação **Generate plan**, que envia a spec em `planMode: true`.
 
 **Fase 3 — Loop de validação (custo: médio, é onde o SDD "fecha").**
 `acceptance_criteria` no frontmatter; `ParsedPlanStep` referencia critérios;
-`PlanReviewCard` mostra cobertura. "Mission pronta" = critérios satisfeitos.
+`PlanReviewCard` e a aba `Spec` mostram cobertura. "Mission pronta" = critérios satisfeitos.
 
-**Status no DCC atual:** parcialmente implementado. O DCC extrai critérios `AC-*` da
-spec e mostra cobertura no `PlanReviewCard` quando o plano referencia explicitamente os
-IDs. A aba `Spec` também oferece **Validate**, que envia ao agente um prompt de auditoria
+**Status no DCC atual:** implementado. O DCC extrai critérios `AC-*` da
+spec, pede `criteria[]` no plano estruturado, aceita fallback por IDs explícitos no texto
+do step e mostra cobertura tanto no `PlanReviewCard` quanto na aba `Spec`. O vínculo é
+deliberadamente **explícito**, não inferido semanticamente: o papel do DCC aqui é ligar
+artefatos versionados com rastreabilidade previsível, não adivinhar equivalência entre
+texto livre e requisito. A aba `Spec` também oferece **Validate**, que envia ao agente um prompt de auditoria
 para inspecionar o worktree e responder `PASS` / `FAIL` / `UNKNOWN` por critério sem
 alterar arquivos. A spec/template agora também pode declarar **checks mínimos de
 validação** (`validation_checks` no frontmatter ou seção `## Validation Checks`), que o
@@ -427,7 +430,7 @@ e a Fase 0 custa quase nada para descobrir isso.
 | `/spec` nativo | ✅ | Ação de cliente no composer, agnóstica de provider |
 | Spec no inspector | ✅ | Aba `Spec` lista specs via comando Rust limitado ao diretório DCC |
 | Spec → Plan | ✅ | `Generate plan` envia `buildPlanFromSpecPrompt(...)` em plan mode |
-| Cobertura `AC-*` no plano | ✅ Parcial | Prompt pede `criteria[]`, parser valida schema básico do plano estruturado e a UI exibe critérios por step; ainda não há vínculo semântico completo |
+| Cobertura `AC-*` no plano | ✅ | Prompt pede `criteria[]`, parser valida o plano estruturado e a UI mostra cobertura explícita por critério no plano e na aba `Spec` |
 | Validação assistida | ✅ | `Validate` pede auditoria, a spec define checks/perfis e o veredito captura critérios + checks executados/pulados/bloqueados |
 | Persistência do veredito | ✅ | `Save verdict` grava `.validation.json`, auto-save é opt-in, a UI mostra proveniência e cada save anexa `.validation.history.jsonl` |
 | Leitura do veredito salvo | ✅ | Aba `Spec` exibe o `.validation.json` associado à spec |
@@ -446,7 +449,6 @@ Este ledger existe para não perdermos o que ainda está deliberadamente incompl
 
 | Parcial | Por que ainda é parcial | Próximo corte recomendado |
 |---|---|---|
-| Cobertura `AC-*` no plano | Prompt, parser e UI já suportam `criteria[]`, mas ainda não entendem semântica além do mapeamento explícito | Só considerar inferência semântica se o plano estruturado continuar insuficiente no uso real |
 | Re-injeção contextual | Re-anchor restaura contexto, mas não cria workflow de fases | Só evoluir para workflow se specs reais mostrarem repetição de fases pendentes |
 | Re-injeção pós-compactação | Gatilho é conservador e best-effort; não cobre compactação interna do provider não exposta ao DCC | Adicionar eventos de compactação por provider quando existirem sinais confiáveis |
 | Resume cross-fase | O DCC já destaca pendências e expõe ação explícita; ainda não agenda automaticamente a próxima fase | Só automatizar se houver evidência de workflow repetitivo entre fases |

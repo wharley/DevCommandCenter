@@ -157,6 +157,11 @@
         "symlink": "Symlink"
       },
       "criteriaTitle": "Acceptance criteria",
+      "criteriaCovered": "Covered",
+      "criteriaUncovered": "Uncovered",
+      "criteriaCoverageSummary": "{{covered}}/{{total}} covered",
+      "criteriaCoveragePending": "{{count}} acceptance criteria item(s) are still not covered by the active plan.",
+      "criteriaCoverageComplete": "The active plan covers every known acceptance criterion.",
       "validationChecksTitle": "Minimum validation checks",
       "suggestedValidationChecksTitle": "Suggested validation checks",
       "suggestedValidationChecksDescription": "The spec did not declare explicit checks. These defaults come from the spec's own validation profiles.",
