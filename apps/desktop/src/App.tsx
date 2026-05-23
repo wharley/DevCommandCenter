@@ -360,6 +360,7 @@ export default function App() {
 	// query keys stable (still LOCAL_BACKEND_CACHE_KEY) so cached data lives
 	// across mounts; the remote branches below are unreachable now.
 	const activeRemoteEnvironment = null;
+	// Remote backend mode is not enabled in the current desktop runtime.
 	const isRemoteBackend = false;
 	const backendCacheKey = LOCAL_BACKEND_CACHE_KEY;
 
