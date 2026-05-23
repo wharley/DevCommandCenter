@@ -1425,6 +1425,9 @@ export function WorkspaceInspectorSidebar({
 										<p className="mt-2 text-[11px] leading-5 text-muted-foreground">
 											{t("inspector.spec.description")}
 										</p>
+										<p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+											{t("inspector.spec.compactAutoReanchorNote")}
+										</p>
 									</div>
 									<div className="rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
 										<div className="flex items-start justify-between gap-3">

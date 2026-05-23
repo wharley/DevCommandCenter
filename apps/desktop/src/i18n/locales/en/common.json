@@ -132,6 +132,7 @@
     "spec": {
       "kicker": "Mission spec",
       "description": "Versioned DCC state for this mission. Generate a plan from it when the requirements are ready.",
+      "compactAutoReanchorNote": "Automatic post-/compact re-anchor only fires when DCC observes an explicit `/compact` command. Provider-internal compaction still exposes no reliable signal.",
       "generatePlan": "Generate plan",
       "validate": "Validate",
       "reanchor": "Re-anchor",

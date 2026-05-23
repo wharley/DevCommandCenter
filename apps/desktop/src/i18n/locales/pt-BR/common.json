@@ -132,6 +132,7 @@
     "spec": {
       "kicker": "Spec da mission",
       "description": "Estado versionado do DCC para esta mission. Gere um plano a partir dela quando os requisitos estiverem prontos.",
+      "compactAutoReanchorNote": "O re-anchor automático pós-/compact só dispara quando o DCC observa um comando explícito `/compact`. Compactações internas do provider ainda não expõem sinal confiável.",
       "generatePlan": "Gerar plano",
       "validate": "Validar",
       "reanchor": "Reancorar",

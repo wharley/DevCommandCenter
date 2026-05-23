@@ -412,6 +412,11 @@ a spec antes de reancorar a sessão; se a compilação falhar, o re-anchor por p
 segue para preservar a recuperação de contexto, e a aba `Spec` passa a exibir uma falha
 persistente quando o auto-compile falha repetidamente. A compilação também roda
 best-effort após setup/criação da Mission e na reabertura/seleção de workspace local.
+Quando a compilação falha durante `create/setup`, o `WorkspaceSetupReport` agora registra
+o warning explicitamente em vez de perder isso só no log.
+O limite restante de pós-compactação também ficou explícito na UI: o auto re-anchor só
+dispara quando o DCC observa um comando `/compact` enviado pelo usuário; compactações
+internas do provider seguem sem sinal confiável no runtime atual.
 
 **Backlog imediato sugerido para Fase 5:**
 1. **Auto-compile no re-anchor e pós-`/compact`.** Antes de enviar o re-anchor, compilar
@@ -447,7 +452,7 @@ e a Fase 0 custa quase nada para descobrir isso.
 | Compilação cross-provider | ✅ | `Compile context` gera seção `dcc:spec` idempotente em `AGENTS.md`/`GEMINI.md` e mantém `.devcommandcenter/context.json` com source + provider matrix |
 | Frescor do contexto compilado | ✅ | Aba `Spec` compara manifesto + alvos provider-native com a spec ativa sem escrever arquivos |
 | Auto-compile antes de re-anchor | ✅ | Re-anchor manual e pós-`/compact` compilam contexto best-effort antes do prompt e a UI expõe falha persistente quando o compile repete erro |
-| Auto-compile setup/reopen | ✅ Parcial | Setup/criação e seleção local de workspace compilam spec ativa best-effort |
+| Auto-compile setup/reopen | ✅ Parcial | Setup/criação e seleção local compilam spec ativa; falha de compile no setup vira warning visível no `WorkspaceSetupReport`, mas backend remoto segue sem cobertura |
 
 ### Ledger dos parciais
 
@@ -455,8 +460,8 @@ Este ledger existe para não perdermos o que ainda está deliberadamente incompl
 
 | Parcial | Por que ainda é parcial | Próximo corte recomendado |
 |---|---|---|
-| Re-injeção pós-compactação | Gatilho é conservador e best-effort; não cobre compactação interna do provider não exposta ao DCC | Adicionar eventos de compactação por provider quando existirem sinais confiáveis |
-| Auto-compile setup/reopen | Best-effort e local; não cobre backend remoto | Integrar o manifesto/provider matrix aos eventos de workspace quando o backend remoto suportar escrita |
+| Re-injeção pós-compactação | Já cobre `/compact` explícito e isso ficou explícito na UI; ainda não cobre compactação interna do provider não exposta ao DCC | Adicionar eventos de compactação por provider quando existirem sinais confiáveis |
+| Auto-compile setup/reopen | Fluxo local já expõe warning de setup e alerta na aba `Spec`, mas não cobre backend remoto | Integrar o manifesto/provider matrix aos eventos de workspace quando o backend remoto suportar escrita |
 
 ---
 

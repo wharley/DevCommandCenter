@@ -18,7 +18,8 @@ use dcc_core::{
     domain::{
         repository::{Repository, RepositoryId},
         workspace::{
-            Workspace, WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus, WorkspaceState,
+            Workspace, WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus,
+            WorkspaceSetupStepReport, WorkspaceState,
         },
     },
     ports::{RepositoryRepo, WorkspaceRepo},
@@ -426,7 +427,9 @@ async fn persist_workspace_setup_outcome(
         .map_err(|error| error.to_string())
 }
 
-fn compile_active_mission_spec_context_for_workspace(workspace: &Workspace) {
+fn compile_active_mission_spec_context_for_workspace(
+    workspace: &Workspace,
+) -> Result<Option<String>, String> {
     match select_active_mission_spec_relative_path(
         resolve_workspace_active_root(workspace),
         &workspace.base_branch,
@@ -441,11 +444,42 @@ fn compile_active_mission_spec_context_for_workspace(workspace: &Workspace) {
             })
             .transpose()
     }) {
-        Ok(_) => {}
+        Ok(_) => Ok(None),
         Err(error) => {
             eprintln!("[dcc] mission spec setup compile failed: {error}");
+            Ok(Some(error))
         }
     }
+}
+
+fn append_mission_spec_compile_warning(
+    setup_report: &WorkspaceSetupReport,
+    compile_error: Option<String>,
+) -> WorkspaceSetupReport {
+    let Some(error) = compile_error.filter(|value| !value.trim().is_empty()) else {
+        return setup_report.clone();
+    };
+
+    let detail =
+        format!("Workspace setup completed, but mission spec context auto-compile failed: {error}");
+    let mut next = setup_report.clone();
+    next.steps.push(WorkspaceSetupStepReport {
+        label: "Compile mission spec context".to_string(),
+        command: "compile_mission_spec_context".to_string(),
+        source_path: DCC_SPEC_CONTEXT_MANIFEST_PATH.to_string(),
+        status: WorkspaceSetupStatus::Warning,
+        detail: Some(detail.clone()),
+    });
+    if matches!(
+        next.status,
+        WorkspaceSetupStatus::Completed | WorkspaceSetupStatus::Skipped
+    ) {
+        next.status = WorkspaceSetupStatus::Warning;
+    }
+    if next.message.is_none() {
+        next.message = Some(detail);
+    }
+    next
 }
 
 fn validate_git_relative_path(path: &str) -> Result<String, String> {
@@ -1225,7 +1259,8 @@ pub async fn create_workspace_for_repo(
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
     let setup_report = execute_workspace_setup_report(&finalized.workspace).await;
     let mut workspace = finalized.workspace;
-    compile_active_mission_spec_context_for_workspace(&workspace);
+    let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
+    let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
 
     Ok(CreateWorkspaceForRepoOutput {
@@ -1252,7 +1287,8 @@ pub async fn create_workspace_from_url(
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
     let setup_report = execute_workspace_setup_report(&finalized.workspace).await;
     let mut workspace = finalized.workspace;
-    compile_active_mission_spec_context_for_workspace(&workspace);
+    let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
+    let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
 
     Ok(CreateWorkspaceFromUrlOutput {
@@ -1275,7 +1311,8 @@ pub async fn workspace_run_setup(
 
     let setup_hints = collect_workspace_setup_hints(&workspace);
     let setup_report = execute_workspace_setup_report(&workspace).await;
-    compile_active_mission_spec_context_for_workspace(&workspace);
+    let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
+    let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
 
     Ok(WorkspaceRunSetupOutput {
