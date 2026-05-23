@@ -106,6 +106,7 @@ import {
 import { getStoredPreferredEditor } from "./features/sessions/workspace-editor-preferences";
 import type { WorkspaceGitPreviewSelection } from "./features/inspector/workspace-git-file-preview";
 import {
+	buildPlanFromSpecPrompt,
 	buildPlanImplementationPrompt,
 	buildPlanImplementationThreadTitle,
 } from "./features/panel/plan-content";
@@ -399,9 +400,9 @@ export default function App() {
 	const [pendingSessionNavigation, setPendingSessionNavigation] =
 		useState<PendingSessionNavigation | null>(null);
 	const [sessionActionSessionId, setSessionActionSessionId] = useState<string | null>(null);
-	const [inspectorTab, setInspectorTab] = useState<"activity" | "context" | "plan">(
-		"activity",
-	);
+	const [inspectorTab, setInspectorTab] = useState<
+		"activity" | "context" | "spec" | "plan"
+	>("activity");
 	const [sessionSnapshotsById, setSessionSnapshotsById] = useState<
 		Record<string, RuntimeSessionSnapshot>
 	>({});
@@ -1085,6 +1086,22 @@ export default function App() {
 		selectedSessionSnapshot,
 		selectedWorkspace,
 	]);
+
+	const handleGeneratePlanFromSpec = useCallback(
+		(specMarkdown: string) => {
+			const prompt = buildPlanFromSpecPrompt(specMarkdown);
+			openPlanSidebar();
+			void handleSubmitPrompt({
+				rawPrompt: prompt,
+				envelope: {
+					planMode: true,
+					effort: "medium",
+					fastMode: true,
+				},
+			});
+		},
+		[handleSubmitPrompt, openPlanSidebar],
+	);
 
 	const handleSelectProvider = useCallback(
 		(providerId: string) => {
@@ -1771,6 +1788,7 @@ export default function App() {
 								sessionId={selectedSessionSnapshot?.sessionId ?? null}
 								selectedPreview={editorSelection}
 								onSelectPreview={handleOpenEditorFile}
+								onGeneratePlanFromSpec={handleGeneratePlanFromSpec}
 								activeTab={inspectorTab}
 								onTabChange={setInspectorTab}
 							/>

@@ -118,6 +118,33 @@ export function isSteerDisabled(submitEnabled: boolean, sending: boolean) {
 	return !submitEnabled || !sending;
 }
 
+export function buildMissionSpecFilename(workspaceBranch: string | null) {
+	const source = workspaceBranch?.trim() || "mission";
+	const slug = source
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "");
+	return `${slug || "mission"}.spec.md`;
+}
+
+export function buildSpecDraftPrompt({
+	workspaceBranch,
+}: {
+	workspaceBranch: string | null;
+}) {
+	const specPath = `.devcommandcenter/specs/${buildMissionSpecFilename(workspaceBranch)}`;
+	return [
+		"Create or update the DCC mission spec for this worktree.",
+		"",
+		`Spec path: ${specPath}`,
+		"Template: .devcommandcenter/spec.template.md",
+		"",
+		"Use the request below as source material. If it is insufficient, ask concise clarifying questions. Do not implement code yet; stop after the spec is written or the questions are asked.",
+		"",
+		"Request:",
+	].join("\n");
+}
+
 export type ComposerContextDirectory = {
 	id: string;
 	label: string;

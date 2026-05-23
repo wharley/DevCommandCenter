@@ -38,8 +38,9 @@ use dcc_tauri::commands::{
     workspace_commands::{
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
-        ListLocalBranchesInput, ListLocalBranchesOutput, ListRepositoriesOutput,
-        ListWorkspacesOutput, RepositoryIdInput, WorkspaceContinueFromBaseBranchInput,
+        ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
+        ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput, MissionSpecEntry,
+        RepositoryIdInput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
         WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput,
         WorkspaceGitPathInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
@@ -71,6 +72,7 @@ struct WorkspaceMethods {
     workspace_forge_context: String,
     list_local_branches: String,
     list_git_tracked_files: String,
+    list_mission_specs: String,
     list_child_directories: String,
     list_workspaces: String,
     list_repositories: String,
@@ -164,6 +166,9 @@ fn main() {
         .typ::<ListLocalBranchesOutput>()
         .typ::<ListGitTrackedFilesInput>()
         .typ::<ListGitTrackedFilesOutput>()
+        .typ::<ListMissionSpecsInput>()
+        .typ::<MissionSpecEntry>()
+        .typ::<ListMissionSpecsOutput>()
         .typ::<ListChildDirectoriesInput>()
         .typ::<ListChildDirectoriesOutput>()
         .typ::<ListWorkspacesOutput>()
@@ -237,6 +242,7 @@ fn main() {
                 workspace_forge_context: "workspace_forge_context".to_string(),
                 list_local_branches: "list_local_branches".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),
+                list_mission_specs: "list_mission_specs".to_string(),
                 list_child_directories: "list_child_directories".to_string(),
                 list_workspaces: "list_workspaces".to_string(),
                 list_repositories: "list_repositories".to_string(),

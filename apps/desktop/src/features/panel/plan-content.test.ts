@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildCollapsedPlanPreviewMarkdown,
+	buildPlanFromSpecPrompt,
 	buildPlanImplementationPrompt,
 	buildPlanImplementationThreadTitle,
 	normalizePlanContentForExport,
@@ -57,5 +58,24 @@ describe("plan-content", () => {
 			"PLEASE IMPLEMENT THIS PLAN:\n# Mission Plan\n\nShip the dashboard.",
 		);
 		expect(buildPlanImplementationThreadTitle(markdown)).toBe("Implement Mission Plan");
+	});
+
+	it("builds a planning prompt from a mission spec without requesting implementation", () => {
+		const spec = [
+			"---",
+			"status: draft",
+			"acceptance_criteria:",
+			"  - id: AC-1",
+			"    description: Dashboard loads the current workspace.",
+			"---",
+			"# Dashboard spec",
+		].join("\n");
+
+		const prompt = buildPlanFromSpecPrompt(spec);
+
+		expect(prompt).toContain("PLEASE TURN THIS SPEC INTO AN IMPLEMENTATION PLAN.");
+		expect(prompt).toContain("Do not implement yet.");
+		expect(prompt).toContain("acceptance criteria");
+		expect(prompt).toContain("# Dashboard spec");
 	});
 });

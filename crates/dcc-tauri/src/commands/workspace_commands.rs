@@ -122,6 +122,26 @@ pub struct ListGitTrackedFilesOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ListMissionSpecsInput {
+    pub workspace_root: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MissionSpecEntry {
+    pub relative_path: String,
+    pub name: String,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListMissionSpecsOutput {
+    pub specs: Vec<MissionSpecEntry>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct ListChildDirectoriesInput {
     pub path: String,
 }
@@ -1206,6 +1226,67 @@ pub async fn list_git_tracked_files(
     paths.dedup();
 
     Ok(ListGitTrackedFilesOutput { paths })
+}
+
+/// Mission specs are intentionally scoped to DCC-owned worktree state.
+#[tauri::command]
+pub async fn list_mission_specs(
+    state: State<'_, WorkspaceCommandState>,
+    input: ListMissionSpecsInput,
+) -> Result<ListMissionSpecsOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Ok(ListMissionSpecsOutput { specs: Vec::new() });
+    }
+
+    let specs_dir = PathBuf::from(root).join(".devcommandcenter").join("specs");
+    if !specs_dir.is_dir() {
+        return Ok(ListMissionSpecsOutput { specs: Vec::new() });
+    }
+
+    let root_canonical = PathBuf::from(root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let specs_canonical = specs_dir
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !specs_canonical.starts_with(&root_canonical) {
+        return Err("mission specs directory must stay inside the workspace".to_string());
+    }
+
+    let mut specs = Vec::new();
+    for entry in fs::read_dir(&specs_dir).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !file_name.ends_with(".spec.md") {
+            continue;
+        }
+
+        let file_canonical = path.canonicalize().map_err(|error| error.to_string())?;
+        if !file_canonical.starts_with(&specs_canonical) {
+            continue;
+        }
+
+        let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        specs.push(MissionSpecEntry {
+            relative_path: format!(".devcommandcenter/specs/{file_name}"),
+            name: file_name.to_string(),
+            content,
+        });
+    }
+
+    specs.sort_by(|a, b| a.name.cmp(&b.name));
+
+    Ok(ListMissionSpecsOutput { specs })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

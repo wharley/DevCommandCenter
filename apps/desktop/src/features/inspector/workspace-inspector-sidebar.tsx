@@ -42,8 +42,10 @@ import {
 	workspaceGitPush,
 	workspaceRunSetup,
 } from "@/lib/workspace-api";
+import { buildMissionSpecFilename } from "@/features/composer/WorkspaceComposer.logic";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./use-workspace-git-branch-diff";
+import { useWorkspaceMissionSpecs } from "./use-workspace-mission-specs";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
 import {
 	useWorkspaceForgeContext,
@@ -82,6 +84,7 @@ type WorkspaceInspectorSidebarProps = {
 	sessionEvents: CoreEvent[];
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+	onGeneratePlanFromSpec: (specMarkdown: string) => void;
 	activeTab: InspectorTab;
 	onTabChange: (tab: InspectorTab) => void;
 };
@@ -90,7 +93,7 @@ const MIN_SECTION_HEIGHT = 128;
 const MAX_SECTION_HEIGHT = 640;
 const INITIAL_CHANGES_HEIGHT = 200;
 
-type InspectorTab = "activity" | "context" | "plan";
+type InspectorTab = "activity" | "context" | "spec" | "plan";
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
 	return (
@@ -336,6 +339,7 @@ export function WorkspaceInspectorSidebar({
 	sessionEvents,
 	selectedPreview,
 	onSelectPreview,
+	onGeneratePlanFromSpec,
 	activeTab,
 	onTabChange,
 }: WorkspaceInspectorSidebarProps) {
@@ -715,6 +719,13 @@ export function WorkspaceInspectorSidebar({
 	);
 	const activePlanMessage = planFollowUpState.activePlanMessage;
 	const latestPlanMessage = planFollowUpState.latestPlanMessage;
+	const missionSpecsQuery = useWorkspaceMissionSpecs(workspacePath);
+	const missionSpecs = missionSpecsQuery.data?.specs ?? [];
+	const preferredSpecName = buildMissionSpecFilename(workspaceBranch);
+	const activeMissionSpec =
+		missionSpecs.find((spec) => spec.name === preferredSpecName) ??
+		missionSpecs[0] ??
+		null;
 
 	useEffect(() => {
 		autoOpenedPlanMessageIdRef.current = null;
@@ -856,7 +867,12 @@ export function WorkspaceInspectorSidebar({
 				<Tabs
 					value={activeTab}
 					onValueChange={(value) => {
-						if (value === "activity" || value === "context" || value === "plan") {
+						if (
+							value === "activity" ||
+							value === "context" ||
+							value === "spec" ||
+							value === "plan"
+						) {
 							onTabChange(value);
 						}
 					}}
@@ -889,6 +905,14 @@ export function WorkspaceInspectorSidebar({
 									</span>
 									) : null}
 							</TabsTrigger>
+								<TabsTrigger value="spec" className="h-9 rounded-none px-3 text-[12px]">
+									{t("inspector.tabs.spec")}
+									{missionSpecs.length > 0 ? (
+										<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
+											({missionSpecs.length})
+										</span>
+									) : null}
+								</TabsTrigger>
 								<TabsTrigger value="plan" className="h-9 rounded-none px-3 text-[12px]">
 									{t("inspector.tabs.plan")}
 									{latestPlanMessage ? (
@@ -1111,6 +1135,56 @@ export function WorkspaceInspectorSidebar({
 									{t("inspector.terminalNote")}
 								</p>
 							</div>
+						</TabsContent>
+
+						<TabsContent
+							value="spec"
+							className="mt-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
+						>
+							{activeMissionSpec ? (
+								<div className="space-y-3">
+									<div className="rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
+										<div className="flex items-start justify-between gap-3">
+											<div className="min-w-0">
+												<p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+													{t("inspector.spec.kicker")}
+												</p>
+												<p className="mt-1 truncate font-mono text-[12px] text-foreground">
+													{activeMissionSpec.relativePath}
+												</p>
+											</div>
+											<Button
+												type="button"
+												size="sm"
+												variant="outline"
+												className="h-8 shrink-0 rounded-lg px-2.5 text-[11px]"
+												onClick={() => onGeneratePlanFromSpec(activeMissionSpec.content)}
+											>
+												{t("inspector.spec.generatePlan")}
+											</Button>
+										</div>
+										<p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+											{t("inspector.spec.description")}
+										</p>
+									</div>
+									<pre className="max-h-[52vh] overflow-auto rounded-2xl border border-border/50 bg-muted/20 p-3 text-[11px] leading-5 text-foreground whitespace-pre-wrap">
+										{activeMissionSpec.content}
+									</pre>
+								</div>
+							) : (
+								<div className="flex min-h-full items-center justify-center px-4 py-8 text-center">
+									<div className="max-w-sm">
+										<p className="text-[13px] font-medium text-foreground">
+											{missionSpecsQuery.isLoading
+												? t("inspector.spec.loadingTitle")
+												: t("inspector.spec.emptyTitle")}
+										</p>
+										<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+											{t("inspector.spec.emptyDescription")}
+										</p>
+									</div>
+								</div>
+							)}
 						</TabsContent>
 
 						<TabsContent

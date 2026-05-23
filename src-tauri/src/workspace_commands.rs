@@ -5,10 +5,10 @@ use dcc_tauri::{
     commands::workspace_commands::{
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
-        ListLocalBranchesInput, ListLocalBranchesOutput, ListRepositoriesOutput,
-        ListWorkspacesOutput, RepositoryIdInput, WorkspaceContinueFromBaseBranchInput,
-        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
-        WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
+        ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
+        ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
+        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
+        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
         WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceIdInput,
         WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
@@ -70,6 +70,14 @@ pub async fn list_git_tracked_files(
     input: ListGitTrackedFilesInput,
 ) -> Result<ListGitTrackedFilesOutput, String> {
     dcc_tauri::commands::workspace_commands::list_git_tracked_files(state, input).await
+}
+
+#[tauri::command]
+pub async fn list_mission_specs(
+    state: State<'_, WorkspaceCommandState>,
+    input: ListMissionSpecsInput,
+) -> Result<ListMissionSpecsOutput, String> {
+    dcc_tauri::commands::workspace_commands::list_mission_specs(state, input).await
 }
 
 #[tauri::command]

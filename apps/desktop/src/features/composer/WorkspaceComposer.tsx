@@ -44,6 +44,7 @@ import {
 } from "./effort";
 import {
 	buildComposerContextDirectories,
+	buildSpecDraftPrompt,
 	composerToolbarTriggerClassName,
 	getComposerDraftKey,
 	isComposerSubmitEnabled,
@@ -281,6 +282,13 @@ export function WorkspaceComposer({
 		[appendContextDirectory],
 	);
 
+	const insertSpecDraftPrompt = useCallback(
+		(editor: LexicalEditor) => {
+			setEditorText(editor, buildSpecDraftPrompt({ workspaceBranch }));
+		},
+		[workspaceBranch],
+	);
+
 	const inputDisabled = disabled;
 	const toolbarDisabled = disabled;
 	const hasProvider = Boolean(selectedProviderId);
@@ -384,6 +392,7 @@ export function WorkspaceComposer({
 					popupAnchorRef={composerRootRef}
 					clientActionHandlers={{
 						"add-dir": $insertAddDirTrigger,
+						spec: insertSpecDraftPrompt,
 					}}
 				/>
 				<AddDirTypeaheadPlugin

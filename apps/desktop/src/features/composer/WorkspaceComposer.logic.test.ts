@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildComposerContextDirectories,
+	buildMissionSpecFilename,
+	buildSpecDraftPrompt,
 	canSendPrompt,
 	decideSend,
 	getComposerDraftKey,
@@ -12,6 +14,21 @@ import {
 } from "./WorkspaceComposer.logic";
 
 describe("WorkspaceComposer.logic", () => {
+	it("derives a stable mission spec filename from the workspace branch", () => {
+		expect(buildMissionSpecFilename("feature/SDD Spike")).toBe(
+			"feature-sdd-spike.spec.md",
+		);
+		expect(buildMissionSpecFilename(null)).toBe("mission.spec.md");
+	});
+
+	it("builds a spec draft prompt that writes the versioned DCC spec only", () => {
+		const prompt = buildSpecDraftPrompt({ workspaceBranch: "feature/sdd" });
+
+		expect(prompt).toContain(".devcommandcenter/specs/feature-sdd.spec.md");
+		expect(prompt).toContain(".devcommandcenter/spec.template.md");
+		expect(prompt).toContain("Do not implement code yet");
+	});
+
 	it("builds a stable draft key", () => {
 		expect(getComposerDraftKey("alpha")).toBe("dcc.workspace.composer.draft.alpha");
 	});

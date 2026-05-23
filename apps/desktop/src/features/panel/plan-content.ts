@@ -79,6 +79,18 @@ export function buildPlanImplementationPrompt(planMarkdown: string) {
 	return `PLEASE IMPLEMENT THIS PLAN:\n${normalizePlanText(planMarkdown)}`;
 }
 
+export function buildPlanFromSpecPrompt(specMarkdown: string) {
+	return [
+		"PLEASE TURN THIS SPEC INTO AN IMPLEMENTATION PLAN.",
+		"",
+		"Do not implement yet. Inspect the repository first, then return a concise structured plan with a title, summary, and checklist steps.",
+		"When the spec lists acceptance criteria, make the plan explicitly cover them.",
+		"",
+		"SPEC:",
+		normalizePlanText(specMarkdown),
+	].join("\n");
+}
+
 export function buildPlanImplementationThreadTitle(
 	planMarkdown: string,
 	explicitTitle?: string | null,

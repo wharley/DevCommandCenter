@@ -19,6 +19,11 @@ export const DEFAULT_SLASH_COMMANDS: readonly SlashCommandEntry[] = [
 		source: "builtin",
 	},
 	{
+		name: "spec",
+		description: "Draft or update this mission spec",
+		source: "client-action",
+	},
+	{
 		name: "context",
 		description: "Show current context budget",
 		source: "builtin",
