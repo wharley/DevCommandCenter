@@ -119,8 +119,10 @@ import {
 	buildPlanImplementationThreadTitle,
 } from "./features/panel/plan-content";
 import {
+	buildMissionContinueCriterionPrompt,
 	buildMissionReanchorPrompt,
 	buildMissionValidationPrompt,
+	type MissionResumeCriterion,
 } from "./features/spec/mission-spec-content";
 import { derivePlanFollowUpState } from "./features/panel/plan-follow-up";
 import { projectWorkspaceMessages } from "./features/panel/thread-projection";
@@ -1341,6 +1343,39 @@ export default function App() {
 		[handleSubmitPrompt, queryClient, selectedLocalWorkspacePath, setInspectorCollapsed],
 	);
 
+	const handleContinueMissionCriterion = useCallback(
+		async (input: {
+			specRelativePath: string;
+			specMarkdown: string;
+			planMarkdown: string | null;
+			validationJson: string | null;
+			criterion: MissionResumeCriterion;
+		}) => {
+			if (selectedLocalWorkspacePath) {
+				await compileMissionSpecContextBestEffort({
+					workspaceRoot: selectedLocalWorkspacePath,
+					specRelativePath: input.specRelativePath,
+				});
+				await queryClient.invalidateQueries({
+					queryKey: ["missionSpecContextStatus", selectedLocalWorkspacePath],
+				});
+			}
+
+			const prompt = buildMissionContinueCriterionPrompt(input);
+			setInspectorCollapsed(false);
+			setInspectorTab("activity");
+			void handleSubmitPrompt({
+				rawPrompt: prompt,
+				envelope: {
+					planMode: false,
+					effort: "medium",
+					fastMode: true,
+				},
+			});
+		},
+		[handleSubmitPrompt, queryClient, selectedLocalWorkspacePath, setInspectorCollapsed],
+	);
+
 	const handleSelectProvider = useCallback(
 		(providerId: string) => {
 			setSelectedProviderId(providerId);
@@ -2029,6 +2064,7 @@ export default function App() {
 								onGeneratePlanFromSpec={handleGeneratePlanFromSpec}
 								onValidateMissionSpec={handleValidateMissionSpec}
 								onReanchorMissionSpec={handleReanchorMissionSpec}
+								onContinueMissionCriterion={handleContinueMissionCriterion}
 								activeTab={inspectorTab}
 								onTabChange={setInspectorTab}
 							/>

@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, CircleHelp, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { saveMissionValidation } from "@/lib/workspace-api";
+import { WORKSPACE_MISSION_SPECS_QUERY_KEY } from "@/features/inspector/use-workspace-mission-specs";
 import type {
 	MissionValidationStatus,
 	ParsedMissionValidationReport,
@@ -43,6 +45,7 @@ export function MissionValidationCard({
 	showSaveAction = true,
 	isStale = false,
 }: MissionValidationCardProps) {
+	const queryClient = useQueryClient();
 	const [isSaving, setIsSaving] = useState(false);
 	const passCount = report.criteria.filter((criterion) => criterion.status === "PASS").length;
 	const failCount = report.criteria.filter((criterion) => criterion.status === "FAIL").length;
@@ -80,6 +83,9 @@ export function MissionValidationCard({
 			});
 			toast.success("Validation saved", {
 				description: result.relativePath,
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_MISSION_SPECS_QUERY_KEY, root],
 			});
 		} catch (error) {
 			toast.error(

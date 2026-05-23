@@ -172,6 +172,54 @@ export function buildMissionReanchorPrompt({
 	].join("\n");
 }
 
+export function buildMissionContinueCriterionPrompt({
+	specMarkdown,
+	planMarkdown,
+	validationJson,
+	criterion,
+}: {
+	specMarkdown: string;
+	planMarkdown?: string | null;
+	validationJson?: string | null;
+	criterion: MissionResumeCriterion;
+}) {
+	const normalizedSpec = specMarkdown.trim();
+	const normalizedPlan = planMarkdown?.trim() ?? "";
+	const normalizedValidation = validationJson?.trim() ?? "";
+	const description = criterion.description.trim();
+	const evidence = criterion.evidence.trim();
+	const nextAction = criterion.nextAction.trim();
+	return [
+		"CONTINUE THE NEXT PENDING MISSION CRITERION.",
+		"",
+		"Focus only on the next pending acceptance criterion below.",
+		"Implement the smallest change set that moves this criterion toward PASS.",
+		"After implementing, summarize what changed and what still remains if the criterion is not fully satisfied.",
+		"",
+		`TARGET CRITERION: ${criterion.id} [${criterion.status}]`,
+		...(description ? [`Description: ${description}`] : []),
+		...(nextAction ? [`Suggested next action: ${nextAction}`] : []),
+		...(evidence ? [`Current evidence or gap: ${evidence}`] : []),
+		"",
+		"MISSION SPEC:",
+		normalizedSpec,
+		...(normalizedPlan
+			? [
+					"",
+					"ACTIVE PLAN:",
+					normalizedPlan,
+				]
+			: []),
+		...(normalizedValidation
+			? [
+					"",
+					"SAVED VALIDATION VERDICT:",
+					normalizedValidation,
+				]
+			: []),
+	].join("\n");
+}
+
 export function parseMissionValidationReport(
 	content: string,
 ): ParsedMissionValidationReport | null {

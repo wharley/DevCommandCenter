@@ -135,6 +135,7 @@
       "generatePlan": "Generate plan",
       "validate": "Validate",
       "reanchor": "Re-anchor",
+      "continueNext": "Continue next",
       "compileContext": "Compile context",
       "compileContextLoading": "Compiling mission context...",
       "compileContextSuccess": "Mission context compiled",

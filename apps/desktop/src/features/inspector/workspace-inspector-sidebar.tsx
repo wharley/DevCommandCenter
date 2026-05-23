@@ -37,6 +37,7 @@ import {
 	computeMissionSpecHash,
 	parseMissionValidationReport,
 	parseMissionAcceptanceCriteria,
+	type MissionResumeCriterion,
 } from "@/features/spec/mission-spec-content";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import { MissionValidationCard } from "@/features/panel/message-components/MissionValidationCard";
@@ -105,6 +106,13 @@ type WorkspaceInspectorSidebarProps = {
 		specMarkdown: string;
 		planMarkdown: string | null;
 		validationJson: string | null;
+	}) => void;
+	onContinueMissionCriterion: (input: {
+		specRelativePath: string;
+		specMarkdown: string;
+		planMarkdown: string | null;
+		validationJson: string | null;
+		criterion: MissionResumeCriterion;
 	}) => void;
 	activeTab: InspectorTab;
 	onTabChange: (tab: InspectorTab) => void;
@@ -363,6 +371,7 @@ export function WorkspaceInspectorSidebar({
 	onGeneratePlanFromSpec,
 	onValidateMissionSpec,
 	onReanchorMissionSpec,
+	onContinueMissionCriterion,
 	activeTab,
 	onTabChange,
 }: WorkspaceInspectorSidebarProps) {
@@ -819,6 +828,7 @@ export function WorkspaceInspectorSidebar({
 				: null,
 		[activeMissionSpec, savedMissionValidationJson],
 	);
+	const nextMissionResumeCriterion = activeMissionResumeContext?.criteria[0] ?? null;
 	const handleCompileMissionSpecContext = useCallback(async () => {
 		const root = workspacePath?.trim();
 		if (!root || !activeMissionSpec) {
@@ -1423,9 +1433,30 @@ export function WorkspaceInspectorSidebar({
 														)}
 													</p>
 												</div>
-												<Badge variant="secondary" className="shrink-0 text-[10px]">
-													{activeMissionResumeContext.criteria.length}
-												</Badge>
+												<div className="flex items-center gap-1.5">
+													<Badge variant="secondary" className="shrink-0 text-[10px]">
+														{activeMissionResumeContext.criteria.length}
+													</Badge>
+													{activeMissionSpec && nextMissionResumeCriterion ? (
+														<Button
+															type="button"
+															size="sm"
+															variant="outline"
+															className="h-8 rounded-lg px-2.5 text-[11px]"
+															onClick={() =>
+																onContinueMissionCriterion({
+																	specRelativePath: activeMissionSpec.relativePath,
+																	specMarkdown: activeMissionSpec.content,
+																	planMarkdown: activePlanMarkdown,
+																	validationJson: savedMissionValidationJson,
+																	criterion: nextMissionResumeCriterion,
+																})
+															}
+														>
+															{t("inspector.spec.continueNext")}
+														</Button>
+													) : null}
+												</div>
 											</div>
 											{activeMissionResumeContext.criteria.length > 0 ? (
 												<div className="mt-3 grid gap-1.5">

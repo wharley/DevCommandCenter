@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildMissionAcceptanceCriteriaCoverage,
+	buildMissionContinueCriterionPrompt,
 	buildMissionReanchorPrompt,
 	buildMissionResumeContext,
 	buildMissionValidationPrompt,
@@ -158,6 +159,27 @@ describe("mission-spec-content", () => {
 				},
 			],
 		});
+	});
+
+	it("builds a prompt to continue the next pending criterion", () => {
+		const prompt = buildMissionContinueCriterionPrompt({
+			specMarkdown: "## Acceptance Criteria\n- AC-2: Persist validation.",
+			planMarkdown: "- [ ] Save verdict flow. Covers AC-2.",
+			validationJson: '{"dccMissionValidation":true}',
+			criterion: {
+				id: "AC-2",
+				description: "Persist validation.",
+				status: "FAIL",
+				evidence: "No saved file found.",
+				nextAction: "Save validation verdict.",
+			},
+		});
+
+		expect(prompt).toContain("CONTINUE THE NEXT PENDING MISSION CRITERION.");
+		expect(prompt).toContain("TARGET CRITERION: AC-2 [FAIL]");
+		expect(prompt).toContain("Suggested next action: Save validation verdict.");
+		expect(prompt).toContain("ACTIVE PLAN:");
+		expect(prompt).toContain("SAVED VALIDATION VERDICT:");
 	});
 
 	it("marks stale validation as historical context in re-anchor prompts", () => {

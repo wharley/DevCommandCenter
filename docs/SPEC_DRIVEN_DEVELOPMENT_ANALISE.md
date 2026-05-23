@@ -374,7 +374,9 @@ plano ativo e validação salva. Ainda falta detecção automática da
 próxima fase pendente como workflow, mas o prompt de re-anchor já deriva um contexto de
 retomada: lista critérios `FAIL` / `UNKNOWN`, critérios não validados e trata validação
 `stale` ou sem `specHash` como histórico, não como prova. A aba `Spec` também expõe esse
-contexto de retomada para o usuário antes de enviar o re-anchor.
+contexto de retomada para o usuário antes de enviar o re-anchor. Além disso, a aba agora
+oferece uma ação explícita para continuar o **primeiro critério pendente**, sem inferir
+workflow completo.
 
 **Fase 5 — Compilação cross-provider (custo: médio, é o diferencial).**
 Compila a spec para `AGENTS.md`/`GEMINI.md`. Funde-se ao "context compiler" do doc de
@@ -415,16 +417,32 @@ e a Fase 0 custa quase nada para descobrir isso.
 | Spec → Plan | ✅ | `Generate plan` envia `buildPlanFromSpecPrompt(...)` em plan mode |
 | Cobertura `AC-*` no plano | ✅ Parcial | Cobertura estrutural por referência explícita ao ID |
 | Validação assistida | ✅ Parcial | `Validate` pede auditoria e card JSON `dccMissionValidation` |
-| Persistência do veredito | ✅ Parcial | `Save verdict` grava `.devcommandcenter/specs/<mission>.validation.json` |
+| Persistência do veredito | ✅ Parcial | `Save verdict` grava `.validation.json` e invalida a aba `Spec`; ainda é ação manual |
 | Leitura do veredito salvo | ✅ | Aba `Spec` exibe o `.validation.json` associado à spec |
 | Frescor do veredito | ✅ | `specHash` marca validação salva como `Stale` quando a spec muda |
 | Re-injeção contextual | ✅ Parcial | `Re-anchor` injeta spec + plano + validação salva manualmente |
 | Re-injeção pós-compactação | ✅ Parcial | `/compact` concluído dispara re-anchor automático se houver spec ativa |
-| Resume cross-fase | ✅ Parcial | Aba `Spec` e re-anchor destacam critérios pendentes/sem validação e invalidam contexto stale/sem hash |
+| Resume cross-fase | ✅ Parcial | Aba `Spec` destaca critérios pendentes e oferece ação explícita para continuar a próxima pendência |
 | Compilação cross-provider | ✅ Parcial | `Compile context` gera seção `dcc:spec` idempotente em `AGENTS.md`/`GEMINI.md` |
 | Frescor do contexto compilado | ✅ | Aba `Spec` compara `AGENTS.md`/`GEMINI.md` com a spec ativa sem escrever arquivos |
 | Auto-compile antes de re-anchor | ✅ Parcial | Re-anchor manual e pós-`/compact` compilam contexto best-effort antes do prompt |
 | Auto-compile setup/reopen | ✅ Parcial | Setup/criação e seleção local de workspace compilam spec ativa best-effort |
+
+### Ledger dos parciais
+
+Este ledger existe para não perdermos o que ainda está deliberadamente incompleto.
+
+| Parcial | Por que ainda é parcial | Próximo corte recomendado |
+|---|---|---|
+| Cobertura `AC-*` no plano | Só detecta referência textual explícita ao ID; não entende semântica do step | Permitir que o agente gere `criteria: ["AC-1"]` em JSON estruturado do plano |
+| Validação assistida | A auditoria depende do agente executar/verificar evidências; o DCC só estrutura e renderiza | Criar política de checks mínimos por spec ou por template, sem impor metodologia |
+| Persistência do veredito | Salvamento ainda é manual; a UX já atualiza a aba `Spec` após salvar | Decidir se auto-save é aceitável ou se deve continuar explícito por segurança |
+| Re-injeção contextual | Re-anchor restaura contexto, mas não cria workflow de fases | Só evoluir para workflow se specs reais mostrarem repetição de fases pendentes |
+| Re-injeção pós-compactação | Gatilho é conservador e best-effort; não cobre compactação interna do provider não exposta ao DCC | Adicionar eventos de compactação por provider quando existirem sinais confiáveis |
+| Resume cross-fase | O DCC já destaca pendências e expõe ação explícita; ainda não agenda automaticamente a próxima fase | Só automatizar se houver evidência de workflow repetitivo entre fases |
+| Compilação cross-provider | Alvos são `AGENTS.md`/`GEMINI.md`; ainda não há manifesto/provider matrix | Unificar com o futuro context compiler de skills e `context.json` |
+| Auto-compile antes de re-anchor | Best-effort para não bloquear recuperação por prompt | Exibir falha persistente na UI se houver erro repetido de compilação |
+| Auto-compile setup/reopen | Best-effort e local; não cobre backend remoto | Integrar ao manifesto/provider e aos eventos de workspace quando o backend remoto suportar escrita |
 
 ---
 
