@@ -285,6 +285,7 @@ describe("mission-spec-content", () => {
 			}),
 		).toMatchObject({
 			state: "pending",
+			nextPhaseTitle: null,
 			criteria: [
 				{
 					id: "AC-2",
@@ -302,6 +303,43 @@ describe("mission-spec-content", () => {
 		});
 	});
 
+	it("tracks the next pending phase when the spec is organized by phases", () => {
+		const specMarkdown = [
+			"# Spec",
+			"",
+			"## Phase 1: Foundation",
+			"### Acceptance Criteria",
+			"- AC-1: Foundation done.",
+			"",
+			"## Phase 2: Integration",
+			"### Acceptance Criteria",
+			"- AC-2: Integration done.",
+			"- AC-3: Handoff done.",
+		].join("\n");
+
+		expect(
+			buildMissionResumeContext({
+				specMarkdown,
+				validationJson: JSON.stringify({
+					dccMissionValidation: true,
+					specHash: computeMissionSpecHash(specMarkdown),
+					criteria: [
+						{ id: "AC-1", status: "PASS", evidence: "Done.", nextAction: "" },
+						{
+							id: "AC-2",
+							status: "FAIL",
+							evidence: "Integration missing.",
+							nextAction: "Implement integration flow.",
+						},
+					],
+				}),
+			}),
+		).toMatchObject({
+			state: "pending",
+			nextPhaseTitle: "Integration",
+		});
+	});
+
 	it("builds a prompt to continue the next pending criterion", () => {
 		const prompt = buildMissionContinueCriterionPrompt({
 			specMarkdown: "## Acceptance Criteria\n- AC-2: Persist validation.",
@@ -310,6 +348,7 @@ describe("mission-spec-content", () => {
 			criterion: {
 				id: "AC-2",
 				description: "Persist validation.",
+				phaseTitle: "Persistence",
 				status: "FAIL",
 				evidence: "No saved file found.",
 				nextAction: "Save validation verdict.",
@@ -317,6 +356,7 @@ describe("mission-spec-content", () => {
 		});
 
 		expect(prompt).toContain("CONTINUE THE NEXT PENDING MISSION CRITERION.");
+		expect(prompt).toContain("TARGET PHASE: Persistence");
 		expect(prompt).toContain("TARGET CRITERION: AC-2 [FAIL]");
 		expect(prompt).toContain("Suggested next action: Save validation verdict.");
 		expect(prompt).toContain("ACTIVE PLAN:");

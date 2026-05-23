@@ -1548,6 +1548,13 @@ export function WorkspaceInspectorSidebar({
 															`inspector.spec.resumeState.${activeMissionResumeContext.state}`,
 														)}
 													</p>
+													{activeMissionResumeContext.nextPhaseTitle ? (
+														<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+															{t("inspector.spec.resumeNextPhase", {
+																phase: activeMissionResumeContext.nextPhaseTitle,
+															})}
+														</p>
+													) : null}
 												</div>
 												<div className="flex items-center gap-1.5">
 													<Badge variant="secondary" className="shrink-0 text-[10px]">
@@ -1576,6 +1583,23 @@ export function WorkspaceInspectorSidebar({
 											</div>
 											{activeMissionResumeContext.criteria.length > 0 ? (
 												<div className="mt-3 grid gap-1.5">
+													{activeMissionResumeContext.phases.length > 0 ? (
+														<div className="mb-1 flex flex-wrap gap-1.5">
+															{activeMissionResumeContext.phases.map((phase) => (
+																<Badge
+																	key={phase.title}
+																	variant="outline"
+																	className="h-5 text-[10px]"
+																>
+																	{t("inspector.spec.resumePhaseSummary", {
+																		phase: phase.title,
+																		pending: phase.pending,
+																		total: phase.total,
+																	})}
+																</Badge>
+															))}
+														</div>
+													) : null}
 													{activeMissionResumeContext.criteria.map((criterion) => (
 														<div
 															key={`${criterion.id}-${criterion.status}`}
@@ -1585,6 +1609,11 @@ export function WorkspaceInspectorSidebar({
 																<span className="font-mono text-[11px] font-semibold text-foreground">
 																	{criterion.id}
 																</span>
+																{criterion.phaseTitle ? (
+																	<Badge variant="secondary" className="h-5 text-[10px]">
+																		{criterion.phaseTitle}
+																	</Badge>
+																) : null}
 																<Badge variant="outline" className="h-5 text-[10px]">
 																	{criterion.status}
 																</Badge>

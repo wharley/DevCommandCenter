@@ -176,6 +176,8 @@
         "pending": "Próximos critérios de aceitação não resolvidos pela validação salva.",
         "complete": "A validação salva marca todos os critérios de aceitação conhecidos como aprovados."
       },
+      "resumeNextPhase": "Próxima fase pendente: {{phase}}",
+      "resumePhaseSummary": "{{phase}}: {{pending}}/{{total}} pendente(s)",
       "savedValidationTitle": "Validação salva",
       "loadingTitle": "Carregando spec da mission...",
       "emptyTitle": "Ainda não há spec da mission.",

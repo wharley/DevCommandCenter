@@ -41,14 +41,24 @@ export type ParsedMissionValidationReport = {
 };
 
 export type MissionResumeCriterion = MissionAcceptanceCriterion & {
+	phaseTitle: string | null;
 	status: MissionValidationStatus;
 	evidence: string;
 	nextAction: string;
 };
 
+export type MissionResumePhase = {
+	title: string;
+	total: number;
+	pending: number;
+	completed: number;
+};
+
 export type MissionResumeContext = {
 	state: "needs_validation" | "stale_validation" | "pending" | "complete";
 	reason: string | null;
+	nextPhaseTitle: string | null;
+	phases: MissionResumePhase[];
 	criteria: MissionResumeCriterion[];
 };
 
@@ -56,6 +66,8 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---(?:\n|$)/;
 const CRITERION_ID_RE = /\b[A-Z]{1,8}-\d+\b/;
 const MARKDOWN_CRITERIA_HEADING_RE =
 	/^\s{0,3}#{1,6}\s+acceptance criteria\s*$/i;
+const MARKDOWN_PHASE_HEADING_RE =
+	/^\s{0,3}#{1,6}\s+(?:phase|fase)\b(?:\s*[:\-]\s*|\s+)(.+?)\s*$/i;
 const MARKDOWN_VALIDATION_CHECKS_HEADING_RE =
 	/^\s{0,3}#{1,6}\s+validation checks\s*$/i;
 const MARKDOWN_HEADING_RE = /^\s{0,3}#{1,6}\s+/;
@@ -307,9 +319,16 @@ export function buildMissionContinueCriterionPrompt({
 		"CONTINUE THE NEXT PENDING MISSION CRITERION.",
 		"",
 		"Focus only on the next pending acceptance criterion below.",
+		...(criterion.phaseTitle
+			? [
+					`Treat the current phase as: ${criterion.phaseTitle}.`,
+					"Prefer work that advances this phase before jumping to later phases.",
+				]
+			: []),
 		"Implement the smallest change set that moves this criterion toward PASS.",
 		"After implementing, summarize what changed and what still remains if the criterion is not fully satisfied.",
 		"",
+		...(criterion.phaseTitle ? [`TARGET PHASE: ${criterion.phaseTitle}`] : []),
 		`TARGET CRITERION: ${criterion.id} [${criterion.status}]`,
 		...(description ? [`Description: ${description}`] : []),
 		...(nextAction ? [`Suggested next action: ${nextAction}`] : []),
@@ -380,7 +399,7 @@ export function buildMissionResumeContext({
 	specMarkdown: string;
 	validationJson?: string | null;
 }): MissionResumeContext | null {
-	const criteria = parseMissionAcceptanceCriteria(specMarkdown);
+	const criteria = parseMissionAcceptanceCriteriaWithPhase(specMarkdown);
 	if (criteria.length === 0) {
 		return null;
 	}
@@ -400,6 +419,15 @@ export function buildMissionResumeContext({
 		return {
 			state: validationIssue ? "stale_validation" : "needs_validation",
 			reason,
+			nextPhaseTitle: null,
+			phases: summarizeMissionResumePhases(
+				criteria.map((criterion) => ({
+					...criterion,
+					status: "UNKNOWN" as const,
+					evidence: "",
+					nextAction: "Validate this acceptance criterion.",
+				})),
+			),
 			criteria: criteria.map((criterion) => ({
 				...criterion,
 				status: "UNKNOWN",
@@ -426,6 +454,7 @@ export function buildMissionResumeContext({
 				return {
 					id: criterion.id,
 					description: specCriterion?.description ?? "",
+					phaseTitle: specCriterion?.phaseTitle ?? null,
 					status: criterion.status,
 					evidence: criterion.evidence,
 					nextAction: criterion.nextAction,
@@ -446,13 +475,22 @@ export function buildMissionResumeContext({
 			state: "complete",
 			reason:
 				"Saved validation marks all known acceptance criteria as PASS. Continue only after checking whether the spec defines another phase or new acceptance criteria.",
+			nextPhaseTitle: null,
+			phases: [],
 			criteria: [],
 		};
 	}
 
+	const phases = summarizeMissionResumePhases(pendingCriteria);
+	const nextPhaseTitle = phases.find((phase) => phase.pending > 0)?.title ?? null;
+
 	return {
 		state: "pending",
-		reason: "Next pending acceptance criteria from the saved validation:",
+		reason: nextPhaseTitle
+			? `Next pending phase from the saved validation: ${nextPhaseTitle}`
+			: "Next pending acceptance criteria from the saved validation:",
+		nextPhaseTitle,
+		phases,
 		criteria: pendingCriteria,
 	};
 }
@@ -604,6 +642,15 @@ function normalizeValidationPersistence(
 function renderMissionResumeContext(context: MissionResumeContext) {
 	return [
 		context.reason,
+		...(context.phases.length > 0
+			? [
+					"Phase summary:",
+					...context.phases.map(
+						(phase) =>
+							`- ${phase.title}: ${phase.pending} pending, ${phase.completed} completed, ${phase.total} total`,
+					),
+				]
+			: []),
 		...(context.criteria.length > 0
 			? [
 					context.state === "pending"
@@ -621,7 +668,8 @@ function renderMissionResumeContext(context: MissionResumeContext) {
 			const evidence = criterion.evidence
 				? ` Evidence: ${criterion.evidence}`
 				: "";
-			return `- ${criterion.id} [${criterion.status}]:${description}${nextAction}${evidence}`;
+			const phase = criterion.phaseTitle ? ` (${criterion.phaseTitle})` : "";
+			return `- ${criterion.id}${phase} [${criterion.status}]:${description}${nextAction}${evidence}`;
 		}),
 	]
 		.filter((line): line is string => Boolean(line))
@@ -644,20 +692,32 @@ function getValidationFreshnessIssue(
 function parseFrontmatterCriteria(
 	specMarkdown: string,
 ): MissionAcceptanceCriterion[] {
+	return parseFrontmatterCriteriaEntries(specMarkdown).map((criterion) => ({
+		id: criterion.id,
+		description: criterion.description,
+	}));
+}
+
+function parseFrontmatterCriteriaEntries(
+	specMarkdown: string,
+): Array<MissionAcceptanceCriterion & { phaseTitle: string | null }> {
 	const match = specMarkdown.match(FRONTMATTER_RE);
 	const frontmatter = match?.[1] ?? "";
 	if (!frontmatter.includes("acceptance_criteria:")) {
 		return [];
 	}
 
-	const criteria: MissionAcceptanceCriterion[] = [];
+	const criteria: Array<MissionAcceptanceCriterion & { phaseTitle: string | null }> = [];
 	let current: Partial<MissionAcceptanceCriterion> | null = null;
 	for (const rawLine of frontmatter.split("\n")) {
 		const line = rawLine.trim();
 		const idMatch = line.match(/^(?:-\s*)?id:\s*["']?([^"']+)["']?$/i);
 		if (idMatch) {
 			if (current?.id) {
-				criteria.push(normalizeCriterion(current));
+				criteria.push({
+					...normalizeCriterion(current),
+					phaseTitle: null,
+				});
 			}
 			current = { id: idMatch[1]?.trim() ?? "" };
 			continue;
@@ -672,7 +732,10 @@ function parseFrontmatterCriteria(
 	}
 
 	if (current?.id) {
-		criteria.push(normalizeCriterion(current));
+		criteria.push({
+			...normalizeCriterion(current),
+			phaseTitle: null,
+		});
 	}
 
 	return criteria.filter((criterion) => criterion.id.length > 0);
@@ -765,9 +828,25 @@ function parseFrontmatterScalarValue(
 }
 
 function parseMarkdownCriteria(specMarkdown: string): MissionAcceptanceCriterion[] {
-	const criteria: MissionAcceptanceCriterion[] = [];
+	return parseMarkdownCriteriaEntries(specMarkdown).map((criterion) => ({
+		id: criterion.id,
+		description: criterion.description,
+	}));
+}
+
+function parseMarkdownCriteriaEntries(
+	specMarkdown: string,
+): Array<MissionAcceptanceCriterion & { phaseTitle: string | null }> {
+	const criteria: Array<MissionAcceptanceCriterion & { phaseTitle: string | null }> = [];
 	let inCriteriaSection = false;
+	let currentPhaseTitle: string | null = null;
 	for (const rawLine of specMarkdown.split("\n")) {
+		const phaseMatch = rawLine.match(MARKDOWN_PHASE_HEADING_RE);
+		if (phaseMatch) {
+			currentPhaseTitle = normalizePhaseTitle(phaseMatch[1] ?? "");
+			inCriteriaSection = false;
+			continue;
+		}
 		if (MARKDOWN_CRITERIA_HEADING_RE.test(rawLine)) {
 			inCriteriaSection = true;
 			continue;
@@ -790,9 +869,63 @@ function parseMarkdownCriteria(specMarkdown: string): MissionAcceptanceCriterion
 		const description = text
 			.replace(new RegExp(`^${escapeRegExp(id)}\\s*:?\\s*`), "")
 			.trim();
-		criteria.push({ id, description });
+		criteria.push({ id, description, phaseTitle: currentPhaseTitle });
 	}
 	return criteria;
+}
+
+function parseMissionAcceptanceCriteriaWithPhase(
+	specMarkdown: string,
+): Array<MissionAcceptanceCriterion & { phaseTitle: string | null }> {
+	const criteria = [
+		...parseFrontmatterCriteriaEntries(specMarkdown),
+		...parseMarkdownCriteriaEntries(specMarkdown),
+	];
+	const byId = new Map<
+		string,
+		MissionAcceptanceCriterion & { phaseTitle: string | null }
+	>();
+	for (const criterion of criteria) {
+		if (!criterion.id) {
+			continue;
+		}
+		if (!byId.has(criterion.id)) {
+			byId.set(criterion.id, criterion);
+		}
+	}
+	return [...byId.values()];
+}
+
+function summarizeMissionResumePhases(criteria: MissionResumeCriterion[]): MissionResumePhase[] {
+	const byTitle = new Map<string, MissionResumePhase>();
+	for (const criterion of criteria) {
+		const title = criterion.phaseTitle?.trim();
+		if (!title) {
+			continue;
+		}
+		const summary = byTitle.get(title) ?? {
+			title,
+			total: 0,
+			pending: 0,
+			completed: 0,
+		};
+		summary.total += 1;
+		if (criterion.status === "PASS") {
+			summary.completed += 1;
+		} else {
+			summary.pending += 1;
+		}
+		byTitle.set(title, summary);
+	}
+	return [...byTitle.values()];
+}
+
+function normalizePhaseTitle(value: string) {
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return null;
+	}
+	return trimmed.replace(/^\d+\s*[:\-]\s*/, "").trim() || trimmed;
 }
 
 function parseMarkdownValidationChecks(

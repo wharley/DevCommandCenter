@@ -176,6 +176,8 @@
         "pending": "Next unresolved acceptance criteria from the saved validation.",
         "complete": "Saved validation marks all known acceptance criteria as passing."
       },
+      "resumeNextPhase": "Next pending phase: {{phase}}",
+      "resumePhaseSummary": "{{phase}}: {{pending}}/{{total}} pending",
       "savedValidationTitle": "Saved validation",
       "loadingTitle": "Loading mission spec...",
       "emptyTitle": "No mission spec yet.",
