@@ -134,6 +134,7 @@
       "description": "Versioned DCC state for this mission. Generate a plan from it when the requirements are ready.",
       "generatePlan": "Generate plan",
       "validate": "Validate",
+      "reanchor": "Re-anchor",
       "criteriaTitle": "Acceptance criteria",
       "savedValidationTitle": "Saved validation",
       "loadingTitle": "Loading mission spec...",

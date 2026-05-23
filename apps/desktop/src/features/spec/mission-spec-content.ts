@@ -96,6 +96,44 @@ export function buildMissionValidationPrompt({
 	].join("\n");
 }
 
+export function buildMissionReanchorPrompt({
+	specMarkdown,
+	planMarkdown,
+	validationJson,
+}: {
+	specMarkdown: string;
+	planMarkdown?: string | null;
+	validationJson?: string | null;
+}) {
+	const normalizedSpec = specMarkdown.trim();
+	const normalizedPlan = planMarkdown?.trim() ?? "";
+	const normalizedValidation = validationJson?.trim() ?? "";
+	return [
+		"RE-ANCHOR THIS SESSION TO THE CURRENT MISSION STATE.",
+		"",
+		"Do not implement yet. Do not modify files.",
+		"Use this message only to restore the mission requirements, current plan, and validation state in your working context.",
+		"After reading, reply with a concise summary of the next pending work and any unresolved acceptance criteria.",
+		"",
+		"MISSION SPEC:",
+		normalizedSpec,
+		...(normalizedPlan
+			? [
+					"",
+					"ACTIVE PLAN:",
+					normalizedPlan,
+				]
+			: []),
+		...(normalizedValidation
+			? [
+					"",
+					"SAVED VALIDATION VERDICT:",
+					normalizedValidation,
+				]
+			: []),
+	].join("\n");
+}
+
 export function parseMissionValidationReport(
 	content: string,
 ): ParsedMissionValidationReport | null {

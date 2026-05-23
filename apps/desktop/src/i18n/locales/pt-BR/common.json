@@ -134,6 +134,7 @@
       "description": "Estado versionado do DCC para esta mission. Gere um plano a partir dela quando os requisitos estiverem prontos.",
       "generatePlan": "Gerar plano",
       "validate": "Validar",
+      "reanchor": "Reancorar",
       "criteriaTitle": "Critérios de aceitação",
       "savedValidationTitle": "Validação salva",
       "loadingTitle": "Carregando spec da mission...",

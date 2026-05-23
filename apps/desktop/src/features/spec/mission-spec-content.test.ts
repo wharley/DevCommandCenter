@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildMissionAcceptanceCriteriaCoverage,
+	buildMissionReanchorPrompt,
 	buildMissionValidationPrompt,
 	parseMissionValidationReport,
 	parseMissionAcceptanceCriteria,
@@ -56,6 +57,20 @@ describe("mission-spec-content", () => {
 		expect(prompt).toContain(".devcommandcenter/specs/demo.spec.md");
 		expect(prompt).toContain("CURRENT PLAN CONTEXT:");
 		expect(prompt).toContain("AC-1");
+	});
+
+	it("builds a re-anchor prompt with spec, plan, and saved validation", () => {
+		const prompt = buildMissionReanchorPrompt({
+			specMarkdown: "# Spec\n\n## Acceptance Criteria\n- AC-1: Visible spec.",
+			planMarkdown: "- [ ] Cover AC-1.",
+			validationJson: '{"dccMissionValidation":true}',
+		});
+
+		expect(prompt).toContain("RE-ANCHOR THIS SESSION");
+		expect(prompt).toContain("Do not implement yet.");
+		expect(prompt).toContain("MISSION SPEC:");
+		expect(prompt).toContain("ACTIVE PLAN:");
+		expect(prompt).toContain("SAVED VALIDATION VERDICT:");
 	});
 
 	it("parses a fenced structured validation report", () => {

@@ -364,6 +364,11 @@ o argumento mais forte e o mais difícil de um arquivo solto replicar. Inclui o
 **resume cross-fase**: reinjetar não só os requisitos, mas o status de todas as fases,
 para o agente continuar da próxima pendente — não apenas reancorar na corrente (§2.1).
 
+**Status no DCC atual:** parcialmente implementado como re-injeção manual. A aba `Spec`
+oferece **Re-anchor**, que envia ao agente a spec, o plano ativo e o veredito salvo para
+restaurar contexto sem modificar arquivos. Ainda não há gatilho automático pós-`/compact`
+nem detecção automática da próxima fase pendente.
+
 **Fase 5 — Compilação cross-provider (custo: médio, é o diferencial).**
 Compila a spec para `AGENTS.md`/`GEMINI.md`. Funde-se ao "context compiler" do doc de
 skills — provavelmente o *mesmo* compilador, dois tipos de artefato.
@@ -383,7 +388,8 @@ e a Fase 0 custa quase nada para descobrir isso.
 | Validação assistida | ✅ Parcial | `Validate` pede auditoria e card JSON `dccMissionValidation` |
 | Persistência do veredito | ✅ Parcial | `Save verdict` grava `.devcommandcenter/specs/<mission>.validation.json` |
 | Leitura do veredito salvo | ✅ | Aba `Spec` exibe o `.validation.json` associado à spec |
-| Re-injeção pós-compactação | ❌ | Fase futura |
+| Re-injeção contextual | ✅ Parcial | `Re-anchor` injeta spec + plano + validação salva manualmente |
+| Re-injeção pós-compactação | ❌ | Gatilho automático futuro |
 | Compilação cross-provider | ❌ | Fase futura |
 
 ---
@@ -407,6 +413,7 @@ plano (`plan-content.ts`) e a abstração multi-provider.
 
 Recomendação prática atual: como as Fases 0–2 já estão implementadas e a Fase 3 já tem
 cobertura estrutural, validação assistida estruturada, persistência manual do veredito e
-leitura do veredito salvo, o próximo investimento deve ser re-injeção contextual apenas
-se o uso real de specs confirmar o ROI. Não construir um "motor de SDD" — construir o
-trilho fino e deixar o usuário (e o agente) fazerem a metodologia.
+leitura do veredito salvo, a Fase 4 começou com re-injeção manual. O próximo investimento
+deve ser gatilho automático pós-`/compact` apenas se o uso real de specs confirmar o ROI.
+Não construir um "motor de SDD" — construir o trilho fino e deixar o usuário (e o
+agente) fazerem a metodologia.

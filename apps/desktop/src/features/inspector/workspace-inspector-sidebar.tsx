@@ -96,6 +96,11 @@ type WorkspaceInspectorSidebarProps = {
 		specMarkdown: string;
 		planMarkdown: string | null;
 	}) => void;
+	onReanchorMissionSpec: (input: {
+		specMarkdown: string;
+		planMarkdown: string | null;
+		validationJson: string | null;
+	}) => void;
 	activeTab: InspectorTab;
 	onTabChange: (tab: InspectorTab) => void;
 };
@@ -352,6 +357,7 @@ export function WorkspaceInspectorSidebar({
 	onSelectPreview,
 	onGeneratePlanFromSpec,
 	onValidateMissionSpec,
+	onReanchorMissionSpec,
 	activeTab,
 	onTabChange,
 }: WorkspaceInspectorSidebarProps) {
@@ -764,6 +770,8 @@ export function WorkspaceInspectorSidebar({
 	);
 	const activePlanMarkdown =
 		latestPlanMessage?.plan?.markdown ?? latestPlanMessage?.content ?? null;
+	const savedMissionValidationJson =
+		activeMissionSpec?.validation?.content ?? null;
 
 	useEffect(() => {
 		autoOpenedPlanMessageIdRef.current = null;
@@ -1215,6 +1223,21 @@ export function WorkspaceInspectorSidebar({
 													}
 												>
 													{t("inspector.spec.validate")}
+												</Button>
+												<Button
+													type="button"
+													size="sm"
+													variant="outline"
+													className="h-8 rounded-lg px-2.5 text-[11px]"
+													onClick={() =>
+														onReanchorMissionSpec({
+															specMarkdown: activeMissionSpec.content,
+															planMarkdown: activePlanMarkdown,
+															validationJson: savedMissionValidationJson,
+														})
+													}
+												>
+													{t("inspector.spec.reanchor")}
 												</Button>
 											</div>
 										</div>
