@@ -36,10 +36,13 @@ use dcc_tauri::commands::{
         RespondToUserInputOutput, SearchSessionsInput,
     },
     workspace_commands::{
-        CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
-        ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
-        ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
-        ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput, MissionSpecEntry,
+        CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
+        CompiledMissionSpecContextFile, CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput,
+        ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
+        ListGitTrackedFilesOutput, ListLocalBranchesInput, ListLocalBranchesOutput,
+        ListMissionSpecsInput, ListMissionSpecsOutput, ListRepositoriesOutput,
+        ListWorkspacesOutput, MissionSpecContextFileState, MissionSpecContextFileStatus,
+        MissionSpecContextStatusInput, MissionSpecContextStatusOutput, MissionSpecEntry,
         MissionValidationEntry, RepositoryIdInput, SaveMissionValidationInput,
         SaveMissionValidationOutput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
@@ -74,6 +77,8 @@ struct WorkspaceMethods {
     list_local_branches: String,
     list_git_tracked_files: String,
     list_mission_specs: String,
+    compile_mission_spec_context: String,
+    mission_spec_context_status: String,
     save_mission_validation: String,
     list_child_directories: String,
     list_workspaces: String,
@@ -172,6 +177,13 @@ fn main() {
         .typ::<MissionSpecEntry>()
         .typ::<MissionValidationEntry>()
         .typ::<ListMissionSpecsOutput>()
+        .typ::<CompileMissionSpecContextInput>()
+        .typ::<CompiledMissionSpecContextFile>()
+        .typ::<CompileMissionSpecContextOutput>()
+        .typ::<MissionSpecContextStatusInput>()
+        .typ::<MissionSpecContextFileState>()
+        .typ::<MissionSpecContextFileStatus>()
+        .typ::<MissionSpecContextStatusOutput>()
         .typ::<SaveMissionValidationInput>()
         .typ::<SaveMissionValidationOutput>()
         .typ::<ListChildDirectoriesInput>()
@@ -248,6 +260,8 @@ fn main() {
                 list_local_branches: "list_local_branches".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),
                 list_mission_specs: "list_mission_specs".to_string(),
+                compile_mission_spec_context: "compile_mission_spec_context".to_string(),
+                mission_spec_context_status: "mission_spec_context_status".to_string(),
                 save_mission_validation: "save_mission_validation".to_string(),
                 list_child_directories: "list_child_directories".to_string(),
                 list_workspaces: "list_workspaces".to_string(),

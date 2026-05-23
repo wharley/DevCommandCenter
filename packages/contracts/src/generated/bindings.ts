@@ -6,7 +6,7 @@ export const PROVIDER_METHODS = {"listProviders":"list_providers"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","closeSession":"close_session","listThreadEvents":"list_thread_events","listWorkspaceSessions":"list_workspace_sessions","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","searchSessions":"search_sessions","sendTurn":"send_turn","startThread":"start_thread"} as const;
 
-export const WORKSPACE_METHODS = {"archiveWorkspace":"archive_workspace","createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","deleteRepository":"delete_repository","deleteWorkspace":"delete_workspace","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listMissionSpecs":"list_mission_specs","listRepositories":"list_repositories","listWorkspaces":"list_workspaces","restoreWorkspace":"restore_workspace","saveMissionValidation":"save_mission_validation","workspaceBackfillForgeRepoBindings":"workspace_backfill_forge_repo_bindings","workspaceChangeRequestCreate":"workspace_change_request_create","workspaceChangeRequestMerge":"workspace_change_request_merge","workspaceChangeRequestViewWeb":"workspace_change_request_view_web","workspaceContinueFromBaseBranch":"workspace_continue_from_base_branch","workspaceForgeCliAccounts":"workspace_forge_cli_accounts","workspaceForgeCliHosts":"workspace_forge_cli_hosts","workspaceForgeCliSelectLogin":"workspace_forge_cli_select_login","workspaceForgeCliStatus":"workspace_forge_cli_status","workspaceForgeContext":"workspace_forge_context","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrMerge":"workspace_gh_pr_merge","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitFilePreview":"workspace_git_file_preview","workspaceGitFilePreviewContent":"workspace_git_file_preview_content","workspaceGitPush":"workspace_git_push","workspaceGitStageAll":"workspace_git_stage_all","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitUnstageFile":"workspace_git_unstage_file","workspaceGithubCliStatus":"workspace_github_cli_status","workspacePrStatus":"workspace_pr_status","workspaceRetryRepositoryForgeBinding":"workspace_retry_repository_forge_binding","workspaceRunSetup":"workspace_run_setup"} as const;
+export const WORKSPACE_METHODS = {"archiveWorkspace":"archive_workspace","compileMissionSpecContext":"compile_mission_spec_context","createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","deleteRepository":"delete_repository","deleteWorkspace":"delete_workspace","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listMissionSpecs":"list_mission_specs","listRepositories":"list_repositories","listWorkspaces":"list_workspaces","missionSpecContextStatus":"mission_spec_context_status","restoreWorkspace":"restore_workspace","saveMissionValidation":"save_mission_validation","workspaceBackfillForgeRepoBindings":"workspace_backfill_forge_repo_bindings","workspaceChangeRequestCreate":"workspace_change_request_create","workspaceChangeRequestMerge":"workspace_change_request_merge","workspaceChangeRequestViewWeb":"workspace_change_request_view_web","workspaceContinueFromBaseBranch":"workspace_continue_from_base_branch","workspaceForgeCliAccounts":"workspace_forge_cli_accounts","workspaceForgeCliHosts":"workspace_forge_cli_hosts","workspaceForgeCliSelectLogin":"workspace_forge_cli_select_login","workspaceForgeCliStatus":"workspace_forge_cli_status","workspaceForgeContext":"workspace_forge_context","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrMerge":"workspace_gh_pr_merge","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitFilePreview":"workspace_git_file_preview","workspaceGitFilePreviewContent":"workspace_git_file_preview_content","workspaceGitPush":"workspace_git_push","workspaceGitStageAll":"workspace_git_stage_all","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitUnstageFile":"workspace_git_unstage_file","workspaceGithubCliStatus":"workspace_github_cli_status","workspacePrStatus":"workspace_pr_status","workspaceRetryRepositoryForgeBinding":"workspace_retry_repository_forge_binding","workspaceRunSetup":"workspace_run_setup"} as const;
 
 /* Types */
 export type AbortRunInput = {
@@ -26,6 +26,21 @@ export type Capabilities = {
 	vision: boolean,
 	resumable: boolean,
 	experimental: boolean,
+};
+
+export type CompileMissionSpecContextInput = {
+	workspaceRoot: string,
+	specRelativePath: string,
+};
+
+export type CompileMissionSpecContextOutput = {
+	files: CompiledMissionSpecContextFile[],
+};
+
+export type CompiledMissionSpecContextFile = {
+	relativePath: string,
+	created: boolean,
+	updated: boolean,
 };
 
 export type Checkpoint = {
@@ -311,6 +326,24 @@ export type MissionSpecEntry = {
 	name: string,
 	content: string,
 	validation: MissionValidationEntry | null,
+};
+
+export type MissionSpecContextFileState = "current" | "missing" | "stale" | "invalid" | "symlink";
+
+export type MissionSpecContextFileStatus = {
+	relativePath: string,
+	state: MissionSpecContextFileState,
+	message: string | null,
+};
+
+export type MissionSpecContextStatusInput = {
+	workspaceRoot: string,
+	specRelativePath: string,
+};
+
+export type MissionSpecContextStatusOutput = {
+	current: boolean,
+	files: MissionSpecContextFileStatus[],
 };
 
 export type MissionValidationEntry = {

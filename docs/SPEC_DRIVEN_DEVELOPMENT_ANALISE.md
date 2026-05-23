@@ -380,6 +380,24 @@ contexto de retomada para o usuário antes de enviar o re-anchor.
 Compila a spec para `AGENTS.md`/`GEMINI.md`. Funde-se ao "context compiler" do doc de
 skills — provavelmente o *mesmo* compilador, dois tipos de artefato.
 
+**Status no DCC atual:** parcialmente implementado como compilação manual na aba `Spec`.
+A ação **Compile context** escreve/atualiza uma seção delimitada por
+`<!-- dcc:spec:start -->` / `<!-- dcc:spec:end -->` em `AGENTS.md` e `GEMINI.md`,
+preservando qualquer conteúdo humano fora dos marcadores e rejeitando alvos symlink.
+A aba também exibe se o contexto compilado está `Current`, `Missing`, `Stale`,
+`Invalid` ou apontando para symlink, comparando os arquivos nativos com a spec ativa sem
+escrever nada. Ainda falta ligar essa compilação ao hook de setup/reabertura da Mission e
+ao futuro manifesto de contexto/provider.
+
+**Backlog imediato sugerido para Fase 5:**
+1. **Auto-compile no re-anchor e pós-`/compact`.** Antes de enviar o re-anchor, compilar
+   a spec para `AGENTS.md`/`GEMINI.md` para manter o contexto nativo sincronizado sem
+   depender do usuário lembrar do botão.
+2. **Indicador de contexto compilado stale/current.** Mostrar na aba `Spec` se
+   `AGENTS.md`/`GEMINI.md` batem com a spec ativa. **Status: implementado.**
+3. **Hook de setup/reopen da Mission.** Automatizar a compilação ao preparar/reabrir a
+   Mission, depois que o comando e a visibilidade na UI estiverem estáveis.
+
 Cada fase entrega valor sozinha. Dá para parar em qualquer ponto se o ROI não aparecer —
 e a Fase 0 custa quase nada para descobrir isso.
 
@@ -399,7 +417,8 @@ e a Fase 0 custa quase nada para descobrir isso.
 | Re-injeção contextual | ✅ Parcial | `Re-anchor` injeta spec + plano + validação salva manualmente |
 | Re-injeção pós-compactação | ✅ Parcial | `/compact` concluído dispara re-anchor automático se houver spec ativa |
 | Resume cross-fase | ✅ Parcial | Aba `Spec` e re-anchor destacam critérios pendentes/sem validação e invalidam contexto stale/sem hash |
-| Compilação cross-provider | ❌ | Fase futura |
+| Compilação cross-provider | ✅ Parcial | `Compile context` gera seção `dcc:spec` idempotente em `AGENTS.md`/`GEMINI.md` |
+| Frescor do contexto compilado | ✅ | Aba `Spec` compara `AGENTS.md`/`GEMINI.md` com a spec ativa sem escrever arquivos |
 
 ---
 
@@ -423,7 +442,8 @@ plano (`plan-content.ts`) e a abstração multi-provider.
 Recomendação prática atual: como as Fases 0–2 já estão implementadas e a Fase 3 já tem
 cobertura estrutural, validação assistida estruturada, persistência manual do veredito e
 leitura do veredito salvo com checagem de frescor, a Fase 4 começou com re-injeção
-manual e gatilho pós-`/compact` conservador. O próximo investimento deve ser resume
-cross-fase como UI/automação explícita ou compilação cross-provider apenas se o uso real
-de specs confirmar o ROI. Não construir um "motor de SDD" — construir o trilho fino e
-deixar o usuário (e o agente) fazerem a metodologia.
+manual e gatilho pós-`/compact` conservador, e a Fase 5 começou com compilação manual
+para `AGENTS.md`/`GEMINI.md`. O próximo investimento deve ser automatizar essa
+compilação no setup/reopen da Mission ou unificar com o futuro context compiler de
+skills, apenas se o uso real de specs confirmar o ROI. Não construir um "motor de SDD" —
+construir o trilho fino e deixar o usuário (e o agente) fazerem a metodologia.

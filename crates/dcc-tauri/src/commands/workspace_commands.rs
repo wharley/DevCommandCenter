@@ -47,6 +47,10 @@ use crate::{
     workspace_setup::run_detected_workspace_setup,
 };
 
+const DCC_SPEC_CONTEXT_START: &str = "<!-- dcc:spec:start -->";
+const DCC_SPEC_CONTEXT_END: &str = "<!-- dcc:spec:end -->";
+const DCC_SPEC_CONTEXT_TARGETS: [&str; 2] = ["AGENTS.md", "GEMINI.md"];
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateWorkspaceForRepoOutput {
@@ -161,6 +165,59 @@ pub struct SaveMissionValidationInput {
 #[serde(rename_all = "camelCase")]
 pub struct SaveMissionValidationOutput {
     pub relative_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CompileMissionSpecContextInput {
+    pub workspace_root: String,
+    pub spec_relative_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CompiledMissionSpecContextFile {
+    pub relative_path: String,
+    pub created: bool,
+    pub updated: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CompileMissionSpecContextOutput {
+    pub files: Vec<CompiledMissionSpecContextFile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MissionSpecContextStatusInput {
+    pub workspace_root: String,
+    pub spec_relative_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum MissionSpecContextFileState {
+    Current,
+    Missing,
+    Stale,
+    Invalid,
+    Symlink,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MissionSpecContextFileStatus {
+    pub relative_path: String,
+    pub state: MissionSpecContextFileState,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MissionSpecContextStatusOutput {
+    pub current: bool,
+    pub files: Vec<MissionSpecContextFileStatus>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1392,6 +1449,223 @@ pub async fn save_mission_validation(
     Ok(SaveMissionValidationOutput {
         relative_path: format!(".devcommandcenter/specs/{validation_name}"),
     })
+}
+
+#[tauri::command]
+pub async fn compile_mission_spec_context(
+    state: State<'_, WorkspaceCommandState>,
+    input: CompileMissionSpecContextInput,
+) -> Result<CompileMissionSpecContextOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+
+    let spec_relative_path = validate_mission_spec_relative_path(&input.spec_relative_path)?;
+    let root_canonical = PathBuf::from(root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let specs_dir = root_canonical.join(".devcommandcenter").join("specs");
+    let specs_canonical = specs_dir
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !specs_canonical.starts_with(&root_canonical) {
+        return Err("mission specs directory must stay inside the workspace".to_string());
+    }
+
+    let spec_path = root_canonical.join(&spec_relative_path);
+    if fs::symlink_metadata(&spec_path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("mission spec source must not be a symlink".to_string());
+    }
+    let spec_canonical = spec_path
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !spec_canonical.starts_with(&specs_canonical) {
+        return Err("mission spec source must stay inside .devcommandcenter/specs".to_string());
+    }
+    let spec_markdown = fs::read_to_string(&spec_path).map_err(|error| error.to_string())?;
+    let generated_section =
+        render_mission_spec_context_section(&spec_relative_path, &spec_markdown);
+
+    let mut files = Vec::new();
+    for target_name in DCC_SPEC_CONTEXT_TARGETS {
+        let target = root_canonical.join(target_name);
+        if fs::symlink_metadata(&target)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(format!("{target_name} must not be a symlink"));
+        }
+
+        let created = !target.exists();
+        let current = if created {
+            String::new()
+        } else {
+            fs::read_to_string(&target).map_err(|error| error.to_string())?
+        };
+        let next = upsert_generated_context_section(&current, &generated_section)?;
+        let updated = next != current;
+        if updated {
+            fs::write(&target, next).map_err(|error| error.to_string())?;
+        }
+        files.push(CompiledMissionSpecContextFile {
+            relative_path: target_name.to_string(),
+            created,
+            updated,
+        });
+    }
+
+    Ok(CompileMissionSpecContextOutput { files })
+}
+
+#[tauri::command]
+pub async fn mission_spec_context_status(
+    state: State<'_, WorkspaceCommandState>,
+    input: MissionSpecContextStatusInput,
+) -> Result<MissionSpecContextStatusOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+
+    let spec_relative_path = validate_mission_spec_relative_path(&input.spec_relative_path)?;
+    let root_canonical = PathBuf::from(root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let specs_dir = root_canonical.join(".devcommandcenter").join("specs");
+    let specs_canonical = specs_dir
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !specs_canonical.starts_with(&root_canonical) {
+        return Err("mission specs directory must stay inside the workspace".to_string());
+    }
+
+    let spec_path = root_canonical.join(&spec_relative_path);
+    if fs::symlink_metadata(&spec_path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("mission spec source must not be a symlink".to_string());
+    }
+    let spec_canonical = spec_path
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !spec_canonical.starts_with(&specs_canonical) {
+        return Err("mission spec source must stay inside .devcommandcenter/specs".to_string());
+    }
+    let spec_markdown = fs::read_to_string(&spec_path).map_err(|error| error.to_string())?;
+    let generated_section =
+        render_mission_spec_context_section(&spec_relative_path, &spec_markdown);
+
+    let mut files = Vec::new();
+    for target_name in DCC_SPEC_CONTEXT_TARGETS {
+        let target = root_canonical.join(target_name);
+        let symlink = fs::symlink_metadata(&target)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false);
+        let (state, message) = if symlink {
+            (
+                MissionSpecContextFileState::Symlink,
+                Some("context file target must not be a symlink".to_string()),
+            )
+        } else if !target.exists() {
+            (
+                MissionSpecContextFileState::Missing,
+                Some("context file has not been generated yet".to_string()),
+            )
+        } else {
+            let current = fs::read_to_string(&target).map_err(|error| error.to_string())?;
+            classify_generated_context_section(&current, &generated_section)
+        };
+        files.push(MissionSpecContextFileStatus {
+            relative_path: target_name.to_string(),
+            state,
+            message,
+        });
+    }
+
+    let current = files
+        .iter()
+        .all(|file| matches!(file.state, MissionSpecContextFileState::Current));
+
+    Ok(MissionSpecContextStatusOutput { current, files })
+}
+
+fn render_mission_spec_context_section(spec_relative_path: &str, spec_markdown: &str) -> String {
+    let normalized_spec = spec_markdown.trim();
+    format!(
+        "{DCC_SPEC_CONTEXT_START}\n\
+## DCC Mission Spec Context\n\n\
+Generated from `{spec_relative_path}` by DevCommandCenter.\n\
+Do not edit inside the `dcc:spec` markers; update the source spec instead.\n\n\
+### Active Mission Spec\n\n\
+{normalized_spec}\n\
+{DCC_SPEC_CONTEXT_END}\n"
+    )
+}
+
+fn classify_generated_context_section(
+    current: &str,
+    generated_section: &str,
+) -> (MissionSpecContextFileState, Option<String>) {
+    match (
+        current.find(DCC_SPEC_CONTEXT_START),
+        current.find(DCC_SPEC_CONTEXT_END),
+    ) {
+        (Some(start), Some(end)) if start < end => {
+            let end_index = end + DCC_SPEC_CONTEXT_END.len();
+            let existing_section = &current[start..end_index];
+            if existing_section.trim_end_matches('\n') == generated_section.trim_end_matches('\n') {
+                (MissionSpecContextFileState::Current, None)
+            } else {
+                (
+                    MissionSpecContextFileState::Stale,
+                    Some("compiled dcc:spec section differs from the active spec".to_string()),
+                )
+            }
+        }
+        (None, None) => (
+            MissionSpecContextFileState::Missing,
+            Some("context file exists without a dcc:spec section".to_string()),
+        ),
+        _ => (
+            MissionSpecContextFileState::Invalid,
+            Some("context file has incomplete dcc:spec markers".to_string()),
+        ),
+    }
+}
+
+fn upsert_generated_context_section(
+    current: &str,
+    generated_section: &str,
+) -> Result<String, String> {
+    match (
+        current.find(DCC_SPEC_CONTEXT_START),
+        current.find(DCC_SPEC_CONTEXT_END),
+    ) {
+        (Some(start), Some(end)) if start < end => {
+            let end_index = end + DCC_SPEC_CONTEXT_END.len();
+            let mut next = String::new();
+            next.push_str(&current[..start]);
+            next.push_str(generated_section);
+            next.push_str(current[end_index..].trim_start_matches('\n'));
+            Ok(next)
+        }
+        (None, None) => {
+            if current.trim().is_empty() {
+                return Ok(generated_section.to_string());
+            }
+            Ok(format!("{}\n\n{}", current.trim_end(), generated_section))
+        }
+        _ => Err("existing context file has incomplete dcc:spec markers".to_string()),
+    }
 }
 
 fn validate_mission_spec_relative_path(path: &str) -> Result<String, String> {

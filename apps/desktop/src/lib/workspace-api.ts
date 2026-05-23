@@ -5,6 +5,8 @@ import type {
 	CreateWorkspaceForRepoOutput,
 	CreateWorkspaceFromUrlInput,
 	CreateWorkspaceFromUrlOutput,
+	CompileMissionSpecContextInput,
+	CompileMissionSpecContextOutput,
 	ForgeCliAccountsInput,
 	ForgeCliAccountsOutput,
 	ForgeCliHostsInput,
@@ -24,6 +26,8 @@ import type {
 	ListLocalBranchesOutput,
 	ListRepositoriesOutput,
 	ListWorkspacesOutput,
+	MissionSpecContextStatusInput,
+	MissionSpecContextStatusOutput,
 	WorkspaceGitBranchDiffInput,
 	WorkspaceGitBranchDiffOutput,
 	WorkspaceGitFilePreviewInput,
@@ -143,6 +147,20 @@ export function listMissionSpecs(input: ListMissionSpecsInput) {
 	return invoke<ListMissionSpecsOutput>(WORKSPACE_METHODS.listMissionSpecs, {
 		input,
 	});
+}
+
+export function compileMissionSpecContext(input: CompileMissionSpecContextInput) {
+	return invoke<CompileMissionSpecContextOutput>(
+		WORKSPACE_METHODS.compileMissionSpecContext,
+		{ input },
+	);
+}
+
+export function missionSpecContextStatus(input: MissionSpecContextStatusInput) {
+	return invoke<MissionSpecContextStatusOutput>(
+		WORKSPACE_METHODS.missionSpecContextStatus,
+		{ input },
+	);
 }
 
 export function saveMissionValidation(input: SaveMissionValidationInput) {

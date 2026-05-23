@@ -3,10 +3,12 @@ use tauri::{AppHandle, State};
 use dcc_core::application::{CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput};
 use dcc_tauri::{
     commands::workspace_commands::{
+        CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
         ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
-        ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
+        ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput,
+        MissionSpecContextStatusInput, MissionSpecContextStatusOutput, RepositoryIdInput,
         SaveMissionValidationInput, SaveMissionValidationOutput,
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
@@ -87,6 +89,22 @@ pub async fn save_mission_validation(
     input: SaveMissionValidationInput,
 ) -> Result<SaveMissionValidationOutput, String> {
     dcc_tauri::commands::workspace_commands::save_mission_validation(state, input).await
+}
+
+#[tauri::command]
+pub async fn compile_mission_spec_context(
+    state: State<'_, WorkspaceCommandState>,
+    input: CompileMissionSpecContextInput,
+) -> Result<CompileMissionSpecContextOutput, String> {
+    dcc_tauri::commands::workspace_commands::compile_mission_spec_context(state, input).await
+}
+
+#[tauri::command]
+pub async fn mission_spec_context_status(
+    state: State<'_, WorkspaceCommandState>,
+    input: MissionSpecContextStatusInput,
+) -> Result<MissionSpecContextStatusOutput, String> {
+    dcc_tauri::commands::workspace_commands::mission_spec_context_status(state, input).await
 }
 
 #[tauri::command]

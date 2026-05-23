@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Info } from "lucide-react";
 import {
 	useCallback,
@@ -41,6 +41,8 @@ import {
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import { MissionValidationCard } from "@/features/panel/message-components/MissionValidationCard";
 import {
+	compileMissionSpecContext,
+	missionSpecContextStatus,
 	workspaceContinueFromBaseBranch,
 	workspaceChangeRequestViewWeb,
 	workspaceChangeRequestCreate,
@@ -412,6 +414,7 @@ export function WorkspaceInspectorSidebar({
 	const [forgeConnectOpen, setForgeConnectOpen] = useState(false);
 	const [isContinuingWorkspace, setIsContinuingWorkspace] = useState(false);
 	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
+	const [isCompilingSpecContext, setIsCompilingSpecContext] = useState(false);
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const hasWorkingTreeChanges =
 		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
@@ -784,6 +787,27 @@ export function WorkspaceInspectorSidebar({
 		latestPlanMessage?.plan?.markdown ?? latestPlanMessage?.content ?? null;
 	const savedMissionValidationJson =
 		activeMissionSpec?.validation?.content ?? null;
+	const missionSpecContextStatusQuery = useQuery({
+		queryKey: [
+			"missionSpecContextStatus",
+			workspacePath?.trim() ?? "",
+			activeMissionSpec?.relativePath ?? "",
+			activeMissionSpecHash,
+		],
+		queryFn: async () => {
+			const root = workspacePath?.trim();
+			if (!root || !activeMissionSpec) {
+				return { current: false, files: [] };
+			}
+			return missionSpecContextStatus({
+				workspaceRoot: root,
+				specRelativePath: activeMissionSpec.relativePath,
+			});
+		},
+		enabled: Boolean(workspacePath?.trim() && activeMissionSpec),
+		staleTime: 8_000,
+		refetchOnWindowFocus: true,
+	});
 	const activeMissionResumeContext = useMemo(
 		() =>
 			activeMissionSpec
@@ -794,6 +818,49 @@ export function WorkspaceInspectorSidebar({
 				: null,
 		[activeMissionSpec, savedMissionValidationJson],
 	);
+	const handleCompileMissionSpecContext = useCallback(async () => {
+		const root = workspacePath?.trim();
+		if (!root || !activeMissionSpec) {
+			return;
+		}
+
+		setIsCompilingSpecContext(true);
+		const loadingToast = toast.loading(t("inspector.spec.compileContextLoading"));
+		try {
+			const result = await compileMissionSpecContext({
+				workspaceRoot: root,
+				specRelativePath: activeMissionSpec.relativePath,
+			});
+			const updatedFiles = result.files
+				.filter((file) => file.updated)
+				.map((file) => file.relativePath);
+			toast.success(t("inspector.spec.compileContextSuccess"), {
+				id: loadingToast,
+				description:
+					updatedFiles.length > 0
+						? t("inspector.spec.compileContextUpdated", {
+								files: updatedFiles.join(", "),
+							})
+						: t("inspector.spec.compileContextUnchanged"),
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: ["missionSpecContextStatus", root],
+			});
+		} catch (error) {
+			const message = getInspectorActionErrorMessage(error);
+			toast.error(`${t("inspector.spec.compileContextFailed")}: ${message}`, {
+				id: loadingToast,
+			});
+		} finally {
+			setIsCompilingSpecContext(false);
+		}
+	}, [activeMissionSpec, queryClient, t, workspacePath]);
 
 	useEffect(() => {
 		autoOpenedPlanMessageIdRef.current = null;
@@ -1261,11 +1328,61 @@ export function WorkspaceInspectorSidebar({
 												>
 													{t("inspector.spec.reanchor")}
 												</Button>
+												<Button
+													type="button"
+													size="sm"
+													variant="outline"
+													className="h-8 rounded-lg px-2.5 text-[11px]"
+													disabled={isCompilingSpecContext}
+													onClick={handleCompileMissionSpecContext}
+												>
+													{t("inspector.spec.compileContext")}
+												</Button>
 											</div>
 										</div>
 										<p className="mt-2 text-[11px] leading-5 text-muted-foreground">
 											{t("inspector.spec.description")}
 										</p>
+									</div>
+									<div className="rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
+										<div className="flex items-start justify-between gap-3">
+											<div>
+												<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+													{t("inspector.spec.compiledContextTitle")}
+												</p>
+												<p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+													{missionSpecContextStatusQuery.isLoading
+														? t("inspector.spec.compiledContextChecking")
+														: missionSpecContextStatusQuery.isError
+															? t("inspector.spec.compiledContextUnavailable")
+															: missionSpecContextStatusQuery.data?.current
+																? t("inspector.spec.compiledContextCurrent")
+																: t("inspector.spec.compiledContextStale")}
+												</p>
+											</div>
+											<Badge variant="secondary" className="shrink-0 text-[10px]">
+												{missionSpecContextStatusQuery.data?.current
+													? t("inspector.spec.compiledContextBadgeCurrent")
+													: t("inspector.spec.compiledContextBadgeStale")}
+											</Badge>
+										</div>
+										{missionSpecContextStatusQuery.data?.files.length ? (
+											<div className="mt-3 grid gap-1.5">
+												{missionSpecContextStatusQuery.data.files.map((file) => (
+													<div
+														key={file.relativePath}
+														className="flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-muted/10 px-2.5 py-2"
+													>
+														<span className="font-mono text-[11px] text-foreground">
+															{file.relativePath}
+														</span>
+														<Badge variant="outline" className="h-5 text-[10px]">
+															{t(`inspector.spec.compiledContextState.${file.state}`)}
+														</Badge>
+													</div>
+												))}
+											</div>
+										) : null}
 									</div>
 									{activeMissionAcceptanceCriteria.length > 0 ? (
 										<div className="rounded-2xl border border-border/50 bg-muted/10 p-3">
