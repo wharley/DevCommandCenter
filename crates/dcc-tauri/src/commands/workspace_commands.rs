@@ -145,6 +145,7 @@ pub struct MissionSpecEntry {
 pub struct MissionValidationEntry {
     pub relative_path: String,
     pub content: String,
+    pub history_relative_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -165,6 +166,7 @@ pub struct SaveMissionValidationInput {
 #[serde(rename_all = "camelCase")]
 pub struct SaveMissionValidationOutput {
     pub relative_path: String,
+    pub history_relative_path: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1419,9 +1421,28 @@ fn read_mission_validation_entry(
     }
 
     let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let history_name = file_name.replace(".validation.json", ".validation.history.jsonl");
+    let history_path = specs_canonical.join(&history_name);
+    let history_relative_path = if history_path.is_file()
+        && !fs::symlink_metadata(&history_path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+    {
+        let history_canonical = history_path
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        if history_canonical.starts_with(specs_canonical) {
+            Some(format!(".devcommandcenter/specs/{history_name}"))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     Ok(Some(MissionValidationEntry {
         relative_path: format!(".devcommandcenter/specs/{file_name}"),
         content,
+        history_relative_path,
     }))
 }
 
@@ -1460,6 +1481,7 @@ pub async fn save_mission_validation(
         .strip_prefix(".devcommandcenter/specs/")
         .ok_or_else(|| "invalid spec path".to_string())?;
     let validation_name = spec_name.replace(".spec.md", ".validation.json");
+    let history_name = spec_name.replace(".spec.md", ".validation.history.jsonl");
     let target = specs_canonical.join(&validation_name);
     if fs::symlink_metadata(&target)
         .map(|metadata| metadata.file_type().is_symlink())
@@ -1467,13 +1489,81 @@ pub async fn save_mission_validation(
     {
         return Err("validation target must not be a symlink".to_string());
     }
+    let history_target = specs_canonical.join(&history_name);
+    if fs::symlink_metadata(&history_target)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("validation history target must not be a symlink".to_string());
+    }
 
     let pretty = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
     fs::write(&target, format!("{pretty}\n")).map_err(|error| error.to_string())?;
+    append_mission_validation_history_entry(
+        &history_target,
+        &spec_relative_path,
+        &validation_name,
+        &report,
+    )?;
 
     Ok(SaveMissionValidationOutput {
         relative_path: format!(".devcommandcenter/specs/{validation_name}"),
+        history_relative_path: format!(".devcommandcenter/specs/{history_name}"),
     })
+}
+
+fn append_mission_validation_history_entry(
+    history_target: &Path,
+    spec_relative_path: &str,
+    validation_name: &str,
+    report: &Value,
+) -> Result<(), String> {
+    let criteria = report
+        .get("criteria")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut pass_count = 0usize;
+    let mut fail_count = 0usize;
+    let mut unknown_count = 0usize;
+    for criterion in criteria {
+        match criterion.get("status").and_then(Value::as_str) {
+            Some("PASS") => pass_count += 1,
+            Some("FAIL") => fail_count += 1,
+            Some("UNKNOWN") => unknown_count += 1,
+            _ => {}
+        }
+    }
+
+    let saved_at = report
+        .get("dccSavedAt")
+        .and_then(Value::as_str)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| Utc::now().to_rfc3339());
+    let history_entry = serde_json::json!({
+        "dccMissionValidationHistory": true,
+        "savedAt": saved_at,
+        "persistenceMode": report
+            .get("dccPersistenceMode")
+            .and_then(Value::as_str)
+            .unwrap_or("manual"),
+        "specRelativePath": spec_relative_path,
+        "specHash": report.get("specHash").and_then(Value::as_str),
+        "validationRelativePath": format!(".devcommandcenter/specs/{validation_name}"),
+        "summary": report.get("summary").and_then(Value::as_str),
+        "passCount": pass_count,
+        "failCount": fail_count,
+        "unknownCount": unknown_count,
+    });
+
+    let serialized = serde_json::to_string(&history_entry).map_err(|error| error.to_string())?;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(history_target)
+        .map_err(|error| error.to_string())?;
+    use std::io::Write;
+    writeln!(file, "{serialized}").map_err(|error| error.to_string())
 }
 
 #[tauri::command]

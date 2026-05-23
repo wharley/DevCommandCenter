@@ -27,6 +27,8 @@ export type ParsedMissionValidationReport = {
 	specHash: string | null;
 	summary: string | null;
 	criteria: MissionValidationCriterionResult[];
+	persistenceMode: MissionValidationPersistence | null;
+	persistedAt: string | null;
 	rawJson: string;
 };
 
@@ -332,6 +334,33 @@ export function parseMissionValidationReport(
 	return null;
 }
 
+export function buildMissionValidationSavePayload({
+	rawJson,
+	mode,
+	savedAt,
+}: {
+	rawJson: string;
+	mode: MissionValidationPersistence;
+	savedAt?: string;
+}): string | null {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(rawJson);
+	} catch {
+		return null;
+	}
+
+	if (!isRecord(parsed) || parsed.dccMissionValidation !== true) {
+		return null;
+	}
+
+	return JSON.stringify({
+		...parsed,
+		dccPersistenceMode: mode,
+		dccSavedAt: (savedAt ?? new Date().toISOString()).trim(),
+	});
+}
+
 export function buildMissionResumeContext({
 	specMarkdown,
 	validationJson,
@@ -466,6 +495,9 @@ function tryParseMissionValidationJson(
 			typeof parsed.specHash === "string" ? parsed.specHash.trim() : null,
 		summary: typeof parsed.summary === "string" ? parsed.summary.trim() : null,
 		criteria,
+		persistenceMode: normalizeValidationPersistence(parsed.dccPersistenceMode),
+		persistedAt:
+			typeof parsed.dccSavedAt === "string" ? parsed.dccSavedAt.trim() : null,
 		rawJson,
 	};
 }
@@ -507,6 +539,12 @@ function normalizeValidationStatus(
 		return normalized;
 	}
 	return null;
+}
+
+function normalizeValidationPersistence(
+	value: unknown,
+): MissionValidationPersistence | null {
+	return value === "manual" || value === "auto" ? value : null;
 }
 
 function renderMissionResumeContext(context: MissionResumeContext) {

@@ -8,9 +8,11 @@ import { cn } from "@/lib/utils";
 import { saveMissionValidation } from "@/lib/workspace-api";
 import { WORKSPACE_MISSION_SPECS_QUERY_KEY } from "@/features/inspector/use-workspace-mission-specs";
 import type {
+	MissionValidationPersistence,
 	MissionValidationStatus,
 	ParsedMissionValidationReport,
 } from "@/features/spec/mission-spec-content";
+import { buildMissionValidationSavePayload } from "@/features/spec/mission-spec-content";
 
 type MissionValidationCardProps = {
 	report: ParsedMissionValidationReport;
@@ -20,6 +22,7 @@ type MissionValidationCardProps = {
 	autoSave?: boolean;
 	activeSpecRelativePath?: string | null;
 	activeSpecHash?: string | null;
+	historyRelativePath?: string | null;
 };
 
 function statusIcon(status: MissionValidationStatus) {
@@ -42,6 +45,21 @@ function statusClassName(status: MissionValidationStatus) {
 	return "border-amber-500/25 bg-amber-500/5";
 }
 
+function persistenceBadgeLabel(mode: MissionValidationPersistence) {
+	return mode === "auto" ? "Saved automatically" : "Saved manually";
+}
+
+function formatPersistedAt(value: string | null) {
+	if (!value) {
+		return null;
+	}
+	const parsed = new Date(value);
+	if (Number.isNaN(parsed.getTime())) {
+		return value;
+	}
+	return parsed.toLocaleString();
+}
+
 export function MissionValidationCard({
 	report,
 	workspacePath,
@@ -50,12 +68,18 @@ export function MissionValidationCard({
 	autoSave = false,
 	activeSpecRelativePath = null,
 	activeSpecHash = null,
+	historyRelativePath = null,
 }: MissionValidationCardProps) {
 	const queryClient = useQueryClient();
 	const [isSaving, setIsSaving] = useState(false);
 	const [autoSaveState, setAutoSaveState] = useState<
 		"idle" | "saving" | "saved" | "failed"
 	>("idle");
+	const [savedMetadata, setSavedMetadata] = useState<{
+		mode: MissionValidationPersistence;
+		persistedAt: string;
+		historyRelativePath: string;
+	} | null>(null);
 	const attemptedAutoSaveKeyRef = useRef<string | null>(null);
 	const passCount = report.criteria.filter((criterion) => criterion.status === "PASS").length;
 	const failCount = report.criteria.filter((criterion) => criterion.status === "FAIL").length;
@@ -90,11 +114,23 @@ export function MissionValidationCard({
 		if (mode === "auto") {
 			setAutoSaveState("saving");
 		}
+		const persistedAt = new Date().toISOString();
+		const reportJson =
+			buildMissionValidationSavePayload({
+				rawJson: report.rawJson,
+				mode,
+				savedAt: persistedAt,
+			}) ?? report.rawJson;
 		try {
 			const result = await saveMissionValidation({
 				workspaceRoot: root,
 				specRelativePath,
-				reportJson: report.rawJson,
+				reportJson,
+			});
+			setSavedMetadata({
+				mode,
+				persistedAt,
+				historyRelativePath: result.historyRelativePath,
 			});
 			if (mode === "manual") {
 				toast.success("Validation saved", {
@@ -160,6 +196,14 @@ export function MissionValidationCard({
 		workspacePath,
 	]);
 
+	const displayedPersistenceMode =
+		savedMetadata?.mode ?? report.persistenceMode ?? null;
+	const displayedPersistedAt =
+		savedMetadata?.persistedAt ?? report.persistedAt ?? null;
+	const displayedHistoryRelativePath =
+		savedMetadata?.historyRelativePath ?? historyRelativePath ?? null;
+	const formattedPersistedAt = formatPersistedAt(displayedPersistedAt);
+
 	return (
 		<div className="rounded-[22px] border border-border/70 bg-card/75 p-4 shadow-[0_12px_40px_rgba(0,0,0,0.06)] backdrop-blur-sm">
 			<div className="flex flex-wrap items-start justify-between gap-3">
@@ -186,6 +230,23 @@ export function MissionValidationCard({
 					<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
 						{passCount} pass · {failCount} fail · {unknownCount} unknown
 					</p>
+					{displayedPersistenceMode ? (
+						<div className="mt-2 flex flex-wrap items-center gap-1.5">
+							<Badge variant="outline" className="h-5 text-[10px]">
+								{persistenceBadgeLabel(displayedPersistenceMode)}
+							</Badge>
+							{formattedPersistedAt ? (
+								<span className="text-[11px] leading-5 text-muted-foreground">
+									{formattedPersistedAt}
+								</span>
+							) : null}
+						</div>
+					) : null}
+					{displayedHistoryRelativePath ? (
+						<p className="mt-1 font-mono text-[10px] leading-5 text-muted-foreground">
+							History: {displayedHistoryRelativePath}
+						</p>
+					) : null}
 				</div>
 				<div className="flex items-center gap-1.5">
 					{showSaveAction ? (

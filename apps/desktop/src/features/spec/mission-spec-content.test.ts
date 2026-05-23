@@ -5,6 +5,7 @@ import {
 	buildMissionReanchorPrompt,
 	buildMissionResumeContext,
 	buildMissionValidationPrompt,
+	buildMissionValidationSavePayload,
 	computeMissionSpecHash,
 	parseMissionValidationReport,
 	parseMissionAcceptanceCriteria,
@@ -172,6 +173,32 @@ describe("mission-spec-content", () => {
 		expect(prompt).toContain(
 			"Run the relevant cargo check command for the affected crate or workspace.",
 		);
+	});
+
+	it("builds a save payload with validation provenance metadata", () => {
+		const payload = buildMissionValidationSavePayload({
+			rawJson: JSON.stringify({
+				dccMissionValidation: true,
+				specRelativePath: ".devcommandcenter/specs/demo.spec.md",
+				specHash: "fnv1a32:12345678",
+				criteria: [
+					{
+						id: "AC-1",
+						status: "PASS",
+						evidence: "Visible.",
+						nextAction: "",
+					},
+				],
+			}),
+			mode: "auto",
+			savedAt: "2026-05-23T12:34:56.000Z",
+		});
+
+		expect(payload).not.toBeNull();
+		expect(JSON.parse(payload ?? "{}")).toMatchObject({
+			dccPersistenceMode: "auto",
+			dccSavedAt: "2026-05-23T12:34:56.000Z",
+		});
 	});
 
 	it("builds a re-anchor prompt with spec, plan, and saved validation", () => {
@@ -366,6 +393,8 @@ describe("mission-spec-content", () => {
 			specHash: "fnv1a32:12345678",
 			summary: "One pass, one unknown.",
 			rawJson: expect.stringContaining("dccMissionValidation"),
+			persistenceMode: null,
+			persistedAt: null,
 			criteria: [
 				{
 					id: "AC-1",
@@ -380,6 +409,31 @@ describe("mission-spec-content", () => {
 					nextAction: "Run the UI flow.",
 				},
 			],
+		});
+	});
+
+	it("parses saved validation provenance metadata", () => {
+		const report = parseMissionValidationReport(
+			JSON.stringify({
+				dccMissionValidation: true,
+				specRelativePath: ".devcommandcenter/specs/demo.spec.md",
+				specHash: "fnv1a32:12345678",
+				dccPersistenceMode: "manual",
+				dccSavedAt: "2026-05-23T12:34:56.000Z",
+				criteria: [
+					{
+						id: "AC-1",
+						status: "PASS",
+						evidence: "Saved.",
+						nextAction: "",
+					},
+				],
+			}),
+		);
+
+		expect(report).toMatchObject({
+			persistenceMode: "manual",
+			persistedAt: "2026-05-23T12:34:56.000Z",
 		});
 	});
 });

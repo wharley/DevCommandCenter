@@ -1576,6 +1576,9 @@ export function WorkspaceInspectorSidebar({
 												workspacePath={workspacePath}
 												showSaveAction={false}
 												isStale={isSavedMissionValidationStale}
+												historyRelativePath={
+													activeMissionSpec?.validation?.historyRelativePath ?? null
+												}
 											/>
 										</div>
 									) : null}

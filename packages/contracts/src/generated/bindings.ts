@@ -349,6 +349,7 @@ export type MissionSpecContextStatusOutput = {
 export type MissionValidationEntry = {
 	relativePath: string,
 	content: string,
+	historyRelativePath: string | null,
 };
 
 export type ProjectId = string;
@@ -459,6 +460,7 @@ export type SaveMissionValidationInput = {
 
 export type SaveMissionValidationOutput = {
 	relativePath: string,
+	historyRelativePath: string,
 };
 
 export type ResumeSessionInput = {
