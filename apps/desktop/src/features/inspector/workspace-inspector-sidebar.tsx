@@ -31,6 +31,10 @@ import { GitSectionHeader } from "./git-section-header";
 import { projectWorkspaceMessages } from "@/features/panel/thread-projection";
 import { PlanReviewCard } from "@/features/panel/message-components";
 import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
+import {
+	buildMissionAcceptanceCriteriaCoverage,
+	parseMissionAcceptanceCriteria,
+} from "@/features/spec/mission-spec-content";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import {
 	workspaceContinueFromBaseBranch,
@@ -85,6 +89,10 @@ type WorkspaceInspectorSidebarProps = {
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	onGeneratePlanFromSpec: (specMarkdown: string) => void;
+	onValidateMissionSpec: (input: {
+		specMarkdown: string;
+		planMarkdown: string | null;
+	}) => void;
 	activeTab: InspectorTab;
 	onTabChange: (tab: InspectorTab) => void;
 };
@@ -340,6 +348,7 @@ export function WorkspaceInspectorSidebar({
 	selectedPreview,
 	onSelectPreview,
 	onGeneratePlanFromSpec,
+	onValidateMissionSpec,
 	activeTab,
 	onTabChange,
 }: WorkspaceInspectorSidebarProps) {
@@ -726,6 +735,25 @@ export function WorkspaceInspectorSidebar({
 		missionSpecs.find((spec) => spec.name === preferredSpecName) ??
 		missionSpecs[0] ??
 		null;
+	const activeMissionAcceptanceCriteria = useMemo(
+		() =>
+			activeMissionSpec
+				? parseMissionAcceptanceCriteria(activeMissionSpec.content)
+				: [],
+		[activeMissionSpec],
+	);
+	const activePlanAcceptanceCriteriaCoverage = useMemo(
+		() =>
+			latestPlanMessage
+				? buildMissionAcceptanceCriteriaCoverage(
+						activeMissionAcceptanceCriteria,
+						latestPlanMessage.plan?.markdown ?? latestPlanMessage.content,
+					)
+				: [],
+		[activeMissionAcceptanceCriteria, latestPlanMessage],
+	);
+	const activePlanMarkdown =
+		latestPlanMessage?.plan?.markdown ?? latestPlanMessage?.content ?? null;
 
 	useEffect(() => {
 		autoOpenedPlanMessageIdRef.current = null;
@@ -1153,20 +1181,60 @@ export function WorkspaceInspectorSidebar({
 													{activeMissionSpec.relativePath}
 												</p>
 											</div>
-											<Button
-												type="button"
-												size="sm"
-												variant="outline"
-												className="h-8 shrink-0 rounded-lg px-2.5 text-[11px]"
-												onClick={() => onGeneratePlanFromSpec(activeMissionSpec.content)}
-											>
-												{t("inspector.spec.generatePlan")}
-											</Button>
+											<div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+												<Button
+													type="button"
+													size="sm"
+													variant="outline"
+													className="h-8 rounded-lg px-2.5 text-[11px]"
+													onClick={() => onGeneratePlanFromSpec(activeMissionSpec.content)}
+												>
+													{t("inspector.spec.generatePlan")}
+												</Button>
+												<Button
+													type="button"
+													size="sm"
+													variant="outline"
+													className="h-8 rounded-lg px-2.5 text-[11px]"
+													onClick={() =>
+														onValidateMissionSpec({
+															specMarkdown: activeMissionSpec.content,
+															planMarkdown: activePlanMarkdown,
+														})
+													}
+												>
+													{t("inspector.spec.validate")}
+												</Button>
+											</div>
 										</div>
 										<p className="mt-2 text-[11px] leading-5 text-muted-foreground">
 											{t("inspector.spec.description")}
 										</p>
 									</div>
+									{activeMissionAcceptanceCriteria.length > 0 ? (
+										<div className="rounded-2xl border border-border/50 bg-muted/10 p-3">
+											<p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+												{t("inspector.spec.criteriaTitle")}
+											</p>
+											<div className="grid gap-1.5">
+												{activeMissionAcceptanceCriteria.map((criterion) => (
+													<div
+														key={criterion.id}
+														className="rounded-xl border border-border/50 bg-background/70 px-2.5 py-2"
+													>
+														<span className="font-mono text-[11px] font-semibold text-foreground">
+															{criterion.id}
+														</span>
+														{criterion.description ? (
+															<p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+																{criterion.description}
+															</p>
+														) : null}
+													</div>
+												))}
+											</div>
+										</div>
+									) : null}
 									<pre className="max-h-[52vh] overflow-auto rounded-2xl border border-border/50 bg-muted/20 p-3 text-[11px] leading-5 text-foreground whitespace-pre-wrap">
 										{activeMissionSpec.content}
 									</pre>
@@ -1207,6 +1275,9 @@ export function WorkspaceInspectorSidebar({
 										}
 									}
 									workspacePath={workspacePath}
+									acceptanceCriteriaCoverage={
+										activePlanAcceptanceCriteriaCoverage
+									}
 								/>
 							) : (
 								<div className="flex min-h-full items-center justify-center px-4 py-8 text-center">

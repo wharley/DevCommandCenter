@@ -133,6 +133,8 @@
       "kicker": "Spec da mission",
       "description": "Estado versionado do DCC para esta mission. Gere um plano a partir dela quando os requisitos estiverem prontos.",
       "generatePlan": "Gerar plano",
+      "validate": "Validar",
+      "criteriaTitle": "Critérios de aceitação",
       "loadingTitle": "Carregando spec da mission...",
       "emptyTitle": "Ainda não há spec da mission.",
       "emptyDescription": "Use /spec no composer para criar .devcommandcenter/specs/<branch>.spec.md."

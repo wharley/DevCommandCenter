@@ -110,6 +110,7 @@ import {
 	buildPlanImplementationPrompt,
 	buildPlanImplementationThreadTitle,
 } from "./features/panel/plan-content";
+import { buildMissionValidationPrompt } from "./features/spec/mission-spec-content";
 import { resolveInitialOnboardingOpen } from "./lib/dev-onboarding-override";
 import {
 	clearProviderRuntimeDraft,
@@ -1103,6 +1104,23 @@ export default function App() {
 		[handleSubmitPrompt, openPlanSidebar],
 	);
 
+	const handleValidateMissionSpec = useCallback(
+		(input: { specMarkdown: string; planMarkdown: string | null }) => {
+			const prompt = buildMissionValidationPrompt(input);
+			setInspectorCollapsed(false);
+			setInspectorTab("activity");
+			void handleSubmitPrompt({
+				rawPrompt: prompt,
+				envelope: {
+					planMode: false,
+					effort: "medium",
+					fastMode: true,
+				},
+			});
+		},
+		[handleSubmitPrompt, setInspectorCollapsed],
+	);
+
 	const handleSelectProvider = useCallback(
 		(providerId: string) => {
 			setSelectedProviderId(providerId);
@@ -1789,6 +1807,7 @@ export default function App() {
 								selectedPreview={editorSelection}
 								onSelectPreview={handleOpenEditorFile}
 								onGeneratePlanFromSpec={handleGeneratePlanFromSpec}
+								onValidateMissionSpec={handleValidateMissionSpec}
 								activeTab={inspectorTab}
 								onTabChange={setInspectorTab}
 							/>

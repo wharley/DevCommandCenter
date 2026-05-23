@@ -325,17 +325,35 @@ commands e abstração de provider **já existem**.
 `spec.template.md` + convenção `.devcommandcenter/specs/<mission>.spec.md`. Sem código —
 só documentação e um template. Valida se o time *quer* escrever specs antes de investir.
 
+**Status no DCC atual:** implementado como `.devcommandcenter/spec.template.md` e
+diretório versionado `.devcommandcenter/specs/`.
+
 **Fase 1 — `/spec` no composer (custo: baixo).**
 Slash command nativo que cria/abre a spec da Mission. Aproveita a infra de
 `default-slash-commands.ts`. A spec já é editável dentro do DCC.
+
+**Status no DCC atual:** implementado como comando nativo de cliente. Ele preenche o
+composer com um prompt para criar/atualizar
+`.devcommandcenter/specs/<branch>.spec.md`, sem depender de slash command do provider.
 
 **Fase 2 — Spec alimenta o plano (custo: baixo).**
 `buildPlanImplementationPrompt` → variante que parte da spec. Reuso quase total de
 `plan-content.ts`. Aqui o eixo SDD fica completo: Spec → Plan → Tasks → Implement.
 
+**Status no DCC atual:** implementado com `buildPlanFromSpecPrompt(...)`, aba `Spec` no
+inspector e ação **Generate plan**, que envia a spec em `planMode: true`.
+
 **Fase 3 — Loop de validação (custo: médio, é onde o SDD "fecha").**
 `acceptance_criteria` no frontmatter; `ParsedPlanStep` referencia critérios;
 `PlanReviewCard` mostra cobertura. "Mission pronta" = critérios satisfeitos.
+
+**Status no DCC atual:** parcialmente implementado. O DCC extrai critérios `AC-*` da
+spec e mostra cobertura no `PlanReviewCard` quando o plano referencia explicitamente os
+IDs. A aba `Spec` também oferece **Validate**, que envia ao agente um prompt de auditoria
+para inspecionar o worktree e responder `PASS` / `FAIL` / `UNKNOWN` por critério sem
+alterar arquivos. A resposta de validação agora pede um bloco JSON
+`dccMissionValidation`, que o frontend reconhece e renderiza como card estruturado.
+Ainda falta persistir esse veredito como estado durável da Mission.
 
 **Fase 4 — Re-injeção pós-compactação (custo: médio, é o valor único).**
 O DCC reinjeta a spec após `/compact`. Resolve o esquecimento de requisitos —
@@ -349,6 +367,20 @@ skills — provavelmente o *mesmo* compilador, dois tipos de artefato.
 
 Cada fase entrega valor sozinha. Dá para parar em qualquer ponto se o ROI não aparecer —
 e a Fase 0 custa quase nada para descobrir isso.
+
+### Status de implementação nesta branch
+
+| Área | Status | Observação |
+|---|---:|---|
+| Spec versionada | ✅ | `.devcommandcenter/spec.template.md` + `.devcommandcenter/specs/` |
+| `/spec` nativo | ✅ | Ação de cliente no composer, agnóstica de provider |
+| Spec no inspector | ✅ | Aba `Spec` lista specs via comando Rust limitado ao diretório DCC |
+| Spec → Plan | ✅ | `Generate plan` envia `buildPlanFromSpecPrompt(...)` em plan mode |
+| Cobertura `AC-*` no plano | ✅ Parcial | Cobertura estrutural por referência explícita ao ID |
+| Validação assistida | ✅ Parcial | `Validate` pede auditoria e card JSON `dccMissionValidation` |
+| Persistência do veredito | ❌ | Próximo passo provável se o uso real justificar |
+| Re-injeção pós-compactação | ❌ | Fase futura |
+| Compilação cross-provider | ❌ | Fase futura |
 
 ---
 
@@ -369,7 +401,8 @@ qualquer agente, e que ele sobreviva à compactação de contexto** — apoiado 
 peças que já existem: o worktree por Mission, o hook `setup-worktree.sh`, o pipeline de
 plano (`plan-content.ts`) e a abstração multi-provider.
 
-Recomendação prática: começar pelas Fases 0–2 (custo baixo, completam o eixo SDD
-reusando o que existe) e só investir nas Fases 3–5 se o uso de specs se confirmar. Não
-construir um "motor de SDD" — construir o trilho fino e deixar o usuário (e o agente)
-fazerem a metodologia.
+Recomendação prática atual: como as Fases 0–2 já estão implementadas e a Fase 3 começou
+com cobertura estrutural de critérios e validação assistida estruturada, o próximo
+investimento só deve persistir vereditos (`PASS` / `FAIL` / `UNKNOWN`) se o uso real de
+specs confirmar o ROI. Não construir um "motor de SDD" — construir o trilho fino e
+deixar o usuário (e o agente) fazerem a metodologia.

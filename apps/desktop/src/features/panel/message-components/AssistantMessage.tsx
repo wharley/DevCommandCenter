@@ -8,9 +8,11 @@ import { Reasoning } from "@/components/ai/reasoning";
 import { ToolCall } from "@/components/ai/tool-call";
 import { MessageTimestamp } from "./message-metadata";
 import { PlanReviewCard } from "./PlanReviewCard";
+import { MissionValidationCard } from "./MissionValidationCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { UserInputCard } from "./UserInputCard";
 import type { ParsedPlanContent } from "@/features/panel/plan-content";
+import { parseMissionValidationReport } from "@/features/spec/mission-spec-content";
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
 
 type AssistantStatus = {
@@ -50,6 +52,7 @@ export function AssistantMessage({
 	sessionId?: string | null;
 }) {
 	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
+	const validationReport = showPlanCard ? null : parseMissionValidationReport(content);
 	return (
 		<div
 			data-message-role="assistant"
@@ -142,6 +145,8 @@ export function AssistantMessage({
 				) : null}
 				{showPlanCard ? (
 					<PlanReviewCard plan={plan ?? { title: "Plan", summary: content, steps: [], approvedPrompts: [], rawMarkdown: content, markdown: content, isPlanLike: false, canCollapse: content.length > 900, source: "plain" }} workspacePath={workspacePath} />
+				) : validationReport ? (
+					<MissionValidationCard report={validationReport} />
 				) : (
 					<div className={cn("assistant-markdown-scale max-w-none break-words text-foreground")}>
 						<Suspense fallback={<AssistantTextFallback text={content} />}>

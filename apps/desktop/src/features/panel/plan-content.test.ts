@@ -76,6 +76,7 @@ describe("plan-content", () => {
 		expect(prompt).toContain("PLEASE TURN THIS SPEC INTO AN IMPLEMENTATION PLAN.");
 		expect(prompt).toContain("Do not implement yet.");
 		expect(prompt).toContain("acceptance criteria");
+		expect(prompt).toContain("AC-1");
 		expect(prompt).toContain("# Dashboard spec");
 	});
 });

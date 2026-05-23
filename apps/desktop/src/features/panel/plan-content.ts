@@ -85,6 +85,7 @@ export function buildPlanFromSpecPrompt(specMarkdown: string) {
 		"",
 		"Do not implement yet. Inspect the repository first, then return a concise structured plan with a title, summary, and checklist steps.",
 		"When the spec lists acceptance criteria, make the plan explicitly cover them.",
+		"Reference acceptance criteria by their ids in relevant steps, for example AC-1.",
 		"",
 		"SPEC:",
 		normalizePlanText(specMarkdown),

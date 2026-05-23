@@ -36,9 +36,11 @@ import {
 	stripDisplayedPlanMarkdown,
 	type ParsedPlanContent,
 } from "../plan-content";
+import type { MissionAcceptanceCriterionCoverage } from "@/features/spec/mission-spec-content";
 
 type PlanReviewCardProps = {
 	plan: ParsedPlanContent;
+	acceptanceCriteriaCoverage?: MissionAcceptanceCriterionCoverage[];
 	workspacePath?: string | null;
 	className?: string;
 };
@@ -90,6 +92,7 @@ function savePlanToWorkspace(
 
 export function PlanReviewCard({
 	plan,
+	acceptanceCriteriaCoverage = [],
 	workspacePath,
 	className,
 }: PlanReviewCardProps) {
@@ -99,6 +102,9 @@ export function PlanReviewCard({
 	const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
 	const hasSteps = plan.steps.length > 0;
 	const completedSteps = plan.steps.filter((step) => step.status === "completed").length;
+	const coveredCriteria = acceptanceCriteriaCoverage.filter(
+		(criterion) => criterion.covered,
+	).length;
 	const canCollapse = plan.canCollapse;
 	const exportContents = normalizePlanContentForExport(plan.markdown);
 	const exportFilename = buildPlanMarkdownFilename(plan.markdown);
@@ -183,7 +189,9 @@ export function PlanReviewCard({
 						</p>
 					</div>
 					<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-						{hasSteps
+						{acceptanceCriteriaCoverage.length > 0
+							? `${coveredCriteria}/${acceptanceCriteriaCoverage.length} criteria covered`
+							: hasSteps
 							? `${completedSteps}/${plan.steps.length} steps tracked`
 							: "Structured plan preview"}
 					</p>
@@ -231,6 +239,46 @@ export function PlanReviewCard({
 								{plan.summary}
 							</LazyStreamdown>
 						</Suspense>
+					</div>
+				</div>
+			) : null}
+
+			{acceptanceCriteriaCoverage.length > 0 ? (
+				<div className="mt-4">
+					<p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+						Acceptance criteria coverage
+					</p>
+					<div className="grid gap-1.5">
+						{acceptanceCriteriaCoverage.map((criterion) => (
+							<div
+								key={criterion.id}
+								className={cn(
+									"rounded-xl border px-2.5 py-2",
+									criterion.covered
+										? "border-emerald-500/25 bg-emerald-500/5"
+										: "border-border/50 bg-muted/10",
+								)}
+							>
+								<div className="flex items-center gap-2">
+									{criterion.covered ? (
+										<Check className="size-3.5 text-emerald-500" strokeWidth={2} />
+									) : (
+										<Circle className="size-3.5 text-muted-foreground/50" strokeWidth={2} />
+									)}
+									<span className="font-mono text-[11px] font-semibold text-foreground">
+										{criterion.id}
+									</span>
+									<span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+										{criterion.covered ? "covered" : "uncovered"}
+									</span>
+								</div>
+								{criterion.description ? (
+									<p className="mt-1 pl-5 text-[12px] leading-5 text-muted-foreground">
+										{criterion.description}
+									</p>
+								) : null}
+							</div>
+						))}
 					</div>
 				</div>
 			) : null}
