@@ -37,6 +37,9 @@ import {
 	computeMissionSpecHash,
 	parseMissionValidationReport,
 	parseMissionAcceptanceCriteria,
+	parseMissionValidationChecks,
+	parseMissionSuggestedValidationChecks,
+	parseMissionValidationPersistence,
 	type MissionResumeCriterion,
 } from "@/features/spec/mission-spec-content";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
@@ -783,6 +786,27 @@ export function WorkspaceInspectorSidebar({
 				: [],
 		[activeMissionSpec],
 	);
+	const activeMissionValidationChecks = useMemo(
+		() =>
+			activeMissionSpec
+				? parseMissionValidationChecks(activeMissionSpec.content)
+				: [],
+		[activeMissionSpec],
+	);
+	const activeMissionSuggestedValidationChecks = useMemo(
+		() =>
+			activeMissionSpec
+				? parseMissionSuggestedValidationChecks(activeMissionSpec.content)
+				: [],
+		[activeMissionSpec],
+	);
+	const activeMissionValidationPersistence = useMemo(
+		() =>
+			activeMissionSpec
+				? parseMissionValidationPersistence(activeMissionSpec.content)
+				: "manual",
+		[activeMissionSpec],
+	);
 	const activePlanAcceptanceCriteriaCoverage = useMemo(
 		() =>
 			latestPlanMessage
@@ -1416,6 +1440,58 @@ export function WorkspaceInspectorSidebar({
 																{criterion.description}
 															</p>
 														) : null}
+													</div>
+												))}
+											</div>
+										</div>
+									) : null}
+									{activeMissionValidationChecks.length > 0 ? (
+										<div className="rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
+											<div className="mb-2 flex items-center justify-between gap-2">
+												<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+													{t("inspector.spec.validationChecksTitle")}
+												</p>
+												<Badge variant="outline" className="h-5 text-[10px]">
+													{t(
+														`inspector.spec.validationPersistence.${activeMissionValidationPersistence}`,
+													)}
+												</Badge>
+											</div>
+											<div className="grid gap-1.5">
+												{activeMissionValidationChecks.map((check) => (
+													<div
+														key={check.text}
+														className="rounded-xl border border-border/50 bg-muted/10 px-2.5 py-2 text-[12px] leading-5 text-muted-foreground"
+													>
+														{check.text}
+													</div>
+												))}
+											</div>
+										</div>
+									) : null}
+									{activeMissionValidationChecks.length === 0 &&
+									activeMissionSuggestedValidationChecks.length > 0 ? (
+										<div className="rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
+											<div className="mb-2 flex items-center justify-between gap-2">
+												<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+													{t("inspector.spec.suggestedValidationChecksTitle")}
+												</p>
+												<Badge variant="outline" className="h-5 text-[10px]">
+													{t(
+														`inspector.spec.validationPersistence.${activeMissionValidationPersistence}`,
+													)}
+												</Badge>
+											</div>
+											<p className="mb-2 text-[11px] leading-5 text-muted-foreground">
+												{t("inspector.spec.suggestedValidationChecksDescription")}
+											</p>
+											<div className="grid gap-1.5">
+												{activeMissionSuggestedValidationChecks.map((check) => (
+													<div
+														key={check.text}
+														className="rounded-xl border border-border/50 bg-muted/10 px-2.5 py-2 text-[12px] leading-5 text-muted-foreground"
+													>
+														{check.text}
 													</div>
 												))}
 											</div>

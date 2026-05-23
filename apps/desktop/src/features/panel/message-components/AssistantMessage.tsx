@@ -40,6 +40,9 @@ export function AssistantMessage({
 	workspacePath,
 	isPlanContext,
 	sessionId,
+	activeMissionSpecRelativePath,
+	activeMissionSpecHash,
+	autoSaveMissionValidation,
 }: {
 	content: string;
 	streaming?: boolean;
@@ -50,9 +53,17 @@ export function AssistantMessage({
 	workspacePath?: string | null;
 	isPlanContext?: boolean;
 	sessionId?: string | null;
+	activeMissionSpecRelativePath?: string | null;
+	activeMissionSpecHash?: string | null;
+	autoSaveMissionValidation?: boolean;
 }) {
 	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
 	const validationReport = showPlanCard ? null : parseMissionValidationReport(content);
+	const isValidationStale = Boolean(
+		validationReport?.specHash &&
+			activeMissionSpecHash &&
+			validationReport.specHash !== activeMissionSpecHash,
+	);
 	return (
 		<div
 			data-message-role="assistant"
@@ -149,6 +160,10 @@ export function AssistantMessage({
 					<MissionValidationCard
 						report={validationReport}
 						workspacePath={workspacePath}
+						isStale={isValidationStale}
+						autoSave={autoSaveMissionValidation}
+						activeSpecRelativePath={activeMissionSpecRelativePath}
+						activeSpecHash={activeMissionSpecHash}
 					/>
 				) : (
 					<div className={cn("assistant-markdown-scale max-w-none break-words text-foreground")}>

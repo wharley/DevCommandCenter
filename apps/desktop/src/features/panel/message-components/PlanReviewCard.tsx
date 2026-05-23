@@ -293,20 +293,35 @@ export function PlanReviewCard({
 							<div
 								key={`${step.index}-${step.text}`}
 								className={cn(
-									"flex items-start gap-2 rounded-xl border border-border/50 px-2.5 py-2",
+									"rounded-xl border border-border/50 px-2.5 py-2",
 									step.status === "completed" && "bg-emerald-500/5",
 									step.status === "in_progress" && "bg-sky-500/5",
 								)}
 							>
-								<div className="mt-0.5 shrink-0">{stepIcon(step.status)}</div>
-								<p
-									className={cn(
-										"text-[13px] leading-snug",
-										stepTextClass(step.status),
-									)}
-								>
-									{step.text}
-								</p>
+								<div className="flex items-start gap-2">
+									<div className="mt-0.5 shrink-0">{stepIcon(step.status)}</div>
+									<p
+										className={cn(
+											"text-[13px] leading-snug",
+											stepTextClass(step.status),
+										)}
+									>
+										{step.text}
+									</p>
+								</div>
+								{step.criteria.length > 0 ? (
+									<div className="mt-2 flex flex-wrap gap-1 pl-[1.35rem]">
+										{step.criteria.map((criterion) => (
+											<Badge
+												key={`${step.index}-${criterion}`}
+												variant="outline"
+												className="h-5 rounded-md px-1.5 text-[10px] font-mono"
+											>
+												{criterion}
+											</Badge>
+										))}
+									</div>
+								) : null}
 							</div>
 						))}
 					</div>

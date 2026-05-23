@@ -157,6 +157,13 @@
         "symlink": "Symlink"
       },
       "criteriaTitle": "Acceptance criteria",
+      "validationChecksTitle": "Minimum validation checks",
+      "suggestedValidationChecksTitle": "Suggested validation checks",
+      "suggestedValidationChecksDescription": "The spec did not declare explicit checks. These defaults come from the spec's own validation profiles.",
+      "validationPersistence": {
+        "manual": "Manual save",
+        "auto": "Auto-save"
+      },
       "resumeTitle": "Resume context",
       "resumeState": {
         "needs_validation": "No saved validation yet. Re-anchor will ask the agent to confirm every acceptance criterion.",

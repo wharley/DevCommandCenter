@@ -76,7 +76,7 @@ describe("plan-content", () => {
 
 		expect(prompt).toContain("PLEASE TURN THIS SPEC INTO AN IMPLEMENTATION PLAN.");
 		expect(prompt).toContain("Do not implement yet.");
-		expect(prompt).toContain("acceptance criteria");
+		expect(prompt).toContain("criteria[]");
 		expect(prompt).toContain("AC-1");
 		expect(prompt).toContain("# Dashboard spec");
 	});
@@ -119,5 +119,40 @@ describe("plan-content", () => {
 				criteria: ["AC-3"],
 			}),
 		]);
+	});
+
+	it("rejects malformed structured plan steps", () => {
+		const parsed = parsePlanContent(
+			JSON.stringify({
+				title: "Broken plan",
+				steps: [
+					{
+						status: "pending",
+						criteria: ["AC-1"],
+					},
+				],
+			}),
+		);
+
+		expect(parsed.source).toBe("markdown");
+		expect(parsed.isPlanLike).toBe(false);
+		expect(parsed.steps).toEqual([]);
+	});
+
+	it("rejects malformed structured criteria arrays", () => {
+		const parsed = parsePlanContent(
+			JSON.stringify({
+				title: "Broken plan",
+				steps: [
+					{
+						text: "Do the work.",
+						criteria: ["AC-1", 42],
+					},
+				],
+			}),
+		);
+
+		expect(parsed.source).toBe("markdown");
+		expect(parsed.steps).toEqual([]);
 	});
 });

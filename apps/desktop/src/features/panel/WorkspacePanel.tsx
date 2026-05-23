@@ -13,6 +13,12 @@ import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types
 import { projectWorkspaceMessages } from "./thread-projection";
 import type { ProviderCatalog, CoreEvent } from "@dcc/contracts";
 import { derivePlanFollowUpState } from "./plan-follow-up";
+import { useWorkspaceMissionSpecs } from "@/features/inspector/use-workspace-mission-specs";
+import { buildMissionSpecFilename } from "@/features/composer/WorkspaceComposer.logic";
+import {
+	computeMissionSpecHash,
+	parseMissionValidationPersistence,
+} from "@/features/spec/mission-spec-content";
 
 type WorkspacePanelProps = {
 	workspaceId: string;
@@ -135,6 +141,20 @@ export function WorkspacePanel({
 	const activePlanMarkdown =
 		activePlanMessage?.plan?.markdown ?? activePlanMessage?.content ?? null;
 	const showPlanFollowUpPrompt = planFollowUpState.showPlanFollowUpPrompt;
+	const missionSpecsQuery = useWorkspaceMissionSpecs(workspacePath);
+	const missionSpecs = missionSpecsQuery.data?.specs ?? [];
+	const preferredSpecName = buildMissionSpecFilename(workspaceBranch);
+	const activeMissionSpec =
+		missionSpecs.find((spec) => spec.name === preferredSpecName) ??
+		missionSpecs[0] ??
+		null;
+	const activeMissionSpecRelativePath = activeMissionSpec?.relativePath ?? null;
+	const activeMissionSpecHash = activeMissionSpec
+		? computeMissionSpecHash(activeMissionSpec.content)
+		: null;
+	const autoSaveMissionValidation =
+		activeMissionSpec != null &&
+		parseMissionValidationPersistence(activeMissionSpec.content) === "auto";
 
 	return editorSelection ? (
 		<WorkspaceEditorSurface
@@ -190,6 +210,9 @@ export function WorkspacePanel({
 					workspacePath={workspacePath}
 					planMessageId={latestPlanMessage?.id ?? null}
 					sessionId={effectiveSessionId}
+					activeMissionSpecRelativePath={activeMissionSpecRelativePath}
+					activeMissionSpecHash={activeMissionSpecHash}
+					autoSaveMissionValidation={autoSaveMissionValidation}
 					onStartSession={onStartSession}
 					onSubmitPrompt={onSubmitPrompt}
 				/>

@@ -3,6 +3,12 @@ export type MissionAcceptanceCriterion = {
 	description: string;
 };
 
+export type MissionValidationCheck = {
+	text: string;
+};
+
+export type MissionValidationPersistence = "manual" | "auto";
+
 export type MissionAcceptanceCriterionCoverage = MissionAcceptanceCriterion & {
 	covered: boolean;
 };
@@ -40,8 +46,28 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---(?:\n|$)/;
 const CRITERION_ID_RE = /\b[A-Z]{1,8}-\d+\b/;
 const MARKDOWN_CRITERIA_HEADING_RE =
 	/^\s{0,3}#{1,6}\s+acceptance criteria\s*$/i;
+const MARKDOWN_VALIDATION_CHECKS_HEADING_RE =
+	/^\s{0,3}#{1,6}\s+validation checks\s*$/i;
 const MARKDOWN_HEADING_RE = /^\s{0,3}#{1,6}\s+/;
 const JSON_FENCE_RE = /```(?:json)?\s*([\s\S]*?)```/gi;
+const VALIDATION_PROFILE_CHECKS: Record<string, string[]> = {
+	node: [
+		"Run the repository's standard Node or workspace typecheck command when one exists.",
+		"Run the repository's standard Node or workspace test command when one exists.",
+	],
+	react: [
+		"Exercise the affected UI flow manually and confirm the observable result.",
+		"Run the frontend typecheck or test command used by the repository when one exists.",
+	],
+	rust: [
+		"Run the relevant cargo check command for the affected crate or workspace.",
+		"Run the relevant cargo test command when tests exist for the affected crate or workspace.",
+	],
+	tauri: [
+		"Run the desktop frontend check and the Rust backend check used by the repository.",
+		"Exercise the affected desktop flow manually before concluding PASS.",
+	],
+};
 
 export function computeMissionSpecHash(specMarkdown: string) {
 	let hash = 0x811c9dc5;
@@ -69,6 +95,55 @@ export function parseMissionAcceptanceCriteria(
 		}
 	}
 	return [...byId.values()];
+}
+
+export function parseMissionValidationChecks(
+	specMarkdown: string,
+): MissionValidationCheck[] {
+	return dedupeMissionValidationChecks([
+		...parseFrontmatterValidationChecks(specMarkdown),
+		...parseMarkdownValidationChecks(specMarkdown),
+	]);
+}
+
+export function parseMissionValidationProfiles(specMarkdown: string): string[] {
+	const profiles = [
+		...parseFrontmatterValidationProfileList(specMarkdown),
+		...parseFrontmatterValidationProfileValue(specMarkdown),
+	];
+	const deduped = new Set<string>();
+	for (const profile of profiles) {
+		const normalized = profile.trim().toLowerCase();
+		if (!normalized || !(normalized in VALIDATION_PROFILE_CHECKS)) {
+			continue;
+		}
+		deduped.add(normalized);
+	}
+	return [...deduped];
+}
+
+export function parseMissionSuggestedValidationChecks(
+	specMarkdown: string,
+): MissionValidationCheck[] {
+	const profiles = parseMissionValidationProfiles(specMarkdown);
+	if (profiles.length === 0) {
+		return [];
+	}
+	return dedupeMissionValidationChecks(
+		profiles.flatMap((profile) =>
+			(VALIDATION_PROFILE_CHECKS[profile] ?? []).map((text) => ({ text })),
+		),
+	);
+}
+
+export function parseMissionValidationPersistence(
+	specMarkdown: string,
+): MissionValidationPersistence {
+	const value = parseFrontmatterScalarValue(specMarkdown, "validation_persistence");
+	if (value === "auto") {
+		return "auto";
+	}
+	return "manual";
 }
 
 export function buildMissionAcceptanceCriteriaCoverage(
@@ -103,10 +178,27 @@ export function buildMissionValidationPrompt({
 	const normalizedPlan = planMarkdown?.trim() ?? "";
 	const normalizedSpecPath = specRelativePath?.trim() ?? null;
 	const specHash = computeMissionSpecHash(specMarkdown);
+	const validationChecks = parseMissionValidationChecks(specMarkdown);
+	const suggestedChecks =
+		validationChecks.length === 0
+			? parseMissionSuggestedValidationChecks(specMarkdown)
+			: [];
 	return [
 		"VALIDATE THIS MISSION AGAINST ITS SPEC.",
 		"",
 		"Do not modify files. Inspect the repository and run only the checks needed to evaluate the acceptance criteria.",
+		...(validationChecks.length > 0
+			? [
+					"Prioritize these validation checks declared by the spec before concluding PASS:",
+					...validationChecks.map((check) => `- ${check.text}`),
+				]
+			: []),
+		...(suggestedChecks.length > 0
+			? [
+					"No explicit validation checks were declared. Start from these defaults suggested by the spec validation profiles:",
+					...suggestedChecks.map((check) => `- ${check.text}`),
+				]
+			: []),
 		"Return a concise validation report with one row per acceptance criterion using: PASS, FAIL, or UNKNOWN.",
 		"For every FAIL or UNKNOWN, include the evidence or missing evidence and the smallest next action.",
 		"End with a fenced JSON block that exactly follows this shape:",
@@ -494,6 +586,92 @@ function parseFrontmatterCriteria(
 	return criteria.filter((criterion) => criterion.id.length > 0);
 }
 
+function parseFrontmatterValidationChecks(
+	specMarkdown: string,
+): MissionValidationCheck[] {
+	const match = specMarkdown.match(FRONTMATTER_RE);
+	const frontmatter = match?.[1] ?? "";
+	if (!frontmatter.includes("validation_checks:")) {
+		return [];
+	}
+
+	const checks: MissionValidationCheck[] = [];
+	let inChecks = false;
+	for (const rawLine of frontmatter.split("\n")) {
+		const line = rawLine.trim();
+		if (!inChecks) {
+			if (/^validation_checks:\s*$/i.test(line)) {
+				inChecks = true;
+			}
+			continue;
+		}
+
+		if (!line) {
+			continue;
+		}
+		if (/^[A-Za-z0-9_-]+:\s*/.test(line)) {
+			break;
+		}
+
+		const checkMatch = line.match(/^-\s+(.+)$/);
+		if (checkMatch) {
+			checks.push({ text: checkMatch[1]?.trim() ?? "" });
+		}
+	}
+
+	return checks.filter((check) => check.text.length > 0);
+}
+
+function parseFrontmatterValidationProfileList(specMarkdown: string): string[] {
+	const match = specMarkdown.match(FRONTMATTER_RE);
+	const frontmatter = match?.[1] ?? "";
+	if (!frontmatter.includes("validation_profiles:")) {
+		return [];
+	}
+
+	const profiles: string[] = [];
+	let inProfiles = false;
+	for (const rawLine of frontmatter.split("\n")) {
+		const line = rawLine.trim();
+		if (!inProfiles) {
+			if (/^validation_profiles:\s*$/i.test(line)) {
+				inProfiles = true;
+			}
+			continue;
+		}
+
+		if (!line) {
+			continue;
+		}
+		if (/^[A-Za-z0-9_-]+:\s*/.test(line)) {
+			break;
+		}
+
+		const profileMatch = line.match(/^-\s+(.+)$/);
+		if (profileMatch) {
+			profiles.push(profileMatch[1]?.trim() ?? "");
+		}
+	}
+
+	return profiles.filter((profile) => profile.length > 0);
+}
+
+function parseFrontmatterValidationProfileValue(specMarkdown: string): string[] {
+	const value = parseFrontmatterScalarValue(specMarkdown, "validation_profile");
+	return value ? [value] : [];
+}
+
+function parseFrontmatterScalarValue(
+	specMarkdown: string,
+	key: string,
+): string | null {
+	const match = specMarkdown.match(FRONTMATTER_RE);
+	const frontmatter = match?.[1] ?? "";
+	const pattern = new RegExp(`^${escapeRegExp(key)}:\\s*["']?([^"'\\n]+)["']?\\s*$`, "im");
+	const valueMatch = frontmatter.match(pattern);
+	return valueMatch?.[1]?.trim() ?? null;
+}
+
 function parseMarkdownCriteria(specMarkdown: string): MissionAcceptanceCriterion[] {
 	const criteria: MissionAcceptanceCriterion[] = [];
 	let inCriteriaSection = false;
@@ -523,6 +701,52 @@ function parseMarkdownCriteria(specMarkdown: string): MissionAcceptanceCriterion
 		criteria.push({ id, description });
 	}
 	return criteria;
+}
+
+function parseMarkdownValidationChecks(
+	specMarkdown: string,
+): MissionValidationCheck[] {
+	const checks: MissionValidationCheck[] = [];
+	let inChecksSection = false;
+	for (const rawLine of specMarkdown.split("\n")) {
+		if (MARKDOWN_VALIDATION_CHECKS_HEADING_RE.test(rawLine)) {
+			inChecksSection = true;
+			continue;
+		}
+		if (inChecksSection && MARKDOWN_HEADING_RE.test(rawLine)) {
+			break;
+		}
+		if (!inChecksSection) {
+			continue;
+		}
+
+		const text = rawLine.trim().replace(/^[-*+]\s+/, "").trim();
+		if (!text) {
+			continue;
+		}
+		checks.push({ text });
+	}
+	return checks;
+}
+
+function dedupeMissionValidationChecks(
+	checks: MissionValidationCheck[],
+): MissionValidationCheck[] {
+	const byText = new Set<string>();
+	const deduped: MissionValidationCheck[] = [];
+	for (const check of checks) {
+		const normalized = check.text.trim();
+		if (!normalized) {
+			continue;
+		}
+		const key = normalized.toLowerCase();
+		if (byText.has(key)) {
+			continue;
+		}
+		byText.add(key);
+		deduped.push({ text: normalized });
+	}
+	return deduped;
 }
 
 function normalizeCriterion(

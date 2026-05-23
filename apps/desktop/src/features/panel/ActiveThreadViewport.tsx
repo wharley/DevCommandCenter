@@ -22,6 +22,9 @@ type ActiveThreadViewportProps = {
 	workspacePath: string | null;
 	planMessageId: string | null;
 	sessionId: string | null;
+	activeMissionSpecRelativePath: string | null;
+	activeMissionSpecHash: string | null;
+	autoSaveMissionValidation: boolean;
 	onStartSession: () => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 };
@@ -39,6 +42,9 @@ export function ActiveThreadViewport({
 	workspacePath,
 	planMessageId,
 	sessionId,
+	activeMissionSpecRelativePath,
+	activeMissionSpecHash,
+	autoSaveMissionValidation,
 	onStartSession,
 	onSubmitPrompt,
 }: ActiveThreadViewportProps) {
@@ -141,6 +147,9 @@ export function ActiveThreadViewport({
 												workspacePath={workspacePath}
 												isPlanContext={message.id === planMessageId}
 												sessionId={sessionId}
+												activeMissionSpecRelativePath={activeMissionSpecRelativePath}
+												activeMissionSpecHash={activeMissionSpecHash}
+												autoSaveMissionValidation={autoSaveMissionValidation}
 											/>
 										</div>
 									);

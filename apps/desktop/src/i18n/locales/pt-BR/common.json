@@ -157,6 +157,13 @@
         "symlink": "Symlink"
       },
       "criteriaTitle": "Critérios de aceitação",
+      "validationChecksTitle": "Checks mínimos de validação",
+      "suggestedValidationChecksTitle": "Checks sugeridos de validação",
+      "suggestedValidationChecksDescription": "A spec não declarou checks explícitos. Estes defaults vêm dos perfis de validação da própria spec.",
+      "validationPersistence": {
+        "manual": "Manual",
+        "auto": "Auto-save"
+      },
       "resumeTitle": "Contexto de retomada",
       "resumeState": {
         "needs_validation": "Ainda não há validação salva. O re-anchor vai pedir ao agente para confirmar todos os critérios de aceitação.",

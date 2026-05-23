@@ -351,13 +351,21 @@ inspector e ação **Generate plan**, que envia a spec em `planMode: true`.
 spec e mostra cobertura no `PlanReviewCard` quando o plano referencia explicitamente os
 IDs. A aba `Spec` também oferece **Validate**, que envia ao agente um prompt de auditoria
 para inspecionar o worktree e responder `PASS` / `FAIL` / `UNKNOWN` por critério sem
-alterar arquivos. A resposta de validação agora pede um bloco JSON
-`dccMissionValidation`, que o frontend reconhece e renderiza como card estruturado.
-O card permite salvar esse veredito como
+alterar arquivos. A spec/template agora também pode declarar **checks mínimos de
+validação** (`validation_checks` no frontmatter ou seção `## Validation Checks`), que o
+DCC exibe na UI e injeta no prompt de validação sem impor metodologia. Quando a spec não
+declara checks explícitos, ela também pode declarar **perfis de validação** (`validation_profile`
+ou `validation_profiles`) para o DCC sugerir defaults conservadores por stack/template,
+sem heurística de repo. A resposta de
+validação pede um bloco JSON `dccMissionValidation`, que o frontend reconhece e renderiza
+como card estruturado. O card permite salvar esse veredito como
 `.devcommandcenter/specs/<mission>.validation.json`, mantendo o resultado versionável no
 worktree. A aba `Spec` carrega esse arquivo de volta e exibe a última validação salva
 como estado ativo da Mission. O JSON inclui `specHash`; se a spec mudar depois da
 validação, o card salvo é marcado como **Stale** para evitar confiar em veredito antigo.
+A persistência agora também pode ser controlada pela própria spec: `validation_persistence: auto`
+faz o card do turno tentar auto-save apenas quando o veredito pertence à spec ativa e ao
+hash atual; o padrão continua `manual`.
 
 **Fase 4 — Re-injeção pós-compactação (custo: médio, é o valor único).**
 O DCC reinjeta a spec após `/compact`. Resolve o esquecimento de requisitos —
@@ -415,9 +423,9 @@ e a Fase 0 custa quase nada para descobrir isso.
 | `/spec` nativo | ✅ | Ação de cliente no composer, agnóstica de provider |
 | Spec no inspector | ✅ | Aba `Spec` lista specs via comando Rust limitado ao diretório DCC |
 | Spec → Plan | ✅ | `Generate plan` envia `buildPlanFromSpecPrompt(...)` em plan mode |
-| Cobertura `AC-*` no plano | ✅ Parcial | Cobertura aceita `criteria[]` estruturado por step e fallback por ID textual; ainda não há vínculo semântico completo |
-| Validação assistida | ✅ Parcial | `Validate` pede auditoria e card JSON `dccMissionValidation` |
-| Persistência do veredito | ✅ Parcial | `Save verdict` grava `.validation.json` e invalida a aba `Spec`; ainda é ação manual |
+| Cobertura `AC-*` no plano | ✅ Parcial | Prompt pede `criteria[]`, parser valida schema básico do plano estruturado e a UI exibe critérios por step; ainda não há vínculo semântico completo |
+| Validação assistida | ✅ Parcial | `Validate` pede auditoria; a spec pode declarar checks explícitos ou perfis com defaults conservadores, e o resultado vira card JSON `dccMissionValidation` |
+| Persistência do veredito | ✅ Parcial | `Save verdict` grava `.validation.json`, a aba `Spec` atualiza, e a spec pode optar por `validation_persistence: auto` |
 | Leitura do veredito salvo | ✅ | Aba `Spec` exibe o `.validation.json` associado à spec |
 | Frescor do veredito | ✅ | `specHash` marca validação salva como `Stale` quando a spec muda |
 | Re-injeção contextual | ✅ Parcial | `Re-anchor` injeta spec + plano + validação salva manualmente |
@@ -434,9 +442,9 @@ Este ledger existe para não perdermos o que ainda está deliberadamente incompl
 
 | Parcial | Por que ainda é parcial | Próximo corte recomendado |
 |---|---|---|
-| Cobertura `AC-*` no plano | Já aceita `criteria[]` estruturado e fallback textual, mas ainda não entende semântica além do mapeamento explícito | Decidir se vale introduzir validação de schema/plan JSON antes de tentar inferência semântica |
-| Validação assistida | A auditoria depende do agente executar/verificar evidências; o DCC só estrutura e renderiza | Criar política de checks mínimos por spec ou por template, sem impor metodologia |
-| Persistência do veredito | Salvamento ainda é manual; a UX já atualiza a aba `Spec` após salvar | Decidir se auto-save é aceitável ou se deve continuar explícito por segurança |
+| Cobertura `AC-*` no plano | Prompt, parser e UI já suportam `criteria[]`, mas ainda não entendem semântica além do mapeamento explícito | Só considerar inferência semântica se o plano estruturado continuar insuficiente no uso real |
+| Validação assistida | A spec já consegue declarar checks explícitos e defaults por perfil, mas a execução/evidência ainda depende do agente e não há captura automática | Observar uso real antes de aumentar a matriz de perfis ou provider-specific checks |
+| Persistência do veredito | Agora há manual por padrão e auto-save opt-in, mas ainda não existe trilha explícita de proveniência além do JSON salvo | Decidir se a UI deve mostrar quando o veredito foi salvo manualmente vs automaticamente |
 | Re-injeção contextual | Re-anchor restaura contexto, mas não cria workflow de fases | Só evoluir para workflow se specs reais mostrarem repetição de fases pendentes |
 | Re-injeção pós-compactação | Gatilho é conservador e best-effort; não cobre compactação interna do provider não exposta ao DCC | Adicionar eventos de compactação por provider quando existirem sinais confiáveis |
 | Resume cross-fase | O DCC já destaca pendências e expõe ação explícita; ainda não agenda automaticamente a próxima fase | Só automatizar se houver evidência de workflow repetitivo entre fases |

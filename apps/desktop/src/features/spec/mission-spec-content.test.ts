@@ -8,6 +8,10 @@ import {
 	computeMissionSpecHash,
 	parseMissionValidationReport,
 	parseMissionAcceptanceCriteria,
+	parseMissionValidationChecks,
+	parseMissionSuggestedValidationChecks,
+	parseMissionValidationPersistence,
+	parseMissionValidationProfiles,
 } from "./mission-spec-content";
 
 describe("mission-spec-content", () => {
@@ -28,6 +32,72 @@ describe("mission-spec-content", () => {
 		expect(parseMissionAcceptanceCriteria(spec)).toEqual([
 			{ id: "AC-1", description: "Workspace spec is visible." },
 			{ id: "AC-2", description: "Plan can be generated from the spec." },
+		]);
+	});
+
+	it("parses validation checks from frontmatter and markdown", () => {
+		const spec = [
+			"---",
+			"status: draft",
+			"validation_checks:",
+			"  - Run `yarn workspace @dcc/desktop typecheck`.",
+			"---",
+			"# Spec",
+			"",
+			"## Validation Checks",
+			"- Run `yarn workspace @dcc/desktop test`.",
+			"- Run `yarn workspace @dcc/desktop typecheck`.",
+		].join("\n");
+
+		expect(parseMissionValidationChecks(spec)).toEqual([
+			{ text: "Run `yarn workspace @dcc/desktop typecheck`." },
+			{ text: "Run `yarn workspace @dcc/desktop test`." },
+		]);
+	});
+
+	it("parses validation profiles and persistence from frontmatter", () => {
+		const spec = [
+			"---",
+			"validation_profile: tauri",
+			"validation_profiles:",
+			"  - rust",
+			"  - react",
+			"validation_persistence: auto",
+			"---",
+			"# Spec",
+		].join("\n");
+
+		expect(parseMissionValidationProfiles(spec)).toEqual([
+			"rust",
+			"react",
+			"tauri",
+		]);
+		expect(parseMissionValidationPersistence(spec)).toBe("auto");
+	});
+
+	it("builds suggested validation checks from declared profiles", () => {
+		const spec = [
+			"---",
+			"validation_profiles:",
+			"  - rust",
+			"  - tauri",
+			"---",
+			"# Spec",
+		].join("\n");
+
+		expect(parseMissionSuggestedValidationChecks(spec)).toEqual([
+			{
+				text: "Run the relevant cargo check command for the affected crate or workspace.",
+			},
+			{
+				text: "Run the relevant cargo test command when tests exist for the affected crate or workspace.",
+			},
+			{
+				text: "Run the desktop frontend check and the Rust backend check used by the repository.",
+			},
+			{
+				text: "Exercise the affected desktop flow manually before concluding PASS.",
+			},
 		]);
 	});
 
@@ -62,6 +132,46 @@ describe("mission-spec-content", () => {
 		expect(prompt).toContain(".devcommandcenter/specs/demo.spec.md");
 		expect(prompt).toContain("CURRENT PLAN CONTEXT:");
 		expect(prompt).toContain("AC-1");
+	});
+
+	it("includes spec-defined validation checks in the validation prompt", () => {
+		const specMarkdown = [
+			"## Validation Checks",
+			"- Run `yarn workspace @dcc/desktop typecheck`.",
+			"",
+			"## Acceptance Criteria",
+			"- AC-1: Visible spec.",
+		].join("\n");
+		const prompt = buildMissionValidationPrompt({
+			specMarkdown,
+		});
+
+		expect(prompt).toContain(
+			"Prioritize these validation checks declared by the spec before concluding PASS:",
+		);
+		expect(prompt).toContain("Run `yarn workspace @dcc/desktop typecheck`.");
+	});
+
+	it("falls back to profile-based validation checks when explicit checks are absent", () => {
+		const specMarkdown = [
+			"---",
+			"validation_profiles:",
+			"  - rust",
+			"---",
+			"",
+			"## Acceptance Criteria",
+			"- AC-1: Visible spec.",
+		].join("\n");
+		const prompt = buildMissionValidationPrompt({
+			specMarkdown,
+		});
+
+		expect(prompt).toContain(
+			"No explicit validation checks were declared. Start from these defaults suggested by the spec validation profiles:",
+		);
+		expect(prompt).toContain(
+			"Run the relevant cargo check command for the affected crate or workspace.",
+		);
 	});
 
 	it("builds a re-anchor prompt with spec, plan, and saved validation", () => {

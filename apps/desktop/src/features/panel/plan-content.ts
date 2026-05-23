@@ -34,6 +34,16 @@ type StructuredPlan = {
 	steps?: Array<string | Record<string, unknown>>;
 };
 
+type StructuredPlanStepInput = {
+	text?: string;
+	title?: string;
+	description?: string;
+	status?: string;
+	criteria?: unknown;
+	acceptanceCriteria?: unknown;
+	acceptance_criteria?: unknown;
+};
+
 const PLAN_HEADING_RE = /^#{1,6}\s+(.*)$/;
 const CHECKLIST_STEP_RE =
 	/^(?:[-*+]|(?:\d+\.))\s+\[(?<check>[ xX~\-\/])\]\s+(?<text>.+)$/;
@@ -84,9 +94,11 @@ export function buildPlanFromSpecPrompt(specMarkdown: string) {
 	return [
 		"PLEASE TURN THIS SPEC INTO AN IMPLEMENTATION PLAN.",
 		"",
-		"Do not implement yet. Inspect the repository first, then return a concise structured plan with a title, summary, and checklist steps.",
+		"Do not implement yet. Inspect the repository first, then return a concise structured plan.",
+		'Prefer JSON with this shape: {"title":"...","summary":"...","steps":[{"text":"...","status":"pending","criteria":["AC-1"]}]}',
 		"When the spec lists acceptance criteria, make the plan explicitly cover them.",
-		"Reference acceptance criteria by their ids in relevant steps, for example AC-1.",
+		"Each relevant step should include criteria ids in criteria[], for example AC-1.",
+		"If you do not return JSON, include the acceptance criteria ids directly in the step text.",
 		"",
 		"SPEC:",
 		normalizePlanText(specMarkdown),
@@ -318,13 +330,13 @@ function buildMarkdownFromStructuredPlan(plan: {
 	}
 	if (plan.steps.length > 0) {
 		lines.push("");
-			lines.push("## Steps");
+		lines.push("## Steps");
 		for (const step of plan.steps) {
 			const marker =
 				step.status === "completed"
 					? "[x]"
 					: step.status === "in_progress"
-					? "[-]"
+						? "[-]"
 						: "[ ]";
 			const criteriaSuffix =
 				step.criteria.length > 0
@@ -353,6 +365,9 @@ function normalizeStructuredSteps(steps: Array<string | Record<string, unknown>>
 				};
 			}
 
+			if (!isStructuredPlanStepInput(step)) {
+				return null;
+			}
 			const text = normalizeText(
 				typeof step.text === "string"
 					? step.text
@@ -368,9 +383,7 @@ function normalizeStructuredSteps(steps: Array<string | Record<string, unknown>>
 			return {
 				raw: text,
 				text: cleanStepText(text),
-				status: statusFromRaw(
-					typeof step.status === "string" ? step.status : text,
-				),
+				status: normalizeStructuredStatus(step.status, text),
 				index,
 				criteria: normalizeStructuredCriteria(step),
 			};
@@ -501,6 +514,58 @@ function normalizeStructuredCriteria(step: Record<string, unknown>) {
 	return ids;
 }
 
+function normalizeStructuredStatus(status: unknown, fallbackText: string) {
+	if (typeof status !== "string") {
+		return statusFromRaw(fallbackText);
+	}
+	const normalized = status.trim().toLowerCase();
+	if (
+		normalized === "completed" ||
+		normalized === "complete" ||
+		normalized === "done"
+	) {
+		return "completed";
+	}
+	if (
+		normalized === "in_progress" ||
+		normalized === "in progress" ||
+		normalized === "working" ||
+		normalized === "running"
+	) {
+		return "in_progress";
+	}
+	return "pending";
+}
+
+function isStructuredPlanStepInput(value: Record<string, unknown>): value is StructuredPlanStepInput {
+	const hasTextLikeField =
+		typeof value.text === "string" ||
+		typeof value.title === "string" ||
+		typeof value.description === "string";
+	if (!hasTextLikeField) {
+		return false;
+	}
+
+	if (value.status != null && typeof value.status !== "string") {
+		return false;
+	}
+
+	for (const key of ["criteria", "acceptanceCriteria", "acceptance_criteria"] as const) {
+		const criteriaValue = value[key];
+		if (criteriaValue == null) {
+			continue;
+		}
+		if (
+			!Array.isArray(criteriaValue) ||
+			criteriaValue.some((candidate) => typeof candidate !== "string")
+		) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 function slugify(value: string) {
 	const normalized = value
 		.normalize("NFKD")
@@ -547,11 +612,38 @@ function tryParseJsonPlan(raw: string): StructuredPlan | null {
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 			return null;
 		}
-		const candidate = parsed as StructuredPlan;
-		if (!candidate.summary && !candidate.steps && !candidate.title) {
+		const candidate = parsed as Record<string, unknown>;
+		if (candidate.title != null && typeof candidate.title !== "string") {
 			return null;
 		}
-		return candidate;
+		if (candidate.summary != null && typeof candidate.summary !== "string") {
+			return null;
+		}
+		if (candidate.steps != null && !Array.isArray(candidate.steps)) {
+			return null;
+		}
+		if (
+			Array.isArray(candidate.steps) &&
+			candidate.steps.some(
+				(step) =>
+					typeof step !== "string" &&
+					(!step ||
+						typeof step !== "object" ||
+						Array.isArray(step) ||
+						!isStructuredPlanStepInput(step as Record<string, unknown>)),
+			)
+		) {
+			return null;
+		}
+		const normalizedCandidate = candidate as StructuredPlan;
+		if (
+			!normalizedCandidate.summary &&
+			!normalizedCandidate.steps &&
+			!normalizedCandidate.title
+		) {
+			return null;
+		}
+		return normalizedCandidate;
 	} catch {
 		return null;
 	}
