@@ -2,6 +2,7 @@ import {
 	useCallback,
 	useEffect,
 	useMemo,
+	useRef,
 	useState,
 	useSyncExternalStore,
 	type KeyboardEventHandler,
@@ -446,6 +447,7 @@ export default function App() {
 	const [pendingPromptSessionId, setPendingPromptSessionId] = useState<
 		string | null
 	>(null);
+	const autoCompiledWorkspaceSpecsRef = useRef<Set<string>>(new Set());
 
 	/**
 	 * Apply each live event to the snapshot of the session that owns it — not
@@ -483,6 +485,50 @@ export default function App() {
 	const selectedWorkspacePath =
 		selectedWorkspace?.worktreePath ?? selectedWorkspace?.rootPath ?? null;
 	const selectedLocalWorkspacePath = isRemoteBackend ? null : selectedWorkspacePath;
+	useEffect(() => {
+		if (!selectedLocalWorkspacePath || !selectedWorkspace) {
+			return;
+		}
+
+		const workspaceKey = `${selectedWorkspace.id}:${selectedWorkspace.branch}`;
+		if (autoCompiledWorkspaceSpecsRef.current.has(workspaceKey)) {
+			return;
+		}
+		autoCompiledWorkspaceSpecsRef.current.add(workspaceKey);
+
+		let cancelled = false;
+		void (async () => {
+			const specs = await listMissionSpecs({
+				workspaceRoot: selectedLocalWorkspacePath,
+			});
+			if (cancelled) {
+				return;
+			}
+			const preferredSpecName = buildMissionSpecFilename(selectedWorkspace.branch);
+			const activeSpec =
+				specs.specs.find((spec) => spec.name === preferredSpecName) ??
+				specs.specs[0] ??
+				null;
+			if (!activeSpec) {
+				return;
+			}
+			await compileMissionSpecContextBestEffort({
+				workspaceRoot: selectedLocalWorkspacePath,
+				specRelativePath: activeSpec.relativePath,
+			});
+			if (!cancelled) {
+				await queryClient.invalidateQueries({
+					queryKey: ["missionSpecContextStatus", selectedLocalWorkspacePath],
+				});
+			}
+		})().catch((error) => {
+			console.warn("[dcc] workspace reopen spec context compile failed:", error);
+		});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [queryClient, selectedLocalWorkspacePath, selectedWorkspace]);
 	const showRemoteUnsupported = useCallback(
 		(kind: "sessions" | "workspaces") => {
 			toast.info(

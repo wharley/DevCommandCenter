@@ -388,8 +388,9 @@ A aba também exibe se o contexto compilado está `Current`, `Missing`, `Stale`,
 `Invalid` ou apontando para symlink, comparando os arquivos nativos com a spec ativa sem
 escrever nada. O re-anchor manual e o re-anchor automático pós-`/compact` tentam compilar
 a spec antes de reancorar a sessão; se a compilação falhar, o re-anchor por prompt ainda
-segue para preservar a recuperação de contexto. Ainda falta ligar essa compilação ao hook
-de setup/reabertura da Mission e ao futuro manifesto de contexto/provider.
+segue para preservar a recuperação de contexto. A compilação também roda best-effort após
+setup/criação da Mission e na reabertura/seleção de workspace local. Ainda falta ligar ao
+futuro manifesto de contexto/provider.
 
 **Backlog imediato sugerido para Fase 5:**
 1. **Auto-compile no re-anchor e pós-`/compact`.** Antes de enviar o re-anchor, compilar
@@ -398,7 +399,8 @@ de setup/reabertura da Mission e ao futuro manifesto de contexto/provider.
 2. **Indicador de contexto compilado stale/current.** Mostrar na aba `Spec` se
    `AGENTS.md`/`GEMINI.md` batem com a spec ativa. **Status: implementado.**
 3. **Hook de setup/reopen da Mission.** Automatizar a compilação ao preparar/reabrir a
-   Mission, depois que o comando e a visibilidade na UI estiverem estáveis.
+   Mission, depois que o comando e a visibilidade na UI estiverem estáveis. **Status:
+   implementado como best-effort.**
 
 Cada fase entrega valor sozinha. Dá para parar em qualquer ponto se o ROI não aparecer —
 e a Fase 0 custa quase nada para descobrir isso.
@@ -422,6 +424,7 @@ e a Fase 0 custa quase nada para descobrir isso.
 | Compilação cross-provider | ✅ Parcial | `Compile context` gera seção `dcc:spec` idempotente em `AGENTS.md`/`GEMINI.md` |
 | Frescor do contexto compilado | ✅ | Aba `Spec` compara `AGENTS.md`/`GEMINI.md` com a spec ativa sem escrever arquivos |
 | Auto-compile antes de re-anchor | ✅ Parcial | Re-anchor manual e pós-`/compact` compilam contexto best-effort antes do prompt |
+| Auto-compile setup/reopen | ✅ Parcial | Setup/criação e seleção local de workspace compilam spec ativa best-effort |
 
 ---
 

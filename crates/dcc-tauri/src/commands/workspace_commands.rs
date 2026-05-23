@@ -393,6 +393,28 @@ async fn persist_workspace_setup_outcome(
         .map_err(|error| error.to_string())
 }
 
+fn compile_active_mission_spec_context_for_workspace(workspace: &Workspace) {
+    match select_active_mission_spec_relative_path(
+        resolve_workspace_active_root(workspace),
+        &workspace.base_branch,
+    )
+    .and_then(|spec_relative_path| {
+        spec_relative_path
+            .map(|path| {
+                compile_mission_spec_context_for_path(
+                    resolve_workspace_active_root(workspace),
+                    &path,
+                )
+            })
+            .transpose()
+    }) {
+        Ok(_) => {}
+        Err(error) => {
+            eprintln!("[dcc] mission spec setup compile failed: {error}");
+        }
+    }
+}
+
 fn validate_git_relative_path(path: &str) -> Result<String, String> {
     let p = normalize_git_relative_path(path);
     if p.is_empty() {
@@ -1170,6 +1192,7 @@ pub async fn create_workspace_for_repo(
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
     let setup_report = execute_workspace_setup_report(&finalized.workspace).await;
     let mut workspace = finalized.workspace;
+    compile_active_mission_spec_context_for_workspace(&workspace);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
 
     Ok(CreateWorkspaceForRepoOutput {
@@ -1196,6 +1219,7 @@ pub async fn create_workspace_from_url(
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
     let setup_report = execute_workspace_setup_report(&finalized.workspace).await;
     let mut workspace = finalized.workspace;
+    compile_active_mission_spec_context_for_workspace(&workspace);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
 
     Ok(CreateWorkspaceFromUrlOutput {
@@ -1218,6 +1242,7 @@ pub async fn workspace_run_setup(
 
     let setup_hints = collect_workspace_setup_hints(&workspace);
     let setup_report = execute_workspace_setup_report(&workspace).await;
+    compile_active_mission_spec_context_for_workspace(&workspace);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
 
     Ok(WorkspaceRunSetupOutput {
@@ -1458,12 +1483,19 @@ pub async fn compile_mission_spec_context(
 ) -> Result<CompileMissionSpecContextOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
 
-    let root = input.workspace_root.trim();
+    compile_mission_spec_context_for_path(&input.workspace_root, &input.spec_relative_path)
+}
+
+fn compile_mission_spec_context_for_path(
+    workspace_root: &str,
+    spec_relative_path: &str,
+) -> Result<CompileMissionSpecContextOutput, String> {
+    let root = workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
 
-    let spec_relative_path = validate_mission_spec_relative_path(&input.spec_relative_path)?;
+    let spec_relative_path = validate_mission_spec_relative_path(spec_relative_path)?;
     let root_canonical = PathBuf::from(root)
         .canonicalize()
         .map_err(|error| error.to_string())?;
@@ -1609,6 +1641,84 @@ Do not edit inside the `dcc:spec` markers; update the source spec instead.\n\n\
 {normalized_spec}\n\
 {DCC_SPEC_CONTEXT_END}\n"
     )
+}
+
+fn select_active_mission_spec_relative_path(
+    workspace_root: &str,
+    workspace_branch: &str,
+) -> Result<Option<String>, String> {
+    let root = workspace_root.trim();
+    if root.is_empty() {
+        return Ok(None);
+    }
+
+    let specs_dir = PathBuf::from(root).join(".devcommandcenter").join("specs");
+    if !specs_dir.is_dir() {
+        return Ok(None);
+    }
+
+    let root_canonical = PathBuf::from(root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let specs_canonical = specs_dir
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !specs_canonical.starts_with(&root_canonical) {
+        return Err("mission specs directory must stay inside the workspace".to_string());
+    }
+
+    let preferred = build_mission_spec_filename(workspace_branch);
+    let mut spec_names = Vec::new();
+    for entry in fs::read_dir(&specs_canonical).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if fs::symlink_metadata(&path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if file_name.ends_with(".spec.md") {
+            spec_names.push(file_name.to_string());
+        }
+    }
+
+    spec_names.sort();
+    let selected = spec_names
+        .iter()
+        .find(|name| **name == preferred)
+        .or_else(|| spec_names.first());
+
+    Ok(selected.map(|name| format!(".devcommandcenter/specs/{name}")))
+}
+
+fn build_mission_spec_filename(workspace_branch: &str) -> String {
+    let source = workspace_branch.trim();
+    let mut slug = String::new();
+    let mut last_was_dash = false;
+    for character in source.chars().flat_map(char::to_lowercase) {
+        if character.is_ascii_alphanumeric() {
+            slug.push(character);
+            last_was_dash = false;
+        } else if !last_was_dash && !slug.is_empty() {
+            slug.push('-');
+            last_was_dash = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        "mission.spec.md".to_string()
+    } else {
+        format!("{slug}.spec.md")
+    }
 }
 
 fn classify_generated_context_section(
