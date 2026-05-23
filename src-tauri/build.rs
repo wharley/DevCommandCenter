@@ -40,12 +40,12 @@ use dcc_tauri::commands::{
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
         ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
         ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput, MissionSpecEntry,
-        RepositoryIdInput, WorkspaceContinueFromBaseBranchInput,
-        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
-        WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput,
-        WorkspaceGitPathInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
-        WorkspaceGitStatusOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
-        WorkspaceSetupHint,
+        RepositoryIdInput, SaveMissionValidationInput, SaveMissionValidationOutput,
+        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
+        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
+        WorkspaceGitCommitPushInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
+        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceRunSetupInput,
+        WorkspaceRunSetupOutput, WorkspaceSetupHint,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -73,6 +73,7 @@ struct WorkspaceMethods {
     list_local_branches: String,
     list_git_tracked_files: String,
     list_mission_specs: String,
+    save_mission_validation: String,
     list_child_directories: String,
     list_workspaces: String,
     list_repositories: String,
@@ -169,6 +170,8 @@ fn main() {
         .typ::<ListMissionSpecsInput>()
         .typ::<MissionSpecEntry>()
         .typ::<ListMissionSpecsOutput>()
+        .typ::<SaveMissionValidationInput>()
+        .typ::<SaveMissionValidationOutput>()
         .typ::<ListChildDirectoriesInput>()
         .typ::<ListChildDirectoriesOutput>()
         .typ::<ListWorkspacesOutput>()
@@ -243,6 +246,7 @@ fn main() {
                 list_local_branches: "list_local_branches".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),
                 list_mission_specs: "list_mission_specs".to_string(),
+                save_mission_validation: "save_mission_validation".to_string(),
                 list_child_directories: "list_child_directories".to_string(),
                 list_workspaces: "list_workspaces".to_string(),
                 list_repositories: "list_repositories".to_string(),

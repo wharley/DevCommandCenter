@@ -33,6 +33,8 @@ import type {
 	WorkspaceGitPushInput,
 	WorkspaceGitStatusInput,
 	WorkspaceGitStatusOutput,
+	SaveMissionValidationInput,
+	SaveMissionValidationOutput,
 	WorkspaceForgeContextInput,
 	WorkspaceForgeContextOutput,
 	WorkspaceContinueFromBaseBranchInput,
@@ -141,6 +143,13 @@ export function listMissionSpecs(input: ListMissionSpecsInput) {
 	return invoke<ListMissionSpecsOutput>(WORKSPACE_METHODS.listMissionSpecs, {
 		input,
 	});
+}
+
+export function saveMissionValidation(input: SaveMissionValidationInput) {
+	return invoke<SaveMissionValidationOutput>(
+		WORKSPACE_METHODS.saveMissionValidation,
+		{ input },
+	);
 }
 
 export function listChildDirectories(input: ListChildDirectoriesInput) {

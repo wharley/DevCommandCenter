@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { AlertTriangle, Check, CircleHelp, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { saveMissionValidation } from "@/lib/workspace-api";
 import type {
 	MissionValidationStatus,
 	ParsedMissionValidationReport,
@@ -10,6 +12,7 @@ import type {
 
 type MissionValidationCardProps = {
 	report: ParsedMissionValidationReport;
+	workspacePath?: string | null;
 };
 
 function statusIcon(status: MissionValidationStatus) {
@@ -32,7 +35,11 @@ function statusClassName(status: MissionValidationStatus) {
 	return "border-amber-500/25 bg-amber-500/5";
 }
 
-export function MissionValidationCard({ report }: MissionValidationCardProps) {
+export function MissionValidationCard({
+	report,
+	workspacePath,
+}: MissionValidationCardProps) {
+	const [isSaving, setIsSaving] = useState(false);
 	const passCount = report.criteria.filter((criterion) => criterion.status === "PASS").length;
 	const failCount = report.criteria.filter((criterion) => criterion.status === "FAIL").length;
 	const unknownCount = report.criteria.filter(
@@ -49,6 +56,35 @@ export function MissionValidationCard({ report }: MissionValidationCardProps) {
 					? error.message
 					: "Unable to copy validation JSON.",
 			);
+		}
+	};
+
+	const handleSave = async () => {
+		const root = workspacePath?.trim();
+		const specRelativePath = report.specRelativePath?.trim();
+		if (!root || !specRelativePath) {
+			toast.error("Validation cannot be saved without workspace and spec path.");
+			return;
+		}
+
+		setIsSaving(true);
+		try {
+			const result = await saveMissionValidation({
+				workspaceRoot: root,
+				specRelativePath,
+				reportJson: report.rawJson,
+			});
+			toast.success("Validation saved", {
+				description: result.relativePath,
+			});
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "Unable to save validation report.",
+			);
+		} finally {
+			setIsSaving(false);
 		}
 	};
 
@@ -71,15 +107,27 @@ export function MissionValidationCard({ report }: MissionValidationCardProps) {
 						{passCount} pass · {failCount} fail · {unknownCount} unknown
 					</p>
 				</div>
-				<Button
-					type="button"
-					variant="outline"
-					size="icon-xs"
-					aria-label="Copy validation JSON"
-					onClick={() => void handleCopyJson()}
-				>
-					<Copy className="size-3.5" aria-hidden />
-				</Button>
+				<div className="flex items-center gap-1.5">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="h-7 rounded-lg px-2 text-[11px]"
+						disabled={isSaving || !workspacePath || !report.specRelativePath}
+						onClick={() => void handleSave()}
+					>
+						{isSaving ? "Saving..." : "Save verdict"}
+					</Button>
+					<Button
+						type="button"
+						variant="outline"
+						size="icon-xs"
+						aria-label="Copy validation JSON"
+						onClick={() => void handleCopyJson()}
+					>
+						<Copy className="size-3.5" aria-hidden />
+					</Button>
+				</div>
 			</div>
 
 			{report.summary ? (

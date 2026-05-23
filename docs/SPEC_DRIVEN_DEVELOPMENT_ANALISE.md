@@ -353,7 +353,9 @@ IDs. A aba `Spec` também oferece **Validate**, que envia ao agente um prompt de
 para inspecionar o worktree e responder `PASS` / `FAIL` / `UNKNOWN` por critério sem
 alterar arquivos. A resposta de validação agora pede um bloco JSON
 `dccMissionValidation`, que o frontend reconhece e renderiza como card estruturado.
-Ainda falta persistir esse veredito como estado durável da Mission.
+O card permite salvar esse veredito como
+`.devcommandcenter/specs/<mission>.validation.json`, mantendo o resultado versionável no
+worktree. Ainda falta carregar esse arquivo de volta como estado ativo da Mission.
 
 **Fase 4 — Re-injeção pós-compactação (custo: médio, é o valor único).**
 O DCC reinjeta a spec após `/compact`. Resolve o esquecimento de requisitos —
@@ -378,7 +380,8 @@ e a Fase 0 custa quase nada para descobrir isso.
 | Spec → Plan | ✅ | `Generate plan` envia `buildPlanFromSpecPrompt(...)` em plan mode |
 | Cobertura `AC-*` no plano | ✅ Parcial | Cobertura estrutural por referência explícita ao ID |
 | Validação assistida | ✅ Parcial | `Validate` pede auditoria e card JSON `dccMissionValidation` |
-| Persistência do veredito | ❌ | Próximo passo provável se o uso real justificar |
+| Persistência do veredito | ✅ Parcial | `Save verdict` grava `.devcommandcenter/specs/<mission>.validation.json` |
+| Leitura do veredito salvo | ❌ | Próximo passo provável se o uso real justificar |
 | Re-injeção pós-compactação | ❌ | Fase futura |
 | Compilação cross-provider | ❌ | Fase futura |
 
@@ -401,8 +404,8 @@ qualquer agente, e que ele sobreviva à compactação de contexto** — apoiado 
 peças que já existem: o worktree por Mission, o hook `setup-worktree.sh`, o pipeline de
 plano (`plan-content.ts`) e a abstração multi-provider.
 
-Recomendação prática atual: como as Fases 0–2 já estão implementadas e a Fase 3 começou
-com cobertura estrutural de critérios e validação assistida estruturada, o próximo
-investimento só deve persistir vereditos (`PASS` / `FAIL` / `UNKNOWN`) se o uso real de
+Recomendação prática atual: como as Fases 0–2 já estão implementadas e a Fase 3 já tem
+cobertura estrutural, validação assistida estruturada e persistência manual do veredito,
+o próximo investimento só deve carregar e destacar vereditos salvos se o uso real de
 specs confirmar o ROI. Não construir um "motor de SDD" — construir o trilho fino e
 deixar o usuário (e o agente) fazerem a metodologia.

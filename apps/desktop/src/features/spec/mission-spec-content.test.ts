@@ -44,6 +44,7 @@ describe("mission-spec-content", () => {
 
 	it("builds a validation prompt that asks for evidence without edits", () => {
 		const prompt = buildMissionValidationPrompt({
+			specRelativePath: ".devcommandcenter/specs/demo.spec.md",
 			specMarkdown: "## Acceptance Criteria\n- AC-1: Visible spec.",
 			planMarkdown: "- [x] Add Spec tab. Covers AC-1.",
 		});
@@ -52,6 +53,7 @@ describe("mission-spec-content", () => {
 		expect(prompt).toContain("Do not modify files.");
 		expect(prompt).toContain("PASS, FAIL, or UNKNOWN");
 		expect(prompt).toContain("dccMissionValidation");
+		expect(prompt).toContain(".devcommandcenter/specs/demo.spec.md");
 		expect(prompt).toContain("CURRENT PLAN CONTEXT:");
 		expect(prompt).toContain("AC-1");
 	});
@@ -63,6 +65,7 @@ describe("mission-spec-content", () => {
 			"```json",
 			JSON.stringify({
 				dccMissionValidation: true,
+				specRelativePath: ".devcommandcenter/specs/demo.spec.md",
 				summary: "One pass, one unknown.",
 				criteria: [
 					{
@@ -83,6 +86,7 @@ describe("mission-spec-content", () => {
 		].join("\n"));
 
 		expect(report).toEqual({
+			specRelativePath: ".devcommandcenter/specs/demo.spec.md",
 			summary: "One pass, one unknown.",
 			rawJson: expect.stringContaining("dccMissionValidation"),
 			criteria: [

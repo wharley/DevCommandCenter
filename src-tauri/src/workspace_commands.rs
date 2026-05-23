@@ -7,6 +7,7 @@ use dcc_tauri::{
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
         ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
         ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput, RepositoryIdInput,
+        SaveMissionValidationInput, SaveMissionValidationOutput,
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
@@ -78,6 +79,14 @@ pub async fn list_mission_specs(
     input: ListMissionSpecsInput,
 ) -> Result<ListMissionSpecsOutput, String> {
     dcc_tauri::commands::workspace_commands::list_mission_specs(state, input).await
+}
+
+#[tauri::command]
+pub async fn save_mission_validation(
+    state: State<'_, WorkspaceCommandState>,
+    input: SaveMissionValidationInput,
+) -> Result<SaveMissionValidationOutput, String> {
+    dcc_tauri::commands::workspace_commands::save_mission_validation(state, input).await
 }
 
 #[tauri::command]

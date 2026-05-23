@@ -59,10 +59,11 @@ use workspace_commands::{
     archive_workspace, create_workspace_for_repo, create_workspace_from_url, delete_repository,
     delete_workspace, list_child_directories, list_git_tracked_files, list_local_branches,
     list_mission_specs, list_repositories, list_workspaces, restore_workspace,
-    workspace_continue_from_base_branch, workspace_git_branch_diff, workspace_git_commit_push,
-    workspace_git_discard_file, workspace_git_file_preview, workspace_git_file_preview_content,
-    workspace_git_push, workspace_git_stage_all, workspace_git_stage_file, workspace_git_status,
-    workspace_git_unstage_file, workspace_run_setup,
+    save_mission_validation, workspace_continue_from_base_branch, workspace_git_branch_diff,
+    workspace_git_commit_push, workspace_git_discard_file, workspace_git_file_preview,
+    workspace_git_file_preview_content, workspace_git_push, workspace_git_stage_all,
+    workspace_git_stage_file, workspace_git_status, workspace_git_unstage_file,
+    workspace_run_setup,
 };
 
 /// Schema SQLite embutido (`src-tauri/sql/schema.sql`, CREATE IF NOT EXISTS).
@@ -6609,6 +6610,7 @@ pub fn run() {
             list_local_branches,
             list_git_tracked_files,
             list_mission_specs,
+            save_mission_validation,
             list_child_directories,
             list_repositories,
             list_workspaces,

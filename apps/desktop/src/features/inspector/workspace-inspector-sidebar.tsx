@@ -90,6 +90,7 @@ type WorkspaceInspectorSidebarProps = {
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	onGeneratePlanFromSpec: (specMarkdown: string) => void;
 	onValidateMissionSpec: (input: {
+		specRelativePath: string;
 		specMarkdown: string;
 		planMarkdown: string | null;
 	}) => void;
@@ -1198,6 +1199,7 @@ export function WorkspaceInspectorSidebar({
 													className="h-8 rounded-lg px-2.5 text-[11px]"
 													onClick={() =>
 														onValidateMissionSpec({
+															specRelativePath: activeMissionSpec.relativePath,
 															specMarkdown: activeMissionSpec.content,
 															planMarkdown: activePlanMarkdown,
 														})

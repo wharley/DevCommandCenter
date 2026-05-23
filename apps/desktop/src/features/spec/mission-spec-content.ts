@@ -17,6 +17,7 @@ export type MissionValidationCriterionResult = {
 };
 
 export type ParsedMissionValidationReport = {
+	specRelativePath: string | null;
 	summary: string | null;
 	criteria: MissionValidationCriterionResult[];
 	rawJson: string;
@@ -60,14 +61,17 @@ export function buildMissionAcceptanceCriteriaCoverage(
 }
 
 export function buildMissionValidationPrompt({
+	specRelativePath,
 	specMarkdown,
 	planMarkdown,
 }: {
+	specRelativePath?: string | null;
 	specMarkdown: string;
 	planMarkdown?: string | null;
 }) {
 	const normalizedSpec = specMarkdown.trim();
 	const normalizedPlan = planMarkdown?.trim() ?? "";
+	const normalizedSpecPath = specRelativePath?.trim() ?? null;
 	return [
 		"VALIDATE THIS MISSION AGAINST ITS SPEC.",
 		"",
@@ -75,7 +79,10 @@ export function buildMissionValidationPrompt({
 		"Return a concise validation report with one row per acceptance criterion using: PASS, FAIL, or UNKNOWN.",
 		"For every FAIL or UNKNOWN, include the evidence or missing evidence and the smallest next action.",
 		"End with a fenced JSON block that exactly follows this shape:",
-		'{"dccMissionValidation":true,"summary":"...","criteria":[{"id":"AC-1","status":"PASS","evidence":"...","nextAction":"..."}]}',
+		'{"dccMissionValidation":true,"specRelativePath":"...","summary":"...","criteria":[{"id":"AC-1","status":"PASS","evidence":"...","nextAction":"..."}]}',
+		...(normalizedSpecPath
+			? ["", `Spec relative path for the JSON: ${normalizedSpecPath}`]
+			: []),
 		"",
 		"SPEC:",
 		normalizedSpec,
@@ -143,6 +150,10 @@ function tryParseMissionValidationJson(
 	}
 
 	return {
+		specRelativePath:
+			typeof parsed.specRelativePath === "string"
+				? parsed.specRelativePath.trim()
+				: null,
 		summary: typeof parsed.summary === "string" ? parsed.summary.trim() : null,
 		criteria,
 		rawJson,

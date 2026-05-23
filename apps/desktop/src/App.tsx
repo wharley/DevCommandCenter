@@ -1105,7 +1105,11 @@ export default function App() {
 	);
 
 	const handleValidateMissionSpec = useCallback(
-		(input: { specMarkdown: string; planMarkdown: string | null }) => {
+		(input: {
+			specRelativePath: string;
+			specMarkdown: string;
+			planMarkdown: string | null;
+		}) => {
 			const prompt = buildMissionValidationPrompt(input);
 			setInspectorCollapsed(false);
 			setInspectorTab("activity");

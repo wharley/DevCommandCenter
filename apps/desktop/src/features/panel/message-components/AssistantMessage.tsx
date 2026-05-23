@@ -146,7 +146,10 @@ export function AssistantMessage({
 				{showPlanCard ? (
 					<PlanReviewCard plan={plan ?? { title: "Plan", summary: content, steps: [], approvedPrompts: [], rawMarkdown: content, markdown: content, isPlanLike: false, canCollapse: content.length > 900, source: "plain" }} workspacePath={workspacePath} />
 				) : validationReport ? (
-					<MissionValidationCard report={validationReport} />
+					<MissionValidationCard
+						report={validationReport}
+						workspacePath={workspacePath}
+					/>
 				) : (
 					<div className={cn("assistant-markdown-scale max-w-none break-words text-foreground")}>
 						<Suspense fallback={<AssistantTextFallback text={content} />}>

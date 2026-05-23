@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use specta::Type;
 use tauri::{AppHandle, State};
 
@@ -138,6 +139,20 @@ pub struct MissionSpecEntry {
 #[serde(rename_all = "camelCase")]
 pub struct ListMissionSpecsOutput {
     pub specs: Vec<MissionSpecEntry>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveMissionValidationInput {
+    pub workspace_root: String,
+    pub spec_relative_path: String,
+    pub report_json: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveMissionValidationOutput {
+    pub relative_path: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1287,6 +1302,74 @@ pub async fn list_mission_specs(
     specs.sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(ListMissionSpecsOutput { specs })
+}
+
+#[tauri::command]
+pub async fn save_mission_validation(
+    state: State<'_, WorkspaceCommandState>,
+    input: SaveMissionValidationInput,
+) -> Result<SaveMissionValidationOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+
+    let spec_relative_path = validate_mission_spec_relative_path(&input.spec_relative_path)?;
+    let report: Value =
+        serde_json::from_str(&input.report_json).map_err(|error| error.to_string())?;
+    if report.get("dccMissionValidation").and_then(Value::as_bool) != Some(true) {
+        return Err("validation report missing dccMissionValidation=true".to_string());
+    }
+
+    let root_canonical = PathBuf::from(root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let specs_dir = root_canonical.join(".devcommandcenter").join("specs");
+    fs::create_dir_all(&specs_dir).map_err(|error| error.to_string())?;
+    let specs_canonical = specs_dir
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !specs_canonical.starts_with(&root_canonical) {
+        return Err("mission specs directory must stay inside the workspace".to_string());
+    }
+
+    let spec_name = spec_relative_path
+        .strip_prefix(".devcommandcenter/specs/")
+        .ok_or_else(|| "invalid spec path".to_string())?;
+    let validation_name = spec_name.replace(".spec.md", ".validation.json");
+    let target = specs_canonical.join(&validation_name);
+    if fs::symlink_metadata(&target)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("validation target must not be a symlink".to_string());
+    }
+
+    let pretty = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
+    fs::write(&target, format!("{pretty}\n")).map_err(|error| error.to_string())?;
+
+    Ok(SaveMissionValidationOutput {
+        relative_path: format!(".devcommandcenter/specs/{validation_name}"),
+    })
+}
+
+fn validate_mission_spec_relative_path(path: &str) -> Result<String, String> {
+    let normalized = normalize_git_relative_path(path);
+    if !normalized.starts_with(".devcommandcenter/specs/") {
+        return Err("mission spec path must be under .devcommandcenter/specs".to_string());
+    }
+    if normalized.contains("..") || normalized.contains("//") {
+        return Err("invalid mission spec path".to_string());
+    }
+    let file_name = normalized
+        .strip_prefix(".devcommandcenter/specs/")
+        .unwrap_or_default();
+    if file_name.is_empty() || file_name.contains('/') || !file_name.ends_with(".spec.md") {
+        return Err("mission spec path must point to a .spec.md file".to_string());
+    }
+    Ok(normalized)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
