@@ -13,6 +13,7 @@ export type ParsedPlanStep = {
 	text: string;
 	status: ParsedPlanStepStatus;
 	index: number;
+	criteria: string[];
 };
 
 export type ParsedPlanContent = {
@@ -237,6 +238,7 @@ function parseMarkdownPlanContent(rawMarkdown: string): ParsedPlanContent {
 				text: cleanStepText(raw),
 				status: statusFromCheckbox(checklistMatch?.groups?.check ?? null),
 				index: steps.length,
+				criteria: extractAcceptanceCriteriaIds(raw),
 			});
 			continue;
 		}
@@ -245,6 +247,7 @@ function parseMarkdownPlanContent(rawMarkdown: string): ParsedPlanContent {
 			const last = steps[steps.length - 1];
 			last.raw = `${last.raw} ${trimmed}`.trim();
 			last.text = cleanStepText(last.raw);
+			last.criteria = extractAcceptanceCriteriaIds(last.raw);
 			continue;
 		}
 
@@ -315,15 +318,19 @@ function buildMarkdownFromStructuredPlan(plan: {
 	}
 	if (plan.steps.length > 0) {
 		lines.push("");
-		lines.push("## Steps");
+			lines.push("## Steps");
 		for (const step of plan.steps) {
 			const marker =
 				step.status === "completed"
 					? "[x]"
 					: step.status === "in_progress"
-						? "[-]"
+					? "[-]"
 						: "[ ]";
-			lines.push(`- ${marker} ${step.text}`);
+			const criteriaSuffix =
+				step.criteria.length > 0
+					? ` Covers ${step.criteria.join(", ")}.`
+					: "";
+			lines.push(`- ${marker} ${step.text}${criteriaSuffix}`);
 		}
 	}
 	return lines.join("\n").trim();
@@ -342,6 +349,7 @@ function normalizeStructuredSteps(steps: Array<string | Record<string, unknown>>
 					text: cleanStepText(raw),
 					status: statusFromRaw(raw),
 					index,
+					criteria: extractAcceptanceCriteriaIds(raw),
 				};
 			}
 
@@ -364,6 +372,7 @@ function normalizeStructuredSteps(steps: Array<string | Record<string, unknown>>
 					typeof step.status === "string" ? step.status : text,
 				),
 				index,
+				criteria: normalizeStructuredCriteria(step),
 			};
 		})
 		.filter((step): step is ParsedPlanStep => Boolean(step));
@@ -452,6 +461,44 @@ function cleanStepText(value: string) {
 		.replace(/^\s*(?:[-*+]|\d+[.)])\s*/, "")
 		.replace(/^\s*\[(?:x|X|~|-|\/)\]\s*/, "")
 		.trim();
+}
+
+function extractAcceptanceCriteriaIds(value: string) {
+	const matches = value.match(/\b[A-Z]{1,8}-\d+\b/gi) ?? [];
+	const seen = new Set<string>();
+	const ids: string[] = [];
+	for (const match of matches) {
+		const normalized = match.toUpperCase();
+		if (!seen.has(normalized)) {
+			seen.add(normalized);
+			ids.push(normalized);
+		}
+	}
+	return ids;
+}
+
+function normalizeStructuredCriteria(step: Record<string, unknown>) {
+	const input =
+		(Array.isArray(step.criteria) ? step.criteria : null) ??
+		(Array.isArray(step.acceptanceCriteria) ? step.acceptanceCriteria : null) ??
+		(Array.isArray(step.acceptance_criteria) ? step.acceptance_criteria : null);
+	if (!input) {
+		return [];
+	}
+	const seen = new Set<string>();
+	const ids: string[] = [];
+	for (const candidate of input) {
+		if (typeof candidate !== "string") {
+			continue;
+		}
+		for (const id of extractAcceptanceCriteriaIds(candidate)) {
+			if (!seen.has(id)) {
+				seen.add(id);
+				ids.push(id);
+			}
+		}
+	}
+	return ids;
 }
 
 function slugify(value: string) {

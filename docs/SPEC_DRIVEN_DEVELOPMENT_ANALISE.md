@@ -415,7 +415,7 @@ e a Fase 0 custa quase nada para descobrir isso.
 | `/spec` nativo | ✅ | Ação de cliente no composer, agnóstica de provider |
 | Spec no inspector | ✅ | Aba `Spec` lista specs via comando Rust limitado ao diretório DCC |
 | Spec → Plan | ✅ | `Generate plan` envia `buildPlanFromSpecPrompt(...)` em plan mode |
-| Cobertura `AC-*` no plano | ✅ Parcial | Cobertura estrutural por referência explícita ao ID |
+| Cobertura `AC-*` no plano | ✅ Parcial | Cobertura aceita `criteria[]` estruturado por step e fallback por ID textual; ainda não há vínculo semântico completo |
 | Validação assistida | ✅ Parcial | `Validate` pede auditoria e card JSON `dccMissionValidation` |
 | Persistência do veredito | ✅ Parcial | `Save verdict` grava `.validation.json` e invalida a aba `Spec`; ainda é ação manual |
 | Leitura do veredito salvo | ✅ | Aba `Spec` exibe o `.validation.json` associado à spec |
@@ -434,7 +434,7 @@ Este ledger existe para não perdermos o que ainda está deliberadamente incompl
 
 | Parcial | Por que ainda é parcial | Próximo corte recomendado |
 |---|---|---|
-| Cobertura `AC-*` no plano | Só detecta referência textual explícita ao ID; não entende semântica do step | Permitir que o agente gere `criteria: ["AC-1"]` em JSON estruturado do plano |
+| Cobertura `AC-*` no plano | Já aceita `criteria[]` estruturado e fallback textual, mas ainda não entende semântica além do mapeamento explícito | Decidir se vale introduzir validação de schema/plan JSON antes de tentar inferência semântica |
 | Validação assistida | A auditoria depende do agente executar/verificar evidências; o DCC só estrutura e renderiza | Criar política de checks mínimos por spec ou por template, sem impor metodologia |
 | Persistência do veredito | Salvamento ainda é manual; a UX já atualiza a aba `Spec` após salvar | Decidir se auto-save é aceitável ou se deve continuar explícito por segurança |
 | Re-injeção contextual | Re-anchor restaura contexto, mas não cria workflow de fases | Só evoluir para workflow se specs reais mostrarem repetição de fases pendentes |

@@ -5,6 +5,7 @@ import {
 	buildPlanImplementationPrompt,
 	buildPlanImplementationThreadTitle,
 	normalizePlanContentForExport,
+	parsePlanContent,
 	stripDisplayedPlanMarkdown,
 } from "./plan-content";
 
@@ -78,5 +79,45 @@ describe("plan-content", () => {
 		expect(prompt).toContain("acceptance criteria");
 		expect(prompt).toContain("AC-1");
 		expect(prompt).toContain("# Dashboard spec");
+	});
+
+	it("parses structured step criteria from json plans", () => {
+		const parsed = parsePlanContent(
+			JSON.stringify({
+				title: "Mission Plan",
+				summary: "Ship the flow.",
+				steps: [
+					{
+						text: "Add save verdict refresh.",
+						status: "pending",
+						criteria: ["AC-1", "ac-2"],
+					},
+				],
+			}),
+		);
+
+		expect(parsed.source).toBe("json");
+		expect(parsed.steps).toEqual([
+			expect.objectContaining({
+				text: "Add save verdict refresh.",
+				criteria: ["AC-1", "AC-2"],
+			}),
+		]);
+		expect(parsed.markdown).toContain("Covers AC-1, AC-2.");
+	});
+
+	it("extracts acceptance criteria ids from markdown step text", () => {
+		const parsed = parsePlanContent([
+			"# Mission Plan",
+			"",
+			"## Steps",
+			"- [ ] Save verdict and cover AC-3.",
+		].join("\n"));
+
+		expect(parsed.steps).toEqual([
+			expect.objectContaining({
+				criteria: ["AC-3"],
+			}),
+		]);
 	});
 });

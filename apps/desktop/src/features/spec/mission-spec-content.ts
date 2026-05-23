@@ -74,11 +74,19 @@ export function parseMissionAcceptanceCriteria(
 export function buildMissionAcceptanceCriteriaCoverage(
 	criteria: MissionAcceptanceCriterion[],
 	planMarkdown: string,
+	planSteps?: Array<{ criteria?: string[] | null }>,
 ): MissionAcceptanceCriterionCoverage[] {
 	const normalizedPlan = planMarkdown.toLowerCase();
+	const structuredIds = new Set(
+		(planSteps ?? []).flatMap((step) =>
+			(step.criteria ?? []).map((criterion) => criterion.toLowerCase()),
+		),
+	);
 	return criteria.map((criterion) => ({
 		...criterion,
-		covered: normalizedPlan.includes(criterion.id.toLowerCase()),
+		covered:
+			structuredIds.has(criterion.id.toLowerCase()) ||
+			normalizedPlan.includes(criterion.id.toLowerCase()),
 	}));
 }
 

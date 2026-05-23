@@ -789,6 +789,7 @@ export function WorkspaceInspectorSidebar({
 				? buildMissionAcceptanceCriteriaCoverage(
 						activeMissionAcceptanceCriteria,
 						latestPlanMessage.plan?.markdown ?? latestPlanMessage.content,
+						latestPlanMessage.plan?.steps,
 					)
 				: [],
 		[activeMissionAcceptanceCriteria, latestPlanMessage],
