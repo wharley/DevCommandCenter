@@ -384,7 +384,7 @@ impl CodexAppServerAdapter {
             .send_request(
                 "initialize",
                 json!({
-                    "clientInfo": { "name": "dcc", "version": "0.1.0" },
+                    "clientInfo": { "name": "dcc", "version": "0.1.1" },
                     "capabilities": {},
                 }),
             )
