@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { TrafficLightSpacer } from "@/components/chrome/traffic-light-spacer";
 import { Button } from "@/components/ui/button";
+import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-utils";
 import { ShortcutDisplay } from "@/features/shortcuts/shortcut-display";
 import { useWorkspaceGitFilePreviewContent } from "@/features/inspector/use-workspace-git-file-preview-content";
 import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
@@ -116,6 +117,23 @@ export function WorkspaceEditorSurface({
 	selection,
 	onClose,
 }: WorkspaceEditorSurfaceProps) {
+	useEffect(() => {
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.defaultPrevented || event.key !== "Escape") {
+				return;
+			}
+			if (shouldIgnoreGlobalShortcutTarget(event.target)) {
+				return;
+			}
+
+			event.preventDefault();
+			onClose();
+		};
+
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [onClose]);
+
 	const query = useWorkspaceGitFilePreviewContent(
 		workspaceRoot
 			? {

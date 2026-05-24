@@ -4,7 +4,7 @@
   "version": "0.1.1",
   "identifier": "com.devcommandcenter.app",
   "build": {
-    "beforeDevCommand": "node scripts/ensure-node.mjs && yarn vite",
+    "beforeDevCommand": "node scripts/build-sidecars.mjs --dev && node scripts/ensure-node.mjs && yarn vite",
     "beforeBuildCommand": "node scripts/build-sidecars.mjs && yarn vite:build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"

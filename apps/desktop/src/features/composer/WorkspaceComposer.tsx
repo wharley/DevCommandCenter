@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { ArrowUp, ChevronDown, ClipboardList, Square, Zap } from "lucide-react";
 import type { LexicalEditor } from "lexical";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
@@ -123,6 +124,7 @@ export function WorkspaceComposer({
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
 }: WorkspaceComposerProps) {
+	const { t } = useTranslation("common");
 	const [hasContent, setHasContent] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [isFastMode, setIsFastMode] = useState(true);
@@ -310,8 +312,8 @@ export function WorkspaceComposer({
 
 	const planActive = isPlanMode;
 	const placeholder = planActive
-		? "Describe what to change, then click Request Changes"
-		: "Ask to make changes, @mention files, run /commands";
+		? t("composer.placeholder.plan")
+		: t("composer.placeholder.default");
 
 	const selectedEffortId = ultrathinkSelected ? "ultrathink" : effort;
 	const effortLabel = getEffortDisplay(selectedEffortId).label;

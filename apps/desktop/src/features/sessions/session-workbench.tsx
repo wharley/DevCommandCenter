@@ -2,10 +2,10 @@ import { useState } from "react";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { WorkspaceTerminalDrawer } from "@/features/terminal";
 import { WorkspacePanel } from "@/features/panel";
+import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surface";
 import type { AppUpdateInfo } from "@/features/updater";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import type { RuntimeSessionSnapshot } from "./workbench-types";
-import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 
 export type { RuntimeSessionSnapshot } from "./workbench-types";
@@ -42,8 +42,8 @@ type SessionWorkbenchProps = {
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
 	onInstallUpdate: () => void;
-	editorSelection: WorkspaceGitPreviewSelection | null;
-	onCloseEditor: () => void;
+	surfaceSelection: WorkspaceSurfaceSelection | null;
+	onCloseSurface: () => void;
 	onOpenPlanSidebar: () => void;
 	onImplementPlanInNewThread: (input: {
 		planMarkdown: string;
@@ -83,8 +83,8 @@ export function SessionWorkbench({
 	updateInfo,
 	isInstallingUpdate,
 	onInstallUpdate,
-	editorSelection,
-	onCloseEditor,
+	surfaceSelection,
+	onCloseSurface,
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
 }: SessionWorkbenchProps) {
@@ -125,8 +125,8 @@ export function SessionWorkbench({
 				updateInfo={updateInfo}
 				isInstallingUpdate={isInstallingUpdate}
 				onInstallUpdate={onInstallUpdate}
-				editorSelection={editorSelection}
-				onCloseEditor={onCloseEditor}
+				surfaceSelection={surfaceSelection}
+				onCloseSurface={onCloseSurface}
 				onOpenPlanSidebar={onOpenPlanSidebar}
 				onImplementPlanInNewThread={onImplementPlanInNewThread}
 			/>

@@ -1,11 +1,15 @@
 export type OnboardingStep =
 	| "intro"
+	| "workflows"
+	| "slashCommands"
 	| "agents"
 	| "repoImport"
 	| "completeTransition";
 
 export const onboardingSteps: readonly OnboardingStep[] = [
 	"intro",
+	"workflows",
+	"slashCommands",
 	"agents",
 	"repoImport",
 	"completeTransition",

@@ -66,7 +66,13 @@ import {
 	WORKSPACE_FORGE_CONTEXT_QUERY_KEY,
 } from "./use-workspace-forge-context";
 import { EmptyState } from "@/features/panel";
-import type { CoreEvent, ProviderCatalog, Repository, WorkspaceSetupReport } from "@dcc/contracts";
+import type {
+	CoreEvent,
+	MissionSpecEntry,
+	ProviderCatalog,
+	Repository,
+	WorkspaceSetupReport,
+} from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
@@ -98,6 +104,7 @@ type WorkspaceInspectorSidebarProps = {
 	sessionEvents: CoreEvent[];
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+	onOpenMissionSpec: (spec: MissionSpecEntry | null) => void;
 	onGeneratePlanFromSpec: (specMarkdown: string) => void;
 	onValidateMissionSpec: (input: {
 		specRelativePath: string;
@@ -383,6 +390,7 @@ export function WorkspaceInspectorSidebar({
 	sessionEvents,
 	selectedPreview,
 	onSelectPreview,
+	onOpenMissionSpec,
 	onGeneratePlanFromSpec,
 	onValidateMissionSpec,
 	onReanchorMissionSpec,
@@ -1355,11 +1363,11 @@ export function WorkspaceInspectorSidebar({
 
 						<TabsContent
 							value="spec"
-							className="mt-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
+							className="mt-0 min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
 						>
 							{activeMissionSpec ? (
-								<div className="space-y-3">
-									<div className="rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
+								<div className="min-w-0 space-y-3">
+									<div className="min-w-0 rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
 										<div className="flex items-start justify-between gap-3">
 											<div className="min-w-0">
 												<p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
@@ -1369,7 +1377,16 @@ export function WorkspaceInspectorSidebar({
 													{activeMissionSpec.relativePath}
 												</p>
 											</div>
-											<div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+											<div className="flex max-w-full min-w-0 flex-wrap justify-end gap-1.5">
+												<Button
+													type="button"
+													size="sm"
+													variant="default"
+													className="h-8 rounded-lg px-2.5 text-[11px]"
+													onClick={() => onOpenMissionSpec(activeMissionSpec)}
+												>
+													{t("inspector.spec.openInCenter")}
+												</Button>
 												<Button
 													type="button"
 													size="sm"
@@ -1429,7 +1446,7 @@ export function WorkspaceInspectorSidebar({
 											{t("inspector.spec.compactAutoReanchorNote")}
 										</p>
 									</div>
-									<div className="rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
+									<div className="min-w-0 rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
 										<div className="flex items-start justify-between gap-3">
 											<div>
 												<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
@@ -1490,13 +1507,13 @@ export function WorkspaceInspectorSidebar({
 											</div>
 										) : null}
 										{missionSpecContextStatusQuery.data?.files.length ? (
-											<div className="mt-3 grid gap-1.5">
+											<div className="mt-3 grid min-w-0 gap-1.5">
 												{missionSpecContextStatusQuery.data.files.map((file) => (
 													<div
 														key={file.relativePath}
 														className="flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-muted/10 px-2.5 py-2"
 													>
-														<span className="font-mono text-[11px] text-foreground">
+														<span className="min-w-0 break-words font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">
 															{file.relativePath}
 														</span>
 														<Badge variant="outline" className="h-5 text-[10px]">
@@ -1508,7 +1525,7 @@ export function WorkspaceInspectorSidebar({
 										) : null}
 									</div>
 									{activeMissionAcceptanceCriteria.length > 0 ? (
-										<div className="rounded-2xl border border-border/50 bg-muted/10 p-3">
+										<div className="min-w-0 rounded-2xl border border-border/50 bg-muted/10 p-3">
 											<div className="mb-2 flex items-center justify-between gap-2">
 												<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
 													{t("inspector.spec.criteriaTitle")}
@@ -1531,7 +1548,7 @@ export function WorkspaceInspectorSidebar({
 														: t("inspector.spec.criteriaCoverageComplete")}
 												</p>
 											) : null}
-											<div className="grid gap-1.5">
+											<div className="grid min-w-0 gap-1.5">
 												{(latestPlanMessage
 													? activePlanAcceptanceCriteriaCoverage
 													: activeMissionAcceptanceCriteria
@@ -1566,7 +1583,7 @@ export function WorkspaceInspectorSidebar({
 										</div>
 									) : null}
 									{activeMissionValidationChecks.length > 0 ? (
-										<div className="rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
+										<div className="min-w-0 rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
 											<div className="mb-2 flex items-center justify-between gap-2">
 												<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
 													{t("inspector.spec.validationChecksTitle")}
@@ -1577,7 +1594,7 @@ export function WorkspaceInspectorSidebar({
 													)}
 												</Badge>
 											</div>
-											<div className="grid gap-1.5">
+											<div className="grid min-w-0 gap-1.5">
 												{activeMissionValidationChecks.map((check) => (
 													<div
 														key={check.text}
@@ -1591,7 +1608,7 @@ export function WorkspaceInspectorSidebar({
 									) : null}
 									{activeMissionValidationChecks.length === 0 &&
 									activeMissionSuggestedValidationChecks.length > 0 ? (
-										<div className="rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
+										<div className="min-w-0 rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
 											<div className="mb-2 flex items-center justify-between gap-2">
 												<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
 													{t("inspector.spec.suggestedValidationChecksTitle")}
@@ -1605,7 +1622,7 @@ export function WorkspaceInspectorSidebar({
 											<p className="mb-2 text-[11px] leading-5 text-muted-foreground">
 												{t("inspector.spec.suggestedValidationChecksDescription")}
 											</p>
-											<div className="grid gap-1.5">
+											<div className="grid min-w-0 gap-1.5">
 												{activeMissionSuggestedValidationChecks.map((check) => (
 													<div
 														key={check.text}
@@ -1618,7 +1635,7 @@ export function WorkspaceInspectorSidebar({
 										</div>
 									) : null}
 									{activeMissionResumeContext ? (
-										<div className="rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
+										<div className="min-w-0 rounded-2xl border border-border/50 bg-background/80 p-3 shadow-sm">
 											<div className="flex items-start justify-between gap-3">
 												<div>
 													<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
@@ -1637,7 +1654,7 @@ export function WorkspaceInspectorSidebar({
 														</p>
 													) : null}
 												</div>
-												<div className="flex items-center gap-1.5">
+												<div className="flex shrink-0 items-center gap-1.5">
 													<Badge variant="secondary" className="shrink-0 text-[10px]">
 														{activeMissionResumeContext.criteria.length}
 													</Badge>
@@ -1663,7 +1680,7 @@ export function WorkspaceInspectorSidebar({
 												</div>
 											</div>
 											{activeMissionResumeContext.criteria.length > 0 ? (
-												<div className="mt-3 grid gap-1.5">
+												<div className="mt-3 grid min-w-0 gap-1.5">
 													{activeMissionResumeContext.phases.length > 0 ? (
 														<div className="mb-1 flex flex-wrap gap-1.5">
 															{activeMissionResumeContext.phases.map((phase) => (
@@ -1731,9 +1748,28 @@ export function WorkspaceInspectorSidebar({
 											/>
 										</div>
 									) : null}
-									<pre className="max-h-[52vh] overflow-auto rounded-2xl border border-border/50 bg-muted/20 p-3 text-[11px] leading-5 text-foreground whitespace-pre-wrap">
-										{activeMissionSpec.content}
-									</pre>
+									<div className="min-w-0 rounded-2xl border border-border/50 bg-muted/20 p-3">
+										<div className="mb-2 flex items-center justify-between gap-2">
+											<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+												{t("inspector.spec.inlinePreviewTitle")}
+											</p>
+											<Button
+												type="button"
+												size="sm"
+												variant="ghost"
+												className="h-7 rounded-lg px-2 text-[11px]"
+												onClick={() => onOpenMissionSpec(activeMissionSpec)}
+											>
+												{t("inspector.spec.openInCenter")}
+											</Button>
+										</div>
+										<p className="mb-3 text-[11px] leading-5 text-muted-foreground">
+											{t("inspector.spec.inlinePreviewHint")}
+										</p>
+										<pre className="max-h-[26vh] min-w-0 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-xl border border-border/50 bg-background/70 p-3 text-[11px] leading-5 text-foreground">
+											{activeMissionSpec.content}
+										</pre>
+									</div>
 								</div>
 							) : (
 								<div className="flex min-h-full items-center justify-center px-4 py-8 text-center">

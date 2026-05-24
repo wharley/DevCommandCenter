@@ -1,12 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Sparkles, Wand2 } from "lucide-react";
+import {
+	CheckCircle2,
+	ChevronLeft,
+	ChevronRight,
+	Command,
+	GitBranch,
+	ListTree,
+	MessageSquare,
+	Sparkles,
+	Wand2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConductorOnboarding } from "@/components/ConductorOnboarding";
 import { cn } from "@/lib/utils";
+import { DEFAULT_SLASH_COMMANDS } from "@/features/composer/default-slash-commands";
 import { openGithubCliAuthTerminal } from "@/lib/github-cli";
 import { OnboardingMockup } from "./mockup/OnboardingMockup";
 import {
@@ -61,6 +72,54 @@ function StepChip({
 	);
 }
 
+function DetailCard({
+	title,
+	body,
+	icon,
+	badge,
+}: {
+	title: string;
+	body: string;
+	icon: ReactNode;
+	badge?: string;
+}) {
+	return (
+		<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+			<div className="flex items-start justify-between gap-3">
+				<div className="flex items-center gap-2">
+					<div className="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background/80 text-muted-foreground">
+						{icon}
+					</div>
+					<p className="text-[12px] font-medium text-foreground">{title}</p>
+				</div>
+				{badge ? (
+					<Badge variant="outline" className="h-6 px-2 text-[10px] font-normal">
+						{badge}
+					</Badge>
+				) : null}
+			</div>
+			<p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">{body}</p>
+		</div>
+	);
+}
+
+function CommandCard({
+	command,
+	description,
+}: {
+	command: string;
+	description: string;
+}) {
+	return (
+		<div className="rounded-xl border border-border/60 bg-muted/15 p-3">
+			<p className="font-mono text-[12px] font-medium text-foreground">/{command}</p>
+			<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+				{description}
+			</p>
+		</div>
+	);
+}
+
 function WizardPanel({
 	step,
 	index,
@@ -75,6 +134,14 @@ function WizardPanel({
 	const { t } = useTranslation("common");
 	const title = t(`onboarding.steps.${step}.title`);
 	const body = t(`onboarding.steps.${step}.body`);
+	const slashCommands = useMemo(
+		() =>
+			DEFAULT_SLASH_COMMANDS.map((command) => ({
+				name: command.name,
+				description: t(`onboarding.slashCommands.items.${command.name}`),
+			})),
+		[t],
+	);
 	const active = index === activeIndex;
 	const behind = index < activeIndex;
 	const motionClass = active
@@ -110,45 +177,168 @@ function WizardPanel({
 					</p>
 
 					<div className="flex flex-wrap gap-2">
-						<StepChip
-							label={t("onboarding.chips.intro")}
-							done={index > 0}
-							active={step === "intro"}
-						/>
-						<StepChip
-							label={t("onboarding.chips.agents")}
-							done={index > 1}
-							active={step === "agents"}
-						/>
-						<StepChip
-							label={t("onboarding.chips.repoImport")}
-							done={index > 2}
-							active={step === "repoImport"}
-						/>
-						<StepChip
-							label={t("onboarding.chips.completeTransition")}
-							active={step === "completeTransition"}
-						/>
+						{onboardingSteps.map((chipStep, chipIndex) => (
+							<StepChip
+								key={chipStep}
+								label={t(`onboarding.chips.${chipStep}`)}
+								done={chipIndex < index}
+								active={step === chipStep}
+							/>
+						))}
 					</div>
 
-					<div className="grid gap-3 sm:grid-cols-2">
-						<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-							<p className="text-[12px] font-medium text-foreground">{t("onboarding.phase4Title")}</p>
-							<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-								{t("onboarding.phase4Body")}
-							</p>
+					{step === "intro" ? (
+						<div className="grid gap-3 sm:grid-cols-2">
+							<DetailCard
+								title={t("onboarding.introCards.workspace.title")}
+								body={t("onboarding.introCards.workspace.body")}
+								icon={<GitBranch className="size-4" />}
+							/>
+							<DetailCard
+								title={t("onboarding.introCards.thread.title")}
+								body={t("onboarding.introCards.thread.body")}
+								icon={<MessageSquare className="size-4" />}
+							/>
 						</div>
-						<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-							<p className="text-[12px] font-medium text-foreground">{t("onboarding.laterSteps")}</p>
-							<div className="mt-2 flex flex-wrap gap-1.5">
-								{futureOnboardingSteps.map((item) => (
-									<Badge key={item} variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
-										{item}
-									</Badge>
+					) : null}
+
+					{step === "workflows" ? (
+						<div className="grid gap-3">
+							<div className="grid gap-3 sm:grid-cols-3">
+								<DetailCard
+									title={t("onboarding.workflows.quickChat.title")}
+									body={t("onboarding.workflows.quickChat.body")}
+									icon={<MessageSquare className="size-4" />}
+									badge={t("onboarding.workflows.quickChat.badge")}
+								/>
+								<DetailCard
+									title={t("onboarding.workflows.planMode.title")}
+									body={t("onboarding.workflows.planMode.body")}
+									icon={<ListTree className="size-4" />}
+									badge={t("onboarding.workflows.planMode.badge")}
+								/>
+								<DetailCard
+									title={t("onboarding.workflows.sdd.title")}
+									body={t("onboarding.workflows.sdd.body")}
+									icon={<GitBranch className="size-4" />}
+									badge={t("onboarding.workflows.sdd.badge")}
+								/>
+							</div>
+							<div className="rounded-xl border border-border/60 bg-sidebar/40 p-3">
+								<p className="text-[12px] font-medium text-foreground">
+									{t("onboarding.workflows.sddFlowTitle")}
+								</p>
+								<div className="mt-2 flex flex-wrap gap-1.5">
+									{[
+										t("onboarding.workflows.sddFlow.spec"),
+										t("onboarding.workflows.sddFlow.plan"),
+										t("onboarding.workflows.sddFlow.validate"),
+										t("onboarding.workflows.sddFlow.continue"),
+									].map((item) => (
+										<Badge
+											key={item}
+											variant="outline"
+											className="h-7 px-2.5 text-[11px] font-normal"
+										>
+											{item}
+										</Badge>
+									))}
+								</div>
+								<p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
+									{t("onboarding.workflows.sddNote")}
+								</p>
+							</div>
+						</div>
+					) : null}
+
+					{step === "slashCommands" ? (
+						<div className="grid gap-3">
+							<div className="rounded-xl border border-border/60 bg-sidebar/40 p-3">
+								<div className="flex items-center gap-2">
+									<Command className="size-4 text-muted-foreground" />
+									<p className="text-[12px] font-medium text-foreground">
+										{t("onboarding.slashCommands.title")}
+									</p>
+								</div>
+								<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+									{t("onboarding.slashCommands.body")}
+								</p>
+							</div>
+							<div className="grid gap-3 sm:grid-cols-2">
+								{slashCommands.map((command) => (
+									<CommandCard
+										key={command.name}
+										command={command.name}
+										description={command.description}
+									/>
 								))}
 							</div>
 						</div>
-					</div>
+					) : null}
+
+					{step === "agents" ? (
+						<div className="grid gap-3 sm:grid-cols-3">
+							<DetailCard
+								title={t("onboarding.agentsCards.activity.title")}
+								body={t("onboarding.agentsCards.activity.body")}
+								icon={<MessageSquare className="size-4" />}
+							/>
+							<DetailCard
+								title={t("onboarding.agentsCards.spec.title")}
+								body={t("onboarding.agentsCards.spec.body")}
+								icon={<GitBranch className="size-4" />}
+							/>
+							<DetailCard
+								title={t("onboarding.agentsCards.plan.title")}
+								body={t("onboarding.agentsCards.plan.body")}
+								icon={<ListTree className="size-4" />}
+							/>
+						</div>
+					) : null}
+
+					{step === "repoImport" ? (
+						<div className="grid gap-3 sm:grid-cols-2">
+							<DetailCard
+								title={t("onboarding.repoCards.openLocal.title")}
+								body={t("onboarding.repoCards.openLocal.body")}
+								icon={<GitBranch className="size-4" />}
+							/>
+							<DetailCard
+								title={t("onboarding.repoCards.cloneRemote.title")}
+								body={t("onboarding.repoCards.cloneRemote.body")}
+								icon={<CheckCircle2 className="size-4" />}
+							/>
+						</div>
+					) : null}
+
+					{step === "completeTransition" ? (
+						<div className="grid gap-3 sm:grid-cols-2">
+							<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+								<p className="text-[12px] font-medium text-foreground">
+									{t("onboarding.phase4Title")}
+								</p>
+								<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+									{t("onboarding.phase4Body")}
+								</p>
+							</div>
+							<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+								<p className="text-[12px] font-medium text-foreground">
+									{t("onboarding.laterSteps")}
+								</p>
+								<div className="mt-2 flex flex-wrap gap-1.5">
+									{futureOnboardingSteps.map((item) => (
+										<Badge
+											key={item}
+											variant="outline"
+											className="h-7 px-2.5 text-[11px] font-normal"
+										>
+											{item}
+										</Badge>
+									))}
+								</div>
+							</div>
+						</div>
+					) : null}
 
 					{step === "repoImport" ? (
 						<div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3">
@@ -285,14 +475,14 @@ export function OnboardingWizard({
 				ref={viewportRef}
 				className="absolute inset-x-0 bottom-0 top-11 overflow-hidden px-4 pb-6 pt-4 sm:px-6"
 			>
-				<div
-					className="pointer-events-none absolute inset-x-0 top-0 flex justify-center"
-					style={{ transform: `scale(${viewportScale})`, transformOrigin: "top center" }}
-				>
-					<div className="h-[900px] w-[1300px]">
-						<OnboardingMockup />
+					<div
+						className="pointer-events-none absolute inset-x-0 top-0 flex justify-center"
+						style={{ transform: `scale(${viewportScale})`, transformOrigin: "top center" }}
+					>
+						<div className="h-[900px] w-[1300px]">
+							<OnboardingMockup step={step} />
+						</div>
 					</div>
-				</div>
 
 				<div className="absolute inset-x-0 top-0 bottom-24">
 					{onboardingSteps.map((panel, index) => (

@@ -137,6 +137,7 @@
       "validate": "Validate",
       "reanchor": "Re-anchor",
       "continueNext": "Continue next",
+      "openInCenter": "Open in center",
       "compileContext": "Compile context",
       "compileContextLoading": "Compiling mission context...",
       "compileContextSuccess": "Mission context compiled",
@@ -190,6 +191,9 @@
       "resumeNextPhase": "Next pending phase: {{phase}}",
       "resumePhaseSummary": "{{phase}}: {{pending}}/{{total}} pending",
       "savedValidationTitle": "Saved validation",
+      "inlinePreviewTitle": "Inline spec preview",
+      "inlinePreviewHint": "Long mission specs stay easier to inspect in the center panel without stretching the inspector layout.",
+      "surfaceHint": "Read-only mission spec view. Press Escape to return to the conversation surface.",
       "loadingTitle": "Loading mission spec...",
       "emptyTitle": "No mission spec yet.",
       "emptyDescription": "Run /spec in the composer to create .devcommandcenter/specs/<branch>.spec.md."
@@ -255,6 +259,10 @@
     }
   },
   "composer": {
+    "placeholder": {
+      "default": "Ask for changes, @mention files, and run /commands",
+      "plan": "Describe what to change, then click Request Changes"
+    },
     "planFollowUp": {
       "kicker": "Plan ready",
       "fallbackTitle": "Active mission plan",
@@ -371,6 +379,14 @@
         "title": "Welcome to Dev Command Center",
         "body": "Start from the shell, keep your workspace visible, and let the thread stay in the center."
       },
+      "workflows": {
+        "title": "Choose the right way to start",
+        "body": "In DCC you can send a direct prompt, ask for a plan before acting, or enter the Spec-Driven Development flow."
+      },
+      "slashCommands": {
+        "title": "Type / to open local actions",
+        "body": "Slash commands shorten the path to action without relying on memory or long prompts."
+      },
       "agents": {
         "title": "Agents stay in the loop",
         "body": "The inspector and composer are already primed for provider-driven sessions and runtime context."
@@ -381,17 +397,90 @@
       },
       "completeTransition": {
         "title": "Ready to transition",
-        "body": "Finish onboarding and drop into the shell with the same main interface."
+        "body": "Finish onboarding and drop into the same main interface without a context switch."
       }
     },
     "chips": {
       "intro": "intro",
+      "workflows": "flows",
+      "slashCommands": "slash /",
       "agents": "agents",
       "repoImport": "repoImport",
       "completeTransition": "completeTransition"
     },
-    "phase4Title": "First steps",
-    "phase4Body": "We ship the intro, agents, repository import, and completion transition first.",
+    "introCards": {
+      "workspace": {
+        "title": "Workspace stays visible",
+        "body": "DCC organizes the conversation around the active branch and worktree instead of a detached chat tab."
+      },
+      "thread": {
+        "title": "Thread stays central",
+        "body": "The composer, thread viewport, and inspector behave like one execution surface."
+      }
+    },
+    "workflows": {
+      "quickChat": {
+        "title": "Direct prompt",
+        "body": "Use it when you already know what to ask and do not need to formalize requirements first.",
+        "badge": "fast"
+      },
+      "planMode": {
+        "title": "Plan mode",
+        "body": "Turn it on when you want the agent to inspect first and return a plan before editing or executing.",
+        "badge": "plan"
+      },
+      "sdd": {
+        "title": "SDD flow",
+        "body": "Use it when the mission needs traceable requirements, explicit validation, and spec-driven resume.",
+        "badge": "spec"
+      },
+      "sddFlowTitle": "SDD flow in DCC",
+      "sddFlow": {
+        "spec": "/spec creates or updates the mission spec",
+        "plan": "Generate plan derives the plan from the spec",
+        "validate": "Validate audits the worktree against the criteria",
+        "continue": "Continue next resumes the next pending criterion"
+      },
+      "sddNote": "Important: `/spec` is the entry point into the SDD flow, but it does not automatically execute every later phase on its own."
+    },
+    "slashCommands": {
+      "title": "Composer slash commands",
+      "body": "When you type `/`, DCC offers local actions to enrich context, compact history, and start specific flows like SDD.",
+      "items": {
+        "add-dir": "Attach extra directories as conversation context.",
+        "compact": "Request a compaction pass for the current thread context.",
+        "spec": "Writes the starter prompt used to create or update the mission spec.",
+        "context": "Shows the current context budget and usage.",
+        "commit": "Prepares a commit message from the current state.",
+        "clear": "Clears the current composer draft."
+      }
+    },
+    "agentsCards": {
+      "activity": {
+        "title": "Session activity",
+        "body": "The Activity tab shows thread events and progress without hiding the workspace."
+      },
+      "spec": {
+        "title": "Spec in the inspector",
+        "body": "The Spec tab centralizes criteria, saved validation, re-anchor, and continue next when the mission uses SDD."
+      },
+      "plan": {
+        "title": "Reviewable plan",
+        "body": "The Plan tab keeps the active plan visible and connects steps back to criteria declared in the spec."
+      }
+    },
+    "repoCards": {
+      "openLocal": {
+        "title": "Open a local project",
+        "body": "Point DCC at an existing repository and it builds the workspace around it."
+      },
+      "cloneRemote": {
+        "title": "Clone from URL",
+        "body": "When the repo is not on disk yet, the clone flow creates the base for workspaces and sessions."
+      }
+    },
+    "phase4Title": "What you leave with",
+    "phase4Body": "You have already seen how to open a repository, start with a direct prompt, use Plan mode, enter the SDD lane, and discover actions from `/`.",
     "repoCliTitle": "GitHub CLI integration",
     "repoCliBody": "Open the terminal and run `gh auth login` so DCC can create PRs and keep GitHub actions local.",
     "repoCliButton": "Open terminal",

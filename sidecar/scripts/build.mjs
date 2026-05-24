@@ -1,7 +1,12 @@
 import { spawnSync } from "node:child_process";
 
 function shouldUseShell(command) {
-	return process.platform === "win32" && command === "yarn";
+	if (process.platform !== "win32") {
+		return false;
+	}
+
+	const normalized = command.toLowerCase();
+	return normalized === "yarn" || normalized.endsWith(".cmd") || normalized.endsWith(".bat");
 }
 
 function run(command, args) {

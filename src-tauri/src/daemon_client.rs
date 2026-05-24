@@ -155,6 +155,10 @@ pub fn write_runtime_info(app_data_dir: &Path, info: &DaemonRuntimeInfo) -> Resu
 }
 
 fn locate_sidecar_binary(app: &AppHandle) -> Option<PathBuf> {
+    if cfg!(dev) {
+        return None;
+    }
+
     let mut candidates = Vec::new();
     let binary_names = sidecar_binary_candidates();
 

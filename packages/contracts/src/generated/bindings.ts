@@ -28,21 +28,6 @@ export type Capabilities = {
 	experimental: boolean,
 };
 
-export type CompileMissionSpecContextInput = {
-	workspaceRoot: string,
-	specRelativePath: string,
-};
-
-export type CompileMissionSpecContextOutput = {
-	files: CompiledMissionSpecContextFile[],
-};
-
-export type CompiledMissionSpecContextFile = {
-	relativePath: string,
-	created: boolean,
-	updated: boolean,
-};
-
 export type Checkpoint = {
 	id: CheckpointId,
 	sessionId: SessionId,
@@ -61,6 +46,21 @@ export type CloseSessionOutput = {
 	sessionId: SessionId,
 	deletedHistory: boolean,
 	archivedAt: string | null,
+};
+
+export type CompileMissionSpecContextInput = {
+	workspaceRoot: string,
+	specRelativePath: string,
+};
+
+export type CompileMissionSpecContextOutput = {
+	files: CompiledMissionSpecContextFile[],
+};
+
+export type CompiledMissionSpecContextFile = {
+	relativePath: string,
+	created: boolean,
+	updated: boolean,
 };
 
 export type CoreEvent = ({ workspacePrepared: {
@@ -293,20 +293,20 @@ export type ListGitTrackedFilesOutput = {
 	paths: string[],
 };
 
-export type ListMissionSpecsInput = {
-	workspaceRoot: string,
-};
-
-export type ListMissionSpecsOutput = {
-	specs: MissionSpecEntry[],
-};
-
 export type ListLocalBranchesInput = {
 	workspaceRoot: string,
 };
 
 export type ListLocalBranchesOutput = {
 	branches: string[],
+};
+
+export type ListMissionSpecsInput = {
+	workspaceRoot: string,
+};
+
+export type ListMissionSpecsOutput = {
+	specs: MissionSpecEntry[],
 };
 
 export type ListProvidersOutput = {
@@ -319,13 +319,6 @@ export type ListRepositoriesOutput = {
 
 export type ListWorkspacesOutput = {
 	workspaces: Workspace[],
-};
-
-export type MissionSpecEntry = {
-	relativePath: string,
-	name: string,
-	content: string,
-	validation: MissionValidationEntry | null,
 };
 
 export type MissionSpecContextFileState = "current" | "missing" | "stale" | "invalid" | "symlink";
@@ -344,6 +337,13 @@ export type MissionSpecContextStatusInput = {
 export type MissionSpecContextStatusOutput = {
 	current: boolean,
 	files: MissionSpecContextFileStatus[],
+};
+
+export type MissionSpecEntry = {
+	relativePath: string,
+	name: string,
+	content: string,
+	validation: MissionValidationEntry | null,
 };
 
 export type MissionValidationEntry = {
@@ -452,6 +452,15 @@ export type RestoreSessionOutput = {
 	sessionId: SessionId,
 };
 
+export type ResumeSessionInput = {
+	sessionId: SessionId,
+};
+
+export type ResumeSessionOutput = {
+	session: Session,
+	projection: SessionProjection,
+};
+
 export type SaveMissionValidationInput = {
 	workspaceRoot: string,
 	specRelativePath: string,
@@ -461,15 +470,6 @@ export type SaveMissionValidationInput = {
 export type SaveMissionValidationOutput = {
 	relativePath: string,
 	historyRelativePath: string,
-};
-
-export type ResumeSessionInput = {
-	sessionId: SessionId,
-};
-
-export type ResumeSessionOutput = {
-	session: Session,
-	projection: SessionProjection,
 };
 
 export type SearchSessionsInput = {
@@ -775,3 +775,4 @@ export type WorkspaceSetupStepReport = {
 };
 
 export type WorkspaceState = "initializing" | "setup_pending" | "ready" | "archived";
+

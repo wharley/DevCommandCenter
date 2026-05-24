@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { Toaster } from "sonner";
 import type {
 	CoreEvent,
+	MissionSpecEntry,
 	SessionSearchResult,
 	WorkspaceSessionSummary,
 } from "@dcc/contracts";
@@ -118,6 +119,7 @@ import {
 	buildPlanImplementationPrompt,
 	buildPlanImplementationThreadTitle,
 } from "./features/panel/plan-content";
+import type { WorkspaceSurfaceSelection } from "./features/panel/workspace-surface";
 import {
 	buildMissionContinueCriterionPrompt,
 	buildMissionReanchorPrompt,
@@ -510,8 +512,8 @@ export default function App() {
 	}, []);
 	const { events: sessionEvents } = useSessionEventFeed(handleSessionEvent);
 
-	const [editorSelection, setEditorSelection] =
-		useState<WorkspaceGitPreviewSelection | null>(null);
+	const [surfaceSelection, setSurfaceSelection] =
+		useState<WorkspaceSurfaceSelection | null>(null);
 	const { theme, setTheme } = useAppearance();
 	const {
 		update: appUpdateInfo,
@@ -852,7 +854,7 @@ export default function App() {
 		setSessionSnapshotsById({});
 		setPendingPrompt(null);
 		setPendingPromptSessionId(null);
-		setEditorSelection(null);
+		setSurfaceSelection(null);
 	}, [selectedWorkspace?.id]);
 
 	useEffect(() => {
@@ -865,7 +867,7 @@ export default function App() {
 		setSessionSnapshotsById({});
 		setPendingPrompt(null);
 		setPendingPromptSessionId(null);
-		setEditorSelection(null);
+		setSurfaceSelection(null);
 		setWorkspaceRepositoryContext(null);
 		setIsSessionSearchOpen(false);
 	}, [backendCacheKey]);
@@ -1632,13 +1634,31 @@ export default function App() {
 
 	const handleOpenEditorFile = useCallback(
 		(selection: WorkspaceGitPreviewSelection | null) => {
-			setEditorSelection(selection);
+			setSurfaceSelection(
+				selection
+					? {
+							kind: "git-diff",
+							file: selection,
+					  }
+					: null,
+			);
 		},
 		[],
 	);
 
-	const handleCloseEditor = useCallback(() => {
-		setEditorSelection(null);
+	const handleOpenMissionSpec = useCallback((spec: MissionSpecEntry | null) => {
+		setSurfaceSelection(
+			spec
+				? {
+						kind: "mission-spec",
+						spec,
+				  }
+				: null,
+		);
+	}, []);
+
+	const handleCloseSurface = useCallback(() => {
+		setSurfaceSelection(null);
 	}, []);
 
 	const handleAbortSession = useCallback(async () => {
@@ -2135,8 +2155,8 @@ export default function App() {
 									updateInfo={appUpdateInfo}
 									isInstallingUpdate={isInstallingUpdate}
 									onInstallUpdate={installUpdate}
-									editorSelection={editorSelection}
-									onCloseEditor={handleCloseEditor}
+									surfaceSelection={surfaceSelection}
+									onCloseSurface={handleCloseSurface}
 									onOpenPlanSidebar={openPlanSidebar}
 									onImplementPlanInNewThread={handleImplementPlanInNewThread}
 								/>
@@ -2192,8 +2212,13 @@ export default function App() {
 								selectedModelLabel={selectedModel?.label ?? null}
 								sessionState={selectedSessionSnapshot?.state ?? "idle"}
 								sessionId={selectedSessionSnapshot?.sessionId ?? null}
-								selectedPreview={editorSelection}
+								selectedPreview={
+									surfaceSelection?.kind === "git-diff"
+										? surfaceSelection.file
+										: null
+								}
 								onSelectPreview={handleOpenEditorFile}
+								onOpenMissionSpec={handleOpenMissionSpec}
 								onGeneratePlanFromSpec={handleGeneratePlanFromSpec}
 								onValidateMissionSpec={handleValidateMissionSpec}
 								onReanchorMissionSpec={handleReanchorMissionSpec}

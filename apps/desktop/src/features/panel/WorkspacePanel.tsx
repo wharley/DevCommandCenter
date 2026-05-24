@@ -2,12 +2,12 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { WorkspaceEditorSurface } from "@/features/editor/WorkspaceEditorSurface";
+import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
 import { WorkspaceComposer } from "@/features/composer";
 import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
-import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
 import type { AppUpdateInfo } from "@/features/updater";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import { projectWorkspaceMessages } from "./thread-projection";
@@ -19,6 +19,7 @@ import {
 	computeMissionSpecHash,
 	parseMissionValidationPersistence,
 } from "@/features/spec/mission-spec-content";
+import type { WorkspaceSurfaceSelection } from "./workspace-surface";
 
 type WorkspacePanelProps = {
 	workspaceId: string;
@@ -51,8 +52,8 @@ type WorkspacePanelProps = {
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
 	onInstallUpdate: () => void;
-	editorSelection: WorkspaceGitPreviewSelection | null;
-	onCloseEditor: () => void;
+	surfaceSelection: WorkspaceSurfaceSelection | null;
+	onCloseSurface: () => void;
 	onOpenPlanSidebar: () => void;
 	onImplementPlanInNewThread: (input: {
 		planMarkdown: string;
@@ -91,8 +92,8 @@ export function WorkspacePanel({
 	updateInfo,
 	isInstallingUpdate,
 	onInstallUpdate,
-	editorSelection,
-	onCloseEditor,
+	surfaceSelection,
+	onCloseSurface,
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
 }: WorkspacePanelProps) {
@@ -156,12 +157,19 @@ export function WorkspacePanel({
 		activeMissionSpec != null &&
 		parseMissionValidationPersistence(activeMissionSpec.content) === "auto";
 
-	return editorSelection ? (
-		<WorkspaceEditorSurface
-			workspaceRoot={workspacePath}
-			selection={editorSelection}
-			onClose={onCloseEditor}
-		/>
+	return surfaceSelection ? (
+		surfaceSelection.kind === "git-diff" ? (
+			<WorkspaceEditorSurface
+				workspaceRoot={workspacePath}
+				selection={surfaceSelection.file}
+				onClose={onCloseSurface}
+			/>
+		) : (
+			<WorkspaceMissionSpecSurface
+				spec={surfaceSelection.spec}
+				onClose={onCloseSurface}
+			/>
+		)
 	) : (
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
 			<header

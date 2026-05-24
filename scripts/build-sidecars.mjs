@@ -10,9 +10,15 @@ const srcTauriDir = join(repoRoot, 'src-tauri');
 const targetDir = join(srcTauriDir, 'target');
 const releaseDir = join(targetDir, 'release');
 const sidecarDistDir = join(sidecarDir, 'dist');
+const isDevMode = process.argv.includes('--dev');
 
 function shouldUseShell(command) {
-  return process.platform === 'win32' && command === 'yarn';
+  if (process.platform !== 'win32') {
+    return false;
+  }
+
+  const normalized = command.toLowerCase();
+  return normalized === 'yarn' || normalized.endsWith('.cmd') || normalized.endsWith('.bat');
 }
 
 function run(command, args, options = {}) {
@@ -106,10 +112,23 @@ for (const baseName of ['dcc', 'dccd']) {
   ensurePlaceholder(releaseDir, baseName, hostTriple);
 }
 
-// Sidecar `yarn build` must run before `cargo build --bins`: the Tauri crate's build
+run('node', ['scripts/stage-vendor.mjs'], {
+  cwd: sidecarDir,
+  env: {
+    ...process.env,
+  },
+});
+
+if (isDevMode) {
+  ensurePlaceholder(sidecarDistDir, 'dcc-claude-sidecar', hostTriple);
+  console.log(`[build-sidecars] prepared dev placeholders for ${hostTriple}`);
+  process.exit(0);
+}
+
+// Sidecar compilation must run before `cargo build --bins`: the Tauri crate's build
 // script validates `bundle.resources` (e.g. `../sidecar/dist/vendor`) while compiling
 // `dev-command-center-tauri`, and `stage-vendor.mjs` only runs during this step.
-run('yarn', ['build'], {
+run('bun', ['build', '--compile', 'src/index.mjs', '--outfile', 'dist/dcc-claude-sidecar'], {
   cwd: sidecarDir,
   env: {
     ...process.env,
@@ -117,7 +136,16 @@ run('yarn', ['build'], {
 });
 copyCompiledClaudeSidecar(hostTriple);
 
-run('cargo', ['build', '--manifest-path', join(srcTauriDir, 'Cargo.toml'), '--release', '--bins']);
+run('cargo', [
+  'build',
+  '--manifest-path',
+  join(srcTauriDir, 'Cargo.toml'),
+  '--release',
+  '--bin',
+  'dcc',
+  '--bin',
+  'dccd',
+]);
 
 copySidecar('dcc', hostTriple);
 copySidecar('dccd', hostTriple);
