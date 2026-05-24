@@ -1,5 +1,8 @@
 use std::process::Command;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use dcc_core::domain::workspace::{
     WorkspaceSetupReport, WorkspaceSetupStatus, WorkspaceSetupStepReport,
 };
