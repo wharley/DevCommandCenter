@@ -566,7 +566,13 @@ export function WorkspaceInspectorSidebar({
 				}
 				case "commit-and-push":
 				default: {
-					await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
+					// Respect the user's selection: if they already staged specific
+					// files, commit only those. Stage everything only when nothing is
+					// staged yet, so the checkpoint commit isn't empty.
+					const stagedCount = gitStatusQuery.data?.staged.length ?? 0;
+					if (stagedCount === 0) {
+						await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
+					}
 					const message = `chore: checkpoint for ${workspaceName ?? "workspace"}`;
 					await workspaceGitCommitPush({
 						workspaceRoot: root,
@@ -607,6 +613,7 @@ export function WorkspaceInspectorSidebar({
 		forgeCliReady,
 		forgeContext.providerLabel,
 		forgeContext.requestLabel,
+		gitStatusQuery.data,
 		queryClient,
 		selectedForgeLogin,
 		workspacePath,
