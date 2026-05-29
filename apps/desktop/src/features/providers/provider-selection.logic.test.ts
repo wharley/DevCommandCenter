@@ -58,9 +58,49 @@ describe("resolveSelectedProviderId", () => {
 
 describe("resolveSelectedModelId", () => {
 	const provider = makeProvider("alpha", true);
+	const claudeProvider = {
+		id: "claude_code",
+		label: "Claude Code",
+		description: "",
+		models: [
+			{
+				id: "claude-opus-4-8",
+				label: "Claude Opus 4.8",
+				description: "",
+				recommended: false,
+				effortLevels: ["low", "medium", "high", "xhigh", "max"],
+			},
+			{
+				id: "claude-sonnet-4-6",
+				label: "Claude Sonnet 4.6",
+				description: "",
+				recommended: true,
+				effortLevels: ["low", "medium", "high", "xhigh"],
+			},
+		],
+		stable: true,
+		capabilities: {
+			streaming: false,
+			tools: false,
+			mcp: false,
+			resumable: false,
+			vision: false,
+			experimental: false,
+		},
+		health: "Healthy" as const,
+	};
 
 	it("keeps a stored model when it still exists", () => {
 		expect(resolveSelectedModelId(provider, "alpha-default")).toBe("alpha-default");
+	});
+
+	it("upgrades legacy Claude Opus 4.7 selections to Claude Opus 4.8", () => {
+		expect(resolveSelectedModelId(claudeProvider, "opus-4.7")).toBe(
+			"claude-opus-4-8",
+		);
+		expect(resolveSelectedModelId(claudeProvider, "claude-opus-4-7")).toBe(
+			"claude-opus-4-8",
+		);
 	});
 
 	it("prefers the recommended model when the stored one is invalid", () => {

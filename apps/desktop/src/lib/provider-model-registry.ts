@@ -14,8 +14,8 @@ export type ModelEntry = {
 export const PROVIDER_MODEL_REGISTRY = {
 	claude_code: [
 		{
-			id: "claude-opus-4-7",
-			label: "Claude Opus 4.7",
+			id: "claude-opus-4-8",
+			label: "Claude Opus 4.8",
 			description: "Highest capability, best for deep reasoning and large refactors.",
 			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
@@ -151,8 +151,10 @@ export type ProviderRegistryKey = keyof typeof PROVIDER_MODEL_REGISTRY;
  */
 export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, string>>> = {
 	claude_code: {
-		opus: "claude-opus-4-7",
-		"opus-4.7": "claude-opus-4-7",
+		opus: "claude-opus-4-8",
+		"opus-4.8": "claude-opus-4-8",
+		"opus-4.7": "claude-opus-4-8",
+		"claude-opus-4-7": "claude-opus-4-8",
 		"opus-4.6": "claude-opus-4-6",
 		"claude-opus-4-6-20251117": "claude-opus-4-6",
 		sonnet: "claude-sonnet-4-6",

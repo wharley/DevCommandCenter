@@ -811,10 +811,10 @@ export default function App() {
 		const stored = getSessionComposerSelection(sessionId);
 		if (stored) {
 			const provider = providerChoices.find((p) => p.id === stored.providerId);
-			const model = provider?.models.find((m) => m.id === stored.modelId);
-			if (provider && model) {
+			const modelId = resolveSelectedModelId(provider ?? null, stored.modelId);
+			if (provider && modelId) {
 				setSelectedProviderId(stored.providerId);
-				setSelectedModelId(stored.modelId);
+				setSelectedModelId(modelId);
 				return;
 			}
 		}
@@ -823,10 +823,10 @@ export default function App() {
 		const sm = selectedSessionSnapshot.model;
 		if (sp && sm) {
 			const provider = providerChoices.find((p) => p.id === sp);
-			const model = provider?.models.find((m) => m.id === sm);
-			if (provider && model) {
+			const modelId = resolveSelectedModelId(provider ?? null, sm);
+			if (provider && modelId) {
 				setSelectedProviderId(sp);
-				setSelectedModelId(sm);
+				setSelectedModelId(modelId);
 			}
 		}
 	}, [

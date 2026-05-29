@@ -8,6 +8,15 @@ import {
 } from "./provider-model-registry";
 
 describe("provider-model-registry", () => {
+	it("upgrades Claude Opus 4.7 aliases to Claude Opus 4.8", () => {
+		expect(resolveModelAlias("claude_code", "opus")).toBe("claude-opus-4-8");
+		expect(resolveModelAlias("claude_code", "opus-4.8")).toBe("claude-opus-4-8");
+		expect(resolveModelAlias("claude_code", "opus-4.7")).toBe("claude-opus-4-8");
+		expect(resolveModelAlias("claude_code", "claude-opus-4-7")).toBe(
+			"claude-opus-4-8",
+		);
+	});
+
 	it("resolves Droid aliases to canonical IDs", () => {
 		expect(resolveModelAlias("droid", "auto")).toBe("auto");
 		expect(resolveModelAlias("droid", "sonnet")).toBe("claude-sonnet-4-6");

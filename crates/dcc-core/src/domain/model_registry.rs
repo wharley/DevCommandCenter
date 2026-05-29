@@ -25,8 +25,10 @@ impl ModelEntry {
 /// Alias tables: (short_alias_or_old_id, canonical_id).
 /// When a new model version ships, add the old ID as an alias pointing to the new canonical.
 pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
-    ("opus", "claude-opus-4-7"),
-    ("opus-4.7", "claude-opus-4-7"),
+    ("opus", "claude-opus-4-8"),
+    ("opus-4.8", "claude-opus-4-8"),
+    ("opus-4.7", "claude-opus-4-8"),
+    ("claude-opus-4-7", "claude-opus-4-8"),
     ("opus-4.6", "claude-opus-4-6"),
     ("claude-opus-4-6-20251117", "claude-opus-4-6"),
     ("sonnet", "claude-sonnet-4-6"),
@@ -90,8 +92,8 @@ pub fn resolve_alias(provider_id: &str, model: &str) -> String {
 
 pub const CLAUDE_CODE: &[ModelEntry] = &[
     ModelEntry {
-        id: "claude-opus-4-7",
-        label: "Claude Opus 4.7",
+        id: "claude-opus-4-8",
+        label: "Claude Opus 4.8",
         description: "Highest capability, best for deep reasoning and large refactors.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
@@ -204,3 +206,19 @@ pub const DROID: &[ModelEntry] = &[
         effort_levels: &["low", "medium", "high"],
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_alias;
+
+    #[test]
+    fn claude_code_aliases_upgrade_opus_47_to_opus_48() {
+        assert_eq!(resolve_alias("claude_code", "opus"), "claude-opus-4-8");
+        assert_eq!(resolve_alias("claude_code", "opus-4.8"), "claude-opus-4-8");
+        assert_eq!(resolve_alias("claude_code", "opus-4.7"), "claude-opus-4-8");
+        assert_eq!(
+            resolve_alias("claude_code", "claude-opus-4-7"),
+            "claude-opus-4-8"
+        );
+    }
+}
