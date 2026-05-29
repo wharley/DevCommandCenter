@@ -38,6 +38,8 @@ export type SkillsDialogProps = {
 const TARGET_LABELS: Record<SkillTargetAgent, string> = {
 	claude: "Claude (.claude/skills)",
 	agents: "Codex · Droid (AGENTS.md)",
+	gemini: "Gemini (GEMINI.md)",
+	cursor: "Cursor (.cursor/rules)",
 };
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
@@ -234,10 +236,17 @@ export function SkillsDialog({
 								<ToggleGroupItem value="agents" className="border border-border/60 px-2.5 py-1">
 									{TARGET_LABELS.agents}
 								</ToggleGroupItem>
+								<ToggleGroupItem value="gemini" className="border border-border/60 px-2.5 py-1">
+									{TARGET_LABELS.gemini}
+								</ToggleGroupItem>
+								<ToggleGroupItem value="cursor" className="border border-border/60 px-2.5 py-1">
+									{TARGET_LABELS.cursor}
+								</ToggleGroupItem>
 							</ToggleGroup>
 							<p className="text-[11px] text-muted-foreground">
-								Claude gets a faithful copy (progressive disclosure). AGENTS.md is
-								always-on instruction — keep few skills enabled there.
+								Claude gets a faithful copy (progressive disclosure). AGENTS.md and
+								GEMINI.md are always-on instruction; Cursor writes one rule per skill —
+								keep few skills enabled in always-on targets.
 							</p>
 						</div>
 

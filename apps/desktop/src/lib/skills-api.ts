@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /** Target agents a source skill compiles to. `agents` covers Codex/Droid via AGENTS.md. */
-export type SkillTargetAgent = "claude" | "agents";
+export type SkillTargetAgent = "claude" | "agents" | "gemini" | "cursor";
 
 /** Provider-neutral skill. Source of truth lives in `.devcommandcenter/skills/`. */
 export type SkillRecord = {

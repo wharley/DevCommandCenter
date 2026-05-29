@@ -15,6 +15,10 @@ use crate::{db_error, ApiResult};
 pub const TARGET_CLAUDE: &str = "claude";
 /// Covers Codex, Droid and the emerging cross-tool `AGENTS.md` standard.
 pub const TARGET_AGENTS_MD: &str = "agents";
+/// Gemini CLI reads `GEMINI.md` (same always-on model as AGENTS.md).
+pub const TARGET_GEMINI: &str = "gemini";
+/// Cursor reads `.cursor/rules/<name>.mdc` (one file per rule).
+pub const TARGET_CURSOR: &str = "cursor";
 
 const AGENTS_BLOCK_START: &str = "<!-- dcc:skills:start -->";
 const AGENTS_BLOCK_END: &str = "<!-- dcc:skills:end -->";
@@ -22,6 +26,17 @@ const MANAGED_MARKER_FILE: &str = ".dcc-managed.json";
 
 fn default_scope() -> String {
     "project".to_string()
+}
+
+/// Writes only when content differs — keeps compilation idempotent so recompiling
+/// on every workspace switch does not churn file mtimes or trip file watchers.
+fn write_if_changed(path: &Path, content: &str) -> std::io::Result<()> {
+    if let Ok(existing) = fs::read_to_string(path) {
+        if existing == content {
+            return Ok(());
+        }
+    }
+    fs::write(path, content)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +192,27 @@ fn upsert_agents_block(existing: &str, inner: &str) -> String {
     }
 }
 
+/// Cursor rule: own frontmatter (`description`, `alwaysApply`) + body.
+fn render_cursor_mdc(skill: &SkillRecord) -> String {
+    format!(
+        "---\ndescription: {desc}\nalwaysApply: false\n---\n\n{body}\n",
+        desc = skill.description.trim(),
+        body = skill.body.trim()
+    )
+}
+
+/// Skills targeting `target`, excluding those hidden from model invocation
+/// (always-on artifacts must not carry hidden skills).
+fn skills_for_target(skills: &[SkillRecord], target: &str) -> Vec<SkillRecord> {
+    skills
+        .iter()
+        .filter(|s| {
+            !s.disable_model_invocation && s.target_agents.iter().any(|t| t == target)
+        })
+        .cloned()
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Source CRUD
 // ---------------------------------------------------------------------------
@@ -257,42 +293,84 @@ fn compile_skills(project_root: &str, target_root: &str) -> ApiResult<()> {
         let dir = claude_root.join(&skill.name);
         fs::create_dir_all(&dir).map_err(|e| db_error(format!("{}: {e}", dir.display())))?;
         let content = render_skill_md(&skill.name, &skill.description, &skill.body);
-        fs::write(dir.join("SKILL.md"), content)
+        write_if_changed(&dir.join("SKILL.md"), &content)
             .map_err(|e| db_error(format!("write SKILL.md: {e}")))?;
     }
     if claude_root.exists() {
         let raw = serde_json::to_string(&claude_names).unwrap_or_else(|_| "[]".to_string());
-        let _ = fs::write(&managed_path, raw);
+        let _ = write_if_changed(&managed_path, &raw);
     }
 
-    // --- AGENTS.md target: flatten (skip disabled-from-model skills) ---
-    let agents_skills: Vec<SkillRecord> = skills
-        .iter()
-        .filter(|s| {
-            !s.disable_model_invocation
-                && s.target_agents.iter().any(|t| t == TARGET_AGENTS_MD)
-        })
-        .cloned()
-        .collect();
-    let agents_path = target.join("AGENTS.md");
-    let existing = fs::read_to_string(&agents_path).unwrap_or_default();
-    let inner = if agents_skills.is_empty() {
+    // --- Always-on block targets: flatten (skip disabled-from-model skills) ---
+    compile_block_file(target, "AGENTS.md", &skills_for_target(&skills, TARGET_AGENTS_MD))?;
+    compile_block_file(target, "GEMINI.md", &skills_for_target(&skills, TARGET_GEMINI))?;
+
+    // --- Cursor target: one .mdc rule per skill ---
+    compile_cursor(target, &skills_for_target(&skills, TARGET_CURSOR))?;
+
+    Ok(())
+}
+
+/// Regenerates the DCC block inside an always-on instructions file (AGENTS.md, GEMINI.md).
+/// Removes the file if it ends up empty (no hand-written content left).
+fn compile_block_file(
+    target: &Path,
+    file_name: &str,
+    block_skills: &[SkillRecord],
+) -> ApiResult<()> {
+    let path = target.join(file_name);
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let inner = if block_skills.is_empty() {
         String::new()
     } else {
-        render_agents_inner(&agents_skills)
+        render_agents_inner(block_skills)
     };
     let next = upsert_agents_block(&existing, &inner);
     if next != existing {
         if next.trim().is_empty() {
-            if agents_path.exists() {
-                let _ = fs::remove_file(&agents_path);
+            if path.exists() {
+                let _ = fs::remove_file(&path);
             }
         } else {
-            fs::write(&agents_path, next)
-                .map_err(|e| db_error(format!("write AGENTS.md: {e}")))?;
+            fs::write(&path, next)
+                .map_err(|e| db_error(format!("write {file_name}: {e}")))?;
+        }
+    }
+    Ok(())
+}
+
+/// Writes one `.cursor/rules/<name>.mdc` per skill, removing stale DCC-managed rules.
+fn compile_cursor(target: &Path, cursor_skills: &[SkillRecord]) -> ApiResult<()> {
+    let rules_dir = target.join(".cursor").join("rules");
+    let names: Vec<String> = cursor_skills.iter().map(|s| s.name.clone()).collect();
+
+    let managed_path = rules_dir.join(MANAGED_MARKER_FILE);
+    let previous: Vec<String> = fs::read_to_string(&managed_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default();
+    for stale in previous.iter().filter(|n| !names.contains(n)) {
+        let file = rules_dir.join(format!("{stale}.mdc"));
+        if file.exists() {
+            let _ = fs::remove_file(&file);
         }
     }
 
+    if !names.is_empty() {
+        fs::create_dir_all(&rules_dir)
+            .map_err(|e| db_error(format!("{}: {e}", rules_dir.display())))?;
+    }
+    for skill in cursor_skills {
+        write_if_changed(
+            &rules_dir.join(format!("{}.mdc", skill.name)),
+            &render_cursor_mdc(skill),
+        )
+        .map_err(|e| db_error(format!("write cursor rule: {e}")))?;
+    }
+    if rules_dir.exists() {
+        let raw = serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string());
+        let _ = write_if_changed(&managed_path, &raw);
+    }
     Ok(())
 }
 
@@ -407,6 +485,24 @@ mod tests {
         let second = upsert_agents_block(&first, &render_agents_inner(&[skill("a", &[TARGET_AGENTS_MD])]));
         assert_eq!(first, second, "recompiling the same skills must be stable");
         assert_eq!(first.matches(AGENTS_BLOCK_START).count(), 1);
+    }
+
+    #[test]
+    fn renders_cursor_mdc_with_frontmatter() {
+        let mdc = render_cursor_mdc(&skill("review-pr", &[TARGET_CURSOR]));
+        assert!(mdc.starts_with("---\ndescription: desc for review-pr\nalwaysApply: false\n---\n"));
+        assert!(mdc.contains("Body of review-pr."));
+    }
+
+    #[test]
+    fn skills_for_target_excludes_disabled() {
+        let mut hidden = skill("hidden", &[TARGET_AGENTS_MD, TARGET_GEMINI]);
+        hidden.disable_model_invocation = true;
+        let visible = skill("visible", &[TARGET_GEMINI]);
+        let all = vec![hidden, visible];
+        let gemini = skills_for_target(&all, TARGET_GEMINI);
+        assert_eq!(gemini.len(), 1);
+        assert_eq!(gemini[0].name, "visible");
     }
 
     #[test]

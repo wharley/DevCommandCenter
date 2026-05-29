@@ -48,6 +48,7 @@ import {
 import { WorkspaceInspectorSidebar } from "./features/inspector";
 import { SettingsDialog } from "./features/settings";
 import { SkillsDialog } from "./features/skills";
+import { compileSkills } from "./lib/skills-api";
 import { OnboardingWizard } from "./features/onboarding";
 import { ShortcutCheatsheetDialog } from "./features/shortcuts";
 import {
@@ -526,6 +527,19 @@ export default function App() {
 	const selectedWorkspacePath =
 		selectedWorkspace?.worktreePath ?? selectedWorkspace?.rootPath ?? null;
 	const selectedLocalWorkspacePath = isRemoteBackend ? null : selectedWorkspacePath;
+
+	// Keep compiled skill artifacts in sync with the active worktree, so a freshly
+	// created worktree (or one edited elsewhere) picks up project skills without
+	// needing to re-save in the Skills dialog. Idempotent on the Rust side.
+	const skillsProjectRoot = selectedWorkspace?.rootPath ?? null;
+	useEffect(() => {
+		if (isRemoteBackend || !skillsProjectRoot || !selectedWorkspacePath) {
+			return;
+		}
+		void compileSkills(skillsProjectRoot, selectedWorkspacePath).catch(() => {
+			/* background recompile; errors surface on demand in the Skills dialog */
+		});
+	}, [isRemoteBackend, skillsProjectRoot, selectedWorkspacePath]);
 	const [
 		missionSpecAutoCompileFailuresByKey,
 		setMissionSpecAutoCompileFailuresByKey,

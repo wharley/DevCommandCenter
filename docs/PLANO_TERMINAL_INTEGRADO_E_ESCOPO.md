@@ -197,7 +197,7 @@ Avaliado e **descartado** por diluir o foco vertical do DCC (vira "mais um caniv
 - [x] (Skills Fase 1) Diálogo próprio (command palette + sidebar) + modal com nome/desc/conteúdo/**agentes-alvo**/disable-model-invocation; alvo `.claude/skills/` (cópia fiel) com tracking `.dcc-managed.json`
 - [x] (Skills Fase 1) *disable model invocation* implementado: exclui do `AGENTS.md` (always-on); UI explica que segue invocável por slash. ⚠️ knob nativo do Agent SDK p/ Claude ainda a validar
 - [x] (Skills Fase 2) Compilar para `AGENTS.md` com marcadores idempotentes `<!-- dcc:skills:start/end -->` (testado: insere/substitui/remove preservando conteúdo escrito à mão)
-- [ ] (Skills Fase 3) Compilar para `GEMINI.md`; `.cursor/rules/` se houver demanda
+- [x] (Skills Fase 3) Compilar para `GEMINI.md` (bloco idempotente, igual AGENTS.md) e `.cursor/rules/<name>.mdc` (1 arquivo por skill, com tracking `.dcc-managed.json`). ⚠️ `.cursor` está no `.gitignore` — o artefato é escrito no worktree ativo e funciona localmente, mas não é versionado/compartilhado
 - [ ] (Skills Fase 4) Skills globais via `shadowHomePath`, fora do repo
-- [ ] (Skills — follow-up) Recompilar por worktree no hook `setup-worktree.sh` (hoje compila no worktree ativo via UI; novos worktrees só recebem ao reeditar)
+- [x] (Skills — follow-up) Recompilar por worktree: efeito em `App.tsx` recompila ao selecionar workspace (worktrees novos recebem skills sem reeditar). Writes idempotentes (`write_if_changed`) evitam churn. Backend local apenas. _(Resolveu melhor que o hook bash, que não chama o compilador Rust.)_
 - [ ] (Depois) MCP-server expondo worktrees/missions/atenção
