@@ -200,4 +200,6 @@ Avaliado e **descartado** por diluir o foco vertical do DCC (vira "mais um caniv
 - [x] (Skills Fase 3) Compilar para `GEMINI.md` (bloco idempotente, igual AGENTS.md) e `.cursor/rules/<name>.mdc` (1 arquivo por skill, com tracking `.dcc-managed.json`). ⚠️ `.cursor` está no `.gitignore` — o artefato é escrito no worktree ativo e funciona localmente, mas não é versionado/compartilhado
 - [ ] (Skills Fase 4) Skills globais via `shadowHomePath`, fora do repo
 - [x] (Skills — follow-up) Recompilar por worktree: efeito em `App.tsx` recompila ao selecionar workspace (worktrees novos recebem skills sem reeditar). Writes idempotentes (`write_if_changed`) evitam churn. Backend local apenas. _(Resolveu melhor que o hook bash, que não chama o compilador Rust.)_
-- [ ] (Depois) MCP-server expondo worktrees/missions/atenção
+- [x] MCP-server (`dcc mcp`, stdio JSON-RPC em `src-tauri/src/bin/dcc.rs`) já existia com 8 tools (daemon/combs/panes/diffs). **Adicionadas 5 tools de status de agentes/processos**: `daemon_health`, `processes_list`, `process_start/stop/restart` (mapeiam métodos do daemon que existiam mas não eram expostos). Smoke test stdio: initialize + tools/list → 13 tools ✅
+- [ ] (MCP follow-up) Tool dedicada de "atenção" (quais agentes terminaram / precisam de interação) — hoje inferível via `panes_list`/`processes_list`; falta um endpoint que materialize a heurística de atenção
+- [ ] (Skills follow-up) Fase 4 global Claude-only via `shadowHomePath` (adiada por decisão)

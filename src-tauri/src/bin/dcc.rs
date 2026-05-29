@@ -222,6 +222,57 @@ fn mcp_tool_list() -> Value {
                         }
                     }
                 }
+            },
+            {
+                "name": "daemon_health",
+                "description": "Snapshot de saúde do daemon (CPU/memória, processos vivos).",
+                "inputSchema": { "type": "object", "properties": {} }
+            },
+            {
+                "name": "processes_list",
+                "description": "Lista processos de longa duração gerenciados (dev servers, watchers, agentes) e seu status, opcionalmente por projeto.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "projectId": { "type": "string" }
+                    }
+                }
+            },
+            {
+                "name": "process_start",
+                "description": "Inicia um processo gerenciado.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "projectId": { "type": "string" },
+                        "processId": { "type": "string" }
+                    },
+                    "required": ["projectId", "processId"]
+                }
+            },
+            {
+                "name": "process_stop",
+                "description": "Para um processo gerenciado.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "projectId": { "type": "string" },
+                        "processId": { "type": "string" }
+                    },
+                    "required": ["projectId", "processId"]
+                }
+            },
+            {
+                "name": "process_restart",
+                "description": "Reinicia um processo gerenciado.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "projectId": { "type": "string" },
+                        "processId": { "type": "string" }
+                    },
+                    "required": ["projectId", "processId"]
+                }
             }
         ]
     })
@@ -348,6 +399,33 @@ fn handle_mcp_request(request: Value) -> Option<Value> {
                 call_daemon(
                     "diffs.bundle",
                     serde_json::json!({ "worktreePaths": worktree_paths, "combIds": comb_ids }),
+                )
+            }
+            "daemon_health" => call_daemon("daemon.health", serde_json::json!({})),
+            "processes_list" => {
+                let project_id = arguments.get("projectId").and_then(|value| value.as_str());
+                call_daemon(
+                    "daemon.listProcesses",
+                    serde_json::json!({ "projectId": project_id }),
+                )
+            }
+            "process_start" | "process_stop" | "process_restart" => {
+                let project_id = arguments
+                    .get("projectId")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default();
+                let process_id = arguments
+                    .get("processId")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default();
+                let method = match tool_name {
+                    "process_start" => "daemon.startProcess",
+                    "process_stop" => "daemon.stopProcess",
+                    _ => "daemon.restartProcess",
+                };
+                call_daemon(
+                    method,
+                    serde_json::json!({ "projectId": project_id, "processId": process_id }),
                 )
             }
             _ => Err(format!("tool desconhecida: {tool_name}")),
