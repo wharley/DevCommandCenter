@@ -52,6 +52,14 @@ function statusClass(status: string): string {
 	return STATUS_BADGE_CLASS[status] ?? "text-muted-foreground";
 }
 
+/**
+ * Floating action toolbar anchored to the row's right edge. Pulled out of the
+ * flex flow so a long file path can never squeeze the add/discard/unstage
+ * buttons off-screen — they always sit on top, at the right, on hover.
+ */
+const ROW_ACTIONS_CLASS =
+	"absolute right-1 top-1/2 z-10 hidden -translate-y-1/2 items-center gap-0.5 rounded-md bg-background/95 px-0.5 py-px shadow-sm ring-1 ring-border/60 backdrop-blur-sm group-hover/row:flex";
+
 function dirname(path: string): string {
 	const i = path.lastIndexOf("/");
 	return i <= 0 ? "" : path.slice(0, i);
@@ -169,7 +177,7 @@ function ChangeRow({
 	return (
 		<div
 			className={cn(
-				"group/row flex items-center gap-1.5 py-[1.5px] pl-2 pr-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent/60",
+				"group/row relative flex items-center gap-1.5 py-[1.5px] pl-2 pr-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent/60",
 				onSelect && "cursor-pointer",
 				selected && "bg-muted/60 text-foreground",
 			)}
@@ -238,7 +246,7 @@ function ChangeRow({
 				</span>
 			</span>
 			{group === "staged" ? (
-				<span className="ml-auto hidden items-center gap-0.5 group-hover/row:inline-flex">
+				<span className={ROW_ACTIONS_CLASS}>
 					<RowIconButton
 						aria-label="Unstage file"
 						disabled={gitBusy}
@@ -253,7 +261,7 @@ function ChangeRow({
 					</RowIconButton>
 				</span>
 			) : group === "unstaged" ? (
-				<span className="ml-auto hidden items-center gap-0.5 group-hover/row:inline-flex">
+				<span className={ROW_ACTIONS_CLASS}>
 					<RowIconButton
 						aria-label="Discard file changes"
 						disabled={gitBusy}
