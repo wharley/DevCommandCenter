@@ -23,6 +23,7 @@ type WorkspaceCommandPaletteProps = {
 	onOpenSettings: () => void;
 	onOpenOnboarding: () => void;
 	onOpenShortcuts: () => void;
+	onOpenSkills: () => void;
 };
 
 export function WorkspaceCommandPalette({
@@ -36,6 +37,7 @@ export function WorkspaceCommandPalette({
 	onOpenSettings,
 	onOpenOnboarding,
 	onOpenShortcuts,
+	onOpenSkills,
 }: WorkspaceCommandPaletteProps) {
 	const { t } = useTranslation("common");
 	const groupedWorkspaces = useMemo(
@@ -118,6 +120,15 @@ export function WorkspaceCommandPalette({
 					>
 						{t("commandPalette.openSettings")}
 						<CommandShortcut>⌘,</CommandShortcut>
+					</CommandItem>
+					<CommandItem
+						value="manage skills"
+						onSelect={() => {
+							onOpenChange(false);
+							onOpenSkills();
+						}}
+					>
+						Manage skills
 					</CommandItem>
 					<CommandItem
 						value="rebuild contracts"

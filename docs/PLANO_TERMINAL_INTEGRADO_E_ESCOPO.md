@@ -192,11 +192,12 @@ Avaliado e **descartado** por diluir o foco vertical do DCC (vira "mais um caniv
 - [x] `App.tsx`/`session-workbench.tsx` passam `projectId` + `rootPath` (cwd fora do worktree)
 - [x] Limite suave de abas (`MAX_TERMINAL_TABS = 8`); `removeTerminal` mata o PTY da aba fechada
 - [x] Matar todos os PTYs ao sair do app (`RunEvent::ExitRequested` → `kill_all_terminals` no `main.rs`). **Trocar de projeto NÃO mata** os PTYs (mantém vivos em background, conforme recomendado — preserva processos ao voltar)
-- [ ] (Skills) Design provider-neutro: fonte única `.devcommandcenter/skills/` + manifesto (agentes-alvo, escopo)
-- [ ] (Skills Fase 0) Teste de fumaça: `settingSources` mantém `"project"`
-- [ ] (Skills Fase 1) Modal estilo Zed + **seletor de agentes-alvo**; primeiro alvo = `.claude/skills/` (cópia fiel)
-- [ ] (Skills Fase 1) Validar por agente o equivalente a *disable model invocation* (auto-catálogo vs slash)
-- [ ] (Skills Fase 2) Compilar para `AGENTS.md` (Codex/Droid) com marcadores idempotentes
+- [x] (Skills) Design provider-neutro: fonte única `.devcommandcenter/skills/<name>/SKILL.md` + manifesto `skills.json` (agentes-alvo, escopo, disable-model-invocation) — `src-tauri/src/skills_commands.rs`
+- [x] (Skills Fase 0) Teste de fumaça: `settingSources` mantém `"project"` (`setting-sources.smoke.test.ts`)
+- [x] (Skills Fase 1) Diálogo próprio (command palette + sidebar) + modal com nome/desc/conteúdo/**agentes-alvo**/disable-model-invocation; alvo `.claude/skills/` (cópia fiel) com tracking `.dcc-managed.json`
+- [x] (Skills Fase 1) *disable model invocation* implementado: exclui do `AGENTS.md` (always-on); UI explica que segue invocável por slash. ⚠️ knob nativo do Agent SDK p/ Claude ainda a validar
+- [x] (Skills Fase 2) Compilar para `AGENTS.md` com marcadores idempotentes `<!-- dcc:skills:start/end -->` (testado: insere/substitui/remove preservando conteúdo escrito à mão)
 - [ ] (Skills Fase 3) Compilar para `GEMINI.md`; `.cursor/rules/` se houver demanda
 - [ ] (Skills Fase 4) Skills globais via `shadowHomePath`, fora do repo
+- [ ] (Skills — follow-up) Recompilar por worktree no hook `setup-worktree.sh` (hoje compila no worktree ativo via UI; novos worktrees só recebem ao reeditar)
 - [ ] (Depois) MCP-server expondo worktrees/missions/atenção

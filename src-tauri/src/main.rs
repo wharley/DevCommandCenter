@@ -3,6 +3,7 @@
 mod forge_commands;
 mod git_support;
 mod session_commands;
+mod skills_commands;
 mod workspace_commands;
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike};
@@ -6601,6 +6602,10 @@ pub fn run() {
             terminal_kill,
             terminal_kill_by_mission_id,
             terminal_get_or_create_for_pane,
+            skills_commands::skills_list,
+            skills_commands::skills_save,
+            skills_commands::skills_delete,
+            skills_commands::skills_compile,
             terminal_get_pane_session,
             terminal_kill_by_pane_id,
             terminal_get_backlog,

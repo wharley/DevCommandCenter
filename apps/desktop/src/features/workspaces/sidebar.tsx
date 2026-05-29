@@ -8,6 +8,7 @@ import {
 	PanelRight,
 	Plus,
 	Settings2,
+	Sparkles,
 	Trash2,
 } from "lucide-react";
 import {
@@ -199,6 +200,7 @@ type WorkspacesSidebarProps = {
 	}) => void;
 	repositories: Repository[];
 	onOpenSettings: () => void;
+	onOpenSkills: () => void;
 	onToggleCollapsed: () => void;
 	onArchiveWorkspace?: (workspaceId: string) => void;
 	onRestoreWorkspace?: (workspaceId: string) => void;
@@ -230,6 +232,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onCreateWorkspaceFromProject,
 	repositories,
 	onOpenSettings,
+	onOpenSkills,
 	onToggleCollapsed,
 	onArchiveWorkspace,
 	onRestoreWorkspace,
@@ -801,6 +804,21 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								variant="ghost"
 								size="icon-xs"
 								className="text-muted-foreground hover:text-foreground"
+								aria-label="Skills"
+								onClick={onOpenSkills}
+							>
+								<Sparkles className="size-4" strokeWidth={1.85} aria-hidden />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="right">Skills</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								className="text-muted-foreground hover:text-foreground"
 								aria-label={t("sidebar.openSettings")}
 								onClick={onOpenSettings}
 							>
@@ -960,6 +978,22 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				</div>
 
 				<div className="flex shrink-0 items-center justify-start gap-1 px-3 pb-3 pt-1">
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="gap-1.5 text-muted-foreground hover:text-foreground"
+								aria-label="Skills"
+								onClick={onOpenSkills}
+							>
+								<Sparkles className="size-4" strokeWidth={1.85} aria-hidden />
+								<span className="text-xs font-medium">Skills</span>
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="top">Skills</TooltipContent>
+					</Tooltip>
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button

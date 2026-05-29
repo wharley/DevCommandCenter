@@ -47,6 +47,7 @@ import {
 } from "./features/workspaces";
 import { WorkspaceInspectorSidebar } from "./features/inspector";
 import { SettingsDialog } from "./features/settings";
+import { SkillsDialog } from "./features/skills";
 import { OnboardingWizard } from "./features/onboarding";
 import { ShortcutCheatsheetDialog } from "./features/shortcuts";
 import {
@@ -424,6 +425,7 @@ export default function App() {
 	const [workspaceRepositoryContext, setWorkspaceRepositoryContext] =
 		useState<ExistingRepositoryContext | null>(null);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+	const [isSkillsOpen, setIsSkillsOpen] = useState(false);
 	const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
 	const [isOnboardingOpen, setIsOnboardingOpen] = useState(() => {
 		if (typeof window === "undefined") {
@@ -2051,6 +2053,7 @@ export default function App() {
 									: (repository) => openWorkspaceDialog("open", repository)
 							}
 							onOpenSettings={() => setIsSettingsOpen(true)}
+							onOpenSkills={() => setIsSkillsOpen(true)}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
 							onArchiveWorkspace={
 								isRemoteBackend ? handleRemoteWorkspaceMutation : archiveWorkspace
@@ -2105,6 +2108,7 @@ export default function App() {
 								onOpenSettings={() => setIsSettingsOpen(true)}
 								onOpenOnboarding={() => setIsOnboardingOpen(true)}
 								onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
+								onOpenSkills={() => setIsSkillsOpen(true)}
 							/>
 							<SessionSearchDialog
 								open={isSessionSearchOpen}
@@ -2296,6 +2300,12 @@ export default function App() {
 				providerRuntimeSettings={providerRuntimeSettings}
 				onChangeProviderRuntime={handleChangeProviderRuntime}
 				onClearProviderRuntime={handleClearProviderRuntime}
+			/>
+			<SkillsDialog
+				open={isSkillsOpen}
+				onOpenChange={setIsSkillsOpen}
+				projectRoot={selectedWorkspace?.rootPath ?? null}
+				targetRoot={selectedWorkspacePath}
 			/>
 			<ShortcutCheatsheetDialog
 				open={isShortcutSheetOpen}
