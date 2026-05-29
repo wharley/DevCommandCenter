@@ -13,23 +13,24 @@ import {
 	type TerminalHandle,
 } from "@/components/terminal-output";
 import {
-	attachWorkspaceTerminal,
-	clearWorkspaceTerminal,
-	detachWorkspaceTerminal,
-	ensureWorkspaceTerminal,
+	attachTerminal,
+	clearTerminal,
+	detachTerminal,
+	ensureTerminal,
 	type TerminalListener,
 	type TerminalSnapshot,
 	type TerminalStatus,
-	writeWorkspaceTerminalInput,
-	resizeWorkspaceTerminal,
+	writeTerminalInput,
+	resizeTerminalView,
 	TERMINAL_OUTPUT_TRUNCATION,
 } from "./terminal-store";
 
 type TerminalPanelProps = {
-	workspaceId: string;
+	terminalId: string;
+	title: string;
+	cwd: string | null;
 	workspaceName: string;
 	workspaceBranch: string;
-	workspacePath: string | null;
 	providerLabel: string | null;
 	sessionState: string;
 	sessionId: string | null;
@@ -38,10 +39,11 @@ type TerminalPanelProps = {
 };
 
 export function TerminalPanel({
-	workspaceId,
+	terminalId,
+	title,
+	cwd,
 	workspaceName,
 	workspaceBranch,
-	workspacePath,
 	providerLabel,
 	sessionState,
 	sessionId,
@@ -169,7 +171,7 @@ export function TerminalPanel({
 			bootstrappingRef.current = true;
 			bootstrappingWritesRef.current = [];
 
-			if (!workspacePath) {
+			if (!cwd) {
 				setTerminalSnapshot(null);
 				pendingWritesRef.current = [];
 				pendingFlushFrameRef.current = null;
@@ -178,10 +180,11 @@ export function TerminalPanel({
 				return;
 			}
 
-			const initial = attachWorkspaceTerminal(workspaceId, listenerRef.current);
+			const initial = attachTerminal(terminalId, listenerRef.current);
 			setTerminalSnapshot(initial);
 
-			const next = await ensureWorkspaceTerminal(workspaceId, workspacePath, {
+			const next = await ensureTerminal(terminalId, cwd, {
+				title,
 				workspaceName,
 				workspaceBranch,
 				providerLabel,
@@ -212,15 +215,9 @@ export function TerminalPanel({
 		return () => {
 			disposed = true;
 			bootstrappingRef.current = false;
-			detachWorkspaceTerminal(workspaceId, listenerRef.current);
+			detachTerminal(terminalId, listenerRef.current);
 		};
-	}, [
-		replayChunks,
-		workspaceBranch,
-		workspaceId,
-		workspaceName,
-		workspacePath,
-	]);
+	}, [replayChunks, terminalId, cwd, workspaceBranch, workspaceName]);
 
 	const handleFocusTerminal = () => {
 		terminalRef.current?.focus();
@@ -228,20 +225,23 @@ export function TerminalPanel({
 	};
 
 	const handleClearTerminal = () => {
-		clearWorkspaceTerminal(workspaceId);
+		clearTerminal(terminalId);
 		terminalRef.current?.clear();
 		pendingWritesRef.current = [];
 	};
 
-	const handleTerminalData = useCallback((data: string) => {
-		writeWorkspaceTerminalInput(workspaceId, data);
-	}, [workspaceId]);
+	const handleTerminalData = useCallback(
+		(data: string) => {
+			writeTerminalInput(terminalId, data);
+		},
+		[terminalId],
+	);
 
 	const handleTerminalResize = useCallback(
 		(cols: number, rows: number) => {
-			resizeWorkspaceTerminal(workspaceId, cols, rows);
+			resizeTerminalView(terminalId, cols, rows);
 		},
-		[workspaceId],
+		[terminalId],
 	);
 
 	if (variant === "drawer") {
@@ -275,7 +275,7 @@ export function TerminalPanel({
 						onResize={handleTerminalResize}
 					/>
 					<p className="m-0 pt-2 text-[10px] leading-snug text-muted-foreground">
-						Cwd · {workspacePath ?? "missing path"}
+						Cwd · {cwd ?? "missing path"}
 					</p>
 				</div>
 			</div>
@@ -287,9 +287,9 @@ export function TerminalPanel({
 			<CardHeader>
 				<div className="dcc-card__meta-row">
 					<div>
-						<CardTitle className="text-sm font-medium">Terminal</CardTitle>
+						<CardTitle className="text-sm font-medium">{title}</CardTitle>
 						<CardDescription>
-							PTY per workspace; panel hide keeps the same shell (Tauri bridge).
+							PTY per tab; panel hide keeps the same shell (Tauri bridge).
 						</CardDescription>
 					</div>
 					<div className="dcc-terminal__header-actions">
@@ -317,10 +317,10 @@ export function TerminalPanel({
 				/>
 				<div className="dcc-terminal__note">
 					<span>
-						<strong>Remembered workspace PTY.</strong> Closing the panel does not kill the
+						<strong>Remembered terminal PTY.</strong> Closing the panel does not kill the
 						shell; reopening reattaches to the same runtime.
 					</span>
-					<Badge variant="outline">{workspacePath ?? "Workspace path pending"}</Badge>
+					<Badge variant="outline">{cwd ?? "Terminal path pending"}</Badge>
 				</div>
 			</CardContent>
 		</Card>

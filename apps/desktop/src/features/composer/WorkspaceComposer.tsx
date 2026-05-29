@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowUp, ChevronDown, ClipboardList, Square, Zap } from "lucide-react";
+import {
+	ArrowUp,
+	ChevronDown,
+	ClipboardList,
+	Square,
+	SquareTerminal,
+	Zap,
+} from "lucide-react";
 import type { LexicalEditor } from "lexical";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
@@ -106,6 +113,7 @@ type WorkspaceComposerProps = {
 		planMarkdown: string;
 		planTitle: string | null;
 	}) => void;
+	onOpenTerminal?: () => void;
 };
 
 export function WorkspaceComposer({
@@ -127,6 +135,7 @@ export function WorkspaceComposer({
 	onAbortSession,
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
+	onOpenTerminal,
 }: WorkspaceComposerProps) {
 	const { t } = useTranslation("common");
 	const [hasContent, setHasContent] = useState(false);
@@ -584,6 +593,23 @@ export function WorkspaceComposer({
 						<ClipboardList className="size-[13px]" strokeWidth={1.8} />
 						<span>Plan</span>
 					</ComposerButton>
+					{onOpenTerminal ? (
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<ComposerButton
+									type="button"
+									aria-label="Terminal"
+									className="h-7 px-1.5 text-muted-foreground"
+									onClick={onOpenTerminal}
+								>
+									<SquareTerminal className="size-[14px]" strokeWidth={1.8} />
+								</ComposerButton>
+							</TooltipTrigger>
+							<TooltipContent side="top" sideOffset={4}>
+								<span>Terminal (project root)</span>
+							</TooltipContent>
+						</Tooltip>
+					) : null}
 				</div>
 
 				<div className="flex shrink-0 items-center gap-1">

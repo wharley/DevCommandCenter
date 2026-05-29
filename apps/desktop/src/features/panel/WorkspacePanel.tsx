@@ -59,6 +59,7 @@ type WorkspacePanelProps = {
 		planMarkdown: string;
 		planTitle: string | null;
 	}) => void;
+	onOpenTerminal?: () => void;
 };
 
 export function WorkspacePanel({
@@ -96,6 +97,7 @@ export function WorkspacePanel({
 	onCloseSurface,
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
+	onOpenTerminal,
 }: WorkspacePanelProps) {
 	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
 	const threadHistoryQuery = useQuery(
@@ -245,6 +247,7 @@ export function WorkspacePanel({
 					onAbortSession={onAbortSession}
 					onOpenPlanSidebar={onOpenPlanSidebar}
 					onImplementPlanInNewThread={onImplementPlanInNewThread}
+					onOpenTerminal={onOpenTerminal}
 				/>
 				</div>
 			</div>

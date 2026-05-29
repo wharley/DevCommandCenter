@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { WorkspaceTerminalDrawer } from "@/features/terminal";
+import { ensureTerminal as ensureTerminalTab } from "@/features/terminal/terminal-tabs-store";
 import { WorkspacePanel } from "@/features/panel";
 import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surface";
 import type { AppUpdateInfo } from "@/features/updater";
@@ -15,7 +16,10 @@ type SessionWorkbenchProps = {
 	workspaceName: string;
 	workspaceBranch: string;
 	workspacePath: string | null;
-	terminalWorkspacePath?: string | null;
+	/** Project id — terminals are scoped per project. */
+	projectId?: string | null;
+	/** Project root (`rootPath`) — terminals open here, outside the worktree. */
+	terminalRootPath?: string | null;
 	sessionQueryScope?: string;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
@@ -56,7 +60,8 @@ export function SessionWorkbench({
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
-	terminalWorkspacePath,
+	projectId,
+	terminalRootPath,
 	sessionQueryScope = "local",
 	selectedProviderLabel,
 	selectedModelLabel,
@@ -91,6 +96,17 @@ export function SessionWorkbench({
 	const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
 	const sessionState = sessionSnapshot?.state ?? "idle";
 	const sessionId = sessionSnapshot?.sessionId ?? null;
+	const terminalProjectKey = projectId ?? workspaceId;
+
+	const handleToggleTerminal = useCallback(() => {
+		setTerminalDrawerOpen((current) => {
+			const next = !current;
+			if (next) {
+				ensureTerminalTab(terminalProjectKey);
+			}
+			return next;
+		});
+	}, [terminalProjectKey]);
 
 	return (
 		<div className="@container/header-actions flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
@@ -129,15 +145,16 @@ export function SessionWorkbench({
 				onCloseSurface={onCloseSurface}
 				onOpenPlanSidebar={onOpenPlanSidebar}
 				onImplementPlanInNewThread={onImplementPlanInNewThread}
+				onOpenTerminal={handleToggleTerminal}
 			/>
 
 			<WorkspaceTerminalDrawer
 				open={terminalDrawerOpen}
 				onOpenChange={setTerminalDrawerOpen}
-				workspaceId={workspaceId}
+				projectKey={terminalProjectKey}
+				rootPath={terminalRootPath ?? workspacePath}
 				workspaceName={workspaceName}
 				workspaceBranch={workspaceBranch}
-				workspacePath={terminalWorkspacePath ?? workspacePath}
 				providerLabel={selectedProviderLabel}
 				sessionState={sessionState}
 				sessionId={sessionId}
