@@ -1,5 +1,6 @@
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,7 @@ export function SkillsDialog({
 	projectRoot,
 	targetRoot,
 }: SkillsDialogProps) {
+	const { t } = useTranslation("common");
 	const [skills, setSkills] = useState<SkillRecord[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [form, setForm] = useState<FormState | null>(null);
@@ -84,11 +86,11 @@ export function SkillsDialog({
 		try {
 			setSkills(await listSkills(projectRoot));
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : "Failed to load skills");
+			toast.error(error instanceof Error ? error.message : t("skills.toast.loadError"));
 		} finally {
 			setLoading(false);
 		}
-	}, [projectRoot]);
+	}, [projectRoot, t]);
 
 	useEffect(() => {
 		if (open) {
@@ -105,10 +107,10 @@ export function SkillsDialog({
 			await compileSkills(projectRoot, targetRoot);
 		} catch (error) {
 			toast.error(
-				error instanceof Error ? error.message : "Failed to compile skills",
+				error instanceof Error ? error.message : t("skills.toast.compileError"),
 			);
 		}
-	}, [projectRoot, targetRoot]);
+	}, [projectRoot, targetRoot, t]);
 
 	const handleSave = useCallback(async () => {
 		if (!projectRoot || !form) {
@@ -116,15 +118,15 @@ export function SkillsDialog({
 		}
 		const name = form.name.trim();
 		if (!NAME_PATTERN.test(name)) {
-			toast.error("Name must be lower-case letters, digits and hyphens (e.g. review-pr).");
+			toast.error(t("skills.toast.nameInvalid"));
 			return;
 		}
 		if (!form.description.trim()) {
-			toast.error("A description is required — it is what the model sees in the catalog.");
+			toast.error(t("skills.toast.descriptionRequired"));
 			return;
 		}
 		if (form.targetAgents.length === 0) {
-			toast.error("Pick at least one target agent.");
+			toast.error(t("skills.toast.pickTarget"));
 			return;
 		}
 		setBusy(true);
@@ -138,15 +140,15 @@ export function SkillsDialog({
 				scope: "project",
 			});
 			await recompile();
-			toast.success(`Skill "${name}" saved`);
+			toast.success(t("skills.toast.saved", { name }));
 			setForm(null);
 			await refresh();
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : "Failed to save skill");
+			toast.error(error instanceof Error ? error.message : t("skills.toast.saveError"));
 		} finally {
 			setBusy(false);
 		}
-	}, [projectRoot, form, recompile, refresh]);
+	}, [projectRoot, form, recompile, refresh, t]);
 
 	const handleDelete = useCallback(
 		async (name: string) => {
@@ -157,24 +159,24 @@ export function SkillsDialog({
 			try {
 				await deleteSkill(projectRoot, name);
 				await recompile();
-				toast.success(`Skill "${name}" deleted`);
+				toast.success(t("skills.toast.deleted", { name }));
 				await refresh();
 			} catch (error) {
-				toast.error(error instanceof Error ? error.message : "Failed to delete skill");
+				toast.error(error instanceof Error ? error.message : t("skills.toast.deleteError"));
 			} finally {
 				setBusy(false);
 			}
 		},
-		[projectRoot, recompile, refresh],
+		[projectRoot, recompile, refresh, t],
 	);
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-w-2xl">
+			<DialogContent className="w-full sm:max-w-2xl">
 				<DialogHeader>
-					<DialogTitle>Skills</DialogTitle>
+					<DialogTitle>{t("skills.title")}</DialogTitle>
 					<DialogDescription>
-						Write once in a neutral source; DCC compiles to each agent. Source:
+						{t("skills.description")}
 						<code className="ml-1 rounded bg-muted px-1 py-0.5 text-[11px]">
 							.devcommandcenter/skills/
 						</code>
@@ -183,26 +185,26 @@ export function SkillsDialog({
 
 				{!projectRoot ? (
 					<p className="py-8 text-center text-sm text-muted-foreground">
-						Select a project to manage its skills.
+						{t("skills.selectProject")}
 					</p>
 				) : form ? (
 					<div className="flex flex-col gap-4">
-						<div className="grid grid-cols-2 gap-3">
-							<div className="flex flex-col gap-1.5">
-								<Label htmlFor="skill-name">Name</Label>
+						<div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3">
+							<div className="flex min-w-0 flex-col gap-1.5">
+								<Label htmlFor="skill-name">{t("skills.fields.name")}</Label>
 								<Input
 									id="skill-name"
-									placeholder="review-pr"
+									placeholder={t("skills.fields.namePlaceholder")}
 									value={form.name}
 									disabled={form.editingExisting}
 									onChange={(e) => setForm({ ...form, name: e.target.value })}
 								/>
 							</div>
-							<div className="flex flex-col gap-1.5">
-								<Label htmlFor="skill-desc">Description</Label>
+							<div className="flex min-w-0 flex-col gap-1.5">
+								<Label htmlFor="skill-desc">{t("skills.fields.description")}</Label>
 								<Input
 									id="skill-desc"
-									placeholder="When to use this skill"
+									placeholder={t("skills.fields.descriptionPlaceholder")}
 									value={form.description}
 									onChange={(e) => setForm({ ...form, description: e.target.value })}
 								/>
@@ -210,52 +212,63 @@ export function SkillsDialog({
 						</div>
 
 						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="skill-body">Skill content</Label>
+							<Label htmlFor="skill-body">{t("skills.fields.body")}</Label>
 							<Textarea
 								id="skill-body"
 								className="min-h-[160px] font-mono text-[12px]"
-								placeholder="Instructions, steps, examples…"
+								placeholder={t("skills.fields.bodyPlaceholder")}
 								value={form.body}
 								onChange={(e) => setForm({ ...form, body: e.target.value })}
 							/>
 						</div>
 
 						<div className="flex flex-col gap-1.5">
-							<Label>Target agents</Label>
+							<Label>{t("skills.fields.targetAgents")}</Label>
 							<ToggleGroup
 								type="multiple"
 								value={form.targetAgents}
 								onValueChange={(value) =>
 									setForm({ ...form, targetAgents: value as SkillTargetAgent[] })
 								}
-								className="justify-start"
+								className="grid grid-cols-2 gap-2"
 							>
-								<ToggleGroupItem value="claude" className="border border-border/60 px-2.5 py-1">
+								<ToggleGroupItem
+									value="claude"
+									className="w-full justify-start border border-border/60 px-3 py-2"
+								>
 									{TARGET_LABELS.claude}
 								</ToggleGroupItem>
-								<ToggleGroupItem value="agents" className="border border-border/60 px-2.5 py-1">
+								<ToggleGroupItem
+									value="agents"
+									className="w-full justify-start border border-border/60 px-3 py-2"
+								>
 									{TARGET_LABELS.agents}
 								</ToggleGroupItem>
-								<ToggleGroupItem value="gemini" className="border border-border/60 px-2.5 py-1">
+								<ToggleGroupItem
+									value="gemini"
+									className="w-full justify-start border border-border/60 px-3 py-2"
+								>
 									{TARGET_LABELS.gemini}
 								</ToggleGroupItem>
-								<ToggleGroupItem value="cursor" className="border border-border/60 px-2.5 py-1">
+								<ToggleGroupItem
+									value="cursor"
+									className="w-full justify-start border border-border/60 px-3 py-2"
+								>
 									{TARGET_LABELS.cursor}
 								</ToggleGroupItem>
 							</ToggleGroup>
 							<p className="text-[11px] text-muted-foreground">
-								Claude gets a faithful copy (progressive disclosure). AGENTS.md and
-								GEMINI.md are always-on instruction; Cursor writes one rule per skill —
-								keep few skills enabled in always-on targets.
+								{t("skills.targetsHint")}
 							</p>
 						</div>
 
 						<div className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2">
 							<div className="pr-3">
-								<p className="text-[13px] font-medium">Disable model invocation</p>
+								<p className="text-[13px] font-medium">
+									{t("skills.disableInvocation.title")}
+								</p>
 								<p className="text-[11px] text-muted-foreground">
-									Hide from the model's auto-catalog (excluded from AGENTS.md). Still
-									available as a slash command.
+									{t("skills.disableInvocation.body")}
 								</p>
 							</div>
 							<Switch
@@ -268,10 +281,10 @@ export function SkillsDialog({
 
 						<DialogFooter>
 							<Button variant="ghost" onClick={() => setForm(null)} disabled={busy}>
-								Cancel
+								{t("skills.cancel")}
 							</Button>
 							<Button onClick={() => void handleSave()} disabled={busy}>
-								Save skill
+								{t("skills.save")}
 							</Button>
 						</DialogFooter>
 					</div>
@@ -280,11 +293,11 @@ export function SkillsDialog({
 						<div className="flex items-center justify-between">
 							<p className="text-[12px] text-muted-foreground">
 								{loading
-									? "Loading…"
-									: `${skills.length} skill${skills.length === 1 ? "" : "s"}`}
+									? t("skills.loading")
+									: t("skills.count", { count: skills.length })}
 							</p>
 							<Button size="sm" onClick={() => setForm(emptyForm())}>
-								<Plus className="size-4" /> New skill
+								<Plus className="size-4" /> {t("skills.newSkill")}
 							</Button>
 						</div>
 
@@ -292,7 +305,7 @@ export function SkillsDialog({
 							<div className="flex flex-col gap-2 pr-3">
 								{skills.length === 0 && !loading ? (
 									<p className="py-8 text-center text-sm text-muted-foreground">
-										No skills yet. Create one — it will be compiled for the agents you pick.
+										{t("skills.emptyList")}
 									</p>
 								) : null}
 								{skills.map((skill) => (
@@ -307,7 +320,7 @@ export function SkillsDialog({
 												</span>
 												{skill.disableModelInvocation ? (
 													<Badge variant="outline" className="text-[10px]">
-														slash-only
+														{t("skills.slashOnlyBadge")}
 													</Badge>
 												) : null}
 											</div>
@@ -326,7 +339,7 @@ export function SkillsDialog({
 											<Button
 												size="icon"
 												variant="ghost"
-												aria-label={`Edit ${skill.name}`}
+												aria-label={t("skills.editAria", { name: skill.name })}
 												disabled={busy}
 												onClick={() =>
 													setForm({
@@ -347,7 +360,7 @@ export function SkillsDialog({
 											<Button
 												size="icon"
 												variant="ghost"
-												aria-label={`Delete ${skill.name}`}
+												aria-label={t("skills.deleteAria", { name: skill.name })}
 												disabled={busy}
 												onClick={() => void handleDelete(skill.name)}
 											>
@@ -360,7 +373,7 @@ export function SkillsDialog({
 						</ScrollArea>
 						{targetRoot ? (
 							<p className="text-[11px] text-muted-foreground">
-								Compiles into the active worktree so the running agent sees changes.
+								{t("skills.compileNote")}
 							</p>
 						) : null}
 					</div>

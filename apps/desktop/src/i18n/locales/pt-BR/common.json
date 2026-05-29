@@ -616,5 +616,46 @@
   },
   "updater": {
     "update": "Atualizar"
+  },
+  "skills": {
+    "title": "Skills",
+    "description": "Escreva uma vez em uma fonte neutra; o DCC compila para cada agente. Fonte:",
+    "selectProject": "Selecione um projeto para gerenciar as skills.",
+    "fields": {
+      "name": "Nome",
+      "namePlaceholder": "review-pr",
+      "description": "Descrição",
+      "descriptionPlaceholder": "Quando usar esta skill",
+      "body": "Conteúdo da skill",
+      "bodyPlaceholder": "Instruções, passos, exemplos…",
+      "targetAgents": "Agentes alvo"
+    },
+    "targetsHint": "O Claude recebe uma cópia fiel (progressive disclosure). AGENTS.md e GEMINI.md são instruções sempre ativas; o Cursor escreve uma regra por skill e mantenha poucas skills ativas em alvos sempre-ativos.",
+    "disableInvocation": {
+      "title": "Desativar invocação pelo modelo",
+      "body": "Oculta do catálogo automático do modelo (excluída do AGENTS.md). Continua disponível como slash command."
+    },
+    "cancel": "Cancelar",
+    "save": "Salvar skill",
+    "loading": "Carregando…",
+    "count_one": "{{count}} skill",
+    "count_other": "{{count}} skills",
+    "newSkill": "Nova skill",
+    "emptyList": "Ainda não há skills. Crie uma, e ela será compilada para os agentes que você escolher.",
+    "slashOnlyBadge": "só slash",
+    "editAria": "Editar {{name}}",
+    "deleteAria": "Excluir {{name}}",
+    "compileNote": "Compila para o worktree ativo para o agente em execução ver as mudanças.",
+    "toast": {
+      "loadError": "Falha ao carregar skills",
+      "compileError": "Falha ao compilar skills",
+      "nameInvalid": "O nome deve ter letras minúsculas, dígitos e hifens (ex.: review-pr).",
+      "descriptionRequired": "A descrição é obrigatória — é o que o modelo vê no catálogo.",
+      "pickTarget": "Escolha pelo menos um agente alvo.",
+      "saved": "Skill \"{{name}}\" salva",
+      "saveError": "Falha ao salvar skill",
+      "deleted": "Skill \"{{name}}\" excluída",
+      "deleteError": "Falha ao excluir skill"
+    }
   }
 }

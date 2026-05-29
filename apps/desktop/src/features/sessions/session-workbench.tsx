@@ -93,72 +93,94 @@ export function SessionWorkbench({
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
 }: SessionWorkbenchProps) {
-	const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
+	const [terminalOpen, setTerminalOpen] = useState(false);
+	const [terminalExpanded, setTerminalExpanded] = useState(false);
 	const sessionState = sessionSnapshot?.state ?? "idle";
 	const sessionId = sessionSnapshot?.sessionId ?? null;
 	const terminalProjectKey = projectId ?? workspaceId;
 
 	const handleToggleTerminal = useCallback(() => {
-		setTerminalDrawerOpen((current) => {
+		setTerminalOpen((current) => {
 			const next = !current;
 			if (next) {
 				ensureTerminalTab(terminalProjectKey);
+			} else {
+				// Reopening should always come back as a split, not full-screen.
+				setTerminalExpanded(false);
 			}
 			return next;
 		});
 	}, [terminalProjectKey]);
 
-	return (
-		<div className="@container/header-actions flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
-			<WorkspacePanel
-				workspaceId={workspaceId}
-				workspaceName={workspaceName}
-				workspaceBranch={workspaceBranch}
-				workspacePath={workspacePath}
-				sessionQueryScope={sessionQueryScope}
-				selectedProviderLabel={selectedProviderLabel}
-				selectedModelLabel={selectedModelLabel}
-				selectedProviderId={selectedProviderId}
-				selectedModelId={selectedModelId}
-				providerChoices={providerChoices}
-				sessions={sessions}
-				selectedSessionId={selectedSessionId}
-				isLoadingSessions={isLoadingSessions}
-				sessionSnapshot={sessionSnapshot}
-				sessionEvents={sessionEvents}
-				pendingPrompt={pendingPrompt}
-				onSelectProvider={onSelectProvider}
-				onSelectModel={onSelectModel}
-				onStartSession={onStartSession}
-				onSelectSession={onSelectSession}
-				onCloseSession={onCloseSession}
-				onRestoreSession={onRestoreSession}
-				onOpenSessionSearch={onOpenSessionSearch}
-				onSubmitPrompt={onSubmitPrompt}
-				onResumeSession={onResumeSession}
-				onAbortSession={onAbortSession}
-				sessionActionSessionId={sessionActionSessionId}
-				updateInfo={updateInfo}
-				isInstallingUpdate={isInstallingUpdate}
-				onInstallUpdate={onInstallUpdate}
-				surfaceSelection={surfaceSelection}
-				onCloseSurface={onCloseSurface}
-				onOpenPlanSidebar={onOpenPlanSidebar}
-				onImplementPlanInNewThread={onImplementPlanInNewThread}
-				onOpenTerminal={handleToggleTerminal}
-			/>
+	const handleTerminalOpenChange = useCallback((next: boolean) => {
+		setTerminalOpen(next);
+		if (!next) {
+			setTerminalExpanded(false);
+		}
+	}, []);
 
-			<WorkspaceTerminalDrawer
-				open={terminalDrawerOpen}
-				onOpenChange={setTerminalDrawerOpen}
-				projectKey={terminalProjectKey}
-				rootPath={terminalRootPath ?? workspacePath}
-				workspaceName={workspaceName}
-				workspaceBranch={workspaceBranch}
-				providerLabel={selectedProviderLabel}
-				sessionState={sessionState}
-				sessionId={sessionId}
-			/>
+	// Full-bleed terminal takeover — hide the chat column entirely.
+	const chatHidden = terminalOpen && terminalExpanded;
+
+	return (
+		<div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden bg-background">
+			{!chatHidden ? (
+				<div className="@container/header-actions flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">
+					<WorkspacePanel
+						workspaceId={workspaceId}
+						workspaceName={workspaceName}
+						workspaceBranch={workspaceBranch}
+						workspacePath={workspacePath}
+						sessionQueryScope={sessionQueryScope}
+						selectedProviderLabel={selectedProviderLabel}
+						selectedModelLabel={selectedModelLabel}
+						selectedProviderId={selectedProviderId}
+						selectedModelId={selectedModelId}
+						providerChoices={providerChoices}
+						sessions={sessions}
+						selectedSessionId={selectedSessionId}
+						isLoadingSessions={isLoadingSessions}
+						sessionSnapshot={sessionSnapshot}
+						sessionEvents={sessionEvents}
+						pendingPrompt={pendingPrompt}
+						onSelectProvider={onSelectProvider}
+						onSelectModel={onSelectModel}
+						onStartSession={onStartSession}
+						onSelectSession={onSelectSession}
+						onCloseSession={onCloseSession}
+						onRestoreSession={onRestoreSession}
+						onOpenSessionSearch={onOpenSessionSearch}
+						onSubmitPrompt={onSubmitPrompt}
+						onResumeSession={onResumeSession}
+						onAbortSession={onAbortSession}
+						sessionActionSessionId={sessionActionSessionId}
+						updateInfo={updateInfo}
+						isInstallingUpdate={isInstallingUpdate}
+						onInstallUpdate={onInstallUpdate}
+						surfaceSelection={surfaceSelection}
+						onCloseSurface={onCloseSurface}
+						onOpenPlanSidebar={onOpenPlanSidebar}
+						onImplementPlanInNewThread={onImplementPlanInNewThread}
+						onOpenTerminal={handleToggleTerminal}
+					/>
+				</div>
+			) : null}
+
+			{terminalOpen ? (
+				<WorkspaceTerminalDrawer
+					open={terminalOpen}
+					onOpenChange={handleTerminalOpenChange}
+					expanded={terminalExpanded}
+					onExpandedChange={setTerminalExpanded}
+					projectKey={terminalProjectKey}
+					rootPath={terminalRootPath ?? workspacePath}
+					workspaceName={workspaceName}
+					workspaceBranch={workspaceBranch}
+					providerLabel={selectedProviderLabel}
+					sessionState={sessionState}
+					sessionId={sessionId}
+				/>
+			) : null}
 		</div>
 	);
 }

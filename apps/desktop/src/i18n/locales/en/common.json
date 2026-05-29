@@ -616,5 +616,46 @@
   },
   "updater": {
     "update": "Update"
+  },
+  "skills": {
+    "title": "Skills",
+    "description": "Write once in a neutral source; DCC compiles to each agent. Source:",
+    "selectProject": "Select a project to manage its skills.",
+    "fields": {
+      "name": "Name",
+      "namePlaceholder": "review-pr",
+      "description": "Description",
+      "descriptionPlaceholder": "When to use this skill",
+      "body": "Skill content",
+      "bodyPlaceholder": "Instructions, steps, examples…",
+      "targetAgents": "Target agents"
+    },
+    "targetsHint": "Claude gets a faithful copy (progressive disclosure). AGENTS.md and GEMINI.md are always-on instruction; Cursor writes one rule per skill — keep few skills enabled in always-on targets.",
+    "disableInvocation": {
+      "title": "Disable model invocation",
+      "body": "Hide from the model's auto-catalog (excluded from AGENTS.md). Still available as a slash command."
+    },
+    "cancel": "Cancel",
+    "save": "Save skill",
+    "loading": "Loading…",
+    "count_one": "{{count}} skill",
+    "count_other": "{{count}} skills",
+    "newSkill": "New skill",
+    "emptyList": "No skills yet. Create one — it will be compiled for the agents you pick.",
+    "slashOnlyBadge": "slash-only",
+    "editAria": "Edit {{name}}",
+    "deleteAria": "Delete {{name}}",
+    "compileNote": "Compiles into the active worktree so the running agent sees changes.",
+    "toast": {
+      "loadError": "Failed to load skills",
+      "compileError": "Failed to compile skills",
+      "nameInvalid": "Name must be lower-case letters, digits and hyphens (e.g. review-pr).",
+      "descriptionRequired": "A description is required — it is what the model sees in the catalog.",
+      "pickTarget": "Pick at least one target agent.",
+      "saved": "Skill \"{{name}}\" saved",
+      "saveError": "Failed to save skill",
+      "deleted": "Skill \"{{name}}\" deleted",
+      "deleteError": "Failed to delete skill"
+    }
   }
 }
