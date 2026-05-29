@@ -7,6 +7,10 @@ export function getComposerDraftKey(workspaceId: string) {
 	return `dcc.workspace.composer.draft.${workspaceId}`;
 }
 
+export function getComposerEffortKey(workspaceId: string) {
+	return `dcc.workspace.composer.effort.${workspaceId}`;
+}
+
 function getWorkspacePlanModeScopeKey(workspaceId: string | null) {
 	return workspaceId ? `workspace:${workspaceId}` : null;
 }

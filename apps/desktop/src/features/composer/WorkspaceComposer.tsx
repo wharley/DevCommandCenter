@@ -38,7 +38,6 @@ import { UsageStatsIndicator } from "./UsageStatsIndicator";
 import { ComposerButton } from "./ComposerButton";
 import {
 	clampEffort,
-	DEFAULT_EFFORT_LEVEL,
 	DEFAULT_EFFORT_LEVELS,
 	getEffortDisplay,
 	resolveEffectiveEffort,
@@ -48,6 +47,7 @@ import {
 	buildSpecDraftPrompt,
 	composerToolbarTriggerClassName,
 	getComposerDraftKey,
+	getComposerEffortKey,
 	isComposerSubmitEnabled,
 	isSendDisabled,
 	isSteerDisabled,
@@ -77,7 +77,11 @@ import { SlashCommandPlugin } from "./editor/plugins/slash-command-plugin";
 import { SubmitPlugin } from "./editor/plugins/SubmitPlugin";
 import { workspaceChildDirsQueryOptions } from "./workspace-child-dirs-query";
 import type { ComposerSubmittedTurn } from "./composer-turn";
-import { clearDraft } from "./draftStorage";
+import {
+	clearDraft,
+	loadEffortSelection,
+	saveEffortSelection,
+} from "./draftStorage";
 import { readComposerPrompt, setEditorText } from "./editorOps";
 
 type WorkspaceComposerProps = {
@@ -128,13 +132,38 @@ export function WorkspaceComposer({
 	const [hasContent, setHasContent] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [isFastMode, setIsFastMode] = useState(true);
-	const [effort, setEffort] = useState(DEFAULT_EFFORT_LEVEL);
-	const [ultrathinkSelected, setUltrathinkSelected] = useState(false);
+	// Effort + ultrathink are persisted per workspace so the selection survives
+	// composer remounts (e.g. opening a git file then pressing Esc) instead of
+	// resetting to the default — mirrors the draft persistence below.
+	const [effortSelection, setEffortSelection] = useState(() =>
+		loadEffortSelection(getComposerEffortKey(draftKey)),
+	);
+	const effort = effortSelection.effort;
+	const ultrathinkSelected = effortSelection.ultrathink;
 	const [planModeByScope, setPlanModeByScope] = useState<Record<string, boolean>>({});
 	const [contextDirectories, setContextDirectories] = useState(() =>
 		buildComposerContextDirectories({ workspacePath, workspaceBranch }),
 	);
 	const composerDraftKey = useMemo(() => getComposerDraftKey(draftKey), [draftKey]);
+	const composerEffortKey = useMemo(
+		() => getComposerEffortKey(draftKey),
+		[draftKey],
+	);
+
+	// Re-load the persisted selection when switching workspaces (the composer may
+	// stay mounted while draftKey changes). Restoring here does not write back, so
+	// it never clobbers another workspace's saved selection.
+	useEffect(() => {
+		setEffortSelection(loadEffortSelection(composerEffortKey));
+	}, [composerEffortKey]);
+
+	const updateEffortSelection = useCallback(
+		(next: { effort: string; ultrathink: boolean }) => {
+			setEffortSelection(next);
+			saveEffortSelection(composerEffortKey, next);
+		},
+		[composerEffortKey],
+	);
 	const composerRootRef = useRef<HTMLDivElement | null>(null);
 	const editorRef = useRef<LexicalEditor | null>(null);
 	const selectedProvider = useMemo(
@@ -174,8 +203,11 @@ export function WorkspaceComposer({
 
 	// Clamp effort when the model changes and no longer supports the current level.
 	useEffect(() => {
-		setEffort((current) => clampEffort(current, availableEffortLevels));
-	}, [availableEffortLevels]);
+		const clamped = clampEffort(effort, availableEffortLevels);
+		if (clamped !== effort) {
+			updateEffortSelection({ effort: clamped, ultrathink: ultrathinkSelected });
+		}
+	}, [availableEffortLevels, effort, ultrathinkSelected, updateEffortSelection]);
 
 	const submitFromComposer = useCallback(
 		async (rawPrompt: string) => {
@@ -497,8 +529,7 @@ export function WorkspaceComposer({
 											disabled={toolbarDisabled}
 											className="flex items-center justify-between gap-3"
 											onClick={() => {
-												setUltrathinkSelected(false);
-												setEffort(id);
+												updateEffortSelection({ effort: id, ultrathink: false });
 											}}
 										>
 											<div className="flex items-center gap-2.5">
@@ -516,7 +547,7 @@ export function WorkspaceComposer({
 									disabled={toolbarDisabled}
 									className="flex items-center justify-between gap-3"
 									onClick={() => {
-										setUltrathinkSelected(true);
+										updateEffortSelection({ effort, ultrathink: true });
 									}}
 								>
 									<div className="flex items-center gap-2.5">
