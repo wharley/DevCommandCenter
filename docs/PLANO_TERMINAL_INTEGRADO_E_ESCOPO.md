@@ -191,7 +191,7 @@ Avaliado e **descartado** por diluir o foco vertical do DCC (vira "mais um caniv
 - [x] Botão Terminal na toolbar do composer abre o drawer (destravou o `terminalDrawerOpen`, que antes nunca abria)
 - [x] `App.tsx`/`session-workbench.tsx` passam `projectId` + `rootPath` (cwd fora do worktree)
 - [x] Limite suave de abas (`MAX_TERMINAL_TABS = 8`); `removeTerminal` mata o PTY da aba fechada
-- [ ] (Pendente) Matar PTYs órfãos de outros projetos ao sair do app / trocar de projeto
+- [x] Matar todos os PTYs ao sair do app (`RunEvent::ExitRequested` → `kill_all_terminals` no `main.rs`). **Trocar de projeto NÃO mata** os PTYs (mantém vivos em background, conforme recomendado — preserva processos ao voltar)
 - [ ] (Skills) Design provider-neutro: fonte única `.devcommandcenter/skills/` + manifesto (agentes-alvo, escopo)
 - [ ] (Skills Fase 0) Teste de fumaça: `settingSources` mantém `"project"`
 - [ ] (Skills Fase 1) Modal estilo Zed + **seletor de agentes-alvo**; primeiro alvo = `.claude/skills/` (cópia fiel)

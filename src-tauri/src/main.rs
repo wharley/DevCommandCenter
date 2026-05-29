@@ -6272,6 +6272,19 @@ fn finalize_managed_terminal_removal(
     }
 }
 
+/// Drains and terminates every managed PTY. Called on app exit so terminal child
+/// processes never outlive the app (belt-and-suspenders over OS process-tree teardown).
+/// Does not emit `terminal-exit`: the webview is already going away.
+fn kill_all_terminals(state: &AppState, app: &AppHandle) {
+    let drained: Vec<(String, ManagedTerminal)> = match state.terminals.lock() {
+        Ok(mut terminals) => terminals.drain().collect(),
+        Err(_) => return,
+    };
+    for (pty_id, terminal) in drained {
+        finalize_managed_terminal_removal(state, app, pty_id, terminal, false);
+    }
+}
+
 #[tauri::command]
 fn terminal_send_signal(
     state: State<'_, AppState>,
@@ -6722,8 +6735,15 @@ pub fn run() {
             start_pair_audit_watcher(app.handle().clone(), audit_db_path);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    kill_all_terminals(&state, app_handle);
+                }
+            }
+        });
 }
 
 fn main() {
