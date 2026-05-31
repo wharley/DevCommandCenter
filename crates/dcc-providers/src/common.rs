@@ -67,6 +67,7 @@ pub(crate) struct ProviderStreamState {
     claude_blocks: HashMap<u64, ClaudeBlockState>,
     claude_streamed_text_emitted: bool,
     pub(crate) gemini_streamed_text_emitted: bool,
+    codex_last_agent_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -332,7 +333,7 @@ pub(crate) fn parse_provider_stream_line(
     if let Some(event) = parse_claude_stream_value(&value, state) {
         return ParsedProviderLine::Event(event);
     }
-    if let Some(event) = parse_codex_stream_value(&value) {
+    if let Some(event) = parse_codex_stream_value(&value, state) {
         return ParsedProviderLine::Event(event);
     }
 
@@ -611,7 +612,32 @@ fn parse_claude_terminal_value(
     }
 }
 
-fn parse_codex_stream_value(value: &Value) -> Option<ProviderEvent> {
+fn codex_agent_message_delta_content(
+    item_id: Option<&str>,
+    delta: &str,
+    last_agent_message_id: &mut Option<String>,
+) -> String {
+    let should_prefix_separator = item_id.is_some_and(|current_id| {
+        last_agent_message_id
+            .as_deref()
+            .is_some_and(|previous_id| previous_id != current_id)
+    }) && !delta.is_empty();
+
+    if let Some(current_id) = item_id.filter(|value| !value.is_empty()) {
+        *last_agent_message_id = Some(current_id.to_string());
+    }
+
+    if should_prefix_separator {
+        format!("\n\n{delta}")
+    } else {
+        delta.to_string()
+    }
+}
+
+fn parse_codex_stream_value(
+    value: &Value,
+    state: &mut ProviderStreamState,
+) -> Option<ProviderEvent> {
     let kind = value.get("type").and_then(Value::as_str)?;
     let at = now_iso();
 
@@ -697,11 +723,11 @@ fn parse_codex_stream_value(value: &Value) -> Option<ProviderEvent> {
             }
         }
         "item/agentMessage/delta" => Some(ProviderEvent::TextDelta {
-            content: value
-                .get("delta")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
+            content: codex_agent_message_delta_content(
+                value.get("itemId").and_then(Value::as_str),
+                value.get("delta").and_then(Value::as_str).unwrap_or(""),
+                &mut state.codex_last_agent_message_id,
+            ),
         }),
         "item/completed" => {
             let item = value.get("item")?.as_object()?;
@@ -751,15 +777,21 @@ fn parse_codex_stream_value(value: &Value) -> Option<ProviderEvent> {
                 _ => None,
             }
         }
-        "turn/completed" | "result" => Some(ProviderEvent::Completed { at }),
-        "turn/aborted" => Some(ProviderEvent::Failed {
-            message: value
-                .get("reason")
-                .and_then(Value::as_str)
-                .unwrap_or("turn aborted")
-                .to_string(),
-            at,
-        }),
+        "turn/completed" | "result" => {
+            state.codex_last_agent_message_id = None;
+            Some(ProviderEvent::Completed { at })
+        }
+        "turn/aborted" => {
+            state.codex_last_agent_message_id = None;
+            Some(ProviderEvent::Failed {
+                message: value
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or("turn aborted")
+                    .to_string(),
+                at,
+            })
+        }
         _ => None,
     }
 }
@@ -1617,6 +1649,17 @@ mod tests {
                 assert_eq!(content, "Listing");
             }
             other => panic!("expected text delta, got {other:?}"),
+        }
+
+        let separated_delta = parse_provider_stream_line(
+            r#"{"type":"item/agentMessage/delta","threadId":"thread_1","turnId":"turn_1","itemId":"msg_2","delta":"Finished listing."}"#,
+            &mut state,
+        );
+        match separated_delta {
+            ParsedProviderLine::Event(ProviderEvent::TextDelta { content }) => {
+                assert_eq!(content, "\n\nFinished listing.");
+            }
+            other => panic!("expected separated text delta, got {other:?}"),
         }
 
         let completed = parse_provider_stream_line(

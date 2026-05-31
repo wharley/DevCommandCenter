@@ -94,17 +94,41 @@ struct Incoming {
 
 // ── Notification → ProviderEvent ────────────────────────────────────────────
 
-fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> {
+fn codex_agent_message_delta_content(
+    params: &Value,
+    last_agent_message_id: &mut Option<String>,
+) -> String {
+    let item_id = params.get("itemId").and_then(Value::as_str);
+    let delta = params.get("delta").and_then(Value::as_str).unwrap_or("");
+    let should_prefix_separator = item_id.is_some_and(|current_id| {
+        last_agent_message_id
+            .as_deref()
+            .is_some_and(|previous_id| previous_id != current_id)
+    }) && !delta.is_empty();
+
+    if let Some(current_id) = item_id.filter(|value| !value.is_empty()) {
+        *last_agent_message_id = Some(current_id.to_string());
+    }
+
+    if should_prefix_separator {
+        format!("\n\n{delta}")
+    } else {
+        delta.to_string()
+    }
+}
+
+fn notification_to_event(
+    method: &str,
+    params: &Value,
+    last_agent_message_id: &mut Option<String>,
+) -> Option<ProviderEvent> {
     let at = Utc::now().to_rfc3339();
     match method {
         "item/agentMessage/delta" => Some(ProviderEvent::TextDelta {
-            content: params
-                .get("delta")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
+            content: codex_agent_message_delta_content(params, last_agent_message_id),
         }),
         "turn/completed" => {
+            *last_agent_message_id = None;
             let status = params
                 .get("turn")
                 .and_then(|t| t.get("status"))
@@ -125,10 +149,13 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
                 Some(ProviderEvent::Completed { at })
             }
         }
-        "error" => Some(ProviderEvent::Failed {
-            message: codex_error_message(params),
-            at,
-        }),
+        "error" => {
+            *last_agent_message_id = None;
+            Some(ProviderEvent::Failed {
+                message: codex_error_message(params),
+                at,
+            })
+        }
         "item/started" => {
             let item = params.get("item")?;
             let kind = item.get("type").and_then(Value::as_str)?;
@@ -446,6 +473,7 @@ impl CodexAppServerAdapter {
             });
 
             let mut reader = BufReader::new(stdout).lines();
+            let mut last_agent_message_id = None;
             while let Ok(Some(line)) = reader.next_line().await {
                 let trimmed = line.trim().to_string();
                 if trimmed.is_empty() {
@@ -483,7 +511,9 @@ impl CodexAppServerAdapter {
                     if method == "error" && should_suppress_codex_error(params, &runtime).await {
                         continue;
                     }
-                    if let Some(event) = notification_to_event(method, params) {
+                    if let Some(event) =
+                        notification_to_event(method, params, &mut last_agent_message_id)
+                    {
                         let _ = runtime.events_tx.send(event);
                     }
                 }
@@ -744,6 +774,41 @@ impl Provider for CodexAppServerAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn separates_codex_agent_message_items() {
+        let mut last_agent_message_id = None;
+
+        let first = notification_to_event(
+            "item/agentMessage/delta",
+            &json!({
+                "itemId": "msg_1",
+                "delta": "Primeira mensagem.",
+            }),
+            &mut last_agent_message_id,
+        );
+        match first {
+            Some(ProviderEvent::TextDelta { content }) => {
+                assert_eq!(content, "Primeira mensagem.");
+            }
+            other => panic!("expected first text delta, got {other:?}"),
+        }
+
+        let second = notification_to_event(
+            "item/agentMessage/delta",
+            &json!({
+                "itemId": "msg_2",
+                "delta": "Segunda mensagem.",
+            }),
+            &mut last_agent_message_id,
+        );
+        match second {
+            Some(ProviderEvent::TextDelta { content }) => {
+                assert_eq!(content, "\n\nSegunda mensagem.");
+            }
+            other => panic!("expected separated text delta, got {other:?}"),
+        }
+    }
 
     #[test]
     fn recognizes_codex_reconnect_notices() {
