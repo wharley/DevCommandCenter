@@ -657,5 +657,14 @@
       "deleted": "Skill \"{{name}}\" deleted",
       "deleteError": "Failed to delete skill"
     }
+  },
+  "diffAnnotate": {
+    "sendToAgent": "Send to agent ↗",
+    "dialogLabel": "Send selection to agent",
+    "instructionPlaceholder": "What should the agent do with this snippet?",
+    "deletedSide": "deleted",
+    "editInComposer": "Edit in composer",
+    "newSession": "New session",
+    "send": "Send ↗"
   }
 }

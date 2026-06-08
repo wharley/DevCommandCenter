@@ -1,16 +1,42 @@
 import { X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { TrafficLightSpacer } from "@/components/chrome/traffic-light-spacer";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-utils";
 import { ShortcutDisplay } from "@/features/shortcuts/shortcut-display";
 import { useWorkspaceGitFilePreviewContent } from "@/features/inspector/use-workspace-git-file-preview-content";
 import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
+import type { DiffAnnotationPayload } from "@/lib/monaco-runtime";
+
+/** A diff annotation bound to the file it was selected in (anchor stripped). */
+export type DiffAnnotationRequest = Omit<DiffAnnotationPayload, "anchor"> & {
+	path: string;
+};
+
+export type DiffAnnotationSubmit = {
+	request: DiffAnnotationRequest;
+	instruction: string;
+	newSession: boolean;
+};
 
 type WorkspaceEditorSurfaceProps = {
 	workspaceRoot: string | null;
 	selection: WorkspaceGitPreviewSelection;
 	onClose: () => void;
+	/** Send the annotated selection + instruction to an agent. */
+	onSubmitAnnotation?: (input: DiffAnnotationSubmit) => void;
+	/** Load the annotation into the composer draft for manual refinement. */
+	onEditInComposer?: (input: {
+		request: DiffAnnotationRequest;
+		instruction: string;
+	}) => void;
+};
+
+type PendingAnnotation = {
+	request: DiffAnnotationRequest;
+	anchor: { top: number; left: number };
 };
 
 type MonacoRuntimeModule = typeof import("@/lib/monaco-runtime");
@@ -23,15 +49,24 @@ function WorkspaceEditorDiff({
 	originalText,
 	modifiedText,
 	inline,
+	onAnnotate,
+	annotateLabel,
 }: {
 	path: string;
 	originalText: string;
 	modifiedText: string;
 	inline: boolean;
+	onAnnotate?: (payload: DiffAnnotationPayload) => void;
+	annotateLabel: string;
 }) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const controllerRef = useRef<MonacoDiffController | null>(null);
 	const requestIdRef = useRef(0);
+	// Keep the latest callback/label in refs so they never recreate the editor.
+	const onAnnotateRef = useRef(onAnnotate);
+	onAnnotateRef.current = onAnnotate;
+	const annotateLabelRef = useRef(annotateLabel);
+	annotateLabelRef.current = annotateLabel;
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
@@ -66,6 +101,8 @@ function WorkspaceEditorDiff({
 					originalText,
 					modifiedText,
 					inline,
+					onAnnotate: (payload) => onAnnotateRef.current?.(payload),
+					annotateLabel: annotateLabelRef.current,
 				});
 
 				if (disposed || requestId !== requestIdRef.current) {
@@ -112,11 +149,144 @@ function WorkspaceEditorDiff({
 	);
 }
 
+function DiffAnnotationPopover({
+	pending,
+	canEditInComposer,
+	onSubmit,
+	onEditInComposer,
+	onCancel,
+}: {
+	pending: PendingAnnotation;
+	canEditInComposer: boolean;
+	onSubmit: (instruction: string, newSession: boolean) => void;
+	onEditInComposer: (instruction: string) => void;
+	onCancel: () => void;
+}) {
+	const { t } = useTranslation("common");
+	const [instruction, setInstruction] = useState("");
+	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+	useEffect(() => {
+		textareaRef.current?.focus();
+	}, []);
+
+	const { request, anchor } = pending;
+	const lineLabel =
+		request.startLine === request.endLine
+			? `L${request.startLine}`
+			: `L${request.startLine}–${request.endLine}`;
+	const sideLabel =
+		request.side === "original" ? t("diffAnnotate.deletedSide") : null;
+	// Anchor above the trigger, unless it sits too close to the top edge.
+	const placeBelow = anchor.top < 240;
+	const trimmed = instruction.trim();
+
+	return (
+		<>
+			<div
+				className="fixed inset-0 z-40"
+				onMouseDown={onCancel}
+				aria-hidden
+			/>
+			<div
+				role="dialog"
+				aria-label={t("diffAnnotate.dialogLabel")}
+				className="fixed z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-lg"
+				style={{
+					top: anchor.top,
+					left: Math.max(12, Math.min(anchor.left, window.innerWidth - 352)),
+					transform: placeBelow
+						? "translateY(24px)"
+						: "translateY(calc(-100% - 8px))",
+				}}
+				onMouseDown={(event) => event.stopPropagation()}
+			>
+				<div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+					<span className="truncate font-mono" title={request.path}>
+						{request.path}
+					</span>
+					<span className="shrink-0 rounded bg-muted px-1 py-0.5 font-medium tabular-nums">
+						{lineLabel}
+					</span>
+					{sideLabel ? (
+						<span className="shrink-0 rounded bg-destructive/15 px-1 py-0.5 font-medium text-destructive">
+							{sideLabel}
+						</span>
+					) : null}
+				</div>
+				<Textarea
+					ref={textareaRef}
+					value={instruction}
+					onChange={(event) => setInstruction(event.target.value)}
+					placeholder={t("diffAnnotate.instructionPlaceholder")}
+					className="min-h-[72px] text-[13px]"
+					onKeyDown={(event) => {
+						if (event.key === "Escape") {
+							event.preventDefault();
+							event.stopPropagation();
+							onCancel();
+							return;
+						}
+						if (
+							(event.metaKey || event.ctrlKey) &&
+							event.key === "Enter" &&
+							trimmed.length > 0
+						) {
+							event.preventDefault();
+							onSubmit(trimmed, false);
+						}
+					}}
+				/>
+				<div className="mt-2.5 flex items-center justify-between gap-2">
+					{canEditInComposer ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="xs"
+							className="text-muted-foreground"
+							onClick={() => onEditInComposer(trimmed)}
+						>
+							{t("diffAnnotate.editInComposer")}
+						</Button>
+					) : (
+						<span />
+					)}
+					<div className="flex items-center gap-1.5">
+						<Button
+							type="button"
+							variant="outline"
+							size="xs"
+							disabled={trimmed.length === 0}
+							onClick={() => onSubmit(trimmed, true)}
+						>
+							{t("diffAnnotate.newSession")}
+						</Button>
+						<Button
+							type="button"
+							variant="default"
+							size="xs"
+							disabled={trimmed.length === 0}
+							onClick={() => onSubmit(trimmed, false)}
+						>
+							{t("diffAnnotate.send")}
+						</Button>
+					</div>
+				</div>
+			</div>
+		</>
+	);
+}
+
 export function WorkspaceEditorSurface({
 	workspaceRoot,
 	selection,
 	onClose,
+	onSubmitAnnotation,
+	onEditInComposer,
 }: WorkspaceEditorSurfaceProps) {
+	const { t } = useTranslation("common");
+	const [pending, setPending] = useState<PendingAnnotation | null>(null);
+	const annotationsEnabled = Boolean(onSubmitAnnotation || onEditInComposer);
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.defaultPrevented || event.key !== "Escape") {
@@ -133,6 +303,42 @@ export function WorkspaceEditorSurface({
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [onClose]);
+
+	const handleAnnotate = useCallback(
+		(payload: DiffAnnotationPayload) => {
+			const { anchor, ...rest } = payload;
+			setPending({ request: { ...rest, path: selection.path }, anchor });
+		},
+		[selection.path],
+	);
+
+	const handleSubmitAnnotation = useCallback(
+		(instruction: string, newSession: boolean) => {
+			if (pending) {
+				onSubmitAnnotation?.({
+					request: pending.request,
+					instruction,
+					newSession,
+				});
+			}
+			setPending(null);
+			// Reveal the thread (the surface replaces it full-screen) so the
+			// reviewer sees the agent pick up the request.
+			onClose();
+		},
+		[onClose, onSubmitAnnotation, pending],
+	);
+
+	const handleEditInComposer = useCallback(
+		(instruction: string) => {
+			if (pending) {
+				onEditInComposer?.({ request: pending.request, instruction });
+			}
+			setPending(null);
+			onClose();
+		},
+		[onClose, onEditInComposer, pending],
+	);
 
 	const query = useWorkspaceGitFilePreviewContent(
 		workspaceRoot
@@ -204,9 +410,20 @@ export function WorkspaceEditorSurface({
 						originalText={snapshot.originalText}
 						modifiedText={snapshot.modifiedText}
 						inline={snapshot.inline}
+						onAnnotate={annotationsEnabled ? handleAnnotate : undefined}
+						annotateLabel={t("diffAnnotate.sendToAgent")}
 					/>
 				)}
 			</div>
+			{pending ? (
+				<DiffAnnotationPopover
+					pending={pending}
+					canEditInComposer={Boolean(onEditInComposer)}
+					onSubmit={handleSubmitAnnotation}
+					onEditInComposer={handleEditInComposer}
+					onCancel={() => setPending(null)}
+				/>
+			) : null}
 		</section>
 	);
 }

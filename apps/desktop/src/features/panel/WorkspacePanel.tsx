@@ -1,25 +1,72 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
-import { WorkspaceEditorSurface } from "@/features/editor/WorkspaceEditorSurface";
+import {
+	WorkspaceEditorSurface,
+	type DiffAnnotationRequest,
+	type DiffAnnotationSubmit,
+} from "@/features/editor/WorkspaceEditorSurface";
 import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
 import { WorkspaceComposer } from "@/features/composer";
 import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
-import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
+import {
+	composerTurnFromRaw,
+	type ComposerSubmittedTurn,
+} from "@/features/composer/composer-turn";
 import type { AppUpdateInfo } from "@/features/updater";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import { projectWorkspaceMessages } from "./thread-projection";
 import type { ProviderCatalog, CoreEvent } from "@dcc/contracts";
 import { derivePlanFollowUpState } from "./plan-follow-up";
 import { useWorkspaceMissionSpecs } from "@/features/inspector/use-workspace-mission-specs";
-import { buildMissionSpecFilename } from "@/features/composer/WorkspaceComposer.logic";
+import {
+	buildMissionSpecFilename,
+	getComposerEffortKey,
+} from "@/features/composer/WorkspaceComposer.logic";
+import { loadEffortSelection } from "@/features/composer/draftStorage";
+import {
+	DEFAULT_EFFORT_LEVELS,
+	resolveEffectiveEffort,
+} from "@/features/composer/effort";
 import {
 	computeMissionSpecHash,
 	parseMissionValidationPersistence,
 } from "@/features/spec/mission-spec-content";
 import type { WorkspaceSurfaceSelection } from "./workspace-surface";
+
+/** Composer draft injection request; the nonce lets a repeated annotation re-fire. */
+type ComposerPrefill = { text: string; nonce: number };
+
+/** Formats a diff selection as a markdown context block for the agent prompt. */
+function buildAnnotationContextBlock(request: DiffAnnotationRequest): string {
+	const lineLabel =
+		request.startLine === request.endLine
+			? `linha ${request.startLine}`
+			: `linhas ${request.startLine}–${request.endLine}`;
+	// Tell the agent when the selection is deleted/old code so it doesn't try to
+	// edit lines that no longer exist in the working tree.
+	const sideNote =
+		request.side === "original" ? ", código removido nesta mudança" : "";
+	return [
+		`Sobre \`${request.path}\` (${lineLabel}${sideNote}):`,
+		"",
+		"```",
+		request.snippet,
+		"```",
+	].join("\n");
+}
+
+/** Combines the reviewer instruction (if any) with the diff context block. */
+function buildAnnotationContent(
+	request: DiffAnnotationRequest,
+	instruction: string,
+): string {
+	const context = buildAnnotationContextBlock(request);
+	const trimmed = instruction.trim();
+	return trimmed.length > 0 ? `${trimmed}\n\n${context}` : context;
+}
 
 type WorkspacePanelProps = {
 	workspaceId: string;
@@ -45,7 +92,10 @@ type WorkspacePanelProps = {
 	onCloseSession: (sessionId: string) => void;
 	onRestoreSession: (sessionId: string) => void;
 	onOpenSessionSearch: () => void;
-	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
+	onSubmitPrompt: (
+		turn: ComposerSubmittedTurn,
+		options?: { forceNewSession?: boolean },
+	) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	sessionActionSessionId: string | null;
@@ -99,6 +149,54 @@ export function WorkspacePanel({
 	onImplementPlanInNewThread,
 	onOpenTerminal,
 }: WorkspacePanelProps) {
+	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
+		null,
+	);
+	const handleSubmitAnnotation = useCallback(
+		({ request, instruction, newSession }: DiffAnnotationSubmit) => {
+			const content = buildAnnotationContent(request, instruction);
+			// Honor the composer's persisted effort/ultrathink for this workspace so
+			// a direct send matches what the user would get from the composer.
+			const selectedProvider = providerChoices.find(
+				(provider) => provider.id === selectedProviderId,
+			);
+			const selectedModel =
+				selectedProvider?.models.find((model) => model.id === selectedModelId) ??
+				null;
+			const persisted = loadEffortSelection(getComposerEffortKey(workspaceId));
+			const effort = resolveEffectiveEffort({
+				selectedEffort: persisted.effort,
+				supportedEfforts: selectedModel?.effortLevels ?? DEFAULT_EFFORT_LEVELS,
+				ultrathinkSelected: persisted.ultrathink,
+				rawPrompt: content,
+			});
+			const turn = composerTurnFromRaw(content, { effort });
+			void onSubmitPrompt(turn, { forceNewSession: newSession });
+		},
+		[
+			onSubmitPrompt,
+			providerChoices,
+			selectedModelId,
+			selectedProviderId,
+			workspaceId,
+		],
+	);
+	const handleEditAnnotationInComposer = useCallback(
+		({
+			request,
+			instruction,
+		}: {
+			request: DiffAnnotationRequest;
+			instruction: string;
+		}) => {
+			setComposerPrefill((prev) => ({
+				text: buildAnnotationContent(request, instruction),
+				nonce: (prev?.nonce ?? 0) + 1,
+			}));
+		},
+		[],
+	);
+
 	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
 	const threadHistoryQuery = useQuery(
 		sessionThreadHistoryQueryOptions(effectiveSessionId, {
@@ -165,6 +263,8 @@ export function WorkspacePanel({
 				workspaceRoot={workspacePath}
 				selection={surfaceSelection.file}
 				onClose={onCloseSurface}
+				onSubmitAnnotation={handleSubmitAnnotation}
+				onEditInComposer={handleEditAnnotationInComposer}
 			/>
 		) : (
 			<WorkspaceMissionSpecSurface
@@ -236,6 +336,7 @@ export function WorkspacePanel({
 						selectedModelId={selectedModelId}
 						sessionSnapshot={sessionSnapshot}
 						pendingPrompt={pendingPrompt}
+						prefill={composerPrefill}
 					workspacePath={workspacePath}
 					workspaceBranch={workspaceBranch}
 					showPlanFollowUpPrompt={showPlanFollowUpPrompt}

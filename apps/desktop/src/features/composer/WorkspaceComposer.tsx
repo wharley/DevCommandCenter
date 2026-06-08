@@ -89,7 +89,7 @@ import {
 	loadEffortSelection,
 	saveEffortSelection,
 } from "./draftStorage";
-import { readComposerPrompt, setEditorText } from "./editorOps";
+import { appendComposerText, readComposerPrompt, setEditorText } from "./editorOps";
 
 type WorkspaceComposerProps = {
 	draftKey: string;
@@ -99,6 +99,8 @@ type WorkspaceComposerProps = {
 	selectedModelId: string | null;
 	sessionSnapshot: RuntimeSessionSnapshot | null;
 	pendingPrompt: string | null;
+	/** Text to append to the draft (e.g. a diff annotation); nonce re-fires it. */
+	prefill?: { text: string; nonce: number } | null;
 	workspacePath: string | null;
 	workspaceBranch: string | null;
 	showPlanFollowUpPrompt: boolean;
@@ -124,6 +126,7 @@ export function WorkspaceComposer({
 	selectedModelId,
 	sessionSnapshot,
 	pendingPrompt,
+	prefill,
 	workspacePath,
 	workspaceBranch,
 	showPlanFollowUpPrompt,
@@ -175,6 +178,7 @@ export function WorkspaceComposer({
 	);
 	const composerRootRef = useRef<HTMLDivElement | null>(null);
 	const editorRef = useRef<LexicalEditor | null>(null);
+	const lastPrefillNonceRef = useRef<number | null>(null);
 	const selectedProvider = useMemo(
 		() =>
 			providerChoices.find((provider) => provider.id === selectedProviderId) ??
@@ -262,6 +266,24 @@ export function WorkspaceComposer({
 			setIsSubmitting(false);
 		}
 	}, [composerDraftKey, isSubmitting, submitFromComposer]);
+
+	// Append externally-supplied context (e.g. a diff annotation) to the draft.
+	// Keyed on nonce so the same selection can be re-sent, and so it fires once.
+	useEffect(() => {
+		if (!prefill || prefill.text.length === 0) {
+			return;
+		}
+		if (lastPrefillNonceRef.current === prefill.nonce) {
+			return;
+		}
+		const editor = editorRef.current;
+		if (!editor) {
+			return;
+		}
+		lastPrefillNonceRef.current = prefill.nonce;
+		appendComposerText(editor, prefill.text);
+		editor.focus();
+	}, [prefill]);
 
 	const lexicalInitialConfig = useMemo(
 		() => ({

@@ -43,6 +43,21 @@ type DiffEditorController = {
 	}): void;
 };
 
+/**
+ * Emitted when the reviewer selects a region in the diff and triggers the
+ * "send to agent" affordance. Line numbers are 1-based and refer to the
+ * modified document; `snippet` is the exact selected text.
+ */
+export type DiffAnnotationPayload = {
+	/** "original" = deleted/old side, "modified" = added/new side. */
+	side: "original" | "modified";
+	startLine: number;
+	endLine: number;
+	snippet: string;
+	/** Viewport coordinates of the trigger button, for anchoring an overlay. */
+	anchor: { top: number; left: number };
+};
+
 let runtimePromise: Promise<MonacoRuntime> | null = null;
 const fileContentCache = new Map<string, string>();
 
@@ -148,6 +163,13 @@ export async function createDiffEditor(options: {
 	originalText: string;
 	modifiedText: string;
 	inline: boolean;
+	/**
+	 * When provided, a floating "send to agent" button is shown over either
+	 * side of the diff whenever the reviewer selects a non-empty range.
+	 */
+	onAnnotate?: (payload: DiffAnnotationPayload) => void;
+	/** Label for the annotate button; defaults to a pt-BR string. */
+	annotateLabel?: string;
 }): Promise<DiffEditorController> {
 	const runtime = await ensureRuntime();
 	const { monaco } = runtime;
@@ -203,9 +225,22 @@ export async function createDiffEditor(options: {
 		modified: modifiedModel,
 	});
 
+	const annotateDisposables: DisposableLike[] = [];
+	if (options.onAnnotate) {
+		annotateDisposables.push(
+			attachDiffAnnotateAffordance(monaco, editor, {
+				label: options.annotateLabel ?? "Enviar ao agente ↗",
+				onAnnotate: options.onAnnotate,
+			}),
+		);
+	}
+
 	return {
 		editor,
 		dispose() {
+			for (const disposable of annotateDisposables) {
+				disposable.dispose();
+			}
 			editor.dispose();
 			originalModel.dispose();
 			modifiedModel.dispose();
@@ -218,6 +253,135 @@ export async function createDiffEditor(options: {
 				modifiedModel.setValue(modifiedText);
 			}
 			editor.updateOptions({ renderSideBySide: !inline });
+		},
+	};
+}
+
+/**
+ * Wires the "send selection to agent" affordance onto both sides of a diff
+ * editor. Confines all Monaco widget APIs here so the React layer only sees a
+ * callback. Returns a disposable that tears down listeners and floating buttons.
+ */
+function attachDiffAnnotateAffordance(
+	monaco: MonacoModule,
+	diffEditor: StandaloneDiffEditor,
+	options: {
+		label: string;
+		onAnnotate: (payload: DiffAnnotationPayload) => void;
+	},
+): DisposableLike {
+	const disposables = [
+		attachAnnotateButton(monaco, diffEditor.getModifiedEditor(), "modified", options),
+		attachAnnotateButton(monaco, diffEditor.getOriginalEditor(), "original", options),
+	];
+	return {
+		dispose() {
+			for (const disposable of disposables) {
+				disposable.dispose();
+			}
+		},
+	};
+}
+
+function attachAnnotateButton(
+	monaco: MonacoModule,
+	editor: StandaloneEditor,
+	side: DiffAnnotationPayload["side"],
+	options: {
+		label: string;
+		onAnnotate: (payload: DiffAnnotationPayload) => void;
+	},
+): DisposableLike {
+	let selection: Monaco.Selection | null = null;
+	let mounted = false;
+
+	const button = document.createElement("button");
+	button.type = "button";
+	button.textContent = options.label;
+	button.setAttribute("aria-label", options.label);
+	Object.assign(button.style, {
+		display: "inline-flex",
+		alignItems: "center",
+		gap: "4px",
+		padding: "3px 8px",
+		fontSize: "11px",
+		fontWeight: "600",
+		lineHeight: "1.2",
+		color: "var(--primary-foreground)",
+		background: "var(--primary)",
+		border: "1px solid var(--border)",
+		borderRadius: "6px",
+		boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+		cursor: "pointer",
+		whiteSpace: "nowrap",
+	} satisfies Partial<CSSStyleDeclaration>);
+
+	const widget: Monaco.editor.IContentWidget = {
+		getId: () => `dcc.diff.annotate.widget.${side}`,
+		getDomNode: () => button,
+		getPosition: () =>
+			selection
+				? {
+						position: {
+							lineNumber: selection.startLineNumber,
+							column: selection.startColumn,
+						},
+						preference: [
+							monaco.editor.ContentWidgetPositionPreference.ABOVE,
+							monaco.editor.ContentWidgetPositionPreference.BELOW,
+						],
+					}
+				: null,
+	};
+
+	const hide = () => {
+		selection = null;
+		if (mounted) {
+			editor.removeContentWidget(widget);
+			mounted = false;
+		}
+	};
+
+	// Prevent the mousedown from collapsing the editor selection before click.
+	button.addEventListener("mousedown", (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+	});
+	button.addEventListener("click", (event) => {
+		event.preventDefault();
+		const active = selection;
+		const model = editor.getModel();
+		if (!active || !model) {
+			return;
+		}
+		const rect = button.getBoundingClientRect();
+		options.onAnnotate({
+			side,
+			startLine: active.startLineNumber,
+			endLine: active.endLineNumber,
+			snippet: model.getValueInRange(active),
+			anchor: { top: rect.top, left: rect.left },
+		});
+		hide();
+	});
+
+	const selectionListener = editor.onDidChangeCursorSelection((event) => {
+		if (event.selection.isEmpty()) {
+			hide();
+			return;
+		}
+		selection = event.selection;
+		if (!mounted) {
+			editor.addContentWidget(widget);
+			mounted = true;
+		}
+		editor.layoutContentWidget(widget);
+	});
+
+	return {
+		dispose() {
+			selectionListener.dispose();
+			hide();
 		},
 	};
 }

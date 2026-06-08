@@ -657,5 +657,14 @@
       "deleted": "Skill \"{{name}}\" excluída",
       "deleteError": "Falha ao excluir skill"
     }
+  },
+  "diffAnnotate": {
+    "sendToAgent": "Enviar ao agente ↗",
+    "dialogLabel": "Enviar trecho ao agente",
+    "instructionPlaceholder": "O que o agente deve fazer com este trecho?",
+    "deletedSide": "removido",
+    "editInComposer": "Editar no composer",
+    "newSession": "Nova sessão",
+    "send": "Enviar ↗"
   }
 }

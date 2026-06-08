@@ -1158,7 +1158,10 @@ export default function App() {
 		],
 	);
 
-	const handleSubmitPrompt = useCallback(async (turn: ComposerSubmittedTurn) => {
+	const handleSubmitPrompt = useCallback(async (
+		turn: ComposerSubmittedTurn,
+		options?: { forceNewSession?: boolean },
+	) => {
 		const trimmedPrompt = turn.rawPrompt.trim();
 		if (trimmedPrompt.length === 0) {
 			return;
@@ -1172,7 +1175,10 @@ export default function App() {
 		let currentSessionId = selectedSessionId;
 
 		try {
-			if (!currentSession || !currentSessionId) {
+			// `forceNewSession` always spins up a fresh thread (used by the diff
+			// annotation flow); otherwise we reuse the selected session and only
+			// start one when none exists yet.
+			if (options?.forceNewSession || !currentSession || !currentSessionId) {
 				if (!selectedProvider || !selectedWorkspace) {
 					return;
 				}

@@ -35,3 +35,27 @@ export function setEditorText(editor: LexicalEditor, text: string) {
 		paragraph.selectEnd();
 	});
 }
+
+/**
+ * Appends text to the composer without clobbering an existing draft. When the
+ * draft already has content, a blank paragraph is inserted as a separator so
+ * the appended block (e.g. a diff annotation) reads as its own chunk.
+ */
+export function appendComposerText(editor: LexicalEditor, text: string) {
+	if (text.length === 0) {
+		return;
+	}
+
+	editor.update(() => {
+		const root = $getRoot();
+		const hasContent = root.getTextContent().trim().length > 0;
+		if (hasContent) {
+			root.append($createParagraphNode());
+		}
+
+		const paragraph = $createParagraphNode();
+		paragraph.append($createTextNode(text));
+		root.append(paragraph);
+		paragraph.selectEnd();
+	});
+}
