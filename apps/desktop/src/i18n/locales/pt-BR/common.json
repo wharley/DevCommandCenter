@@ -665,6 +665,18 @@
     "deletedSide": "removido",
     "editInComposer": "Editar no composer",
     "newSession": "Nova sessão",
-    "send": "Enviar ↗"
+    "send": "Enviar ↗",
+    "addToReview": "+ Adicionar à revisão",
+    "review": {
+      "title": "Revisão",
+      "items": "{{count}} trecho(s)",
+      "overallPlaceholder": "Instrução geral para todos os trechos (opcional)",
+      "remove": "Remover trecho",
+      "clear": "Limpar",
+      "send": "Enviar revisão ↗",
+      "newSession": "Nova sessão",
+      "collapse": "Recolher",
+      "expand": "Expandir"
+    }
   }
 }

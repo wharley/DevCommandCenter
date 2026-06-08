@@ -665,6 +665,18 @@
     "deletedSide": "deleted",
     "editInComposer": "Edit in composer",
     "newSession": "New session",
-    "send": "Send ↗"
+    "send": "Send ↗",
+    "addToReview": "+ Add to review",
+    "review": {
+      "title": "Review",
+      "items": "{{count}} snippet(s)",
+      "overallPlaceholder": "Overall instruction for all snippets (optional)",
+      "remove": "Remove snippet",
+      "clear": "Clear",
+      "send": "Send review ↗",
+      "newSession": "New session",
+      "collapse": "Collapse",
+      "expand": "Expand"
+    }
   }
 }

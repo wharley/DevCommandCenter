@@ -32,6 +32,11 @@ type WorkspaceEditorSurfaceProps = {
 		request: DiffAnnotationRequest;
 		instruction: string;
 	}) => void;
+	/** Collect the annotation into the multi-snippet review buffer. */
+	onAddToReview?: (input: {
+		request: DiffAnnotationRequest;
+		note: string;
+	}) => void;
 };
 
 type PendingAnnotation = {
@@ -152,14 +157,18 @@ function WorkspaceEditorDiff({
 function DiffAnnotationPopover({
 	pending,
 	canEditInComposer,
+	canAddToReview,
 	onSubmit,
 	onEditInComposer,
+	onAddToReview,
 	onCancel,
 }: {
 	pending: PendingAnnotation;
 	canEditInComposer: boolean;
+	canAddToReview: boolean;
 	onSubmit: (instruction: string, newSession: boolean) => void;
 	onEditInComposer: (instruction: string) => void;
+	onAddToReview: (note: string) => void;
 	onCancel: () => void;
 }) {
 	const { t } = useTranslation("common");
@@ -237,7 +246,18 @@ function DiffAnnotationPopover({
 						}
 					}}
 				/>
-				<div className="mt-2.5 flex items-center justify-between gap-2">
+				{canAddToReview ? (
+					<Button
+						type="button"
+						variant="outline"
+						size="xs"
+						className="mt-2.5 w-full"
+						onClick={() => onAddToReview(trimmed)}
+					>
+						{t("diffAnnotate.addToReview")}
+					</Button>
+				) : null}
+				<div className="mt-2 flex items-center justify-between gap-2">
 					{canEditInComposer ? (
 						<Button
 							type="button"
@@ -283,10 +303,13 @@ export function WorkspaceEditorSurface({
 	onClose,
 	onSubmitAnnotation,
 	onEditInComposer,
+	onAddToReview,
 }: WorkspaceEditorSurfaceProps) {
 	const { t } = useTranslation("common");
 	const [pending, setPending] = useState<PendingAnnotation | null>(null);
-	const annotationsEnabled = Boolean(onSubmitAnnotation || onEditInComposer);
+	const annotationsEnabled = Boolean(
+		onSubmitAnnotation || onEditInComposer || onAddToReview,
+	);
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.defaultPrevented || event.key !== "Escape") {
@@ -338,6 +361,17 @@ export function WorkspaceEditorSurface({
 			onClose();
 		},
 		[onClose, onEditInComposer, pending],
+	);
+
+	const handleAddToReview = useCallback(
+		(note: string) => {
+			if (pending) {
+				onAddToReview?.({ request: pending.request, note });
+			}
+			// Keep the surface open so the reviewer can collect more snippets.
+			setPending(null);
+		},
+		[onAddToReview, pending],
 	);
 
 	const query = useWorkspaceGitFilePreviewContent(
@@ -419,8 +453,10 @@ export function WorkspaceEditorSurface({
 				<DiffAnnotationPopover
 					pending={pending}
 					canEditInComposer={Boolean(onEditInComposer)}
+					canAddToReview={Boolean(onAddToReview)}
 					onSubmit={handleSubmitAnnotation}
 					onEditInComposer={handleEditInComposer}
+					onAddToReview={handleAddToReview}
 					onCancel={() => setPending(null)}
 				/>
 			) : null}

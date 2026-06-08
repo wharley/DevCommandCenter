@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import {
@@ -9,6 +9,7 @@ import {
 import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
+import { DiffReviewTray, type ReviewAnnotation } from "./diff-review-tray";
 import { WorkspaceComposer } from "@/features/composer";
 import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
 import {
@@ -66,6 +67,25 @@ function buildAnnotationContent(
 	const context = buildAnnotationContextBlock(request);
 	const trimmed = instruction.trim();
 	return trimmed.length > 0 ? `${trimmed}\n\n${context}` : context;
+}
+
+/** Composes every collected snippet (and its note) into one review prompt. */
+function buildReviewContent(
+	annotations: ReviewAnnotation[],
+	overallInstruction: string,
+): string {
+	const parts: string[] = [];
+	const overall = overallInstruction.trim();
+	if (overall.length > 0) {
+		parts.push(overall, "");
+	}
+	parts.push(`Revisão de ${annotations.length} trecho(s):`, "");
+	annotations.forEach((annotation, index) => {
+		const note = annotation.note.trim();
+		parts.push(note.length > 0 ? `${index + 1}. ${note}` : `${index + 1}.`);
+		parts.push(buildAnnotationContextBlock(annotation.request), "");
+	});
+	return parts.join("\n");
 }
 
 type WorkspacePanelProps = {
@@ -152,11 +172,15 @@ export function WorkspacePanel({
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
 	);
-	const handleSubmitAnnotation = useCallback(
-		({ request, instruction, newSession }: DiffAnnotationSubmit) => {
-			const content = buildAnnotationContent(request, instruction);
-			// Honor the composer's persisted effort/ultrathink for this workspace so
-			// a direct send matches what the user would get from the composer.
+	const [reviewAnnotations, setReviewAnnotations] = useState<ReviewAnnotation[]>(
+		[],
+	);
+	const reviewIdRef = useRef(0);
+
+	// Build a turn that honors the workspace's persisted effort/ultrathink so a
+	// direct send matches what the user would get from the composer.
+	const buildAnnotationTurn = useCallback(
+		(content: string) => {
 			const selectedProvider = providerChoices.find(
 				(provider) => provider.id === selectedProviderId,
 			);
@@ -170,16 +194,19 @@ export function WorkspacePanel({
 				ultrathinkSelected: persisted.ultrathink,
 				rawPrompt: content,
 			});
-			const turn = composerTurnFromRaw(content, { effort });
+			return composerTurnFromRaw(content, { effort });
+		},
+		[providerChoices, selectedModelId, selectedProviderId, workspaceId],
+	);
+
+	const handleSubmitAnnotation = useCallback(
+		({ request, instruction, newSession }: DiffAnnotationSubmit) => {
+			const turn = buildAnnotationTurn(
+				buildAnnotationContent(request, instruction),
+			);
 			void onSubmitPrompt(turn, { forceNewSession: newSession });
 		},
-		[
-			onSubmitPrompt,
-			providerChoices,
-			selectedModelId,
-			selectedProviderId,
-			workspaceId,
-		],
+		[buildAnnotationTurn, onSubmitPrompt],
 	);
 	const handleEditAnnotationInComposer = useCallback(
 		({
@@ -195,6 +222,32 @@ export function WorkspacePanel({
 			}));
 		},
 		[],
+	);
+	const handleAddToReview = useCallback(
+		({ request, note }: { request: DiffAnnotationRequest; note: string }) => {
+			reviewIdRef.current += 1;
+			const id = `rev-${reviewIdRef.current}`;
+			setReviewAnnotations((prev) => [...prev, { id, request, note }]);
+		},
+		[],
+	);
+	const handleRemoveReviewAnnotation = useCallback((id: string) => {
+		setReviewAnnotations((prev) => prev.filter((item) => item.id !== id));
+	}, []);
+	const handleClearReview = useCallback(() => setReviewAnnotations([]), []);
+	const handleSubmitReview = useCallback(
+		({ instruction, newSession }: { instruction: string; newSession: boolean }) => {
+			if (reviewAnnotations.length === 0) {
+				return;
+			}
+			const turn = buildAnnotationTurn(
+				buildReviewContent(reviewAnnotations, instruction),
+			);
+			void onSubmitPrompt(turn, { forceNewSession: newSession });
+			setReviewAnnotations([]);
+			onCloseSurface();
+		},
+		[buildAnnotationTurn, onCloseSurface, onSubmitPrompt, reviewAnnotations],
 	);
 
 	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
@@ -257,7 +310,7 @@ export function WorkspacePanel({
 		activeMissionSpec != null &&
 		parseMissionValidationPersistence(activeMissionSpec.content) === "auto";
 
-	return surfaceSelection ? (
+	const surfaceContent = surfaceSelection ? (
 		surfaceSelection.kind === "git-diff" ? (
 			<WorkspaceEditorSurface
 				workspaceRoot={workspacePath}
@@ -265,6 +318,7 @@ export function WorkspacePanel({
 				onClose={onCloseSurface}
 				onSubmitAnnotation={handleSubmitAnnotation}
 				onEditInComposer={handleEditAnnotationInComposer}
+				onAddToReview={handleAddToReview}
 			/>
 		) : (
 			<WorkspaceMissionSpecSurface
@@ -353,5 +407,17 @@ export function WorkspacePanel({
 				</div>
 			</div>
 		</div>
+	);
+
+	return (
+		<>
+			{surfaceContent}
+			<DiffReviewTray
+				annotations={reviewAnnotations}
+				onRemove={handleRemoveReviewAnnotation}
+				onClear={handleClearReview}
+				onSubmit={handleSubmitReview}
+			/>
+		</>
 	);
 }
