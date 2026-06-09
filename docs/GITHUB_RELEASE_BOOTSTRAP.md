@@ -89,7 +89,7 @@ git push origin v0.1.1
 7. Confirm that the assets include updater metadata such as `latest.json` and signature files.
 8. Publish the draft only after checking at least one downloaded build manually.
 
-For macOS, expect the public release workflow to publish signed app bundle archives (`.app.tar.gz`) plus updater metadata. For Linux, expect the public release workflow to publish an `AppImage`. The separate Linux validation workflow can still be used when you want to build a `.deb` artifact manually.
+For macOS, expect the public release workflow to publish signed app bundle archives (`.app.tar.gz`) plus updater metadata. For Linux, expect the public release workflow to publish a `.deb` package.
 
 ## 7. Post-release verification
 

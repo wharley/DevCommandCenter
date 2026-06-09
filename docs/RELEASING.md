@@ -5,7 +5,7 @@ This repository is configured to use GitHub Releases as the first public distrib
 Current public release scope:
 
 - macOS
-- Linux (AppImage in the public release pipeline)
+- Linux (Debian package in the public release pipeline)
 
 ## Release model
 
@@ -13,7 +13,7 @@ Current public release scope:
 - The `publish-release.yml` workflow creates or updates a GitHub Release draft.
 - The Tauri updater is configured to read `latest.json` from the latest GitHub Release.
 - macOS public releases build signed app bundle archives (`.app.tar.gz`) instead of DMG installers in the GitHub release pipeline.
-- Linux public releases build `AppImage` only, which matches the artifact Tauri uses for updater support on Linux.
+- Linux public releases build `.deb` packages in the GitHub release pipeline.
 
 ## Required secrets
 

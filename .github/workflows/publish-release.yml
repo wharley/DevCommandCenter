@@ -43,7 +43,7 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             case "${{ inputs.target }}" in
               linux-x64)
-                echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles appimage"}]}' >> "$GITHUB_OUTPUT"
+                echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles deb"}]}' >> "$GITHUB_OUTPUT"
                 ;;
               macos-arm64)
                 echo 'matrix={"include":[{"name":"macos-arm64","platform":"macos-latest","args":"--bundles app"}]}' >> "$GITHUB_OUTPUT"
@@ -52,7 +52,7 @@ jobs:
                 echo 'matrix={"include":[{"name":"macos-intel","platform":"macos-15-intel","args":"--bundles app"}]}' >> "$GITHUB_OUTPUT"
                 ;;
               all)
-                echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles appimage"},{"name":"macos-arm64","platform":"macos-latest","args":"--bundles app"},{"name":"macos-intel","platform":"macos-15-intel","args":"--bundles app"}]}' >> "$GITHUB_OUTPUT"
+                echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles deb"},{"name":"macos-arm64","platform":"macos-latest","args":"--bundles app"},{"name":"macos-intel","platform":"macos-15-intel","args":"--bundles app"}]}' >> "$GITHUB_OUTPUT"
                 ;;
               *)
                 echo "Unsupported workflow_dispatch target: ${{ inputs.target }}"
@@ -60,7 +60,7 @@ jobs:
                 ;;
             esac
           else
-            echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles appimage"},{"name":"macos-arm64","platform":"macos-latest","args":"--bundles app"},{"name":"macos-intel","platform":"macos-15-intel","args":"--bundles app"}]}' >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles deb"},{"name":"macos-arm64","platform":"macos-latest","args":"--bundles app"},{"name":"macos-intel","platform":"macos-15-intel","args":"--bundles app"}]}' >> "$GITHUB_OUTPUT"
           fi
 
   publish-tauri:
@@ -170,7 +170,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPIMAGE_EXTRACT_AND_RUN: ${{ matrix.platform == 'ubuntu-24.04' && '1' || '' }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
