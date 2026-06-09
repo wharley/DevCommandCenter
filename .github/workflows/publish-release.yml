@@ -28,9 +28,44 @@ env:
   CI: true
 
 jobs:
+  define-matrix:
+    name: Select release targets
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Build matrix
+        id: set-matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            case "${{ inputs.target }}" in
+              linux-x64)
+                echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles appimage"}]}' >> "$GITHUB_OUTPUT"
+                ;;
+              macos-arm64)
+                echo 'matrix={"include":[{"name":"macos-arm64","platform":"macos-latest","args":""}]}' >> "$GITHUB_OUTPUT"
+                ;;
+              macos-intel)
+                echo 'matrix={"include":[{"name":"macos-intel","platform":"macos-15-intel","args":""}]}' >> "$GITHUB_OUTPUT"
+                ;;
+              all)
+                echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles appimage"},{"name":"macos-arm64","platform":"macos-latest","args":""},{"name":"macos-intel","platform":"macos-15-intel","args":""}]}' >> "$GITHUB_OUTPUT"
+                ;;
+              *)
+                echo "Unsupported workflow_dispatch target: ${{ inputs.target }}"
+                exit 1
+                ;;
+            esac
+          else
+            echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles appimage"},{"name":"macos-arm64","platform":"macos-latest","args":""},{"name":"macos-intel","platform":"macos-15-intel","args":""}]}' >> "$GITHUB_OUTPUT"
+          fi
+
   publish-tauri:
+    needs: define-matrix
     name: Publish (${{ matrix.name }})
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.name }}
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 90
     environment:
@@ -38,17 +73,7 @@ jobs:
       url: https://github.com/wharley/DevCommandCenter/releases
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: linux-x64
-            platform: ubuntu-24.04
-            args: "--bundles appimage"
-          - name: macos-arm64
-            platform: macos-latest
-            args: ""
-          - name: macos-intel
-            platform: macos-15-intel
-            args: ""
+      matrix: ${{ fromJSON(needs.define-matrix.outputs.matrix) }}
 
     steps:
       - name: Checkout
