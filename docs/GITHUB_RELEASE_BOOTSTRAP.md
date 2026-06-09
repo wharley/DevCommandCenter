@@ -76,7 +76,7 @@ Notes:
 
 1. Confirm the version in [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) and package metadata is the version you want to release.
 2. Commit and push `main`.
-3. Recommended first pass: trigger `.github/workflows/publish-release.yml` with `workflow_dispatch` and confirm the draft release looks correct.
+3. Recommended first pass: trigger `.github/workflows/publish-release.yml` with `workflow_dispatch`, choose the platform you want to validate first, and confirm the draft release looks correct.
 4. After that, create a tag:
 
 ```bash

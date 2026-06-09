@@ -74,6 +74,7 @@ If no shared `.env` is found, the setup script falls back to `.env.example`.
 - GitHub Actions provide manual validation workflows for Linux and macOS.
 - Signed public releases are prepared through GitHub Releases via `.github/workflows/publish-release.yml`.
 - Public release publication is intentionally limited to manual dispatch or version tags.
+- Manual release dispatch can target `all`, `linux-x64`, `macos-arm64`, or `macos-intel`.
 - The in-app updater is configured to read `latest.json` from GitHub Releases after the first signed release is published.
 - Validation workflows and release publishing are intentionally separated so signing secrets stay isolated to the protected `release` environment.
 

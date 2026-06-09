@@ -43,9 +43,10 @@ macOS signing and notarization:
 
 1. Update the application version.
 2. Push a tag in the format `v<version>` or trigger the publish workflow manually.
-3. Let the workflow build macOS and Linux bundles plus updater artifacts.
-4. Review the generated GitHub Release draft.
-5. Publish the draft once the assets are validated.
+3. For `workflow_dispatch`, choose `all`, `linux-x64`, `macos-arm64`, or `macos-intel` depending on what you want to validate.
+4. Let the workflow build the selected bundles plus updater artifacts.
+5. Review the generated GitHub Release draft.
+6. Publish the draft once the assets are validated.
 
 ## Public download URLs
 
