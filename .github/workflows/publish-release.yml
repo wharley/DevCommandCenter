@@ -42,7 +42,7 @@ jobs:
         include:
           - name: linux-x64
             platform: ubuntu-24.04
-            args: ""
+            args: "--bundles appimage"
           - name: macos-arm64
             platform: macos-latest
             args: ""

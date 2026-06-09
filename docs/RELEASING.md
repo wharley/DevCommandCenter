@@ -5,13 +5,14 @@ This repository is configured to use GitHub Releases as the first public distrib
 Current public release scope:
 
 - macOS
-- Linux
+- Linux (AppImage in the public release pipeline)
 
 ## Release model
 
 - Manual validation workflows build and upload temporary artifacts when you explicitly dispatch them.
 - The `publish-release.yml` workflow creates or updates a GitHub Release draft.
 - The Tauri updater is configured to read `latest.json` from the latest GitHub Release.
+- Linux public releases build `AppImage` only, which matches the artifact Tauri uses for updater support on Linux.
 
 ## Required secrets
 

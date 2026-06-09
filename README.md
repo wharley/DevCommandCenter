@@ -67,6 +67,7 @@ If no shared `.env` is found, the setup script falls back to `.env.example`.
 
 - Releases page: <https://github.com/wharley/DevCommandCenter/releases>
 - Signed builds are published for macOS and Linux through GitHub Releases.
+- Linux release artifacts are currently distributed as AppImage in the public release pipeline.
 - Public releases are signed for this repository. Forks that want their own downloadable builds should publish from their own repository with their own signing keys and release endpoint.
 
 ## CI and releases
