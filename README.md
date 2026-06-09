@@ -81,7 +81,8 @@ DCC was shaped by the broader ecosystem of AI coding tools, terminal-native deve
 
 - Releases page: <https://github.com/wharley/DevCommandCenter/releases>
 - Signed builds are published for macOS and Linux through GitHub Releases.
-- Linux release artifacts are currently distributed as AppImage in the public release pipeline.
+- macOS public release artifacts are currently published as signed app bundle archives (`.app.tar.gz`) with updater metadata.
+- Linux public release artifacts are currently distributed as AppImage in the public release pipeline.
 - Public releases are signed for this repository. Forks that want their own downloadable builds should publish from their own repository with their own signing keys and release endpoint.
 
 ## CI and releases

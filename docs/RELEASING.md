@@ -12,6 +12,7 @@ Current public release scope:
 - Manual validation workflows build and upload temporary artifacts when you explicitly dispatch them.
 - The `publish-release.yml` workflow creates or updates a GitHub Release draft.
 - The Tauri updater is configured to read `latest.json` from the latest GitHub Release.
+- macOS public releases build signed app bundle archives (`.app.tar.gz`) instead of DMG installers in the GitHub release pipeline.
 - Linux public releases build `AppImage` only, which matches the artifact Tauri uses for updater support on Linux.
 
 ## Required secrets
