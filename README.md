@@ -4,13 +4,23 @@ Dev Command Center (DCC) is a local-first desktop workbench for software enginee
 
 ![Dev Command Center screenshot](docs/assets/app-screenshot-new.png)
 
-## Core capabilities
+## What you can do in DCC
 
-- Worktree-first task isolation for parallel changes without `git stash`.
-- Multi-provider execution flows for tools such as Claude, Gemini, and Codex.
-- Local session state, event replay, and workspace-aware runtime surfaces.
-- Native terminal integration and repository inspection from the desktop shell.
-- Optional mobile pairing and local HTTP access for companion workflows.
+- Create isolated workspaces and git worktrees for parallel tasks without juggling `git stash`.
+- Run agent workflows across providers such as Claude, Gemini, Codex, and Cursor from the same desktop surface.
+- Keep local session history, replay prior activity, and preserve workspace-specific runtime context.
+- Open embedded project terminals with tabs for repo-level work that should stay inside the app.
+- Open the active workspace in a preferred editor such as Cursor, Zed, or VS Code.
+- Inspect workspace changes, diffs, and review surfaces without leaving the DCC workbench.
+- Drive plan mode, mission specs, and follow-up implementation flows from the same session.
+- Manage project skills from a provider-neutral source and compile them into agent-native targets such as `.claude/skills/`, `AGENTS.md`, `GEMINI.md`, and `.cursor/rules/`.
+- Use optional mobile pairing and local HTTP access for companion workflows on the same trusted network.
+
+## Product shape
+
+- Workspace-first: the main unit is an isolated task workspace tied to a repository and branch context.
+- Local-first: state, sessions, and runtime surfaces stay on your machine.
+- Agent-aware: DCC is not just a terminal wrapper; it keeps plans, specs, diffs, session events, and provider context connected inside one workbench.
 
 ## Stack
 
@@ -62,6 +72,10 @@ If no shared `.env` is found, the setup script falls back to `.env.example`.
 - The project is open source under Apache-2.0.
 - Signed release distribution is currently focused on macOS and Linux.
 - Licensed under Apache-2.0. See [LICENSE](LICENSE).
+
+## Acknowledgments
+
+DCC was shaped by the broader ecosystem of AI coding tools, terminal-native developer workflows, local-first apps, and worktree-based development practices.
 
 ## Downloads
 
