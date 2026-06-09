@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 
 /**
- * DCC session counters (from Rust snapshot) in the same slot as helmor’s rate-limit
+ * DCC session counters from the Rust snapshot.
  * UsageStatsIndicator — compact row so the footer matches the reference layout.
  */
 export function UsageStatsIndicator({

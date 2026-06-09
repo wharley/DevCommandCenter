@@ -64,7 +64,7 @@ export type DccWorkbenchChatHeaderProps = {
 	onInstallUpdate: () => void;
 };
 
-/** Chat column top bar — compact toolbar cloned from reference shells: titles left, icon cluster right. */
+/** Chat column top bar with titles left and action icons right. */
 
 export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	threadTitle,

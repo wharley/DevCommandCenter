@@ -1,23 +1,18 @@
-name: Build macOS (staging -> main)
+name: Build macOS
 
 on:
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
+  workflow_dispatch:
 
 concurrency:
-  group: build-macos-staging-to-main-${{ github.event.pull_request.number }}
+  group: build-macos-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   macos:
     name: macOS desktop validation
-    if: github.event.pull_request.head.ref == 'staging'
     runs-on: macos-latest
     timeout-minutes: 60
 

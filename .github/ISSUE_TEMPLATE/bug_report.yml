@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a reproducible problem in Dev Command Center
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please include concrete reproduction details and avoid posting secrets, tokens, certificates, or private repository data.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: Short description of the problem
+      placeholder: The app crashes when...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps that reproduce the issue
+      placeholder: |
+        1. Open...
+        2. Click...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux
+        - Mobile web
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Share only data that is safe to publish publicly
+      render: shell

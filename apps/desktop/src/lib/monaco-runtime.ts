@@ -73,7 +73,7 @@ function detectInitialTheme(): EditorTheme {
 }
 
 function themeId(theme: EditorTheme): string {
-	return theme === "dark" ? "helmor-editor-dark" : "helmor-editor-light";
+	return theme === "dark" ? "dcc-editor-dark" : "dcc-editor-light";
 }
 
 export async function createFileEditor(options: {
@@ -474,7 +474,7 @@ function installMonacoEnvironment() {
 }
 
 function installEditorTheme(monaco: MonacoModule) {
-	monaco.editor.defineTheme("helmor-editor-dark", {
+	monaco.editor.defineTheme("dcc-editor-dark", {
 		base: "vs-dark",
 		inherit: true,
 		rules: [
@@ -525,7 +525,7 @@ function installEditorTheme(monaco: MonacoModule) {
 		},
 	});
 
-	monaco.editor.defineTheme("helmor-editor-light", {
+	monaco.editor.defineTheme("dcc-editor-light", {
 		base: "vs",
 		inherit: true,
 		rules: [

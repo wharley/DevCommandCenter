@@ -62,7 +62,7 @@ export function setPlanModeState(
 	return next;
 }
 
-/** Matches `docs/UX_UI_BLUEPRINT.md` §15.4 and helmor `submitEnabled` / send vs steer. */
+/** Shared submit-state helpers for send vs steer behavior. */
 export type ComposerSendDecision =
 	| { kind: "send" }
 	| { kind: "steer" }
@@ -101,7 +101,7 @@ export function decideSend({
 	return { kind: "send" };
 }
 
-/** Shared gate for Send, Steer, and ⌘Enter — helmor `submitEnabled`. */
+/** Shared gate for Send, Steer, and ⌘Enter. */
 export function isComposerSubmitEnabled({
 	disabled,
 	hasProvider,

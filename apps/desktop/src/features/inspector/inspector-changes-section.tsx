@@ -1,6 +1,6 @@
 /**
  * Git changes list — staged / unstaged groups, list or tree view, per-file +/−,
- * extension icons (Helmor-style), NumberTicker for diff stats.
+ * extension icons and NumberTicker for diff stats.
  */
 
 import { useQueryClient } from "@tanstack/react-query";

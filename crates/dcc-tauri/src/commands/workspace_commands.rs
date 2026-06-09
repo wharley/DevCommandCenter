@@ -667,7 +667,7 @@ fn read_worktree_file_text(root: &str, rel: &str) -> Result<Option<String>, Stri
     Ok(Some(String::from_utf8_lossy(&bytes).to_string()))
 }
 
-/// `git add -- path` (Helmor `stage_workspace_file`).
+/// `git add -- path`.
 #[tauri::command]
 pub async fn workspace_git_stage_file(
     state: State<'_, WorkspaceCommandState>,
@@ -686,7 +686,7 @@ pub async fn workspace_git_stage_file(
     Err(git_output_err("git add", &output.stderr))
 }
 
-/// `git restore --staged` with `git reset HEAD --` fallback (Helmor `unstage_workspace_file`).
+/// `git restore --staged` with `git reset HEAD --` fallback.
 #[tauri::command]
 pub async fn workspace_git_unstage_file(
     state: State<'_, WorkspaceCommandState>,
@@ -709,7 +709,7 @@ pub async fn workspace_git_unstage_file(
     Err(git_output_err("git reset", &fallback.stderr))
 }
 
-/// Tracked: `git checkout HEAD -- path`; untracked file: remove (Helmor `discard_workspace_file`).
+/// Tracked: `git checkout HEAD -- path`; untracked file: remove.
 #[tauri::command]
 pub async fn workspace_git_discard_file(
     state: State<'_, WorkspaceCommandState>,
@@ -832,7 +832,7 @@ fn file_name_from_path(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
-/// `git status --porcelain` → staged / unstaged rows (Helmor-style split).
+/// `git status --porcelain` → staged / unstaged rows.
 fn workspace_git_status_inner(workspace_root: &str) -> Result<WorkspaceGitStatusOutput, String> {
     let root = workspace_root.trim();
     if root.is_empty() {

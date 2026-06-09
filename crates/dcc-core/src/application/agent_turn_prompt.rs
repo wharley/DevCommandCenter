@@ -77,7 +77,7 @@ fn wire_claude_code_partial(
     maybe_push_plan_line(
         &mut lines,
         plan,
-        "PLAN / permission-style ON: respond with a structured plan first (sections, ordered steps, risks). Do NOT write files, run shell, or apply patches until the user clearly asks to execute or exit planning — treat this like Helmor `permissionMode: plan`.",
+        "PLAN / permission-style ON: respond with a structured plan first (sections, ordered steps, risks). Do NOT write files, run shell, or apply patches until the user clearly asks to execute or exit planning.",
         "EXECUTION ON: you may invoke tools, edit files, and run commands as appropriate for the repo.",
     );
     maybe_push_effort_line(&mut lines, effort);

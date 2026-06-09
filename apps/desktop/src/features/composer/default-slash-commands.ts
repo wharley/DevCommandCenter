@@ -1,4 +1,4 @@
-/** Matches helmor slash-command rows (minus SDK-loaded skills). */
+/** Default slash-command rows exposed before SDK-loaded skills arrive. */
 
 export type SlashCommandEntry = {
 	name: string;

@@ -42,7 +42,7 @@ body,
 body {
 	margin: 0;
 	overflow: hidden;
-	/* Helmor-style flat app chrome — tokens still drive accents inside panels */
+	/* Flat app chrome — tokens still drive accents inside panels */
 	background-color: var(--background);
 	color: var(--foreground);
 	font-family: "Geist Variable", "Geist", sans-serif;
@@ -62,7 +62,7 @@ a {
 	color: inherit;
 }
 
-/* Flex shell (Helmor-style): three columns + absolute resize hit targets — see App.tsx `.dcc-app-shell` */
+/* Flex shell: three columns + absolute resize hit targets — see App.tsx `.dcc-app-shell` */
 .dcc-app-shell {
 	min-height: 100vh;
 }

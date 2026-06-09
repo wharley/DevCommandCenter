@@ -29,7 +29,7 @@ pub struct SendTurnInput {
     /// When set, replaces the session runtime config for this provider selection.
     #[serde(default)]
     pub provider_runtime: Option<ProviderRuntimeConfig>,
-    /// Plan-before-edit style directives (Helmor plan-style).
+    /// Plan-before-edit style directives.
     #[serde(default)]
     pub plan_mode: Option<bool>,
     /// `minimal` | `low` | `medium` | `high` | `xhigh` | `max`
@@ -39,7 +39,7 @@ pub struct SendTurnInput {
     pub fast_mode: Option<bool>,
 }
 
-/// Merge UI selection into session fields (Helmor-style per-turn model routing).
+/// Merge UI selection into session fields for per-turn model routing.
 pub fn merge_send_turn_session_selection(
     session: &Session,
     input: &SendTurnInput,

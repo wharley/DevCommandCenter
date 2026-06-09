@@ -28,6 +28,9 @@ yarn-error.log*
 .env*
 !.env.example
 
+# sidecar temporary build outputs
+sidecar/*.bun-build
+
 # vercel
 .vercel
 

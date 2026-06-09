@@ -51,7 +51,7 @@ describe("WorkspaceComposer.logic", () => {
 		).toEqual({ kind: "steer" });
 	});
 
-	it("gates send vs steer with helmor-style helpers", () => {
+	it("gates send vs steer with the shared helpers", () => {
 		const ok = isComposerSubmitEnabled({
 			disabled: false,
 			hasProvider: true,

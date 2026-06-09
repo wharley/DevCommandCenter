@@ -487,7 +487,7 @@ export type SendTurnInput = {
 	model?: string | null,
 	// When set, replaces the session runtime config for this provider selection.
 	providerRuntime?: ProviderRuntimeConfig | null,
-	// Plan-before-edit style directives (Helmor plan-style).
+	// Plan-before-edit style directives.
 	planMode?: boolean | null,
 	// `minimal` | `low` | `medium` | `high` | `xhigh` | `max`
 	effort?: string | null,
@@ -775,4 +775,3 @@ export type WorkspaceSetupStepReport = {
 };
 
 export type WorkspaceState = "initializing" | "setup_pending" | "ready" | "archived";
-

@@ -371,7 +371,7 @@ function SetupPendingBanner({
 }
 
 /**
- * Right rail: Git (clone Helmor) + session activity / context integrated from App props — no placeholder cards.
+ * Right rail: Git + session activity / context integrated from App props — no placeholder cards.
  */
 export function WorkspaceInspectorSidebar({
 	providerCatalog,

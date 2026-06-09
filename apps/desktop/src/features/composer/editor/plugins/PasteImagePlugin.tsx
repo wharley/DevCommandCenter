@@ -15,7 +15,7 @@ import { $appendNodesToComposerEnd } from "../append-to-end";
 import { $createImageBadgeNode } from "../image-badge-node";
 import { $createPastedSnippetBadgeNode } from "../pasted-snippet-badge-node";
 
-/** Collapse huge plain-text pastes into an inline snippet badge (Helmor case 3). */
+/** Collapse huge plain-text pastes into an inline snippet badge. */
 const LARGE_PASTE_CHAR_THRESHOLD = 1200;
 
 function getClipboardData(event: unknown) {

@@ -10,7 +10,7 @@ import { $isImageBadgeNode } from "./image-badge-node";
 import { $isPastedSnippetBadgeNode } from "./pasted-snippet-badge-node";
 
 /**
- * Serializes composer editor state for `send_turn` — mirrors helmor
+ * Serializes composer editor state for `send_turn`.
  * `$extractComposerContent` text assembly (badges → `@path`).
  */
 export function $extractComposerPrompt(): string {

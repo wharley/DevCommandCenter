@@ -814,7 +814,7 @@ export default function App() {
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [selectedWorkspacePath]);
 
-	/** Helmor-style: restore provider/model for this session, else follow backend snapshot. */
+	/** Restore provider/model for this session, else follow backend snapshot. */
 	useEffect(() => {
 		if (providerChoices.length === 0) {
 			return;

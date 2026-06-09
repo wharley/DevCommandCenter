@@ -8,7 +8,7 @@ import {
 } from "lexical";
 import type { ReactNode } from "react";
 
-/** Purple `/add-dir` pill — verbatim chrome from helmor `add-dir/trigger-node.tsx`. */
+/** Purple `/add-dir` pill node. */
 export class AddDirTriggerNode extends DecoratorNode<ReactNode> {
 	static getType(): string {
 		return "add-dir-trigger";

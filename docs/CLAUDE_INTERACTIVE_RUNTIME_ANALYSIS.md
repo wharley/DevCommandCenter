@@ -347,7 +347,7 @@ Isso nao invalida a migracao. So muda a ordem de entrega.
    Sem protocolo oficial, o runtime precisa definir criterios robustos.
 
 3. Multi-plataforma.
-   O PTY do Tauri ja ajuda, mas Claude pode se comportar diferente entre macOS, Linux e Windows.
+   O PTY do Tauri ja ajuda, mas Claude pode se comportar diferente entre macOS e Linux.
 
 4. Approval automation.
    Alguns prompts podem variar por versao, idioma ou contexto.

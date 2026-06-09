@@ -7,10 +7,10 @@
 export type ComposerEffortLevel = string;
 
 export type ComposerTurnEnvelope = {
-	/** Helmor-style planning phase: structured plan before edits / risky tools. */
+	/** Planning phase: structured plan before edits or risky tools. */
 	planMode: boolean;
 	effort: ComposerEffortLevel;
-	/** Short replies when true (Helmor fast prelude spirit). */
+	/** Short replies when true. */
 	fastMode: boolean;
 };
 

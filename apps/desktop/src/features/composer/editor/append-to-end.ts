@@ -7,7 +7,7 @@ import {
 	type LexicalNode,
 } from "lexical";
 
-/** Append nodes at the end of the last block; trailing space for caret (helmor pattern). */
+/** Append nodes at the end of the last block; trailing space for caret. */
 export function $appendNodesToComposerEnd(...nodes: LexicalNode[]) {
 	const root = $getRoot();
 	let lastChild = root.getLastChild();

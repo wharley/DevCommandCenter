@@ -29,8 +29,8 @@ type ComposerProviderModelMenuProps = {
 };
 
 /**
- * t3code-style Popover + cmdk search + Helmorian grouped headings (`ModelPickerContent` pattern).
- * Shortcut listeners use {@link DCC_OPEN_MODEL_PICKER_EVENT} (Helmor: `helmor:open-model-picker`).
+ * Popover + cmdk search with grouped headings for the provider/model picker.
+ * Shortcut listeners use {@link DCC_OPEN_MODEL_PICKER_EVENT}.
  */
 export function ComposerProviderModelMenu({
 	providers,

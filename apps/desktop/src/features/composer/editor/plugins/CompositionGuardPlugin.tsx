@@ -66,7 +66,7 @@ function stripImeSegmentationSpaces(
 	return null;
 }
 
-/** Verbatim from helmor — IME / composition cleanup for CJK + Latin mixed input. */
+/** IME / composition cleanup for CJK + Latin mixed input. */
 export function CompositionGuardPlugin() {
 	const [editor] = useLexicalComposerContext();
 	const stripResultRef = useRef<StripResult | null>(null);

@@ -1,0 +1,10 @@
+# Sensitive repository surfaces that should require explicit owner review
+# once "Require review from Code Owners" is enabled on the protected branch.
+
+.github/workflows/ @wharley
+.github/ISSUE_TEMPLATE/ @wharley
+.github/pull_request_template.md @wharley
+docs/RELEASING.md @wharley
+docs/GITHUB_RELEASE_BOOTSTRAP.md @wharley
+SECURITY.md @wharley
+src-tauri/tauri.conf.json @wharley

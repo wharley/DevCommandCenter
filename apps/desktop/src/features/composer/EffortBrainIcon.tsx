@@ -1,4 +1,4 @@
-/** Effort tier glyphs — verbatim shape from helmor `features/composer/index.tsx` (EffortBrainIcon). */
+/** Effort tier glyphs. */
 
 export function EffortBrainIcon({ level }: { level: string }) {
 	const cls = "shrink-0";

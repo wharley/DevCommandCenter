@@ -8,7 +8,7 @@ export const SELECTED_PROVIDER_STORAGE_KEY = "dcc.selectedProviderId";
 export const SELECTED_MODEL_STORAGE_KEY = "dcc.selectedModelId";
 
 /**
- * Per-thread composer picks (Helmor `modelSelections[contextKey]` / t3code thread-scoped prefs).
+ * Per-thread composer picks keyed by conversation context.
  * Survives snapshot refreshes so the footer stays aligned when switching turns or reloading catalog.
  */
 export const SESSION_COMPOSER_MAP_KEY = "dcc.sessionComposerSelections";
