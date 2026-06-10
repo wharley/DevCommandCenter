@@ -102,13 +102,10 @@ DCC was shaped by the broader ecosystem of AI coding tools, terminal-native deve
 - The in-app updater is configured to read `latest.json` from GitHub Releases after the first signed release is published.
 - Validation workflows and release publishing are intentionally separated so signing secrets stay isolated to the protected `release` environment.
 
-## Available docs
+## Project docs
 
-- [Mobile pairing security model](docs/SECURITY_MOBILE_PAIRING.md)
 - [Security policy](SECURITY.md)
 - [Contributing guide](CONTRIBUTING.md)
 - [Support](SUPPORT.md)
 - [Release guide](docs/RELEASING.md)
-- [GitHub release bootstrap](docs/GITHUB_RELEASE_BOOTSTRAP.md)
-- [GitHub repository settings](docs/GITHUB_REPOSITORY_SETTINGS.md)
-- [Open source release checklist](docs/OPEN_SOURCE_RELEASE_CHECKLIST.md)
+- [Mobile pairing security model](docs/SECURITY_MOBILE_PAIRING.md)
