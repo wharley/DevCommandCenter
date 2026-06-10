@@ -1,4 +1,12 @@
-# Dev Command Center
+<p align="center">
+  <img src="src-tauri/icons/128x128.png" alt="Dev Command Center icon" width="96" height="96" />
+</p>
+
+<h1 align="center">Dev Command Center</h1>
+
+<p align="center">
+  Workspace-first AI coding hub for managing agents, reviews, terminals, and task flows across multiple providers.
+</p>
 
 Dev Command Center (DCC) is a local-first desktop workbench for software engineering with AI agents. It combines isolated Git worktrees, terminal execution, session orchestration, provider integrations, and local persistence in a single Tauri application.
 
