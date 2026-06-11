@@ -36,6 +36,7 @@ import { ProviderSelectionPanel } from "@/features/providers/provider-selection-
 import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
 import { PairedDevicesPanel } from "@/features/settings/paired-devices";
+import type { AppUpdateInfo } from "@/features/updater";
 import { getOpenPreferredEditorShortcutKeys } from "@/features/shortcuts/shortcut-utils";
 import type {
 	ProviderRuntimeDraft,
@@ -69,6 +70,13 @@ type SettingsDialogProps = {
 	providerRuntimeSettings: ProviderRuntimeSettings;
 	onChangeProviderRuntime: (providerId: string, draft: ProviderRuntimeDraft) => void;
 	onClearProviderRuntime: (providerId: string) => void;
+	appVersion?: string | null;
+	appUpdate?: AppUpdateInfo;
+	isCheckingUpdate?: boolean;
+	isInstallingUpdate?: boolean;
+	updateCheckError?: string | null;
+	onCheckForUpdate?: () => void;
+	onInstallUpdate?: () => void;
 };
 
 export type SettingsSectionId =
@@ -437,6 +445,13 @@ export function SettingsDialog({
 	providerRuntimeSettings,
 	onChangeProviderRuntime,
 	onClearProviderRuntime,
+	appVersion = null,
+	appUpdate = null,
+	isCheckingUpdate = false,
+	isInstallingUpdate = false,
+	updateCheckError = null,
+	onCheckForUpdate,
+	onInstallUpdate,
 }: SettingsDialogProps) {
 	const { t, i18n } = useTranslation("common");
 	const [activeSection, setActiveSection] = useState<SettingsSectionId>("general");
@@ -575,6 +590,73 @@ export function SettingsDialog({
 						<div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 pt-5 pb-6 lg:px-8">
 							{activeSection === "general" ? (
 								<section className="space-y-4">
+									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+										<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+											<div className="min-w-0">
+												<h3 className="text-[14px] font-medium text-foreground">
+													{t("settings.general.appVersionTitle")}
+												</h3>
+												<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+													{t("settings.general.appVersionBody")}
+												</p>
+												<p className="mt-3 font-mono text-[13px] text-foreground">
+													{appVersion ?? t("settings.general.appVersionUnknown")}
+												</p>
+											</div>
+											<div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+												{appUpdate ? (
+													<Badge variant="secondary" className="h-8 px-3 text-[12px] font-normal">
+														{t("settings.general.updateAvailable", {
+															version: appUpdate.version,
+														})}
+													</Badge>
+												) : (
+													<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal">
+														{isCheckingUpdate
+															? t("settings.general.checkingUpdates")
+															: t("settings.general.upToDate")}
+													</Badge>
+												)}
+												<div className="flex flex-wrap gap-2 sm:justify-end">
+													<Button
+														type="button"
+														variant="outline"
+														size="sm"
+														disabled={isCheckingUpdate || isInstallingUpdate}
+														onClick={() => onCheckForUpdate?.()}
+													>
+														{isCheckingUpdate ? (
+															<Loader2 className="size-3.5 animate-spin" />
+														) : null}
+														{t("settings.general.checkForUpdates")}
+													</Button>
+													{appUpdate ? (
+														<Button
+															type="button"
+															size="sm"
+															disabled={isInstallingUpdate}
+															onClick={() => onInstallUpdate?.()}
+														>
+															{isInstallingUpdate ? (
+																<Loader2 className="size-3.5 animate-spin" />
+															) : null}
+															{isInstallingUpdate
+																? t("updater.installing")
+																: t("settings.general.installUpdate")}
+														</Button>
+													) : null}
+												</div>
+											</div>
+										</div>
+										{updateCheckError ? (
+											<p className="mt-3 text-[12px] leading-relaxed text-destructive">
+												{t("settings.general.updateCheckFailed", {
+													message: updateCheckError,
+												})}
+											</p>
+										) : null}
+									</div>
+
 									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
 										<div className="flex items-start justify-between gap-6">
 											<div className="min-w-0">

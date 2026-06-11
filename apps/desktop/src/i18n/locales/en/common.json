@@ -297,7 +297,16 @@
       "defaultEntry": "Default entry",
       "defaultEntryBody": "Workspaces open into the inspector-first workbench with the composer in the center pane.",
       "commandPalette": "Command palette",
-      "commandPaletteBody": "The command palette opens workspace switching and actions."
+      "commandPaletteBody": "The command palette opens workspace switching and actions.",
+      "appVersionTitle": "App version",
+      "appVersionBody": "Installed build of Dev Command Center on this machine.",
+      "appVersionUnknown": "Unknown",
+      "checkForUpdates": "Check for updates",
+      "checkingUpdates": "Checking…",
+      "upToDate": "Up to date",
+      "updateAvailable": "Update available: v{{version}}",
+      "installUpdate": "Install update",
+      "updateCheckFailed": "Could not check for updates: {{message}}"
     },
     "appearance": {
       "theme": "Theme",
@@ -615,7 +624,9 @@
     "openInEditorLabel": "Preferred editor: {{editor}}"
   },
   "updater": {
-    "update": "Update"
+    "update": "Update",
+    "installing": "Updating…",
+    "installFailed": "Could not install the update: {{message}}"
   },
   "skills": {
     "title": "Skills",

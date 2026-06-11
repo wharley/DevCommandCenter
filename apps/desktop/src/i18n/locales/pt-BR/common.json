@@ -297,7 +297,16 @@
       "defaultEntry": "Entrada padrão",
       "defaultEntryBody": "Os workspaces abrem no workbench com o inspetor à direita e o composer no centro.",
       "commandPalette": "Paleta de comandos",
-      "commandPaletteBody": "A paleta de comandos abre troca de workspace e ações."
+      "commandPaletteBody": "A paleta de comandos abre troca de workspace e ações.",
+      "appVersionTitle": "Versão do app",
+      "appVersionBody": "Build instalada do Dev Command Center nesta máquina.",
+      "appVersionUnknown": "Desconhecida",
+      "checkForUpdates": "Verificar atualizações",
+      "checkingUpdates": "Verificando…",
+      "upToDate": "Atualizado",
+      "updateAvailable": "Atualização disponível: v{{version}}",
+      "installUpdate": "Instalar atualização",
+      "updateCheckFailed": "Não foi possível verificar atualizações: {{message}}"
     },
     "appearance": {
       "theme": "Tema",
@@ -615,7 +624,9 @@
     "openInEditorLabel": "Editor preferido: {{editor}}"
   },
   "updater": {
-    "update": "Atualizar"
+    "update": "Atualizar",
+    "installing": "Atualizando…",
+    "installFailed": "Não foi possível instalar a atualização: {{message}}"
   },
   "skills": {
     "title": "Skills",

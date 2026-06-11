@@ -8,7 +8,7 @@ type AppUpdateButtonProps = {
 		| {
 				currentVersion: string;
 				version: string;
-				stage: "downloaded" | "checking" | "idle";
+				stage: "available" | "checking" | "idle";
 		  }
 		| null;
 	installing?: boolean;
@@ -21,7 +21,7 @@ export function AppUpdateButton({
 	onInstallNow,
 }: AppUpdateButtonProps) {
 	const { t } = useTranslation("common");
-	if (!update || update.stage !== "downloaded") {
+	if (!update || update.stage !== "available") {
 		return null;
 	}
 
@@ -41,7 +41,7 @@ export function AppUpdateButton({
 					) : (
 						<Download className="size-3 text-foreground/72" />
 					)}
-					<span>{t("updater.update")}</span>
+					<span>{installing ? t("updater.installing") : t("updater.update")}</span>
 				</Button>
 			</TooltipTrigger>
 			<TooltipContent

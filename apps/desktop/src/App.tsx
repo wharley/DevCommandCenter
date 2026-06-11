@@ -520,7 +520,11 @@ export default function App() {
 	const { theme, setTheme } = useAppearance();
 	const {
 		update: appUpdateInfo,
+		currentVersion: appCurrentVersion,
+		checkError: appUpdateCheckError,
+		isChecking: isCheckingUpdate,
 		isInstalling: isInstallingUpdate,
+		checkForUpdate,
 		installUpdate,
 	} = useAppUpdate();
 	const providerChoices = providerCatalog.providers;
@@ -2320,6 +2324,17 @@ export default function App() {
 				providerRuntimeSettings={providerRuntimeSettings}
 				onChangeProviderRuntime={handleChangeProviderRuntime}
 				onClearProviderRuntime={handleClearProviderRuntime}
+				appVersion={appCurrentVersion}
+				appUpdate={appUpdateInfo}
+				isCheckingUpdate={isCheckingUpdate}
+				isInstallingUpdate={isInstallingUpdate}
+				updateCheckError={appUpdateCheckError}
+				onCheckForUpdate={() => {
+					void checkForUpdate();
+				}}
+				onInstallUpdate={() => {
+					void installUpdate();
+				}}
 			/>
 			<SkillsDialog
 				open={isSkillsOpen}
