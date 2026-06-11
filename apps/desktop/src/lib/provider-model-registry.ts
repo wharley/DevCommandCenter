@@ -14,6 +14,14 @@ export type ModelEntry = {
 export const PROVIDER_MODEL_REGISTRY = {
 	claude_code: [
 		{
+			id: "claude-fable-5",
+			label: "Claude Fable 5",
+			description:
+				"Most capable widely available Claude model for demanding reasoning and long-horizon agentic work.",
+			recommended: false,
+			effortLevels: ["low", "medium", "high", "xhigh", "max"],
+		},
+		{
 			id: "claude-opus-4-8",
 			label: "Claude Opus 4.8",
 			description: "Highest capability, best for deep reasoning and large refactors.",
@@ -151,6 +159,8 @@ export type ProviderRegistryKey = keyof typeof PROVIDER_MODEL_REGISTRY;
  */
 export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, string>>> = {
 	claude_code: {
+		fable: "claude-fable-5",
+		"fable-5": "claude-fable-5",
 		opus: "claude-opus-4-8",
 		"opus-4.8": "claude-opus-4-8",
 		"opus-4.7": "claude-opus-4-8",

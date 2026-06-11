@@ -25,6 +25,8 @@ impl ModelEntry {
 /// Alias tables: (short_alias_or_old_id, canonical_id).
 /// When a new model version ships, add the old ID as an alias pointing to the new canonical.
 pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
+    ("fable", "claude-fable-5"),
+    ("fable-5", "claude-fable-5"),
     ("opus", "claude-opus-4-8"),
     ("opus-4.8", "claude-opus-4-8"),
     ("opus-4.7", "claude-opus-4-8"),
@@ -91,6 +93,13 @@ pub fn resolve_alias(provider_id: &str, model: &str) -> String {
 }
 
 pub const CLAUDE_CODE: &[ModelEntry] = &[
+    ModelEntry {
+        id: "claude-fable-5",
+        label: "Claude Fable 5",
+        description: "Most capable widely available Claude model for demanding reasoning and long-horizon agentic work.",
+        recommended: false,
+        effort_levels: &["low", "medium", "high", "xhigh", "max"],
+    },
     ModelEntry {
         id: "claude-opus-4-8",
         label: "Claude Opus 4.8",
@@ -210,6 +219,12 @@ pub const DROID: &[ModelEntry] = &[
 #[cfg(test)]
 mod tests {
     use super::resolve_alias;
+
+    #[test]
+    fn claude_code_aliases_resolve_fable_5() {
+        assert_eq!(resolve_alias("claude_code", "fable"), "claude-fable-5");
+        assert_eq!(resolve_alias("claude_code", "fable-5"), "claude-fable-5");
+    }
 
     #[test]
     fn claude_code_aliases_upgrade_opus_47_to_opus_48() {

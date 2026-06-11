@@ -64,6 +64,13 @@ describe("resolveSelectedModelId", () => {
 		description: "",
 		models: [
 			{
+				id: "claude-fable-5",
+				label: "Claude Fable 5",
+				description: "",
+				recommended: false,
+				effortLevels: ["low", "medium", "high", "xhigh", "max"],
+			},
+			{
 				id: "claude-opus-4-8",
 				label: "Claude Opus 4.8",
 				description: "",
@@ -105,6 +112,12 @@ describe("resolveSelectedModelId", () => {
 
 	it("prefers the recommended model when the stored one is invalid", () => {
 		expect(resolveSelectedModelId(provider, "missing")).toBe("alpha-default");
+	});
+
+	it("keeps Claude Sonnet 4.6 as the recommended fallback", () => {
+		expect(resolveSelectedModelId(claudeProvider, "missing")).toBe(
+			"claude-sonnet-4-6",
+		);
 	});
 
 	it("returns null when the provider has no models", () => {

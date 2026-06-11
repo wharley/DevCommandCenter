@@ -8,6 +8,11 @@ import {
 } from "./provider-model-registry";
 
 describe("provider-model-registry", () => {
+	it("resolves Claude Fable aliases to Claude Fable 5", () => {
+		expect(resolveModelAlias("claude_code", "fable")).toBe("claude-fable-5");
+		expect(resolveModelAlias("claude_code", "fable-5")).toBe("claude-fable-5");
+	});
+
 	it("upgrades Claude Opus 4.7 aliases to Claude Opus 4.8", () => {
 		expect(resolveModelAlias("claude_code", "opus")).toBe("claude-opus-4-8");
 		expect(resolveModelAlias("claude_code", "opus-4.8")).toBe("claude-opus-4-8");
@@ -15,6 +20,10 @@ describe("provider-model-registry", () => {
 		expect(resolveModelAlias("claude_code", "claude-opus-4-7")).toBe(
 			"claude-opus-4-8",
 		);
+	});
+
+	it("keeps Claude Sonnet 4.6 as the default Claude model", () => {
+		expect(getDefaultModelId("claude_code")).toBe("claude-sonnet-4-6");
 	});
 
 	it("resolves Droid aliases to canonical IDs", () => {
