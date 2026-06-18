@@ -64,9 +64,9 @@ import {
 import {
 	ARCHIVED_SECTION_ID,
 	findSelectedRailSectionId,
-	humanizeWorkspaceBranchLabel,
 	initialsFromWorkspaceLabel,
 	ProjectGroupGlyph,
+	workspaceRailDisplayTitle,
 } from "./workspace-rail-shared";
 import { WorkspaceRailRowItem } from "./workspace-rail-row";
 import { useWorkspaceAgentStates } from "./use-workspace-agent-states";
@@ -730,9 +730,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					{workspaces.length > 0 ? (
 						<div className="flex flex-col items-center gap-1">
 							{workspaces.map((workspace) => {
-								const label = workspace.branch
-									? humanizeWorkspaceBranchLabel(workspace.branch)
-									: workspace.name;
+								const label = workspaceRailDisplayTitle(workspace);
 								const initials = initialsFromWorkspaceLabel(workspace.name || label);
 								const selected = workspace.id === selectedWorkspaceId;
 								return (

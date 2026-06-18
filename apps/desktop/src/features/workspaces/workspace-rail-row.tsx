@@ -8,9 +8,9 @@ import type { AgentState } from "./use-workspace-agent-states";
 import type { WorkspaceSummary } from "./types";
 import {
 	branchToneFromWorkspace,
-	humanizeWorkspaceBranchLabel,
 	initialsFromWorkspaceLabel,
 	workspaceRailBranchToneClasses,
+	workspaceRailDisplayTitle,
 } from "./workspace-rail-shared";
 
 const rowVariants = cva(
@@ -69,9 +69,7 @@ export const WorkspaceRailRowItem = memo(
 	}: WorkspaceRailRowProps) {
 		const { t } = useTranslation("common");
 		const branchTone = branchToneFromWorkspace(workspace);
-		const displayTitle = workspace.branch
-			? humanizeWorkspaceBranchLabel(workspace.branch)
-			: workspace.name;
+		const displayTitle = workspaceRailDisplayTitle(workspace);
 
 		return (
 			<div className="px-[2px]">

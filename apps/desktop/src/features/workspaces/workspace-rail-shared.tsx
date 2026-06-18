@@ -48,6 +48,24 @@ export function humanizeWorkspaceBranchLabel(branch: string): string {
 		.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/**
+ * Label shown in the workspace rail. Prefers the custom display name set in the
+ * "Create workspace" dialog; falls back to the humanized base branch when none
+ * was provided (the summary defaults `name` → branch in that case).
+ */
+export function workspaceRailDisplayTitle(
+	workspace: Pick<WorkspaceSummary, "name" | "branch">,
+): string {
+	const name = workspace.name?.trim() ?? "";
+	const branch = workspace.branch?.trim() ?? "";
+
+	if (name.length > 0 && name !== branch) {
+		return name;
+	}
+
+	return branch.length > 0 ? humanizeWorkspaceBranchLabel(branch) : name;
+}
+
 export function findSelectedRailSectionId(
 	selectedWorkspaceId: string | null | undefined,
 	groups: DccWorkspaceRailGroup[],
