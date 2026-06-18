@@ -704,6 +704,8 @@ pub(crate) fn create_change_request(
             base_branch,
             "--head",
             head_branch,
+            "--assignee",
+            "@me",
         ])
         .output()
         .map_err(|e| e.to_string())?;
