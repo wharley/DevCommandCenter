@@ -3,6 +3,7 @@ import {
 	Archive,
 	ChevronRight,
 	FolderPlus,
+	Loader2,
 	MoreHorizontal,
 	PanelLeft,
 	PanelRight,
@@ -1062,7 +1063,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								void handleConfirmProjectRemoval();
 							}}
 						>
-							{t("sidebar.removeProjectConfirm")}
+							{isRemovingProject ? (
+								<>
+									<Loader2 className="size-3.5 animate-spin" aria-hidden />
+									{t("sidebar.removeProjectConfirming")}
+								</>
+							) : (
+								t("sidebar.removeProjectConfirm")
+							)}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

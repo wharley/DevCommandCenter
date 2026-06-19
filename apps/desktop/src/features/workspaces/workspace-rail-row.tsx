@@ -1,6 +1,6 @@
 import { cva } from "class-variance-authority";
-import { Archive, GitBranch, RotateCcw, Trash2 } from "lucide-react";
-import { memo } from "react";
+import { Archive, GitBranch, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -70,6 +70,25 @@ export const WorkspaceRailRowItem = memo(
 		const { t } = useTranslation("common");
 		const branchTone = branchToneFromWorkspace(workspace);
 		const displayTitle = workspaceRailDisplayTitle(workspace);
+		const [pendingAction, setPendingAction] = useState<
+			"restore" | "delete" | null
+		>(null);
+
+		const runRowAction = (
+			action: "restore" | "delete",
+			handler: (workspaceId: string) => void | Promise<void>,
+		) => {
+			if (pendingAction) {
+				return;
+			}
+			setPendingAction(action);
+			Promise.resolve(handler(workspace.id)).catch(() => {
+				// On failure the row stays; clear pending so it can be retried.
+				setPendingAction(null);
+			});
+		};
+
+		const isPending = pendingAction !== null;
 
 		return (
 			<div className="px-[2px]">
@@ -81,11 +100,17 @@ export const WorkspaceRailRowItem = memo(
 					data-active={selected ? "true" : "false"}
 					data-workspace-id={workspace.id}
 					onClick={() => {
+						if (isPending) {
+							return;
+						}
 						onSelect?.(workspace.id);
 					}}
 					onKeyDown={(event) => {
 						if (event.key === "Enter" || event.key === " ") {
 							event.preventDefault();
+							if (isPending) {
+								return;
+							}
 							onSelect?.(workspace.id);
 						}
 					}}
@@ -93,6 +118,7 @@ export const WorkspaceRailRowItem = memo(
 						rowVariants({ active: selected }),
 						"w-full text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
 						workspace.status === "archived" && !selected && "opacity-50",
+						isPending && "pointer-events-none opacity-60",
 					)}
 				>
 					<div className="flex min-w-0 flex-1 items-center gap-2">
@@ -141,7 +167,12 @@ export const WorkspaceRailRowItem = memo(
 							)}
 						</div>
 					</div>
-					<div className="group/actions flex shrink-0 items-center gap-0.5 pr-2.5 opacity-0 transition-opacity group-hover/dccRailRow:opacity-100 group-focus-within/dccRailRow:opacity-100">
+					<div
+						className={cn(
+							"group/actions flex shrink-0 items-center gap-0.5 pr-2.5 transition-opacity group-hover/dccRailRow:opacity-100 group-focus-within/dccRailRow:opacity-100",
+							isPending ? "opacity-100" : "opacity-0",
+						)}
+					>
 						{workspace.status === "archived" ? (
 							<>
 								{onRestoreWorkspace && (
@@ -149,14 +180,27 @@ export const WorkspaceRailRowItem = memo(
 										type="button"
 										variant="ghost"
 										size="icon-xs"
-										aria-label="Restore workspace"
-										className="text-muted-foreground/60 hover:text-foreground"
+										aria-label={
+											pendingAction === "restore"
+												? t("sidebar.restoringWorkspace")
+												: "Restore workspace"
+										}
+										disabled={isPending}
+										className="text-muted-foreground/60 hover:text-foreground disabled:opacity-100"
 										onClick={(event) => {
 											event.stopPropagation();
-											onRestoreWorkspace(workspace.id);
+											runRowAction("restore", onRestoreWorkspace);
 										}}
 									>
-										<RotateCcw className="size-3.5" strokeWidth={2} aria-hidden />
+										{pendingAction === "restore" ? (
+											<Loader2
+												className="size-3.5 animate-spin"
+												strokeWidth={2}
+												aria-hidden
+											/>
+										) : (
+											<RotateCcw className="size-3.5" strokeWidth={2} aria-hidden />
+										)}
 									</Button>
 								)}
 								{onDeleteWorkspace && (
@@ -164,14 +208,27 @@ export const WorkspaceRailRowItem = memo(
 										type="button"
 										variant="ghost"
 										size="icon-xs"
-										aria-label="Delete workspace permanently"
-										className="text-muted-foreground/60 hover:text-destructive"
+										aria-label={
+											pendingAction === "delete"
+												? t("sidebar.deletingWorkspace")
+												: "Delete workspace permanently"
+										}
+										disabled={isPending}
+										className="text-muted-foreground/60 hover:text-destructive disabled:opacity-100"
 										onClick={(event) => {
 											event.stopPropagation();
-											onDeleteWorkspace(workspace.id);
+											runRowAction("delete", onDeleteWorkspace);
 										}}
 									>
-										<Trash2 className="size-3.5" strokeWidth={2} aria-hidden />
+										{pendingAction === "delete" ? (
+											<Loader2
+												className="size-3.5 animate-spin text-destructive"
+												strokeWidth={2}
+												aria-hidden
+											/>
+										) : (
+											<Trash2 className="size-3.5" strokeWidth={2} aria-hidden />
+										)}
 									</Button>
 								)}
 							</>
