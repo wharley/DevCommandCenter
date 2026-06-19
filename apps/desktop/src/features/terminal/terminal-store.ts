@@ -45,6 +45,8 @@ export const TERMINAL_OUTPUT_TRUNCATION =
 type TerminalEntry = TerminalSnapshot & {
 	listeners: Set<TerminalListener>;
 	spawnPromise: Promise<TerminalSnapshot> | null;
+	lastResizeCols: number | null;
+	lastResizeRows: number | null;
 };
 
 const entries = new Map<string, TerminalEntry>();
@@ -76,6 +78,8 @@ function getOrCreateEntry(terminalId: string): TerminalEntry {
 		truncated: false,
 		listeners: new Set(),
 		spawnPromise: null,
+		lastResizeCols: null,
+		lastResizeRows: null,
 	};
 	entries.set(entryKey, created);
 	return created;
@@ -318,7 +322,12 @@ export function resizeTerminalView(
 	if (!entry?.ptyId) {
 		return;
 	}
+	if (entry.lastResizeCols === cols && entry.lastResizeRows === rows) {
+		return;
+	}
 
+	entry.lastResizeCols = cols;
+	entry.lastResizeRows = rows;
 	void resizeTerminalApi(entry.ptyId, cols, rows);
 }
 

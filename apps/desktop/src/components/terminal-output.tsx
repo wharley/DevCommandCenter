@@ -146,7 +146,7 @@ function TerminalOutputImpl({
 
 		const fit = new FitAddon();
 		const terminal = new Terminal({
-			convertEol: true,
+			convertEol: false,
 			disableStdin: false,
 			scrollback: 5000,
 			fontSize,
@@ -163,31 +163,38 @@ function TerminalOutputImpl({
 		terminal.open(container);
 		terminal.element?.style.setProperty("padding", padding);
 
-		const refitListener = () => {
-			requestAnimationFrame(() => {
+		let fitFrame: number | null = null;
+		let lastFitWidth = -1;
+		let lastFitHeight = -1;
+		let lastResizeCols = -1;
+		let lastResizeRows = -1;
+
+		const fitNow = () => {
+			if (terminalFitSuspendCount > 0 || fitFrame !== null) return;
+			fitFrame = requestAnimationFrame(() => {
+				fitFrame = null;
+				const width = container.clientWidth;
+				const height = container.clientHeight;
+				if (width === 0 || height === 0) return;
+				if (width === lastFitWidth && height === lastFitHeight) return;
+				lastFitWidth = width;
+				lastFitHeight = height;
 				try {
 					fit.fit();
 				} catch {
 					// Detached container during resize transition.
 				}
 			});
+		};
+
+		const refitListener = () => {
+			fitNow();
 		};
 		terminalRefitListeners.add(refitListener);
 
 		const linkProviderDisposable = detectLinks
 			? terminal.registerLinkProvider(createHttpLinkProvider(terminal))
 			: null;
-
-		const fitNow = () => {
-			if (terminalFitSuspendCount > 0) return;
-			requestAnimationFrame(() => {
-				try {
-					fit.fit();
-				} catch {
-					// Detached container during resize transition.
-				}
-			});
-		};
 
 		fitNow();
 
@@ -196,6 +203,9 @@ function TerminalOutputImpl({
 		});
 
 		const resizeSub = terminal.onResize(({ cols, rows }) => {
+			if (cols === lastResizeCols && rows === lastResizeRows) return;
+			lastResizeCols = cols;
+			lastResizeRows = rows;
 			onResizeRef.current?.(cols, rows);
 		});
 
@@ -229,6 +239,9 @@ function TerminalOutputImpl({
 		}
 
 		return () => {
+			if (fitFrame !== null) {
+				cancelAnimationFrame(fitFrame);
+			}
 			dataSub.dispose();
 			resizeSub.dispose();
 			linkProviderDisposable?.dispose();
