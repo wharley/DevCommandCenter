@@ -226,6 +226,10 @@
       "forge": "Contexto de forge",
       "providers": "Catálogo de provedores"
     },
+    "identityChip": {
+      "commitAs": "Você vai commitar como {{handle}}{{location}}",
+      "mismatch": "Conta ativa {{handle}} difere da vinculada ao workspace (@{{bound}})"
+    },
     "fields": {
       "name": "Nome",
       "id": "Id",
@@ -584,6 +588,7 @@
     "workspacePathUnavailable": "Caminho do workspace indisponível",
     "branchOptionsAria": "Opções do branch",
     "syncBase": "Atualizar com base",
+    "syncBaseBehind": "Atualizar · {{count}} atrás",
     "syncingBase": "Atualizando...",
     "openBranchDetails": "Abrir detalhes do branch",
     "copyBranchName": "Copiar nome do branch"

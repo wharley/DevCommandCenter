@@ -226,6 +226,10 @@
       "forge": "Forge context",
       "providers": "Provider catalog"
     },
+    "identityChip": {
+      "commitAs": "You'll commit as {{handle}}{{location}}",
+      "mismatch": "Active account {{handle}} differs from the one bound to this workspace (@{{bound}})"
+    },
     "fields": {
       "name": "Name",
       "id": "Id",
@@ -584,6 +588,7 @@
     "workspacePathUnavailable": "Workspace path unavailable",
     "branchOptionsAria": "Branch options",
     "syncBase": "Update with base",
+    "syncBaseBehind": "Update · {{count}} behind",
     "syncingBase": "Updating...",
     "openBranchDetails": "Open branch details",
     "copyBranchName": "Copy branch name"

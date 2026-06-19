@@ -27,6 +27,10 @@ export function BranchToolbar({
 }) {
 	const { t } = useTranslation("common");
 	const canSyncBase = Boolean(onSyncBase);
+	const isBehind = behindOfRemoteCount > 0;
+	// When the branch is behind its base, surface the fix as a first-class
+	// inline action right next to the signal. Otherwise it stays in the overflow.
+	const showInlineSync = canSyncBase && (isBehind || isSyncingBase);
 
 	return (
 		<div
@@ -44,16 +48,31 @@ export function BranchToolbar({
 					<Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">
 						{t("branchToolbar.activeBadge")}
 					</Badge>
-					{behindOfRemoteCount > 0 ? (
-						<Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
-							{t("branchToolbar.behindBadge", { count: behindOfRemoteCount })}
-						</Badge>
-					) : null}
 				</div>
 				<p className="truncate text-[11px] text-muted-foreground">
 					{workspacePath ?? t("branchToolbar.workspacePathUnavailable")}
 				</p>
 			</div>
+			{showInlineSync ? (
+				<Button
+					type="button"
+					variant="secondary"
+					size="sm"
+					className="h-7 shrink-0 gap-1.5 rounded-lg px-2.5 text-[12px] font-medium"
+					disabled={isSyncingBase}
+					onClick={() => {
+						onSyncBase?.();
+					}}
+				>
+					<RefreshCw
+						className={cn("size-3.5", isSyncingBase && "animate-spin")}
+						aria-hidden
+					/>
+					{isSyncingBase
+						? t("branchToolbar.syncingBase")
+						: t("branchToolbar.syncBaseBehind", { count: behindOfRemoteCount })}
+				</Button>
+			) : null}
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>
 					<Button
@@ -67,21 +86,23 @@ export function BranchToolbar({
 					</Button>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end" sideOffset={6} className="min-w-44">
-					<DropdownMenuItem
-						className="gap-2 text-[13px]"
-						disabled={!canSyncBase || isSyncingBase}
-						onSelect={() => {
-							onSyncBase?.();
-						}}
-					>
-						<RefreshCw
-							className={cn("size-4", isSyncingBase && "animate-spin")}
-							aria-hidden
-						/>
-						{isSyncingBase
-							? t("branchToolbar.syncingBase")
-							: t("branchToolbar.syncBase")}
-					</DropdownMenuItem>
+					{canSyncBase && !isBehind ? (
+						<DropdownMenuItem
+							className="gap-2 text-[13px]"
+							disabled={isSyncingBase}
+							onSelect={() => {
+								onSyncBase?.();
+							}}
+						>
+							<RefreshCw
+								className={cn("size-4", isSyncingBase && "animate-spin")}
+								aria-hidden
+							/>
+							{isSyncingBase
+								? t("branchToolbar.syncingBase")
+								: t("branchToolbar.syncBase")}
+						</DropdownMenuItem>
+					) : null}
 					<DropdownMenuItem className="gap-2 text-[13px]">
 						<GitCommitHorizontal className="size-4" aria-hidden />
 						{t("branchToolbar.openBranchDetails")}

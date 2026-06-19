@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ChevronsRight, ExternalLink, RotateCcw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceCommitButton } from "@/features/commit";
@@ -37,6 +38,7 @@ export type GitSectionHeaderProps = {
   prUrl?: string | null;
   prNumber?: number | null;
   prProvider?: string | null;
+  identitySlot?: ReactNode;
   className?: string;
 };
 
@@ -53,6 +55,7 @@ export function GitSectionHeader({
   prUrl = null,
   prNumber = null,
   prProvider = null,
+  identitySlot = null,
   className,
 }: GitSectionHeaderProps) {
   const highlightClass = gitSectionHeaderHighlightClass(commitMode);
@@ -101,6 +104,7 @@ export function GitSectionHeader({
             {prNumber ? ` #${prNumber}` : ""}
           </Button>
         ) : null}
+        {identitySlot}
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         {showContinue ? (

@@ -251,6 +251,64 @@ function ForgeAccountAvatar({
 	);
 }
 
+/**
+ * Compact, always-visible identity marker for the Git action surface: answers
+ * "which account am I about to commit/push as?" right next to the commit button.
+ * Turns amber when the active account diverges from the one bound to the workspace.
+ */
+function ForgeIdentityChip({
+	avatarUrl,
+	label,
+	login,
+	boundLogin,
+	provider,
+	host,
+}: {
+	avatarUrl?: string | null;
+	label: string;
+	login: string;
+	boundLogin?: string | null;
+	provider?: ForgeCliProvider | null;
+	host?: string | null;
+}) {
+	const { t } = useTranslation("common");
+	const handle = `@${login}`;
+	const location = host ? ` (${host})` : "";
+	const mismatch = Boolean(boundLogin && boundLogin !== login);
+
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<span
+					className={cn(
+						"flex min-w-0 items-center gap-1.5 rounded-full border px-1.5 py-0.5 text-[11px] font-medium",
+						mismatch
+							? "border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+							: "border-border/60 bg-background/80 text-muted-foreground",
+					)}
+				>
+					<ForgeAccountAvatar avatarUrl={avatarUrl} label={label} size="sm" />
+					<span className="max-w-[7rem] truncate">{handle}</span>
+					{provider ? (
+						<span
+							aria-hidden
+							className={cn(
+								"size-1.5 shrink-0 rounded-full",
+								forgeProviderDotClass(provider),
+							)}
+						/>
+					) : null}
+				</span>
+			</TooltipTrigger>
+			<TooltipContent side="bottom">
+				{mismatch
+					? t("inspector.identityChip.mismatch", { handle, bound: boundLogin })
+					: t("inspector.identityChip.commitAs", { handle, location })}
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
 function inspectorActionTitle(mode: string, requestLabel: "PR" | "MR") {
 	switch (mode) {
 		case "create-pr":
@@ -1221,6 +1279,18 @@ export function WorkspaceInspectorSidebar({
 					prUrl={prStatus?.url ?? null}
 					prNumber={prStatus?.number ?? null}
 					prProvider={prStatus?.provider ?? null}
+					identitySlot={
+						forgeConnected && forgeIdentityLogin ? (
+							<ForgeIdentityChip
+								avatarUrl={forgeIdentityAccount?.avatarUrl}
+								label={forgeIdentityLabel}
+								login={forgeIdentityLogin}
+								boundLogin={boundForgeLogin}
+								provider={workspaceForgeContext?.provider ?? null}
+								host={workspaceForgeContext?.host ?? null}
+							/>
+						) : null
+					}
 				/>
 
 				<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 pb-3 pt-2">
