@@ -35,9 +35,10 @@ use crate::{
         broken_workspace_message, cleanup_workspace_files, ensure_pushable_branch,
         find_workspace_by_root, next_available_branch_name, preflight_workspace_root,
         purge_broken_workspace_by_root, push_branch_refspec, resolve_branch_diff_base,
-        resolve_current_branch_name, resolve_workspace_active_root,
-        resolve_workspace_broken_reason, resolve_workspace_setup_root,
-        resolve_workspace_target_branch,
+        resolve_current_branch_name, resolve_current_commit_sha, resolve_default_remote_name,
+        resolve_workspace_active_root, resolve_workspace_broken_reason,
+        resolve_workspace_setup_root, resolve_workspace_target_branch,
+        run_git_network_output_with_workspace_auth,
     },
     events::TauriEventBus,
     git::{
@@ -322,6 +323,24 @@ pub struct WorkspaceGitCommitPushInput {
 pub struct WorkspaceGitPushInput {
     pub workspace_root: String,
     pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitSyncBaseInput {
+    pub workspace_root: String,
+    pub base_branch: Option<String>,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitSyncBaseOutput {
+    pub branch: String,
+    pub base_branch: String,
+    pub remote: String,
+    pub updated: bool,
+    pub conflict_count: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -823,6 +842,110 @@ pub async fn workspace_git_push(
         protected_branch.as_deref(),
         input.forge_login.as_deref(),
     )
+}
+
+fn normalize_base_branch_for_sync(value: &str, remote: &str) -> Option<String> {
+    let mut trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "HEAD" {
+        return None;
+    }
+
+    if let Some(stripped) = trimmed.strip_prefix("refs/heads/") {
+        trimmed = stripped.trim();
+    } else if let Some(stripped) = trimmed.strip_prefix("refs/remotes/") {
+        trimmed = stripped.trim();
+    }
+
+    for prefix in [format!("{remote}/"), "origin/".to_string()] {
+        if let Some(stripped) = trimmed.strip_prefix(prefix.as_str()) {
+            trimmed = stripped.trim();
+            break;
+        }
+    }
+
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn validate_branch_for_fetch(root: &str, branch: &str) -> Result<(), String> {
+    let output = run_git_output(root, &["check-ref-format", "--branch", branch])?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(git_output_err(
+        "git check-ref-format --branch",
+        &output.stderr,
+    ))
+}
+
+#[tauri::command]
+pub async fn workspace_git_sync_base(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitSyncBaseInput,
+) -> Result<WorkspaceGitSyncBaseOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+
+    if git_command_succeeds(root, &["rev-parse", "--verify", "-q", "MERGE_HEAD"]) {
+        return Err(
+            "a merge is already in progress; resolve it before updating the base".to_string(),
+        );
+    }
+
+    let remote = resolve_default_remote_name(root)?;
+    let workspace_target_branch = resolve_workspace_target_branch(&state, root).await;
+    let default_branch = resolve_default_branch_name(root).ok();
+    let base_branch = input
+        .base_branch
+        .as_deref()
+        .and_then(|branch| normalize_base_branch_for_sync(branch, &remote))
+        .or_else(|| {
+            workspace_target_branch
+                .as_deref()
+                .and_then(|branch| normalize_base_branch_for_sync(branch, &remote))
+        })
+        .or_else(|| {
+            default_branch
+                .as_deref()
+                .and_then(|branch| normalize_base_branch_for_sync(branch, &remote))
+        })
+        .unwrap_or_else(|| "main".to_string());
+
+    validate_branch_for_fetch(root, &base_branch)?;
+    let branch = resolve_current_branch_name(root)?;
+    let before = resolve_current_commit_sha(root)?.unwrap_or_default();
+    let fetch = run_git_network_output_with_workspace_auth(
+        &state.db_path,
+        root,
+        &["fetch", &remote, &base_branch],
+        input.forge_login.as_deref(),
+    )?;
+    if !fetch.status.success() {
+        return Err(git_output_err("git fetch", &fetch.stderr));
+    }
+
+    let merge = run_git_output(root, &["merge", "--no-edit", "FETCH_HEAD"])?;
+    let conflict_count = resolve_conflict_count(root).unwrap_or(0);
+    if !merge.status.success() {
+        let detail = git_output_err("git merge", &merge.stderr);
+        if conflict_count > 0 {
+            return Err(format!(
+                "{detail}\nMerge left {conflict_count} conflicting file(s) in the worktree."
+            ));
+        }
+        return Err(detail);
+    }
+
+    let after = resolve_current_commit_sha(root)?.unwrap_or_default();
+    Ok(WorkspaceGitSyncBaseOutput {
+        branch,
+        base_branch,
+        remote,
+        updated: before != after,
+        conflict_count,
+    })
 }
 
 fn file_name_from_path(path: &str) -> String {

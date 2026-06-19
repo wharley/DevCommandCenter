@@ -287,7 +287,7 @@ pub(crate) fn workspace_branch_hints(root: &str, branch: Option<&str>) -> Vec<St
     hints
 }
 
-fn resolve_default_remote_name(root: &str) -> Result<String, String> {
+pub(crate) fn resolve_default_remote_name(root: &str) -> Result<String, String> {
     let output = run_git_output(root, &["remote"])?;
     if !output.status.success() {
         return Err(git_output_err("git remote", &output.stderr));
@@ -352,31 +352,41 @@ pub(crate) fn push_branch_refspec(
 
     let remote = resolve_default_remote_name(root)?;
     let remote_ref = format!("HEAD:refs/heads/{branch}");
+    let output = run_git_network_output_with_workspace_auth(
+        db_path,
+        root,
+        &["push", "-u", &remote, &remote_ref],
+        forge_login,
+    )?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    Err(git_output_err("git push -u", &output.stderr))
+}
+
+pub(crate) fn run_git_network_output_with_workspace_auth(
+    db_path: &Path,
+    root: &str,
+    args: &[&str],
+    forge_login: Option<&str>,
+) -> Result<std::process::Output, String> {
     let auth = forge_context::resolve_workspace_git_auth(db_path, root, forge_login)?;
-    let output = if let Some(auth) = auth {
+    if let Some(auth) = auth {
         let extraheader_key = format!("http.https://{}/.extraheader", auth.host);
         let extraheader_value = format!(
             "AUTHORIZATION: Basic {}",
             base64_encode(&auth.git_http_authorization)
         );
         let config_arg = format!("{extraheader_key}={extraheader_value}");
-        let args = [
-            "-c",
-            config_arg.as_str(),
-            "push",
-            "-u",
-            &remote,
-            &remote_ref,
-        ];
-        run_git_network_output_with_env(root, &args, &auth.envs)?
+        let mut authed_args = Vec::with_capacity(args.len() + 2);
+        authed_args.push("-c");
+        authed_args.push(config_arg.as_str());
+        authed_args.extend_from_slice(args);
+        run_git_network_output_with_env(root, &authed_args, &auth.envs)
     } else {
-        run_git_network_output(root, &["push", "-u", &remote, &remote_ref])?
-    };
-    if output.status.success() {
-        return Ok(());
+        run_git_network_output(root, args)
     }
-
-    Err(git_output_err("git push -u", &output.stderr))
 }
 
 fn branch_name_from_worktree_path(root: &str) -> String {

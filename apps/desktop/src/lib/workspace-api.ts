@@ -37,6 +37,8 @@ import type {
 	WorkspaceGitPushInput,
 	WorkspaceGitStatusInput,
 	WorkspaceGitStatusOutput,
+	WorkspaceGitSyncBaseInput,
+	WorkspaceGitSyncBaseOutput,
 	SaveMissionValidationInput,
 	SaveMissionValidationOutput,
 	WorkspaceForgeContextInput,
@@ -204,6 +206,12 @@ export function workspaceGitCommitPush(input: WorkspaceGitCommitPushInput) {
 
 export function workspaceGitPush(input: WorkspaceGitPushInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceGitPush, { input });
+}
+
+export function workspaceGitSyncBase(input: WorkspaceGitSyncBaseInput) {
+	return invoke<WorkspaceGitSyncBaseOutput>(WORKSPACE_METHODS.workspaceGitSyncBase, {
+		input,
+	});
 }
 
 export function workspaceContinueFromBaseBranch(input: WorkspaceContinueFromBaseBranchInput) {

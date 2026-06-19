@@ -27,5 +27,5 @@ pub use workspace_commands::{
     workspace_continue_from_base_branch, workspace_git_commit_push, workspace_git_discard_file,
     workspace_git_file_preview, workspace_git_file_preview_content, workspace_git_push,
     workspace_git_stage_all, workspace_git_stage_file, workspace_git_status,
-    workspace_git_unstage_file, workspace_run_setup,
+    workspace_git_sync_base, workspace_git_unstage_file, workspace_run_setup,
 };

@@ -13,7 +13,8 @@ use dcc_tauri::{
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
-        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceIdInput,
+        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
+        WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceIdInput,
         WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
     },
     state::WorkspaceCommandState,
@@ -168,6 +169,14 @@ pub async fn workspace_git_push(
     input: WorkspaceGitPushInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::workspace_commands::workspace_git_push(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_sync_base(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitSyncBaseInput,
+) -> Result<WorkspaceGitSyncBaseOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_sync_base(state, input).await
 }
 
 #[tauri::command]

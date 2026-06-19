@@ -48,8 +48,8 @@ use dcc_tauri::commands::{
         WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
         WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput,
         WorkspaceGitPathInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
-        WorkspaceGitStatusOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
-        WorkspaceSetupHint,
+        WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput,
+        WorkspaceRunSetupInput, WorkspaceRunSetupOutput, WorkspaceSetupHint,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -100,6 +100,7 @@ struct WorkspaceMethods {
     workspace_git_stage_all: String,
     workspace_git_stage_file: String,
     workspace_git_status: String,
+    workspace_git_sync_base: String,
     workspace_git_unstage_file: String,
     workspace_run_setup: String,
 }
@@ -219,6 +220,8 @@ fn main() {
         .typ::<WorkspaceGitPathInput>()
         .typ::<WorkspaceGitCommitPushInput>()
         .typ::<WorkspaceGitPushInput>()
+        .typ::<WorkspaceGitSyncBaseInput>()
+        .typ::<WorkspaceGitSyncBaseOutput>()
         .typ::<ListProvidersOutput>()
         .typ::<StartThreadInput>()
         .typ::<StartThreadOutput>()
@@ -285,6 +288,7 @@ fn main() {
                 workspace_git_stage_all: "workspace_git_stage_all".to_string(),
                 workspace_git_stage_file: "workspace_git_stage_file".to_string(),
                 workspace_git_status: "workspace_git_status".to_string(),
+                workspace_git_sync_base: "workspace_git_sync_base".to_string(),
                 workspace_git_unstage_file: "workspace_git_unstage_file".to_string(),
                 workspace_run_setup: "workspace_run_setup".to_string(),
             },

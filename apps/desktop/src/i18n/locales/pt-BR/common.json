@@ -123,6 +123,23 @@
       "title": "Atividade e contexto do workspace",
       "eventsCount": "{{count}} eventos"
     },
+    "gitConfirmation": {
+      "mergeTitle": "Mesclar {{requestLabel}}?",
+      "mergeDescription": "Esta ação vai mesclar o {{requestLabel}} atual. Use somente quando você tiver certeza de que a task está pronta.",
+      "syncTitle": "Atualizar worktree com a base?",
+      "syncDescription": "Esta ação vai buscar a base mais recente e fazer merge neste worktree. Se houver conflito, o worktree ficará em estado de resolução de merge.",
+      "syncDescriptionWithBase": "Esta ação vai buscar a base mais recente e fazer merge neste worktree a partir de {{baseBranch}}. Se houver conflito, o worktree ficará em estado de resolução de merge.",
+      "cancel": "Cancelar",
+      "mergeConfirm": "Mesclar {{requestLabel}}",
+      "syncConfirm": "Atualizar worktree",
+      "syncLoading": "Atualizando worktree com a base...",
+      "mergeLoading": "Mesclando {{requestLabel}}...",
+      "syncSuccess": "Worktree atualizado com {{baseRef}}",
+      "syncAlreadyCurrent": "Worktree já estava atualizado com {{baseRef}}",
+      "syncFailed": "Falha ao atualizar: {{message}}",
+      "mergeSuccess": "{{requestLabel}} mesclado",
+      "mergeFailed": "Falha ao mesclar {{requestLabel}}: {{message}}"
+    },
     "tabs": {
       "activity": "Atividade",
       "context": "Contexto",
@@ -563,8 +580,11 @@
   "branchToolbar": {
     "noBranch": "Sem branch",
     "activeBadge": "Ativa",
+    "behindBadge": "{{count}} atrás",
     "workspacePathUnavailable": "Caminho do workspace indisponível",
     "branchOptionsAria": "Opções do branch",
+    "syncBase": "Atualizar com base",
+    "syncingBase": "Atualizando...",
     "openBranchDetails": "Abrir detalhes do branch",
     "copyBranchName": "Copiar nome do branch"
   },

@@ -15,6 +15,14 @@ import { BranchToolbar } from "@/components/BranchToolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import {
 	Popover,
 	PopoverContent,
 	PopoverDescription,
@@ -54,6 +62,7 @@ import {
 	workspaceGitCommitPush,
 	workspaceGitStageAll,
 	workspaceGitPush,
+	workspaceGitSyncBase,
 	workspaceRunSetup,
 } from "@/lib/workspace-api";
 import { buildMissionSpecFilename } from "@/features/composer/WorkspaceComposer.logic";
@@ -86,6 +95,7 @@ import { sessionStateLabel } from "@/i18n/session-state-label";
 import type { WorkspaceStatus } from "@/features/workspaces/types";
 import { setupReportDescription } from "@/features/workspaces/workspace-setup-report";
 import type { ForgeCliProvider } from "@dcc/contracts";
+import { cn } from "@/lib/utils";
 
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
@@ -145,6 +155,7 @@ const MAX_SECTION_HEIGHT = 640;
 const INITIAL_CHANGES_HEIGHT = 200;
 
 type InspectorTab = "activity" | "context" | "spec" | "plan";
+type PendingGitConfirmation = "merge" | "sync-base" | null;
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
 	return (
@@ -198,6 +209,46 @@ function forgeIdentityInitials(value: string): string {
 
 function forgeProviderDotClass(provider: ForgeCliProvider): string {
 	return provider === "gitlab" ? "bg-[#FC6D26]" : "bg-foreground";
+}
+
+function ForgeAccountAvatar({
+	avatarUrl,
+	label,
+	size = "md",
+}: {
+	avatarUrl?: string | null;
+	label: string;
+	size?: "sm" | "md";
+}) {
+	const [failed, setFailed] = useState(false);
+	const sizeClass =
+		size === "sm"
+			? "size-4 text-[8px] font-semibold"
+			: "size-10 text-[13px] font-semibold";
+	const baseClass =
+		"shrink-0 overflow-hidden rounded-full border border-border/60 bg-background uppercase text-foreground";
+
+	if (avatarUrl && !failed) {
+		return (
+			<img
+				src={avatarUrl}
+				alt=""
+				aria-hidden
+				className={cn(baseClass, sizeClass, "object-cover")}
+				onError={() => setFailed(true)}
+				referrerPolicy="no-referrer"
+			/>
+		);
+	}
+
+	return (
+		<span
+			aria-hidden
+			className={cn(baseClass, sizeClass, "flex items-center justify-center")}
+		>
+			{forgeIdentityInitials(label)}
+		</span>
+	);
 }
 
 function inspectorActionTitle(mode: string, requestLabel: "PR" | "MR") {
@@ -448,8 +499,11 @@ export function WorkspaceInspectorSidebar({
 	const prStatus = prStatusQuery.data ?? null;
 	const [forgeConnectOpen, setForgeConnectOpen] = useState(false);
 	const [isContinuingWorkspace, setIsContinuingWorkspace] = useState(false);
+	const [isSyncingBase, setIsSyncingBase] = useState(false);
 	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
 	const [isCompilingSpecContext, setIsCompilingSpecContext] = useState(false);
+	const [pendingGitConfirmation, setPendingGitConfirmation] =
+		useState<PendingGitConfirmation>(null);
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const hasWorkingTreeChanges =
 		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
@@ -458,9 +512,19 @@ export function WorkspaceInspectorSidebar({
 	const forgeNeedsConnect = workspaceForgeContext?.remoteState === "unauthenticated";
 	const forgeUnavailable = workspaceForgeContext?.remoteState === "unavailable";
 	const forgeConnected = workspaceForgeContext?.remoteState === "ok";
+	const selectedForgeAccount = useMemo(() => {
+		if (!selectedForgeLogin) {
+			return null;
+		}
+		return (
+			forgeAccounts.find((account) => account.login === selectedForgeLogin) ?? null
+		);
+	}, [forgeAccounts, selectedForgeLogin]);
+	const forgeIdentityAccount = selectedForgeAccount ?? boundForgeAccount;
+	const forgeIdentityLogin = selectedForgeLogin ?? boundForgeLogin;
 	const forgeIdentityLabel =
-		boundForgeAccount?.name?.trim() || boundForgeLogin || forgeContext.providerLabel;
-	const forgeIdentitySubtitle = boundForgeLogin ? `@${boundForgeLogin}` : null;
+		forgeIdentityAccount?.name?.trim() || forgeIdentityLogin || forgeContext.providerLabel;
+	const forgeIdentitySubtitle = forgeIdentityLogin ? `@${forgeIdentityLogin}` : null;
 	const isSetupPending = workspaceStatus === "setup_pending";
 	const setupReportSummary =
 		workspaceSetupReport == null
@@ -482,6 +546,11 @@ export function WorkspaceInspectorSidebar({
 		if (!root) {
 			toast.error("No workspace path");
 			throw new Error("No workspace path");
+		}
+
+		if (commitMode === "merge") {
+			setPendingGitConfirmation("merge");
+			return;
 		}
 
 		const loadingToast = toast.loading(
@@ -533,13 +602,6 @@ export function WorkspaceInspectorSidebar({
 					toast.success(`${forgeContext.requestLabel} aberto no navegador`, {
 						id: loadingToast,
 					});
-					break;
-				case "merge":
-					await workspaceChangeRequestMerge({
-						workspaceRoot: root,
-						forgeLogin: selectedForgeLogin,
-					});
-					toast.success(`${forgeContext.requestLabel} mesclado`, { id: loadingToast });
 					break;
 				case "fix":
 				case "resolve-conflicts":
@@ -619,6 +681,104 @@ export function WorkspaceInspectorSidebar({
 		workspacePath,
 		workspaceName,
 	]);
+
+	const executeConfirmedMerge = useCallback(async () => {
+		const root = workspacePath?.trim();
+		if (!root) {
+			toast.error("No workspace path");
+			return;
+		}
+
+		const loadingToast = toast.loading(
+			t("inspector.gitConfirmation.mergeLoading", {
+				requestLabel: forgeContext.requestLabel,
+			}),
+		);
+		try {
+			await workspaceChangeRequestMerge({
+				workspaceRoot: root,
+				forgeLogin: selectedForgeLogin,
+			});
+			toast.success(
+				t("inspector.gitConfirmation.mergeSuccess", {
+					requestLabel: forgeContext.requestLabel,
+				}),
+				{ id: loadingToast },
+			);
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+			});
+		} catch (error) {
+			const message = getInspectorActionErrorMessage(error);
+			toast.error(
+				t("inspector.gitConfirmation.mergeFailed", {
+					requestLabel: forgeContext.requestLabel,
+					message,
+				}),
+				{ id: loadingToast },
+			);
+		}
+	}, [forgeContext.requestLabel, queryClient, selectedForgeLogin, t, workspacePath]);
+
+	const executeConfirmedSyncBase = useCallback(async () => {
+		const root = workspacePath?.trim();
+		if (!root) {
+			toast.error("No workspace path");
+			return;
+		}
+
+		setIsSyncingBase(true);
+		const loadingToast = toast.loading(t("inspector.gitConfirmation.syncLoading"));
+		try {
+			const result = await workspaceGitSyncBase({
+				workspaceRoot: root,
+				baseBranch: prStatus?.baseBranch ?? null,
+				forgeLogin: selectedForgeLogin,
+			});
+			const baseRef = `${result.remote}/${result.baseBranch}`;
+			if (result.updated) {
+				toast.success(t("inspector.gitConfirmation.syncSuccess", { baseRef }), {
+					id: loadingToast,
+				});
+			} else {
+				toast.info(t("inspector.gitConfirmation.syncAlreadyCurrent", { baseRef }), {
+					id: loadingToast,
+				});
+			}
+		} catch (error) {
+			const message = getInspectorActionErrorMessage(error);
+			toast.error(t("inspector.gitConfirmation.syncFailed", { message }), {
+				id: loadingToast,
+			});
+		} finally {
+			setIsSyncingBase(false);
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+			});
+		}
+	}, [prStatus?.baseBranch, queryClient, selectedForgeLogin, t, workspacePath]);
+
+	const handleSyncBase = useCallback(() => {
+		setPendingGitConfirmation("sync-base");
+	}, []);
 
 	const handleContinueWorkspace = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -1065,7 +1225,13 @@ export function WorkspaceInspectorSidebar({
 
 				<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 pb-3 pt-2">
 					<div className="shrink-0">
-						<BranchToolbar branch={currentBranch} workspacePath={workspacePath} />
+						<BranchToolbar
+							branch={currentBranch}
+							workspacePath={workspacePath}
+							behindOfRemoteCount={gitStatusQuery.data?.behindOfRemoteCount ?? 0}
+							isSyncingBase={isSyncingBase}
+							onSyncBase={handleSyncBase}
+						/>
 					</div>
 					{pathLine ? (
 						<p
@@ -1233,12 +1399,10 @@ export function WorkspaceInspectorSidebar({
 									</p>
 									<div className="rounded-md border border-border/50 bg-muted/10 p-3">
 										<div className="flex items-center gap-3">
-											<span
-												aria-hidden
-												className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border/60 bg-background text-[13px] font-semibold uppercase text-foreground"
-											>
-												{forgeIdentityInitials(forgeIdentityLabel)}
-											</span>
+											<ForgeAccountAvatar
+												avatarUrl={forgeIdentityAccount?.avatarUrl}
+												label={forgeIdentityLabel}
+											/>
 											<div className="min-w-0 flex-1">
 												<div className="flex flex-wrap items-center gap-2">
 													<span className="truncate text-[13px] font-semibold text-foreground">
@@ -1314,10 +1478,16 @@ export function WorkspaceInspectorSidebar({
 																	variant={active ? "default" : "outline"}
 																	size="sm"
 																	title={account.email ?? undefined}
+																	className="gap-2"
 																	onClick={() => {
 																		void handleSelectForgeLogin(account.login);
 																	}}
 																>
+																	<ForgeAccountAvatar
+																		avatarUrl={account.avatarUrl}
+																		label={label}
+																		size="sm"
+																	/>
 																	{label}
 																</Button>
 															);
@@ -1834,6 +2004,66 @@ export function WorkspaceInspectorSidebar({
 				</Tabs>
 			</section>
 			</div>
+			<Dialog
+				open={pendingGitConfirmation !== null}
+				onOpenChange={(open) => {
+					if (!open) {
+						setPendingGitConfirmation(null);
+					}
+				}}
+			>
+				<DialogContent showCloseButton={false}>
+					<DialogHeader>
+						<DialogTitle>
+							{pendingGitConfirmation === "merge"
+								? t("inspector.gitConfirmation.mergeTitle", {
+										requestLabel: forgeContext.requestLabel,
+									})
+								: t("inspector.gitConfirmation.syncTitle")}
+						</DialogTitle>
+						<DialogDescription className="text-[12px] leading-relaxed">
+							{pendingGitConfirmation === "merge"
+								? t("inspector.gitConfirmation.mergeDescription", {
+										requestLabel: forgeContext.requestLabel,
+									})
+								: prStatus?.baseBranch
+									? t("inspector.gitConfirmation.syncDescriptionWithBase", {
+											baseBranch: prStatus.baseBranch,
+										})
+									: t("inspector.gitConfirmation.syncDescription")}
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							type="button"
+							variant="outline"
+							onClick={() => setPendingGitConfirmation(null)}
+						>
+							{t("inspector.gitConfirmation.cancel")}
+						</Button>
+						<Button
+							type="button"
+							variant={pendingGitConfirmation === "merge" ? "destructive" : "default"}
+							disabled={isSyncingBase}
+							onClick={() => {
+								const action = pendingGitConfirmation;
+								setPendingGitConfirmation(null);
+								if (action === "merge") {
+									void executeConfirmedMerge();
+								} else if (action === "sync-base") {
+									void executeConfirmedSyncBase();
+								}
+							}}
+						>
+							{pendingGitConfirmation === "merge"
+								? t("inspector.gitConfirmation.mergeConfirm", {
+										requestLabel: forgeContext.requestLabel,
+									})
+								: t("inspector.gitConfirmation.syncConfirm")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 			<ForgeConnectDialog
 				open={forgeConnectOpen}
 				onOpenChange={setForgeConnectOpen}

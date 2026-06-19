@@ -123,6 +123,23 @@
       "title": "Activity and workspace context",
       "eventsCount": "{{count}} events"
     },
+    "gitConfirmation": {
+      "mergeTitle": "Merge {{requestLabel}}?",
+      "mergeDescription": "This will merge the current {{requestLabel}}. Use it only when you are sure the task is ready.",
+      "syncTitle": "Update worktree with base?",
+      "syncDescription": "This will fetch the latest base and merge it into this worktree. If there is a conflict, the worktree will be left in merge resolution state.",
+      "syncDescriptionWithBase": "This will fetch the latest base and merge {{baseBranch}} into this worktree. If there is a conflict, the worktree will be left in merge resolution state.",
+      "cancel": "Cancel",
+      "mergeConfirm": "Merge {{requestLabel}}",
+      "syncConfirm": "Update worktree",
+      "syncLoading": "Updating worktree with base...",
+      "mergeLoading": "Merging {{requestLabel}}...",
+      "syncSuccess": "Worktree updated with {{baseRef}}",
+      "syncAlreadyCurrent": "Worktree was already current with {{baseRef}}",
+      "syncFailed": "Update failed: {{message}}",
+      "mergeSuccess": "{{requestLabel}} merged",
+      "mergeFailed": "Failed to merge {{requestLabel}}: {{message}}"
+    },
     "tabs": {
       "activity": "Activity",
       "context": "Context",
@@ -563,8 +580,11 @@
   "branchToolbar": {
     "noBranch": "No branch",
     "activeBadge": "active",
+    "behindBadge": "{{count}} behind",
     "workspacePathUnavailable": "Workspace path unavailable",
     "branchOptionsAria": "Branch options",
+    "syncBase": "Update with base",
+    "syncingBase": "Updating...",
     "openBranchDetails": "Open branch details",
     "copyBranchName": "Copy branch name"
   },

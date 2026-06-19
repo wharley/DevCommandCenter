@@ -79,6 +79,49 @@ type SettingsDialogProps = {
 	onInstallUpdate?: () => void;
 };
 
+function forgeAccountInitials(value: string): string {
+	return (
+		value
+			.split(/[\s@._/-]+/)
+			.map((part) => part.trim())
+			.filter(Boolean)
+			.slice(0, 2)
+			.map((part) => part[0]?.toUpperCase() ?? "")
+			.join("") || "FG"
+	);
+}
+
+function ForgeAccountAvatar({
+	avatarUrl,
+	label,
+}: {
+	avatarUrl?: string | null;
+	label: string;
+}) {
+	const [failed, setFailed] = useState(false);
+	const className =
+		"size-4 shrink-0 overflow-hidden rounded-full border border-border/60 bg-background text-[8px] font-semibold uppercase text-foreground";
+
+	if (avatarUrl && !failed) {
+		return (
+			<img
+				src={avatarUrl}
+				alt=""
+				aria-hidden
+				className={cn(className, "object-cover")}
+				onError={() => setFailed(true)}
+				referrerPolicy="no-referrer"
+			/>
+		);
+	}
+
+	return (
+		<span aria-hidden className={cn(className, "flex items-center justify-center")}>
+			{forgeAccountInitials(label)}
+		</span>
+	);
+}
+
 export type SettingsSectionId =
 	| "general"
 	| "appearance"
@@ -381,6 +424,7 @@ function ForgeCliIntegrationCard() {
 											variant={active ? "default" : "outline"}
 											size="sm"
 											title={title}
+											className="gap-2"
 											onClick={() => {
 												void setForgeCliSelectedLogin(
 													provider,
@@ -398,6 +442,10 @@ function ForgeCliIntegrationCard() {
 												});
 											}}
 										>
+											<ForgeAccountAvatar
+												avatarUrl={account.avatarUrl}
+												label={label}
+											/>
 											{label}
 										</Button>
 									);
