@@ -106,7 +106,9 @@ export async function createFileEditor(options: {
 	const runtime = await ensureRuntime();
 	const { monaco } = runtime;
 	const language = resolveLanguageId(monaco, options.path);
-	const model = monaco.editor.createModel(options.content, language);
+	const modelUri = monaco.Uri.file(options.path);
+	monaco.editor.getModel(modelUri)?.dispose();
+	const model = monaco.editor.createModel(options.content, language, modelUri);
 
 	fileContentCache.set(options.path, options.content);
 
@@ -556,6 +558,7 @@ async function ensureRuntime(): Promise<MonacoRuntime> {
 			const monaco = await import("monaco-editor");
 
 			installMonacoEnvironment();
+			configureTypeScriptLanguageService(monaco);
 			installEditorTheme(monaco);
 			installThemeObserver(monaco);
 
@@ -564,6 +567,33 @@ async function ensureRuntime(): Promise<MonacoRuntime> {
 	}
 
 	return runtimePromise;
+}
+
+function configureTypeScriptLanguageService(monaco: MonacoModule) {
+	const typescript = monaco.typescript;
+	const compilerOptions: Monaco.typescript.CompilerOptions = {
+		allowJs: true,
+		allowNonTsExtensions: true,
+		allowSyntheticDefaultImports: true,
+		checkJs: false,
+		esModuleInterop: true,
+		jsx: typescript.JsxEmit.ReactJSX,
+		module: typescript.ModuleKind.ESNext,
+		moduleResolution: typescript.ModuleResolutionKind.NodeJs,
+		noEmit: true,
+		skipLibCheck: true,
+		strict: false,
+		target: typescript.ScriptTarget.ESNext,
+	};
+	const diagnosticsOptions: Monaco.typescript.DiagnosticsOptions = {
+		noSemanticValidation: true,
+		noSyntaxValidation: false,
+	};
+
+	typescript.typescriptDefaults.setCompilerOptions(compilerOptions);
+	typescript.javascriptDefaults.setCompilerOptions(compilerOptions);
+	typescript.typescriptDefaults.setDiagnosticsOptions(diagnosticsOptions);
+	typescript.javascriptDefaults.setDiagnosticsOptions(diagnosticsOptions);
 }
 
 function installThemeObserver(monaco: MonacoModule) {
