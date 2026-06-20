@@ -859,7 +859,25 @@
     "openWholeFile": "Abrir arquivo inteiro",
     "backToDiff": "Voltar para o diff",
     "loading": "Carregando arquivo…",
-    "empty": "Este arquivo não tem conteúdo para exibir."
+    "empty": "Este arquivo não tem conteúdo para exibir.",
+    "save": "Salvar",
+    "unsaved": "Alterações não salvas",
+    "saved": "{{name}} salvo",
+    "saveFailed": "Não foi possível salvar o arquivo",
+    "discardConfirm": "Descartar alterações não salvas?",
+    "reconcile": {
+      "title": "Este arquivo mudou no disco",
+      "description": "{{name}} foi alterado no disco depois que você abriu — provavelmente por um agente que compartilha este worktree. Escolha como resolver.",
+      "diskLabel": "No disco",
+      "mineLabel": "Sua edição",
+      "cancel": "Cancelar",
+      "takeDisk": "Recarregar do disco",
+      "overwrite": "Sobrescrever com a minha"
+    }
+  },
+  "fileTabs": {
+    "close": "Fechar aba",
+    "closeAll": "Fechar editor"
   },
   "quickOpen": {
     "title": "Abertura rápida",
@@ -867,5 +885,14 @@
     "placeholder": "Buscar arquivos pelo nome…",
     "loading": "Listando arquivos…",
     "empty": "Nenhum arquivo encontrado."
+  },
+  "workspaceSearch": {
+    "title": "Buscar no workspace",
+    "description": "Encontrar texto nos arquivos rastreados",
+    "placeholder": "Buscar texto nos arquivos…",
+    "hint": "Digite ao menos 2 caracteres para buscar.",
+    "searching": "Buscando…",
+    "empty": "Nenhum resultado.",
+    "truncated": "Mostrando os primeiros 200 resultados — refine a busca."
   }
 }

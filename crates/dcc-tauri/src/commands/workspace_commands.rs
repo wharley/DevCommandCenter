@@ -173,6 +173,49 @@ pub struct ReadWorkspaceFileOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct WriteWorkspaceFileInput {
+    pub workspace_root: String,
+    pub relative_path: String,
+    pub content: String,
+    /// When set, the write only proceeds if the file on disk still equals this
+    /// (compare-and-swap). A mismatch returns `conflicted` instead of overwriting.
+    pub expected_previous: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteWorkspaceFileOutput {
+    pub bytes_written: u32,
+    /// True when `expected_previous` no longer matched the disk; nothing was written.
+    pub conflicted: bool,
+    /// The current on-disk content, present only when `conflicted` is true.
+    pub disk_content: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchWorkspaceInput {
+    pub workspace_root: String,
+    pub query: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchWorkspaceMatch {
+    pub path: String,
+    pub line: u32,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchWorkspaceOutput {
+    pub matches: Vec<SearchWorkspaceMatch>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct ListMissionSpecsInput {
     pub workspace_root: String,
 }
@@ -1559,6 +1602,107 @@ pub async fn read_workspace_file(
         read_worktree_file_text(root, &rel)?.ok_or_else(|| "file not found".to_string())?;
 
     Ok(ReadWorkspaceFileOutput { content })
+}
+
+/// Writes `content` to an existing worktree file (path confined to the workspace
+/// root, no `..` escapes). Used by the editable file surface. The reconciliation
+/// against concurrent agent edits is handled client-side before this is called.
+#[tauri::command]
+pub async fn write_workspace_file(
+    state: State<'_, WorkspaceCommandState>,
+    input: WriteWorkspaceFileInput,
+) -> Result<WriteWorkspaceFileOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+
+    let rel = validate_git_relative_path(&input.relative_path)?;
+    let path = PathBuf::from(root).join(&rel);
+
+    // Compare-and-swap: verify the disk still matches what the caller last saw
+    // before overwriting. Doing the read+compare+write in one command shrinks the
+    // window where a concurrent agent edit could be clobbered.
+    if let Some(expected) = &input.expected_previous {
+        let current = read_worktree_file_text(root, &rel)?.unwrap_or_default();
+        if &current != expected {
+            return Ok(WriteWorkspaceFileOutput {
+                bytes_written: 0,
+                conflicted: true,
+                disk_content: Some(current),
+            });
+        }
+    }
+
+    let bytes = input.content.into_bytes();
+    let bytes_written = bytes.len() as u32;
+    fs::write(&path, &bytes).map_err(|error| error.to_string())?;
+
+    Ok(WriteWorkspaceFileOutput {
+        bytes_written,
+        conflicted: false,
+        disk_content: None,
+    })
+}
+
+const SEARCH_WORKSPACE_MAX_RESULTS: usize = 200;
+
+/// Content search across tracked files via `git grep` (on demand, capped). Fixed
+/// string, case-insensitive, repo-scoped — consistent with Quick Open's ls-files.
+#[tauri::command]
+pub async fn search_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: SearchWorkspaceInput,
+) -> Result<SearchWorkspaceOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
+    let root = input.workspace_root.trim();
+    let query = input.query.trim();
+    if root.is_empty() || query.is_empty() {
+        return Ok(SearchWorkspaceOutput {
+            matches: Vec::new(),
+            truncated: false,
+        });
+    }
+
+    // `-z` makes the path delimiter NUL, so paths containing `:` parse cleanly.
+    // git grep exits 1 with empty output when there are no matches (not an error).
+    let output = run_git_output(
+        root,
+        &["grep", "-z", "-n", "-I", "-i", "-F", "-e", query, "--"],
+    )?;
+
+    let mut matches = Vec::new();
+    let mut truncated = false;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for record in stdout.split('\n') {
+        if record.is_empty() {
+            continue;
+        }
+        // Record format: "<path>\0<line>:<text>"
+        let Some((path, rest)) = record.split_once('\0') else {
+            continue;
+        };
+        let Some((line_str, text)) = rest.split_once(':') else {
+            continue;
+        };
+        let Ok(line) = line_str.trim().parse::<u32>() else {
+            continue;
+        };
+        if matches.len() >= SEARCH_WORKSPACE_MAX_RESULTS {
+            truncated = true;
+            break;
+        }
+        matches.push(SearchWorkspaceMatch {
+            path: path.to_string(),
+            line,
+            text: text.chars().take(400).collect(),
+        });
+    }
+
+    Ok(SearchWorkspaceOutput { matches, truncated })
 }
 
 /// Mission specs are intentionally scoped to DCC-owned worktree state.

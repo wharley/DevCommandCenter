@@ -40,6 +40,10 @@ import type {
 	ListGitTrackedFilesOutput,
 	ReadWorkspaceFileInput,
 	ReadWorkspaceFileOutput,
+	WriteWorkspaceFileInput,
+	WriteWorkspaceFileOutput,
+	SearchWorkspaceInput,
+	SearchWorkspaceOutput,
 	ListMissionSpecsInput,
 	ListMissionSpecsOutput,
 	ListLocalBranchesInput,
@@ -256,6 +260,18 @@ export function listGitTrackedFiles(input: ListGitTrackedFilesInput) {
 
 export function readWorkspaceFile(input: ReadWorkspaceFileInput) {
 	return invoke<ReadWorkspaceFileOutput>(WORKSPACE_METHODS.readWorkspaceFile, {
+		input,
+	});
+}
+
+export function writeWorkspaceFile(input: WriteWorkspaceFileInput) {
+	return invoke<WriteWorkspaceFileOutput>(WORKSPACE_METHODS.writeWorkspaceFile, {
+		input,
+	});
+}
+
+export function searchWorkspace(input: SearchWorkspaceInput) {
+	return invoke<SearchWorkspaceOutput>(WORKSPACE_METHODS.searchWorkspace, {
 		input,
 	});
 }

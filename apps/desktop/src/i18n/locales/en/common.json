@@ -859,7 +859,25 @@
     "openWholeFile": "Open whole file",
     "backToDiff": "Back to diff",
     "loading": "Loading file…",
-    "empty": "This file has no content to show."
+    "empty": "This file has no content to show.",
+    "save": "Save",
+    "unsaved": "Unsaved changes",
+    "saved": "Saved {{name}}",
+    "saveFailed": "Couldn't save the file",
+    "discardConfirm": "Discard unsaved changes?",
+    "reconcile": {
+      "title": "This file changed on disk",
+      "description": "{{name}} was modified on disk after you opened it — likely by an agent sharing this worktree. Choose how to resolve it.",
+      "diskLabel": "On disk",
+      "mineLabel": "Your edit",
+      "cancel": "Cancel",
+      "takeDisk": "Reload from disk",
+      "overwrite": "Overwrite with mine"
+    }
+  },
+  "fileTabs": {
+    "close": "Close tab",
+    "closeAll": "Close editor"
   },
   "quickOpen": {
     "title": "Quick open",
@@ -867,5 +885,14 @@
     "placeholder": "Search files by name…",
     "loading": "Listing files…",
     "empty": "No files match."
+  },
+  "workspaceSearch": {
+    "title": "Search in workspace",
+    "description": "Find text across tracked files",
+    "placeholder": "Search text in files…",
+    "hint": "Type at least 2 characters to search.",
+    "searching": "Searching…",
+    "empty": "No matches.",
+    "truncated": "Showing the first 200 matches — narrow your search."
   }
 }

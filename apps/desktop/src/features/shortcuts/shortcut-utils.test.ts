@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
 	getOpenPreferredEditorShortcutKeys,
 	getQuickOpenShortcutKeys,
+	getWorkspaceSearchShortcutKeys,
 	isOpenPreferredEditorShortcut,
 	isQuickOpenShortcut,
+	isWorkspaceSearchShortcut,
 } from "./shortcut-utils";
 
 describe("shortcut-utils", () => {
@@ -116,5 +118,58 @@ describe("shortcut-utils", () => {
 		).toBe(false);
 		expect(getQuickOpenShortcutKeys("MacIntel")).toEqual(["Cmd", "P"]);
 		expect(getQuickOpenShortcutKeys("Win32")).toEqual(["Ctrl", "P"]);
+	});
+
+	it("matches workspace search (Cmd/Ctrl+Shift+F) and requires Shift", () => {
+		expect(
+			isWorkspaceSearchShortcut(
+				{
+					key: "f",
+					metaKey: true,
+					ctrlKey: false,
+					altKey: false,
+					shiftKey: true,
+					defaultPrevented: false,
+				},
+				"MacIntel",
+			),
+		).toBe(true);
+		expect(
+			isWorkspaceSearchShortcut(
+				{
+					key: "f",
+					metaKey: false,
+					ctrlKey: true,
+					altKey: false,
+					shiftKey: true,
+					defaultPrevented: false,
+				},
+				"Linux x86_64",
+			),
+		).toBe(true);
+		// Without Shift this is the in-file find, not workspace search.
+		expect(
+			isWorkspaceSearchShortcut(
+				{
+					key: "f",
+					metaKey: true,
+					ctrlKey: false,
+					altKey: false,
+					shiftKey: false,
+					defaultPrevented: false,
+				},
+				"MacIntel",
+			),
+		).toBe(false);
+		expect(getWorkspaceSearchShortcutKeys("MacIntel")).toEqual([
+			"Cmd",
+			"Shift",
+			"F",
+		]);
+		expect(getWorkspaceSearchShortcutKeys("Win32")).toEqual([
+			"Ctrl",
+			"Shift",
+			"F",
+		]);
 	});
 });

@@ -54,9 +54,11 @@ import { ShortcutCheatsheetDialog } from "./features/shortcuts";
 import {
 	isOpenPreferredEditorShortcut,
 	isQuickOpenShortcut,
+	isWorkspaceSearchShortcut,
 	shouldIgnoreGlobalShortcutTarget,
 } from "./features/shortcuts/shortcut-utils";
 import { FileQuickOpen } from "./features/editor/file-quick-open";
+import { WorkspaceSearch } from "./features/editor/workspace-search";
 import { useDockUnreadBadge } from "./features/dock-badge/useDockUnreadBadge";
 import { useAppUpdate } from "./features/updater";
 import {
@@ -437,6 +439,7 @@ export default function App() {
 	const [isSkillsOpen, setIsSkillsOpen] = useState(false);
 	const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
 	const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
+	const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
 	const [isOnboardingOpen, setIsOnboardingOpen] = useState(() => {
 		if (typeof window === "undefined") {
 			return false;
@@ -814,6 +817,11 @@ export default function App() {
 				setIsQuickOpenOpen(true);
 				return;
 			}
+			if (isWorkspaceSearchShortcut(event)) {
+				event.preventDefault();
+				setIsWorkspaceSearchOpen(true);
+				return;
+			}
 			if (shouldIgnoreGlobalShortcutTarget(event.target)) {
 				return;
 			}
@@ -909,6 +917,7 @@ export default function App() {
 		setWorkspaceRepositoryContext(null);
 		setIsSessionSearchOpen(false);
 		setIsQuickOpenOpen(false);
+		setIsWorkspaceSearchOpen(false);
 	}, [backendCacheKey]);
 
 	useEffect(() => {
@@ -1698,6 +1707,14 @@ export default function App() {
 		[],
 	);
 
+	const handleOpenSearchMatch = useCallback(
+		({ path, line }: { path: string; line: number }) => {
+			const name = path.split("/").pop() ?? path;
+			setSurfaceSelection({ kind: "file-edit", path, name, focusLine: line });
+		},
+		[],
+	);
+
 	const handlePrefillComposer = useCallback(
 		(text: string) => {
 			if (!selectedWorkspace || text.trim().length === 0) {
@@ -2186,6 +2203,12 @@ export default function App() {
 								onOpenChange={setIsQuickOpenOpen}
 								workspaceRoot={selectedWorkspacePath}
 								onSelectFile={handleOpenFileFromQuickOpen}
+							/>
+							<WorkspaceSearch
+								open={isWorkspaceSearchOpen}
+								onOpenChange={setIsWorkspaceSearchOpen}
+								workspaceRoot={selectedWorkspacePath}
+								onSelectMatch={handleOpenSearchMatch}
 							/>
 							<CreateWorkspaceDialog
 								open={isCreateWorkspaceOpen}

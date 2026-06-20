@@ -54,6 +54,8 @@ use dcc_tauri::commands::{
         CompiledMissionSpecContextFile, CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput,
         ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
         ListGitTrackedFilesOutput, ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
+        WriteWorkspaceFileInput, WriteWorkspaceFileOutput, SearchWorkspaceInput,
+        SearchWorkspaceMatch, SearchWorkspaceOutput,
         ListLocalBranchesInput, ListLocalBranchesOutput,
         ListMissionSpecsInput, ListMissionSpecsOutput, ListRepositoriesOutput,
         ListWorkspacesOutput, MissionSpecContextFileState, MissionSpecContextFileStatus,
@@ -92,6 +94,8 @@ struct WorkspaceMethods {
     list_local_branches: String,
     list_git_tracked_files: String,
     read_workspace_file: String,
+    write_workspace_file: String,
+    search_workspace: String,
     list_mission_specs: String,
     compile_mission_spec_context: String,
     mission_spec_context_status: String,
@@ -203,6 +207,11 @@ fn main() {
         .typ::<ListGitTrackedFilesOutput>()
         .typ::<ReadWorkspaceFileInput>()
         .typ::<ReadWorkspaceFileOutput>()
+        .typ::<WriteWorkspaceFileInput>()
+        .typ::<WriteWorkspaceFileOutput>()
+        .typ::<SearchWorkspaceInput>()
+        .typ::<SearchWorkspaceMatch>()
+        .typ::<SearchWorkspaceOutput>()
         .typ::<ListMissionSpecsInput>()
         .typ::<MissionSpecEntry>()
         .typ::<MissionValidationEntry>()
@@ -318,6 +327,8 @@ fn main() {
                 list_local_branches: "list_local_branches".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),
                 read_workspace_file: "read_workspace_file".to_string(),
+                write_workspace_file: "write_workspace_file".to_string(),
+                search_workspace: "search_workspace".to_string(),
                 list_mission_specs: "list_mission_specs".to_string(),
                 compile_mission_spec_context: "compile_mission_spec_context".to_string(),
                 mission_spec_context_status: "mission_spec_context_status".to_string(),

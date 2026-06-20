@@ -7,6 +7,7 @@ import {
 	type DiffAnnotationSubmit,
 } from "@/features/editor/WorkspaceEditorSurface";
 import { WorkspaceFileSurface } from "@/features/editor/WorkspaceFileSurface";
+import { FileTabsSurface } from "@/features/editor/file-tabs-surface";
 import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
@@ -352,14 +353,11 @@ export function WorkspacePanel({
 				/>
 			)
 		) : surfaceSelection.kind === "file-edit" ? (
-			<WorkspaceFileSurface
+			<FileTabsSurface
 				workspaceRoot={workspacePath}
-				source={{
-					kind: "path",
-					path: surfaceSelection.path,
-					name: surfaceSelection.name,
-					focusLine: surfaceSelection.focusLine ?? null,
-				}}
+				path={surfaceSelection.path}
+				name={surfaceSelection.name}
+				focusLine={surfaceSelection.focusLine ?? null}
 				onClose={onCloseSurface}
 				onSubmitAnnotation={handleSubmitAnnotation}
 				onEditInComposer={handleEditAnnotationInComposer}

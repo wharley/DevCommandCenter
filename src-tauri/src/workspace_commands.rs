@@ -6,7 +6,8 @@ use dcc_tauri::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
-        ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
+        ReadWorkspaceFileInput, ReadWorkspaceFileOutput, WriteWorkspaceFileInput,
+        WriteWorkspaceFileOutput, SearchWorkspaceInput, SearchWorkspaceOutput,
         ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
         ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput,
         MissionSpecContextStatusInput, MissionSpecContextStatusOutput, RepositoryIdInput,
@@ -83,6 +84,22 @@ pub async fn read_workspace_file(
     input: ReadWorkspaceFileInput,
 ) -> Result<ReadWorkspaceFileOutput, String> {
     dcc_tauri::commands::workspace_commands::read_workspace_file(state, input).await
+}
+
+#[tauri::command]
+pub async fn write_workspace_file(
+    state: State<'_, WorkspaceCommandState>,
+    input: WriteWorkspaceFileInput,
+) -> Result<WriteWorkspaceFileOutput, String> {
+    dcc_tauri::commands::workspace_commands::write_workspace_file(state, input).await
+}
+
+#[tauri::command]
+pub async fn search_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: SearchWorkspaceInput,
+) -> Result<SearchWorkspaceOutput, String> {
+    dcc_tauri::commands::workspace_commands::search_workspace(state, input).await
 }
 
 #[tauri::command]
