@@ -160,6 +160,19 @@ pub struct ListGitTrackedFilesOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ReadWorkspaceFileInput {
+    pub workspace_root: String,
+    pub relative_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadWorkspaceFileOutput {
+    pub content: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct ListMissionSpecsInput {
     pub workspace_root: String,
 }
@@ -1524,6 +1537,28 @@ pub async fn list_git_tracked_files(
     paths.dedup();
 
     Ok(ListGitTrackedFilesOutput { paths })
+}
+
+/// Reads the current working-tree body of an arbitrary worktree file. The path is
+/// confined to the workspace root (no `..` escapes). Used by Quick Open and the
+/// read-only file surface to open files that may not have pending changes.
+#[tauri::command]
+pub async fn read_workspace_file(
+    state: State<'_, WorkspaceCommandState>,
+    input: ReadWorkspaceFileInput,
+) -> Result<ReadWorkspaceFileOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+
+    let rel = validate_git_relative_path(&input.relative_path)?;
+    let content =
+        read_worktree_file_text(root, &rel)?.ok_or_else(|| "file not found".to_string())?;
+
+    Ok(ReadWorkspaceFileOutput { content })
 }
 
 /// Mission specs are intentionally scoped to DCC-owned worktree state.

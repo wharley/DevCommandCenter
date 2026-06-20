@@ -53,7 +53,8 @@ use dcc_tauri::commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
         CompiledMissionSpecContextFile, CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput,
         ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
-        ListGitTrackedFilesOutput, ListLocalBranchesInput, ListLocalBranchesOutput,
+        ListGitTrackedFilesOutput, ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
+        ListLocalBranchesInput, ListLocalBranchesOutput,
         ListMissionSpecsInput, ListMissionSpecsOutput, ListRepositoriesOutput,
         ListWorkspacesOutput, MissionSpecContextFileState, MissionSpecContextFileStatus,
         MissionSpecContextStatusInput, MissionSpecContextStatusOutput, MissionSpecEntry,
@@ -90,6 +91,7 @@ struct WorkspaceMethods {
     workspace_forge_context: String,
     list_local_branches: String,
     list_git_tracked_files: String,
+    read_workspace_file: String,
     list_mission_specs: String,
     compile_mission_spec_context: String,
     mission_spec_context_status: String,
@@ -199,6 +201,8 @@ fn main() {
         .typ::<ListLocalBranchesOutput>()
         .typ::<ListGitTrackedFilesInput>()
         .typ::<ListGitTrackedFilesOutput>()
+        .typ::<ReadWorkspaceFileInput>()
+        .typ::<ReadWorkspaceFileOutput>()
         .typ::<ListMissionSpecsInput>()
         .typ::<MissionSpecEntry>()
         .typ::<MissionValidationEntry>()
@@ -313,6 +317,7 @@ fn main() {
                 workspace_forge_context: "workspace_forge_context".to_string(),
                 list_local_branches: "list_local_branches".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),
+                read_workspace_file: "read_workspace_file".to_string(),
                 list_mission_specs: "list_mission_specs".to_string(),
                 compile_mission_spec_context: "compile_mission_spec_context".to_string(),
                 mission_spec_context_status: "mission_spec_context_status".to_string(),

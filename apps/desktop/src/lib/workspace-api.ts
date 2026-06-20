@@ -38,6 +38,8 @@ import type {
 	ListChildDirectoriesOutput,
 	ListGitTrackedFilesInput,
 	ListGitTrackedFilesOutput,
+	ReadWorkspaceFileInput,
+	ReadWorkspaceFileOutput,
 	ListMissionSpecsInput,
 	ListMissionSpecsOutput,
 	ListLocalBranchesInput,
@@ -248,6 +250,12 @@ export function listRepositories() {
 
 export function listGitTrackedFiles(input: ListGitTrackedFilesInput) {
 	return invoke<ListGitTrackedFilesOutput>(WORKSPACE_METHODS.listGitTrackedFiles, {
+		input,
+	});
+}
+
+export function readWorkspaceFile(input: ReadWorkspaceFileInput) {
+	return invoke<ReadWorkspaceFileOutput>(WORKSPACE_METHODS.readWorkspaceFile, {
 		input,
 	});
 }

@@ -6,6 +6,7 @@ use dcc_tauri::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
+        ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
         ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
         ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput,
         MissionSpecContextStatusInput, MissionSpecContextStatusOutput, RepositoryIdInput,
@@ -74,6 +75,14 @@ pub async fn list_git_tracked_files(
     input: ListGitTrackedFilesInput,
 ) -> Result<ListGitTrackedFilesOutput, String> {
     dcc_tauri::commands::workspace_commands::list_git_tracked_files(state, input).await
+}
+
+#[tauri::command]
+pub async fn read_workspace_file(
+    state: State<'_, WorkspaceCommandState>,
+    input: ReadWorkspaceFileInput,
+) -> Result<ReadWorkspaceFileOutput, String> {
+    dcc_tauri::commands::workspace_commands::read_workspace_file(state, input).await
 }
 
 #[tauri::command]
