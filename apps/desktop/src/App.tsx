@@ -53,8 +53,10 @@ import { OnboardingWizard } from "./features/onboarding";
 import { ShortcutCheatsheetDialog } from "./features/shortcuts";
 import {
 	isOpenPreferredEditorShortcut,
+	isQuickOpenShortcut,
 	shouldIgnoreGlobalShortcutTarget,
 } from "./features/shortcuts/shortcut-utils";
+import { FileQuickOpen } from "./features/editor/file-quick-open";
 import { useDockUnreadBadge } from "./features/dock-badge/useDockUnreadBadge";
 import { useAppUpdate } from "./features/updater";
 import {
@@ -434,6 +436,7 @@ export default function App() {
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [isSkillsOpen, setIsSkillsOpen] = useState(false);
 	const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
+	const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
 	const [isOnboardingOpen, setIsOnboardingOpen] = useState(() => {
 		if (typeof window === "undefined") {
 			return false;
@@ -804,6 +807,13 @@ export default function App() {
 			if (!selectedWorkspacePath) {
 				return;
 			}
+			// Quick Open (Cmd/Ctrl+P) is a navigation chord, so it wins even when a
+			// text field has focus — the modifier means it can't be literal input.
+			if (isQuickOpenShortcut(event)) {
+				event.preventDefault();
+				setIsQuickOpenOpen(true);
+				return;
+			}
 			if (shouldIgnoreGlobalShortcutTarget(event.target)) {
 				return;
 			}
@@ -898,6 +908,7 @@ export default function App() {
 		setSurfaceSelection(null);
 		setWorkspaceRepositoryContext(null);
 		setIsSessionSearchOpen(false);
+		setIsQuickOpenOpen(false);
 	}, [backendCacheKey]);
 
 	useEffect(() => {
@@ -1680,6 +1691,13 @@ export default function App() {
 		[],
 	);
 
+	const handleOpenFileFromQuickOpen = useCallback(
+		({ path, name }: { path: string; name: string }) => {
+			setSurfaceSelection({ kind: "file-edit", path, name, focusLine: null });
+		},
+		[],
+	);
+
 	const handlePrefillComposer = useCallback(
 		(text: string) => {
 			if (!selectedWorkspace || text.trim().length === 0) {
@@ -2162,6 +2180,12 @@ export default function App() {
 								selectedWorkspaceId={selectedWorkspaceId}
 								queryScope={backendCacheKey}
 								onSelectResult={handleSelectSessionSearchResult}
+							/>
+							<FileQuickOpen
+								open={isQuickOpenOpen}
+								onOpenChange={setIsQuickOpenOpen}
+								workspaceRoot={selectedWorkspacePath}
+								onSelectFile={handleOpenFileFromQuickOpen}
 							/>
 							<CreateWorkspaceDialog
 								open={isCreateWorkspaceOpen}

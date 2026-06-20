@@ -34,12 +34,15 @@ function CommandDialog({
 	children,
 	className,
 	showCloseButton = false,
+	shouldFilter,
 	...props
 }: Omit<React.ComponentProps<typeof Dialog>, "children"> & {
 	title?: string;
 	description?: string;
 	className?: string;
 	showCloseButton?: boolean;
+	/** Forwarded to the inner cmdk root; set false to filter results yourself. */
+	shouldFilter?: boolean;
 	children: React.ReactNode;
 }) {
 	return (
@@ -55,7 +58,10 @@ function CommandDialog({
 					<DialogTitle>{title}</DialogTitle>
 					<DialogDescription>{description}</DialogDescription>
 				</DialogHeader>
-				<Command className="rounded-none border-0 bg-transparent p-0 shadow-none">
+				<Command
+					className="rounded-none border-0 bg-transparent p-0 shadow-none"
+					shouldFilter={shouldFilter}
+				>
 					{children}
 				</Command>
 			</DialogContent>

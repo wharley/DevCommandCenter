@@ -333,7 +333,7 @@ export function WorkspacePanel({
 			wholeFileView ? (
 				<WorkspaceFileSurface
 					workspaceRoot={workspacePath}
-					selection={surfaceSelection.file}
+					source={{ kind: "git", selection: surfaceSelection.file }}
 					onBackToDiff={() => setWholeFileView(false)}
 					onClose={onCloseSurface}
 					onSubmitAnnotation={handleSubmitAnnotation}
@@ -351,6 +351,20 @@ export function WorkspacePanel({
 					onAddToReview={handleAddToReview}
 				/>
 			)
+		) : surfaceSelection.kind === "file-edit" ? (
+			<WorkspaceFileSurface
+				workspaceRoot={workspacePath}
+				source={{
+					kind: "path",
+					path: surfaceSelection.path,
+					name: surfaceSelection.name,
+					focusLine: surfaceSelection.focusLine ?? null,
+				}}
+				onClose={onCloseSurface}
+				onSubmitAnnotation={handleSubmitAnnotation}
+				onEditInComposer={handleEditAnnotationInComposer}
+				onAddToReview={handleAddToReview}
+			/>
 		) : (
 			<WorkspaceMissionSpecSurface
 				spec={surfaceSelection.spec}

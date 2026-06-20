@@ -860,5 +860,12 @@
     "backToDiff": "Voltar para o diff",
     "loading": "Carregando arquivo…",
     "empty": "Este arquivo não tem conteúdo para exibir."
+  },
+  "quickOpen": {
+    "title": "Abertura rápida",
+    "description": "Abrir um arquivo pelo nome",
+    "placeholder": "Buscar arquivos pelo nome…",
+    "loading": "Listando arquivos…",
+    "empty": "Nenhum arquivo encontrado."
   }
 }

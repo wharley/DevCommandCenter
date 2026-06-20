@@ -15,12 +15,26 @@ import {
 	type PendingAnnotation,
 } from "./diff-annotation";
 import { FileViewToggle } from "./file-view-toggle";
+import { useWorkspaceFileContent } from "./use-workspace-file-content";
+
+/**
+ * Where the file body comes from. `git` is the diff surface's whole-file toggle
+ * (has a diff to return to); `path` is a standalone open (e.g. Quick Open).
+ */
+export type FileSurfaceSource =
+	| { kind: "git"; selection: WorkspaceGitPreviewSelection }
+	| {
+			kind: "path";
+			path: string;
+			name: string;
+			focusLine?: number | null;
+	  };
 
 type WorkspaceFileSurfaceProps = {
 	workspaceRoot: string | null;
-	selection: WorkspaceGitPreviewSelection;
-	/** Return to the diff view of the same file. */
-	onBackToDiff: () => void;
+	source: FileSurfaceSource;
+	/** Return to the diff view of the same file. Only set for the `git` source. */
+	onBackToDiff?: () => void;
 	onClose: () => void;
 	onSubmitAnnotation?: (input: DiffAnnotationSubmit) => void;
 	onEditInComposer?: (input: {
@@ -150,7 +164,7 @@ function WorkspaceFileEditor({
 
 export function WorkspaceFileSurface({
 	workspaceRoot,
-	selection,
+	source,
 	onBackToDiff,
 	onClose,
 	onSubmitAnnotation,
@@ -162,6 +176,11 @@ export function WorkspaceFileSurface({
 	const annotationsEnabled = Boolean(
 		onSubmitAnnotation || onEditInComposer || onAddToReview,
 	);
+
+	const filePath = source.kind === "git" ? source.selection.path : source.path;
+	const fileName = source.kind === "git" ? source.selection.name : source.name;
+	const focusLine =
+		source.kind === "git" ? source.selection.focusLine : source.focusLine;
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -183,9 +202,9 @@ export function WorkspaceFileSurface({
 	const handleAnnotate = useCallback(
 		(payload: DiffAnnotationPayload) => {
 			const { anchor, ...rest } = payload;
-			setPending({ request: { ...rest, path: selection.path }, anchor });
+			setPending({ request: { ...rest, path: filePath }, anchor });
 		},
-		[selection.path],
+		[filePath],
 	);
 
 	const handleSubmitAnnotation = useCallback(
@@ -225,24 +244,35 @@ export function WorkspaceFileSurface({
 		[onAddToReview, pending],
 	);
 
-	const query = useWorkspaceGitFilePreviewContent(
-		workspaceRoot
+	// Both hooks are always called (rules of hooks); only the one matching the
+	// active source is enabled, the other is disabled with a null input.
+	const gitQuery = useWorkspaceGitFilePreviewContent(
+		workspaceRoot && source.kind === "git"
 			? {
 					workspaceRoot,
-					relativePath: selection.path,
-					status: selection.status,
-					scope: selection.group,
-					baseBranch: selection.baseBranch ?? null,
+					relativePath: source.selection.path,
+					status: source.selection.status,
+					scope: source.selection.group,
+					baseBranch: source.selection.baseBranch ?? null,
 				}
 			: null,
 	);
+	const pathQuery = useWorkspaceFileContent(
+		workspaceRoot && source.kind === "path"
+			? { workspaceRoot, relativePath: source.path }
+			: null,
+	);
 
-	const snapshot = query.data;
-	// The whole-file body is the working-tree content (modified side); fall back to
-	// the original side for deletions where only the old content exists.
-	const body = snapshot
-		? snapshot.modifiedText || snapshot.originalText
-		: "";
+	const query = source.kind === "git" ? gitQuery : pathQuery;
+	// The whole-file body is the working-tree content. The diff preview exposes it
+	// as the modified side (fall back to original for pure deletions); the path
+	// reader returns it directly.
+	const body =
+		source.kind === "git"
+			? gitQuery.data
+				? gitQuery.data.modifiedText || gitQuery.data.originalText
+				: ""
+			: (pathQuery.data?.content ?? "");
 
 	return (
 		<section
@@ -257,11 +287,13 @@ export function WorkspaceFileSurface({
 				<TrafficLightSpacer side="left" width={86} />
 				<div className="min-w-0 flex-1" data-tauri-drag-region />
 				<div className="min-w-0 px-3 text-[11px] text-muted-foreground">
-					{selection.name}
+					{fileName}
 				</div>
-				<div className="shrink-0 pr-2">
-					<FileViewToggle mode="file" onSelectDiff={onBackToDiff} />
-				</div>
+				{onBackToDiff ? (
+					<div className="shrink-0 pr-2">
+						<FileViewToggle mode="file" onSelectDiff={onBackToDiff} />
+					</div>
+				) : null}
 				<div className="flex shrink-0 items-center pr-2">
 					<Button
 						type="button"
@@ -297,9 +329,9 @@ export function WorkspaceFileSurface({
 					</div>
 				) : (
 					<WorkspaceFileEditor
-						path={selection.path}
+						path={filePath}
 						content={body}
-						focusLine={selection.focusLine ?? null}
+						focusLine={focusLine ?? null}
 						onAnnotate={annotationsEnabled ? handleAnnotate : undefined}
 						annotateLabel={t("diffAnnotate.sendToAgent")}
 					/>

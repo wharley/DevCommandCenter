@@ -9,4 +9,10 @@ export type WorkspaceSurfaceSelection =
 	| {
 			kind: "mission-spec";
 			spec: MissionSpecEntry;
+	  }
+	| {
+			kind: "file-edit";
+			path: string;
+			name: string;
+			focusLine?: number | null;
 	  };

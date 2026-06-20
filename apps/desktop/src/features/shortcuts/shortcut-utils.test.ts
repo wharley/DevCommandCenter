@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
 	getOpenPreferredEditorShortcutKeys,
+	getQuickOpenShortcutKeys,
 	isOpenPreferredEditorShortcut,
+	isQuickOpenShortcut,
 } from "./shortcut-utils";
 
 describe("shortcut-utils", () => {
@@ -69,5 +71,50 @@ describe("shortcut-utils", () => {
 	it("resolves platform-specific labels", () => {
 		expect(getOpenPreferredEditorShortcutKeys("MacIntel")).toEqual(["Cmd", "O"]);
 		expect(getOpenPreferredEditorShortcutKeys("Win32")).toEqual(["Ctrl", "O"]);
+	});
+
+	it("matches Quick Open (Cmd/Ctrl+P) per platform", () => {
+		expect(
+			isQuickOpenShortcut(
+				{
+					key: "p",
+					metaKey: true,
+					ctrlKey: false,
+					altKey: false,
+					shiftKey: false,
+					defaultPrevented: false,
+				},
+				"MacIntel",
+			),
+		).toBe(true);
+		expect(
+			isQuickOpenShortcut(
+				{
+					key: "p",
+					metaKey: false,
+					ctrlKey: true,
+					altKey: false,
+					shiftKey: false,
+					defaultPrevented: false,
+				},
+				"Linux x86_64",
+			),
+		).toBe(true);
+		// Shift+Cmd+P is a different command surface and must not trigger Quick Open.
+		expect(
+			isQuickOpenShortcut(
+				{
+					key: "p",
+					metaKey: true,
+					ctrlKey: false,
+					altKey: false,
+					shiftKey: true,
+					defaultPrevented: false,
+				},
+				"MacIntel",
+			),
+		).toBe(false);
+		expect(getQuickOpenShortcutKeys("MacIntel")).toEqual(["Cmd", "P"]);
+		expect(getQuickOpenShortcutKeys("Win32")).toEqual(["Ctrl", "P"]);
 	});
 });
