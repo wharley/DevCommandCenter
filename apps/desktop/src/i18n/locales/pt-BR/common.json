@@ -851,5 +851,14 @@
       "collapse": "Recolher",
       "expand": "Expandir"
     }
+  },
+  "fileSurface": {
+    "ariaLabel": "Visualização do arquivo inteiro",
+    "viewDiff": "Diff",
+    "viewWholeFile": "Arquivo inteiro",
+    "openWholeFile": "Abrir arquivo inteiro",
+    "backToDiff": "Voltar para o diff",
+    "loading": "Carregando arquivo…",
+    "empty": "Este arquivo não tem conteúdo para exibir."
   }
 }

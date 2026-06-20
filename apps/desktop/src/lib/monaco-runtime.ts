@@ -93,6 +93,15 @@ export async function createFileEditor(options: {
 	content: string;
 	line?: number;
 	column?: number;
+	/** Render the file without allowing edits (e.g. read-only review surface). */
+	readOnly?: boolean;
+	/**
+	 * When provided, a floating "send to agent" button is shown over the editor
+	 * whenever the user selects a non-empty range. Mirrors the diff affordance.
+	 */
+	onAnnotate?: (payload: DiffAnnotationPayload) => void;
+	/** Label for the annotate button; defaults to a pt-BR string. */
+	annotateLabel?: string;
 }): Promise<FileEditorController> {
 	const runtime = await ensureRuntime();
 	const { monaco } = runtime;
@@ -101,9 +110,11 @@ export async function createFileEditor(options: {
 
 	fileContentCache.set(options.path, options.content);
 
+	const readOnly = options.readOnly ?? false;
 	const editor = monaco.editor.create(options.container, {
 		automaticLayout: true,
 		bracketPairColorization: { enabled: true },
+		domReadOnly: readOnly,
 		fontFamily:
 			'"SF Mono","Monaco","Cascadia Mono","Roboto Mono","Menlo",monospace',
 		fontLigatures: true,
@@ -112,6 +123,7 @@ export async function createFileEditor(options: {
 		minimap: { enabled: false },
 		model,
 		padding: { top: 14, bottom: 24 },
+		readOnly,
 		renderValidationDecorations: "editable",
 		scrollBeyondLastLine: false,
 		smoothScrolling: true,
@@ -122,11 +134,24 @@ export async function createFileEditor(options: {
 
 	revealEditorPosition(editor, options.line, options.column);
 
+	const annotateDisposables: DisposableLike[] = [];
+	if (options.onAnnotate) {
+		annotateDisposables.push(
+			attachAnnotateButton(monaco, editor, "modified", {
+				label: options.annotateLabel ?? "Enviar ao agente ↗",
+				onAnnotate: options.onAnnotate,
+			}),
+		);
+	}
+
 	const currentModel = model;
 
 	return {
 		editor,
 		dispose() {
+			for (const disposable of annotateDisposables) {
+				disposable.dispose();
+			}
 			editor.dispose();
 			currentModel.dispose();
 		},

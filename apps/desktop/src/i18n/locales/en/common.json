@@ -851,5 +851,14 @@
       "collapse": "Collapse",
       "expand": "Expand"
     }
+  },
+  "fileSurface": {
+    "ariaLabel": "Whole file view",
+    "viewDiff": "Diff",
+    "viewWholeFile": "Whole file",
+    "openWholeFile": "Open whole file",
+    "backToDiff": "Back to diff",
+    "loading": "Loading file…",
+    "empty": "This file has no content to show."
   }
 }

@@ -3,16 +3,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useTranslation } from "react-i18next";
 import { TrafficLightSpacer } from "@/components/chrome/traffic-light-spacer";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-utils";
-import { ShortcutDisplay } from "@/features/shortcuts/shortcut-display";
-import { InlineShortcutDisplay } from "@/features/shortcuts/InlineShortcutDisplay";
 import { useWorkspaceGitFilePreviewContent } from "@/features/inspector/use-workspace-git-file-preview-content";
 import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
-import type {
-	DiffAnnotationPayload,
-	DiffMachineAnnotation,
-} from "@/lib/monaco-runtime";
+import { ShortcutDisplay } from "@/features/shortcuts/shortcut-display";
+import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-utils";
+import type { DiffAnnotationPayload } from "@/lib/monaco-runtime";
 import {
 	DiffAnnotationPopover,
 	type DiffAnnotationRequest,
@@ -21,23 +16,17 @@ import {
 } from "./diff-annotation";
 import { FileViewToggle } from "./file-view-toggle";
 
-// Re-exported for backward compatibility with existing importers.
-export type { DiffAnnotationRequest, DiffAnnotationSubmit };
-
-type WorkspaceEditorSurfaceProps = {
+type WorkspaceFileSurfaceProps = {
 	workspaceRoot: string | null;
 	selection: WorkspaceGitPreviewSelection;
+	/** Return to the diff view of the same file. */
+	onBackToDiff: () => void;
 	onClose: () => void;
-	/** Switch the surface to the read-only whole-file view of the same file. */
-	onOpenWholeFile?: () => void;
-	/** Send the annotated selection + instruction to an agent. */
 	onSubmitAnnotation?: (input: DiffAnnotationSubmit) => void;
-	/** Load the annotation into the composer draft for manual refinement. */
 	onEditInComposer?: (input: {
 		request: DiffAnnotationRequest;
 		instruction: string;
 	}) => void;
-	/** Collect the annotation into the multi-snippet review buffer. */
 	onAddToReview?: (input: {
 		request: DiffAnnotationRequest;
 		note: string;
@@ -45,31 +34,25 @@ type WorkspaceEditorSurfaceProps = {
 };
 
 type MonacoRuntimeModule = typeof import("@/lib/monaco-runtime");
-type MonacoDiffController = Awaited<
-	ReturnType<MonacoRuntimeModule["createDiffEditor"]>
+type MonacoFileController = Awaited<
+	ReturnType<MonacoRuntimeModule["createFileEditor"]>
 >;
 
-function WorkspaceEditorDiff({
+function WorkspaceFileEditor({
 	path,
-	originalText,
-	modifiedText,
-	inline,
+	content,
 	focusLine,
-	machineAnnotations,
 	onAnnotate,
 	annotateLabel,
 }: {
 	path: string;
-	originalText: string;
-	modifiedText: string;
-	inline: boolean;
+	content: string;
 	focusLine?: number | null;
-	machineAnnotations?: DiffMachineAnnotation[];
 	onAnnotate?: (payload: DiffAnnotationPayload) => void;
 	annotateLabel: string;
 }) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
-	const controllerRef = useRef<MonacoDiffController | null>(null);
+	const controllerRef = useRef<MonacoFileController | null>(null);
 	const requestIdRef = useRef(0);
 	// Keep the latest callback/label in refs so they never recreate the editor.
 	const onAnnotateRef = useRef(onAnnotate);
@@ -87,6 +70,8 @@ function WorkspaceEditorDiff({
 		[],
 	);
 
+	// Recreate the editor only when the file identity changes. Content edits to the
+	// same file are pushed through setValue below so selection state survives.
 	useLayoutEffect(() => {
 		const host = hostRef.current;
 		if (!host) return;
@@ -103,15 +88,13 @@ function WorkspaceEditorDiff({
 
 		void (async () => {
 			try {
-				const { createDiffEditor } = await import("@/lib/monaco-runtime");
-				const controller = await createDiffEditor({
+				const { createFileEditor } = await import("@/lib/monaco-runtime");
+				const controller = await createFileEditor({
 					container: host,
 					path,
-					originalText,
-					modifiedText,
-					inline,
-					focusLine,
-					machineAnnotations,
+					content,
+					readOnly: true,
+					line: focusLine ?? undefined,
 					onAnnotate: (payload) => onAnnotateRef.current?.(payload),
 					annotateLabel: annotateLabelRef.current,
 				});
@@ -133,23 +116,18 @@ function WorkspaceEditorDiff({
 		return () => {
 			disposed = true;
 		};
-	}, [focusLine, inline, machineAnnotations, modifiedText, originalText, path]);
+		// `content` is intentionally omitted: it flows through the setValue effect so
+		// switching files (path) is the only trigger that rebuilds the editor.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [path]);
 
 	useEffect(() => {
-		controllerRef.current?.setTexts({
-			originalText,
-			modifiedText,
-			inline,
-		});
-	}, [inline, modifiedText, originalText]);
-
-	useEffect(() => {
-		controllerRef.current?.setMachineAnnotations(machineAnnotations ?? []);
-	}, [machineAnnotations]);
+		controllerRef.current?.setValue(content);
+	}, [content]);
 
 	useEffect(() => {
 		if (focusLine) {
-			controllerRef.current?.revealLine(focusLine);
+			controllerRef.current?.revealPosition(focusLine);
 		}
 	}, [focusLine]);
 
@@ -170,20 +148,21 @@ function WorkspaceEditorDiff({
 	);
 }
 
-export function WorkspaceEditorSurface({
+export function WorkspaceFileSurface({
 	workspaceRoot,
 	selection,
+	onBackToDiff,
 	onClose,
-	onOpenWholeFile,
 	onSubmitAnnotation,
 	onEditInComposer,
 	onAddToReview,
-}: WorkspaceEditorSurfaceProps) {
+}: WorkspaceFileSurfaceProps) {
 	const { t } = useTranslation("common");
 	const [pending, setPending] = useState<PendingAnnotation | null>(null);
 	const annotationsEnabled = Boolean(
 		onSubmitAnnotation || onEditInComposer || onAddToReview,
 	);
+
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.defaultPrevented || event.key !== "Escape") {
@@ -219,8 +198,6 @@ export function WorkspaceEditorSurface({
 				});
 			}
 			setPending(null);
-			// Reveal the thread (the surface replaces it full-screen) so the
-			// reviewer sees the agent pick up the request.
 			onClose();
 		},
 		[onClose, onSubmitAnnotation, pending],
@@ -259,22 +236,17 @@ export function WorkspaceEditorSurface({
 				}
 			: null,
 	);
-	const loadErrorMessage =
-		(query.error as Error | null)?.message ?? "Failed to load file";
-
-	if (query.isPending) {
-		return null;
-	}
-
-	if (query.isError) {
-		return null;
-	}
 
 	const snapshot = query.data;
+	// The whole-file body is the working-tree content (modified side); fall back to
+	// the original side for deletions where only the old content exists.
+	const body = snapshot
+		? snapshot.modifiedText || snapshot.originalText
+		: "";
 
 	return (
 		<section
-			aria-label="Workspace editor surface"
+			aria-label={t("fileSurface.ariaLabel")}
 			data-focus-scope="editor"
 			className="flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground"
 		>
@@ -287,11 +259,9 @@ export function WorkspaceEditorSurface({
 				<div className="min-w-0 px-3 text-[11px] text-muted-foreground">
 					{selection.name}
 				</div>
-				{onOpenWholeFile ? (
-					<div className="shrink-0 pr-2">
-						<FileViewToggle mode="diff" onSelectWholeFile={onOpenWholeFile} />
-					</div>
-				) : null}
+				<div className="shrink-0 pr-2">
+					<FileViewToggle mode="file" onSelectDiff={onBackToDiff} />
+				</div>
 				<div className="flex shrink-0 items-center pr-2">
 					<Button
 						type="button"
@@ -310,21 +280,26 @@ export function WorkspaceEditorSurface({
 				{query.isError ? (
 					<div className="absolute inset-0 flex items-center justify-center bg-background">
 						<p className="text-[11px] text-destructive">
-							{loadErrorMessage}
+							{(query.error as Error | null)?.message ?? "Failed to load file"}
 						</p>
 					</div>
-				) : query.isPending || !snapshot ? (
+				) : query.isPending ? (
 					<div className="absolute inset-0 flex items-center justify-center bg-background">
-						<p className="text-[11px] text-muted-foreground">Loading file...</p>
+						<p className="text-[11px] text-muted-foreground">
+							{t("fileSurface.loading")}
+						</p>
+					</div>
+				) : body.length === 0 ? (
+					<div className="absolute inset-0 flex items-center justify-center bg-background">
+						<p className="text-[11px] text-muted-foreground">
+							{t("fileSurface.empty")}
+						</p>
 					</div>
 				) : (
-					<WorkspaceEditorDiff
+					<WorkspaceFileEditor
 						path={selection.path}
-						originalText={snapshot.originalText}
-						modifiedText={snapshot.modifiedText}
-						inline={snapshot.inline}
+						content={body}
 						focusLine={selection.focusLine ?? null}
-						machineAnnotations={selection.machineAnnotations}
 						onAnnotate={annotationsEnabled ? handleAnnotate : undefined}
 						annotateLabel={t("diffAnnotate.sendToAgent")}
 					/>

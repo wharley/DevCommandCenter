@@ -6,6 +6,7 @@ import {
 	type DiffAnnotationRequest,
 	type DiffAnnotationSubmit,
 } from "@/features/editor/WorkspaceEditorSurface";
+import { WorkspaceFileSurface } from "@/features/editor/WorkspaceFileSurface";
 import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
@@ -178,6 +179,15 @@ export function WorkspacePanel({
 		[],
 	);
 	const reviewIdRef = useRef(0);
+	// Local view mode for the git-diff surface: flip to the read-only whole-file
+	// view without disturbing the App-owned surface selection.
+	const [wholeFileView, setWholeFileView] = useState(false);
+	const surfaceFilePath =
+		surfaceSelection?.kind === "git-diff" ? surfaceSelection.file.path : null;
+	// Reset to the diff view whenever the open file changes (or the surface closes).
+	useEffect(() => {
+		setWholeFileView(false);
+	}, [surfaceFilePath]);
 
 	useEffect(() => {
 		if (externalComposerPrefill) {
@@ -320,14 +330,27 @@ export function WorkspacePanel({
 
 	const surfaceContent = surfaceSelection ? (
 		surfaceSelection.kind === "git-diff" ? (
-			<WorkspaceEditorSurface
-				workspaceRoot={workspacePath}
-				selection={surfaceSelection.file}
-				onClose={onCloseSurface}
-				onSubmitAnnotation={handleSubmitAnnotation}
-				onEditInComposer={handleEditAnnotationInComposer}
-				onAddToReview={handleAddToReview}
-			/>
+			wholeFileView ? (
+				<WorkspaceFileSurface
+					workspaceRoot={workspacePath}
+					selection={surfaceSelection.file}
+					onBackToDiff={() => setWholeFileView(false)}
+					onClose={onCloseSurface}
+					onSubmitAnnotation={handleSubmitAnnotation}
+					onEditInComposer={handleEditAnnotationInComposer}
+					onAddToReview={handleAddToReview}
+				/>
+			) : (
+				<WorkspaceEditorSurface
+					workspaceRoot={workspacePath}
+					selection={surfaceSelection.file}
+					onClose={onCloseSurface}
+					onOpenWholeFile={() => setWholeFileView(true)}
+					onSubmitAnnotation={handleSubmitAnnotation}
+					onEditInComposer={handleEditAnnotationInComposer}
+					onAddToReview={handleAddToReview}
+				/>
+			)
 		) : (
 			<WorkspaceMissionSpecSurface
 				spec={surfaceSelection.spec}
