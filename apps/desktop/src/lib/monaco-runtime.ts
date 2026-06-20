@@ -116,7 +116,6 @@ export async function createFileEditor(options: {
 	const editor = monaco.editor.create(options.container, {
 		automaticLayout: true,
 		bracketPairColorization: { enabled: true },
-		domReadOnly: readOnly,
 		fontFamily:
 			'"SF Mono","Monaco","Cascadia Mono","Roboto Mono","Menlo",monospace',
 		fontLigatures: true,
@@ -126,10 +125,11 @@ export async function createFileEditor(options: {
 		model,
 		padding: { top: 14, bottom: 24 },
 		readOnly,
-		renderValidationDecorations: "editable",
+		renderValidationDecorations: "off",
 		scrollBeyondLastLine: false,
 		smoothScrolling: true,
 		tabSize: 2,
+		tabFocusMode: false,
 		theme: themeId(desiredTheme),
 		wordWrap: "on",
 	});

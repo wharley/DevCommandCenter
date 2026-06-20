@@ -19,6 +19,7 @@ import {
 	useRef,
 	useState,
 	type MouseEvent as ReactMouseEvent,
+	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -812,6 +813,14 @@ function CodeTreeNodeList({
 		return left.name.localeCompare(right.name);
 	});
 	const pad = depth * 12 + 8;
+	const keepEditorFocusOnMouseDown = (event: ReactMouseEvent<HTMLButtonElement>) => {
+		event.preventDefault();
+	};
+	const keepEditorFocusOnPointerDown = (
+		event: ReactPointerEvent<HTMLButtonElement>,
+	) => {
+		event.preventDefault();
+	};
 
 	return (
 		<div role={depth === 0 ? "tree" : "group"}>
@@ -825,6 +834,8 @@ function CodeTreeNodeList({
 								type="button"
 								role="treeitem"
 								aria-expanded={isOpen}
+								onPointerDown={keepEditorFocusOnPointerDown}
+								onMouseDown={keepEditorFocusOnMouseDown}
 								onClick={() => onToggle(node.path)}
 								className="flex h-6 w-full cursor-pointer items-center gap-1 rounded-sm pr-2 text-left text-[11.5px] text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring"
 								style={{ paddingLeft: pad }}
@@ -865,6 +876,8 @@ function CodeTreeNodeList({
 						type="button"
 						role="treeitem"
 						title={filePath}
+						onPointerDown={keepEditorFocusOnPointerDown}
+						onMouseDown={keepEditorFocusOnMouseDown}
 						onClick={() => onOpenFile({ path: filePath, name: basename(filePath) })}
 						className={cn(
 							"flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-sm pr-2 text-left text-[11.5px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",

@@ -29,6 +29,7 @@ type FileTabsSurfaceProps = {
 	/** The current open request from the app (one file-edit selection). */
 	path: string;
 	name: string;
+	openRequestId: number;
 	focusLine?: number | null;
 	/** Close the whole surface (no tabs left, or the user closed it). */
 	onClose: () => void;
@@ -47,6 +48,7 @@ export function FileTabsSurface({
 	workspaceRoot,
 	path,
 	name,
+	openRequestId,
 	focusLine,
 	onClose,
 	onSubmitAnnotation,
@@ -88,7 +90,7 @@ export function FileTabsSurface({
 			];
 		});
 		setActivePath(path);
-	}, [path, name, focusLine]);
+	}, [path, name, openRequestId, focusLine]);
 
 	const handleStateChange = useCallback((filePath: string, next: SurfaceState) => {
 		setStateByPath((prev) => {
@@ -182,11 +184,20 @@ export function FileTabsSurface({
 	// On tab switch, re-measure + focus the now-visible editor (kept-alive surfaces
 	// can render at zero size while hidden under display:none).
 	useEffect(() => {
-		const frame = requestAnimationFrame(() => {
+		const revealActive = () => {
 			surfaceRefs.current.get(activePath)?.reveal();
+		};
+		const frame = requestAnimationFrame(() => {
+			revealActive();
 		});
-		return () => cancelAnimationFrame(frame);
-	}, [activePath]);
+		const quickTimeout = window.setTimeout(revealActive, 0);
+		const settledTimeout = window.setTimeout(revealActive, 80);
+		return () => {
+			cancelAnimationFrame(frame);
+			window.clearTimeout(quickTimeout);
+			window.clearTimeout(settledTimeout);
+		};
+	}, [activePath, openRequestId]);
 
 	const activeState = stateByPath[activePath];
 

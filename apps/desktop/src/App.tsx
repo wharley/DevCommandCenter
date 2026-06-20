@@ -529,6 +529,7 @@ export default function App() {
 
 	const [surfaceSelection, setSurfaceSelection] =
 		useState<WorkspaceSurfaceSelection | null>(null);
+	const fileOpenRequestIdRef = useRef(0);
 	const [workspaceComposerPrefill, setWorkspaceComposerPrefill] =
 		useState<WorkspaceComposerPrefillRequest | null>(null);
 	const { theme, setTheme } = useAppearance();
@@ -1706,7 +1707,14 @@ export default function App() {
 
 	const handleOpenFileFromQuickOpen = useCallback(
 		({ path, name }: { path: string; name: string }) => {
-			setSurfaceSelection({ kind: "file-edit", path, name, focusLine: null });
+			fileOpenRequestIdRef.current += 1;
+			setSurfaceSelection({
+				kind: "file-edit",
+				path,
+				name,
+				requestId: fileOpenRequestIdRef.current,
+				focusLine: null,
+			});
 		},
 		[],
 	);
@@ -1714,7 +1722,14 @@ export default function App() {
 	const handleOpenSearchMatch = useCallback(
 		({ path, line }: { path: string; line: number }) => {
 			const name = path.split("/").pop() ?? path;
-			setSurfaceSelection({ kind: "file-edit", path, name, focusLine: line });
+			fileOpenRequestIdRef.current += 1;
+			setSurfaceSelection({
+				kind: "file-edit",
+				path,
+				name,
+				requestId: fileOpenRequestIdRef.current,
+				focusLine: line,
+			});
 		},
 		[],
 	);

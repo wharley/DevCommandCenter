@@ -152,6 +152,7 @@ const WorkspaceFileEditor = forwardRef<
 		requestIdRef.current = requestId;
 		let disposed = false;
 		let changeSub: { dispose(): void } | null = null;
+		let focusFrame: number | null = null;
 
 		controllerRef.current?.dispose();
 		controllerRef.current = null;
@@ -182,6 +183,13 @@ const WorkspaceFileEditor = forwardRef<
 					onChangeRef.current?.(),
 				);
 				setLoading(false);
+				focusFrame = requestAnimationFrame(() => {
+					if (disposed || requestId !== requestIdRef.current) {
+						return;
+					}
+					controller.editor.layout();
+					controller.editor.focus();
+				});
 			} catch (cause) {
 				if (disposed) return;
 				setError(cause instanceof Error ? cause.message : "Failed to load editor");
@@ -191,6 +199,9 @@ const WorkspaceFileEditor = forwardRef<
 
 		return () => {
 			disposed = true;
+			if (focusFrame !== null) {
+				cancelAnimationFrame(focusFrame);
+			}
 			changeSub?.dispose();
 		};
 		// `content`/`readOnly` are intentionally omitted: content flows through the

@@ -14,5 +14,6 @@ export type WorkspaceSurfaceSelection =
 			kind: "file-edit";
 			path: string;
 			name: string;
+			requestId: number;
 			focusLine?: number | null;
 	  };

@@ -357,6 +357,7 @@ export function WorkspacePanel({
 				workspaceRoot={workspacePath}
 				path={surfaceSelection.path}
 				name={surfaceSelection.name}
+				openRequestId={surfaceSelection.requestId}
 				focusLine={surfaceSelection.focusLine ?? null}
 				onClose={onCloseSurface}
 				onSubmitAnnotation={handleSubmitAnnotation}
