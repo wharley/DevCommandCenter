@@ -149,6 +149,11 @@
       "spec": "Spec",
       "plan": "Plano"
     },
+    "sessionDock": {
+      "expand": "Expandir sessão",
+      "collapse": "Recolher sessão",
+      "resize": "Redimensionar painel de sessão"
+    },
     "spec": {
       "kicker": "Spec da mission",
       "description": "Estado versionado do DCC para esta mission. Gere um plano a partir dela quando os requisitos estiverem prontos.",

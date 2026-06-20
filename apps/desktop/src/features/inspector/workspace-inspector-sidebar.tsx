@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Info, Rabbit, TerminalSquare } from "lucide-react";
+import { Activity, ChevronUp, Info, Rabbit, TerminalSquare } from "lucide-react";
 import {
 	useCallback,
 	useEffect,
@@ -158,9 +158,11 @@ type WorkspaceInspectorSidebarProps = {
 
 const MIN_SECTION_HEIGHT = 128;
 const MAX_SECTION_HEIGHT = 640;
-const INITIAL_CHANGES_HEIGHT = 200;
+const DEFAULT_DOCK_HEIGHT = 320;
 
 type InspectorTab = "activity" | "context" | "spec" | "plan";
+
+const SESSION_DOCK_TABS: InspectorTab[] = ["activity", "context", "spec", "plan"];
 type PendingGitConfirmation = "merge" | "sync-base" | null;
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
@@ -434,6 +436,87 @@ function ResizeHandle({
 		>
 			<span className="h-px w-full bg-border/70 transition-colors group-hover:bg-foreground/30 group-focus-visible:bg-foreground/40" />
 		</button>
+	);
+}
+
+/**
+ * Collapsed resting state for the session panel: a slim footer dock that keeps
+ * Activity/Context/Spec/Plan one click away while handing the full rail height
+ * to the Git + review surface above it. Clicking any chip (or the bar) lifts the
+ * dock back open at the chosen tab.
+ */
+function SessionDockFooter({
+	activeTab,
+	counts,
+	live,
+	onExpand,
+}: {
+	activeTab: InspectorTab;
+	counts: Record<InspectorTab, number | null>;
+	live: boolean;
+	onExpand: (tab: InspectorTab) => void;
+}) {
+	const { t } = useTranslation("common");
+	return (
+		<div className="shrink-0 border-t border-border/50 bg-sidebar/85">
+			<div className="flex items-center gap-1 px-2 py-1.5">
+				<button
+					type="button"
+					onClick={() => onExpand(activeTab)}
+					aria-label={t("inspector.sessionDock.expand")}
+					className="group flex shrink-0 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-1 focus-visible:ring-ring"
+				>
+					<span className="relative flex size-4 items-center justify-center">
+						<Activity
+							className="size-3.5 text-muted-foreground transition-colors group-hover:text-foreground"
+							strokeWidth={2}
+						/>
+						{live ? (
+							<span className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-emerald-500 ring-2 ring-sidebar" />
+						) : null}
+					</span>
+					<span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors group-hover:text-foreground">
+						{t("inspector.gitSection.kicker")}
+					</span>
+				</button>
+				<div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+					{SESSION_DOCK_TABS.map((tab) => {
+						const count = counts[tab];
+						const active = tab === activeTab;
+						return (
+							<button
+								key={tab}
+								type="button"
+								onClick={() => onExpand(tab)}
+								className={cn(
+									"flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11.5px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
+									active
+										? "bg-muted/55 font-medium text-foreground"
+										: "text-muted-foreground hover:bg-muted/35 hover:text-foreground",
+								)}
+							>
+								{t(`inspector.tabs.${tab}`)}
+								{count != null && count > 0 ? (
+									<span className="tabular-nums text-[10px] text-muted-foreground">
+										{count}
+									</span>
+								) : null}
+							</button>
+						);
+					})}
+				</div>
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-xs"
+					className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+					onClick={() => onExpand(activeTab)}
+					aria-label={t("inspector.sessionDock.expand")}
+				>
+					<ChevronUp className="size-4" />
+				</Button>
+			</div>
+		</div>
 	);
 }
 
@@ -1010,8 +1093,13 @@ export function WorkspaceInspectorSidebar({
 		[queryClient, workspaceForgeContext, workspacePath],
 	);
 
-	const [changesHeight, setChangesHeight] = useState(INITIAL_CHANGES_HEIGHT);
-	const [manualResize, setManualResize] = useState(false);
+	const [dockHeight, setDockHeight] = useState(DEFAULT_DOCK_HEIGHT);
+	const [sessionDockOpen, setSessionDockOpen] = useState(false);
+	// Tracks the last activity count we reacted to, so only *new* chat events
+	// pop the dock open — and whether the user deliberately collapsed it during
+	// this session, which suppresses the auto-open until the session changes.
+	const lastActivityCountRef = useRef(0);
+	const dockUserClosedRef = useRef(false);
 	const autoOpenedPlanMessageIdRef = useRef<string | null>(null);
 	const planMessages = useMemo(
 		() => projectWorkspaceMessages([], sessionEvents, sessionId, null),
@@ -1197,59 +1285,74 @@ export function WorkspaceInspectorSidebar({
 		workspacePath,
 	]);
 
+	const openSessionDock = useCallback(
+		(tab?: InspectorTab) => {
+			dockUserClosedRef.current = false;
+			if (tab) {
+				onTabChange(tab);
+			}
+			setSessionDockOpen(true);
+		},
+		[onTabChange],
+	);
+
+	const closeSessionDock = useCallback(() => {
+		dockUserClosedRef.current = true;
+		setSessionDockOpen(false);
+	}, []);
+
 	useEffect(() => {
 		autoOpenedPlanMessageIdRef.current = null;
 		onTabChange("activity");
+		// New session: rest collapsed, and treat its existing history as already
+		// seen so we only react to events that stream in from here on.
+		setSessionDockOpen(false);
+		dockUserClosedRef.current = false;
+		lastActivityCountRef.current = sessionEvents.length;
 	}, [sessionId]);
+
+	// New chat activity lifts the dock open on its own. Gated on an active
+	// session so merely loading a past session's history stays quiet, and
+	// suppressed once the user closes it on purpose this session.
+	useEffect(() => {
+		const previous = lastActivityCountRef.current;
+		lastActivityCountRef.current = sessionEvents.length;
+		if (
+			sessionEvents.length > previous &&
+			sessionState === "active" &&
+			!dockUserClosedRef.current
+		) {
+			setSessionDockOpen(true);
+		}
+	}, [sessionEvents.length, sessionState]);
 
 	useEffect(() => {
 		const planMessageId = activePlanMessage?.id ?? null;
 		if (!planMessageId) {
 			return;
 		}
-		if (activeTab === "plan") {
-			autoOpenedPlanMessageIdRef.current = planMessageId;
-			return;
-		}
 		if (autoOpenedPlanMessageIdRef.current === planMessageId) {
 			return;
 		}
 		autoOpenedPlanMessageIdRef.current = planMessageId;
-		onTabChange("plan");
+		// A fresh plan is worth surfacing: open the dock and focus the Plan tab,
+		// overriding a manual collapse so the review isn't missed.
+		dockUserClosedRef.current = false;
+		setSessionDockOpen(true);
+		if (activeTab !== "plan") {
+			onTabChange("plan");
+		}
 	}, [activePlanMessage?.id, activeTab, onTabChange]);
 
-	useEffect(() => {
-		const root = rootRef.current;
-		if (!root || manualResize) {
-			return;
-		}
-
-		const syncHeight = () => {
-			const availableHeight = root.clientHeight;
-			if (availableHeight <= 0) {
-				return;
-			}
-			const half = Math.round(availableHeight / 2);
-			setChangesHeight(
-				Math.min(MAX_SECTION_HEIGHT, Math.max(MIN_SECTION_HEIGHT, half)),
-			);
-		};
-
-		syncHeight();
-		const observer = new ResizeObserver(syncHeight);
-		observer.observe(root);
-		return () => observer.disconnect();
-	}, [manualResize]);
-
-	function handleResizeGitSectionStart(event: ReactMouseEvent<HTMLButtonElement>) {
+	function handleResizeDockStart(event: ReactMouseEvent<HTMLButtonElement>) {
 		event.preventDefault();
-		setManualResize(true);
 		const startY = event.clientY;
-		const startHeight = changesHeight;
+		const startHeight = dockHeight;
 		const onMove = (moveEvent: MouseEvent) => {
+			// Handle sits above the dock: dragging up (negative delta) grows it.
 			const delta = moveEvent.clientY - startY;
-			setChangesHeight(
-				Math.min(MAX_SECTION_HEIGHT, Math.max(MIN_SECTION_HEIGHT, startHeight + delta)),
+			setDockHeight(
+				Math.min(MAX_SECTION_HEIGHT, Math.max(MIN_SECTION_HEIGHT, startHeight - delta)),
 			);
 		};
 		const onUp = () => {
@@ -1283,10 +1386,7 @@ export function WorkspaceInspectorSidebar({
 				className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground"
 				data-dcc-inspector-root
 			>
-			<section
-				className="flex shrink-0 flex-col overflow-hidden border-b border-border/60"
-				style={{ height: `${changesHeight}px` }}
-			>
+			<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border/60">
 				<GitSectionHeader
 					commitMode={commitMode}
 					isRefreshing={gitStatusQuery.isFetching && !gitStatusQuery.isPending}
@@ -1350,9 +1450,17 @@ export function WorkspaceInspectorSidebar({
 				</div>
 			</section>
 
-			<ResizeHandle label="Resize Git section" onMouseDown={handleResizeGitSectionStart} />
+			{sessionDockOpen ? (
+			<>
+			<ResizeHandle
+				label={t("inspector.sessionDock.resize")}
+				onMouseDown={handleResizeDockStart}
+			/>
 
-			<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-border/40">
+			<section
+				className="flex min-h-0 shrink-0 flex-col overflow-hidden border-t border-border/40"
+				style={{ height: `${dockHeight}px` }}
+			>
 				<Tabs
 					value={activeTab}
 					onValueChange={(value) => {
@@ -1376,9 +1484,21 @@ export function WorkspaceInspectorSidebar({
 								{t("inspector.gitSection.title")}
 							</p>
 						</div>
-						<Badge variant="outline" className="h-6 shrink-0 px-2 text-[10px] font-normal">
-							{t("inspector.gitSection.eventsCount", { count: activityCount })}
-						</Badge>
+						<div className="flex shrink-0 items-center gap-1">
+							<Badge variant="outline" className="h-6 px-2 text-[10px] font-normal">
+								{t("inspector.gitSection.eventsCount", { count: activityCount })}
+							</Badge>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								className="size-6 text-muted-foreground hover:text-foreground"
+								onClick={closeSessionDock}
+								aria-label={t("inspector.sessionDock.collapse")}
+							>
+								<ChevronUp className="size-4 rotate-180" />
+							</Button>
+						</div>
 					</div>
 
 					<div className="shrink-0 border-b border-border/40 bg-muted/15 px-2">
@@ -2177,6 +2297,20 @@ export function WorkspaceInspectorSidebar({
 						</TabsContent>
 				</Tabs>
 			</section>
+			</>
+			) : (
+				<SessionDockFooter
+					activeTab={activeTab}
+					counts={{
+						activity: activityCount,
+						context: catalogCount,
+						spec: missionSpecs.length,
+						plan: latestPlanMessage ? 1 : 0,
+					}}
+					live={sessionState === "active"}
+					onExpand={openSessionDock}
+				/>
+			)}
 			</div>
 			<Dialog
 				open={pendingGitConfirmation !== null}
