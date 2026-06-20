@@ -126,6 +126,21 @@
       "title": "Activity and workspace context",
       "eventsCount": "{{count}} events"
     },
+    "codeSection": {
+      "kicker": "Project",
+      "title": "Files",
+      "filesCount": "{{count}} files",
+      "quickOpen": "Quick Open",
+      "loading": "Loading project files...",
+      "unavailable": "Project files are available for local workspaces.",
+      "empty": "No tracked files found.",
+      "error": "Failed to load project files"
+    },
+    "modeDock": {
+      "ariaLabel": "Inspector mode",
+      "git": "Git",
+      "code": "Code"
+    },
     "gitConfirmation": {
       "mergeTitle": "Merge {{requestLabel}}?",
       "mergeDescription": "This will merge the current {{requestLabel}}. Use it only when you are sure the task is ready.",

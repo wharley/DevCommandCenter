@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
 	getOpenPreferredEditorShortcutKeys,
+	getInspectorCodeModeShortcutKeys,
+	getInspectorGitModeShortcutKeys,
 	getQuickOpenShortcutKeys,
 	getWorkspaceSearchShortcutKeys,
+	isInspectorCodeModeShortcut,
+	isInspectorGitModeShortcut,
 	isOpenPreferredEditorShortcut,
 	isQuickOpenShortcut,
 	isWorkspaceSearchShortcut,
@@ -170,6 +174,58 @@ describe("shortcut-utils", () => {
 			"Ctrl",
 			"Shift",
 			"F",
+		]);
+	});
+
+	it("matches inspector mode shortcuts and resolves platform labels", () => {
+		expect(
+			isInspectorGitModeShortcut(
+				{
+					key: "g",
+					metaKey: true,
+					ctrlKey: false,
+					altKey: false,
+					shiftKey: true,
+					defaultPrevented: false,
+				},
+				"MacIntel",
+			),
+		).toBe(true);
+		expect(
+			isInspectorCodeModeShortcut(
+				{
+					key: "e",
+					metaKey: false,
+					ctrlKey: true,
+					altKey: false,
+					shiftKey: true,
+					defaultPrevented: false,
+				},
+				"Linux x86_64",
+			),
+		).toBe(true);
+		expect(
+			isInspectorCodeModeShortcut(
+				{
+					key: "e",
+					metaKey: false,
+					ctrlKey: true,
+					altKey: false,
+					shiftKey: false,
+					defaultPrevented: false,
+				},
+				"Linux x86_64",
+			),
+		).toBe(false);
+		expect(getInspectorGitModeShortcutKeys("MacIntel")).toEqual([
+			"Cmd",
+			"Shift",
+			"G",
+		]);
+		expect(getInspectorCodeModeShortcutKeys("Win32")).toEqual([
+			"Ctrl",
+			"Shift",
+			"E",
 		]);
 	});
 });

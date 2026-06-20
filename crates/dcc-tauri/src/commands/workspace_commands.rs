@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -448,6 +448,10 @@ fn normalize_git_relative_path(path: &str) -> String {
     path.trim().replace('\\', "/")
 }
 
+fn is_path_inside(path: &Path, root: &Path) -> bool {
+    path.starts_with(root)
+}
+
 fn collect_workspace_setup_hints(workspace: &Workspace) -> Vec<WorkspaceSetupHint> {
     detect_workspace_setup_suggestions(resolve_workspace_setup_root(workspace))
         .into_iter()
@@ -562,7 +566,27 @@ fn validate_git_relative_path(path: &str) -> Result<String, String> {
     if p.is_empty() {
         return Err("path is empty".to_string());
     }
-    if p.contains("..") {
+    if p.contains('\0') {
+        return Err("invalid path".to_string());
+    }
+    let path = Path::new(&p);
+    if path.is_absolute() {
+        return Err("invalid path".to_string());
+    }
+    let has_normal_component = path.components().any(|component| match component {
+        Component::Normal(_) => true,
+        Component::CurDir => false,
+        Component::ParentDir | Component::RootDir | Component::Prefix(_) => false,
+    });
+    if !has_normal_component {
+        return Err("invalid path".to_string());
+    }
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
         return Err("invalid path".to_string());
     }
     Ok(p)
@@ -732,12 +756,73 @@ fn run_git_show_text(
     Err(git_output_err(command, &output.stderr))
 }
 
-fn read_worktree_file_text(root: &str, rel: &str) -> Result<Option<String>, String> {
-    let path = PathBuf::from(root).join(rel);
-    if !path.is_file() {
+fn resolve_worktree_file_path(root: &str, rel: &str) -> Result<Option<PathBuf>, String> {
+    let root_canonical = PathBuf::from(root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let candidate = root_canonical.join(rel);
+    let metadata = match fs::symlink_metadata(&candidate) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    if !metadata.is_file() && !metadata.file_type().is_symlink() {
         return Ok(None);
     }
+    let canonical = candidate
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !is_path_inside(&canonical, &root_canonical) {
+        return Err("path escapes workspace".to_string());
+    }
+    if !canonical.is_file() {
+        return Ok(None);
+    }
+    Ok(Some(canonical))
+}
 
+fn resolve_worktree_write_path(root: &str, rel: &str) -> Result<PathBuf, String> {
+    let root_canonical = PathBuf::from(root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let candidate = root_canonical.join(rel);
+    match fs::symlink_metadata(&candidate) {
+        Ok(metadata) => {
+            if !metadata.is_file() && !metadata.file_type().is_symlink() {
+                return Err("path is not a file".to_string());
+            }
+            let canonical = candidate
+                .canonicalize()
+                .map_err(|error| error.to_string())?;
+            if !is_path_inside(&canonical, &root_canonical) {
+                return Err("path escapes workspace".to_string());
+            }
+            if !canonical.is_file() {
+                return Err("path is not a file".to_string());
+            }
+            Ok(canonical)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = candidate
+                .parent()
+                .ok_or_else(|| "invalid path".to_string())?;
+            let parent_canonical = parent.canonicalize().map_err(|error| error.to_string())?;
+            if !is_path_inside(&parent_canonical, &root_canonical) {
+                return Err("path escapes workspace".to_string());
+            }
+            let file_name = candidate
+                .file_name()
+                .ok_or_else(|| "invalid path".to_string())?;
+            Ok(parent_canonical.join(file_name))
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn read_worktree_file_text(root: &str, rel: &str) -> Result<Option<String>, String> {
+    let Some(path) = resolve_worktree_file_path(root, rel)? else {
+        return Ok(None);
+    };
     let bytes = fs::read(&path).map_err(|error| error.to_string())?;
     Ok(Some(String::from_utf8_lossy(&bytes).to_string()))
 }
@@ -1620,7 +1705,7 @@ pub async fn write_workspace_file(
     }
 
     let rel = validate_git_relative_path(&input.relative_path)?;
-    let path = PathBuf::from(root).join(&rel);
+    let path = resolve_worktree_write_path(root, &rel)?;
 
     // Compare-and-swap: verify the disk still matches what the caller last saw
     // before overwriting. Doing the read+compare+write in one command shrinks the
@@ -1649,6 +1734,143 @@ pub async fn write_workspace_file(
 
 const SEARCH_WORKSPACE_MAX_RESULTS: usize = 200;
 
+fn parse_git_grep_z_output(stdout: &[u8], max_results: usize) -> SearchWorkspaceOutput {
+    let mut matches = Vec::new();
+    let mut truncated = false;
+    let stdout = String::from_utf8_lossy(stdout);
+    for record in stdout.split('\n') {
+        if record.is_empty() {
+            continue;
+        }
+        // Record format: "<path>\0<line>:<text>"
+        let Some((path, rest)) = record.split_once('\0') else {
+            continue;
+        };
+        let Some((line_str, text)) = rest.split_once(':') else {
+            continue;
+        };
+        let Ok(line) = line_str.trim().parse::<u32>() else {
+            continue;
+        };
+        if matches.len() >= max_results {
+            truncated = true;
+            break;
+        }
+        matches.push(SearchWorkspaceMatch {
+            path: path.to_string(),
+            line,
+            text: text.chars().take(400).collect(),
+        });
+    }
+
+    SearchWorkspaceOutput { matches, truncated }
+}
+
+#[cfg(test)]
+mod editor_workspace_file_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new(name: &str) -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time before unix epoch")
+                .as_nanos();
+            let path =
+                std::env::temp_dir().join(format!("dcc-{name}-{}-{nanos}", std::process::id()));
+            fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+
+        fn as_str(&self) -> &str {
+            self.path.to_str().expect("utf-8 temp path")
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn relative_path_validation_blocks_escapes_but_allows_dot_names() {
+        assert_eq!(
+            validate_git_relative_path("src/..hidden/file.rs").expect("valid dot-name"),
+            "src/..hidden/file.rs"
+        );
+        assert_eq!(
+            validate_git_relative_path("./src/main.rs").expect("valid curdir"),
+            "./src/main.rs"
+        );
+        assert!(validate_git_relative_path("../secret").is_err());
+        assert!(validate_git_relative_path("src/../secret").is_err());
+        assert!(validate_git_relative_path("/tmp/secret").is_err());
+    }
+
+    #[test]
+    fn read_and_write_workspace_file_stay_inside_root() {
+        let root = TestDir::new("workspace-files");
+        fs::create_dir_all(root.path.join("src")).expect("create src");
+        fs::write(root.path.join("src/main.rs"), "fn main() {}\n").expect("write file");
+
+        let content = read_worktree_file_text(root.as_str(), "src/main.rs")
+            .expect("read succeeds")
+            .expect("file exists");
+        assert_eq!(content, "fn main() {}\n");
+
+        let path =
+            resolve_worktree_write_path(root.as_str(), "src/main.rs").expect("resolve write path");
+        fs::write(path, "fn main() { println!(\"ok\"); }\n").expect("write resolved file");
+        let updated = read_worktree_file_text(root.as_str(), "src/main.rs")
+            .expect("read updated")
+            .expect("file exists");
+        assert!(updated.contains("println!"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_file_helpers_reject_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = TestDir::new("workspace-symlink-root");
+        let outside = TestDir::new("workspace-symlink-outside");
+        let outside_file = outside.path.join("secret.txt");
+        fs::write(&outside_file, "secret").expect("write outside file");
+        symlink(&outside_file, root.path.join("linked-secret.txt")).expect("create symlink");
+
+        let read_error = read_worktree_file_text(root.as_str(), "linked-secret.txt")
+            .expect_err("read should reject symlink escape");
+        assert!(read_error.contains("escapes workspace"));
+
+        let write_error = resolve_worktree_write_path(root.as_str(), "linked-secret.txt")
+            .expect_err("write should reject symlink escape");
+        assert!(write_error.contains("escapes workspace"));
+    }
+
+    #[test]
+    fn git_grep_parser_handles_colon_paths_and_truncation() {
+        let mut input = Vec::new();
+        input.extend_from_slice(b"src/with:colon.rs");
+        input.push(0);
+        input.extend_from_slice(b"12:let value = 1;\nsrc/lib.rs");
+        input.push(0);
+        input.extend_from_slice(b"3:needle\n");
+        let output = parse_git_grep_z_output(&input, 1);
+
+        assert!(output.truncated);
+        assert_eq!(output.matches.len(), 1);
+        assert_eq!(output.matches[0].path, "src/with:colon.rs");
+        assert_eq!(output.matches[0].line, 12);
+        assert_eq!(output.matches[0].text, "let value = 1;");
+    }
+}
+
 /// Content search across tracked files via `git grep` (on demand, capped). Fixed
 /// string, case-insensitive, repo-scoped — consistent with Quick Open's ls-files.
 #[tauri::command]
@@ -1674,35 +1896,10 @@ pub async fn search_workspace(
         &["grep", "-z", "-n", "-I", "-i", "-F", "-e", query, "--"],
     )?;
 
-    let mut matches = Vec::new();
-    let mut truncated = false;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for record in stdout.split('\n') {
-        if record.is_empty() {
-            continue;
-        }
-        // Record format: "<path>\0<line>:<text>"
-        let Some((path, rest)) = record.split_once('\0') else {
-            continue;
-        };
-        let Some((line_str, text)) = rest.split_once(':') else {
-            continue;
-        };
-        let Ok(line) = line_str.trim().parse::<u32>() else {
-            continue;
-        };
-        if matches.len() >= SEARCH_WORKSPACE_MAX_RESULTS {
-            truncated = true;
-            break;
-        }
-        matches.push(SearchWorkspaceMatch {
-            path: path.to_string(),
-            line,
-            text: text.chars().take(400).collect(),
-        });
-    }
-
-    Ok(SearchWorkspaceOutput { matches, truncated })
+    Ok(parse_git_grep_z_output(
+        &output.stdout,
+        SEARCH_WORKSPACE_MAX_RESULTS,
+    ))
 }
 
 /// Mission specs are intentionally scoped to DCC-owned worktree state.

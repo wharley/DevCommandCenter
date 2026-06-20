@@ -1606,6 +1606,10 @@ export default function App() {
 		setIsSessionSearchOpen(true);
 	}, []);
 
+	const handleOpenQuickOpen = useCallback(() => {
+		setIsQuickOpenOpen(true);
+	}, []);
+
 	const handleSelectSessionSearchResult = useCallback(
 		async (result: SessionSearchResult) => {
 			try {
@@ -2322,10 +2326,17 @@ export default function App() {
 									surfaceSelection?.kind === "git-diff"
 										? surfaceSelection.file
 										: null
-								}
-								onSelectPreview={handleOpenEditorFile}
-								onPrefillComposer={handlePrefillComposer}
-								onOpenMissionSpec={handleOpenMissionSpec}
+									}
+									onSelectPreview={handleOpenEditorFile}
+									onPrefillComposer={handlePrefillComposer}
+									onOpenCodeFile={handleOpenFileFromQuickOpen}
+									selectedCodePath={
+										surfaceSelection?.kind === "file-edit"
+											? surfaceSelection.path
+											: null
+									}
+									onOpenQuickOpen={handleOpenQuickOpen}
+									onOpenMissionSpec={handleOpenMissionSpec}
 								onGeneratePlanFromSpec={handleGeneratePlanFromSpec}
 								onValidateMissionSpec={handleValidateMissionSpec}
 								onReanchorMissionSpec={handleReanchorMissionSpec}

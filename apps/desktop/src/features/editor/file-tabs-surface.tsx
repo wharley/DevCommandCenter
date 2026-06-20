@@ -8,6 +8,7 @@ import type {
 	DiffAnnotationRequest,
 	DiffAnnotationSubmit,
 } from "./diff-annotation";
+import { hasDirtyFileSurfaceState } from "./file-surface.logic";
 import {
 	WorkspaceFileSurface,
 	type WorkspaceFileSurfaceHandle,
@@ -147,6 +148,14 @@ export function FileTabsSurface({
 		);
 	}, []);
 
+	const requestCloseAll = useCallback(() => {
+		const anyDirty = hasDirtyFileSurfaceState(stateByPathRef.current);
+		if (anyDirty && !window.confirm(t("fileSurface.discardConfirm"))) {
+			return;
+		}
+		onClose();
+	}, [onClose, t]);
+
 	// One global key handler for the active tab (embedded surfaces stay silent).
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -164,15 +173,11 @@ export function FileTabsSurface({
 			if (event.key !== "Escape") return;
 			if (shouldIgnoreGlobalShortcutTarget(event.target)) return;
 			event.preventDefault();
-			const anyDirty = Object.values(stateByPathRef.current).some(
-				(state) => state.dirty,
-			);
-			if (anyDirty && !window.confirm(t("fileSurface.discardConfirm"))) return;
-			onClose();
+			requestCloseAll();
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [onClose, t]);
+	}, [requestCloseAll]);
 
 	// On tab switch, re-measure + focus the now-visible editor (kept-alive surfaces
 	// can render at zero size while hidden under display:none).
@@ -227,7 +232,7 @@ export function FileTabsSurface({
 						type="button"
 						variant="ghost"
 						size="sm"
-						onClick={onClose}
+						onClick={requestCloseAll}
 						aria-label={t("fileTabs.closeAll")}
 						className="px-2 text-muted-foreground hover:text-foreground"
 					>

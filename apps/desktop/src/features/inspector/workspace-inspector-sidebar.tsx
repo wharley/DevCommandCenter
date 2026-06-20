@@ -1,5 +1,17 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, ChevronUp, Info, Rabbit, TerminalSquare } from "lucide-react";
+import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-js";
+import {
+	Activity,
+	ChevronRight,
+	ChevronUp,
+	Code2,
+	GitBranch,
+	Info,
+	Loader2,
+	Rabbit,
+	Search,
+	TerminalSquare,
+} from "lucide-react";
 import {
 	useCallback,
 	useEffect,
@@ -60,6 +72,7 @@ import {
 	workspaceChangeRequestCreate,
 	workspaceChangeRequestMerge,
 	workspaceGitCommitPush,
+	listGitTrackedFiles,
 	workspaceGitStageAll,
 	workspaceGitPush,
 	workspaceGitSyncBase,
@@ -97,6 +110,14 @@ import {
 import { useForgeCliLoginsHealth } from "@/features/settings/use-forge-cli-logins-health";
 import { getDefaultForgeHost, setForgeCliSelectedLogin } from "@/lib/forge-cli";
 import { sessionStateLabel } from "@/i18n/session-state-label";
+import { InlineShortcutDisplay } from "@/features/shortcuts/InlineShortcutDisplay";
+import {
+	getInspectorCodeModeShortcutKeys,
+	getInspectorGitModeShortcutKeys,
+	getQuickOpenShortcutKeys,
+	isInspectorCodeModeShortcut,
+	isInspectorGitModeShortcut,
+} from "@/features/shortcuts/shortcut-utils";
 import type { WorkspaceStatus } from "@/features/workspaces/types";
 import { setupReportDescription } from "@/features/workspaces/workspace-setup-report";
 import type { ForgeCliProvider } from "@dcc/contracts";
@@ -120,6 +141,9 @@ type WorkspaceInspectorSidebarProps = {
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	onPrefillComposer?: (text: string) => void;
+	onOpenCodeFile: (input: { path: string; name: string }) => void;
+	selectedCodePath: string | null;
+	onOpenQuickOpen: () => void;
 	onOpenMissionSpec: (spec: MissionSpecEntry | null) => void;
 	onGeneratePlanFromSpec: (specMarkdown: string) => void;
 	onValidateMissionSpec: (input: {
@@ -161,8 +185,11 @@ const MAX_SECTION_HEIGHT = 640;
 const DEFAULT_DOCK_HEIGHT = 320;
 
 type InspectorTab = "activity" | "context" | "spec" | "plan";
+type InspectorMode = "git" | "code";
 
 const SESSION_DOCK_TABS: InspectorTab[] = ["activity", "context", "spec", "plan"];
+const INSPECTOR_MODES: InspectorMode[] = ["git", "code"];
+const EMPTY_CODE_FILE_PATHS: string[] = [];
 type PendingGitConfirmation = "merge" | "sync-base" | null;
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
@@ -520,6 +547,346 @@ function SessionDockFooter({
 	);
 }
 
+function basename(path: string): string {
+	const slash = path.lastIndexOf("/");
+	return slash === -1 ? path : path.slice(slash + 1);
+}
+
+type CodeTreeNode = {
+	name: string;
+	path: string;
+	children: Map<string, CodeTreeNode>;
+	file?: string;
+};
+
+function buildCodeTree(paths: string[]): CodeTreeNode {
+	const root: CodeTreeNode = { name: "", path: "", children: new Map() };
+
+	for (const filePath of paths) {
+		const parts = filePath.split("/").filter(Boolean);
+		if (parts.length === 0) {
+			continue;
+		}
+		let current = root;
+		for (let index = 0; index < parts.length - 1; index += 1) {
+			const part = parts[index]!;
+			if (!current.children.has(part)) {
+				current.children.set(part, {
+					name: part,
+					path: parts.slice(0, index + 1).join("/"),
+					children: new Map(),
+				});
+			}
+			current = current.children.get(part)!;
+		}
+		const fileName = parts[parts.length - 1]!;
+		current.children.set(fileName, {
+			name: fileName,
+			path: filePath,
+			children: new Map(),
+			file: filePath,
+		});
+	}
+
+	return root;
+}
+
+function collectInitialCodeFolderPaths(node: CodeTreeNode): string[] {
+	const paths: string[] = [];
+	for (const child of node.children.values()) {
+		if (child.children.size > 0 && !child.file) {
+			paths.push(child.path);
+		}
+	}
+	return paths;
+}
+
+function sameStringSet(left: Set<string>, right: Set<string>): boolean {
+	if (left.size !== right.size) {
+		return false;
+	}
+	for (const item of left) {
+		if (!right.has(item)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function InspectorModeDock({
+	mode,
+	onModeChange,
+}: {
+	mode: InspectorMode;
+	onModeChange: (mode: InspectorMode) => void;
+}) {
+	const { t } = useTranslation("common");
+	return (
+		<nav
+			aria-label={t("inspector.modeDock.ariaLabel")}
+			className="shrink-0 border-t border-border/60 bg-sidebar"
+		>
+			<div className="flex h-10 items-center justify-start gap-1 px-2">
+				{INSPECTOR_MODES.map((item) => {
+					const active = item === mode;
+					const Icon = item === "git" ? GitBranch : Code2;
+					const shortcutKeys =
+						item === "git"
+							? getInspectorGitModeShortcutKeys()
+							: getInspectorCodeModeShortcutKeys();
+					return (
+						<Tooltip key={item}>
+							<TooltipTrigger asChild>
+								<button
+									type="button"
+									aria-label={t(`inspector.modeDock.${item}`)}
+									aria-pressed={active}
+									onMouseDown={(event) => {
+										event.preventDefault();
+										event.stopPropagation();
+									}}
+									onClick={(event) => {
+										event.preventDefault();
+										event.stopPropagation();
+										onModeChange(item);
+									}}
+									className={cn(
+										"flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[11.5px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
+										active
+											? "bg-muted text-foreground shadow-sm"
+											: "text-muted-foreground hover:bg-muted/45 hover:text-foreground",
+									)}
+								>
+									<Icon className="size-4" strokeWidth={2} />
+									<span className="font-medium">{t(`inspector.modeDock.${item}`)}</span>
+								</button>
+							</TooltipTrigger>
+							<TooltipContent side="top" className="gap-2">
+								<span>{t(`inspector.modeDock.${item}`)}</span>
+								<InlineShortcutDisplay keys={shortcutKeys} />
+							</TooltipContent>
+						</Tooltip>
+					);
+				})}
+			</div>
+		</nav>
+	);
+}
+
+function CodeProjectSection({
+	workspaceRoot,
+	selectedPath,
+	onOpenFile,
+	onOpenQuickOpen,
+}: {
+	workspaceRoot: string | null;
+	selectedPath: string | null;
+	onOpenFile: (input: { path: string; name: string }) => void;
+	onOpenQuickOpen: () => void;
+}) {
+	const { t } = useTranslation("common");
+	const quickOpenShortcutKeys = getQuickOpenShortcutKeys();
+	const root = workspaceRoot?.trim() ?? "";
+	const filesQuery = useQuery({
+		queryKey: ["inspectorCodeFiles", root],
+		queryFn: async () => {
+			const result = await listGitTrackedFiles({ workspaceRoot: root });
+			return result.paths;
+		},
+		enabled: Boolean(root),
+		staleTime: 30_000,
+		refetchOnWindowFocus: false,
+	});
+	const paths = filesQuery.data ?? EMPTY_CODE_FILE_PATHS;
+	const tree = useMemo(() => buildCodeTree(paths), [paths]);
+	const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+
+	useEffect(() => {
+		const next = new Set(collectInitialCodeFolderPaths(tree));
+		setExpanded((current) => (sameStringSet(current, next) ? current : next));
+	}, [tree]);
+
+	const toggle = useCallback((path: string) => {
+		setExpanded((previous) => {
+			const next = new Set(previous);
+			if (next.has(path)) {
+				next.delete(path);
+			} else {
+				next.add(path);
+			}
+			return next;
+		});
+	}, []);
+
+	return (
+		<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border/60">
+			<div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border/50 px-3">
+				<div className="min-w-0">
+					<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+						{t("inspector.codeSection.kicker")}
+					</p>
+					<p className="truncate text-[13px] font-medium leading-tight text-foreground">
+						{t("inspector.codeSection.title")}
+					</p>
+				</div>
+				<div className="flex shrink-0 items-center gap-1.5">
+					<Badge variant="outline" className="h-6 px-2 text-[10px] font-normal">
+						{t("inspector.codeSection.filesCount", { count: paths.length })}
+					</Badge>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="h-7 cursor-pointer gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+								onClick={onOpenQuickOpen}
+								aria-label={t("inspector.codeSection.quickOpen")}
+							>
+								<Search className="size-3.5" strokeWidth={1.8} />
+								<InlineShortcutDisplay keys={quickOpenShortcutKeys} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom" className="gap-2">
+							<span>{t("inspector.codeSection.quickOpen")}</span>
+							<InlineShortcutDisplay keys={quickOpenShortcutKeys} />
+						</TooltipContent>
+					</Tooltip>
+				</div>
+			</div>
+			<div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2">
+				{!root ? (
+					<p className="px-2 py-3 text-[12px] text-muted-foreground">
+						{t("inspector.codeSection.unavailable")}
+					</p>
+				) : filesQuery.isPending ? (
+					<div className="flex items-center gap-2 px-2 py-3 text-[12px] text-muted-foreground">
+						<Loader2 className="size-3.5 animate-spin" strokeWidth={1.8} />
+						<span>{t("inspector.codeSection.loading")}</span>
+					</div>
+				) : filesQuery.isError ? (
+					<p className="px-2 py-3 text-[12px] text-destructive">
+						{(filesQuery.error as Error | null)?.message ??
+							t("inspector.codeSection.error")}
+					</p>
+				) : paths.length === 0 ? (
+					<p className="px-2 py-3 text-[12px] text-muted-foreground">
+						{t("inspector.codeSection.empty")}
+					</p>
+				) : (
+					<CodeTreeNodeList
+						nodes={tree.children}
+						expanded={expanded}
+						onToggle={toggle}
+						depth={0}
+						selectedPath={selectedPath}
+						onOpenFile={onOpenFile}
+					/>
+				)}
+			</div>
+		</section>
+	);
+}
+
+function CodeTreeNodeList({
+	nodes,
+	expanded,
+	onToggle,
+	depth,
+	selectedPath,
+	onOpenFile,
+}: {
+	nodes: Map<string, CodeTreeNode>;
+	expanded: Set<string>;
+	onToggle: (path: string) => void;
+	depth: number;
+	selectedPath: string | null;
+	onOpenFile: (input: { path: string; name: string }) => void;
+}) {
+	const sorted = [...nodes.values()].sort((left, right) => {
+		const leftIsFolder = left.children.size > 0 && !left.file;
+		const rightIsFolder = right.children.size > 0 && !right.file;
+		if (leftIsFolder !== rightIsFolder) {
+			return leftIsFolder ? -1 : 1;
+		}
+		return left.name.localeCompare(right.name);
+	});
+	const pad = depth * 12 + 8;
+
+	return (
+		<div role={depth === 0 ? "tree" : "group"}>
+			{sorted.map((node) => {
+				const isFolder = node.children.size > 0 && !node.file;
+				if (isFolder) {
+					const isOpen = expanded.has(node.path);
+					return (
+						<div key={node.path}>
+							<button
+								type="button"
+								role="treeitem"
+								aria-expanded={isOpen}
+								onClick={() => onToggle(node.path)}
+								className="flex h-6 w-full cursor-pointer items-center gap-1 rounded-sm pr-2 text-left text-[11.5px] text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring"
+								style={{ paddingLeft: pad }}
+							>
+								<ChevronRight
+									className={cn("size-3 shrink-0 transition-transform", isOpen && "rotate-90")}
+									strokeWidth={2}
+								/>
+								<img
+									src={getMaterialFolderIcon(node.name, isOpen || undefined)}
+									alt=""
+									className="size-3.5 shrink-0"
+								/>
+								<span className="min-w-0 truncate">{node.name}</span>
+							</button>
+							{isOpen ? (
+								<CodeTreeNodeList
+									nodes={node.children}
+									expanded={expanded}
+									onToggle={onToggle}
+									depth={depth + 1}
+									selectedPath={selectedPath}
+									onOpenFile={onOpenFile}
+								/>
+							) : null}
+						</div>
+					);
+				}
+
+				const filePath = node.file;
+				if (!filePath) {
+					return null;
+				}
+				const selected = selectedPath === filePath;
+				return (
+					<button
+						key={filePath}
+						type="button"
+						role="treeitem"
+						title={filePath}
+						onClick={() => onOpenFile({ path: filePath, name: basename(filePath) })}
+						className={cn(
+							"flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-sm pr-2 text-left text-[11.5px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
+							selected
+								? "bg-muted/70 text-foreground"
+								: "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+						)}
+						style={{ paddingLeft: depth * 12 + 22 }}
+					>
+						<img
+							src={getMaterialFileIcon(node.name)}
+							alt=""
+							className="size-3.5 shrink-0"
+						/>
+						<span className="min-w-0 truncate">{node.name}</span>
+					</button>
+				);
+			})}
+		</div>
+	);
+}
+
 function SetupPendingBanner({
 	title,
 	description,
@@ -589,6 +956,9 @@ export function WorkspaceInspectorSidebar({
 	selectedPreview,
 	onSelectPreview,
 	onPrefillComposer,
+	onOpenCodeFile,
+	selectedCodePath,
+	onOpenQuickOpen,
 	onOpenMissionSpec,
 	onGeneratePlanFromSpec,
 	onValidateMissionSpec,
@@ -600,6 +970,7 @@ export function WorkspaceInspectorSidebar({
 	onTabChange,
 }: WorkspaceInspectorSidebarProps) {
 	const { t } = useTranslation("common");
+	const [inspectorMode, setInspectorMode] = useState<InspectorMode>("git");
 	const hasWorkspace = Boolean(workspaceId && workspaceName && workspaceBranch);
 	const pathLine =
 		workspacePath && workspacePath.length > 0
@@ -608,6 +979,7 @@ export function WorkspaceInspectorSidebar({
 				: workspacePath
 			: null;
 	const queryClient = useQueryClient();
+
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
 	const gitBranch =
 		gitStatusQuery.data?.currentBranch &&
@@ -1101,6 +1473,25 @@ export function WorkspaceInspectorSidebar({
 	const lastActivityCountRef = useRef(0);
 	const dockUserClosedRef = useRef(false);
 	const autoOpenedPlanMessageIdRef = useRef<string | null>(null);
+	const selectInspectorMode = useCallback((mode: InspectorMode) => {
+		setInspectorMode(mode);
+	}, []);
+
+	useEffect(() => {
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (isInspectorGitModeShortcut(event)) {
+				event.preventDefault();
+				selectInspectorMode("git");
+				return;
+			}
+			if (isInspectorCodeModeShortcut(event)) {
+				event.preventDefault();
+				selectInspectorMode("code");
+			}
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [selectInspectorMode]);
 	const planMessages = useMemo(
 		() => projectWorkspaceMessages([], sessionEvents, sessionId, null),
 		[sessionEvents, sessionId],
@@ -1386,69 +1777,78 @@ export function WorkspaceInspectorSidebar({
 				className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground"
 				data-dcc-inspector-root
 			>
-			<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border/60">
-				<GitSectionHeader
-					commitMode={commitMode}
-					isRefreshing={gitStatusQuery.isFetching && !gitStatusQuery.isPending}
-					onCommit={handleInspectorCommit}
-					onContinueWorkspace={handleContinueWorkspace}
-					isContinuingWorkspace={isContinuingWorkspace}
-					onRetrySetup={handleRetrySetup}
-					isRetryingSetup={isRetryingSetup}
-					showRetrySetup={isSetupPending}
-					retrySetupLabel={t("inspector.setupRetry.button")}
-					prUrl={prStatus?.url ?? null}
-					prNumber={prStatus?.number ?? null}
-					prProvider={prStatus?.provider ?? null}
-					identitySlot={
-						forgeConnected && forgeIdentityLogin ? (
-							<ForgeIdentityChip
-								avatarUrl={forgeIdentityAccount?.avatarUrl}
-								label={forgeIdentityLabel}
-								login={forgeIdentityLogin}
-								boundLogin={boundForgeLogin}
-								provider={workspaceForgeContext?.provider ?? null}
-								host={workspaceForgeContext?.host ?? null}
-							/>
-						) : null
-					}
-				/>
+				{inspectorMode === "git" ? (
+					<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border/60">
+						<GitSectionHeader
+							commitMode={commitMode}
+							isRefreshing={gitStatusQuery.isFetching && !gitStatusQuery.isPending}
+							onCommit={handleInspectorCommit}
+							onContinueWorkspace={handleContinueWorkspace}
+							isContinuingWorkspace={isContinuingWorkspace}
+							onRetrySetup={handleRetrySetup}
+							isRetryingSetup={isRetryingSetup}
+							showRetrySetup={isSetupPending}
+							retrySetupLabel={t("inspector.setupRetry.button")}
+							prUrl={prStatus?.url ?? null}
+							prNumber={prStatus?.number ?? null}
+							prProvider={prStatus?.provider ?? null}
+							identitySlot={
+								forgeConnected && forgeIdentityLogin ? (
+									<ForgeIdentityChip
+										avatarUrl={forgeIdentityAccount?.avatarUrl}
+										label={forgeIdentityLabel}
+										login={forgeIdentityLogin}
+										boundLogin={boundForgeLogin}
+										provider={workspaceForgeContext?.provider ?? null}
+										host={workspaceForgeContext?.host ?? null}
+									/>
+								) : null
+							}
+						/>
 
-				<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 pb-3 pt-2">
-					<div className="shrink-0">
-						<BranchToolbar
-							branch={currentBranch}
-							workspacePath={workspacePath}
-							behindOfRemoteCount={gitStatusQuery.data?.behindOfRemoteCount ?? 0}
-							isSyncingBase={isSyncingBase}
-							onSyncBase={handleSyncBase}
-						/>
-					</div>
-					{pathLine ? (
-						<p
-							className="shrink-0 truncate text-[11px] text-muted-foreground"
-							title={workspacePath ?? undefined}
-						>
-							{pathLine}
-						</p>
-					) : null}
-					{isSetupPending && setupReportSummary ? (
-						<SetupPendingBanner
-							title={t("inspector.setupRetry.pendingTitle")}
-							description={setupReportSummary}
-							detailsLabel={t("inspector.setupRetry.details")}
-						/>
-					) : null}
-					<div className="flex min-h-0 min-w-0 flex-1 flex-col">
-						<InspectorChangesSection
-							workspaceRoot={workspacePath}
-							selectedPreview={selectedPreview}
-							onSelectPreview={onSelectPreview}
-							onPrefillComposer={onPrefillComposer}
-						/>
-					</div>
-				</div>
-			</section>
+						<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 pb-3 pt-2">
+							<div className="shrink-0">
+								<BranchToolbar
+									branch={currentBranch}
+									workspacePath={workspacePath}
+									behindOfRemoteCount={gitStatusQuery.data?.behindOfRemoteCount ?? 0}
+									isSyncingBase={isSyncingBase}
+									onSyncBase={handleSyncBase}
+								/>
+							</div>
+							{pathLine ? (
+								<p
+									className="shrink-0 truncate text-[11px] text-muted-foreground"
+									title={workspacePath ?? undefined}
+								>
+									{pathLine}
+								</p>
+							) : null}
+							{isSetupPending && setupReportSummary ? (
+								<SetupPendingBanner
+									title={t("inspector.setupRetry.pendingTitle")}
+									description={setupReportSummary}
+									detailsLabel={t("inspector.setupRetry.details")}
+								/>
+							) : null}
+							<div className="flex min-h-0 min-w-0 flex-1 flex-col">
+								<InspectorChangesSection
+									workspaceRoot={workspacePath}
+									selectedPreview={selectedPreview}
+									onSelectPreview={onSelectPreview}
+									onPrefillComposer={onPrefillComposer}
+								/>
+							</div>
+						</div>
+					</section>
+				) : (
+					<CodeProjectSection
+						workspaceRoot={workspacePath}
+						selectedPath={selectedCodePath}
+						onOpenFile={onOpenCodeFile}
+						onOpenQuickOpen={onOpenQuickOpen}
+					/>
+				)}
 
 			{sessionDockOpen ? (
 			<>
@@ -2298,9 +2698,9 @@ export function WorkspaceInspectorSidebar({
 				</Tabs>
 			</section>
 			</>
-			) : (
-				<SessionDockFooter
-					activeTab={activeTab}
+				) : (
+					<SessionDockFooter
+						activeTab={activeTab}
 					counts={{
 						activity: activityCount,
 						context: catalogCount,
@@ -2308,10 +2708,11 @@ export function WorkspaceInspectorSidebar({
 						plan: latestPlanMessage ? 1 : 0,
 					}}
 					live={sessionState === "active"}
-					onExpand={openSessionDock}
-				/>
-			)}
-			</div>
+						onExpand={openSessionDock}
+					/>
+				)}
+				<InspectorModeDock mode={inspectorMode} onModeChange={selectInspectorMode} />
+				</div>
 			<Dialog
 				open={pendingGitConfirmation !== null}
 				onOpenChange={(open) => {

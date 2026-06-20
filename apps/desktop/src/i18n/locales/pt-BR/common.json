@@ -126,6 +126,21 @@
       "title": "Atividade e contexto do workspace",
       "eventsCount": "{{count}} eventos"
     },
+    "codeSection": {
+      "kicker": "Projeto",
+      "title": "Arquivos",
+      "filesCount": "{{count}} arquivos",
+      "quickOpen": "Quick Open",
+      "loading": "Carregando arquivos do projeto...",
+      "unavailable": "Arquivos do projeto estão disponíveis para workspaces locais.",
+      "empty": "Nenhum arquivo rastreado encontrado.",
+      "error": "Falha ao carregar arquivos do projeto"
+    },
+    "modeDock": {
+      "ariaLabel": "Modo do inspector",
+      "git": "Git",
+      "code": "Código"
+    },
     "gitConfirmation": {
       "mergeTitle": "Mesclar {{requestLabel}}?",
       "mergeDescription": "Esta ação vai mesclar o {{requestLabel}} atual. Use somente quando você tiver certeza de que a task está pronta.",

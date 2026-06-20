@@ -32,6 +32,7 @@ import {
 	type DiffAnnotationSubmit,
 	type PendingAnnotation,
 } from "./diff-annotation";
+import { resolveFileSurfaceContentState } from "./file-surface.logic";
 import { FileViewToggle } from "./file-view-toggle";
 import { useWorkspaceFileContent } from "./use-workspace-file-content";
 
@@ -488,6 +489,7 @@ export const WorkspaceFileSurface = forwardRef<
 				? gitQuery.data.modifiedText || gitQuery.data.originalText
 				: ""
 			: (pathQuery.data?.content ?? "");
+	const contentState = resolveFileSurfaceContentState(query);
 
 	// The loaded disk body becomes the reconciliation baseline. Fires only when the
 	// content value actually changes (new file, or a refetch with new content).
@@ -557,22 +559,16 @@ export const WorkspaceFileSurface = forwardRef<
 			</div>
 			)}
 			<div className="relative flex min-h-0 flex-1 bg-background">
-				{query.isError ? (
+				{contentState === "error" ? (
 					<div className="absolute inset-0 flex items-center justify-center bg-background">
 						<p className="text-[11px] text-destructive">
 							{(query.error as Error | null)?.message ?? "Failed to load file"}
 						</p>
 					</div>
-				) : query.isPending ? (
+				) : contentState === "loading" ? (
 					<div className="absolute inset-0 flex items-center justify-center bg-background">
 						<p className="text-[11px] text-muted-foreground">
 							{t("fileSurface.loading")}
-						</p>
-					</div>
-				) : body.length === 0 ? (
-					<div className="absolute inset-0 flex items-center justify-center bg-background">
-						<p className="text-[11px] text-muted-foreground">
-							{t("fileSurface.empty")}
 						</p>
 					</div>
 				) : (
