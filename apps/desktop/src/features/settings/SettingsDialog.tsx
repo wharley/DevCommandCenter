@@ -7,6 +7,7 @@ import {
 	Keyboard,
 	Moon,
 	Package,
+	Rabbit,
 	Loader2,
 	Server,
 	Sparkles,
@@ -34,6 +35,11 @@ import type { DccTheme } from "@/components/theme-provider";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
 import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
+import { CodeRabbitConnectDialog } from "@/features/settings/coderabbit-connect-dialog";
+import {
+	invalidateCodeRabbitCliQueries,
+	useCodeRabbitCliStatus,
+} from "@/features/settings/coderabbit-cli-queries";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
 import { PairedDevicesPanel } from "@/features/settings/paired-devices";
 import type { AppUpdateInfo } from "@/features/updater";
@@ -479,6 +485,115 @@ function ForgeCliIntegrationCard() {
 	);
 }
 
+function CodeRabbitCliIntegrationCard() {
+	const { t } = useTranslation("common");
+	const queryClient = useQueryClient();
+	const [connectOpen, setConnectOpen] = useState(false);
+	const statusQuery = useCodeRabbitCliStatus(null, { includeAuthStatus: true });
+	const status = statusQuery.data;
+	const authReady = Boolean(status?.auth?.success || status?.auth?.authenticated);
+	const installed = status?.installed ?? false;
+	const isReady = installed && authReady;
+	const statusMessage = status?.message ?? t("settings.codeRabbit.checkingStatus");
+	const authMessage = status?.auth?.message ?? status?.auth?.stderr ?? null;
+	const accountLabel =
+		status?.auth?.login ||
+		status?.auth?.organization ||
+		(authReady ? t("settings.codeRabbit.authenticated") : null);
+
+	const handleRefresh = async () => {
+		await invalidateCodeRabbitCliQueries(queryClient, null);
+	};
+
+	return (
+		<>
+			<div className="rounded-xl border border-border/60 p-4">
+				<div className="flex flex-col gap-4">
+					<div className="flex flex-wrap items-start justify-between gap-3">
+						<div className="min-w-0">
+							<div className="flex items-center gap-2">
+								<Rabbit className="size-4 text-muted-foreground" strokeWidth={1.8} />
+								<h3 className="text-[14px] font-medium text-foreground">
+									{t("settings.codeRabbit.title")}
+								</h3>
+								<Badge
+									variant={isReady ? "success" : "outline"}
+									className="h-5 text-[10px] font-normal"
+								>
+									{isReady
+										? t("settings.codeRabbit.readyBadge")
+										: t("settings.codeRabbit.notReadyBadge")}
+								</Badge>
+							</div>
+							<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+								{t("settings.codeRabbit.hint")}
+							</p>
+						</div>
+
+						<div className="flex flex-wrap items-center gap-2">
+							{statusQuery.isPending ? (
+								<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-muted-foreground">
+									<Loader2 className="size-3.5 animate-spin" />
+									{t("settings.codeRabbit.checking")}
+								</div>
+							) : isReady ? (
+								<>
+									<div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-[12px] text-foreground">
+										<TerminalSquare className="size-3.5" />
+										<span className="truncate">
+											{accountLabel ?? status?.cliName ?? "CodeRabbit"}
+										</span>
+									</div>
+									<Button variant="ghost" size="sm" onClick={() => void handleRefresh()}>
+										{t("settings.codeRabbit.refresh")}
+									</Button>
+									<Button variant="outline" size="sm" onClick={() => setConnectOpen(true)}>
+										<TerminalSquare className="size-3.5" />
+										{t("settings.codeRabbit.reconnect")}
+									</Button>
+								</>
+							) : (
+								<>
+									<Button variant="outline" size="sm" onClick={() => setConnectOpen(true)}>
+										<TerminalSquare className="size-3.5" />
+										{t("settings.codeRabbit.connect")}
+									</Button>
+									<Button variant="ghost" size="sm" onClick={() => void handleRefresh()}>
+										{t("settings.codeRabbit.refresh")}
+									</Button>
+								</>
+							)}
+						</div>
+					</div>
+
+					<div className="min-w-0">
+						<p className="text-[12px] leading-relaxed text-muted-foreground">
+							{authMessage ?? statusMessage}
+						</p>
+						<p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
+							{t("settings.codeRabbit.command", {
+								command: status?.loginCommand ?? "cr auth login",
+							})}
+						</p>
+						{status?.version ? (
+							<p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">
+								{t("settings.codeRabbit.version", { version: status.version })}
+							</p>
+						) : null}
+					</div>
+				</div>
+			</div>
+			<CodeRabbitConnectDialog
+				open={connectOpen}
+				onOpenChange={setConnectOpen}
+				onConnected={() => {
+					void invalidateCodeRabbitCliQueries(queryClient, null);
+				}}
+			/>
+		</>
+	);
+}
+
 export function SettingsDialog({
 	open,
 	onOpenChange,
@@ -916,6 +1031,7 @@ export function SettingsDialog({
 										</Badge>
 									</div>
 									<ForgeCliIntegrationCard />
+									<CodeRabbitCliIntegrationCard />
 								</section>
 							) : null}
 						</div>

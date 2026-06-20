@@ -1,3 +1,4 @@
+pub mod coderabbit;
 pub mod common;
 pub mod forge;
 pub mod forge_commands;
@@ -6,6 +7,10 @@ pub mod session_commands;
 pub mod workspace_commands;
 pub(crate) mod workspace_support;
 
+pub use coderabbit::{
+    workspace_coderabbit_cli_status, workspace_coderabbit_diff_fingerprint,
+    workspace_coderabbit_doctor, workspace_coderabbit_review,
+};
 pub use forge_commands::{
     workspace_backfill_forge_repo_bindings, workspace_change_request_create,
     workspace_change_request_merge, workspace_change_request_view_web,

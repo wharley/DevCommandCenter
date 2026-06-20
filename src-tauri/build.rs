@@ -24,6 +24,14 @@ use dcc_core::{
     ports::{events::CoreEvent, ProviderRuntimeConfig},
 };
 use dcc_tauri::commands::{
+    coderabbit::{
+        CodeRabbitAuthStatusOutput, CodeRabbitCliStatusState, CodeRabbitDiffFingerprint,
+        CodeRabbitFinding, CodeRabbitFindingSeverity, CodeRabbitReviewComplete,
+        CodeRabbitReviewStatusEvent, CodeRabbitReviewType, WorkspaceCodeRabbitCliStatusInput,
+        WorkspaceCodeRabbitCliStatusOutput, WorkspaceCodeRabbitDoctorInput,
+        WorkspaceCodeRabbitDoctorOutput, WorkspaceCodeRabbitFingerprintInput,
+        WorkspaceCodeRabbitReviewInput, WorkspaceCodeRabbitReviewOutput,
+    },
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
         ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput,
@@ -103,6 +111,10 @@ struct WorkspaceMethods {
     workspace_git_sync_base: String,
     workspace_git_unstage_file: String,
     workspace_run_setup: String,
+    workspace_coderabbit_cli_status: String,
+    workspace_coderabbit_doctor: String,
+    workspace_coderabbit_diff_fingerprint: String,
+    workspace_coderabbit_review: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -222,6 +234,21 @@ fn main() {
         .typ::<WorkspaceGitPushInput>()
         .typ::<WorkspaceGitSyncBaseInput>()
         .typ::<WorkspaceGitSyncBaseOutput>()
+        .typ::<CodeRabbitCliStatusState>()
+        .typ::<CodeRabbitReviewType>()
+        .typ::<CodeRabbitFindingSeverity>()
+        .typ::<WorkspaceCodeRabbitCliStatusInput>()
+        .typ::<CodeRabbitAuthStatusOutput>()
+        .typ::<WorkspaceCodeRabbitCliStatusOutput>()
+        .typ::<WorkspaceCodeRabbitDoctorInput>()
+        .typ::<WorkspaceCodeRabbitDoctorOutput>()
+        .typ::<WorkspaceCodeRabbitFingerprintInput>()
+        .typ::<CodeRabbitDiffFingerprint>()
+        .typ::<WorkspaceCodeRabbitReviewInput>()
+        .typ::<CodeRabbitFinding>()
+        .typ::<CodeRabbitReviewStatusEvent>()
+        .typ::<CodeRabbitReviewComplete>()
+        .typ::<WorkspaceCodeRabbitReviewOutput>()
         .typ::<ListProvidersOutput>()
         .typ::<StartThreadInput>()
         .typ::<StartThreadOutput>()
@@ -291,6 +318,11 @@ fn main() {
                 workspace_git_sync_base: "workspace_git_sync_base".to_string(),
                 workspace_git_unstage_file: "workspace_git_unstage_file".to_string(),
                 workspace_run_setup: "workspace_run_setup".to_string(),
+                workspace_coderabbit_cli_status: "workspace_coderabbit_cli_status".to_string(),
+                workspace_coderabbit_doctor: "workspace_coderabbit_doctor".to_string(),
+                workspace_coderabbit_diff_fingerprint: "workspace_coderabbit_diff_fingerprint"
+                    .to_string(),
+                workspace_coderabbit_review: "workspace_coderabbit_review".to_string(),
             },
         );
 

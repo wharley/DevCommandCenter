@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod coderabbit_commands;
 mod forge_commands;
 mod git_support;
 mod session_commands;
@@ -42,6 +43,10 @@ use sysinfo::{Pid, System};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::git_support::build_review_diffs_for_path;
+use coderabbit_commands::{
+    workspace_coderabbit_cli_status, workspace_coderabbit_diff_fingerprint,
+    workspace_coderabbit_doctor, workspace_coderabbit_review,
+};
 use forge_commands::{
     workspace_backfill_forge_repo_bindings, workspace_change_request_create,
     workspace_change_request_merge, workspace_change_request_view_web,
@@ -6636,6 +6641,10 @@ pub fn run() {
             list_repositories,
             list_workspaces,
             workspace_forge_cli_status,
+            workspace_coderabbit_cli_status,
+            workspace_coderabbit_doctor,
+            workspace_coderabbit_diff_fingerprint,
+            workspace_coderabbit_review,
             workspace_forge_cli_accounts,
             workspace_forge_cli_hosts,
             workspace_forge_cli_select_login,

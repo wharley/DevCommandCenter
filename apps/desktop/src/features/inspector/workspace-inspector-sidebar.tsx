@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Info } from "lucide-react";
+import { Info, Rabbit, TerminalSquare } from "lucide-react";
 import {
 	useCallback,
 	useEffect,
@@ -84,6 +84,11 @@ import type {
 } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
+import { CodeRabbitConnectDialog } from "@/features/settings/coderabbit-connect-dialog";
+import {
+	invalidateCodeRabbitCliQueries,
+	useCodeRabbitCliStatus,
+} from "@/features/settings/coderabbit-cli-queries";
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
 import {
 	invalidateForgeCliQueries,
@@ -556,6 +561,20 @@ export function WorkspaceInspectorSidebar({
 	);
 	const prStatus = prStatusQuery.data ?? null;
 	const [forgeConnectOpen, setForgeConnectOpen] = useState(false);
+	const [codeRabbitConnectOpen, setCodeRabbitConnectOpen] = useState(false);
+	const codeRabbitStatusQuery = useCodeRabbitCliStatus(workspacePath, {
+		enabled: Boolean(workspacePath?.trim()),
+		includeAuthStatus: true,
+	});
+	const codeRabbitStatus = codeRabbitStatusQuery.data ?? null;
+	const codeRabbitReady = Boolean(
+		codeRabbitStatus?.installed &&
+			(codeRabbitStatus.auth?.success || codeRabbitStatus.auth?.authenticated),
+	);
+	const codeRabbitMessage =
+		codeRabbitStatus?.auth?.message ??
+		codeRabbitStatus?.message ??
+		(codeRabbitStatusQuery.isPending ? t("inspector.codeRabbit.checking") : null);
 	const [isContinuingWorkspace, setIsContinuingWorkspace] = useState(false);
 	const [isSyncingBase, setIsSyncingBase] = useState(false);
 	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
@@ -1589,6 +1608,88 @@ export function WorkspaceInspectorSidebar({
 								</div>
 
 								<div>
+									<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+										{t("inspector.groups.codeRabbit")}
+									</p>
+									<div className="rounded-md border border-border/50 bg-muted/10 p-3">
+										<div className="flex items-center gap-3">
+											<div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border/60 bg-background text-muted-foreground">
+												<Rabbit className="size-4" strokeWidth={1.8} />
+											</div>
+											<div className="min-w-0 flex-1">
+												<div className="flex flex-wrap items-center gap-2">
+													<span className="truncate text-[13px] font-semibold text-foreground">
+														{t("inspector.codeRabbit.title")}
+													</span>
+													<Badge
+														variant={codeRabbitReady ? "success" : "outline"}
+														className="h-5 text-[10px] font-normal"
+													>
+														{codeRabbitReady
+															? t("settings.codeRabbit.readyBadge")
+															: t("settings.codeRabbit.notReadyBadge")}
+													</Badge>
+												</div>
+												<div className="mt-0.5 text-[12px] text-muted-foreground">
+													{codeRabbitReady
+														? (codeRabbitStatus?.auth?.login ??
+															codeRabbitStatus?.auth?.organization ??
+															t("inspector.codeRabbit.authenticated"))
+														: codeRabbitMessage ?? "—"}
+												</div>
+											</div>
+											<Button
+												type="button"
+												variant={codeRabbitReady ? "outline" : "default"}
+												size="sm"
+												onClick={() => setCodeRabbitConnectOpen(true)}
+												disabled={!workspacePath?.trim()}
+												className={!codeRabbitReady ? "px-4" : undefined}
+											>
+												<TerminalSquare className="size-3.5" />
+												{codeRabbitReady
+													? t("settings.codeRabbit.reconnect")
+													: t("settings.codeRabbit.connect")}
+											</Button>
+										</div>
+										<div className="mt-3 border-t border-border/45" />
+										<DetailRow label={t("inspector.fields.cli")}>
+											<div className="flex flex-wrap items-center gap-2">
+												<span>{codeRabbitStatus?.cliName ?? "cr"}</span>
+												{codeRabbitStatus?.version ? (
+													<Badge variant="outline" className="text-[10px] font-normal">
+														{codeRabbitStatus.version}
+													</Badge>
+												) : null}
+											</div>
+										</DetailRow>
+										<DetailRow label={t("inspector.fields.command")}>
+											{codeRabbitStatus?.loginCommand ?? "cr auth login"}
+										</DetailRow>
+										<DetailRow label={t("inspector.fields.codeRabbitStatus")}>
+											<div className="flex flex-wrap items-center gap-2">
+												<span className="text-muted-foreground">
+													{codeRabbitMessage ?? "—"}
+												</span>
+												<Button
+													type="button"
+													variant="ghost"
+													size="xs"
+													onClick={() =>
+														void invalidateCodeRabbitCliQueries(
+															queryClient,
+															workspacePath,
+														)
+													}
+												>
+													{t("settings.codeRabbit.refresh")}
+												</Button>
+											</div>
+										</DetailRow>
+									</div>
+								</div>
+
+								<div>
 									<div className="mb-2 flex items-center justify-between gap-2">
 										<p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
 											{t("inspector.groups.providers")}
@@ -2152,6 +2253,14 @@ export function WorkspaceInspectorSidebar({
 							queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, workspacePath.trim()],
 						});
 					}
+				}}
+			/>
+			<CodeRabbitConnectDialog
+				open={codeRabbitConnectOpen}
+				onOpenChange={setCodeRabbitConnectOpen}
+				workspaceRoot={workspacePath}
+				onConnected={() => {
+					void invalidateCodeRabbitCliQueries(queryClient, workspacePath);
 				}}
 			/>
 		</>

@@ -32,6 +32,7 @@ import {
 	workspaceGitUnstageFile,
 } from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
+import { CodeRabbitReviewSection } from "./coderabbit-review-section";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { useWorkspaceGitBranchDiff, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./use-workspace-git-branch-diff";
 import type { WorkspaceGitPreviewSelection } from "./workspace-git-file-preview";
@@ -762,6 +763,7 @@ export function InspectorChangesSection({
 	);
 
 	const query = useWorkspaceGitStatus(workspaceRoot);
+	const branchDiffQuery = useWorkspaceGitBranchDiff(workspaceRoot);
 
 	const unstageAll = useCallback(
 		async (paths: string[]) => {
@@ -875,6 +877,15 @@ export function InspectorChangesSection({
 						onSelect={onSelectPreview}
 					/>
 				)}
+				{Boolean(root) ? (
+					<CodeRabbitReviewSection
+						workspaceRoot={root}
+						staged={data.staged}
+						unstaged={data.unstaged}
+						baseBranch={branchDiffQuery.data?.baseBranch ?? null}
+						onSelectPreview={onSelectPreview}
+					/>
+				) : null}
 			</div>
 		</ScrollArea>
 	);

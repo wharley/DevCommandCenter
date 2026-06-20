@@ -227,7 +227,38 @@
       "composer": "Composer selection",
       "runtime": "Session runtime",
       "forge": "Forge context",
+      "codeRabbit": "CodeRabbit",
       "providers": "Provider catalog"
+    },
+    "codeRabbit": {
+      "title": "CodeRabbit CLI",
+      "authenticated": "Authenticated",
+      "checking": "Checking CodeRabbit CLI...",
+      "reviewTitle": "CodeRabbit review",
+      "run": "Run review",
+      "rerun": "Re-run",
+      "clear": "Clear CodeRabbit review",
+      "running": "Reviewing this diff. This can take a few minutes.",
+      "reviewComplete": "CodeRabbit review completed with {{count}} finding(s).",
+      "reviewFailed": "CodeRabbit review failed",
+      "reviewAge": "{{age}} ago",
+      "findingsCount": "{{count}} findings",
+      "staleBadge": "Diff changed",
+      "staleMessage": "The diff changed since this review. Re-run CodeRabbit before acting on these findings.",
+      "emptyFindings": "CodeRabbit did not report findings for this review.",
+      "reviewType": {
+        "all": "All",
+        "uncommitted": "Uncommitted",
+        "committed": "Branch"
+      },
+      "severity": {
+        "critical": "Critical",
+        "major": "Major",
+        "minor": "Minor",
+        "trivial": "Trivial",
+        "info": "Info",
+        "unknown": "Unknown"
+      }
     },
     "identityChip": {
       "commitAs": "You'll commit as {{handle}}{{location}}",
@@ -244,6 +275,9 @@
       "knownHosts": "Known hosts",
       "account": "Account",
       "forgeStatus": "Forge CLI",
+      "cli": "CLI",
+      "command": "Command",
+      "codeRabbitStatus": "Status",
       "model": "Model",
       "state": "State",
       "turns": "Turns",
@@ -396,6 +430,25 @@
       "repoBindingExpired": "The @{{login}} account bound to this repository is no longer authenticated in the {{provider}} CLI.",
       "loadingError": "Could not verify the {{provider}} CLI.",
       "command": "Suggested command: `{{command}}`"
+    },
+    "codeRabbit": {
+      "title": "CodeRabbit CLI",
+      "hint": "Connect CodeRabbit to run local code reviews from the Inspector.",
+      "readyBadge": "Ready",
+      "notReadyBadge": "Not ready",
+      "checking": "Checking",
+      "checkingStatus": "Checking CodeRabbit CLI...",
+      "connect": "Connect",
+      "reconnect": "Reconnect",
+      "refresh": "Refresh",
+      "authenticated": "Authenticated",
+      "command": "Command: {{command}}",
+      "version": "Version: {{version}}",
+      "connectedToast": "CodeRabbit connected",
+      "dialogTitle": "Connect CodeRabbit",
+      "dialogDescription": "Use this terminal to authenticate CodeRabbit CLI.",
+      "loginSubtitle": "cr auth login",
+      "bootError": "Unable to start login terminal."
     }
   },
   "shortcutsSheet": {

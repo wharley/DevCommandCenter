@@ -7,6 +7,14 @@ import type {
 	CreateWorkspaceFromUrlOutput,
 	CompileMissionSpecContextInput,
 	CompileMissionSpecContextOutput,
+	WorkspaceCodeRabbitCliStatusInput,
+	WorkspaceCodeRabbitCliStatusOutput,
+	WorkspaceCodeRabbitDoctorInput,
+	WorkspaceCodeRabbitDoctorOutput,
+	WorkspaceCodeRabbitFingerprintInput,
+	CodeRabbitDiffFingerprint,
+	WorkspaceCodeRabbitReviewInput,
+	WorkspaceCodeRabbitReviewOutput,
 	ForgeCliAccountsInput,
 	ForgeCliAccountsOutput,
 	ForgeCliHostsInput,
@@ -123,6 +131,36 @@ export function workspaceForgeContext(input: WorkspaceForgeContextInput) {
 	return invoke<WorkspaceForgeContextOutput>(WORKSPACE_METHODS.workspaceForgeContext, {
 		input,
 	});
+}
+
+export function workspaceCodeRabbitCliStatus(input: WorkspaceCodeRabbitCliStatusInput) {
+	return invoke<WorkspaceCodeRabbitCliStatusOutput>(
+		WORKSPACE_METHODS.workspaceCoderabbitCliStatus,
+		{ input },
+	);
+}
+
+export function workspaceCodeRabbitDoctor(input: WorkspaceCodeRabbitDoctorInput) {
+	return invoke<WorkspaceCodeRabbitDoctorOutput>(
+		WORKSPACE_METHODS.workspaceCoderabbitDoctor,
+		{ input },
+	);
+}
+
+export function workspaceCodeRabbitDiffFingerprint(
+	input: WorkspaceCodeRabbitFingerprintInput,
+) {
+	return invoke<CodeRabbitDiffFingerprint>(
+		WORKSPACE_METHODS.workspaceCoderabbitDiffFingerprint,
+		{ input },
+	);
+}
+
+export function workspaceCodeRabbitReview(input: WorkspaceCodeRabbitReviewInput) {
+	return invoke<WorkspaceCodeRabbitReviewOutput>(
+		WORKSPACE_METHODS.workspaceCoderabbitReview,
+		{ input },
+	);
 }
 
 export function listLocalBranches(input: ListLocalBranchesInput) {
