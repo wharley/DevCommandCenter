@@ -248,11 +248,64 @@
       "cancelFailed": "Could not cancel CodeRabbit review.",
       "reviewComplete": "CodeRabbit review completed with {{count}} finding(s).",
       "reviewFailed": "CodeRabbit review failed",
+      "errorActionConnect": "Connect",
+      "errorActionRerun": "Re-run",
+      "errors": {
+        "auth": {
+          "title": "Authentication required",
+          "description": "CodeRabbit needs a fresh CLI login before it can review this workspace."
+        },
+        "permission": {
+          "title": "Access denied",
+          "description": "The active CodeRabbit account does not have permission for this repository or organization."
+        },
+        "rate_limit": {
+          "title": "Rate limit reached",
+          "description": "CodeRabbit is rate limited right now. Wait a bit, then run the review again."
+        },
+        "no_diff": {
+          "title": "Nothing to review",
+          "description": "CodeRabbit did not find a diff for the selected scope."
+        },
+        "timeout": {
+          "title": "Review timed out",
+          "description": "The CodeRabbit CLI took too long to finish. Try a narrower scope or run it again."
+        },
+        "network": {
+          "title": "Network error",
+          "description": "CodeRabbit could not reach its service. Check the connection and run the review again."
+        },
+        "git": {
+          "title": "Git state issue",
+          "description": "CodeRabbit could not resolve the selected Git diff. Check the branch/base state and try again."
+        },
+        "config": {
+          "title": "Configuration issue",
+          "description": "CodeRabbit rejected the local configuration or command options."
+        },
+        "parse": {
+          "title": "Unexpected CLI output",
+          "description": "CodeRabbit returned output DCC could not fully parse. The raw detail is shown below."
+        },
+        "cli_unavailable": {
+          "title": "CLI unavailable",
+          "description": "DCC could not run the CodeRabbit CLI. Install it or reconnect from the embedded login."
+        },
+        "unknown": {
+          "title": "Review failed",
+          "description": "CodeRabbit failed with an unexpected error. The raw detail is shown below."
+        }
+      },
       "history": "History",
       "historyLoading": "Loading",
       "historyCount": "{{count}} saved",
       "historyEmpty": "No saved CodeRabbit reviews yet.",
       "historyEntry": "{{type}} · {{count}} finding(s)",
+      "privacyTitle": "External review",
+      "privacyDescription": "CodeRabbit will inspect this workspace diff through its external service. Allow it for this workspace before running a review.",
+      "privacyAccept": "Allow",
+      "privacyAccepted": "CodeRabbit review enabled for this workspace.",
+      "reviewScope": "Scope: {{scope}}",
       "reviewAge": "{{age}} ago",
       "findingsCount": "{{count}} findings",
       "staleBadge": "Diff changed",

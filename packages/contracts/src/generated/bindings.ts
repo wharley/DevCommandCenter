@@ -97,6 +97,8 @@ export type CodeRabbitReviewComplete = {
 	message: string | null,
 };
 
+export type CodeRabbitReviewErrorKind = "auth" | "permission" | "rate_limit" | "no_diff" | "timeout" | "network" | "git" | "config" | "parse" | "cli_unavailable" | "unknown";
+
 export type CodeRabbitReviewJobStatus = "starting" | "running" | "succeeded" | "failed" | "canceled";
 
 export type CodeRabbitReviewStatusEvent = {
@@ -114,6 +116,7 @@ export type CodeRabbitReviewStreamEvent = {
 	finding: CodeRabbitFinding | null,
 	complete: CodeRabbitReviewComplete | null,
 	result: WorkspaceCodeRabbitReviewOutput | null,
+	errorKind: CodeRabbitReviewErrorKind | null,
 	errors: string[],
 };
 
@@ -769,6 +772,7 @@ export type WorkspaceCodeRabbitReviewJobSnapshot = {
 	cancelRequested: boolean,
 	message: string | null,
 	result: WorkspaceCodeRabbitReviewOutput | null,
+	errorKind: CodeRabbitReviewErrorKind | null,
 	errors: string[],
 };
 
@@ -782,6 +786,7 @@ export type WorkspaceCodeRabbitReviewOutput = {
 	findings: CodeRabbitFinding[],
 	statuses: CodeRabbitReviewStatusEvent[],
 	complete: CodeRabbitReviewComplete | null,
+	errorKind: CodeRabbitReviewErrorKind | null,
 	errors: string[],
 	eventCount: number,
 	stdout: string,

@@ -9,6 +9,7 @@ import {
 	Rabbit,
 	RefreshCw,
 	Send,
+	ShieldCheck,
 	Trash2,
 	X,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import { toast } from "sonner";
 import type {
 	CodeRabbitFinding,
 	CodeRabbitFindingSeverity,
+	CodeRabbitReviewErrorKind,
 	CodeRabbitReviewType,
 	WorkspaceGitChangeEntry,
 } from "@dcc/contracts";
@@ -56,6 +58,7 @@ type CodeRabbitReviewSectionProps = {
 };
 
 const REVIEW_TYPES: CodeRabbitReviewType[] = ["all", "uncommitted", "committed"];
+const PRIVACY_CONSENT_VERSION = "v1";
 
 const SEVERITY_ORDER: CodeRabbitFindingSeverity[] = [
 	"critical",
@@ -73,6 +76,18 @@ const SEVERITY_CLASS: Record<CodeRabbitFindingSeverity, string> = {
 	trivial: "text-muted-foreground border-border/60 bg-muted/30",
 	info: "text-muted-foreground border-border/60 bg-muted/30",
 	unknown: "text-muted-foreground border-border/60 bg-muted/30",
+};
+
+const ERROR_ACTION: Partial<
+	Record<CodeRabbitReviewErrorKind, "connect" | "rerun">
+> = {
+	auth: "connect",
+	cli_unavailable: "connect",
+	permission: "connect",
+	network: "rerun",
+	rate_limit: "rerun",
+	timeout: "rerun",
+	unknown: "rerun",
 };
 
 function fileName(path: string): string {
@@ -101,6 +116,24 @@ function formatReviewAge(value?: string | null): string | null {
 		return `${hours}h`;
 	}
 	return `${Math.floor(hours / 24)}d`;
+}
+
+function privacyConsentKey(workspaceRoot: string): string {
+	return `dcc.workspace.coderabbit.privacy.${PRIVACY_CONSENT_VERSION}.${encodeURIComponent(workspaceRoot)}`;
+}
+
+function loadPrivacyConsent(workspaceRoot: string): boolean {
+	if (typeof window === "undefined" || !workspaceRoot) {
+		return false;
+	}
+	return window.localStorage.getItem(privacyConsentKey(workspaceRoot)) === "accepted";
+}
+
+function savePrivacyConsent(workspaceRoot: string) {
+	if (typeof window === "undefined" || !workspaceRoot) {
+		return;
+	}
+	window.localStorage.setItem(privacyConsentKey(workspaceRoot), "accepted");
 }
 
 function buildSelectionForFinding(
@@ -164,6 +197,9 @@ export function CodeRabbitReviewSection({
 	const [reviewType, setReviewType] = useState<CodeRabbitReviewType>("all");
 	const [connectOpen, setConnectOpen] = useState(false);
 	const [historyOpen, setHistoryOpen] = useState(false);
+	const [privacyAccepted, setPrivacyAccepted] = useState(() =>
+		loadPrivacyConsent(workspaceRoot),
+	);
 	const [selectedFindingIds, setSelectedFindingIds] = useState<Set<string>>(
 		() => new Set(),
 	);
@@ -278,6 +314,20 @@ export function CodeRabbitReviewSection({
 			activeJob?.status === "running",
 	);
 
+	const formatReviewError = useCallback(
+		(kind?: CodeRabbitReviewErrorKind | null, fallback?: string | null) => {
+			if (kind) {
+				return t(`inspector.codeRabbit.errors.${kind}.description`);
+			}
+			return fallback ?? t("inspector.codeRabbit.reviewFailed");
+		},
+		[t],
+	);
+
+	useEffect(() => {
+		setPrivacyAccepted(loadPrivacyConsent(workspaceRoot));
+	}, [workspaceRoot]);
+
 	useEffect(() => {
 		if (!activeJobId) {
 			setLiveJobMessage(null);
@@ -338,9 +388,10 @@ export function CodeRabbitReviewSection({
 			}
 			setActiveJobId(null);
 			toast.error(
-				activeJob.errors[0] ??
-					activeJob.result?.errors[0] ??
-					t("inspector.codeRabbit.reviewFailed"),
+				formatReviewError(
+					activeJob.errorKind ?? activeJob.result?.errorKind,
+					activeJob.errors[0] ?? activeJob.result?.errors[0],
+				),
 			);
 			return;
 		}
@@ -348,7 +399,7 @@ export function CodeRabbitReviewSection({
 			setActiveJobId(null);
 			toast.info(t("inspector.codeRabbit.reviewCanceled"));
 		}
-	}, [activeJob, saveReview, t]);
+	}, [activeJob, formatReviewError, saveReview, t]);
 
 	const groupedFindings = useMemo(() => {
 		const grouped = new Map<CodeRabbitFindingSeverity, CodeRabbitFinding[]>();
@@ -406,13 +457,25 @@ export function CodeRabbitReviewSection({
 	}, []);
 
 	const reviewAge = formatReviewAge(review?.completedAt);
-	const canRun = !reviewRunning && Boolean(workspaceRoot) && codeRabbitReady;
+	const canRun =
+		!reviewRunning && Boolean(workspaceRoot) && codeRabbitReady && privacyAccepted;
 	const canSendToComposer = Boolean(onPrefillComposer && selectedFindings.length > 0);
 	const activeJobMessage = activeJob?.cancelRequested
 		? t("inspector.codeRabbit.cancelingStatus")
 		: activeJob?.status === "starting"
 			? t("inspector.codeRabbit.starting")
 			: liveJobMessage ?? t("inspector.codeRabbit.running");
+	const reviewScopeLabel = review
+		? t(`inspector.codeRabbit.reviewType.${review.reviewType}`)
+		: null;
+	const reviewErrorKind = review?.errorKind ?? null;
+	const reviewErrorAction = reviewErrorKind ? ERROR_ACTION[reviewErrorKind] : undefined;
+
+	const acceptPrivacy = useCallback(() => {
+		savePrivacyConsent(workspaceRoot);
+		setPrivacyAccepted(true);
+		toast.success(t("inspector.codeRabbit.privacyAccepted"));
+	}, [t, workspaceRoot]);
 
 	const sendSelectedToComposer = useCallback(() => {
 		if (!onPrefillComposer || selectedFindings.length === 0 || !review) {
@@ -501,6 +564,13 @@ export function CodeRabbitReviewSection({
 									{t("inspector.codeRabbit.reviewAge", { age: reviewAge })}
 								</span>
 							) : null}
+							{reviewScopeLabel ? (
+								<span className="rounded bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
+									{t("inspector.codeRabbit.reviewScope", {
+										scope: reviewScopeLabel,
+									})}
+								</span>
+							) : null}
 							{review ? (
 								<Button
 									type="button"
@@ -565,6 +635,31 @@ export function CodeRabbitReviewSection({
 						</div>
 					) : null}
 
+					{codeRabbitReady && !privacyAccepted && !reviewRunning ? (
+						<div className="flex items-start justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-2 text-[11px] text-amber-800 dark:text-amber-200">
+							<div className="flex min-w-0 gap-2">
+								<ShieldCheck className="mt-0.5 size-3.5 shrink-0" />
+								<div className="min-w-0">
+									<div className="font-medium">
+										{t("inspector.codeRabbit.privacyTitle")}
+									</div>
+									<div className="mt-0.5 leading-snug text-amber-700 dark:text-amber-300">
+										{t("inspector.codeRabbit.privacyDescription")}
+									</div>
+								</div>
+							</div>
+							<Button
+								type="button"
+								variant="outline"
+								size="xs"
+								onClick={acceptPrivacy}
+								className="shrink-0 border-amber-500/40 bg-background/70 text-amber-800 hover:bg-background dark:text-amber-200"
+							>
+								{t("inspector.codeRabbit.privacyAccept")}
+							</Button>
+						</div>
+					) : null}
+
 					{historyOpen ? (
 						<div className="space-y-1 rounded-md border border-border/45 bg-muted/15 p-1.5">
 							<div className="flex items-center justify-between px-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
@@ -596,8 +691,9 @@ export function CodeRabbitReviewSection({
 											<span className="min-w-0 flex-1 truncate">
 												{t("inspector.codeRabbit.historyEntry", {
 													type:
-														entry.reviewType ??
-														entry.review.reviewType,
+														t(
+															`inspector.codeRabbit.reviewType.${entry.review.reviewType}`,
+														),
 													count: entry.findingsCount,
 												})}
 											</span>
@@ -641,9 +737,48 @@ export function CodeRabbitReviewSection({
 						</div>
 					) : null}
 
-					{review?.errors.length ? (
-						<div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
-							{review.errors[0]}
+					{review?.errorKind || review?.errors.length ? (
+						<div className="space-y-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
+							<div className="flex items-start justify-between gap-2">
+								<div className="min-w-0">
+									<div className="font-medium">
+										{reviewErrorKind
+											? t(`inspector.codeRabbit.errors.${reviewErrorKind}.title`)
+											: t("inspector.codeRabbit.reviewFailed")}
+									</div>
+									<div className="mt-0.5 leading-snug">
+										{formatReviewError(reviewErrorKind, review.errors[0])}
+									</div>
+								</div>
+								{reviewErrorAction === "connect" ? (
+									<Button
+										type="button"
+										variant="outline"
+										size="xs"
+										onClick={() => setConnectOpen(true)}
+										className="shrink-0 border-destructive/35 bg-background/70 text-destructive hover:bg-background"
+									>
+										{t("inspector.codeRabbit.errorActionConnect")}
+									</Button>
+								) : null}
+								{reviewErrorAction === "rerun" ? (
+									<Button
+										type="button"
+										variant="outline"
+										size="xs"
+										disabled={!canRun}
+										onClick={() => startReview.mutate()}
+										className="shrink-0 border-destructive/35 bg-background/70 text-destructive hover:bg-background"
+									>
+										{t("inspector.codeRabbit.errorActionRerun")}
+									</Button>
+								) : null}
+							</div>
+							{review.errors[0] ? (
+								<div className="line-clamp-2 border-t border-destructive/20 pt-1 font-mono text-[10px] opacity-80">
+									{review.errors[0]}
+								</div>
+							) : null}
 						</div>
 					) : null}
 

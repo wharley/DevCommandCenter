@@ -55,31 +55,39 @@ pub(crate) fn parse_agent_jsonl_line(
     let value = serde_json::from_str::<Value>(line)
         .map_err(|_| format!("line {line_number} is not valid JSON"))?;
 
-    Ok(match value
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-    {
-        "finding" => parse_finding(&value, finding_index).map(ParsedCodeRabbitAgentEvent::Finding),
-        "status" => Some(ParsedCodeRabbitAgentEvent::Status(parse_status_event(&value))),
-        "complete" => Some(ParsedCodeRabbitAgentEvent::Complete(parse_complete_event(&value))),
-        "error" => Some(ParsedCodeRabbitAgentEvent::Error(
-            value
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("CodeRabbit emitted an error event")
-                .to_string(),
-        )),
-        "heartbeat" | "review_context" => None,
-        other if !other.is_empty() => Some(ParsedCodeRabbitAgentEvent::Status(
-            CodeRabbitReviewStatusEvent {
-                event_type: other.to_string(),
-                status: string_field(&value, &["status"]),
-                message: string_field(&value, &["message", "detail"]),
-            },
-        )),
-        _ => None,
-    })
+    Ok(
+        match value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+        {
+            "finding" => {
+                parse_finding(&value, finding_index).map(ParsedCodeRabbitAgentEvent::Finding)
+            }
+            "status" => Some(ParsedCodeRabbitAgentEvent::Status(parse_status_event(
+                &value,
+            ))),
+            "complete" => Some(ParsedCodeRabbitAgentEvent::Complete(parse_complete_event(
+                &value,
+            ))),
+            "error" => Some(ParsedCodeRabbitAgentEvent::Error(
+                value
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("CodeRabbit emitted an error event")
+                    .to_string(),
+            )),
+            "heartbeat" | "review_context" => None,
+            other if !other.is_empty() => Some(ParsedCodeRabbitAgentEvent::Status(
+                CodeRabbitReviewStatusEvent {
+                    event_type: other.to_string(),
+                    status: string_field(&value, &["status"]),
+                    message: string_field(&value, &["message", "detail"]),
+                },
+            )),
+            _ => None,
+        },
+    )
 }
 
 pub(crate) fn apply_agent_event(

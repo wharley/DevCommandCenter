@@ -49,10 +49,9 @@ use crate::git_support::build_review_diffs_for_path;
 use coderabbit_commands::{
     workspace_coderabbit_cli_status, workspace_coderabbit_diff_fingerprint,
     workspace_coderabbit_doctor, workspace_coderabbit_review, workspace_coderabbit_review_cancel,
-    workspace_coderabbit_review_clear, workspace_coderabbit_review_job,
-    workspace_coderabbit_review_history, workspace_coderabbit_review_load,
-    workspace_coderabbit_review_save,
-    workspace_coderabbit_review_start,
+    workspace_coderabbit_review_clear, workspace_coderabbit_review_history,
+    workspace_coderabbit_review_job, workspace_coderabbit_review_load,
+    workspace_coderabbit_review_save, workspace_coderabbit_review_start,
 };
 use forge_commands::{
     workspace_backfill_forge_repo_bindings, workspace_change_request_create,
@@ -3811,9 +3810,8 @@ async fn pair_list_devices(app: AppHandle, include_revoked: Option<bool>) -> Api
 async fn pair_revoke_device(app: AppHandle, device_id: String) -> ApiResult<Value> {
     tauri::async_runtime::spawn_blocking(move || {
         let conn = open_pairing_conn(&app)?;
-        let revoked =
-            dev_command_center_tauri::pairing::revoke_device(&conn, &device_id, None)
-                .map_err(pairing_error_to_api)?;
+        let revoked = dev_command_center_tauri::pairing::revoke_device(&conn, &device_id, None)
+            .map_err(pairing_error_to_api)?;
         Ok(serde_json::json!({ "revoked": revoked }))
     })
     .await

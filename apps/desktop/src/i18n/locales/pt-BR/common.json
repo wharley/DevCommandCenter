@@ -248,11 +248,64 @@
       "cancelFailed": "Não foi possível cancelar o review CodeRabbit.",
       "reviewComplete": "Review CodeRabbit concluído com {{count}} finding(s).",
       "reviewFailed": "Falha no review CodeRabbit",
+      "errorActionConnect": "Conectar",
+      "errorActionRerun": "Rodar novamente",
+      "errors": {
+        "auth": {
+          "title": "Autenticação necessária",
+          "description": "O CodeRabbit precisa de um login CLI válido antes de revisar este workspace."
+        },
+        "permission": {
+          "title": "Acesso negado",
+          "description": "A conta ativa do CodeRabbit não tem permissão para este repositório ou organização."
+        },
+        "rate_limit": {
+          "title": "Rate limit atingido",
+          "description": "O CodeRabbit está com limite de uso no momento. Aguarde um pouco e rode o review novamente."
+        },
+        "no_diff": {
+          "title": "Nada para revisar",
+          "description": "O CodeRabbit não encontrou diff para o escopo selecionado."
+        },
+        "timeout": {
+          "title": "Review expirou",
+          "description": "O CodeRabbit CLI demorou demais para concluir. Tente um escopo menor ou rode novamente."
+        },
+        "network": {
+          "title": "Erro de rede",
+          "description": "O CodeRabbit não conseguiu acessar o serviço externo. Verifique a conexão e rode novamente."
+        },
+        "git": {
+          "title": "Problema no estado Git",
+          "description": "O CodeRabbit não conseguiu resolver o diff Git selecionado. Verifique branch/base e tente de novo."
+        },
+        "config": {
+          "title": "Problema de configuração",
+          "description": "O CodeRabbit rejeitou a configuração local ou as opções do comando."
+        },
+        "parse": {
+          "title": "Saída inesperada do CLI",
+          "description": "O CodeRabbit retornou uma saída que o DCC não conseguiu interpretar completamente. O detalhe bruto aparece abaixo."
+        },
+        "cli_unavailable": {
+          "title": "CLI indisponível",
+          "description": "O DCC não conseguiu executar o CodeRabbit CLI. Instale o CLI ou reconecte pelo login embutido."
+        },
+        "unknown": {
+          "title": "Falha no review",
+          "description": "O CodeRabbit falhou com um erro inesperado. O detalhe bruto aparece abaixo."
+        }
+      },
       "history": "Histórico",
       "historyLoading": "Carregando",
       "historyCount": "{{count}} salvo(s)",
       "historyEmpty": "Ainda não há reviews CodeRabbit salvos.",
       "historyEntry": "{{type}} · {{count}} finding(s)",
+      "privacyTitle": "Review externo",
+      "privacyDescription": "O CodeRabbit vai inspecionar o diff deste workspace usando o serviço externo dele. Autorize neste workspace antes de rodar um review.",
+      "privacyAccept": "Autorizar",
+      "privacyAccepted": "Review CodeRabbit habilitado para este workspace.",
+      "reviewScope": "Escopo: {{scope}}",
       "reviewAge": "há {{age}}",
       "findingsCount": "{{count}} findings",
       "staleBadge": "Diff mudou",

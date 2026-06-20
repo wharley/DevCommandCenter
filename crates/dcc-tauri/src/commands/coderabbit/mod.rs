@@ -1,22 +1,22 @@
+mod errors;
 mod fingerprint;
+mod jobs;
 mod parser;
 mod process;
+mod storage;
 
 use std::{
-    collections::HashMap,
     ffi::OsString,
     io::{BufRead, BufReader, Read},
     path::{Component, Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc,
-        Arc, Mutex,
+        mpsc, Arc,
     },
     time::{Duration, Instant},
 };
 
 use chrono::Utc;
-use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
@@ -24,8 +24,16 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::{commands::workspace_support::preflight_workspace_root, state::WorkspaceCommandState};
 
+pub use self::jobs::CodeRabbitReviewJobsState;
+
 use self::{
+    errors::classify_review_error,
     fingerprint::build_diff_fingerprint,
+    jobs::{
+        finish_review_job_canceled, finish_review_job_error, get_review_job_snapshot,
+        insert_review_job, request_review_job_cancel, update_review_job,
+        update_review_job_from_parsed,
+    },
     parser::{
         apply_agent_event, parse_agent_jsonl, parse_agent_jsonl_line, ParsedCodeRabbitAgentEvent,
         ParsedCodeRabbitAgentOutput,
@@ -35,6 +43,7 @@ use self::{
         kill_process_group, run_command_with_timeout, spawn_command, CODERABBIT_DEFAULT_TIMEOUT,
         CODERABBIT_DOCTOR_TIMEOUT, CODERABBIT_STATUS_TIMEOUT,
     },
+    storage::{clear_review, load_review, review_history, save_review},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -225,6 +234,7 @@ pub struct WorkspaceCodeRabbitReviewOutput {
     pub findings: Vec<CodeRabbitFinding>,
     pub statuses: Vec<CodeRabbitReviewStatusEvent>,
     pub complete: Option<CodeRabbitReviewComplete>,
+    pub error_kind: Option<CodeRabbitReviewErrorKind>,
     pub errors: Vec<String>,
     pub event_count: u32,
     pub stdout: String,
@@ -241,6 +251,22 @@ pub enum CodeRabbitReviewJobStatus {
     Succeeded,
     Failed,
     Canceled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeRabbitReviewErrorKind {
+    Auth,
+    Permission,
+    RateLimit,
+    NoDiff,
+    Timeout,
+    Network,
+    Git,
+    Config,
+    Parse,
+    CliUnavailable,
+    Unknown,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -271,6 +297,7 @@ pub struct WorkspaceCodeRabbitReviewJobSnapshot {
     pub cancel_requested: bool,
     pub message: Option<String>,
     pub result: Option<WorkspaceCodeRabbitReviewOutput>,
+    pub error_kind: Option<CodeRabbitReviewErrorKind>,
     pub errors: Vec<String>,
 }
 
@@ -287,6 +314,7 @@ pub struct CodeRabbitReviewStreamEvent {
     pub finding: Option<CodeRabbitFinding>,
     pub complete: Option<CodeRabbitReviewComplete>,
     pub result: Option<WorkspaceCodeRabbitReviewOutput>,
+    pub error_kind: Option<CodeRabbitReviewErrorKind>,
     pub errors: Vec<String>,
 }
 
@@ -337,17 +365,6 @@ pub struct WorkspaceCodeRabbitReviewHistoryEntry {
 pub struct WorkspaceCodeRabbitReviewHistoryOutput {
     pub workspace_root: String,
     pub entries: Vec<WorkspaceCodeRabbitReviewHistoryEntry>,
-}
-
-#[derive(Clone, Default)]
-pub struct CodeRabbitReviewJobsState {
-    jobs: Arc<Mutex<HashMap<String, CodeRabbitReviewJobRecord>>>,
-}
-
-#[derive(Clone)]
-struct CodeRabbitReviewJobRecord {
-    snapshot: WorkspaceCodeRabbitReviewJobSnapshot,
-    cancel_requested: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -448,22 +465,16 @@ pub async fn workspace_coderabbit_review_start(
         cancel_requested: false,
         message: Some("CodeRabbit review queued".to_string()),
         result: None,
+        error_kind: None,
         errors: Vec::new(),
     };
 
-    {
-        let mut jobs = jobs_state
-            .jobs
-            .lock()
-            .map_err(|_| "CodeRabbit review jobs lock poisoned".to_string())?;
-        jobs.insert(
-            job_id.clone(),
-            CodeRabbitReviewJobRecord {
-                snapshot,
-                cancel_requested: cancel_requested.clone(),
-            },
-        );
-    }
+    insert_review_job(
+        jobs_state.inner(),
+        job_id.clone(),
+        snapshot,
+        cancel_requested.clone(),
+    )?;
 
     let jobs_state = jobs_state.inner().clone();
     std::thread::spawn({
@@ -500,26 +511,7 @@ pub async fn workspace_coderabbit_review_cancel(
     jobs_state: State<'_, CodeRabbitReviewJobsState>,
     input: WorkspaceCodeRabbitReviewJobInput,
 ) -> Result<WorkspaceCodeRabbitReviewJobSnapshot, String> {
-    let pid = {
-        let mut jobs = jobs_state
-            .jobs
-            .lock()
-            .map_err(|_| "CodeRabbit review jobs lock poisoned".to_string())?;
-        let record = jobs
-            .get_mut(&input.job_id)
-            .ok_or_else(|| format!("CodeRabbit review job not found: {}", input.job_id))?;
-        record.cancel_requested.store(true, Ordering::Relaxed);
-        record.snapshot.cancel_requested = true;
-        record.snapshot.updated_at = Utc::now().to_rfc3339();
-        record.snapshot.message = Some("Canceling CodeRabbit review".to_string());
-        if matches!(
-            record.snapshot.status,
-            CodeRabbitReviewJobStatus::Starting | CodeRabbitReviewJobStatus::Running
-        ) {
-            record.snapshot.status = CodeRabbitReviewJobStatus::Running;
-        }
-        record.snapshot.pid
-    };
+    let pid = request_review_job_cancel(jobs_state.inner(), &input.job_id)?;
 
     if let Some(pid) = pid {
         kill_process_group(pid);
@@ -537,33 +529,9 @@ pub async fn workspace_coderabbit_review_load(
     let workspace_root = normalize_workspace_root(&input.workspace_root)?;
     let db_path = state.db_path.clone();
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = open_coderabbit_reviews_db(&db_path)?;
-        let row = conn
-            .query_row(
-                "SELECT review_json, updated_at FROM workspace_coderabbit_reviews WHERE workspace_root = ?1",
-                params![&workspace_root],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
-            )
-            .optional()
-            .map_err(|error| error.to_string())?;
-        let Some((review_json, updated_at)) = row else {
-            return Ok(WorkspaceCodeRabbitStoredReviewOutput {
-                workspace_root,
-                review: None,
-                updated_at: None,
-            });
-        };
-        let review = serde_json::from_str::<WorkspaceCodeRabbitReviewOutput>(&review_json)
-            .map_err(|error| error.to_string())?;
-        Ok(WorkspaceCodeRabbitStoredReviewOutput {
-            workspace_root,
-            review: Some(review),
-            updated_at,
-        })
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || load_review(&db_path, workspace_root))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -576,60 +544,9 @@ pub async fn workspace_coderabbit_review_save(
     let db_path = state.db_path.clone();
     let review = input.review;
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = open_coderabbit_reviews_db(&db_path)?;
-        let review_json = serde_json::to_string(&review).map_err(|error| error.to_string())?;
-        conn.execute(
-            "INSERT INTO workspace_coderabbit_reviews (
-                workspace_root, review_json, fingerprint_hash, completed_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, datetime('now'))
-             ON CONFLICT(workspace_root) DO UPDATE SET
-                review_json = excluded.review_json,
-                fingerprint_hash = excluded.fingerprint_hash,
-                completed_at = excluded.completed_at,
-                updated_at = datetime('now')",
-            params![
-                &workspace_root,
-                &review_json,
-                &review.fingerprint.combined_hash,
-                &review.completed_at
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-        conn.execute(
-            "INSERT INTO workspace_coderabbit_review_history (
-                review_id, workspace_root, review_json, review_type, success,
-                findings_count, fingerprint_hash, completed_at, saved_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))",
-            params![
-                format!("cr-review-{}", uuid::Uuid::new_v4().simple()),
-                &workspace_root,
-                &review_json,
-                review.review_type.as_cli_value(),
-                if review.success { 1 } else { 0 },
-                review.findings.len() as i64,
-                &review.fingerprint.combined_hash,
-                &review.completed_at
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-        let updated_at = conn
-            .query_row(
-                "SELECT updated_at FROM workspace_coderabbit_reviews WHERE workspace_root = ?1",
-                params![&workspace_root],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()
-            .map_err(|error| error.to_string())?
-            .flatten();
-        Ok(WorkspaceCodeRabbitStoredReviewOutput {
-            workspace_root,
-            review: Some(review),
-            updated_at,
-        })
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || save_review(&db_path, workspace_root, review))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -642,52 +559,9 @@ pub async fn workspace_coderabbit_review_history(
     let db_path = state.db_path.clone();
     let limit = input.limit.unwrap_or(20).clamp(1, 100);
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = open_coderabbit_reviews_db(&db_path)?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT review_id, workspace_root, review_json, review_type, success,
-                        findings_count, fingerprint_hash, completed_at, saved_at
-                 FROM workspace_coderabbit_review_history
-                 WHERE workspace_root = ?1
-                 ORDER BY saved_at DESC
-                 LIMIT ?2",
-            )
-            .map_err(|error| error.to_string())?;
-        let rows = stmt
-            .query_map(params![&workspace_root, limit as i64], |row| {
-                let review_json: String = row.get(2)?;
-                let review = serde_json::from_str::<WorkspaceCodeRabbitReviewOutput>(&review_json)
-                    .map_err(|error| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            2,
-                            rusqlite::types::Type::Text,
-                            Box::new(error),
-                        )
-                    })?;
-                Ok(WorkspaceCodeRabbitReviewHistoryEntry {
-                    review_id: row.get(0)?,
-                    workspace_root: row.get(1)?,
-                    review,
-                    review_type: row.get(3)?,
-                    success: row.get::<_, i64>(4)? != 0,
-                    findings_count: row.get::<_, i64>(5)? as u32,
-                    fingerprint_hash: row.get(6)?,
-                    completed_at: row.get(7)?,
-                    saved_at: row.get(8)?,
-                })
-            })
-            .map_err(|error| error.to_string())?;
-        let entries = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?;
-        Ok(WorkspaceCodeRabbitReviewHistoryOutput {
-            workspace_root,
-            entries,
-        })
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || review_history(&db_path, workspace_root, limit))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -699,17 +573,9 @@ pub async fn workspace_coderabbit_review_clear(
     let workspace_root = normalize_workspace_root(&input.workspace_root)?;
     let db_path = state.db_path.clone();
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = open_coderabbit_reviews_db(&db_path)?;
-        conn.execute(
-            "DELETE FROM workspace_coderabbit_reviews WHERE workspace_root = ?1",
-            params![&workspace_root],
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(())
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || clear_review(&db_path, workspace_root))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -846,6 +712,7 @@ fn run_review_job(
             finding: None,
             complete: None,
             result: None,
+            error_kind: None,
             errors: Vec::new(),
         },
     );
@@ -910,6 +777,7 @@ fn run_review_job(
                             finding: None,
                             complete: None,
                             result: None,
+                            error_kind: Some(CodeRabbitReviewErrorKind::Parse),
                             errors: vec![error],
                         },
                     );
@@ -970,6 +838,13 @@ fn run_review_job(
                     timeout.as_secs()
                 ));
             }
+            let error_kind = if status.success() && !timed_out && !canceled {
+                None
+            } else if canceled {
+                None
+            } else {
+                classify_review_error(&parsed.errors, &stderr, &stdout, timed_out, status.code())
+            };
             let result = WorkspaceCodeRabbitReviewOutput {
                 cli_name: cli.name,
                 cli_path: cli.path,
@@ -980,6 +855,7 @@ fn run_review_job(
                 findings: parsed.findings,
                 statuses: parsed.statuses,
                 complete: parsed.complete,
+                error_kind,
                 errors: parsed.errors,
                 event_count: parsed.event_count,
                 stdout,
@@ -999,15 +875,17 @@ fn run_review_job(
                 snapshot.updated_at = completed_at.clone();
                 snapshot.completed_at = Some(completed_at.clone());
                 snapshot.cancel_requested = canceled;
-                snapshot.message = Some(match snapshot.status {
-                    CodeRabbitReviewJobStatus::Canceled => "CodeRabbit review canceled",
-                    CodeRabbitReviewJobStatus::Succeeded => "CodeRabbit review completed",
-                    CodeRabbitReviewJobStatus::Failed => "CodeRabbit review failed",
-                    CodeRabbitReviewJobStatus::Starting | CodeRabbitReviewJobStatus::Running => {
-                        "CodeRabbit review updated"
+                snapshot.message = Some(
+                    match snapshot.status {
+                        CodeRabbitReviewJobStatus::Canceled => "CodeRabbit review canceled",
+                        CodeRabbitReviewJobStatus::Succeeded => "CodeRabbit review completed",
+                        CodeRabbitReviewJobStatus::Failed => "CodeRabbit review failed",
+                        CodeRabbitReviewJobStatus::Starting
+                        | CodeRabbitReviewJobStatus::Running => "CodeRabbit review updated",
                     }
-                }
-                .to_string());
+                    .to_string(),
+                );
+                snapshot.error_kind = result.error_kind;
                 snapshot.errors = result.errors.clone();
                 snapshot.result = Some(result);
             });
@@ -1027,24 +905,42 @@ fn run_review_job(
                             "failed"
                         }
                         .to_string(),
-                        status: Some(if canceled {
-                            "canceled"
-                        } else if result.success {
-                            "succeeded"
-                        } else {
-                            "failed"
-                        }
-                        .to_string()),
+                        status: Some(
+                            if canceled {
+                                "canceled"
+                            } else if result.success {
+                                "succeeded"
+                            } else {
+                                "failed"
+                            }
+                            .to_string(),
+                        ),
                         message: None,
                         finding: None,
                         complete: result.complete.clone(),
                         result: Some(result.clone()),
+                        error_kind: result.error_kind,
                         errors: result.errors.clone(),
                     },
                 );
             }
         }
         Err(error) => {
+            let errors = if canceled {
+                Vec::new()
+            } else if timed_out {
+                vec![format!(
+                    "CodeRabbit CLI command timed out after {}s",
+                    timeout.as_secs()
+                )]
+            } else {
+                vec![error.to_string()]
+            };
+            let error_kind = if canceled {
+                None
+            } else {
+                classify_review_error(&errors, "", "", timed_out, None)
+            };
             update_review_job(jobs_state, &job_id, |snapshot| {
                 snapshot.status = if canceled {
                     CodeRabbitReviewJobStatus::Canceled
@@ -1060,16 +956,8 @@ fn run_review_job(
                 } else {
                     "CodeRabbit review failed".to_string()
                 });
-                if !canceled {
-                    if timed_out {
-                        snapshot.errors.push(format!(
-                            "CodeRabbit CLI command timed out after {}s",
-                            timeout.as_secs()
-                        ));
-                    } else {
-                        snapshot.errors.push(error.to_string());
-                    }
-                }
+                snapshot.error_kind = error_kind;
+                snapshot.errors.extend(errors.clone());
             });
             emit_review_event(
                 &app,
@@ -1086,46 +974,12 @@ fn run_review_job(
                     finding: None,
                     complete: None,
                     result: None,
-                    errors: if canceled {
-                        Vec::new()
-                    } else {
-                        vec![error.to_string()]
-                    },
+                    error_kind,
+                    errors,
                 },
             );
         }
     }
-}
-
-fn finish_review_job_canceled(jobs_state: &CodeRabbitReviewJobsState, job_id: &str) {
-    update_review_job(jobs_state, job_id, |snapshot| {
-        let now = Utc::now().to_rfc3339();
-        snapshot.status = CodeRabbitReviewJobStatus::Canceled;
-        snapshot.updated_at = now.clone();
-        snapshot.completed_at = Some(now);
-        snapshot.cancel_requested = true;
-        snapshot.message = Some("CodeRabbit review canceled".to_string());
-    });
-}
-
-fn update_review_job_from_parsed(
-    jobs_state: &CodeRabbitReviewJobsState,
-    job_id: &str,
-    parsed: &ParsedCodeRabbitAgentOutput,
-) {
-    update_review_job(jobs_state, job_id, |snapshot| {
-        snapshot.updated_at = Utc::now().to_rfc3339();
-        if let Some(status) = parsed.statuses.last() {
-            snapshot.message = status
-                .message
-                .clone()
-                .or_else(|| status.status.clone())
-                .or_else(|| Some(status.event_type.clone()));
-        }
-        if !parsed.errors.is_empty() {
-            snapshot.errors = parsed.errors.clone();
-        }
-    });
 }
 
 fn stream_event_from_agent_event(
@@ -1143,6 +997,7 @@ fn stream_event_from_agent_event(
             finding: Some(finding.clone()),
             complete: None,
             result: None,
+            error_kind: None,
             errors: Vec::new(),
         },
         ParsedCodeRabbitAgentEvent::Status(status) => CodeRabbitReviewStreamEvent {
@@ -1154,6 +1009,7 @@ fn stream_event_from_agent_event(
             finding: None,
             complete: None,
             result: None,
+            error_kind: None,
             errors: Vec::new(),
         },
         ParsedCodeRabbitAgentEvent::Complete(complete) => CodeRabbitReviewStreamEvent {
@@ -1165,6 +1021,7 @@ fn stream_event_from_agent_event(
             finding: None,
             complete: Some(complete.clone()),
             result: None,
+            error_kind: None,
             errors: Vec::new(),
         },
         ParsedCodeRabbitAgentEvent::Error(error) => CodeRabbitReviewStreamEvent {
@@ -1176,6 +1033,7 @@ fn stream_event_from_agent_event(
             finding: None,
             complete: None,
             result: None,
+            error_kind: Some(CodeRabbitReviewErrorKind::Unknown),
             errors: vec![error.clone()],
         },
     }
@@ -1183,82 +1041,6 @@ fn stream_event_from_agent_event(
 
 fn emit_review_event(app: &AppHandle, event: CodeRabbitReviewStreamEvent) {
     let _ = app.emit(CODERABBIT_REVIEW_EVENT_NAME, event);
-}
-
-fn finish_review_job_error(jobs_state: &CodeRabbitReviewJobsState, job_id: &str, error: String) {
-    update_review_job(jobs_state, job_id, |snapshot| {
-        let now = Utc::now().to_rfc3339();
-        snapshot.status = CodeRabbitReviewJobStatus::Failed;
-        snapshot.updated_at = now.clone();
-        snapshot.completed_at = Some(now);
-        snapshot.message = Some("CodeRabbit review failed".to_string());
-        snapshot.errors.push(error);
-    });
-}
-
-fn update_review_job(
-    jobs_state: &CodeRabbitReviewJobsState,
-    job_id: &str,
-    update: impl FnOnce(&mut WorkspaceCodeRabbitReviewJobSnapshot),
-) {
-    if let Ok(mut jobs) = jobs_state.jobs.lock() {
-        if let Some(record) = jobs.get_mut(job_id) {
-            update(&mut record.snapshot);
-        }
-    }
-}
-
-fn get_review_job_snapshot(
-    jobs_state: &CodeRabbitReviewJobsState,
-    job_id: &str,
-) -> Result<WorkspaceCodeRabbitReviewJobSnapshot, String> {
-    let jobs = jobs_state
-        .jobs
-        .lock()
-        .map_err(|_| "CodeRabbit review jobs lock poisoned".to_string())?;
-    jobs.get(job_id)
-        .map(|record| record.snapshot.clone())
-        .ok_or_else(|| format!("CodeRabbit review job not found: {job_id}"))
-}
-
-fn open_coderabbit_reviews_db(db_path: &Path) -> Result<Connection, String> {
-    let conn = Connection::open(db_path).map_err(|error| error.to_string())?;
-    conn.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS workspace_coderabbit_reviews (
-          workspace_root TEXT PRIMARY KEY,
-          review_json TEXT NOT NULL,
-          fingerprint_hash TEXT,
-          completed_at TEXT,
-          created_at TEXT DEFAULT (datetime('now')),
-          updated_at TEXT DEFAULT (datetime('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_workspace_coderabbit_reviews_updated
-          ON workspace_coderabbit_reviews(updated_at DESC);
-        CREATE TABLE IF NOT EXISTS workspace_coderabbit_review_history (
-          review_id TEXT PRIMARY KEY,
-          workspace_root TEXT NOT NULL,
-          review_json TEXT NOT NULL,
-          review_type TEXT,
-          success INTEGER DEFAULT 0,
-          findings_count INTEGER DEFAULT 0,
-          fingerprint_hash TEXT,
-          completed_at TEXT,
-          saved_at TEXT DEFAULT (datetime('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_workspace_coderabbit_review_history_workspace
-          ON workspace_coderabbit_review_history(workspace_root, saved_at DESC);
-        CREATE TRIGGER IF NOT EXISTS update_workspace_coderabbit_reviews_timestamp
-        AFTER UPDATE ON workspace_coderabbit_reviews
-        BEGIN
-          UPDATE workspace_coderabbit_reviews
-          SET updated_at = datetime('now')
-          WHERE workspace_root = NEW.workspace_root;
-        END;
-        ",
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(conn)
 }
 
 #[tauri::command]
@@ -1328,6 +1110,17 @@ pub async fn workspace_coderabbit_review(
                 .errors
                 .push(command_output_detail(&output, "CodeRabbit review failed"));
         }
+        let error_kind = if output.status.success() {
+            None
+        } else {
+            classify_review_error(
+                &parsed.errors,
+                &stderr,
+                &stdout,
+                false,
+                output.status.code(),
+            )
+        };
 
         Ok(WorkspaceCodeRabbitReviewOutput {
             cli_name: cli.name,
@@ -1339,6 +1132,7 @@ pub async fn workspace_coderabbit_review(
             findings: parsed.findings,
             statuses: parsed.statuses,
             complete: parsed.complete,
+            error_kind,
             errors: parsed.errors,
             event_count: parsed.event_count,
             stdout,

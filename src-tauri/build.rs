@@ -27,16 +27,16 @@ use dcc_tauri::commands::{
     coderabbit::{
         CodeRabbitAuthStatusOutput, CodeRabbitCliStatusState, CodeRabbitDiffFingerprint,
         CodeRabbitFinding, CodeRabbitFindingSeverity, CodeRabbitReviewComplete,
-        CodeRabbitReviewJobStatus, CodeRabbitReviewStatusEvent, CodeRabbitReviewType,
-        CodeRabbitReviewStreamEvent, WorkspaceCodeRabbitCliStatusInput,
+        CodeRabbitReviewJobStatus, CodeRabbitReviewStatusEvent, CodeRabbitReviewStreamEvent,
+        CodeRabbitReviewType, WorkspaceCodeRabbitCliStatusInput,
         WorkspaceCodeRabbitCliStatusOutput, WorkspaceCodeRabbitDoctorInput,
         WorkspaceCodeRabbitDoctorOutput, WorkspaceCodeRabbitFingerprintInput,
-        WorkspaceCodeRabbitReviewInput, WorkspaceCodeRabbitReviewJobInput,
-        WorkspaceCodeRabbitReviewJobSnapshot, WorkspaceCodeRabbitReviewOutput,
-        WorkspaceCodeRabbitReviewStartOutput, WorkspaceCodeRabbitReviewHistoryEntry,
-        WorkspaceCodeRabbitReviewHistoryInput, WorkspaceCodeRabbitReviewHistoryOutput,
-        WorkspaceCodeRabbitSaveReviewInput,
-        WorkspaceCodeRabbitStoredReviewInput, WorkspaceCodeRabbitStoredReviewOutput,
+        WorkspaceCodeRabbitReviewHistoryEntry, WorkspaceCodeRabbitReviewHistoryInput,
+        WorkspaceCodeRabbitReviewHistoryOutput, WorkspaceCodeRabbitReviewInput,
+        WorkspaceCodeRabbitReviewJobInput, WorkspaceCodeRabbitReviewJobSnapshot,
+        WorkspaceCodeRabbitReviewOutput, WorkspaceCodeRabbitReviewStartOutput,
+        WorkspaceCodeRabbitSaveReviewInput, WorkspaceCodeRabbitStoredReviewInput,
+        WorkspaceCodeRabbitStoredReviewOutput,
     },
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
@@ -347,8 +347,7 @@ fn main() {
                 workspace_coderabbit_diff_fingerprint: "workspace_coderabbit_diff_fingerprint"
                     .to_string(),
                 workspace_coderabbit_review: "workspace_coderabbit_review".to_string(),
-                workspace_coderabbit_review_start: "workspace_coderabbit_review_start"
-                    .to_string(),
+                workspace_coderabbit_review_start: "workspace_coderabbit_review_start".to_string(),
                 workspace_coderabbit_review_job: "workspace_coderabbit_review_job".to_string(),
                 workspace_coderabbit_review_cancel: "workspace_coderabbit_review_cancel"
                     .to_string(),
@@ -356,8 +355,7 @@ fn main() {
                 workspace_coderabbit_review_save: "workspace_coderabbit_review_save".to_string(),
                 workspace_coderabbit_review_history: "workspace_coderabbit_review_history"
                     .to_string(),
-                workspace_coderabbit_review_clear: "workspace_coderabbit_review_clear"
-                    .to_string(),
+                workspace_coderabbit_review_clear: "workspace_coderabbit_review_clear".to_string(),
             },
         );
 

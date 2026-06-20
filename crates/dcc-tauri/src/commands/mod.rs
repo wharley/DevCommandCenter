@@ -10,10 +10,9 @@ pub(crate) mod workspace_support;
 pub use coderabbit::{
     workspace_coderabbit_cli_status, workspace_coderabbit_diff_fingerprint,
     workspace_coderabbit_doctor, workspace_coderabbit_review, workspace_coderabbit_review_cancel,
-    workspace_coderabbit_review_clear, workspace_coderabbit_review_job,
-    workspace_coderabbit_review_history, workspace_coderabbit_review_load,
-    workspace_coderabbit_review_save,
-    workspace_coderabbit_review_start,
+    workspace_coderabbit_review_clear, workspace_coderabbit_review_history,
+    workspace_coderabbit_review_job, workspace_coderabbit_review_load,
+    workspace_coderabbit_review_save, workspace_coderabbit_review_start,
 };
 pub use forge_commands::{
     workspace_backfill_forge_repo_bindings, workspace_change_request_create,

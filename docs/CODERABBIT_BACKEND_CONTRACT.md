@@ -1,6 +1,6 @@
 # CodeRabbit no DCC - contrato backend
 
-Status: backend Rust implementado para health/check, fingerprint de diff, review sincrono legado, review em background com polling/cancelamento, eventos Tauri por JSONL e persistencia SQLite do ultimo review + historico por workspace. Frontend implementado para auth, review no Inspector, stale detection, selecao de findings, historico, destaque inline e handoff para o Composer.
+Status: backend Rust implementado para health/check, fingerprint de diff, review sincrono legado, review em background com polling/cancelamento, eventos Tauri por JSONL e persistencia SQLite do ultimo review + historico por workspace. Frontend implementado para auth, opt-in de privacidade por workspace, review no Inspector, stale detection, selecao de findings, historico, destaque inline e handoff para o Composer.
 
 Atualizacao frontend:
 
@@ -16,6 +16,7 @@ Atualizacao frontend:
   - Card contextual `CodeRabbit` no Inspector > Context.
 - `apps/desktop/src/features/inspector/coderabbit-review-section.tsx`
   - Bloco `CodeRabbit review` dentro do Inspector > Changes.
+  - Opt-in local por workspace antes de iniciar reviews externos.
   - Selecao de findings e envio do prompt estruturado para o Composer.
 - `apps/desktop/src/features/inspector/use-workspace-coderabbit-review.ts`
   - Persistencia do ultimo review por workspace via SQLite, com migracao/fallback de `localStorage`.
@@ -37,8 +38,14 @@ CodeRabbit entra no DCC como camada de review derivada do estado Git, nao como c
   - Deteccao de `cr`/`coderabbit` e execucao com timeout/process kill.
 - `crates/dcc-tauri/src/commands/coderabbit/parser.rs`
   - Parser de `cr review --agent` como JSON Lines.
+- `crates/dcc-tauri/src/commands/coderabbit/errors.rs`
+  - Classificacao heuristica de erros reais do CLI em categorias estaveis para a UI.
 - `crates/dcc-tauri/src/commands/coderabbit/fingerprint.rs`
   - Fingerprint Git para stale detection.
+- `crates/dcc-tauri/src/commands/coderabbit/jobs.rs`
+  - Estado em memoria dos reviews em background, cancelamento e snapshots de job.
+- `crates/dcc-tauri/src/commands/coderabbit/storage.rs`
+  - Persistencia SQLite de ultimo review e historico.
 - `src-tauri/src/coderabbit_commands.rs`
   - Wrapper fino do app Tauri.
 - `packages/contracts/src/generated/bindings.ts`
@@ -191,6 +198,7 @@ Campos principais:
 - `findings`
 - `statuses`
 - `complete`
+- `errorKind: "auth" | "permission" | "rate_limit" | "no_diff" | "timeout" | "network" | "git" | "config" | "parse" | "cli_unavailable" | "unknown" | null`
 - `errors`
 - `eventCount`
 - `stdout`
@@ -244,6 +252,7 @@ Campos principais:
 - `cancelRequested`
 - `message`
 - `result: WorkspaceCodeRabbitReviewOutput | null`
+- `errorKind`
 - `errors`
 
 Uso esperado:
@@ -251,7 +260,7 @@ Uso esperado:
 - Polling no frontend enquanto `status` for `starting | running`.
 - Eventos Tauri atualizam a mensagem e aceleram refetch; polling continua como fallback.
 - Quando `status=succeeded`, persistir `result`.
-- Quando `status=failed`, mostrar `errors[0]` e persistir `result` se existir.
+- Quando `status=failed`, mostrar copy baseada em `errorKind` e usar `errors[0]` como detalhe bruto; persistir `result` se existir.
 - Quando `status=canceled`, encerrar estado de progresso sem substituir o ultimo review salvo.
 
 ### `workspaceCoderabbitReviewCancel`
@@ -287,6 +296,7 @@ Tipo: `CodeRabbitReviewStreamEvent`
   finding: CodeRabbitFinding | null;
   complete: CodeRabbitReviewComplete | null;
   result: WorkspaceCodeRabbitReviewOutput | null;
+  errorKind: CodeRabbitReviewErrorKind | null;
   errors: string[];
 }
 ```
@@ -438,22 +448,24 @@ Mapeamento do parser:
 1. Chamar `workspaceCoderabbitCliStatus({ workspaceRoot, includeAuthStatus: true })`, via `useCodeRabbitCliStatus`.
 2. Se `installed=false`, mostrar instrucao de instalacao.
 3. Se auth falhar, abrir `CodeRabbitConnectDialog`, que executa `cr auth login` em PTY embutido e reconsulta o status no fechamento.
-4. Rodar `workspaceCoderabbitReviewStart` em acao explicita do usuario.
-5. Fazer polling com `workspaceCoderabbitReviewJob` enquanto o status for `starting | running`.
-6. Permitir cancelamento via `workspaceCoderabbitReviewCancel`.
-7. Persistir o `result` por workspace com `workspaceCoderabbitReviewSave`.
-8. Recalcular `workspaceCoderabbitDiffFingerprint` quando `WORKSPACE_GIT_STATUS_QUERY_KEY` ou branch diff invalidar.
-9. Se `combinedHash` divergir, marcar UI como stale: "O diff mudou desde este review".
-10. Renderizar findings agrupados por severidade.
-11. Clique em finding seleciona arquivo/linha no diff preview.
-12. Handoff implementado: findings selecionados geram um prompt estruturado e entram no Composer via `prefill`.
-13. Handoff futuro opcional: findings podem evoluir para `DiffAnnotation { source: "coderabbit" }` quando o contrato incluir snippet/side suficiente para reusar o tray humano sem perder contexto.
+4. Antes do primeiro review por workspace, exigir opt-in explicito no Inspector. A UI atual salva consentimento local em `localStorage` com chave versionada por workspace, porque o diff e analisado por servico externo do CodeRabbit.
+5. Rodar `workspaceCoderabbitReviewStart` em acao explicita do usuario.
+6. Fazer polling com `workspaceCoderabbitReviewJob` enquanto o status for `starting | running`.
+7. Permitir cancelamento via `workspaceCoderabbitReviewCancel`.
+8. Persistir o `result` por workspace com `workspaceCoderabbitReviewSave`.
+9. Recalcular `workspaceCoderabbitDiffFingerprint` quando `WORKSPACE_GIT_STATUS_QUERY_KEY` ou branch diff invalidar.
+10. Se `combinedHash` divergir, marcar UI como stale: "O diff mudou desde este review".
+11. Renderizar findings agrupados por severidade.
+12. Clique em finding seleciona arquivo/linha no diff preview.
+13. Handoff implementado: findings selecionados geram um prompt estruturado e entram no Composer via `prefill`.
+14. Handoff futuro opcional: findings podem evoluir para `DiffAnnotation { source: "coderabbit" }` quando o contrato incluir snippet/side suficiente para reusar o tray humano sem perder contexto.
 
 ## Fluxo implementado no Inspector
 
 - O bloco `CodeRabbit review` aparece abaixo de staged/unstaged/branch diff.
 - O usuario escolhe escopo `all | uncommitted | committed`.
 - Se o CLI nao estiver autenticado, o bloco mostra a mensagem de status e abre `CodeRabbitConnectDialog`.
+- Se o CLI estiver autenticado mas o workspace ainda nao tiver consentimento, o bloco mostra aviso de review externo e bloqueia `Run review` ate o usuario autorizar.
 - `Run review` chama `workspaceCoderabbitReviewStart`.
 - Enquanto o job roda, a UI faz polling de `workspaceCoderabbitReviewJob`.
 - O usuario pode cancelar com `workspaceCoderabbitReviewCancel`.
