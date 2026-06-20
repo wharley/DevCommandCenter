@@ -119,6 +119,7 @@ type WorkspaceInspectorSidebarProps = {
 	sessionEvents: CoreEvent[];
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+	onPrefillComposer?: (text: string) => void;
 	onOpenMissionSpec: (spec: MissionSpecEntry | null) => void;
 	onGeneratePlanFromSpec: (specMarkdown: string) => void;
 	onValidateMissionSpec: (input: {
@@ -504,6 +505,7 @@ export function WorkspaceInspectorSidebar({
 	sessionEvents,
 	selectedPreview,
 	onSelectPreview,
+	onPrefillComposer,
 	onOpenMissionSpec,
 	onGeneratePlanFromSpec,
 	onValidateMissionSpec,
@@ -1342,6 +1344,7 @@ export function WorkspaceInspectorSidebar({
 							workspaceRoot={workspacePath}
 							selectedPreview={selectedPreview}
 							onSelectPreview={onSelectPreview}
+							onPrefillComposer={onPrefillComposer}
 						/>
 					</div>
 				</div>

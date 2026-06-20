@@ -8,7 +8,10 @@ mod skills_commands;
 mod workspace_commands;
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike};
-use dcc_tauri::state::{SessionCommandState, WorkspaceCommandState};
+use dcc_tauri::{
+    commands::coderabbit::CodeRabbitReviewJobsState,
+    state::{SessionCommandState, WorkspaceCommandState},
+};
 use dev_command_center_tauri::daemon_client::{
     ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo,
 };
@@ -45,7 +48,11 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::git_support::build_review_diffs_for_path;
 use coderabbit_commands::{
     workspace_coderabbit_cli_status, workspace_coderabbit_diff_fingerprint,
-    workspace_coderabbit_doctor, workspace_coderabbit_review,
+    workspace_coderabbit_doctor, workspace_coderabbit_review, workspace_coderabbit_review_cancel,
+    workspace_coderabbit_review_clear, workspace_coderabbit_review_job,
+    workspace_coderabbit_review_history, workspace_coderabbit_review_load,
+    workspace_coderabbit_review_save,
+    workspace_coderabbit_review_start,
 };
 use forge_commands::{
     workspace_backfill_forge_repo_bindings, workspace_change_request_create,
@@ -6645,6 +6652,13 @@ pub fn run() {
             workspace_coderabbit_doctor,
             workspace_coderabbit_diff_fingerprint,
             workspace_coderabbit_review,
+            workspace_coderabbit_review_start,
+            workspace_coderabbit_review_job,
+            workspace_coderabbit_review_cancel,
+            workspace_coderabbit_review_load,
+            workspace_coderabbit_review_save,
+            workspace_coderabbit_review_history,
+            workspace_coderabbit_review_clear,
             workspace_forge_cli_accounts,
             workspace_forge_cli_hosts,
             workspace_forge_cli_select_login,
@@ -6709,6 +6723,7 @@ pub fn run() {
                 .map_err(|e| format!("failed to sync repo configs: {e}"))?;
             eprintln!("[DCC] Database ready at {:?}", db_path);
             app.manage(WorkspaceCommandState::new(db_path.clone()));
+            app.manage(CodeRabbitReviewJobsState::default());
             app.manage(SessionCommandState::new(
                 app.handle().clone(),
                 db_path.clone(),

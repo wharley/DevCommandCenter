@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import {
@@ -130,6 +130,7 @@ type WorkspacePanelProps = {
 		planTitle: string | null;
 	}) => void;
 	onOpenTerminal?: () => void;
+	externalComposerPrefill?: ComposerPrefill | null;
 };
 
 export function WorkspacePanel({
@@ -168,6 +169,7 @@ export function WorkspacePanel({
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
 	onOpenTerminal,
+	externalComposerPrefill,
 }: WorkspacePanelProps) {
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
@@ -176,6 +178,12 @@ export function WorkspacePanel({
 		[],
 	);
 	const reviewIdRef = useRef(0);
+
+	useEffect(() => {
+		if (externalComposerPrefill) {
+			setComposerPrefill(externalComposerPrefill);
+		}
+	}, [externalComposerPrefill]);
 
 	// Build a turn that honors the workspace's persisted effort/ultrathink so a
 	// direct send matches what the user would get from the composer.

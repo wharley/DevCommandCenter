@@ -1,7 +1,17 @@
+import type { CodeRabbitFindingSeverity } from "@dcc/contracts";
 import { AlertCircle, FileCode2, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { useWorkspaceGitFilePreviewContent } from "./use-workspace-git-file-preview-content";
+
+export type WorkspaceGitPreviewMachineAnnotation = {
+	source: "coderabbit";
+	severity: CodeRabbitFindingSeverity;
+	side: "original" | "modified";
+	startLine: number;
+	endLine: number;
+	title: string;
+};
 
 export type WorkspaceGitPreviewSelection = {
 	group: "staged" | "unstaged" | "committed";
@@ -9,6 +19,8 @@ export type WorkspaceGitPreviewSelection = {
 	name: string;
 	status: string;
 	baseBranch?: string | null;
+	focusLine?: number | null;
+	machineAnnotations?: WorkspaceGitPreviewMachineAnnotation[];
 };
 
 type WorkspaceGitFilePreviewProps = {

@@ -15,6 +15,14 @@ pub(crate) struct ParsedCodeRabbitAgentOutput {
     pub event_count: u32,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) enum ParsedCodeRabbitAgentEvent {
+    Finding(CodeRabbitFinding),
+    Status(CodeRabbitReviewStatusEvent),
+    Complete(CodeRabbitReviewComplete),
+    Error(String),
+}
+
 pub(crate) fn parse_agent_jsonl(stdout: &str) -> ParsedCodeRabbitAgentOutput {
     let mut parsed = ParsedCodeRabbitAgentOutput::default();
 
@@ -24,44 +32,67 @@ pub(crate) fn parse_agent_jsonl(stdout: &str) -> ParsedCodeRabbitAgentOutput {
             continue;
         }
 
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            parsed
-                .errors
-                .push(format!("line {} is not valid JSON", index + 1));
-            continue;
-        };
-
-        parsed.event_count += 1;
-        match value
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-        {
-            "finding" => {
-                if let Some(finding) = parse_finding(&value, parsed.findings.len()) {
-                    parsed.findings.push(finding);
-                }
-            }
-            "status" => parsed.statuses.push(parse_status_event(&value)),
-            "complete" => parsed.complete = Some(parse_complete_event(&value)),
-            "error" => parsed.errors.push(
-                value
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("CodeRabbit emitted an error event")
-                    .to_string(),
-            ),
-            "heartbeat" | "review_context" => {}
-            other if !other.is_empty() => parsed.statuses.push(CodeRabbitReviewStatusEvent {
-                event_type: other.to_string(),
-                status: string_field(&value, &["status"]),
-                message: string_field(&value, &["message", "detail"]),
-            }),
-            _ => {}
+        match parse_agent_jsonl_line(line, index + 1, parsed.findings.len()) {
+            Ok(Some(event)) => apply_agent_event(&mut parsed, event),
+            Ok(None) => {}
+            Err(error) => parsed.errors.push(error),
         }
     }
 
     parsed
+}
+
+pub(crate) fn parse_agent_jsonl_line(
+    line: &str,
+    line_number: usize,
+    finding_index: usize,
+) -> Result<Option<ParsedCodeRabbitAgentEvent>, String> {
+    let line = line.trim();
+    if line.is_empty() {
+        return Ok(None);
+    }
+
+    let value = serde_json::from_str::<Value>(line)
+        .map_err(|_| format!("line {line_number} is not valid JSON"))?;
+
+    Ok(match value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+    {
+        "finding" => parse_finding(&value, finding_index).map(ParsedCodeRabbitAgentEvent::Finding),
+        "status" => Some(ParsedCodeRabbitAgentEvent::Status(parse_status_event(&value))),
+        "complete" => Some(ParsedCodeRabbitAgentEvent::Complete(parse_complete_event(&value))),
+        "error" => Some(ParsedCodeRabbitAgentEvent::Error(
+            value
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("CodeRabbit emitted an error event")
+                .to_string(),
+        )),
+        "heartbeat" | "review_context" => None,
+        other if !other.is_empty() => Some(ParsedCodeRabbitAgentEvent::Status(
+            CodeRabbitReviewStatusEvent {
+                event_type: other.to_string(),
+                status: string_field(&value, &["status"]),
+                message: string_field(&value, &["message", "detail"]),
+            },
+        )),
+        _ => None,
+    })
+}
+
+pub(crate) fn apply_agent_event(
+    parsed: &mut ParsedCodeRabbitAgentOutput,
+    event: ParsedCodeRabbitAgentEvent,
+) {
+    parsed.event_count += 1;
+    match event {
+        ParsedCodeRabbitAgentEvent::Finding(finding) => parsed.findings.push(finding),
+        ParsedCodeRabbitAgentEvent::Status(status) => parsed.statuses.push(status),
+        ParsedCodeRabbitAgentEvent::Complete(complete) => parsed.complete = Some(complete),
+        ParsedCodeRabbitAgentEvent::Error(error) => parsed.errors.push(error),
+    }
 }
 
 fn parse_finding(value: &Value, index: usize) -> Option<CodeRabbitFinding> {

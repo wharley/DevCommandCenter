@@ -1,14 +1,20 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use dcc_tauri::{
     commands::coderabbit::{
         CodeRabbitDiffFingerprint, WorkspaceCodeRabbitCliStatusInput,
         WorkspaceCodeRabbitCliStatusOutput, WorkspaceCodeRabbitDoctorInput,
         WorkspaceCodeRabbitDoctorOutput, WorkspaceCodeRabbitFingerprintInput,
-        WorkspaceCodeRabbitReviewInput, WorkspaceCodeRabbitReviewOutput,
+        WorkspaceCodeRabbitSaveReviewInput,
+        WorkspaceCodeRabbitReviewHistoryInput, WorkspaceCodeRabbitReviewHistoryOutput,
+        WorkspaceCodeRabbitReviewInput, WorkspaceCodeRabbitReviewJobInput,
+        WorkspaceCodeRabbitReviewJobSnapshot, WorkspaceCodeRabbitReviewOutput,
+        WorkspaceCodeRabbitReviewStartOutput, WorkspaceCodeRabbitStoredReviewInput,
+        WorkspaceCodeRabbitStoredReviewOutput,
     },
     state::WorkspaceCommandState,
 };
+use dcc_tauri::commands::coderabbit::CodeRabbitReviewJobsState;
 
 #[tauri::command]
 pub async fn workspace_coderabbit_cli_status(
@@ -40,4 +46,68 @@ pub async fn workspace_coderabbit_review(
     input: WorkspaceCodeRabbitReviewInput,
 ) -> Result<WorkspaceCodeRabbitReviewOutput, String> {
     dcc_tauri::commands::coderabbit::workspace_coderabbit_review(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_coderabbit_review_start(
+    app: AppHandle,
+    workspace_state: State<'_, WorkspaceCommandState>,
+    jobs_state: State<'_, CodeRabbitReviewJobsState>,
+    input: WorkspaceCodeRabbitReviewInput,
+) -> Result<WorkspaceCodeRabbitReviewStartOutput, String> {
+    dcc_tauri::commands::coderabbit::workspace_coderabbit_review_start(
+        app,
+        workspace_state,
+        jobs_state,
+        input,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn workspace_coderabbit_review_job(
+    jobs_state: State<'_, CodeRabbitReviewJobsState>,
+    input: WorkspaceCodeRabbitReviewJobInput,
+) -> Result<WorkspaceCodeRabbitReviewJobSnapshot, String> {
+    dcc_tauri::commands::coderabbit::workspace_coderabbit_review_job(jobs_state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_coderabbit_review_cancel(
+    jobs_state: State<'_, CodeRabbitReviewJobsState>,
+    input: WorkspaceCodeRabbitReviewJobInput,
+) -> Result<WorkspaceCodeRabbitReviewJobSnapshot, String> {
+    dcc_tauri::commands::coderabbit::workspace_coderabbit_review_cancel(jobs_state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_coderabbit_review_load(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceCodeRabbitStoredReviewInput,
+) -> Result<WorkspaceCodeRabbitStoredReviewOutput, String> {
+    dcc_tauri::commands::coderabbit::workspace_coderabbit_review_load(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_coderabbit_review_save(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceCodeRabbitSaveReviewInput,
+) -> Result<WorkspaceCodeRabbitStoredReviewOutput, String> {
+    dcc_tauri::commands::coderabbit::workspace_coderabbit_review_save(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_coderabbit_review_history(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceCodeRabbitReviewHistoryInput,
+) -> Result<WorkspaceCodeRabbitReviewHistoryOutput, String> {
+    dcc_tauri::commands::coderabbit::workspace_coderabbit_review_history(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_coderabbit_review_clear(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceCodeRabbitStoredReviewInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::coderabbit::workspace_coderabbit_review_clear(state, input).await
 }

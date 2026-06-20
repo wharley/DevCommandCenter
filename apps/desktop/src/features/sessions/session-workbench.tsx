@@ -53,6 +53,7 @@ type SessionWorkbenchProps = {
 		planMarkdown: string;
 		planTitle: string | null;
 	}) => void;
+	composerPrefill?: { text: string; nonce: number } | null;
 };
 
 export function SessionWorkbench({
@@ -92,6 +93,7 @@ export function SessionWorkbench({
 	onCloseSurface,
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
+	composerPrefill,
 }: SessionWorkbenchProps) {
 	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [terminalExpanded, setTerminalExpanded] = useState(false);
@@ -162,6 +164,7 @@ export function SessionWorkbench({
 						onOpenPlanSidebar={onOpenPlanSidebar}
 						onImplementPlanInNewThread={onImplementPlanInNewThread}
 						onOpenTerminal={handleToggleTerminal}
+						externalComposerPrefill={composerPrefill}
 					/>
 				</div>
 			) : null}

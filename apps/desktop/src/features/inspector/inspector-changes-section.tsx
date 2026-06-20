@@ -725,12 +725,14 @@ type InspectorChangesSectionProps = {
 	workspaceRoot: string | null;
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+	onPrefillComposer?: (text: string) => void;
 };
 
 export function InspectorChangesSection({
 	workspaceRoot,
 	selectedPreview,
 	onSelectPreview,
+	onPrefillComposer,
 }: InspectorChangesSectionProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -884,6 +886,7 @@ export function InspectorChangesSection({
 						unstaged={data.unstaged}
 						baseBranch={branchDiffQuery.data?.baseBranch ?? null}
 						onSelectPreview={onSelectPreview}
+						onPrefillComposer={onPrefillComposer}
 					/>
 				) : null}
 			</div>

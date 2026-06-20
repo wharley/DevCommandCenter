@@ -27,10 +27,16 @@ use dcc_tauri::commands::{
     coderabbit::{
         CodeRabbitAuthStatusOutput, CodeRabbitCliStatusState, CodeRabbitDiffFingerprint,
         CodeRabbitFinding, CodeRabbitFindingSeverity, CodeRabbitReviewComplete,
-        CodeRabbitReviewStatusEvent, CodeRabbitReviewType, WorkspaceCodeRabbitCliStatusInput,
+        CodeRabbitReviewJobStatus, CodeRabbitReviewStatusEvent, CodeRabbitReviewType,
+        CodeRabbitReviewStreamEvent, WorkspaceCodeRabbitCliStatusInput,
         WorkspaceCodeRabbitCliStatusOutput, WorkspaceCodeRabbitDoctorInput,
         WorkspaceCodeRabbitDoctorOutput, WorkspaceCodeRabbitFingerprintInput,
-        WorkspaceCodeRabbitReviewInput, WorkspaceCodeRabbitReviewOutput,
+        WorkspaceCodeRabbitReviewInput, WorkspaceCodeRabbitReviewJobInput,
+        WorkspaceCodeRabbitReviewJobSnapshot, WorkspaceCodeRabbitReviewOutput,
+        WorkspaceCodeRabbitReviewStartOutput, WorkspaceCodeRabbitReviewHistoryEntry,
+        WorkspaceCodeRabbitReviewHistoryInput, WorkspaceCodeRabbitReviewHistoryOutput,
+        WorkspaceCodeRabbitSaveReviewInput,
+        WorkspaceCodeRabbitStoredReviewInput, WorkspaceCodeRabbitStoredReviewOutput,
     },
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
@@ -115,6 +121,13 @@ struct WorkspaceMethods {
     workspace_coderabbit_doctor: String,
     workspace_coderabbit_diff_fingerprint: String,
     workspace_coderabbit_review: String,
+    workspace_coderabbit_review_start: String,
+    workspace_coderabbit_review_job: String,
+    workspace_coderabbit_review_cancel: String,
+    workspace_coderabbit_review_load: String,
+    workspace_coderabbit_review_save: String,
+    workspace_coderabbit_review_history: String,
+    workspace_coderabbit_review_clear: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -249,6 +262,17 @@ fn main() {
         .typ::<CodeRabbitReviewStatusEvent>()
         .typ::<CodeRabbitReviewComplete>()
         .typ::<WorkspaceCodeRabbitReviewOutput>()
+        .typ::<CodeRabbitReviewStreamEvent>()
+        .typ::<CodeRabbitReviewJobStatus>()
+        .typ::<WorkspaceCodeRabbitReviewStartOutput>()
+        .typ::<WorkspaceCodeRabbitReviewJobInput>()
+        .typ::<WorkspaceCodeRabbitReviewJobSnapshot>()
+        .typ::<WorkspaceCodeRabbitStoredReviewInput>()
+        .typ::<WorkspaceCodeRabbitSaveReviewInput>()
+        .typ::<WorkspaceCodeRabbitStoredReviewOutput>()
+        .typ::<WorkspaceCodeRabbitReviewHistoryInput>()
+        .typ::<WorkspaceCodeRabbitReviewHistoryEntry>()
+        .typ::<WorkspaceCodeRabbitReviewHistoryOutput>()
         .typ::<ListProvidersOutput>()
         .typ::<StartThreadInput>()
         .typ::<StartThreadOutput>()
@@ -323,6 +347,17 @@ fn main() {
                 workspace_coderabbit_diff_fingerprint: "workspace_coderabbit_diff_fingerprint"
                     .to_string(),
                 workspace_coderabbit_review: "workspace_coderabbit_review".to_string(),
+                workspace_coderabbit_review_start: "workspace_coderabbit_review_start"
+                    .to_string(),
+                workspace_coderabbit_review_job: "workspace_coderabbit_review_job".to_string(),
+                workspace_coderabbit_review_cancel: "workspace_coderabbit_review_cancel"
+                    .to_string(),
+                workspace_coderabbit_review_load: "workspace_coderabbit_review_load".to_string(),
+                workspace_coderabbit_review_save: "workspace_coderabbit_review_save".to_string(),
+                workspace_coderabbit_review_history: "workspace_coderabbit_review_history"
+                    .to_string(),
+                workspace_coderabbit_review_clear: "workspace_coderabbit_review_clear"
+                    .to_string(),
             },
         );
 

@@ -9,7 +9,10 @@ import { ShortcutDisplay } from "@/features/shortcuts/shortcut-display";
 import { InlineShortcutDisplay } from "@/features/shortcuts/InlineShortcutDisplay";
 import { useWorkspaceGitFilePreviewContent } from "@/features/inspector/use-workspace-git-file-preview-content";
 import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
-import type { DiffAnnotationPayload } from "@/lib/monaco-runtime";
+import type {
+	DiffAnnotationPayload,
+	DiffMachineAnnotation,
+} from "@/lib/monaco-runtime";
 
 /** A diff annotation bound to the file it was selected in (anchor stripped). */
 export type DiffAnnotationRequest = Omit<DiffAnnotationPayload, "anchor"> & {
@@ -55,6 +58,8 @@ function WorkspaceEditorDiff({
 	originalText,
 	modifiedText,
 	inline,
+	focusLine,
+	machineAnnotations,
 	onAnnotate,
 	annotateLabel,
 }: {
@@ -62,6 +67,8 @@ function WorkspaceEditorDiff({
 	originalText: string;
 	modifiedText: string;
 	inline: boolean;
+	focusLine?: number | null;
+	machineAnnotations?: DiffMachineAnnotation[];
 	onAnnotate?: (payload: DiffAnnotationPayload) => void;
 	annotateLabel: string;
 }) {
@@ -107,6 +114,8 @@ function WorkspaceEditorDiff({
 					originalText,
 					modifiedText,
 					inline,
+					focusLine,
+					machineAnnotations,
 					onAnnotate: (payload) => onAnnotateRef.current?.(payload),
 					annotateLabel: annotateLabelRef.current,
 				});
@@ -128,7 +137,7 @@ function WorkspaceEditorDiff({
 		return () => {
 			disposed = true;
 		};
-	}, [inline, modifiedText, originalText, path]);
+	}, [focusLine, inline, machineAnnotations, modifiedText, originalText, path]);
 
 	useEffect(() => {
 		controllerRef.current?.setTexts({
@@ -137,6 +146,16 @@ function WorkspaceEditorDiff({
 			inline,
 		});
 	}, [inline, modifiedText, originalText]);
+
+	useEffect(() => {
+		controllerRef.current?.setMachineAnnotations(machineAnnotations ?? []);
+	}, [machineAnnotations]);
+
+	useEffect(() => {
+		if (focusLine) {
+			controllerRef.current?.revealLine(focusLine);
+		}
+	}, [focusLine]);
 
 	return (
 		<div className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
@@ -498,6 +517,8 @@ export function WorkspaceEditorSurface({
 						originalText={snapshot.originalText}
 						modifiedText={snapshot.modifiedText}
 						inline={snapshot.inline}
+						focusLine={selection.focusLine ?? null}
+						machineAnnotations={selection.machineAnnotations}
 						onAnnotate={annotationsEnabled ? handleAnnotate : undefined}
 						annotateLabel={t("diffAnnotate.sendToAgent")}
 					/>

@@ -22,3 +22,4 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt", "sync"] }
 reqwest = { version = "0.11", features = ["blocking"] }
 uuid = { version = "1", features = ["v4"] }
+rusqlite = { version = "0.32", features = ["bundled"] }

@@ -1,7 +1,7 @@
 use std::{
     ffi::{OsStr, OsString},
     path::Path,
-    process::{Command, Output, Stdio},
+    process::{Child, Command, Output, Stdio},
     sync::mpsc,
     thread,
     time::Duration,
@@ -136,6 +136,50 @@ where
             let _ = waiter.join();
             Err("CodeRabbit CLI waiter thread crashed before returning output".to_string())
         }
+    }
+}
+
+pub(crate) fn spawn_command<I, S>(
+    program: &str,
+    args: I,
+    current_dir: Option<&Path>,
+) -> Result<Child, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut command = Command::new(program);
+    for arg in args {
+        command.arg(arg.as_ref());
+    }
+    if let Some(current_dir) = current_dir {
+        command.current_dir(current_dir);
+    }
+
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
+    command.spawn().map_err(|error| error.to_string())
+}
+
+pub(crate) fn kill_process_group(pid: u32) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .arg("/PID")
+            .arg(pid.to_string())
+            .arg("/T")
+            .arg("/F")
+            .output();
     }
 }
 

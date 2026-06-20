@@ -103,6 +103,33 @@ CREATE TABLE IF NOT EXISTS pane_terminal_scrollback (
 
 CREATE INDEX IF NOT EXISTS idx_pane_scrollback_updated ON pane_terminal_scrollback(updated_at DESC);
 
+-- Ultimo review CodeRabbit persistido por workspace/worktree.
+CREATE TABLE IF NOT EXISTS workspace_coderabbit_reviews (
+  workspace_root TEXT PRIMARY KEY,
+  review_json TEXT NOT NULL,
+  fingerprint_hash TEXT,
+  completed_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_workspace_coderabbit_reviews_updated ON workspace_coderabbit_reviews(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS workspace_coderabbit_review_history (
+  review_id TEXT PRIMARY KEY,
+  workspace_root TEXT NOT NULL,
+  review_json TEXT NOT NULL,
+  review_type TEXT,
+  success INTEGER DEFAULT 0,
+  findings_count INTEGER DEFAULT 0,
+  fingerprint_hash TEXT,
+  completed_at TEXT,
+  saved_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_workspace_coderabbit_review_history_workspace
+  ON workspace_coderabbit_review_history(workspace_root, saved_at DESC);
+
 -- Tabela de estado do daemon (tasks agendadas + sessões persistentes no processo)
 CREATE TABLE IF NOT EXISTS daemon_task_runs (
   id TEXT PRIMARY KEY,
@@ -196,6 +223,12 @@ CREATE TRIGGER IF NOT EXISTS update_panes_timestamp
 AFTER UPDATE ON panes
 BEGIN
   UPDATE panes SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS update_workspace_coderabbit_reviews_timestamp
+AFTER UPDATE ON workspace_coderabbit_reviews
+BEGIN
+  UPDATE workspace_coderabbit_reviews SET updated_at = datetime('now') WHERE workspace_root = NEW.workspace_root;
 END;
 
 CREATE TRIGGER IF NOT EXISTS update_daemon_task_runs_timestamp

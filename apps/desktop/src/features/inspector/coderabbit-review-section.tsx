@@ -4,12 +4,15 @@ import {
 	CheckCircle2,
 	ChevronRight,
 	Clock3,
+	History,
 	LoaderCircle,
 	Rabbit,
 	RefreshCw,
+	Send,
 	Trash2,
+	X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type {
@@ -28,9 +31,18 @@ import {
 } from "@/features/settings/coderabbit-cli-queries";
 import {
 	workspaceCodeRabbitDiffFingerprint,
-	workspaceCodeRabbitReview,
+	workspaceCodeRabbitReviewCancel,
+	workspaceCodeRabbitReviewJob,
+	listenCodeRabbitReviewEvents,
+	workspaceCodeRabbitReviewStart,
 } from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
+import {
+	buildCodeRabbitComposerPrompt,
+	buildMachineAnnotationsForPath,
+	findingTitle,
+	lineLabel,
+} from "./coderabbit-review-format";
 import type { WorkspaceGitPreviewSelection } from "./workspace-git-file-preview";
 import { useStoredCodeRabbitReview } from "./use-workspace-coderabbit-review";
 
@@ -40,6 +52,7 @@ type CodeRabbitReviewSectionProps = {
 	unstaged: WorkspaceGitChangeEntry[];
 	baseBranch?: string | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection) => void;
+	onPrefillComposer?: (text: string) => void;
 };
 
 const REVIEW_TYPES: CodeRabbitReviewType[] = ["all", "uncommitted", "committed"];
@@ -67,25 +80,6 @@ function fileName(path: string): string {
 	return index >= 0 ? path.slice(index + 1) : path;
 }
 
-function lineLabel(finding: CodeRabbitFinding): string | null {
-	if (!finding.startLine) {
-		return null;
-	}
-	if (!finding.endLine || finding.endLine === finding.startLine) {
-		return `L${finding.startLine}`;
-	}
-	return `L${finding.startLine}-${finding.endLine}`;
-}
-
-function findingTitle(finding: CodeRabbitFinding): string {
-	return (
-		finding.comment?.trim() ||
-		finding.codegenInstructions?.trim() ||
-		finding.suggestions[0]?.trim() ||
-		"CodeRabbit finding"
-	);
-}
-
 function formatReviewAge(value?: string | null): string | null {
 	if (!value) {
 		return null;
@@ -111,10 +105,16 @@ function formatReviewAge(value?: string | null): string | null {
 
 function buildSelectionForFinding(
 	finding: CodeRabbitFinding,
+	allFindings: CodeRabbitFinding[],
 	staged: WorkspaceGitChangeEntry[],
 	unstaged: WorkspaceGitChangeEntry[],
 	baseBranch?: string | null,
 ): WorkspaceGitPreviewSelection {
+	const machineAnnotations = buildMachineAnnotationsForPath(
+		finding.path,
+		allFindings,
+	);
+	const focusLine = finding.startLine ?? null;
 	const stagedEntry = staged.find((entry) => entry.path === finding.path);
 	if (stagedEntry) {
 		return {
@@ -123,6 +123,8 @@ function buildSelectionForFinding(
 			name: stagedEntry.name,
 			status: stagedEntry.status,
 			baseBranch: null,
+			focusLine,
+			machineAnnotations,
 		};
 	}
 	const unstagedEntry = unstaged.find((entry) => entry.path === finding.path);
@@ -133,6 +135,8 @@ function buildSelectionForFinding(
 			name: unstagedEntry.name,
 			status: unstagedEntry.status,
 			baseBranch: null,
+			focusLine,
+			machineAnnotations,
 		};
 	}
 	return {
@@ -141,6 +145,8 @@ function buildSelectionForFinding(
 		name: fileName(finding.path),
 		status: "M",
 		baseBranch: baseBranch ?? null,
+		focusLine,
+		machineAnnotations,
 	};
 }
 
@@ -150,13 +156,27 @@ export function CodeRabbitReviewSection({
 	unstaged,
 	baseBranch,
 	onSelectPreview,
+	onPrefillComposer,
 }: CodeRabbitReviewSectionProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
 	const [open, setOpen] = useState(true);
 	const [reviewType, setReviewType] = useState<CodeRabbitReviewType>("all");
 	const [connectOpen, setConnectOpen] = useState(false);
-	const { review, saveReview, clearReview } = useStoredCodeRabbitReview(workspaceRoot);
+	const [historyOpen, setHistoryOpen] = useState(false);
+	const [selectedFindingIds, setSelectedFindingIds] = useState<Set<string>>(
+		() => new Set(),
+	);
+	const [activeJobId, setActiveJobId] = useState<string | null>(null);
+	const [liveJobMessage, setLiveJobMessage] = useState<string | null>(null);
+	const {
+		review,
+		saveReview,
+		clearReview,
+		history,
+		historyLoading,
+		useReviewFromHistory,
+	} = useStoredCodeRabbitReview(workspaceRoot);
 	const codeRabbitStatusQuery = useCodeRabbitCliStatus(workspaceRoot, {
 		includeAuthStatus: true,
 	});
@@ -196,9 +216,21 @@ export function CodeRabbitReviewSection({
 			fingerprintQuery.data.combinedHash !== review.fingerprint.combinedHash,
 	);
 
-	const runReview = useMutation({
+	const reviewJobQuery = useQuery({
+		queryKey: ["workspaceCodeRabbitReviewJob", activeJobId],
+		queryFn: () => workspaceCodeRabbitReviewJob({ jobId: activeJobId! }),
+		enabled: Boolean(activeJobId),
+		refetchInterval: (query) => {
+			const status = query.state.data?.status;
+			return status === "starting" || status === "running" ? 2_500 : false;
+		},
+		refetchOnWindowFocus: true,
+	});
+	const activeJob = reviewJobQuery.data ?? null;
+
+	const startReview = useMutation({
 		mutationFn: () =>
-			workspaceCodeRabbitReview({
+			workspaceCodeRabbitReviewStart({
 				workspaceRoot,
 				reviewType,
 				base: baseBranch ?? null,
@@ -209,18 +241,9 @@ export function CodeRabbitReviewSection({
 				timeoutSeconds: null,
 			}),
 		onSuccess: (next) => {
-			saveReview(next);
-			if (next.success) {
-				toast.success(
-					t("inspector.codeRabbit.reviewComplete", {
-						count: next.findings.length,
-					}),
-				);
-			} else {
-				toast.error(
-					next.errors[0] ?? t("inspector.codeRabbit.reviewFailed"),
-				);
-			}
+			setActiveJobId(next.jobId);
+			setLiveJobMessage(null);
+			toast.info(t("inspector.codeRabbit.reviewStarted"));
 		},
 		onError: (error) => {
 			toast.error(
@@ -228,6 +251,104 @@ export function CodeRabbitReviewSection({
 			);
 		},
 	});
+
+	const cancelReview = useMutation({
+		mutationFn: () => {
+			if (!activeJobId) {
+				throw new Error("No active CodeRabbit review job");
+			}
+			return workspaceCodeRabbitReviewCancel({ jobId: activeJobId });
+		},
+		onSuccess: (snapshot) => {
+			if (snapshot.status === "canceled") {
+				setActiveJobId(null);
+				toast.info(t("inspector.codeRabbit.reviewCanceled"));
+			}
+		},
+		onError: (error) => {
+			toast.error(
+				error instanceof Error ? error.message : t("inspector.codeRabbit.cancelFailed"),
+			);
+		},
+	});
+
+	const reviewRunning = Boolean(
+		startReview.isPending ||
+			activeJob?.status === "starting" ||
+			activeJob?.status === "running",
+	);
+
+	useEffect(() => {
+		if (!activeJobId) {
+			setLiveJobMessage(null);
+			return;
+		}
+		let disposed = false;
+		let cleanup: (() => void) | null = null;
+		void listenCodeRabbitReviewEvents((event) => {
+			if (disposed || event.jobId !== activeJobId) {
+				return;
+			}
+			if (event.message || event.status) {
+				setLiveJobMessage(event.message ?? event.status ?? null);
+			}
+			if (
+				event.eventType === "finding" ||
+				event.eventType === "complete" ||
+				event.eventType === "succeeded" ||
+				event.eventType === "failed" ||
+				event.eventType === "canceled"
+			) {
+				void reviewJobQuery.refetch();
+			}
+		})
+			.then((unlisten) => {
+				if (disposed) {
+					void unlisten();
+					return;
+				}
+				cleanup = unlisten;
+			})
+			.catch(() => {
+				/* polling remains the fallback */
+			});
+		return () => {
+			disposed = true;
+			cleanup?.();
+		};
+	}, [activeJobId, reviewJobQuery]);
+
+	useEffect(() => {
+		if (!activeJob) {
+			return;
+		}
+		if (activeJob.status === "succeeded" && activeJob.result) {
+			saveReview(activeJob.result);
+			setActiveJobId(null);
+			toast.success(
+				t("inspector.codeRabbit.reviewComplete", {
+					count: activeJob.result.findings.length,
+				}),
+			);
+			return;
+		}
+		if (activeJob.status === "failed") {
+			if (activeJob.result) {
+				saveReview(activeJob.result);
+			}
+			setActiveJobId(null);
+			toast.error(
+				activeJob.errors[0] ??
+					activeJob.result?.errors[0] ??
+					t("inspector.codeRabbit.reviewFailed"),
+			);
+			return;
+		}
+		if (activeJob.status === "canceled") {
+			setActiveJobId(null);
+			toast.info(t("inspector.codeRabbit.reviewCanceled"));
+		}
+	}, [activeJob, saveReview, t]);
 
 	const groupedFindings = useMemo(() => {
 		const grouped = new Map<CodeRabbitFindingSeverity, CodeRabbitFinding[]>();
@@ -243,8 +364,82 @@ export function CodeRabbitReviewSection({
 		})).filter((group) => group.findings.length > 0);
 	}, [review?.findings]);
 
+	useEffect(() => {
+		const allowed = new Set((review?.findings ?? []).map((finding) => finding.id));
+		setSelectedFindingIds((previous) => {
+			const next = new Set<string>();
+			for (const id of previous) {
+				if (allowed.has(id)) {
+					next.add(id);
+				}
+			}
+			return next.size === previous.size ? previous : next;
+		});
+	}, [review?.findings]);
+
+	const selectedFindings = useMemo(() => {
+		return (review?.findings ?? []).filter((finding) =>
+			selectedFindingIds.has(finding.id),
+		);
+	}, [review?.findings, selectedFindingIds]);
+
+	const toggleFindingSelection = useCallback((findingId: string) => {
+		setSelectedFindingIds((previous) => {
+			const next = new Set(previous);
+			if (next.has(findingId)) {
+				next.delete(findingId);
+			} else {
+				next.add(findingId);
+			}
+			return next;
+		});
+	}, []);
+
+	const selectAllFindings = useCallback(() => {
+		setSelectedFindingIds(
+			new Set((review?.findings ?? []).map((finding) => finding.id)),
+		);
+	}, [review?.findings]);
+
+	const clearSelectedFindings = useCallback(() => {
+		setSelectedFindingIds(new Set());
+	}, []);
+
 	const reviewAge = formatReviewAge(review?.completedAt);
-	const canRun = !runReview.isPending && Boolean(workspaceRoot) && codeRabbitReady;
+	const canRun = !reviewRunning && Boolean(workspaceRoot) && codeRabbitReady;
+	const canSendToComposer = Boolean(onPrefillComposer && selectedFindings.length > 0);
+	const activeJobMessage = activeJob?.cancelRequested
+		? t("inspector.codeRabbit.cancelingStatus")
+		: activeJob?.status === "starting"
+			? t("inspector.codeRabbit.starting")
+			: liveJobMessage ?? t("inspector.codeRabbit.running");
+
+	const sendSelectedToComposer = useCallback(() => {
+		if (!onPrefillComposer || selectedFindings.length === 0 || !review) {
+			return;
+		}
+		onPrefillComposer(
+			buildCodeRabbitComposerPrompt({
+				findings: selectedFindings,
+				reviewType: review.reviewType,
+				completedAt: review.completedAt,
+				isStale,
+			}),
+		);
+		toast.success(
+			t("inspector.codeRabbit.sentToComposer", {
+				count: selectedFindings.length,
+			}),
+		);
+		clearSelectedFindings();
+	}, [
+		clearSelectedFindings,
+		isStale,
+		onPrefillComposer,
+		review,
+		selectedFindings,
+		t,
+	]);
 
 	return (
 		<div className="border-t border-border/50 bg-background/70 font-sans">
@@ -292,7 +487,7 @@ export function CodeRabbitReviewSection({
 								<ToggleGroupItem
 									key={type}
 									value={type}
-									disabled={runReview.isPending}
+									disabled={reviewRunning}
 									className="h-6 rounded px-2 text-[10.5px] data-[state=on]:bg-background data-[state=on]:text-foreground"
 								>
 									{t(`inspector.codeRabbit.reviewType.${type}`)}
@@ -317,15 +512,26 @@ export function CodeRabbitReviewSection({
 									<Trash2 className="size-3.5" />
 								</Button>
 							) : null}
+							{history.length > 0 ? (
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-xs"
+									aria-label={t("inspector.codeRabbit.history")}
+									onClick={() => setHistoryOpen((value) => !value)}
+								>
+									<History className="size-3.5" />
+								</Button>
+							) : null}
 							<Button
 								type="button"
 								variant={review ? "outline" : "default"}
 								size="xs"
 								disabled={!canRun}
-								onClick={() => runReview.mutate()}
+								onClick={() => startReview.mutate()}
 								className="gap-1.5"
 							>
-								{runReview.isPending ? (
+								{reviewRunning ? (
 									<LoaderCircle className="size-3.5 animate-spin" />
 								) : (
 									<RefreshCw className="size-3.5" />
@@ -334,6 +540,21 @@ export function CodeRabbitReviewSection({
 									? t("inspector.codeRabbit.rerun")
 									: t("inspector.codeRabbit.run")}
 							</Button>
+							{reviewRunning ? (
+								<Button
+									type="button"
+									variant="outline"
+									size="xs"
+									disabled={cancelReview.isPending}
+									onClick={() => cancelReview.mutate()}
+									className="gap-1.5"
+								>
+									<X className="size-3.5" />
+									{cancelReview.isPending
+										? t("inspector.codeRabbit.canceling")
+										: t("inspector.codeRabbit.cancel")}
+								</Button>
+							) : null}
 						</div>
 					</div>
 
@@ -344,14 +565,69 @@ export function CodeRabbitReviewSection({
 						</div>
 					) : null}
 
-					{runReview.isPending ? (
-						<div className="flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-2 py-2 text-[11px] text-muted-foreground">
-							<LoaderCircle className="size-3.5 animate-spin" />
-							{t("inspector.codeRabbit.running")}
+					{historyOpen ? (
+						<div className="space-y-1 rounded-md border border-border/45 bg-muted/15 p-1.5">
+							<div className="flex items-center justify-between px-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+								<span>{t("inspector.codeRabbit.history")}</span>
+								<span className="tabular-nums">
+									{historyLoading
+										? t("inspector.codeRabbit.historyLoading")
+										: t("inspector.codeRabbit.historyCount", {
+												count: history.length,
+											})}
+								</span>
+							</div>
+							{history.length === 0 ? (
+								<div className="px-1 py-1 text-[11px] text-muted-foreground">
+									{t("inspector.codeRabbit.historyEmpty")}
+								</div>
+							) : (
+								<div className="max-h-40 space-y-1 overflow-y-auto">
+									{history.map((entry) => (
+										<button
+											key={entry.reviewId}
+											type="button"
+											className="flex w-full min-w-0 items-center justify-between gap-2 rounded border border-border/35 bg-background/70 px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-accent/60"
+											onClick={() => {
+												useReviewFromHistory(entry.review);
+												setHistoryOpen(false);
+											}}
+										>
+											<span className="min-w-0 flex-1 truncate">
+												{t("inspector.codeRabbit.historyEntry", {
+													type:
+														entry.reviewType ??
+														entry.review.reviewType,
+													count: entry.findingsCount,
+												})}
+											</span>
+											<span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+												{formatReviewAge(entry.savedAt) ?? "-"}
+											</span>
+										</button>
+									))}
+								</div>
+							)}
 						</div>
 					) : null}
 
-					{!codeRabbitReady && !runReview.isPending ? (
+					{reviewRunning ? (
+						<div className="flex items-center justify-between gap-2 rounded-md border border-border/50 bg-muted/20 px-2 py-2 text-[11px] text-muted-foreground">
+							<span className="inline-flex min-w-0 items-center gap-2">
+							<LoaderCircle className="size-3.5 animate-spin" />
+								<span className="truncate">
+									{activeJobMessage}
+								</span>
+							</span>
+							{activeJob?.jobId ? (
+								<span className="shrink-0 font-mono text-[10px]">
+									{activeJob.jobId.slice(-8)}
+								</span>
+							) : null}
+						</div>
+					) : null}
+
+					{!codeRabbitReady && !reviewRunning ? (
 						<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 bg-muted/20 px-2 py-2 text-[11px] text-muted-foreground">
 							<span>{codeRabbitMessage}</span>
 							<Button
@@ -380,6 +656,46 @@ export function CodeRabbitReviewSection({
 
 					{groupedFindings.length > 0 ? (
 						<div className="space-y-2">
+							<div className="flex flex-wrap items-center justify-between gap-1.5 rounded-md border border-border/45 bg-muted/20 px-2 py-1.5 text-[11px] text-muted-foreground">
+								<span className="tabular-nums">
+									{t("inspector.codeRabbit.selectedCount", {
+										count: selectedFindings.length,
+									})}
+								</span>
+								<div className="flex items-center gap-1">
+									<Button
+										type="button"
+										variant="ghost"
+										size="xs"
+										onClick={selectAllFindings}
+										disabled={!review?.findings.length}
+										className="h-6 px-1.5 text-[10.5px]"
+									>
+										{t("inspector.codeRabbit.selectAll")}
+									</Button>
+									<Button
+										type="button"
+										variant="ghost"
+										size="xs"
+										onClick={clearSelectedFindings}
+										disabled={selectedFindings.length === 0}
+										className="h-6 px-1.5 text-[10.5px]"
+									>
+										{t("inspector.codeRabbit.clearSelection")}
+									</Button>
+									<Button
+										type="button"
+										variant="default"
+										size="xs"
+										onClick={sendSelectedToComposer}
+										disabled={!canSendToComposer}
+										className="h-6 gap-1 px-1.5 text-[10.5px]"
+									>
+										<Send className="size-3" />
+										{t("inspector.codeRabbit.sendToComposer")}
+									</Button>
+								</div>
+							</div>
 							{groupedFindings.map((group) => (
 								<div key={group.severity} className="space-y-1">
 									<div className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
@@ -393,37 +709,71 @@ export function CodeRabbitReviewSection({
 										<span className="tabular-nums">{group.findings.length}</span>
 									</div>
 									<div className="space-y-1">
-										{group.findings.map((finding) => (
-											<button
-												key={finding.id}
-												type="button"
-												className="w-full rounded-md border border-border/45 bg-background/80 px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-accent/60"
-												onClick={() =>
-													onSelectPreview(
-														buildSelectionForFinding(
-															finding,
-															staged,
-															unstaged,
-															baseBranch,
-														),
-													)
-												}
-											>
-												<div className="flex min-w-0 items-center gap-1.5">
-													<span className="min-w-0 flex-1 truncate font-mono text-foreground">
-														{finding.path}
-													</span>
-													{lineLabel(finding) ? (
-														<span className="shrink-0 rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
-															{lineLabel(finding)}
-														</span>
-													) : null}
+										{group.findings.map((finding) => {
+											const selected = selectedFindingIds.has(finding.id);
+											return (
+												<div
+													key={finding.id}
+													role="button"
+													tabIndex={0}
+													className={cn(
+														"flex w-full items-start gap-2 rounded-md border border-border/45 bg-background/80 px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-accent/60",
+														selected && "border-primary/45 bg-primary/5",
+													)}
+													onClick={() =>
+														onSelectPreview(
+															buildSelectionForFinding(
+																finding,
+																review?.findings ?? [],
+																staged,
+																unstaged,
+																baseBranch,
+															),
+														)
+													}
+													onKeyDown={(event) => {
+														if (event.key === "Enter" || event.key === " ") {
+															event.preventDefault();
+															onSelectPreview(
+																buildSelectionForFinding(
+																	finding,
+																	review?.findings ?? [],
+																	staged,
+																	unstaged,
+																	baseBranch,
+																),
+															);
+														}
+													}}
+												>
+													<input
+														type="checkbox"
+														checked={selected}
+														aria-label={t("inspector.codeRabbit.selectFinding", {
+															path: finding.path,
+														})}
+														onClick={(event) => event.stopPropagation()}
+														onChange={() => toggleFindingSelection(finding.id)}
+														className="mt-0.5 size-3.5 shrink-0 accent-primary"
+													/>
+													<div className="min-w-0 flex-1">
+														<div className="flex min-w-0 items-center gap-1.5">
+															<span className="min-w-0 flex-1 truncate font-mono text-foreground">
+																{finding.path}
+															</span>
+															{lineLabel(finding) ? (
+																<span className="shrink-0 rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
+																	{lineLabel(finding)}
+																</span>
+															) : null}
+														</div>
+														<p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+															{findingTitle(finding)}
+														</p>
+													</div>
 												</div>
-												<p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
-													{findingTitle(finding)}
-												</p>
-											</button>
-										))}
+											);
+										})}
 									</div>
 								</div>
 							))}

@@ -6,7 +6,7 @@ export const PROVIDER_METHODS = {"listProviders":"list_providers"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","closeSession":"close_session","listThreadEvents":"list_thread_events","listWorkspaceSessions":"list_workspace_sessions","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","searchSessions":"search_sessions","sendTurn":"send_turn","startThread":"start_thread"} as const;
 
-export const WORKSPACE_METHODS = {"archiveWorkspace":"archive_workspace","compileMissionSpecContext":"compile_mission_spec_context","createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","deleteRepository":"delete_repository","deleteWorkspace":"delete_workspace","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listMissionSpecs":"list_mission_specs","listRepositories":"list_repositories","listWorkspaces":"list_workspaces","missionSpecContextStatus":"mission_spec_context_status","restoreWorkspace":"restore_workspace","saveMissionValidation":"save_mission_validation","workspaceBackfillForgeRepoBindings":"workspace_backfill_forge_repo_bindings","workspaceChangeRequestCreate":"workspace_change_request_create","workspaceChangeRequestMerge":"workspace_change_request_merge","workspaceChangeRequestViewWeb":"workspace_change_request_view_web","workspaceCoderabbitCliStatus":"workspace_coderabbit_cli_status","workspaceCoderabbitDiffFingerprint":"workspace_coderabbit_diff_fingerprint","workspaceCoderabbitDoctor":"workspace_coderabbit_doctor","workspaceCoderabbitReview":"workspace_coderabbit_review","workspaceContinueFromBaseBranch":"workspace_continue_from_base_branch","workspaceForgeCliAccounts":"workspace_forge_cli_accounts","workspaceForgeCliHosts":"workspace_forge_cli_hosts","workspaceForgeCliSelectLogin":"workspace_forge_cli_select_login","workspaceForgeCliStatus":"workspace_forge_cli_status","workspaceForgeContext":"workspace_forge_context","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrMerge":"workspace_gh_pr_merge","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitFilePreview":"workspace_git_file_preview","workspaceGitFilePreviewContent":"workspace_git_file_preview_content","workspaceGitPush":"workspace_git_push","workspaceGitStageAll":"workspace_git_stage_all","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitSyncBase":"workspace_git_sync_base","workspaceGitUnstageFile":"workspace_git_unstage_file","workspaceGithubCliStatus":"workspace_github_cli_status","workspacePrStatus":"workspace_pr_status","workspaceRetryRepositoryForgeBinding":"workspace_retry_repository_forge_binding","workspaceRunSetup":"workspace_run_setup"} as const;
+export const WORKSPACE_METHODS = {"archiveWorkspace":"archive_workspace","compileMissionSpecContext":"compile_mission_spec_context","createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromUrl":"create_workspace_from_url","deleteRepository":"delete_repository","deleteWorkspace":"delete_workspace","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listMissionSpecs":"list_mission_specs","listRepositories":"list_repositories","listWorkspaces":"list_workspaces","missionSpecContextStatus":"mission_spec_context_status","restoreWorkspace":"restore_workspace","saveMissionValidation":"save_mission_validation","workspaceBackfillForgeRepoBindings":"workspace_backfill_forge_repo_bindings","workspaceChangeRequestCreate":"workspace_change_request_create","workspaceChangeRequestMerge":"workspace_change_request_merge","workspaceChangeRequestViewWeb":"workspace_change_request_view_web","workspaceCoderabbitCliStatus":"workspace_coderabbit_cli_status","workspaceCoderabbitDiffFingerprint":"workspace_coderabbit_diff_fingerprint","workspaceCoderabbitDoctor":"workspace_coderabbit_doctor","workspaceCoderabbitReview":"workspace_coderabbit_review","workspaceCoderabbitReviewCancel":"workspace_coderabbit_review_cancel","workspaceCoderabbitReviewClear":"workspace_coderabbit_review_clear","workspaceCoderabbitReviewHistory":"workspace_coderabbit_review_history","workspaceCoderabbitReviewJob":"workspace_coderabbit_review_job","workspaceCoderabbitReviewLoad":"workspace_coderabbit_review_load","workspaceCoderabbitReviewSave":"workspace_coderabbit_review_save","workspaceCoderabbitReviewStart":"workspace_coderabbit_review_start","workspaceContinueFromBaseBranch":"workspace_continue_from_base_branch","workspaceForgeCliAccounts":"workspace_forge_cli_accounts","workspaceForgeCliHosts":"workspace_forge_cli_hosts","workspaceForgeCliSelectLogin":"workspace_forge_cli_select_login","workspaceForgeCliStatus":"workspace_forge_cli_status","workspaceForgeContext":"workspace_forge_context","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrMerge":"workspace_gh_pr_merge","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitFilePreview":"workspace_git_file_preview","workspaceGitFilePreviewContent":"workspace_git_file_preview_content","workspaceGitPush":"workspace_git_push","workspaceGitStageAll":"workspace_git_stage_all","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitSyncBase":"workspace_git_sync_base","workspaceGitUnstageFile":"workspace_git_unstage_file","workspaceGithubCliStatus":"workspace_github_cli_status","workspacePrStatus":"workspace_pr_status","workspaceRetryRepositoryForgeBinding":"workspace_retry_repository_forge_binding","workspaceRunSetup":"workspace_run_setup"} as const;
 
 /* Types */
 export type AbortRunInput = {
@@ -97,10 +97,24 @@ export type CodeRabbitReviewComplete = {
 	message: string | null,
 };
 
+export type CodeRabbitReviewJobStatus = "starting" | "running" | "succeeded" | "failed" | "canceled";
+
 export type CodeRabbitReviewStatusEvent = {
 	eventType: string,
 	status: string | null,
 	message: string | null,
+};
+
+export type CodeRabbitReviewStreamEvent = {
+	jobId: string,
+	workspaceRoot: string,
+	eventType: string,
+	status: string | null,
+	message: string | null,
+	finding: CodeRabbitFinding | null,
+	complete: CodeRabbitReviewComplete | null,
+	result: WorkspaceCodeRabbitReviewOutput | null,
+	errors: string[],
 };
 
 export type CodeRabbitReviewType = "all" | "committed" | "uncommitted";
@@ -706,6 +720,28 @@ export type WorkspaceCodeRabbitFingerprintInput = {
 	baseCommit: string | null,
 };
 
+export type WorkspaceCodeRabbitReviewHistoryEntry = {
+	reviewId: string,
+	workspaceRoot: string,
+	review: WorkspaceCodeRabbitReviewOutput,
+	reviewType: string | null,
+	success: boolean,
+	findingsCount: number,
+	fingerprintHash: string | null,
+	completedAt: string | null,
+	savedAt: string,
+};
+
+export type WorkspaceCodeRabbitReviewHistoryInput = {
+	workspaceRoot: string,
+	limit: number | null,
+};
+
+export type WorkspaceCodeRabbitReviewHistoryOutput = {
+	workspaceRoot: string,
+	entries: WorkspaceCodeRabbitReviewHistoryEntry[],
+};
+
 export type WorkspaceCodeRabbitReviewInput = {
 	workspaceRoot: string,
 	cliPath: string | null,
@@ -715,6 +751,25 @@ export type WorkspaceCodeRabbitReviewInput = {
 	light: boolean | null,
 	configPaths?: string[],
 	timeoutSeconds: number | null,
+};
+
+export type WorkspaceCodeRabbitReviewJobInput = {
+	jobId: string,
+};
+
+export type WorkspaceCodeRabbitReviewJobSnapshot = {
+	jobId: string,
+	workspaceRoot: string,
+	reviewType: CodeRabbitReviewType,
+	status: CodeRabbitReviewJobStatus,
+	pid: number | null,
+	startedAt: string,
+	updatedAt: string,
+	completedAt: string | null,
+	cancelRequested: boolean,
+	message: string | null,
+	result: WorkspaceCodeRabbitReviewOutput | null,
+	errors: string[],
 };
 
 export type WorkspaceCodeRabbitReviewOutput = {
@@ -733,6 +788,27 @@ export type WorkspaceCodeRabbitReviewOutput = {
 	stderr: string,
 	startedAt: string,
 	completedAt: string,
+};
+
+export type WorkspaceCodeRabbitReviewStartOutput = {
+	jobId: string,
+	status: CodeRabbitReviewJobStatus,
+	startedAt: string,
+};
+
+export type WorkspaceCodeRabbitSaveReviewInput = {
+	workspaceRoot: string,
+	review: WorkspaceCodeRabbitReviewOutput,
+};
+
+export type WorkspaceCodeRabbitStoredReviewInput = {
+	workspaceRoot: string,
+};
+
+export type WorkspaceCodeRabbitStoredReviewOutput = {
+	workspaceRoot: string,
+	review: WorkspaceCodeRabbitReviewOutput | null,
+	updatedAt: string | null,
 };
 
 export type WorkspaceContinueFromBaseBranchInput = {

@@ -217,6 +217,12 @@ type PendingSessionNavigation = {
 	workspaceId: string;
 };
 
+type WorkspaceComposerPrefillRequest = {
+	workspaceId: string;
+	text: string;
+	nonce: number;
+};
+
 function ResizeSeparator({
 	side,
 	widthAt,
@@ -517,6 +523,8 @@ export default function App() {
 
 	const [surfaceSelection, setSurfaceSelection] =
 		useState<WorkspaceSurfaceSelection | null>(null);
+	const [workspaceComposerPrefill, setWorkspaceComposerPrefill] =
+		useState<WorkspaceComposerPrefillRequest | null>(null);
 	const { theme, setTheme } = useAppearance();
 	const {
 		update: appUpdateInfo,
@@ -1672,6 +1680,20 @@ export default function App() {
 		[],
 	);
 
+	const handlePrefillComposer = useCallback(
+		(text: string) => {
+			if (!selectedWorkspace || text.trim().length === 0) {
+				return;
+			}
+			setWorkspaceComposerPrefill((previous) => ({
+				workspaceId: selectedWorkspace.id,
+				text,
+				nonce: (previous?.nonce ?? 0) + 1,
+			}));
+		},
+		[selectedWorkspace],
+	);
+
 	const handleOpenMissionSpec = useCallback((spec: MissionSpecEntry | null) => {
 		setSurfaceSelection(
 			spec
@@ -2188,6 +2210,14 @@ export default function App() {
 									onCloseSurface={handleCloseSurface}
 									onOpenPlanSidebar={openPlanSidebar}
 									onImplementPlanInNewThread={handleImplementPlanInNewThread}
+									composerPrefill={
+										workspaceComposerPrefill?.workspaceId === selectedWorkspace.id
+											? {
+													text: workspaceComposerPrefill.text,
+													nonce: workspaceComposerPrefill.nonce,
+											  }
+											: null
+									}
 								/>
 							) : (
 								<WorkspaceBootstrapState
@@ -2247,6 +2277,7 @@ export default function App() {
 										: null
 								}
 								onSelectPreview={handleOpenEditorFile}
+								onPrefillComposer={handlePrefillComposer}
 								onOpenMissionSpec={handleOpenMissionSpec}
 								onGeneratePlanFromSpec={handleGeneratePlanFromSpec}
 								onValidateMissionSpec={handleValidateMissionSpec}

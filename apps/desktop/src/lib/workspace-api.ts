@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { WORKSPACE_METHODS } from "@dcc/contracts";
 import type {
+	CodeRabbitReviewStreamEvent,
 	CreateWorkspaceForRepoInput,
 	CreateWorkspaceForRepoOutput,
 	CreateWorkspaceFromUrlInput,
@@ -14,7 +16,15 @@ import type {
 	WorkspaceCodeRabbitFingerprintInput,
 	CodeRabbitDiffFingerprint,
 	WorkspaceCodeRabbitReviewInput,
+	WorkspaceCodeRabbitReviewJobInput,
+	WorkspaceCodeRabbitReviewJobSnapshot,
 	WorkspaceCodeRabbitReviewOutput,
+	WorkspaceCodeRabbitReviewStartOutput,
+	WorkspaceCodeRabbitReviewHistoryInput,
+	WorkspaceCodeRabbitReviewHistoryOutput,
+	WorkspaceCodeRabbitSaveReviewInput,
+	WorkspaceCodeRabbitStoredReviewInput,
+	WorkspaceCodeRabbitStoredReviewOutput,
 	ForgeCliAccountsInput,
 	ForgeCliAccountsOutput,
 	ForgeCliHostsInput,
@@ -58,6 +68,8 @@ import type {
 	WorkspaceRunSetupInput,
 	WorkspaceRunSetupOutput,
 } from "@dcc/contracts";
+
+export const CODERABBIT_REVIEW_EVENT_NAME = "dcc/coderabbit/review/event";
 
 export function createWorkspaceForRepo(input: CreateWorkspaceForRepoInput) {
 	return invoke<CreateWorkspaceForRepoOutput>(WORKSPACE_METHODS.createWorkspaceForRepo, {
@@ -160,6 +172,63 @@ export function workspaceCodeRabbitReview(input: WorkspaceCodeRabbitReviewInput)
 	return invoke<WorkspaceCodeRabbitReviewOutput>(
 		WORKSPACE_METHODS.workspaceCoderabbitReview,
 		{ input },
+	);
+}
+
+export function workspaceCodeRabbitReviewStart(input: WorkspaceCodeRabbitReviewInput) {
+	return invoke<WorkspaceCodeRabbitReviewStartOutput>(
+		WORKSPACE_METHODS.workspaceCoderabbitReviewStart,
+		{ input },
+	);
+}
+
+export function workspaceCodeRabbitReviewJob(input: WorkspaceCodeRabbitReviewJobInput) {
+	return invoke<WorkspaceCodeRabbitReviewJobSnapshot>(
+		WORKSPACE_METHODS.workspaceCoderabbitReviewJob,
+		{ input },
+	);
+}
+
+export function workspaceCodeRabbitReviewCancel(input: WorkspaceCodeRabbitReviewJobInput) {
+	return invoke<WorkspaceCodeRabbitReviewJobSnapshot>(
+		WORKSPACE_METHODS.workspaceCoderabbitReviewCancel,
+		{ input },
+	);
+}
+
+export function workspaceCodeRabbitReviewLoad(input: WorkspaceCodeRabbitStoredReviewInput) {
+	return invoke<WorkspaceCodeRabbitStoredReviewOutput>(
+		WORKSPACE_METHODS.workspaceCoderabbitReviewLoad,
+		{ input },
+	);
+}
+
+export function workspaceCodeRabbitReviewSave(input: WorkspaceCodeRabbitSaveReviewInput) {
+	return invoke<WorkspaceCodeRabbitStoredReviewOutput>(
+		WORKSPACE_METHODS.workspaceCoderabbitReviewSave,
+		{ input },
+	);
+}
+
+export function workspaceCodeRabbitReviewHistory(
+	input: WorkspaceCodeRabbitReviewHistoryInput,
+) {
+	return invoke<WorkspaceCodeRabbitReviewHistoryOutput>(
+		WORKSPACE_METHODS.workspaceCoderabbitReviewHistory,
+		{ input },
+	);
+}
+
+export function workspaceCodeRabbitReviewClear(input: WorkspaceCodeRabbitStoredReviewInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceCoderabbitReviewClear, { input });
+}
+
+export async function listenCodeRabbitReviewEvents(
+	handler: (event: CodeRabbitReviewStreamEvent) => void,
+) {
+	return listen<CodeRabbitReviewStreamEvent>(
+		CODERABBIT_REVIEW_EVENT_NAME,
+		(event) => handler(event.payload),
 	);
 }
 

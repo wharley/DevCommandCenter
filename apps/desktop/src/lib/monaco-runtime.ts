@@ -41,6 +41,8 @@ type DiffEditorController = {
 		modifiedText: string;
 		inline: boolean;
 	}): void;
+	setMachineAnnotations(annotations: DiffMachineAnnotation[]): void;
+	revealLine(line: number, side?: DiffMachineAnnotation["side"]): void;
 };
 
 /**
@@ -56,6 +58,15 @@ export type DiffAnnotationPayload = {
 	snippet: string;
 	/** Viewport coordinates of the trigger button, for anchoring an overlay. */
 	anchor: { top: number; left: number };
+};
+
+export type DiffMachineAnnotation = {
+	source: "coderabbit";
+	severity: "critical" | "major" | "minor" | "trivial" | "info" | "unknown";
+	side: "original" | "modified";
+	startLine: number;
+	endLine: number;
+	title: string;
 };
 
 let runtimePromise: Promise<MonacoRuntime> | null = null;
@@ -163,6 +174,8 @@ export async function createDiffEditor(options: {
 	originalText: string;
 	modifiedText: string;
 	inline: boolean;
+	focusLine?: number | null;
+	machineAnnotations?: DiffMachineAnnotation[];
 	/**
 	 * When provided, a floating "send to agent" button is shown over either
 	 * side of the diff whenever the reviewer selects a non-empty range.
@@ -225,6 +238,16 @@ export async function createDiffEditor(options: {
 		modified: modifiedModel,
 	});
 
+	ensureDiffMachineAnnotationStyles();
+	const machineAnnotationController = createDiffMachineAnnotationController(
+		monaco,
+		editor,
+	);
+	machineAnnotationController.set(options.machineAnnotations ?? []);
+	if (options.focusLine) {
+		revealDiffLine(editor, options.focusLine, "modified");
+	}
+
 	const annotateDisposables: DisposableLike[] = [];
 	if (options.onAnnotate) {
 		annotateDisposables.push(
@@ -241,6 +264,7 @@ export async function createDiffEditor(options: {
 			for (const disposable of annotateDisposables) {
 				disposable.dispose();
 			}
+			machineAnnotationController.dispose();
 			editor.dispose();
 			originalModel.dispose();
 			modifiedModel.dispose();
@@ -254,7 +278,110 @@ export async function createDiffEditor(options: {
 			}
 			editor.updateOptions({ renderSideBySide: !inline });
 		},
+		setMachineAnnotations(annotations) {
+			machineAnnotationController.set(annotations);
+		},
+		revealLine(line, side = "modified") {
+			revealDiffLine(editor, line, side);
+		},
 	};
+}
+
+function createDiffMachineAnnotationController(
+	monaco: MonacoModule,
+	diffEditor: StandaloneDiffEditor,
+): { set(annotations: DiffMachineAnnotation[]): void; dispose(): void } {
+	const originalDecorations = diffEditor
+		.getOriginalEditor()
+		.createDecorationsCollection();
+	const modifiedDecorations = diffEditor
+		.getModifiedEditor()
+		.createDecorationsCollection();
+
+	const toDecoration = (
+		annotation: DiffMachineAnnotation,
+	): Monaco.editor.IModelDeltaDecoration => {
+		const startLine = Math.max(1, Math.floor(annotation.startLine));
+		const endLine = Math.max(startLine, Math.floor(annotation.endLine));
+		return {
+			range: new monaco.Range(startLine, 1, endLine, 1),
+			options: {
+				isWholeLine: true,
+				className: `dcc-coderabbit-line dcc-coderabbit-line-${annotation.severity}`,
+				hoverMessage: {
+					value: `**CodeRabbit**\n\n${annotation.title}`,
+				},
+			},
+		};
+	};
+
+	return {
+		set(annotations) {
+			originalDecorations.set(
+				annotations
+					.filter((annotation) => annotation.side === "original")
+					.map(toDecoration),
+			);
+			modifiedDecorations.set(
+				annotations
+					.filter((annotation) => annotation.side === "modified")
+					.map(toDecoration),
+			);
+		},
+		dispose() {
+			originalDecorations.clear();
+			modifiedDecorations.clear();
+		},
+	};
+}
+
+function revealDiffLine(
+	diffEditor: StandaloneDiffEditor,
+	line: number,
+	side: DiffMachineAnnotation["side"],
+) {
+	const editor =
+		side === "original"
+			? diffEditor.getOriginalEditor()
+			: diffEditor.getModifiedEditor();
+	const lineNumber = Math.max(1, Math.floor(line));
+	editor.revealLineInCenterIfOutsideViewport(lineNumber);
+	editor.setPosition({ lineNumber, column: 1 });
+}
+
+function ensureDiffMachineAnnotationStyles() {
+	if (typeof document === "undefined") {
+		return;
+	}
+	if (document.getElementById("dcc-coderabbit-diff-annotations")) {
+		return;
+	}
+	const style = document.createElement("style");
+	style.id = "dcc-coderabbit-diff-annotations";
+	style.textContent = `
+.monaco-editor .dcc-coderabbit-line {
+	box-shadow: inset 2px 0 0 var(--border);
+}
+.monaco-editor .dcc-coderabbit-line-critical {
+	background: color-mix(in srgb, var(--destructive) 18%, transparent);
+	box-shadow: inset 2px 0 0 var(--destructive);
+}
+.monaco-editor .dcc-coderabbit-line-major {
+	background: color-mix(in srgb, #f59e0b 16%, transparent);
+	box-shadow: inset 2px 0 0 #f59e0b;
+}
+.monaco-editor .dcc-coderabbit-line-minor {
+	background: color-mix(in srgb, #0284c7 14%, transparent);
+	box-shadow: inset 2px 0 0 #0284c7;
+}
+.monaco-editor .dcc-coderabbit-line-trivial,
+.monaco-editor .dcc-coderabbit-line-info,
+.monaco-editor .dcc-coderabbit-line-unknown {
+	background: color-mix(in srgb, var(--muted-foreground) 10%, transparent);
+	box-shadow: inset 2px 0 0 var(--muted-foreground);
+}
+`;
+	document.head.appendChild(style);
 }
 
 /**
