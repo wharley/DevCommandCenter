@@ -822,7 +822,7 @@ export function InspectorChangesSection({
 			className="min-h-0 flex-1 bg-muted/15 font-mono text-[11.5px]"
 			aria-label="Git changes"
 		>
-			<div className="pr-2">
+			<div className="min-w-0 max-w-full overflow-x-hidden pr-2">
 				{data.staged.length > 0 ? (
 					<ChangesGroup
 						label="Staged changes"

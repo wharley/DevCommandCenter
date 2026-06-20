@@ -1,4 +1,5 @@
 import type { WorkspaceCodeRabbitCliStatusOutput } from "@dcc/contracts";
+import { openTerminalAtPath } from "./shell-api";
 import { workspaceCodeRabbitCliStatus } from "./workspace-api";
 
 function isTauriRuntime(): boolean {
@@ -44,4 +45,8 @@ export async function getCodeRabbitCliStatus(options?: {
 
 export function buildCodeRabbitLoginShellCommand(): string {
 	return CODERABBIT_LOGIN_COMMAND;
+}
+
+export async function openCodeRabbitCliAuthTerminal() {
+	return openTerminalAtPath("~", { command: buildCodeRabbitLoginShellCommand() });
 }

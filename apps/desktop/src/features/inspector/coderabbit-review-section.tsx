@@ -505,7 +505,7 @@ export function CodeRabbitReviewSection({
 	]);
 
 	return (
-		<div className="border-t border-border/50 bg-background/70 font-sans">
+		<div className="min-w-0 max-w-full overflow-x-hidden border-t border-border/50 bg-background/70 font-sans">
 			<div className="flex items-center gap-1 px-2 py-1.5 text-[11.5px]">
 				<Button
 					type="button"
@@ -534,8 +534,8 @@ export function CodeRabbitReviewSection({
 				) : null}
 			</div>
 			{open ? (
-				<div className="space-y-2 px-3 pb-3">
-					<div className="flex flex-wrap items-center justify-between gap-2">
+				<div className="min-w-0 max-w-full space-y-2 overflow-x-hidden px-3 pb-3">
+					<div className="flex min-w-0 max-w-full flex-wrap items-center justify-between gap-2 overflow-x-hidden">
 						<ToggleGroup
 							type="single"
 							value={reviewType}
@@ -636,14 +636,14 @@ export function CodeRabbitReviewSection({
 					) : null}
 
 					{codeRabbitReady && !privacyAccepted && !reviewRunning ? (
-						<div className="flex items-start justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-2 text-[11px] text-amber-800 dark:text-amber-200">
-							<div className="flex min-w-0 gap-2">
+						<div className="box-border flex w-full min-w-0 max-w-full flex-col items-stretch gap-2 overflow-hidden rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-2 text-[11px] text-amber-800 [contain:inline-size] dark:text-amber-200">
+							<div className="grid w-full min-w-0 max-w-full grid-cols-[auto_minmax(0,1fr)] gap-2">
 								<ShieldCheck className="mt-0.5 size-3.5 shrink-0" />
-								<div className="min-w-0">
+								<div className="w-full min-w-0 max-w-full">
 									<div className="font-medium">
 										{t("inspector.codeRabbit.privacyTitle")}
 									</div>
-									<div className="mt-0.5 leading-snug text-amber-700 dark:text-amber-300">
+									<div className="mt-0.5 block w-full max-w-full whitespace-normal break-words leading-snug text-amber-700 [overflow-wrap:anywhere] dark:text-amber-300">
 										{t("inspector.codeRabbit.privacyDescription")}
 									</div>
 								</div>
@@ -653,7 +653,7 @@ export function CodeRabbitReviewSection({
 								variant="outline"
 								size="xs"
 								onClick={acceptPrivacy}
-								className="shrink-0 border-amber-500/40 bg-background/70 text-amber-800 hover:bg-background dark:text-amber-200"
+								className="shrink-0 self-start border-amber-500/40 bg-background/70 text-amber-800 hover:bg-background dark:text-amber-200"
 							>
 								{t("inspector.codeRabbit.privacyAccept")}
 							</Button>

@@ -9,6 +9,7 @@ import {
 	GitBranch,
 	ListTree,
 	MessageSquare,
+	Rabbit,
 	Sparkles,
 	Wand2,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ConductorOnboarding } from "@/components/ConductorOnboarding";
 import { cn } from "@/lib/utils";
 import { DEFAULT_SLASH_COMMANDS } from "@/features/composer/default-slash-commands";
+import { openCodeRabbitCliAuthTerminal } from "@/lib/coderabbit-cli";
 import { openGithubCliAuthTerminal } from "@/lib/github-cli";
 import { OnboardingMockup } from "./mockup/OnboardingMockup";
 import {
@@ -341,33 +343,66 @@ function WizardPanel({
 					) : null}
 
 					{step === "repoImport" ? (
-						<div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3">
-							<div className="min-w-0">
-								<p className="text-[12px] font-medium text-foreground">
-									{t("onboarding.repoCliTitle")}
-								</p>
-								<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-									{t("onboarding.repoCliBody")}
-								</p>
+						<div className="grid gap-3">
+							<div className="flex flex-col items-stretch gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3 sm:flex-row sm:items-center sm:justify-between">
+								<div className="min-w-0">
+									<p className="text-[12px] font-medium text-foreground">
+										{t("onboarding.repoCliTitle")}
+									</p>
+									<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+										{t("onboarding.repoCliBody")}
+									</p>
+								</div>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									className="h-8 self-start rounded-[9px] px-2.5 text-[12px] sm:self-auto"
+									onClick={async () => {
+										const result = await openGithubCliAuthTerminal();
+										if (result.success) {
+											toast.success(t("onboarding.repoCliOpened"));
+											return;
+										}
+										toast.error(
+											result.error ?? t("onboarding.repoCliFailed"),
+										);
+									}}
+								>
+									{t("onboarding.repoCliButton")}
+								</Button>
 							</div>
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								className="h-8 rounded-[9px] px-2.5 text-[12px]"
-								onClick={async () => {
-									const result = await openGithubCliAuthTerminal();
-									if (result.success) {
-										toast.success(t("onboarding.repoCliOpened"));
-										return;
-									}
-									toast.error(
-										result.error ?? t("onboarding.repoCliFailed"),
-									);
-								}}
-							>
-								{t("onboarding.repoCliButton")}
-							</Button>
+							<div className="flex flex-col items-stretch gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3 sm:flex-row sm:items-center sm:justify-between">
+								<div className="min-w-0">
+									<div className="flex items-center gap-1.5">
+										<Rabbit className="size-3.5 text-muted-foreground" />
+										<p className="text-[12px] font-medium text-foreground">
+											{t("onboarding.repoCodeRabbitTitle")}
+										</p>
+									</div>
+									<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+										{t("onboarding.repoCodeRabbitBody")}
+									</p>
+								</div>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									className="h-8 self-start rounded-[9px] px-2.5 text-[12px] sm:self-auto"
+									onClick={async () => {
+										const result = await openCodeRabbitCliAuthTerminal();
+										if (result.success) {
+											toast.success(t("onboarding.repoCodeRabbitOpened"));
+											return;
+										}
+										toast.error(
+											result.error ?? t("onboarding.repoCodeRabbitFailed"),
+										);
+									}}
+								>
+									{t("onboarding.repoCodeRabbitButton")}
+								</Button>
+							</div>
 						</div>
 					) : null}
 

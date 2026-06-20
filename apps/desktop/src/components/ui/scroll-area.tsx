@@ -9,7 +9,7 @@ function ScrollArea({
 }: React.ComponentProps<typeof ScrollAreaPrimitive.Root>) {
 	return (
 		<ScrollAreaPrimitive.Root className={cn("relative overflow-hidden", className)} {...props}>
-			<ScrollAreaPrimitive.Viewport className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+			<ScrollAreaPrimitive.Viewport className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 [&>div]:!block [&>div]:!w-full [&>div]:!min-w-0">
 				{children}
 			</ScrollAreaPrimitive.Viewport>
 			<ScrollAreaPrimitive.Scrollbar
