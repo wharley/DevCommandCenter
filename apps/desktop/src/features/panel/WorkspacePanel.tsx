@@ -20,6 +20,10 @@ import {
 } from "@/features/composer/composer-turn";
 import type { AppUpdateInfo } from "@/features/updater";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
+import type {
+	OpenTerminalRequest,
+	TerminalScopeTarget,
+} from "@/features/terminal/terminal-scope";
 import { projectWorkspaceMessages } from "./thread-projection";
 import type { ProviderCatalog, CoreEvent } from "@dcc/contracts";
 import { derivePlanFollowUpState } from "./plan-follow-up";
@@ -131,7 +135,8 @@ type WorkspacePanelProps = {
 		planMarkdown: string;
 		planTitle: string | null;
 	}) => void;
-	onOpenTerminal?: () => void;
+	terminalScopes?: TerminalScopeTarget[];
+	onOpenTerminal?: (request: OpenTerminalRequest) => void;
 	externalComposerPrefill?: ComposerPrefill | null;
 };
 
@@ -170,6 +175,7 @@ export function WorkspacePanel({
 	onCloseSurface,
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
+	terminalScopes,
 	onOpenTerminal,
 	externalComposerPrefill,
 }: WorkspacePanelProps) {
@@ -447,6 +453,7 @@ export function WorkspacePanel({
 					onAbortSession={onAbortSession}
 					onOpenPlanSidebar={onOpenPlanSidebar}
 					onImplementPlanInNewThread={onImplementPlanInNewThread}
+					terminalScopes={terminalScopes}
 					onOpenTerminal={onOpenTerminal}
 				/>
 				</div>

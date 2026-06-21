@@ -73,15 +73,15 @@ function emit() {
 	}
 }
 
-function read(projectKey: string): ProjectTerminals {
+function read(scopeKey: string): ProjectTerminals {
 	hydrate();
-	return state.get(projectKey) ?? EMPTY;
+	return state.get(scopeKey) ?? EMPTY;
 }
 
-/** Stable snapshot per project so `useSyncExternalStore` does not loop. */
-function cachedSnapshot(projectKey: string): ProjectTerminals {
-	const current = read(projectKey);
-	const cached = snapshotCache.get(projectKey);
+/** Stable snapshot per scope so `useSyncExternalStore` does not loop. */
+function cachedSnapshot(scopeKey: string): ProjectTerminals {
+	const current = read(scopeKey);
+	const cached = snapshotCache.get(scopeKey);
 	if (
 		cached &&
 		cached.activeId === current.activeId &&
@@ -89,12 +89,12 @@ function cachedSnapshot(projectKey: string): ProjectTerminals {
 	) {
 		return cached;
 	}
-	snapshotCache.set(projectKey, current);
+	snapshotCache.set(scopeKey, current);
 	return current;
 }
 
-function write(projectKey: string, next: ProjectTerminals) {
-	state.set(projectKey, next);
+function write(scopeKey: string, next: ProjectTerminals) {
+	state.set(scopeKey, next);
 	persist();
 	emit();
 }
@@ -110,19 +110,23 @@ function nextTitle(tabs: TerminalTab[]): string {
 	return `Terminal ${tabs.length + 1}`;
 }
 
-export function addTerminal(projectKey: string): string | null {
-	const current = read(projectKey);
+export function getTerminalRuntimeId(scopeKey: string, terminalId: string) {
+	return `${scopeKey}:${terminalId}`;
+}
+
+export function addTerminal(scopeKey: string): string | null {
+	const current = read(scopeKey);
 	if (current.tabs.length >= MAX_TERMINAL_TABS) {
 		// At the soft cap: focus the last tab instead of spawning another PTY.
 		const last = current.tabs[current.tabs.length - 1];
 		if (last && current.activeId !== last.id) {
-			write(projectKey, { ...current, activeId: last.id });
+			write(scopeKey, { ...current, activeId: last.id });
 		}
 		return last?.id ?? null;
 	}
 
 	const tab: TerminalTab = { id: newId(), title: nextTitle(current.tabs) };
-	write(projectKey, {
+	write(scopeKey, {
 		tabs: [...current.tabs, tab],
 		activeId: tab.id,
 	});
@@ -130,26 +134,26 @@ export function addTerminal(projectKey: string): string | null {
 }
 
 /** Ensure at least one tab exists; returns the active id. */
-export function ensureTerminal(projectKey: string): string | null {
-	const current = read(projectKey);
+export function ensureTerminal(scopeKey: string): string | null {
+	const current = read(scopeKey);
 	if (current.tabs.length === 0) {
-		return addTerminal(projectKey);
+		return addTerminal(scopeKey);
 	}
 	if (!current.activeId) {
-		write(projectKey, { ...current, activeId: current.tabs[0].id });
+		write(scopeKey, { ...current, activeId: current.tabs[0].id });
 		return current.tabs[0].id;
 	}
 	return current.activeId;
 }
 
-export function removeTerminal(projectKey: string, terminalId: string) {
-	const current = read(projectKey);
+export function removeTerminal(scopeKey: string, terminalId: string) {
+	const current = read(scopeKey);
 	const index = current.tabs.findIndex((tab) => tab.id === terminalId);
 	if (index === -1) {
 		return;
 	}
 
-	killTerminal(terminalId);
+	killTerminal(getTerminalRuntimeId(scopeKey, terminalId));
 	const tabs = current.tabs.filter((tab) => tab.id !== terminalId);
 
 	let activeId = current.activeId;
@@ -158,18 +162,18 @@ export function removeTerminal(projectKey: string, terminalId: string) {
 		activeId = fallback?.id ?? null;
 	}
 
-	write(projectKey, { tabs, activeId });
+	write(scopeKey, { tabs, activeId });
 }
 
-export function setActiveTerminal(projectKey: string, terminalId: string) {
-	const current = read(projectKey);
+export function setActiveTerminal(scopeKey: string, terminalId: string) {
+	const current = read(scopeKey);
 	if (current.activeId === terminalId) {
 		return;
 	}
 	if (!current.tabs.some((tab) => tab.id === terminalId)) {
 		return;
 	}
-	write(projectKey, { ...current, activeId: terminalId });
+	write(scopeKey, { ...current, activeId: terminalId });
 }
 
 function subscribe(listener: () => void): () => void {
@@ -179,10 +183,10 @@ function subscribe(listener: () => void): () => void {
 	};
 }
 
-export function useProjectTerminals(projectKey: string): ProjectTerminals {
+export function useProjectTerminals(scopeKey: string): ProjectTerminals {
 	return useSyncExternalStore(
 		subscribe,
-		() => cachedSnapshot(projectKey),
-		() => cachedSnapshot(projectKey),
+		() => cachedSnapshot(scopeKey),
+		() => cachedSnapshot(scopeKey),
 	);
 }

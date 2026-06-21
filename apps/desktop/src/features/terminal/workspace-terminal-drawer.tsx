@@ -17,6 +17,7 @@ import { TerminalPanel } from "./terminal-panel";
 import {
 	addTerminal,
 	ensureTerminal,
+	getTerminalRuntimeId,
 	MAX_TERMINAL_TABS,
 	removeTerminal,
 	setActiveTerminal,
@@ -47,10 +48,11 @@ export type WorkspaceTerminalDrawerProps = {
 	/** Expanded = terminal takes over the full workbench (chat hidden). */
 	expanded: boolean;
 	onExpandedChange: (expanded: boolean) => void;
-	/** Terminals are scoped per project (one set of tabs per project root). */
-	projectKey: string;
-	/** Project root (`rootPath`) — terminals open here, NOT inside the worktree. */
-	rootPath: string | null;
+	/** Terminals are scoped by project root or by worktree/mission. */
+	scopeKey: string;
+	scopeLabel: string;
+	/** CWD for this terminal scope. */
+	cwd: string | null;
 	workspaceName: string;
 	workspaceBranch: string;
 	providerLabel: string | null;
@@ -70,8 +72,9 @@ export function WorkspaceTerminalDrawer({
 	onOpenChange,
 	expanded,
 	onExpandedChange,
-	projectKey,
-	rootPath,
+	scopeKey,
+	scopeLabel,
+	cwd,
 	workspaceName,
 	workspaceBranch,
 	providerLabel,
@@ -84,16 +87,16 @@ export function WorkspaceTerminalDrawer({
 	const widthRef = useRef(DEFAULT_WIDTH_PX);
 	const [widthPx, setWidthPx] = useState(DEFAULT_WIDTH_PX);
 
-	const { tabs, activeId } = useProjectTerminals(projectKey);
+	const { tabs, activeId } = useProjectTerminals(scopeKey);
 	const activeTab = tabs.find((tab) => tab.id === activeId) ?? tabs[0] ?? null;
 	const atCap = tabs.length >= MAX_TERMINAL_TABS;
 
 	// Make sure an open dock always has at least one terminal to show.
 	useEffect(() => {
-		if (open) {
-			ensureTerminal(projectKey);
+		if (open && cwd) {
+			ensureTerminal(scopeKey);
 		}
-	}, [open, projectKey]);
+	}, [cwd, open, scopeKey]);
 
 	useEffect(() => {
 		widthRef.current = widthPx;
@@ -234,6 +237,9 @@ export function WorkspaceTerminalDrawer({
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 				<div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/60 px-2">
 					<div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+						<div className="mr-1 shrink-0 rounded-md border border-border/70 bg-muted/35 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+							{scopeLabel}
+						</div>
 						{tabs.map((tab) => {
 							const isActive = tab.id === activeTab?.id;
 							return (
@@ -249,7 +255,7 @@ export function WorkspaceTerminalDrawer({
 									<button
 										type="button"
 										className="max-w-[9rem] truncate"
-										onClick={() => setActiveTerminal(projectKey, tab.id)}
+										onClick={() => setActiveTerminal(scopeKey, tab.id)}
 									>
 										{tab.title}
 									</button>
@@ -259,7 +265,7 @@ export function WorkspaceTerminalDrawer({
 										className="rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover/tab:opacity-100"
 										onClick={(event) => {
 											event.stopPropagation();
-											removeTerminal(projectKey, tab.id);
+											removeTerminal(scopeKey, tab.id);
 										}}
 									>
 										<X className="size-3" />
@@ -275,14 +281,18 @@ export function WorkspaceTerminalDrawer({
 									variant="ghost"
 									className="h-7 shrink-0 px-1.5"
 									aria-label="New terminal tab"
-									disabled={atCap}
-									onClick={() => addTerminal(projectKey)}
+									disabled={atCap || !cwd}
+									onClick={() => addTerminal(scopeKey)}
 								>
 									<Plus className="size-4" />
 								</Button>
 							</TooltipTrigger>
 							<TooltipContent side="bottom">
-								{atCap ? `Max ${MAX_TERMINAL_TABS} terminals` : "New terminal"}
+								{atCap
+									? `Max ${MAX_TERMINAL_TABS} terminals`
+									: cwd
+										? `New ${scopeLabel.toLowerCase()} terminal`
+										: "No terminal path available"}
 							</TooltipContent>
 						</Tooltip>
 					</div>
@@ -327,11 +337,12 @@ export function WorkspaceTerminalDrawer({
 				<div className="dcc-workbench-terminal-dock__panel flex min-h-0 flex-1 flex-col px-2 pb-2 pt-1">
 					{activeTab ? (
 						<TerminalPanel
-							key={activeTab.id}
+							key={getTerminalRuntimeId(scopeKey, activeTab.id)}
 							variant="drawer"
-							terminalId={activeTab.id}
+							terminalId={getTerminalRuntimeId(scopeKey, activeTab.id)}
 							title={activeTab.title}
-							cwd={rootPath}
+							cwd={cwd}
+							scopeLabel={scopeLabel}
 							workspaceName={workspaceName}
 							workspaceBranch={workspaceBranch}
 							providerLabel={providerLabel}
@@ -340,7 +351,7 @@ export function WorkspaceTerminalDrawer({
 						/>
 					) : (
 						<div className="flex flex-1 items-center justify-center text-[12px] text-muted-foreground">
-							No terminal open
+							{cwd ? "No terminal open" : "No terminal path available"}
 						</div>
 					)}
 				</div>

@@ -51,6 +51,7 @@ type TerminalEntry = TerminalSnapshot & {
 
 const entries = new Map<string, TerminalEntry>();
 const ptyToTerminal = new Map<string, string>();
+const storeListeners = new Set<() => void>();
 let bridgePromise: Promise<void> | null = null;
 let bridgeScope: string | null = null;
 let bridgeCleanup: (() => void) | null = null;
@@ -121,6 +122,16 @@ function notifyStatus(entry: TerminalEntry) {
 		listener.onStatusChange(entry.status, entry.exitCode);
 		listener.onPtyIdChange?.(entry.ptyId);
 	}
+	for (const listener of storeListeners) {
+		listener();
+	}
+}
+
+export function subscribeTerminalStore(listener: () => void): () => void {
+	storeListeners.add(listener);
+	return () => {
+		storeListeners.delete(listener);
+	};
 }
 
 async function ensureTerminalBridge() {

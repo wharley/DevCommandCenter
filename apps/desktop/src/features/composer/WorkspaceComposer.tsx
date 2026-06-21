@@ -5,6 +5,7 @@ import {
 	ArrowUp,
 	ChevronDown,
 	ClipboardList,
+	Plus,
 	Square,
 	SquareTerminal,
 	Zap,
@@ -90,6 +91,20 @@ import {
 	saveEffortSelection,
 } from "./draftStorage";
 import { appendComposerText, readComposerPrompt, setEditorText } from "./editorOps";
+import type {
+	OpenTerminalRequest,
+	TerminalScopeTarget,
+} from "@/features/terminal/terminal-scope";
+import {
+	getTerminalRuntimeId,
+	type TerminalTab,
+	useProjectTerminals,
+} from "@/features/terminal/terminal-tabs-store";
+import {
+	getTerminalSnapshot,
+	subscribeTerminalStore,
+	type TerminalStatus,
+} from "@/features/terminal/terminal-store";
 
 type WorkspaceComposerProps = {
 	draftKey: string;
@@ -115,8 +130,101 @@ type WorkspaceComposerProps = {
 		planMarkdown: string;
 		planTitle: string | null;
 	}) => void;
-	onOpenTerminal?: () => void;
+	terminalScopes?: TerminalScopeTarget[];
+	onOpenTerminal?: (request: OpenTerminalRequest) => void;
 };
+
+type TerminalMenuRow = {
+	tab: TerminalTab;
+	status: TerminalStatus | "ready";
+};
+
+function buildTerminalMenuRows(
+	scopeKey: string,
+	tabs: TerminalTab[],
+): TerminalMenuRow[] {
+	return tabs.map((tab) => ({
+		tab,
+		status:
+			getTerminalSnapshot(getTerminalRuntimeId(scopeKey, tab.id))?.status ??
+			"ready",
+	}));
+}
+
+function statusDotClass(status: TerminalStatus | "ready") {
+	if (status === "running") return "bg-emerald-500";
+	if (status === "starting") return "bg-amber-400";
+	if (status === "error") return "bg-destructive";
+	if (status === "exited") return "bg-muted-foreground";
+	return "bg-muted-foreground/50";
+}
+
+function TerminalScopeMenuGroup({
+	scope,
+	rows,
+	onOpenTerminal,
+}: {
+	scope: TerminalScopeTarget | null;
+	rows: TerminalMenuRow[];
+	onOpenTerminal: (request: OpenTerminalRequest) => void;
+}) {
+	const label = scope?.label ?? "Terminal";
+	const disabled = !scope || !scope.cwd;
+	const kind = scope?.kind;
+
+	return (
+		<>
+			<DropdownMenuLabel>{label}</DropdownMenuLabel>
+			{rows.length > 0 ? (
+				rows.map((row) => (
+					<DropdownMenuItem
+						key={row.tab.id}
+						size="sm"
+						disabled={disabled}
+						className="justify-between gap-2"
+						onSelect={() => {
+							if (!kind) return;
+							onOpenTerminal({ scope: kind, terminalId: row.tab.id });
+						}}
+					>
+						<span className="flex min-w-0 items-center gap-1.5">
+							<span
+								className={cn(
+									"size-1.5 shrink-0 rounded-full",
+									statusDotClass(row.status),
+								)}
+							/>
+							<span className="truncate">{row.tab.title}</span>
+						</span>
+						<span className="shrink-0 text-[11px] text-muted-foreground">
+							{row.status}
+						</span>
+					</DropdownMenuItem>
+				))
+			) : (
+				<DropdownMenuItem size="sm" disabled className="text-muted-foreground">
+					No terminals yet
+				</DropdownMenuItem>
+			)}
+			<DropdownMenuItem
+				size="sm"
+				disabled={disabled}
+				onSelect={() => {
+					if (!kind) return;
+					onOpenTerminal({ scope: kind, createNew: true });
+				}}
+			>
+				<Plus className="size-3.5" strokeWidth={1.8} />
+				<span>New {label.toLowerCase()} terminal</span>
+			</DropdownMenuItem>
+			{scope?.disabledReason ? (
+				<div className="px-1.5 py-1 text-[11px] leading-snug text-muted-foreground">
+					{scope.disabledReason}
+				</div>
+			) : null}
+		</>
+	);
+}
 
 export function WorkspaceComposer({
 	draftKey,
@@ -138,6 +246,7 @@ export function WorkspaceComposer({
 	onAbortSession,
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
+	terminalScopes,
 	onOpenTerminal,
 }: WorkspaceComposerProps) {
 	const { t } = useTranslation("common");
@@ -178,6 +287,43 @@ export function WorkspaceComposer({
 	);
 	const composerRootRef = useRef<HTMLDivElement | null>(null);
 	const editorRef = useRef<LexicalEditor | null>(null);
+	const [terminalStatusVersion, setTerminalStatusVersion] = useState(0);
+	const worktreeTerminalScope =
+		terminalScopes?.find((scope) => scope.kind === "worktree") ?? null;
+	const projectTerminalScope =
+		terminalScopes?.find((scope) => scope.kind === "project") ?? null;
+	const worktreeTerminals = useProjectTerminals(
+		worktreeTerminalScope?.scopeKey ?? "__missing-worktree-terminal-scope__",
+	);
+	const projectTerminals = useProjectTerminals(
+		projectTerminalScope?.scopeKey ?? "__missing-project-terminal-scope__",
+	);
+	const worktreeTerminalRows = useMemo(
+		() =>
+			worktreeTerminalScope
+				? buildTerminalMenuRows(worktreeTerminalScope.scopeKey, worktreeTerminals.tabs)
+				: [],
+		[terminalStatusVersion, worktreeTerminalScope, worktreeTerminals.tabs],
+	);
+	const projectTerminalRows = useMemo(
+		() =>
+			projectTerminalScope
+				? buildTerminalMenuRows(projectTerminalScope.scopeKey, projectTerminals.tabs)
+				: [],
+		[terminalStatusVersion, projectTerminalScope, projectTerminals.tabs],
+	);
+	const runningTerminalCount = useMemo(
+		() =>
+			[...worktreeTerminalRows, ...projectTerminalRows].filter(
+				(row) => row.status === "running" || row.status === "starting",
+			).length,
+		[projectTerminalRows, worktreeTerminalRows],
+	);
+
+	useEffect(
+		() => subscribeTerminalStore(() => setTerminalStatusVersion((value) => value + 1)),
+		[],
+	);
 	const lastPrefillNonceRef = useRef<number | null>(null);
 	const selectedProvider = useMemo(
 		() =>
@@ -616,21 +762,42 @@ export function WorkspaceComposer({
 						<span>Plan</span>
 					</ComposerButton>
 					{onOpenTerminal ? (
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<ComposerButton
-									type="button"
-									aria-label="Terminal"
-									className="h-7 px-1.5 text-muted-foreground"
-									onClick={onOpenTerminal}
-								>
-									<SquareTerminal className="size-[14px]" strokeWidth={1.8} />
-								</ComposerButton>
-							</TooltipTrigger>
-							<TooltipContent side="top" sideOffset={4}>
-								<span>Terminal (project root)</span>
-							</TooltipContent>
-						</Tooltip>
+						<DropdownMenu>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<DropdownMenuTrigger asChild>
+										<ComposerButton
+											type="button"
+											aria-label="Terminal"
+											className="relative h-7 px-1.5 text-muted-foreground"
+										>
+											<SquareTerminal className="size-[14px]" strokeWidth={1.8} />
+											{runningTerminalCount > 0 ? (
+												<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">
+													{runningTerminalCount}
+												</span>
+											) : null}
+										</ComposerButton>
+									</DropdownMenuTrigger>
+								</TooltipTrigger>
+								<TooltipContent side="top" sideOffset={4}>
+									<span>Terminal</span>
+								</TooltipContent>
+							</Tooltip>
+							<DropdownMenuContent align="start" className="w-72">
+								<TerminalScopeMenuGroup
+									scope={worktreeTerminalScope}
+									rows={worktreeTerminalRows}
+									onOpenTerminal={onOpenTerminal}
+								/>
+								<DropdownMenuSeparator />
+								<TerminalScopeMenuGroup
+									scope={projectTerminalScope}
+									rows={projectTerminalRows}
+									onOpenTerminal={onOpenTerminal}
+								/>
+							</DropdownMenuContent>
+						</DropdownMenu>
 					) : null}
 				</div>
 

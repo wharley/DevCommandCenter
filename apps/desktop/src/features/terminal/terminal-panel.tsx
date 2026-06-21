@@ -29,6 +29,7 @@ type TerminalPanelProps = {
 	terminalId: string;
 	title: string;
 	cwd: string | null;
+	scopeLabel?: string;
 	workspaceName: string;
 	workspaceBranch: string;
 	providerLabel: string | null;
@@ -42,6 +43,7 @@ export function TerminalPanel({
 	terminalId,
 	title,
 	cwd,
+	scopeLabel,
 	workspaceName,
 	workspaceBranch,
 	providerLabel,
@@ -249,6 +251,7 @@ export function TerminalPanel({
 			<div className="dcc-terminal dcc-terminal--drawer flex min-h-0 flex-1 flex-col">
 				<div className="dcc-terminal__toolbar flex flex-wrap items-center justify-between gap-2 border-b border-border/70 pb-2 pt-0.5">
 					<div className="flex min-w-0 flex-wrap gap-2">
+						{scopeLabel ? <Badge variant="outline">{scopeLabel}</Badge> : null}
 						<Badge variant={terminalSnapshot?.status === "running" ? "success" : "outline"}>
 							{terminalSnapshot?.status ?? "idle"}
 						</Badge>

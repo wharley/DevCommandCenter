@@ -1,13 +1,22 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { WorkspaceTerminalDrawer } from "@/features/terminal";
-import { ensureTerminal as ensureTerminalTab } from "@/features/terminal/terminal-tabs-store";
+import {
+	addTerminal as addTerminalTab,
+	ensureTerminal as ensureTerminalTab,
+	setActiveTerminal as setActiveTerminalTab,
+} from "@/features/terminal/terminal-tabs-store";
 import { WorkspacePanel } from "@/features/panel";
 import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surface";
 import type { AppUpdateInfo } from "@/features/updater";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import type { RuntimeSessionSnapshot } from "./workbench-types";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
+import type {
+	OpenTerminalRequest,
+	TerminalScopeKind,
+	TerminalScopeTarget,
+} from "@/features/terminal/terminal-scope";
 
 export type { RuntimeSessionSnapshot } from "./workbench-types";
 
@@ -20,6 +29,8 @@ type SessionWorkbenchProps = {
 	projectId?: string | null;
 	/** Project root (`rootPath`) — terminals open here, outside the worktree. */
 	terminalRootPath?: string | null;
+	/** Active mission worktree path. Unlike workspacePath, this does not fall back to rootPath. */
+	terminalWorktreePath?: string | null;
 	sessionQueryScope?: string;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
@@ -63,6 +74,7 @@ export function SessionWorkbench({
 	workspacePath,
 	projectId,
 	terminalRootPath,
+	terminalWorktreePath,
 	sessionQueryScope = "local",
 	selectedProviderLabel,
 	selectedModelLabel,
@@ -97,22 +109,57 @@ export function SessionWorkbench({
 }: SessionWorkbenchProps) {
 	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [terminalExpanded, setTerminalExpanded] = useState(false);
+	const [terminalScopeKind, setTerminalScopeKind] =
+		useState<TerminalScopeKind>("worktree");
 	const sessionState = sessionSnapshot?.state ?? "idle";
 	const sessionId = sessionSnapshot?.sessionId ?? null;
 	const terminalProjectKey = projectId ?? workspaceId;
+	const terminalScopes: TerminalScopeTarget[] = useMemo(
+		() => [
+			{
+				kind: "worktree",
+				label: "Worktree",
+				scopeKey: `worktree:${workspaceId}`,
+				cwd: terminalWorktreePath ?? null,
+				disabledReason: terminalWorktreePath ? null : "No worktree path available",
+			},
+			{
+				kind: "project",
+				label: "Project root",
+				scopeKey: terminalProjectKey,
+				cwd: terminalRootPath ?? workspacePath,
+				disabledReason:
+					terminalRootPath ?? workspacePath ? null : "No project root available",
+			},
+		],
+		[terminalProjectKey, terminalRootPath, terminalWorktreePath, workspaceId, workspacePath],
+	);
+	const activeTerminalScope =
+		terminalScopes.find((scope) => scope.kind === terminalScopeKind && scope.cwd) ??
+		terminalScopes.find((scope) => scope.cwd) ??
+		terminalScopes[0];
 
-	const handleToggleTerminal = useCallback(() => {
-		setTerminalOpen((current) => {
-			const next = !current;
-			if (next) {
-				ensureTerminalTab(terminalProjectKey);
-			} else {
-				// Reopening should always come back as a split, not full-screen.
-				setTerminalExpanded(false);
+	const handleOpenTerminal = useCallback(
+		(request: OpenTerminalRequest = { scope: "worktree" }) => {
+			const scope =
+				terminalScopes.find((item) => item.kind === request.scope) ??
+				terminalScopes[0];
+			if (!scope.cwd) {
+				return;
 			}
-			return next;
-		});
-	}, [terminalProjectKey]);
+
+			setTerminalScopeKind(scope.kind);
+			if (request.terminalId) {
+				setActiveTerminalTab(scope.scopeKey, request.terminalId);
+			} else if (request.createNew) {
+				addTerminalTab(scope.scopeKey);
+			} else {
+				ensureTerminalTab(scope.scopeKey);
+			}
+			setTerminalOpen(true);
+		},
+		[terminalScopes],
+	);
 
 	const handleTerminalOpenChange = useCallback((next: boolean) => {
 		setTerminalOpen(next);
@@ -163,7 +210,8 @@ export function SessionWorkbench({
 						onCloseSurface={onCloseSurface}
 						onOpenPlanSidebar={onOpenPlanSidebar}
 						onImplementPlanInNewThread={onImplementPlanInNewThread}
-						onOpenTerminal={handleToggleTerminal}
+						terminalScopes={terminalScopes}
+						onOpenTerminal={handleOpenTerminal}
 						externalComposerPrefill={composerPrefill}
 					/>
 				</div>
@@ -175,8 +223,9 @@ export function SessionWorkbench({
 					onOpenChange={handleTerminalOpenChange}
 					expanded={terminalExpanded}
 					onExpandedChange={setTerminalExpanded}
-					projectKey={terminalProjectKey}
-					rootPath={terminalRootPath ?? workspacePath}
+					scopeKey={activeTerminalScope.scopeKey}
+					scopeLabel={activeTerminalScope.label}
+					cwd={activeTerminalScope.cwd}
 					workspaceName={workspaceName}
 					workspaceBranch={workspaceBranch}
 					providerLabel={selectedProviderLabel}

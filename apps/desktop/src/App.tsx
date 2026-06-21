@@ -2246,6 +2246,9 @@ export default function App() {
 									workspacePath={selectedLocalWorkspacePath}
 									projectId={selectedWorkspace.projectId ?? selectedWorkspace.id}
 									terminalRootPath={selectedWorkspace.rootPath ?? null}
+									terminalWorktreePath={
+										isRemoteBackend ? null : (selectedWorkspace.worktreePath ?? null)
+									}
 									sessionQueryScope={backendCacheKey}
 									selectedProviderLabel={selectedProvider?.label ?? null}
 									selectedModelLabel={selectedModel?.label ?? null}
