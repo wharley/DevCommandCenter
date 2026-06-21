@@ -171,7 +171,6 @@ export async function createFileEditor(options: {
 	revealEditorPosition(editor, options.line, options.column);
 
 	const editorDisposables: DisposableLike[] = [
-		...installCodeEditorKeybindings(monaco, editor),
 		...installCodeEditorFocusGuards(editor),
 	];
 	const annotateDisposables: DisposableLike[] = [];
@@ -573,120 +572,6 @@ function attachAnnotateButton(
 			hide();
 		},
 	};
-}
-
-function installCodeEditorKeybindings(
-	monaco: MonacoModule,
-	editor: StandaloneEditor,
-): DisposableLike[] {
-	const isReadOnly = () => editor.getOption(monaco.editor.EditorOption.readOnly);
-	const indentText = () => {
-		const options = editor.getModel()?.getOptions();
-		const tabSize = options?.tabSize ?? 2;
-		return options?.insertSpaces === false
-			? "\t"
-			: " ".repeat(Math.max(1, tabSize));
-	};
-	const indent = () => {
-		if (isReadOnly()) {
-			return;
-		}
-		const model = editor.getModel();
-		const selections = editor.getSelections();
-		if (!model || !selections?.length) {
-			return;
-		}
-		const hasRangeSelection = selections.some(
-			(selection) =>
-				!selection.isEmpty() ||
-				selection.startLineNumber !== selection.endLineNumber,
-		);
-		if (hasRangeSelection) {
-			void editor.getAction("editor.action.indentLines")?.run();
-			return;
-		}
-		const text = indentText();
-		editor.executeEdits(
-			"dcc.editor.indent",
-			selections.map((selection) => ({
-				range: selection,
-				text,
-				forceMoveMarkers: true,
-			})),
-		);
-		editor.focus();
-	};
-	const outdent = () => {
-		if (isReadOnly()) {
-			return;
-		}
-		void editor.getAction("editor.action.outdentLines")?.run();
-		editor.focus();
-	};
-	const moveCursor = (event: KeyboardEvent) => {
-		const commandByKey: Record<string, string> = {
-			ArrowLeft: event.shiftKey ? "cursorLeftSelect" : "cursorLeft",
-			ArrowRight: event.shiftKey ? "cursorRightSelect" : "cursorRight",
-			ArrowUp: event.shiftKey ? "cursorUpSelect" : "cursorUp",
-			ArrowDown: event.shiftKey ? "cursorDownSelect" : "cursorDown",
-		};
-		const command = commandByKey[event.key];
-		if (!command) {
-			return false;
-		}
-		editor.trigger("keyboard", command, null);
-		editor.focus();
-		return true;
-	};
-	const domNode = editor.getDomNode();
-	const onKeyDown = (event: KeyboardEvent) => {
-		if (event.metaKey || event.ctrlKey || event.altKey) {
-			return;
-		}
-		// In the embedded Tauri shell, these keys can fall through to browser focus
-		// navigation before Monaco consumes them. Capture them at the editor root and
-		// delegate to Monaco commands so editing behaves like a normal code editor.
-		if (event.key === "Tab") {
-			event.preventDefault();
-			event.stopPropagation();
-			if (event.shiftKey) {
-				outdent();
-			} else {
-				indent();
-			}
-			return;
-		}
-		if (event.key.startsWith("Arrow")) {
-			event.preventDefault();
-			event.stopPropagation();
-			moveCursor(event);
-		}
-	};
-	domNode?.addEventListener("keydown", onKeyDown, { capture: true });
-
-	return [
-		{
-			dispose() {
-				domNode?.removeEventListener("keydown", onKeyDown, { capture: true });
-			},
-		},
-		editor.addAction({
-			id: "dcc.editor.indent",
-			label: "Indent",
-			keybindings: [monaco.KeyCode.Tab],
-			run() {
-				indent();
-			},
-		}),
-		editor.addAction({
-			id: "dcc.editor.outdent",
-			label: "Outdent",
-			keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.Tab],
-			run() {
-				outdent();
-			},
-		}),
-	];
 }
 
 function installCodeEditorFocusGuards(editor: StandaloneEditor): DisposableLike[] {
