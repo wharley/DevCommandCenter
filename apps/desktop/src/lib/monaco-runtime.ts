@@ -25,6 +25,7 @@ type FileEditorController = {
 	setValue(value: string): void;
 	revealPosition(line?: number, column?: number): void;
 	onDidChangeModelContent(callback: (value: string) => void): DisposableLike;
+	getPath(): string;
 	switchFile(
 		path: string,
 		content?: string,
@@ -126,11 +127,16 @@ export async function createFileEditor(options: {
 	const readOnly = options.readOnly ?? false;
 	const editor = monaco.editor.create(options.container, {
 		automaticLayout: true,
+		accessibilitySupport: "off",
 		bracketPairColorization: { enabled: true },
 		contextmenu: true,
 		cursorBlinking: "blink",
 		cursorSmoothCaretAnimation: "on",
 		detectIndentation: true,
+		domReadOnly: readOnly,
+	// EditContext (Monaco 0.53+) breaks keyboard input in embedded shells like Tauri;
+	// keep the classic textarea input path. See docs/MONACO_TAURI.md.
+	editContext: false,
 		dragAndDrop: true,
 		folding: true,
 		formatOnPaste: true,
@@ -170,8 +176,15 @@ export async function createFileEditor(options: {
 
 	revealEditorPosition(editor, options.line, options.column);
 
+	options.container.dataset.dccMonacoInput = editor.getOption(
+		monaco.editor.EditorOption.editContext,
+	)
+		? "edit-context"
+		: "textarea";
+
 	const editorDisposables: DisposableLike[] = [
 		...installCodeEditorFocusGuards(editor),
+		...installEmbeddedShellNavigationCommands(monaco, editor),
 	];
 	const annotateDisposables: DisposableLike[] = [];
 	if (options.onAnnotate) {
@@ -184,10 +197,12 @@ export async function createFileEditor(options: {
 	}
 
 	const currentModel = model;
+	let activePath = options.path;
 
 	return {
 		editor,
 		dispose() {
+			releaseCodeEditorFocus(editor);
 			for (const disposable of editorDisposables) {
 				disposable.dispose();
 			}
@@ -215,13 +230,24 @@ export async function createFileEditor(options: {
 				callback(currentModel.getValue());
 			});
 		},
+		getPath() {
+			return activePath;
+		},
 		switchFile(path: string, content?: string, line?: number, column?: number) {
 			const resolvedContent = content ?? fileContentCache.get(path);
 			if (resolvedContent === undefined) {
 				return false;
 			}
 
-			currentModel.setValue(resolvedContent);
+			const samePath = path === activePath;
+			const position = editor.getPosition();
+			const selection = editor.getSelection();
+			const didSetValue = currentModel.getValue() !== resolvedContent;
+			activePath = path;
+
+			if (didSetValue) {
+				currentModel.setValue(resolvedContent);
+			}
 
 			const nextLanguage = resolveLanguageId(monaco, path);
 			if (nextLanguage && currentModel.getLanguageId() !== nextLanguage) {
@@ -229,7 +255,17 @@ export async function createFileEditor(options: {
 			}
 
 			fileContentCache.set(path, resolvedContent);
-			revealEditorPosition(editor, line, column);
+
+			if (line) {
+				revealEditorPosition(editor, line, column);
+			} else if (samePath && position) {
+				editor.setPosition(position);
+				if (selection) {
+					editor.setSelection(selection);
+				}
+			}
+
+			focusCodeEditor(editor);
 			return true;
 		},
 	};
@@ -271,6 +307,7 @@ export async function createDiffEditor(options: {
 
 	const editor = monaco.editor.createDiffEditor(options.container, {
 		automaticLayout: true,
+		editContext: false,
 		enableSplitViewResizing: true,
 		fontFamily:
 			'"SF Mono","Monaco","Cascadia Mono","Roboto Mono","Menlo",monospace',
@@ -309,6 +346,15 @@ export async function createDiffEditor(options: {
 		revealDiffLine(editor, options.focusLine, "modified");
 	}
 
+	const originalEditor = editor.getOriginalEditor();
+	const modifiedEditor = editor.getModifiedEditor();
+	const editorDisposables: DisposableLike[] = [
+		...installCodeEditorFocusGuards(originalEditor),
+		...installCodeEditorFocusGuards(modifiedEditor),
+		...installEmbeddedShellNavigationCommands(monaco, originalEditor),
+		...installEmbeddedShellNavigationCommands(monaco, modifiedEditor),
+	];
+
 	const annotateDisposables: DisposableLike[] = [];
 	if (options.onAnnotate) {
 		annotateDisposables.push(
@@ -322,6 +368,9 @@ export async function createDiffEditor(options: {
 	return {
 		editor,
 		dispose() {
+			for (const disposable of editorDisposables) {
+				disposable.dispose();
+			}
 			for (const disposable of annotateDisposables) {
 				disposable.dispose();
 			}
@@ -572,6 +621,54 @@ function attachAnnotateButton(
 			hide();
 		},
 	};
+}
+
+function releaseCodeEditorFocus(editor: StandaloneEditor) {
+	const domNode = editor.getDomNode();
+	const textarea = domNode?.querySelector("textarea.inputarea");
+	if (textarea instanceof HTMLElement && document.activeElement === textarea) {
+		textarea.blur();
+	}
+	if (domNode?.contains(document.activeElement)) {
+		document.body.focus({ preventScroll: true });
+	}
+}
+
+function focusCodeEditor(editor: StandaloneEditor) {
+	editor.focus();
+	const textarea = editor.getDomNode()?.querySelector("textarea.inputarea");
+	if (textarea instanceof HTMLTextAreaElement) {
+		textarea.focus({ preventScroll: true });
+	}
+	editor.layout();
+}
+
+function installEmbeddedShellNavigationCommands(
+	monaco: MonacoModule,
+	editor: StandaloneEditor,
+): DisposableLike[] {
+	// Default Monaco keybindings rely on context keys that can stay false in the
+	// Tauri webview even when the textarea has focus. addCommand + trigger() uses
+	// Monaco's built-in commands without DOM capture. See docs/MONACO_TAURI.md.
+	const bind = (keybinding: number, command: string) => {
+		editor.addCommand(keybinding, () => {
+			editor.trigger("keyboard", command, null);
+			focusCodeEditor(editor);
+		});
+	};
+
+	bind(monaco.KeyCode.UpArrow, "cursorUp");
+	bind(monaco.KeyCode.DownArrow, "cursorDown");
+	bind(monaco.KeyCode.LeftArrow, "cursorLeft");
+	bind(monaco.KeyCode.RightArrow, "cursorRight");
+	bind(monaco.KeyCode.UpArrow | monaco.KeyMod.Shift, "cursorUpSelect");
+	bind(monaco.KeyCode.DownArrow | monaco.KeyMod.Shift, "cursorDownSelect");
+	bind(monaco.KeyCode.LeftArrow | monaco.KeyMod.Shift, "cursorLeftSelect");
+	bind(monaco.KeyCode.RightArrow | monaco.KeyMod.Shift, "cursorRightSelect");
+	bind(monaco.KeyCode.Tab, "tab");
+	bind(monaco.KeyCode.Tab | monaco.KeyMod.Shift, "outdent");
+
+	return [];
 }
 
 function installCodeEditorFocusGuards(editor: StandaloneEditor): DisposableLike[] {
@@ -868,5 +965,5 @@ function revealEditorPosition(
 	};
 	editor.setPosition(position);
 	editor.revealPositionInCenter(position);
-	editor.focus();
+	focusCodeEditor(editor);
 }

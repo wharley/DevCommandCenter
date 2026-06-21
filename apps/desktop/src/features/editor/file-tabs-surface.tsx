@@ -10,7 +10,9 @@ import type {
 } from "./diff-annotation";
 import { hasDirtyFileSurfaceState } from "./file-surface.logic";
 import {
+	WorkspaceFileEditor,
 	WorkspaceFileSurface,
+	type FileEditorHandle,
 	type WorkspaceFileSurfaceHandle,
 } from "./WorkspaceFileSurface";
 
@@ -67,11 +69,51 @@ export function FileTabsSurface({
 	const surfaceRefs = useRef(
 		new Map<string, WorkspaceFileSurfaceHandle | null>(),
 	);
+	const buffersRef = useRef(new Map<string, string>());
+	const contentByPathRef = useRef(new Map<string, string>());
+	const cursorByPathRef = useRef(
+		new Map<string, { lineNumber: number; column: number }>(),
+	);
+	const sharedEditorRef = useRef<FileEditorHandle | null>(null);
+	const editorSwitchLockRef = useRef(false);
+	const previousActivePathRef = useRef(activePath);
+	const [sharedEditorStarted, setSharedEditorStarted] = useState(false);
+	const [sharedEditorPayload, setSharedEditorPayload] = useState<{
+		path: string;
+		content: string;
+		focusLine: number | null;
+		cursorLine: number | null;
+		cursorColumn: number | null;
+	} | null>(null);
 	// Mirrors for use inside global key/close handlers without stale closures.
 	const activePathRef = useRef(activePath);
 	activePathRef.current = activePath;
 	const stateByPathRef = useRef(stateByPath);
 	stateByPathRef.current = stateByPath;
+
+	const saveEditorState = useCallback((filePath: string) => {
+		const editor = sharedEditorRef.current;
+		if (!editor || editor.getPath() !== filePath) {
+			return;
+		}
+		buffersRef.current.set(filePath, editor.getValue());
+		const position = editor.getPosition();
+		if (position) {
+			cursorByPathRef.current.set(filePath, position);
+		}
+	}, []);
+
+	const activateTab = useCallback(
+		(filePath: string) => {
+			const leaving = activePathRef.current;
+			if (leaving !== filePath) {
+				saveEditorState(leaving);
+			}
+			editorSwitchLockRef.current = true;
+			setActivePath(filePath);
+		},
+		[saveEditorState],
+	);
 
 	// React to a new open request: focus an existing tab, or add a fresh preview
 	// (replacing the previous preview so previews never pile up).
@@ -79,6 +121,9 @@ export function FileTabsSurface({
 		setOpenFiles((prev) => {
 			const existing = prev.find((file) => file.path === path);
 			if (existing) {
+				if (focusLine != null) {
+					cursorByPathRef.current.delete(path);
+				}
 				return prev.map((file) =>
 					file.path === path ? { ...file, focusLine: focusLine ?? null } : file,
 				);
@@ -89,8 +134,75 @@ export function FileTabsSurface({
 				{ path, name, focusLine: focusLine ?? null, preview: true },
 			];
 		});
-		setActivePath(path);
-	}, [path, name, openRequestId, focusLine]);
+		activateTab(path);
+	}, [path, name, openRequestId, focusLine, activateTab]);
+
+	const handleBufferSnapshot = useCallback((filePath: string, content: string) => {
+		buffersRef.current.set(filePath, content);
+	}, []);
+
+	const applySharedEditorPayload = useCallback(
+		(filePath: string, diskContent: string) => {
+			const file = openFiles.find((entry) => entry.path === filePath);
+			const buffered = buffersRef.current.get(filePath);
+			const content = buffered ?? diskContent;
+			const savedCursor = cursorByPathRef.current.get(filePath);
+			const focusLine = file?.focusLine ?? null;
+			const cursorLine = savedCursor?.lineNumber ?? focusLine;
+			const cursorColumn =
+				savedCursor?.column ?? (focusLine != null ? 1 : null);
+
+			setSharedEditorPayload((prev) =>
+				prev?.path === filePath &&
+				prev.content === content &&
+				prev.focusLine === focusLine &&
+				prev.cursorLine === cursorLine &&
+				prev.cursorColumn === cursorColumn
+					? prev
+					: {
+							path: filePath,
+							content,
+							focusLine,
+							cursorLine,
+							cursorColumn,
+						},
+			);
+			setSharedEditorStarted(true);
+		},
+		[openFiles],
+	);
+
+	const handleContentReady = useCallback(
+		(filePath: string, content: string) => {
+			if (contentByPathRef.current.has(filePath)) {
+				return;
+			}
+			contentByPathRef.current.set(filePath, content);
+			if (filePath !== activePathRef.current) {
+				return;
+			}
+			applySharedEditorPayload(filePath, content);
+		},
+		[applySharedEditorPayload],
+	);
+
+	useEffect(() => {
+		const leaving = previousActivePathRef.current;
+		if (leaving !== activePath) {
+			saveEditorState(leaving);
+		}
+		previousActivePathRef.current = activePath;
+
+		const cached = contentByPathRef.current.get(activePath);
+		if (cached !== undefined) {
+			applySharedEditorPayload(activePath, cached);
+		}
+
+		const unlockFrame = requestAnimationFrame(() => {
+			editorSwitchLockRef.current = false;
+		});
+		return () => cancelAnimationFrame(unlockFrame);
+	}, [activePath, applySharedEditorPayload, saveEditorState]);
 
 	const handleStateChange = useCallback((filePath: string, next: SurfaceState) => {
 		setStateByPath((prev) => {
@@ -121,6 +233,9 @@ export function FileTabsSurface({
 				return;
 			}
 			surfaceRefs.current.delete(filePath);
+			buffersRef.current.delete(filePath);
+			contentByPathRef.current.delete(filePath);
+			cursorByPathRef.current.delete(filePath);
 			setStateByPath((prev) => {
 				const { [filePath]: _removed, ...rest } = prev;
 				return rest;
@@ -134,12 +249,12 @@ export function FileTabsSurface({
 				}
 				if (activePathRef.current === filePath) {
 					const neighbor = next[Math.min(index, next.length - 1)];
-					setActivePath(neighbor.path);
+					activateTab(neighbor.path);
 				}
 				return next;
 			});
 		},
-		[onClose, t],
+		[activateTab, onClose, t],
 	);
 
 	const pinTab = useCallback((filePath: string) => {
@@ -216,7 +331,7 @@ export function FileTabsSurface({
 							active={file.path === activePath}
 							dirty={Boolean(stateByPath[file.path]?.dirty)}
 							closeLabel={t("fileTabs.close")}
-							onActivate={() => setActivePath(file.path)}
+							onActivate={() => activateTab(file.path)}
 							onPin={() => pinTab(file.path)}
 							onClose={() => closeTab(file.path)}
 						/>
@@ -251,13 +366,13 @@ export function FileTabsSurface({
 					</Button>
 				</div>
 			</div>
-			<div className="relative flex min-h-0 flex-1 bg-background">
+			<div className="relative min-h-0 flex-1 bg-background">
 				{openFiles.map((file) => (
 					<div
 						key={file.path}
 						aria-hidden={file.path !== activePath}
 						className={cn(
-							"absolute inset-0 flex flex-col",
+							"absolute inset-0 flex min-h-0 flex-col",
 							file.path === activePath
 								? "z-10 opacity-100"
 								: "pointer-events-none invisible z-0 opacity-0",
@@ -265,12 +380,28 @@ export function FileTabsSurface({
 					>
 						<WorkspaceFileSurface
 							ref={(handle) => {
-								if (handle) surfaceRefs.current.set(file.path, handle);
-								else surfaceRefs.current.delete(file.path);
+								if (handle) {
+									surfaceRefs.current.set(file.path, handle);
+								} else {
+									surfaceRefs.current.delete(file.path);
+								}
 							}}
 							embedded
 							editable
+							useSharedEditor
+							editorBridge={
+								file.path === activePath ? sharedEditorRef : undefined
+							}
 							workspaceRoot={workspaceRoot}
+							initialBuffer={
+								buffersRef.current.has(file.path)
+									? (buffersRef.current.get(file.path) ?? null)
+									: null
+							}
+							onBufferSnapshot={(content) =>
+								handleBufferSnapshot(file.path, content)
+							}
+							onContentReady={(content) => handleContentReady(file.path, content)}
 							source={{
 								kind: "path",
 								path: file.path,
@@ -285,6 +416,44 @@ export function FileTabsSurface({
 						/>
 					</div>
 				))}
+				{sharedEditorStarted ? (
+					<div
+						className={cn(
+							"absolute inset-0 z-20 flex min-h-0 flex-col",
+							(sharedEditorPayload?.path ?? activePath) !== activePath &&
+								"pointer-events-none invisible",
+						)}
+					>
+						<WorkspaceFileEditor
+							ref={sharedEditorRef}
+							path={sharedEditorPayload?.path ?? activePath}
+							content={
+								sharedEditorPayload?.content ??
+								contentByPathRef.current.get(activePath) ??
+								""
+							}
+							focusLine={sharedEditorPayload?.focusLine ?? null}
+							cursorLine={sharedEditorPayload?.cursorLine ?? null}
+							cursorColumn={sharedEditorPayload?.cursorColumn ?? null}
+							readOnly={false}
+							reuseInstance
+							onChange={() => {
+								if (editorSwitchLockRef.current) {
+									return;
+								}
+								const currentPath = activePathRef.current;
+								const editorPath = sharedEditorRef.current?.getPath();
+								if (!editorPath || editorPath !== currentPath) {
+									return;
+								}
+								const value = sharedEditorRef.current?.getValue() ?? "";
+								buffersRef.current.set(currentPath, value);
+								surfaceRefs.current.get(currentPath)?.syncEditorChange();
+							}}
+							annotateLabel={t("diffAnnotate.sendToAgent")}
+						/>
+					</div>
+				) : null}
 			</div>
 		</section>
 	);

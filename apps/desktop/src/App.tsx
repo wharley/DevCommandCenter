@@ -251,7 +251,7 @@ function ResizeSeparator({
 	return (
 		<div
 			role="separator"
-			tabIndex={0}
+			tabIndex={-1}
 			aria-label={ariaLabel}
 			aria-orientation="vertical"
 			aria-valuemin={ariaMin}

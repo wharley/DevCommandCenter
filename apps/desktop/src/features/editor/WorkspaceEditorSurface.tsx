@@ -19,7 +19,6 @@ import {
 	type DiffAnnotationSubmit,
 	type PendingAnnotation,
 } from "./diff-annotation";
-import { FileViewToggle } from "./file-view-toggle";
 
 // Re-exported for backward compatibility with existing importers.
 export type { DiffAnnotationRequest, DiffAnnotationSubmit };
@@ -28,8 +27,6 @@ type WorkspaceEditorSurfaceProps = {
 	workspaceRoot: string | null;
 	selection: WorkspaceGitPreviewSelection;
 	onClose: () => void;
-	/** Switch the surface to the read-only whole-file view of the same file. */
-	onOpenWholeFile?: () => void;
 	/** Send the annotated selection + instruction to an agent. */
 	onSubmitAnnotation?: (input: DiffAnnotationSubmit) => void;
 	/** Load the annotation into the composer draft for manual refinement. */
@@ -123,6 +120,14 @@ function WorkspaceEditorDiff({
 
 				controllerRef.current = controller;
 				setLoading(false);
+				requestAnimationFrame(() => {
+					if (disposed || requestId !== requestIdRef.current) {
+						return;
+					}
+					const modified = controller.editor.getModifiedEditor();
+					modified.layout();
+					modified.focus();
+				});
 			} catch (cause) {
 				if (disposed) return;
 				setError(cause instanceof Error ? cause.message : "Failed to load editor");
@@ -174,7 +179,6 @@ export function WorkspaceEditorSurface({
 	workspaceRoot,
 	selection,
 	onClose,
-	onOpenWholeFile,
 	onSubmitAnnotation,
 	onEditInComposer,
 	onAddToReview,
@@ -287,11 +291,6 @@ export function WorkspaceEditorSurface({
 				<div className="min-w-0 px-3 text-[11px] text-muted-foreground">
 					{selection.name}
 				</div>
-				{onOpenWholeFile ? (
-					<div className="shrink-0 pr-2">
-						<FileViewToggle mode="diff" onSelectWholeFile={onOpenWholeFile} />
-					</div>
-				) : null}
 				<div className="flex shrink-0 items-center pr-2">
 					<Button
 						type="button"

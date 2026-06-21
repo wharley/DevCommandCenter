@@ -7,6 +7,7 @@ import {
 	useLayoutEffect,
 	useRef,
 	useState,
+	type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -33,12 +34,11 @@ import {
 	type PendingAnnotation,
 } from "./diff-annotation";
 import { resolveFileSurfaceContentState } from "./file-surface.logic";
-import { FileViewToggle } from "./file-view-toggle";
 import { useWorkspaceFileContent } from "./use-workspace-file-content";
 
 /**
- * Where the file body comes from. `git` is the diff surface's whole-file toggle
- * (has a diff to return to); `path` is a standalone open (e.g. Quick Open).
+ * Where the file body comes from. `git` loads working-tree content from the
+ * diff preview API; `path` is a standalone open (e.g. Quick Open or Code dock).
  */
 export type FileSurfaceSource =
 	| { kind: "git"; selection: WorkspaceGitPreviewSelection }
@@ -54,6 +54,8 @@ export type WorkspaceFileSurfaceHandle = {
 	save: () => void;
 	/** Re-measure + focus the editor when this surface's tab becomes active. */
 	reveal: () => void;
+	/** Notify dirty state after the shared Monaco buffer changes. */
+	syncEditorChange: () => void;
 };
 
 type WorkspaceFileSurfaceProps = {
@@ -68,8 +70,16 @@ type WorkspaceFileSurfaceProps = {
 	embedded?: boolean;
 	/** Report dirty/saving up so the tab strip can show state and pin previews. */
 	onStateChange?: (state: { dirty: boolean; saving: boolean }) => void;
-	/** Return to the diff view of the same file. Only set for the `git` source. */
-	onBackToDiff?: () => void;
+	/** Restored buffer when remounting a tab the user already edited. */
+	initialBuffer?: string | null;
+	/** Persist in-flight edits when the tab surface unmounts. */
+	onBufferSnapshot?: (content: string) => void;
+	/** Tab strip renders one shared Monaco; this surface only loads content. */
+	useSharedEditor?: boolean;
+	/** Live editor handle for the active tab (shared Monaco). */
+	editorBridge?: RefObject<FileEditorHandle | null>;
+	/** Fired when disk content is ready for the shared editor. */
+	onContentReady?: (content: string) => void;
 	onClose: () => void;
 	onSubmitAnnotation?: (input: DiffAnnotationSubmit) => void;
 	onEditInComposer?: (input: {
@@ -90,28 +100,52 @@ type MonacoFileController = Awaited<
 export type FileEditorHandle = {
 	getValue: () => string;
 	setValue: (value: string) => void;
+	getPath: () => string;
+	getPosition: () => { lineNumber: number; column: number } | null;
+	switchFile: (
+		path: string,
+		content: string,
+		focusLine?: number | null,
+		focusColumn?: number | null,
+	) => boolean;
 	/** Re-measure after the host becomes visible again (kept-alive tab switch). */
 	layout: () => void;
 	focus: () => void;
 };
 
-const WorkspaceFileEditor = forwardRef<
+export const WorkspaceFileEditor = forwardRef<
 	FileEditorHandle,
 	{
 		path: string;
 		content: string;
 		focusLine?: number | null;
+		cursorLine?: number | null;
+		cursorColumn?: number | null;
 		readOnly: boolean;
+		/** Swap models on tab change instead of tearing down Monaco (tab strip). */
+		reuseInstance?: boolean;
 		onAnnotate?: (payload: DiffAnnotationPayload) => void;
 		annotateLabel: string;
 		onChange?: () => void;
 	}
 >(function WorkspaceFileEditor(
-	{ path, content, focusLine, readOnly, onAnnotate, annotateLabel, onChange },
+	{
+		path,
+		content,
+		focusLine,
+		cursorLine,
+		cursorColumn,
+		readOnly,
+		reuseInstance = false,
+		onAnnotate,
+		annotateLabel,
+		onChange,
+	},
 	ref,
 ) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const controllerRef = useRef<MonacoFileController | null>(null);
+	const changeSubRef = useRef<{ dispose(): void } | null>(null);
 	const requestIdRef = useRef(0);
 	// Keep the latest callbacks/label in refs so they never recreate the editor.
 	const onAnnotateRef = useRef(onAnnotate);
@@ -128,6 +162,15 @@ const WorkspaceFileEditor = forwardRef<
 		() => ({
 			getValue: () => controllerRef.current?.getValue() ?? "",
 			setValue: (value: string) => controllerRef.current?.setValue(value),
+			getPath: () => controllerRef.current?.getPath() ?? path,
+			getPosition: () => controllerRef.current?.editor.getPosition() ?? null,
+			switchFile: (nextPath, nextContent, nextFocusLine, nextFocusColumn) =>
+				controllerRef.current?.switchFile(
+					nextPath,
+					nextContent,
+					nextFocusLine ?? undefined,
+					nextFocusColumn ?? undefined,
+				) ?? false,
 			layout: () => controllerRef.current?.editor.layout(),
 			focus: () => controllerRef.current?.editor.focus(),
 		}),
@@ -136,14 +179,16 @@ const WorkspaceFileEditor = forwardRef<
 
 	useEffect(
 		() => () => {
+			changeSubRef.current?.dispose();
+			changeSubRef.current = null;
 			controllerRef.current?.dispose();
 			controllerRef.current = null;
 		},
 		[],
 	);
 
-	// Recreate the editor only when the file identity changes. Content edits to the
-	// same file are pushed through setValue below so selection state survives.
+	// Recreate the editor when the file identity changes, unless the tab strip reuses
+	// one Monaco instance and swaps models via switchFile().
 	useLayoutEffect(() => {
 		const host = hostRef.current;
 		if (!host) return;
@@ -151,10 +196,40 @@ const WorkspaceFileEditor = forwardRef<
 		const requestId = requestIdRef.current + 1;
 		requestIdRef.current = requestId;
 		let disposed = false;
-		let changeSub: { dispose(): void } | null = null;
 		let focusFrame: number | null = null;
 
-		controllerRef.current?.dispose();
+		const scheduleFocus = (controller: MonacoFileController) => {
+			focusFrame = requestAnimationFrame(() => {
+				if (disposed || requestId !== requestIdRef.current) {
+					return;
+				}
+				controller.editor.layout();
+				const textarea = host.querySelector("textarea.inputarea");
+				if (textarea instanceof HTMLTextAreaElement) {
+					textarea.focus({ preventScroll: true });
+				}
+				controller.editor.focus();
+				controller.editor.layout();
+			});
+		};
+
+		const existing = controllerRef.current;
+		const restoreLine = cursorLine ?? focusLine ?? undefined;
+		const restoreColumn = cursorColumn ?? (focusLine ? 1 : undefined);
+		if (reuseInstance && existing) {
+			existing.switchFile(path, content, restoreLine, restoreColumn);
+			setLoading(false);
+			setError(null);
+			scheduleFocus(existing);
+			return () => {
+				disposed = true;
+				if (focusFrame !== null) {
+					cancelAnimationFrame(focusFrame);
+				}
+			};
+		}
+
+		existing?.dispose();
 		controllerRef.current = null;
 		host.replaceChildren();
 		setLoading(true);
@@ -179,17 +254,12 @@ const WorkspaceFileEditor = forwardRef<
 				}
 
 				controllerRef.current = controller;
-				changeSub = controller.onDidChangeModelContent(() =>
+				changeSubRef.current?.dispose();
+				changeSubRef.current = controller.onDidChangeModelContent(() =>
 					onChangeRef.current?.(),
 				);
 				setLoading(false);
-				focusFrame = requestAnimationFrame(() => {
-					if (disposed || requestId !== requestIdRef.current) {
-						return;
-					}
-					controller.editor.layout();
-					controller.editor.focus();
-				});
+				scheduleFocus(controller);
 			} catch (cause) {
 				if (disposed) return;
 				setError(cause instanceof Error ? cause.message : "Failed to load editor");
@@ -202,13 +272,9 @@ const WorkspaceFileEditor = forwardRef<
 			if (focusFrame !== null) {
 				cancelAnimationFrame(focusFrame);
 			}
-			changeSub?.dispose();
 		};
-		// `content`/`readOnly` are intentionally omitted: content and readOnly flow
-		// through effects below, so switching files (path) is the only trigger that
-		// rebuilds the editor.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [path]);
+	}, [path, reuseInstance]);
 
 	// Only the read-only surface mirrors later content into the editor. In edit
 	// mode the buffer is user-owned (synced via the imperative handle), so we never
@@ -224,10 +290,11 @@ const WorkspaceFileEditor = forwardRef<
 	}, [readOnly]);
 
 	useEffect(() => {
-		if (focusLine) {
-			controllerRef.current?.revealPosition(focusLine);
+		if (!focusLine || cursorLine != null) {
+			return;
 		}
-	}, [focusLine]);
+		controllerRef.current?.revealPosition(focusLine);
+	}, [cursorLine, focusLine]);
 
 	return (
 		<div className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
@@ -256,7 +323,11 @@ export const WorkspaceFileSurface = forwardRef<
 		editable,
 		embedded,
 		onStateChange,
-		onBackToDiff,
+		initialBuffer,
+		onBufferSnapshot,
+		useSharedEditor = false,
+		editorBridge,
+		onContentReady,
 		onClose,
 		onSubmitAnnotation,
 		onEditInComposer,
@@ -277,6 +348,10 @@ export const WorkspaceFileSurface = forwardRef<
 	const canEdit = Boolean(editable && workspaceRoot);
 
 	const editorRef = useRef<FileEditorHandle | null>(null);
+	const resolveEditor = useCallback(
+		() => editorBridge?.current ?? editorRef.current,
+		[editorBridge],
+	);
 	// Disk content as of open / last save / last reload. Reconciliation compares
 	// against this to detect a concurrent change (e.g. an agent on the same CWD).
 	const baseContentRef = useRef("");
@@ -289,9 +364,9 @@ export const WorkspaceFileSurface = forwardRef<
 	} | null>(null);
 
 	const handleEditorChange = useCallback(() => {
-		const value = editorRef.current?.getValue() ?? "";
+		const value = resolveEditor()?.getValue() ?? "";
 		setDirty(value !== baseContentRef.current);
-	}, []);
+	}, [resolveEditor]);
 
 	const handleEditorSaved = useCallback(
 		(content: string) => {
@@ -304,7 +379,7 @@ export const WorkspaceFileSurface = forwardRef<
 
 	const handleSave = useCallback(async () => {
 		if (!canEdit || !workspaceRoot || saving) return;
-		const mine = editorRef.current?.getValue() ?? "";
+		const mine = resolveEditor()?.getValue() ?? "";
 		if (mine === baseContentRef.current) {
 			setDirty(false);
 			return;
@@ -332,7 +407,7 @@ export const WorkspaceFileSurface = forwardRef<
 		} finally {
 			setSaving(false);
 		}
-	}, [canEdit, filePath, handleEditorSaved, saving, t, workspaceRoot]);
+	}, [canEdit, filePath, handleEditorSaved, resolveEditor, saving, t, workspaceRoot]);
 
 	// Reconciliation choices.
 	const handleOverwrite = useCallback(async () => {
@@ -359,11 +434,11 @@ export const WorkspaceFileSurface = forwardRef<
 
 	const handleTakeDisk = useCallback(() => {
 		if (!reconcile) return;
-		editorRef.current?.setValue(reconcile.disk);
+		resolveEditor()?.setValue(reconcile.disk);
 		baseContentRef.current = reconcile.disk;
 		setDirty(false);
 		setReconcile(null);
-	}, [reconcile]);
+	}, [reconcile, resolveEditor]);
 
 	// Let the tab wrapper drive Save on the active surface and watch its state.
 	useImperativeHandle(
@@ -371,11 +446,12 @@ export const WorkspaceFileSurface = forwardRef<
 		() => ({
 			save: () => void handleSave(),
 			reveal: () => {
-				editorRef.current?.layout();
-				editorRef.current?.focus();
+				resolveEditor()?.layout();
+				resolveEditor()?.focus();
 			},
+			syncEditorChange: () => handleEditorChange(),
 		}),
-		[handleSave],
+		[handleEditorChange, handleSave, resolveEditor],
 	);
 
 	const onStateChangeRef = useRef(onStateChange);
@@ -504,14 +580,41 @@ export const WorkspaceFileSurface = forwardRef<
 				? gitQuery.data.modifiedText || gitQuery.data.originalText
 				: ""
 			: (pathQuery.data?.content ?? "");
+	const editorContent =
+		initialBuffer != null && initialBuffer.length > 0 ? initialBuffer : body;
 	const contentState = resolveFileSurfaceContentState(query);
+	const contentReadySentRef = useRef(false);
+
+	useEffect(() => {
+		contentReadySentRef.current = false;
+	}, [filePath]);
+
+	// Notify the shared editor once when disk content is first available. Do not
+	// re-fire on buffer edits — that would push content back into Monaco and reset
+	// the cursor while the user is typing.
+	useEffect(() => {
+		if (contentState !== "editor" || !onContentReady || body.length === 0) {
+			return;
+		}
+		if (contentReadySentRef.current) {
+			return;
+		}
+		contentReadySentRef.current = true;
+		const initialContent =
+			initialBuffer != null && initialBuffer.length > 0 ? initialBuffer : body;
+		onContentReady(initialContent);
+	}, [body, contentState, initialBuffer, onContentReady]);
 
 	// The loaded disk body becomes the reconciliation baseline. Fires only when the
 	// content value actually changes (new file, or a refetch with new content).
 	useEffect(() => {
 		baseContentRef.current = body;
-		setDirty(false);
-	}, [body]);
+		if (initialBuffer == null) {
+			setDirty(false);
+			return;
+		}
+		setDirty(initialBuffer !== body);
+	}, [body, initialBuffer]);
 
 	return (
 		<section
@@ -535,11 +638,6 @@ export const WorkspaceFileSurface = forwardRef<
 					) : null}
 					<span className="truncate">{fileName}</span>
 				</div>
-				{onBackToDiff ? (
-					<div className="shrink-0 pr-2">
-						<FileViewToggle mode="file" onSelectDiff={onBackToDiff} />
-					</div>
-				) : null}
 				<div className="flex shrink-0 items-center gap-1 pr-2">
 					{canEdit ? (
 						<Button
@@ -586,18 +684,20 @@ export const WorkspaceFileSurface = forwardRef<
 							{t("fileSurface.loading")}
 						</p>
 					</div>
-				) : (
+				) : !useSharedEditor && contentState === "editor" ? (
 					<WorkspaceFileEditor
 						ref={editorRef}
 						path={filePath}
-						content={body}
+						content={editorContent}
 						focusLine={focusLine ?? null}
 						readOnly={!canEdit}
 						onChange={canEdit ? handleEditorChange : undefined}
 						onAnnotate={annotationsEnabled ? handleAnnotate : undefined}
 						annotateLabel={t("diffAnnotate.sendToAgent")}
 					/>
-				)}
+				) : useSharedEditor && contentState === "editor" ? (
+					<div className="min-h-0 flex-1 bg-background" aria-hidden />
+				) : null}
 			</div>
 			{pending ? (
 				<DiffAnnotationPopover

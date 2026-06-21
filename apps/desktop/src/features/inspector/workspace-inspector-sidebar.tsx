@@ -876,8 +876,6 @@ function CodeTreeNodeList({
 						type="button"
 						role="treeitem"
 						title={filePath}
-						onPointerDown={keepEditorFocusOnPointerDown}
-						onMouseDown={keepEditorFocusOnMouseDown}
 						onClick={() => onOpenFile({ path: filePath, name: basename(filePath) })}
 						className={cn(
 							"flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-sm pr-2 text-left text-[11.5px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
