@@ -4,9 +4,14 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-utils";
 import { cn } from "@/lib/utils";
+import type { DiffAnnotationPayload } from "@/lib/monaco-runtime";
 import type {
 	DiffAnnotationRequest,
 	DiffAnnotationSubmit,
+} from "./diff-annotation";
+import {
+	DiffAnnotationPopover,
+	type PendingAnnotation,
 } from "./diff-annotation";
 import { hasDirtyFileSurfaceState } from "./file-surface.logic";
 import {
@@ -58,6 +63,10 @@ export function FileTabsSurface({
 	onAddToReview,
 }: FileTabsSurfaceProps) {
 	const { t } = useTranslation("common");
+	const [pending, setPending] = useState<PendingAnnotation | null>(null);
+	const annotationsEnabled = Boolean(
+		onSubmitAnnotation || onEditInComposer || onAddToReview,
+	);
 	const [openFiles, setOpenFiles] = useState<OpenFile[]>(() => [
 		{ path, name, focusLine: focusLine ?? null, preview: true },
 	]);
@@ -273,6 +282,50 @@ export function FileTabsSurface({
 		onClose();
 	}, [onClose, t]);
 
+	const handleAnnotate = useCallback((payload: DiffAnnotationPayload) => {
+		const { anchor, ...rest } = payload;
+		setPending({
+			request: { ...rest, path: activePathRef.current },
+			anchor,
+		});
+	}, []);
+
+	const handleSubmitAnnotation = useCallback(
+		(instruction: string, newSession: boolean) => {
+			if (pending) {
+				onSubmitAnnotation?.({
+					request: pending.request,
+					instruction,
+					newSession,
+				});
+			}
+			setPending(null);
+			onClose();
+		},
+		[onClose, onSubmitAnnotation, pending],
+	);
+
+	const handleEditInComposer = useCallback(
+		(instruction: string) => {
+			if (pending) {
+				onEditInComposer?.({ request: pending.request, instruction });
+			}
+			setPending(null);
+			onClose();
+		},
+		[onClose, onEditInComposer, pending],
+	);
+
+	const handleAddToReview = useCallback(
+		(note: string) => {
+			if (pending) {
+				onAddToReview?.({ request: pending.request, note });
+			}
+			setPending(null);
+		},
+		[onAddToReview, pending],
+	);
+
 	// One global key handler for the active tab (embedded surfaces stay silent).
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -290,11 +343,15 @@ export function FileTabsSurface({
 			if (event.key !== "Escape") return;
 			if (shouldIgnoreGlobalShortcutTarget(event.target)) return;
 			event.preventDefault();
+			if (pending) {
+				setPending(null);
+				return;
+			}
 			requestCloseAll();
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [requestCloseAll]);
+	}, [pending, requestCloseAll]);
 
 	// On tab switch, re-measure + focus the now-visible editor (kept-alive surfaces
 	// can render at zero size while hidden under display:none).
@@ -450,11 +507,23 @@ export function FileTabsSurface({
 								buffersRef.current.set(currentPath, value);
 								surfaceRefs.current.get(currentPath)?.syncEditorChange();
 							}}
+							onAnnotate={annotationsEnabled ? handleAnnotate : undefined}
 							annotateLabel={t("diffAnnotate.sendToAgent")}
 						/>
 					</div>
 				) : null}
 			</div>
+			{pending ? (
+				<DiffAnnotationPopover
+					pending={pending}
+					canEditInComposer={Boolean(onEditInComposer)}
+					canAddToReview={Boolean(onAddToReview)}
+					onSubmit={handleSubmitAnnotation}
+					onEditInComposer={handleEditInComposer}
+					onAddToReview={handleAddToReview}
+					onCancel={() => setPending(null)}
+				/>
+			) : null}
 		</section>
 	);
 }

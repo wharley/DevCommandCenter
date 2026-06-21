@@ -238,14 +238,19 @@ export const WorkspaceFileEditor = forwardRef<
 		void (async () => {
 			try {
 				const { createFileEditor } = await import("@/lib/monaco-runtime");
+				const annotateHandler = onAnnotateRef.current;
 				const controller = await createFileEditor({
 					container: host,
 					path,
 					content,
 					readOnly,
 					line: focusLine ?? undefined,
-					onAnnotate: (payload) => onAnnotateRef.current?.(payload),
-					annotateLabel: annotateLabelRef.current,
+					...(annotateHandler
+						? {
+								onAnnotate: (payload) => annotateHandler(payload),
+								annotateLabel: annotateLabelRef.current,
+							}
+						: {}),
 				});
 
 				if (disposed || requestId !== requestIdRef.current) {
