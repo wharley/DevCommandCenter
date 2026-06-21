@@ -335,6 +335,7 @@ export function WorkspacePanel({
 				<WorkspaceFileSurface
 					workspaceRoot={workspacePath}
 					source={{ kind: "git", selection: surfaceSelection.file }}
+					editable={!surfaceSelection.file.status.includes("D")}
 					onBackToDiff={() => setWholeFileView(false)}
 					onClose={onCloseSurface}
 					onSubmitAnnotation={handleSubmitAnnotation}

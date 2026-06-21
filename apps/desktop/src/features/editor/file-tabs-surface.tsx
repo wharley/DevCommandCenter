@@ -255,9 +255,12 @@ export function FileTabsSurface({
 				{openFiles.map((file) => (
 					<div
 						key={file.path}
+						aria-hidden={file.path !== activePath}
 						className={cn(
 							"absolute inset-0 flex flex-col",
-							file.path === activePath ? "" : "hidden",
+							file.path === activePath
+								? "z-10 opacity-100"
+								: "pointer-events-none invisible z-0 opacity-0",
 						)}
 					>
 						<WorkspaceFileSurface

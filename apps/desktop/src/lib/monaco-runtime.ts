@@ -71,6 +71,7 @@ export type DiffMachineAnnotation = {
 
 let runtimePromise: Promise<MonacoRuntime> | null = null;
 const fileContentCache = new Map<string, string>();
+let editorModelId = 0;
 
 type EditorTheme = "light" | "dark";
 let desiredTheme: EditorTheme = detectInitialTheme();
@@ -85,6 +86,17 @@ function detectInitialTheme(): EditorTheme {
 
 function themeId(theme: EditorTheme): string {
 	return theme === "dark" ? "dcc-editor-dark" : "dcc-editor-light";
+}
+
+function createEditorModelUri(
+	monaco: MonacoModule,
+	path: string,
+	role: string,
+): Monaco.Uri {
+	editorModelId += 1;
+	return monaco.Uri.file(path).with({
+		query: `dcc-editor-role=${role}&dcc-editor-id=${editorModelId}`,
+	});
 }
 
 export async function createFileEditor(options: {
@@ -106,8 +118,7 @@ export async function createFileEditor(options: {
 	const runtime = await ensureRuntime();
 	const { monaco } = runtime;
 	const language = resolveLanguageId(monaco, options.path);
-	const modelUri = monaco.Uri.file(options.path);
-	monaco.editor.getModel(modelUri)?.dispose();
+	const modelUri = createEditorModelUri(monaco, options.path, "file");
 	const model = monaco.editor.createModel(options.content, language, modelUri);
 
 	fileContentCache.set(options.path, options.content);
@@ -119,8 +130,11 @@ export async function createFileEditor(options: {
 		contextmenu: true,
 		cursorBlinking: "blink",
 		cursorSmoothCaretAnimation: "on",
+		detectIndentation: true,
 		dragAndDrop: true,
 		folding: true,
+		formatOnPaste: true,
+		formatOnType: true,
 		fontFamily:
 			'"SF Mono","Monaco","Cascadia Mono","Roboto Mono","Menlo",monospace',
 		fontLigatures: true,
@@ -147,6 +161,8 @@ export async function createFileEditor(options: {
 		smoothScrolling: true,
 		tabSize: 2,
 		tabFocusMode: false,
+		autoIndent: "full",
+		insertSpaces: true,
 		theme: themeId(desiredTheme),
 		useTabStops: true,
 		wordWrap: "on",
@@ -154,6 +170,10 @@ export async function createFileEditor(options: {
 
 	revealEditorPosition(editor, options.line, options.column);
 
+	const editorDisposables: DisposableLike[] = [
+		...installCodeEditorKeybindings(monaco, editor),
+		...installCodeEditorFocusGuards(editor),
+	];
 	const annotateDisposables: DisposableLike[] = [];
 	if (options.onAnnotate) {
 		annotateDisposables.push(
@@ -169,6 +189,9 @@ export async function createFileEditor(options: {
 	return {
 		editor,
 		dispose() {
+			for (const disposable of editorDisposables) {
+				disposable.dispose();
+			}
 			for (const disposable of annotateDisposables) {
 				disposable.dispose();
 			}
@@ -233,14 +256,8 @@ export async function createDiffEditor(options: {
 	const { monaco } = runtime;
 	const language = resolveLanguageId(monaco, options.path);
 
-	const originalUri = monaco.Uri.file(options.path).with({
-		query: "dcc-review=original",
-	});
-	const modifiedUri = monaco.Uri.file(options.path).with({
-		query: "dcc-review=modified",
-	});
-	monaco.editor.getModel(originalUri)?.dispose();
-	monaco.editor.getModel(modifiedUri)?.dispose();
+	const originalUri = createEditorModelUri(monaco, options.path, "diff-original");
+	const modifiedUri = createEditorModelUri(monaco, options.path, "diff-modified");
 
 	const originalModel = monaco.editor.createModel(
 		options.originalText,
@@ -556,6 +573,128 @@ function attachAnnotateButton(
 			hide();
 		},
 	};
+}
+
+function installCodeEditorKeybindings(
+	monaco: MonacoModule,
+	editor: StandaloneEditor,
+): DisposableLike[] {
+	const isReadOnly = () => editor.getOption(monaco.editor.EditorOption.readOnly);
+	const indentText = () => {
+		const options = editor.getModel()?.getOptions();
+		const tabSize = options?.tabSize ?? 2;
+		return options?.insertSpaces === false
+			? "\t"
+			: " ".repeat(Math.max(1, tabSize));
+	};
+	const indent = () => {
+		if (isReadOnly()) {
+			return;
+		}
+		const model = editor.getModel();
+		const selections = editor.getSelections();
+		if (!model || !selections?.length) {
+			return;
+		}
+		const hasRangeSelection = selections.some(
+			(selection) =>
+				!selection.isEmpty() ||
+				selection.startLineNumber !== selection.endLineNumber,
+		);
+		if (hasRangeSelection) {
+			void editor.getAction("editor.action.indentLines")?.run();
+			return;
+		}
+		const text = indentText();
+		editor.executeEdits(
+			"dcc.editor.indent",
+			selections.map((selection) => ({
+				range: selection,
+				text,
+				forceMoveMarkers: true,
+			})),
+		);
+		editor.focus();
+	};
+	const outdent = () => {
+		if (isReadOnly()) {
+			return;
+		}
+		void editor.getAction("editor.action.outdentLines")?.run();
+		editor.focus();
+	};
+	const moveCursor = (event: KeyboardEvent) => {
+		const commandByKey: Record<string, string> = {
+			ArrowLeft: event.shiftKey ? "cursorLeftSelect" : "cursorLeft",
+			ArrowRight: event.shiftKey ? "cursorRightSelect" : "cursorRight",
+			ArrowUp: event.shiftKey ? "cursorUpSelect" : "cursorUp",
+			ArrowDown: event.shiftKey ? "cursorDownSelect" : "cursorDown",
+		};
+		const command = commandByKey[event.key];
+		if (!command) {
+			return false;
+		}
+		editor.trigger("keyboard", command, null);
+		editor.focus();
+		return true;
+	};
+	const domNode = editor.getDomNode();
+	const onKeyDown = (event: KeyboardEvent) => {
+		if (event.metaKey || event.ctrlKey || event.altKey) {
+			return;
+		}
+		// In the embedded Tauri shell, these keys can fall through to browser focus
+		// navigation before Monaco consumes them. Capture them at the editor root and
+		// delegate to Monaco commands so editing behaves like a normal code editor.
+		if (event.key === "Tab") {
+			event.preventDefault();
+			event.stopPropagation();
+			if (event.shiftKey) {
+				outdent();
+			} else {
+				indent();
+			}
+			return;
+		}
+		if (event.key.startsWith("Arrow")) {
+			event.preventDefault();
+			event.stopPropagation();
+			moveCursor(event);
+		}
+	};
+	domNode?.addEventListener("keydown", onKeyDown, { capture: true });
+
+	return [
+		{
+			dispose() {
+				domNode?.removeEventListener("keydown", onKeyDown, { capture: true });
+			},
+		},
+		editor.addAction({
+			id: "dcc.editor.indent",
+			label: "Indent",
+			keybindings: [monaco.KeyCode.Tab],
+			run() {
+				indent();
+			},
+		}),
+		editor.addAction({
+			id: "dcc.editor.outdent",
+			label: "Outdent",
+			keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.Tab],
+			run() {
+				outdent();
+			},
+		}),
+	];
+}
+
+function installCodeEditorFocusGuards(editor: StandaloneEditor): DisposableLike[] {
+	return [
+		editor.onMouseDown(() => {
+			editor.focus();
+		}),
+	];
 }
 
 export function preWarmFileContents(

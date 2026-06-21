@@ -204,9 +204,9 @@ const WorkspaceFileEditor = forwardRef<
 			}
 			changeSub?.dispose();
 		};
-		// `content`/`readOnly` are intentionally omitted: content flows through the
-		// setValue effect and readOnly is fixed per surface, so switching files (path)
-		// is the only trigger that rebuilds the editor.
+		// `content`/`readOnly` are intentionally omitted: content and readOnly flow
+		// through effects below, so switching files (path) is the only trigger that
+		// rebuilds the editor.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [path]);
 
@@ -218,6 +218,10 @@ const WorkspaceFileEditor = forwardRef<
 			controllerRef.current?.setValue(content);
 		}
 	}, [content, readOnly]);
+
+	useEffect(() => {
+		controllerRef.current?.editor.updateOptions({ readOnly });
+	}, [readOnly]);
 
 	useEffect(() => {
 		if (focusLine) {
