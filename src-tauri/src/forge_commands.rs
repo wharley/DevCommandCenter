@@ -5,7 +5,8 @@ use dcc_tauri::{
         ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliHostsInput, ForgeCliHostsOutput,
         ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput,
         GithubCliStatusOutput, WorkspaceForgeContextInput, WorkspaceForgeContextOutput,
-        WorkspacePrStatusInput, WorkspacePrStatusOutput,
+        WorkspacePrReviewCommentsInput, WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput,
+        WorkspacePrStatusOutput,
     },
     commands::workspace_commands::{RepositoryIdInput, WorkspaceGitPushInput},
     state::WorkspaceCommandState,
@@ -129,4 +130,12 @@ pub async fn workspace_pr_status(
     input: WorkspacePrStatusInput,
 ) -> Result<WorkspacePrStatusOutput, String> {
     dcc_tauri::commands::forge_commands::workspace_pr_status(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_pr_review_comments(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePrReviewCommentsInput,
+) -> Result<WorkspacePrReviewCommentsOutput, String> {
+    dcc_tauri::commands::forge_commands::workspace_pr_review_comments(state, input).await
 }

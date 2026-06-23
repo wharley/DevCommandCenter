@@ -46,6 +46,11 @@ type DiffEditorController = {
 	revealLine(line: number, side?: DiffMachineAnnotation["side"]): void;
 };
 
+type DiffMachineAnnotationClick = {
+	annotation: DiffMachineAnnotation;
+	anchor: { top: number; left: number };
+};
+
 /**
  * Emitted when the reviewer selects a region in the diff and triggers the
  * "send to agent" affordance. Line numbers are 1-based and refer to the
@@ -62,7 +67,8 @@ export type DiffAnnotationPayload = {
 };
 
 export type DiffMachineAnnotation = {
-	source: "coderabbit";
+	source: "coderabbit" | "github-review";
+	id?: string;
 	severity: "critical" | "major" | "minor" | "trivial" | "info" | "unknown";
 	side: "original" | "modified";
 	startLine: number;
@@ -286,6 +292,9 @@ export async function createDiffEditor(options: {
 	onAnnotate?: (payload: DiffAnnotationPayload) => void;
 	/** Label for the annotate button; defaults to a pt-BR string. */
 	annotateLabel?: string;
+	/** Label for PR review comment affordances. */
+	reviewCommentLabel?: string;
+	onMachineAnnotationClick?: (payload: DiffMachineAnnotationClick) => void;
 }): Promise<DiffEditorController> {
 	const runtime = await ensureRuntime();
 	const { monaco } = runtime;
@@ -328,6 +337,7 @@ export async function createDiffEditor(options: {
 		renderSideBySide: !options.inline,
 		scrollBeyondLastLine: false,
 		smoothScrolling: true,
+		glyphMargin: true,
 		theme: themeId(desiredTheme),
 	});
 
@@ -340,6 +350,8 @@ export async function createDiffEditor(options: {
 	const machineAnnotationController = createDiffMachineAnnotationController(
 		monaco,
 		editor,
+		options.onMachineAnnotationClick,
+		options.reviewCommentLabel ?? "Comentário",
 	);
 	machineAnnotationController.set(options.machineAnnotations ?? []);
 	if (options.focusLine) {
@@ -400,6 +412,8 @@ export async function createDiffEditor(options: {
 function createDiffMachineAnnotationController(
 	monaco: MonacoModule,
 	diffEditor: StandaloneDiffEditor,
+	onClick?: (payload: DiffMachineAnnotationClick) => void,
+	reviewCommentLabel = "Comentário",
 ): { set(annotations: DiffMachineAnnotation[]): void; dispose(): void } {
 	const originalDecorations = diffEditor
 		.getOriginalEditor()
@@ -407,26 +421,145 @@ function createDiffMachineAnnotationController(
 	const modifiedDecorations = diffEditor
 		.getModifiedEditor()
 		.createDecorationsCollection();
+	let activeAnnotations: DiffMachineAnnotation[] = [];
+	let reviewCommentWidgets: Array<{
+		editor: StandaloneEditor;
+		widget: Monaco.editor.IContentWidget;
+	}> = [];
+
+	const clearReviewCommentWidgets = () => {
+		for (const { editor, widget } of reviewCommentWidgets) {
+			editor.removeContentWidget(widget);
+		}
+		reviewCommentWidgets = [];
+	};
 
 	const toDecoration = (
 		annotation: DiffMachineAnnotation,
 	): Monaco.editor.IModelDeltaDecoration => {
 		const startLine = Math.max(1, Math.floor(annotation.startLine));
 		const endLine = Math.max(startLine, Math.floor(annotation.endLine));
+		const isReviewComment = annotation.source === "github-review";
+		const label = isReviewComment ? "GitHub review" : "CodeRabbit";
 		return {
 			range: new monaco.Range(startLine, 1, endLine, 1),
 			options: {
 				isWholeLine: true,
-				className: `dcc-coderabbit-line dcc-coderabbit-line-${annotation.severity}`,
+				className: isReviewComment
+					? "dcc-review-comment-line"
+					: `dcc-coderabbit-line dcc-coderabbit-line-${annotation.severity}`,
 				hoverMessage: {
-					value: `**CodeRabbit**\n\n${annotation.title}`,
+					value: `**${label}**\n\n${annotation.title}`,
 				},
 			},
 		};
 	};
 
+	const findAnnotationAt = (
+		side: DiffMachineAnnotation["side"],
+		lineNumber: number,
+	) =>
+		activeAnnotations.find(
+			(annotation) =>
+				annotation.source === "github-review" &&
+				annotation.side === side &&
+				lineNumber >= Math.max(1, Math.floor(annotation.startLine)) &&
+				lineNumber <= Math.max(1, Math.floor(annotation.endLine)),
+		);
+
+	const attachClick = (
+		editor: StandaloneEditor,
+		side: DiffMachineAnnotation["side"],
+	): DisposableLike =>
+		editor.onMouseDown((event) => {
+			if (!onClick || !event.target.position) {
+				return;
+			}
+			if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+				return;
+			}
+			const annotation = findAnnotationAt(side, event.target.position.lineNumber);
+			if (!annotation) {
+				return;
+			}
+			event.event.preventDefault();
+			event.event.stopPropagation();
+			onClick({
+				annotation,
+				anchor: {
+					top: event.event.browserEvent.clientY,
+					left: event.event.browserEvent.clientX,
+				},
+			});
+		});
+
+	const addReviewCommentWidget = (annotation: DiffMachineAnnotation) => {
+		if (!onClick || annotation.source !== "github-review") {
+			return;
+		}
+		const editor =
+			annotation.side === "original"
+				? diffEditor.getOriginalEditor()
+				: diffEditor.getModifiedEditor();
+		const model = editor.getModel();
+		if (!model) {
+			return;
+		}
+		const lineNumber = Math.min(
+			model.getLineCount(),
+			Math.max(1, Math.floor(annotation.startLine)),
+		);
+		const column = 1;
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "dcc-review-comment-floating-button";
+		button.title = annotation.title;
+		button.setAttribute("aria-label", annotation.title);
+		button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg><span></span>`;
+		const label = button.querySelector("span");
+		if (label) {
+			label.textContent = reviewCommentLabel;
+		}
+		button.addEventListener("mousedown", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+		});
+		button.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			const rect = button.getBoundingClientRect();
+			onClick({
+				annotation,
+				anchor: { top: rect.top, left: rect.left },
+			});
+		});
+
+		const widget: Monaco.editor.IContentWidget = {
+			getId: () =>
+				`dcc.diff.review-comment.widget.${annotation.side}.${annotation.id ?? lineNumber}`,
+			getDomNode: () => button,
+			getPosition: () => ({
+				position: { lineNumber, column },
+				preference: [
+					monaco.editor.ContentWidgetPositionPreference.ABOVE,
+					monaco.editor.ContentWidgetPositionPreference.BELOW,
+				],
+			}),
+		};
+		editor.addContentWidget(widget);
+		editor.layoutContentWidget(widget);
+		reviewCommentWidgets.push({ editor, widget });
+	};
+
+	const clickDisposables = [
+		attachClick(diffEditor.getOriginalEditor(), "original"),
+		attachClick(diffEditor.getModifiedEditor(), "modified"),
+	];
+
 	return {
 		set(annotations) {
+			clearReviewCommentWidgets();
+			activeAnnotations = annotations;
 			originalDecorations.set(
 				annotations
 					.filter((annotation) => annotation.side === "original")
@@ -437,10 +570,17 @@ function createDiffMachineAnnotationController(
 					.filter((annotation) => annotation.side === "modified")
 					.map(toDecoration),
 			);
+			for (const annotation of annotations) {
+				addReviewCommentWidget(annotation);
+			}
 		},
 		dispose() {
+			clearReviewCommentWidgets();
 			originalDecorations.clear();
 			modifiedDecorations.clear();
+			for (const disposable of clickDisposables) {
+				disposable.dispose();
+			}
 		},
 	};
 }
@@ -489,6 +629,92 @@ function ensureDiffMachineAnnotationStyles() {
 .monaco-editor .dcc-coderabbit-line-unknown {
 	background: color-mix(in srgb, var(--muted-foreground) 10%, transparent);
 	box-shadow: inset 2px 0 0 var(--muted-foreground);
+}
+.monaco-editor .dcc-review-comment-line {
+	background: color-mix(in oklch, #f59e0b 9%, transparent);
+	box-shadow: inset 2px 0 0 color-mix(in oklch, #f59e0b 65%, transparent);
+}
+.dcc-review-comment-floating-button {
+	display: inline-flex !important;
+	flex-direction: row !important;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	gap: 5px;
+	height: 21px;
+	padding: 0 9px;
+	margin-bottom: 2px;
+	font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+	font-size: 10.5px !important;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	line-height: 1 !important;
+	color: #92400e;
+	background: color-mix(in oklch, #f59e0b 16%, var(--popover));
+	border: 1px solid color-mix(in oklch, #f59e0b 50%, var(--border));
+	border-radius: 999px;
+	box-shadow:
+		0 1px 2px rgba(0, 0, 0, 0.12),
+		0 2px 8px rgba(0, 0, 0, 0.1);
+	cursor: pointer;
+	white-space: nowrap;
+	transition:
+		background 120ms ease,
+		border-color 120ms ease,
+		box-shadow 120ms ease,
+		transform 120ms ease;
+}
+.dcc-review-comment-floating-button > span {
+	display: inline-block;
+	font-size: inherit;
+	line-height: inherit;
+	white-space: nowrap;
+}
+.dcc-review-comment-floating-button > svg {
+	display: block;
+	flex: 0 0 auto;
+	width: 12px;
+	height: 12px;
+	fill: none;
+	stroke: #b45309;
+	stroke-width: 2;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+.dark .dcc-review-comment-floating-button {
+	color: #fde68a;
+	background: color-mix(in oklch, #f59e0b 20%, var(--popover));
+	border-color: color-mix(in oklch, #f59e0b 42%, var(--border));
+}
+.dark .dcc-review-comment-floating-button > svg {
+	stroke: #fcd34d;
+}
+.dcc-review-comment-floating-button:hover {
+	background: color-mix(in oklch, #f59e0b 26%, var(--popover));
+	border-color: color-mix(in oklch, #f59e0b 62%, var(--border));
+	transform: translateY(-1px);
+	box-shadow:
+		0 2px 4px rgba(0, 0, 0, 0.16),
+		0 4px 12px rgba(0, 0, 0, 0.14);
+}
+.dark .dcc-review-comment-floating-button:hover {
+	background: color-mix(in oklch, #f59e0b 30%, var(--popover));
+	border-color: color-mix(in oklch, #f59e0b 55%, var(--border));
+}
+.dcc-review-comment-floating-button:active {
+	transform: translateY(0);
+}
+.dcc-review-comment-floating-button:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+	.dcc-review-comment-floating-button {
+		transition: none;
+	}
+	.dcc-review-comment-floating-button:hover {
+		transform: none;
+	}
 }
 `;
 	document.head.appendChild(style);

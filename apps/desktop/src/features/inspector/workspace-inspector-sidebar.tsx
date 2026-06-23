@@ -8,6 +8,7 @@ import {
 	GitBranch,
 	Info,
 	Loader2,
+	MessageSquare,
 	Rabbit,
 	Search,
 	TerminalSquare,
@@ -81,9 +82,13 @@ import {
 } from "@/lib/workspace-api";
 import { buildMissionSpecFilename } from "@/features/composer/WorkspaceComposer.logic";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
-import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./use-workspace-git-branch-diff";
+import {
+	useWorkspaceGitBranchDiff,
+	WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY,
+} from "./use-workspace-git-branch-diff";
 import { useWorkspaceMissionSpecs } from "./use-workspace-mission-specs";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
+import { useWorkspacePrReviewComments } from "./use-workspace-pr-review-comments";
 import {
 	useWorkspaceForgeContext,
 	WORKSPACE_FORGE_CONTEXT_QUERY_KEY,
@@ -94,6 +99,7 @@ import type {
 	MissionSpecEntry,
 	ProviderCatalog,
 	Repository,
+	WorkspacePrReviewComment,
 	WorkspaceSetupReport,
 } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -614,6 +620,33 @@ function sameStringSet(left: Set<string>, right: Set<string>): boolean {
 	return true;
 }
 
+function groupReviewCommentsByPath(comments: WorkspacePrReviewComment[]) {
+	const grouped = new Map<string, WorkspacePrReviewComment[]>();
+	for (const comment of comments) {
+		const existing = grouped.get(comment.path);
+		if (existing) {
+			existing.push(comment);
+		} else {
+			grouped.set(comment.path, [comment]);
+		}
+	}
+	return grouped;
+}
+
+function countReviewCommentsForNode(
+	node: CodeTreeNode,
+	commentsByPath: Map<string, WorkspacePrReviewComment[]>,
+): number {
+	if (node.file) {
+		return commentsByPath.get(node.file)?.length ?? 0;
+	}
+	let count = 0;
+	for (const child of node.children.values()) {
+		count += countReviewCommentsForNode(child, commentsByPath);
+	}
+	return count;
+}
+
 function InspectorModeDock({
 	mode,
 	onModeChange,
@@ -677,11 +710,13 @@ function InspectorModeDock({
 function CodeProjectSection({
 	workspaceRoot,
 	selectedPath,
+	reviewCommentsByPath,
 	onOpenFile,
 	onOpenQuickOpen,
 }: {
 	workspaceRoot: string | null;
 	selectedPath: string | null;
+	reviewCommentsByPath: Map<string, WorkspacePrReviewComment[]>;
 	onOpenFile: (input: { path: string; name: string }) => void;
 	onOpenQuickOpen: () => void;
 }) {
@@ -781,6 +816,7 @@ function CodeProjectSection({
 						onToggle={toggle}
 						depth={0}
 						selectedPath={selectedPath}
+						reviewCommentsByPath={reviewCommentsByPath}
 						onOpenFile={onOpenFile}
 					/>
 				)}
@@ -795,6 +831,7 @@ function CodeTreeNodeList({
 	onToggle,
 	depth,
 	selectedPath,
+	reviewCommentsByPath,
 	onOpenFile,
 }: {
 	nodes: Map<string, CodeTreeNode>;
@@ -802,6 +839,7 @@ function CodeTreeNodeList({
 	onToggle: (path: string) => void;
 	depth: number;
 	selectedPath: string | null;
+	reviewCommentsByPath: Map<string, WorkspacePrReviewComment[]>;
 	onOpenFile: (input: { path: string; name: string }) => void;
 }) {
 	const sorted = [...nodes.values()].sort((left, right) => {
@@ -828,6 +866,7 @@ function CodeTreeNodeList({
 				const isFolder = node.children.size > 0 && !node.file;
 				if (isFolder) {
 					const isOpen = expanded.has(node.path);
+					const reviewCount = countReviewCommentsForNode(node, reviewCommentsByPath);
 					return (
 						<div key={node.path}>
 							<button
@@ -850,6 +889,12 @@ function CodeTreeNodeList({
 									className="size-3.5 shrink-0"
 								/>
 								<span className="min-w-0 truncate">{node.name}</span>
+								{reviewCount > 0 ? (
+									<span className="ml-auto inline-flex h-4 shrink-0 items-center gap-0.5 rounded-full bg-primary/10 px-1 text-[9.5px] font-semibold text-primary">
+										<MessageSquare className="size-2.5" strokeWidth={2} />
+										{reviewCount}
+									</span>
+								) : null}
 							</button>
 							{isOpen ? (
 								<CodeTreeNodeList
@@ -858,6 +903,7 @@ function CodeTreeNodeList({
 									onToggle={onToggle}
 									depth={depth + 1}
 									selectedPath={selectedPath}
+									reviewCommentsByPath={reviewCommentsByPath}
 									onOpenFile={onOpenFile}
 								/>
 							) : null}
@@ -870,6 +916,7 @@ function CodeTreeNodeList({
 					return null;
 				}
 				const selected = selectedPath === filePath;
+				const reviewCount = reviewCommentsByPath.get(filePath)?.length ?? 0;
 				return (
 					<button
 						key={filePath}
@@ -891,6 +938,12 @@ function CodeTreeNodeList({
 							className="size-3.5 shrink-0"
 						/>
 						<span className="min-w-0 truncate">{node.name}</span>
+						{reviewCount > 0 ? (
+							<span className="ml-auto inline-flex h-4 shrink-0 items-center gap-0.5 rounded-full bg-primary/10 px-1 text-[9.5px] font-semibold text-primary">
+								<MessageSquare className="size-2.5" strokeWidth={2} />
+								{reviewCount}
+							</span>
+						) : null}
 					</button>
 				);
 			})}
@@ -1028,6 +1081,45 @@ export function WorkspaceInspectorSidebar({
 		selectedForgeLogin,
 	);
 	const prStatus = prStatusQuery.data ?? null;
+	const prReviewCommentsQuery = useWorkspacePrReviewComments(
+		workspacePath,
+		gitBranch,
+		selectedForgeLogin,
+		workspaceForgeContext?.provider === "github" && Boolean(prStatus?.number),
+	);
+	const reviewCommentsByPath = useMemo(
+		() => groupReviewCommentsByPath(prReviewCommentsQuery.data?.comments ?? []),
+		[prReviewCommentsQuery.data?.comments],
+	);
+	const reviewBranchDiffQuery = useWorkspaceGitBranchDiff(workspacePath);
+	const handleOpenCodeFileFromTree = useCallback(
+		(input: { path: string; name: string }) => {
+			const comments = reviewCommentsByPath.get(input.path) ?? [];
+			const baseBranch = reviewBranchDiffQuery.data?.baseBranch ?? null;
+			if (comments.length > 0 && baseBranch) {
+				const change = reviewBranchDiffQuery.data?.changes.find(
+					(entry) => entry.path === input.path,
+				);
+				onSelectPreview({
+					group: "committed",
+					path: input.path,
+					name: input.name,
+					status: change?.status ?? "M",
+					baseBranch,
+					reviewComments: comments,
+				});
+				return;
+			}
+			onOpenCodeFile(input);
+		},
+		[
+			onOpenCodeFile,
+			onSelectPreview,
+			reviewBranchDiffQuery.data?.baseBranch,
+			reviewBranchDiffQuery.data?.changes,
+			reviewCommentsByPath,
+		],
+	);
 	const [forgeConnectOpen, setForgeConnectOpen] = useState(false);
 	const [codeRabbitConnectOpen, setCodeRabbitConnectOpen] = useState(false);
 	const codeRabbitStatusQuery = useCodeRabbitCliStatus(workspacePath, {
@@ -1848,6 +1940,7 @@ export function WorkspaceInspectorSidebar({
 									selectedPreview={selectedPreview}
 									onSelectPreview={onSelectPreview}
 									onPrefillComposer={onPrefillComposer}
+									reviewCommentsByPath={reviewCommentsByPath}
 								/>
 							</div>
 						</div>
@@ -1856,7 +1949,8 @@ export function WorkspaceInspectorSidebar({
 					<CodeProjectSection
 						workspaceRoot={workspacePath}
 						selectedPath={selectedCodePath}
-						onOpenFile={onOpenCodeFile}
+						reviewCommentsByPath={reviewCommentsByPath}
+						onOpenFile={handleOpenCodeFileFromTree}
 						onOpenQuickOpen={onOpenQuickOpen}
 					/>
 				)}

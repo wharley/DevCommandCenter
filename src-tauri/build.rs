@@ -42,7 +42,8 @@ use dcc_tauri::commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
         ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput,
         GithubCliStatusOutput, WorkspaceForgeContextInput, WorkspaceForgeContextOutput,
-        WorkspacePrStatusInput, WorkspacePrStatusOutput,
+        WorkspacePrReviewComment, WorkspacePrReviewCommentAuthor, WorkspacePrReviewCommentsInput,
+        WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
     },
     provider_commands::ListProvidersOutput,
     session_commands::{
@@ -53,20 +54,19 @@ use dcc_tauri::commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
         CompiledMissionSpecContextFile, CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput,
         ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
-        ListGitTrackedFilesOutput, ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
-        WriteWorkspaceFileInput, WriteWorkspaceFileOutput, SearchWorkspaceInput,
-        SearchWorkspaceMatch, SearchWorkspaceOutput,
-        ListLocalBranchesInput, ListLocalBranchesOutput,
+        ListGitTrackedFilesOutput, ListLocalBranchesInput, ListLocalBranchesOutput,
         ListMissionSpecsInput, ListMissionSpecsOutput, ListRepositoriesOutput,
         ListWorkspacesOutput, MissionSpecContextFileState, MissionSpecContextFileStatus,
         MissionSpecContextStatusInput, MissionSpecContextStatusOutput, MissionSpecEntry,
-        MissionValidationEntry, RepositoryIdInput, SaveMissionValidationInput,
-        SaveMissionValidationOutput, WorkspaceContinueFromBaseBranchInput,
+        MissionValidationEntry, ReadWorkspaceFileInput, ReadWorkspaceFileOutput, RepositoryIdInput,
+        SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
+        SearchWorkspaceMatch, SearchWorkspaceOutput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
         WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput,
         WorkspaceGitPathInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
         WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput,
         WorkspaceRunSetupInput, WorkspaceRunSetupOutput, WorkspaceSetupHint,
+        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -110,6 +110,7 @@ struct WorkspaceMethods {
     workspace_gh_pr_create_fill: String,
     workspace_gh_pr_merge: String,
     workspace_gh_pr_view_web: String,
+    workspace_pr_review_comments: String,
     workspace_pr_status: String,
     workspace_git_branch_diff: String,
     workspace_git_commit_push: String,
@@ -243,6 +244,10 @@ fn main() {
         .typ::<ForgeCliStatusOutput>()
         .typ::<WorkspaceForgeContextInput>()
         .typ::<WorkspaceForgeContextOutput>()
+        .typ::<WorkspacePrReviewCommentAuthor>()
+        .typ::<WorkspacePrReviewComment>()
+        .typ::<WorkspacePrReviewCommentsInput>()
+        .typ::<WorkspacePrReviewCommentsOutput>()
         .typ::<WorkspaceGitStatusInput>()
         .typ::<WorkspaceGitStatusOutput>()
         .typ::<WorkspaceGitChangeEntry>()
@@ -344,6 +349,7 @@ fn main() {
                 workspace_gh_pr_create_fill: "workspace_gh_pr_create_fill".to_string(),
                 workspace_gh_pr_merge: "workspace_gh_pr_merge".to_string(),
                 workspace_gh_pr_view_web: "workspace_gh_pr_view_web".to_string(),
+                workspace_pr_review_comments: "workspace_pr_review_comments".to_string(),
                 workspace_pr_status: "workspace_pr_status".to_string(),
                 workspace_git_branch_diff: "workspace_git_branch_diff".to_string(),
                 workspace_git_file_preview: "workspace_git_file_preview".to_string(),

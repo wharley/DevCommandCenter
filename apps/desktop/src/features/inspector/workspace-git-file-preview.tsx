@@ -1,4 +1,4 @@
-import type { CodeRabbitFindingSeverity } from "@dcc/contracts";
+import type { CodeRabbitFindingSeverity, WorkspacePrReviewComment } from "@dcc/contracts";
 import { AlertCircle, FileCode2, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,7 @@ export type WorkspaceGitPreviewSelection = {
 	baseBranch?: string | null;
 	focusLine?: number | null;
 	machineAnnotations?: WorkspaceGitPreviewMachineAnnotation[];
+	reviewComments?: WorkspacePrReviewComment[];
 };
 
 type WorkspaceGitFilePreviewProps = {

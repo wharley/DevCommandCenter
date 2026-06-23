@@ -848,6 +848,7 @@
   },
   "diffAnnotate": {
     "sendToAgent": "Send to agent ↗",
+    "reviewComment": "Review comment",
     "dialogLabel": "Send selection to agent",
     "instructionPlaceholder": "What should the agent do with this snippet?",
     "deletedSide": "deleted",
@@ -866,6 +867,15 @@
       "collapse": "Collapse",
       "expand": "Expand"
     }
+  },
+  "reviewThread": {
+    "title": "Code review",
+    "reviewer": "Reviewer",
+    "close": "Close review thread",
+    "codeContext": "Referenced code",
+    "openOnGithub": "GitHub",
+    "composer": "Composer",
+    "sendToAgent": "Send to agent"
   },
   "fileSurface": {
     "ariaLabel": "Whole file view",

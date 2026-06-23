@@ -59,7 +59,7 @@ use forge_commands::{
     workspace_forge_cli_accounts, workspace_forge_cli_hosts, workspace_forge_cli_select_login,
     workspace_forge_cli_status, workspace_forge_context, workspace_gh_pr_create_fill,
     workspace_gh_pr_merge, workspace_gh_pr_view_web, workspace_github_cli_status,
-    workspace_pr_status, workspace_retry_repository_forge_binding,
+    workspace_pr_review_comments, workspace_pr_status, workspace_retry_repository_forge_binding,
 };
 use tauri_plugin_dialog::{
     DialogExt, FilePath, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
@@ -72,11 +72,11 @@ use workspace_commands::{
     create_workspace_from_url, delete_repository, delete_workspace, list_child_directories,
     list_git_tracked_files, list_local_branches, list_mission_specs, list_repositories,
     list_workspaces, mission_spec_context_status, read_workspace_file, restore_workspace,
-    save_mission_validation, search_workspace, write_workspace_file,
-    workspace_continue_from_base_branch, workspace_git_branch_diff, workspace_git_commit_push,
-    workspace_git_discard_file, workspace_git_file_preview, workspace_git_file_preview_content,
-    workspace_git_push, workspace_git_stage_all, workspace_git_stage_file, workspace_git_status,
-    workspace_git_sync_base, workspace_git_unstage_file, workspace_run_setup,
+    save_mission_validation, search_workspace, workspace_continue_from_base_branch,
+    workspace_git_branch_diff, workspace_git_commit_push, workspace_git_discard_file,
+    workspace_git_file_preview, workspace_git_file_preview_content, workspace_git_push,
+    workspace_git_stage_all, workspace_git_stage_file, workspace_git_status,
+    workspace_git_sync_base, workspace_git_unstage_file, workspace_run_setup, write_workspace_file,
 };
 
 /// Schema SQLite embutido (`src-tauri/sql/schema.sql`, CREATE IF NOT EXISTS).
@@ -6685,6 +6685,7 @@ pub fn run() {
             workspace_git_status,
             workspace_git_sync_base,
             workspace_git_unstage_file,
+            workspace_pr_review_comments,
             workspace_pr_status,
             workspace_run_setup,
             workspace_continue_from_base_branch,

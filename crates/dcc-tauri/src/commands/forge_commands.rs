@@ -148,6 +148,14 @@ pub struct WorkspacePrStatusInput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspacePrReviewCommentsInput {
+    pub workspace_root: String,
+    pub branch: Option<String>,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspacePrStatusOutput {
     pub provider: Option<String>,
     pub host: Option<String>,
@@ -159,6 +167,44 @@ pub struct WorkspacePrStatusOutput {
     pub state: Option<String>,
     pub mergeable: Option<String>,
     pub merge_state_status: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePrReviewCommentAuthor {
+    pub login: Option<String>,
+    pub avatar_url: Option<String>,
+    pub html_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePrReviewComment {
+    pub id: i64,
+    pub parent_id: Option<i64>,
+    pub thread_id: i64,
+    pub path: String,
+    pub body: String,
+    pub diff_hunk: Option<String>,
+    pub html_url: Option<String>,
+    pub side: Option<String>,
+    pub line: Option<i64>,
+    pub start_line: Option<i64>,
+    pub original_line: Option<i64>,
+    pub original_start_line: Option<i64>,
+    pub author: Option<WorkspacePrReviewCommentAuthor>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePrReviewCommentsOutput {
+    pub provider: Option<String>,
+    pub host: Option<String>,
+    pub number: Option<u32>,
+    pub url: Option<String>,
+    pub comments: Vec<WorkspacePrReviewComment>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -625,5 +671,137 @@ pub async fn workspace_pr_status(
         state: resolved.state,
         mergeable: resolved.mergeable,
         merge_state_status: resolved.merge_state_status,
+    })
+}
+
+pub async fn workspace_pr_review_comments(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePrReviewCommentsInput,
+) -> Result<WorkspacePrReviewCommentsOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Ok(WorkspacePrReviewCommentsOutput {
+            provider: None,
+            host: None,
+            number: None,
+            url: None,
+            comments: Vec::new(),
+        });
+    }
+
+    let forge_context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?;
+    let Some(forge_context) = forge_context else {
+        return Ok(WorkspacePrReviewCommentsOutput {
+            provider: None,
+            host: None,
+            number: None,
+            url: None,
+            comments: Vec::new(),
+        });
+    };
+    if forge_context.provider != ForgeCliProvider::Github {
+        return Ok(WorkspacePrReviewCommentsOutput {
+            provider: Some(forge_context::forge_provider_key(forge_context.provider).to_string()),
+            host: Some(forge_context.host),
+            number: None,
+            url: None,
+            comments: Vec::new(),
+        });
+    }
+
+    let branch = match input
+        .branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(branch) => branch.to_string(),
+        None => match resolve_current_branch_name(root) {
+            Ok(branch) => branch,
+            Err(_) => {
+                return Ok(WorkspacePrReviewCommentsOutput {
+                    provider: Some("github".to_string()),
+                    host: Some(forge_context.host),
+                    number: None,
+                    url: None,
+                    comments: Vec::new(),
+                });
+            }
+        },
+    };
+    let branch_hints = workspace_branch_hints(root, Some(&branch));
+    let head_sha = resolve_current_commit_sha(root).ok().flatten();
+    let resolved = forge_provider::resolve_workspace_change_request_status(
+        root,
+        &branch,
+        &branch_hints,
+        head_sha.as_deref(),
+        forge_context.effective_login.as_deref(),
+    )?;
+    let Some(resolved) = resolved else {
+        return Ok(WorkspacePrReviewCommentsOutput {
+            provider: Some("github".to_string()),
+            host: Some(forge_context.host),
+            number: None,
+            url: None,
+            comments: Vec::new(),
+        });
+    };
+    let Some(number) = resolved.number else {
+        return Ok(WorkspacePrReviewCommentsOutput {
+            provider: Some("github".to_string()),
+            host: Some(forge_context.host),
+            number: None,
+            url: resolved.url,
+            comments: Vec::new(),
+        });
+    };
+
+    let comments = crate::commands::forge::github::list_pull_review_comments(
+        &forge_context.host,
+        &forge_context.namespace,
+        &forge_context.repo,
+        number,
+        forge_context.effective_login.as_deref(),
+    )?
+    .into_iter()
+    .map(|comment| {
+        let thread_id = comment.in_reply_to_id.unwrap_or(comment.id);
+        WorkspacePrReviewComment {
+            id: comment.id,
+            parent_id: comment.in_reply_to_id,
+            thread_id,
+            path: comment.path,
+            body: comment.body.unwrap_or_default(),
+            diff_hunk: comment.diff_hunk,
+            html_url: comment.html_url,
+            side: comment.side,
+            line: comment.line,
+            start_line: comment.start_line,
+            original_line: comment.original_line,
+            original_start_line: comment.original_start_line,
+            author: comment.user.map(|user| WorkspacePrReviewCommentAuthor {
+                login: user.login,
+                avatar_url: user.avatar_url,
+                html_url: user.html_url,
+            }),
+            created_at: comment.created_at,
+            updated_at: comment.updated_at,
+        }
+    })
+    .collect();
+
+    Ok(WorkspacePrReviewCommentsOutput {
+        provider: Some("github".to_string()),
+        host: Some(forge_context.host),
+        number: Some(number),
+        url: resolved.url,
+        comments,
     })
 }

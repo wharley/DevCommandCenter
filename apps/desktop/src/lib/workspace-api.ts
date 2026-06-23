@@ -69,6 +69,8 @@ import type {
 	WorkspaceForgeContextOutput,
 	WorkspaceContinueFromBaseBranchInput,
 	WorkspaceContinueFromBaseBranchOutput,
+	WorkspacePrReviewCommentsInput,
+	WorkspacePrReviewCommentsOutput,
 	WorkspacePrStatusInput,
 	WorkspacePrStatusOutput,
 	WorkspaceRunSetupInput,
@@ -386,6 +388,13 @@ export function workspacePrStatus(input: WorkspacePrStatusInput) {
 	return invoke<WorkspacePrStatusOutput>(WORKSPACE_METHODS.workspacePrStatus, {
 		input,
 	});
+}
+
+export function workspacePrReviewComments(input: WorkspacePrReviewCommentsInput) {
+	return invoke<WorkspacePrReviewCommentsOutput>(
+		WORKSPACE_METHODS.workspacePrReviewComments,
+		{ input },
+	);
 }
 
 export function workspaceGitBranchDiff(input: WorkspaceGitBranchDiffInput) {

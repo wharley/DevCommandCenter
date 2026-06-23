@@ -12,6 +12,7 @@ import {
 	List as ListIcon,
 	ListTree,
 	LoaderCircleIcon,
+	MessageSquare,
 	MinusIcon,
 	PlusIcon,
 	Undo2Icon,
@@ -24,7 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { WorkspaceGitChangeEntry } from "@dcc/contracts";
+import type { WorkspaceGitChangeEntry, WorkspacePrReviewComment } from "@dcc/contracts";
 import {
 	workspaceGitDiscardFile,
 	workspaceGitStageAll,
@@ -60,6 +61,7 @@ function statusClass(status: string): string {
  */
 const ROW_ACTIONS_CLASS =
 	"absolute right-1 top-1/2 z-10 hidden -translate-y-1/2 items-center gap-0.5 rounded-md bg-background/95 px-0.5 py-px shadow-sm ring-1 ring-border/60 backdrop-blur-sm group-hover/row:flex";
+const EMPTY_REVIEW_COMMENTS_BY_PATH = new Map<string, WorkspacePrReviewComment[]>();
 
 function dirname(path: string): string {
 	const i = path.lastIndexOf("/");
@@ -158,6 +160,7 @@ function ChangeRow({
 	fileIconSrc,
 	flashingPaths = new Set(),
 	selected = false,
+	reviewCommentCount = 0,
 	onSelect,
 }: {
 	entry: WorkspaceGitChangeEntry;
@@ -169,6 +172,7 @@ function ChangeRow({
 	fileIconSrc?: string;
 	flashingPaths?: Set<string>;
 	selected?: boolean;
+	reviewCommentCount?: number;
 	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	const folder = dirname(entry.path);
@@ -237,6 +241,15 @@ function ChangeRow({
 						−<NumberTicker value={entry.deletions} className="text-[10px]" direction="down" />
 					</span>
 				) : null}
+				{reviewCommentCount > 0 ? (
+					<span
+						className="inline-flex h-4 items-center gap-0.5 rounded-full bg-primary/10 px-1 text-[9.5px] font-semibold text-primary"
+						title={`${reviewCommentCount} review comment${reviewCommentCount === 1 ? "" : "s"}`}
+					>
+						<MessageSquare className="size-2.5" strokeWidth={2} />
+						{reviewCommentCount}
+					</span>
+				) : null}
 				<span
 					className={cn(
 						"inline-flex h-4 min-w-[1rem] items-center justify-center text-[10px] font-semibold",
@@ -301,6 +314,7 @@ function ChangesTreeView({
 	runGit,
 	flashingPaths = new Set(),
 	selectedPath = null,
+	reviewCommentCounts,
 	onSelect,
 }: {
 	entries: WorkspaceGitChangeEntry[];
@@ -310,6 +324,7 @@ function ChangesTreeView({
 	runGit: (fn: () => Promise<void>) => Promise<void>;
 	flashingPaths?: Set<string>;
 	selectedPath?: string | null;
+	reviewCommentCounts?: Map<string, number>;
 	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	const tree = useMemo(() => buildTree(entries), [entries]);
@@ -340,6 +355,7 @@ function ChangesTreeView({
 				runGit={runGit}
 				flashingPaths={flashingPaths}
 				selectedPath={selectedPath}
+				reviewCommentCounts={reviewCommentCounts}
 				onSelect={onSelect}
 			/>
 		</div>
@@ -357,6 +373,7 @@ function TreeNodeList({
 	runGit,
 	flashingPaths = new Set(),
 	selectedPath = null,
+	reviewCommentCounts,
 	onSelect,
 }: {
 	nodes: Map<string, TreeNode>;
@@ -369,6 +386,7 @@ function TreeNodeList({
 	runGit: (fn: () => Promise<void>) => Promise<void>;
 	flashingPaths?: Set<string>;
 	selectedPath?: string | null;
+	reviewCommentCounts?: Map<string, number>;
 	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	const sorted = [...nodes.values()].sort((left, right) => {
@@ -428,6 +446,7 @@ function TreeNodeList({
 									runGit={runGit}
 									flashingPaths={flashingPaths}
 									selectedPath={selectedPath}
+									reviewCommentCounts={reviewCommentCounts}
 									onSelect={onSelect}
 								/>
 							) : null}
@@ -452,6 +471,7 @@ function TreeNodeList({
 						fileIconSrc={getMaterialFileIcon(node.name)}
 						flashingPaths={flashingPaths}
 						selected={selectedPath === file.path}
+						reviewCommentCount={reviewCommentCounts?.get(file.path) ?? 0}
 						onSelect={onSelect}
 					/>
 				);
@@ -489,11 +509,13 @@ function BranchDiffSection({
 	workspaceRoot,
 	gitBusy,
 	selectedPath = null,
+	reviewCommentCounts,
 	onSelect,
 }: {
 	workspaceRoot: string;
 	gitBusy: boolean;
 	selectedPath?: string | null;
+	reviewCommentCounts?: Map<string, number>;
 	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	const [open, setOpen] = useState(true);
@@ -560,6 +582,7 @@ function BranchDiffSection({
 							runGit={async () => {}}
 							flashingPaths={flashingPaths}
 							selectedPath={selectedPath}
+							reviewCommentCounts={reviewCommentCounts}
 							onSelect={(selection) =>
 								onSelect?.({ ...selection, baseBranch })
 							}
@@ -576,6 +599,7 @@ function BranchDiffSection({
 									runGit={async () => {}}
 									flashingPaths={flashingPaths}
 									selected={selectedPath === entry.path}
+									reviewCommentCount={reviewCommentCounts?.get(entry.path) ?? 0}
 									onSelect={(selection) =>
 										onSelect?.({ ...selection, baseBranch })
 									}
@@ -629,6 +653,7 @@ function ChangesGroup({
 	showViewToggle,
 	icon,
 	selectedPath = null,
+	reviewCommentCounts,
 	onSelect,
 }: {
 	label: string;
@@ -648,6 +673,7 @@ function ChangesGroup({
 	showViewToggle: boolean;
 	icon?: React.ReactNode;
 	selectedPath?: string | null;
+	reviewCommentCounts?: Map<string, number>;
 	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	return (
@@ -698,6 +724,7 @@ function ChangesGroup({
 						gitBusy={gitBusy}
 						runGit={runGit}
 						selectedPath={selectedPath}
+						reviewCommentCounts={reviewCommentCounts}
 						onSelect={onSelect}
 					/>
 				) : (
@@ -711,6 +738,7 @@ function ChangesGroup({
 								gitBusy={gitBusy}
 								runGit={runGit}
 								selected={selectedPath === e.path}
+								reviewCommentCount={reviewCommentCounts?.get(e.path) ?? 0}
 								onSelect={onSelect}
 							/>
 						))}
@@ -726,6 +754,7 @@ type InspectorChangesSectionProps = {
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	onPrefillComposer?: (text: string) => void;
+	reviewCommentsByPath?: Map<string, WorkspacePrReviewComment[]>;
 };
 
 export function InspectorChangesSection({
@@ -733,6 +762,7 @@ export function InspectorChangesSection({
 	selectedPreview,
 	onSelectPreview,
 	onPrefillComposer,
+	reviewCommentsByPath = EMPTY_REVIEW_COMMENTS_BY_PATH,
 }: InspectorChangesSectionProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -766,6 +796,28 @@ export function InspectorChangesSection({
 
 	const query = useWorkspaceGitStatus(workspaceRoot);
 	const branchDiffQuery = useWorkspaceGitBranchDiff(workspaceRoot);
+	const reviewCommentCounts = useMemo(() => {
+		const counts = new Map<string, number>();
+		for (const [path, comments] of reviewCommentsByPath) {
+			if (comments.length > 0) {
+				counts.set(path, comments.length);
+			}
+		}
+		return counts;
+	}, [reviewCommentsByPath]);
+	const handleSelectPreview = useCallback(
+		(selection: WorkspaceGitPreviewSelection | null) => {
+			if (!selection) {
+				onSelectPreview(null);
+				return;
+			}
+			onSelectPreview({
+				...selection,
+				reviewComments: reviewCommentsByPath.get(selection.path) ?? [],
+			});
+		},
+		[onSelectPreview, reviewCommentsByPath],
+	);
 
 	const unstageAll = useCallback(
 		async (paths: string[]) => {
@@ -841,7 +893,8 @@ export function InspectorChangesSection({
 						onToggleTreeView={() => setChangesTreeView((v) => !v)}
 						showViewToggle
 						selectedPath={selectedPreview?.group === "staged" ? selectedPreview.path : null}
-						onSelect={onSelectPreview}
+						reviewCommentCounts={reviewCommentCounts}
+						onSelect={handleSelectPreview}
 					/>
 				) : null}
 				{data.unstaged.length > 0 ? (
@@ -863,7 +916,8 @@ export function InspectorChangesSection({
 						showViewToggle={data.staged.length === 0}
 						icon={<LaptopIcon className="size-3 shrink-0 text-muted-foreground" strokeWidth={2} />}
 						selectedPath={selectedPreview?.group === "unstaged" ? selectedPreview.path : null}
-						onSelect={onSelectPreview}
+						reviewCommentCounts={reviewCommentCounts}
+						onSelect={handleSelectPreview}
 					/>
 				) : null}
 				{!hasAny ? (
@@ -876,7 +930,8 @@ export function InspectorChangesSection({
 						workspaceRoot={root}
 						gitBusy={gitBusy}
 						selectedPath={selectedPreview?.group === "committed" ? selectedPreview.path : null}
-						onSelect={onSelectPreview}
+						reviewCommentCounts={reviewCommentCounts}
+						onSelect={handleSelectPreview}
 					/>
 				)}
 				{Boolean(root) ? (
@@ -885,7 +940,7 @@ export function InspectorChangesSection({
 						staged={data.staged}
 						unstaged={data.unstaged}
 						baseBranch={branchDiffQuery.data?.baseBranch ?? null}
-						onSelectPreview={onSelectPreview}
+						onSelectPreview={handleSelectPreview}
 						onPrefillComposer={onPrefillComposer}
 					/>
 				) : null}

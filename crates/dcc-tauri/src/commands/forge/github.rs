@@ -51,6 +51,31 @@ struct GithubUserProfile {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub(crate) struct GithubReviewCommentUser {
+    pub(crate) login: Option<String>,
+    pub(crate) avatar_url: Option<String>,
+    pub(crate) html_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct GithubReviewComment {
+    pub(crate) id: i64,
+    pub(crate) in_reply_to_id: Option<i64>,
+    pub(crate) path: String,
+    pub(crate) body: Option<String>,
+    pub(crate) diff_hunk: Option<String>,
+    pub(crate) html_url: Option<String>,
+    pub(crate) side: Option<String>,
+    pub(crate) line: Option<i64>,
+    pub(crate) start_line: Option<i64>,
+    pub(crate) original_line: Option<i64>,
+    pub(crate) original_start_line: Option<i64>,
+    pub(crate) user: Option<GithubReviewCommentUser>,
+    pub(crate) created_at: Option<String>,
+    pub(crate) updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct GhAuthStatusResponse {
     hosts: std::collections::HashMap<String, Vec<GhHostStatusEntry>>,
 }
@@ -408,6 +433,52 @@ pub(crate) fn repo_access(
     }
 
     parse_repo_push_permission(&output.stdout)
+}
+
+pub(crate) fn list_pull_review_comments(
+    host: &str,
+    owner: &str,
+    repo: &str,
+    pull_number: u32,
+    login: Option<&str>,
+) -> Result<Vec<GithubReviewComment>, String> {
+    let Some(auth) = resolve_auth_context(host, login)? else {
+        return Err("GitHub CLI is not authenticated for this repository host.".to_string());
+    };
+
+    let path = format!("/repos/{owner}/{repo}/pulls/{pull_number}/comments");
+    let gh = resolve_cli_binary("gh")?;
+    let mut command = Command::new(gh);
+    command
+        .args([
+            "api",
+            "--hostname",
+            host,
+            "--paginate",
+            "--slurp",
+            "-H",
+            "Accept: application/vnd.github+json",
+            path.as_str(),
+        ])
+        .envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let detail = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let trimmed = detail.trim();
+        return Err(if trimmed.is_empty() {
+            "Failed to load GitHub pull request review comments.".to_string()
+        } else {
+            trimmed.to_string()
+        });
+    }
+
+    let pages: Vec<Vec<GithubReviewComment>> = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitHub review comments: {error}"))?;
+    Ok(pages.into_iter().flatten().collect())
 }
 
 fn fetch_github_profile(host: &str, login: &str) -> Result<GithubUserProfile, String> {
