@@ -13,6 +13,23 @@ export type SkillRecord = {
 	scope: string;
 };
 
+export type SkillContextDetection = {
+	id: string;
+	kind:
+		| "dcc_source"
+		| "instructions_file"
+		| "claude_skills"
+		| "cursor_rules"
+		| "codex_skills";
+	title: string;
+	relativePath: string;
+	rootKind: "project_root" | "target_root";
+	count: number;
+	managedCount: number;
+	externalCount: number;
+	hasDccBlock: boolean;
+};
+
 export function listSkills(projectRoot: string) {
 	return invoke<SkillRecord[]>("skills_list", { projectRoot });
 }
@@ -31,4 +48,14 @@ export function deleteSkill(projectRoot: string, name: string) {
  */
 export function compileSkills(projectRoot: string, targetRoot: string) {
 	return invoke<void>("skills_compile", { projectRoot, targetRoot });
+}
+
+export function detectSkillContext(
+	projectRoot: string,
+	targetRoot: string | null,
+) {
+	return invoke<SkillContextDetection[]>("skills_detect_context", {
+		projectRoot,
+		targetRoot,
+	});
 }

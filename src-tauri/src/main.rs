@@ -6618,6 +6618,7 @@ pub fn run() {
             skills_commands::skills_save,
             skills_commands::skills_delete,
             skills_commands::skills_compile,
+            skills_commands::skills_detect_context,
             terminal_get_pane_session,
             terminal_kill_by_pane_id,
             terminal_get_backlog,

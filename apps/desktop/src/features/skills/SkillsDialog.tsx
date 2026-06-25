@@ -1,4 +1,4 @@
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { FileText, FolderSearch, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -21,8 +21,10 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
 	compileSkills,
 	deleteSkill,
+	detectSkillContext,
 	listSkills,
 	saveSkill,
+	type SkillContextDetection,
 	type SkillRecord,
 	type SkillTargetAgent,
 } from "@/lib/skills-api";
@@ -73,6 +75,7 @@ export function SkillsDialog({
 }: SkillsDialogProps) {
 	const { t } = useTranslation("common");
 	const [skills, setSkills] = useState<SkillRecord[]>([]);
+	const [detections, setDetections] = useState<SkillContextDetection[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [form, setForm] = useState<FormState | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -80,17 +83,23 @@ export function SkillsDialog({
 	const refresh = useCallback(async () => {
 		if (!projectRoot) {
 			setSkills([]);
+			setDetections([]);
 			return;
 		}
 		setLoading(true);
 		try {
-			setSkills(await listSkills(projectRoot));
+			const [nextSkills, nextDetections] = await Promise.all([
+				listSkills(projectRoot),
+				detectSkillContext(projectRoot, targetRoot),
+			]);
+			setSkills(nextSkills);
+			setDetections(nextDetections);
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : t("skills.toast.loadError"));
 		} finally {
 			setLoading(false);
 		}
-	}, [projectRoot, t]);
+	}, [projectRoot, targetRoot, t]);
 
 	useEffect(() => {
 		if (open) {
@@ -168,6 +177,26 @@ export function SkillsDialog({
 			}
 		},
 		[projectRoot, recompile, refresh, t],
+	);
+
+	const detectionDescription = useCallback(
+		(item: SkillContextDetection) => {
+			switch (item.kind) {
+				case "dcc_source":
+					return t("skills.detected.behavior.dccSource");
+				case "instructions_file":
+					return t("skills.detected.behavior.instructionsFile");
+				case "claude_skills":
+					return t("skills.detected.behavior.claudeSkills");
+				case "cursor_rules":
+					return t("skills.detected.behavior.cursorRules");
+				case "codex_skills":
+					return t("skills.detected.behavior.codexSkills");
+				default:
+					return t("skills.detected.behavior.generic");
+			}
+		},
+		[t],
 	);
 
 	return (
@@ -371,6 +400,70 @@ export function SkillsDialog({
 								))}
 							</div>
 						</ScrollArea>
+
+						<div className="rounded-md border border-border/60 px-3 py-2">
+							<div className="mb-2 flex items-start justify-between gap-3">
+								<div className="min-w-0">
+									<p className="text-[13px] font-medium">
+										{t("skills.detected.title")}
+									</p>
+									<p className="text-[11px] text-muted-foreground">
+										{t("skills.detected.hint")}
+									</p>
+								</div>
+								<FolderSearch className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+							</div>
+							{detections.length === 0 && !loading ? (
+								<p className="py-3 text-center text-[12px] text-muted-foreground">
+									{t("skills.detected.empty")}
+								</p>
+							) : (
+								<div className="flex flex-col gap-2">
+									{detections.map((item) => (
+										<div
+											key={item.id}
+											className="flex min-w-0 items-start gap-2 rounded-md bg-muted/35 px-2.5 py-2"
+										>
+											<FileText className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+											<div className="min-w-0 flex-1">
+												<div className="flex min-w-0 flex-wrap items-center gap-1.5">
+													<span className="truncate text-[12px] font-medium">
+														{item.title}
+													</span>
+													<Badge variant="outline" className="text-[10px]">
+														{t("skills.detected.itemCount", { count: item.count })}
+													</Badge>
+													{item.managedCount > 0 ? (
+														<Badge variant="secondary" className="text-[10px]">
+															{t("skills.detected.managedBadge", {
+																count: item.managedCount,
+															})}
+														</Badge>
+													) : null}
+													{item.externalCount > 0 ? (
+														<Badge variant="outline" className="text-[10px]">
+															{t("skills.detected.externalBadge", {
+																count: item.externalCount,
+															})}
+														</Badge>
+													) : null}
+												</div>
+												<p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+													{item.relativePath}
+													{" · "}
+													{item.rootKind === "project_root"
+														? t("skills.detected.projectRoot")
+														: t("skills.detected.worktreeRoot")}
+												</p>
+												<p className="mt-1 text-[11px] text-muted-foreground">
+													{detectionDescription(item)}
+												</p>
+											</div>
+										</div>
+									))}
+								</div>
+							)}
+						</div>
 						{targetRoot ? (
 							<p className="text-[11px] text-muted-foreground">
 								{t("skills.compileNote")}

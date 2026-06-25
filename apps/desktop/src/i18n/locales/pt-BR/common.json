@@ -834,6 +834,27 @@
     "editAria": "Editar {{name}}",
     "deleteAria": "Excluir {{name}}",
     "compileNote": "Compila para o worktree ativo para o agente em execução ver as mudanças.",
+    "detected": {
+      "title": "Detectado no projeto",
+      "hint": "Inventário passivo: o DCC mostra o que existe, sem importar ou reescrever arquivos externos.",
+      "empty": "Nenhum arquivo de agente ou regra externa detectado neste workspace.",
+      "itemCount_one": "{{count}} item",
+      "itemCount_other": "{{count}} itens",
+      "managedBadge_one": "{{count}} DCC",
+      "managedBadge_other": "{{count}} DCC",
+      "externalBadge_one": "{{count}} externo",
+      "externalBadge_other": "{{count}} externos",
+      "projectRoot": "raiz do projeto",
+      "worktreeRoot": "worktree ativo",
+      "behavior": {
+        "dccSource": "Fonte neutra gerenciada pelo DCC; pode ser compilada para os agentes alvo.",
+        "instructionsFile": "Arquivo nativo de instruções do agente; o DCC detecta, mas não injeta automaticamente no prompt.",
+        "claudeSkills": "Skills nativas do Claude no worktree; o Claude pode descobri-las pelo próprio runtime.",
+        "cursorRules": "Regras nativas do Cursor; entram no fluxo como contexto detectado do workspace.",
+        "codexSkills": "Skills nativas do Codex encontradas no workspace.",
+        "generic": "Contexto de agente encontrado no workspace."
+      }
+    },
     "toast": {
       "loadError": "Falha ao carregar skills",
       "compileError": "Falha ao compilar skills",
