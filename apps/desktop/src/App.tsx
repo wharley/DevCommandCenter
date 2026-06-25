@@ -47,8 +47,8 @@ import {
 } from "./features/workspaces";
 import { WorkspaceInspectorSidebar } from "./features/inspector";
 import { SettingsDialog } from "./features/settings";
-import { SkillsDialog } from "./features/skills";
-import { compileSkills } from "./lib/skills-api";
+import { SkillsDialog, getTotalSkillContextCount } from "./features/skills";
+import { compileSkills, detectSkillContext } from "./lib/skills-api";
 import { OnboardingWizard } from "./features/onboarding";
 import { ShortcutCheatsheetDialog } from "./features/shortcuts";
 import {
@@ -551,14 +551,42 @@ export default function App() {
 	// created worktree (or one edited elsewhere) picks up project skills without
 	// needing to re-save in the Skills dialog. Idempotent on the Rust side.
 	const skillsProjectRoot = selectedWorkspace?.rootPath ?? null;
+	const skillContextCountQuery = useQuery({
+		queryKey: ["skills", "context-count", skillsProjectRoot, selectedWorkspacePath],
+		enabled: !isRemoteBackend && Boolean(skillsProjectRoot),
+		queryFn: async () => {
+			if (!skillsProjectRoot) {
+				return 0;
+			}
+			const detections = await detectSkillContext(
+				skillsProjectRoot,
+				selectedWorkspacePath,
+			);
+			return getTotalSkillContextCount(detections);
+		},
+		staleTime: 10_000,
+		refetchOnWindowFocus: false,
+	});
+	const skillContextCount = skillContextCountQuery.data ?? 0;
 	useEffect(() => {
 		if (isRemoteBackend || !skillsProjectRoot || !selectedWorkspacePath) {
 			return;
 		}
-		void compileSkills(skillsProjectRoot, selectedWorkspacePath).catch(() => {
-			/* background recompile; errors surface on demand in the Skills dialog */
-		});
-	}, [isRemoteBackend, skillsProjectRoot, selectedWorkspacePath]);
+		void compileSkills(skillsProjectRoot, selectedWorkspacePath)
+			.then(() =>
+				queryClient.invalidateQueries({
+					queryKey: [
+						"skills",
+						"context-count",
+						skillsProjectRoot,
+						selectedWorkspacePath,
+					],
+				}),
+			)
+			.catch(() => {
+				/* background recompile; errors surface on demand in the Skills dialog */
+			});
+	}, [isRemoteBackend, queryClient, skillsProjectRoot, selectedWorkspacePath]);
 	const [
 		missionSpecAutoCompileFailuresByKey,
 		setMissionSpecAutoCompileFailuresByKey,
@@ -2166,6 +2194,7 @@ export default function App() {
 							}
 							onDeleteProject={isRemoteBackend ? undefined : handleDeleteProject}
 							repositories={repositoriesFromBackend}
+							skillCount={skillContextCount}
 							selectedWorkspaceId={selectedWorkspaceId}
 							workspaces={filteredWorkspaces}
 						/>
@@ -2446,6 +2475,11 @@ export default function App() {
 			<SkillsDialog
 				open={isSkillsOpen}
 				onOpenChange={setIsSkillsOpen}
+				onSkillsChanged={() => {
+					void queryClient.invalidateQueries({
+						queryKey: ["skills", "context-count"],
+					});
+				}}
 				projectRoot={selectedWorkspace?.rootPath ?? null}
 				targetRoot={selectedWorkspacePath}
 			/>

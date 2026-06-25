@@ -32,6 +32,7 @@ import {
 export type SkillsDialogProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
+	onSkillsChanged?: () => void;
 	/** Project root (`rootPath`) — the source of truth `.devcommandcenter/skills/` lives here. */
 	projectRoot: string | null;
 	/** Active worktree path where compiled artifacts (`.claude/skills`, `AGENTS.md`) land. */
@@ -70,6 +71,7 @@ function emptyForm(): FormState {
 export function SkillsDialog({
 	open,
 	onOpenChange,
+	onSkillsChanged,
 	projectRoot,
 	targetRoot,
 }: SkillsDialogProps) {
@@ -152,12 +154,13 @@ export function SkillsDialog({
 			toast.success(t("skills.toast.saved", { name }));
 			setForm(null);
 			await refresh();
+			onSkillsChanged?.();
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : t("skills.toast.saveError"));
 		} finally {
 			setBusy(false);
 		}
-	}, [projectRoot, form, recompile, refresh, t]);
+	}, [projectRoot, form, onSkillsChanged, recompile, refresh, t]);
 
 	const handleDelete = useCallback(
 		async (name: string) => {
@@ -170,13 +173,14 @@ export function SkillsDialog({
 				await recompile();
 				toast.success(t("skills.toast.deleted", { name }));
 				await refresh();
+				onSkillsChanged?.();
 			} catch (error) {
 				toast.error(error instanceof Error ? error.message : t("skills.toast.deleteError"));
 			} finally {
 				setBusy(false);
 			}
 		},
-		[projectRoot, recompile, refresh, t],
+		[onSkillsChanged, projectRoot, recompile, refresh, t],
 	);
 
 	const detectionDescription = useCallback(

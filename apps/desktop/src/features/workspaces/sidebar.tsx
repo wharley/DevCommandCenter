@@ -200,6 +200,7 @@ type WorkspacesSidebarProps = {
 		label: string;
 	}) => void;
 	repositories: Repository[];
+	skillCount?: number;
 	onOpenSettings: () => void;
 	onOpenSkills: () => void;
 	onToggleCollapsed: () => void;
@@ -232,6 +233,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onCloneWorkspace,
 	onCreateWorkspaceFromProject,
 	repositories,
+	skillCount = 0,
 	onOpenSettings,
 	onOpenSkills,
 	onToggleCollapsed,
@@ -802,11 +804,16 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								type="button"
 								variant="ghost"
 								size="icon-xs"
-								className="text-muted-foreground hover:text-foreground"
+								className="relative text-muted-foreground hover:text-foreground"
 								aria-label="Skills"
 								onClick={onOpenSkills}
 							>
 								<Sparkles className="size-4" strokeWidth={1.85} aria-hidden />
+								{skillCount > 0 ? (
+									<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-sidebar bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">
+										{skillCount}
+									</span>
+								) : null}
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent side="right">Skills</TooltipContent>
@@ -983,12 +990,17 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								type="button"
 								variant="ghost"
 								size="sm"
-								className="gap-1.5 text-muted-foreground hover:text-foreground"
+								className="relative gap-1.5 text-muted-foreground hover:text-foreground"
 								aria-label="Skills"
 								onClick={onOpenSkills}
 							>
 								<Sparkles className="size-4" strokeWidth={1.85} aria-hidden />
 								<span className="text-xs font-medium">Skills</span>
+								{skillCount > 0 ? (
+									<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-sidebar bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">
+										{skillCount}
+									</span>
+								) : null}
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent side="top">Skills</TooltipContent>
