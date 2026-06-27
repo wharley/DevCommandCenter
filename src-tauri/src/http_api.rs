@@ -1870,12 +1870,16 @@ async fn search_sessions_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     Query(query): Query<SessionSearchQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let payload = session_repo_operation(config, move |repo| {
-        let items = repo
-            .search_sessions(&query.query, query.limit)
-            .map_err(|error| error.to_string())?;
-        serde_json::to_value(items).map_err(|error| error.to_string())
-    })
+    // Sources from the live `dcc_sessions`/`dcc_workspaces` tables (via the
+    // daemon RPC) instead of the FTS index, which accumulates orphaned rows
+    // for deleted worktrees. The text query is applied client-side by the
+    // mobile companion, so we only forward the limit.
+    let payload = rpc_value(
+        config,
+        "sessions.live",
+        json!({ "limit": query.limit }),
+        DEFAULT_TIMEOUT,
+    )
     .await?;
     Ok(Json(payload))
 }

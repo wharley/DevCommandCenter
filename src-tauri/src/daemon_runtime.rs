@@ -1641,17 +1641,19 @@ impl DaemonService {
     }
 
     pub fn list_combs(&self, project_id: Option<&str>) -> Result<Value, String> {
+        // The live worktrees live in `dcc_workspaces` (the legacy `combs` table
+        // is empty in current installs). The mobile companion reads this via
+        // `/api/v1/combs`, so we map dcc_workspaces onto the comb shape it
+        // expects. The project group label is the basename of `root_path`
+        // (e.g. ".../vendeagora-app" → "vendeagora-app"); `dcc_workspaces`
+        // carries no FK into `projects`, so we derive it.
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT c.id, c.project_id, c.name, c.description, c.base_branch, c.branch, c.worktree_path,
-                            c.review_targets, c.status, c.is_pinned, c.pinned_at, c.last_opened_at, c.created_at,
-                            c.updated_at, c.last_git_activity_at, c.forge_link, p.name, p.path
-                     FROM combs c
-                     LEFT JOIN projects p ON p.id = c.project_id
-                     ORDER BY COALESCE(c.is_pinned, 0) DESC,
-                              (c.last_git_activity_at IS NULL), c.last_git_activity_at DESC,
-                              COALESCE(c.last_opened_at, c.created_at) DESC",
+                    "SELECT w.id, w.project_id, w.name, w.base_branch, w.worktree_path,
+                            w.root_path, w.state, w.created_at, w.updated_at
+                     FROM dcc_workspaces w
+                     ORDER BY w.updated_at DESC, w.created_at DESC",
                 )
                 .map_err(|e| e.to_string())?;
             let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
@@ -1663,27 +1665,85 @@ impl DaemonService {
                         continue;
                     }
                 }
-                let review_targets_raw: Option<String> = row.get(7).map_err(|e| e.to_string())?;
-                let forge_link_raw: Option<String> = row.get(15).map_err(|e| e.to_string())?;
+                let root_path: Option<String> = row.get(5).map_err(|e| e.to_string())?;
+                let project_name = root_path
+                    .as_deref()
+                    .map(|p| p.trim_end_matches('/'))
+                    .and_then(|p| p.rsplit('/').next())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| row_project_id.clone());
+                let base_branch: Option<String> = row.get(3).map_err(|e| e.to_string())?;
                 out.push(serde_json::json!({
                     "id": row.get::<_, String>(0).map_err(|e| e.to_string())?,
                     "projectId": row_project_id,
-                    "projectName": row.get::<_, Option<String>>(16).map_err(|e| e.to_string())?,
-                    "projectPath": row.get::<_, Option<String>>(17).map_err(|e| e.to_string())?,
+                    "projectName": project_name,
+                    "projectPath": root_path,
                     "name": row.get::<_, String>(2).map_err(|e| e.to_string())?,
-                    "description": row.get::<_, Option<String>>(3).map_err(|e| e.to_string())?,
-                    "baseBranch": row.get::<_, String>(4).map_err(|e| e.to_string())?,
-                    "branch": row.get::<_, Option<String>>(5).map_err(|e| e.to_string())?,
-                    "worktreePath": row.get::<_, Option<String>>(6).map_err(|e| e.to_string())?,
-                    "reviewTargets": parse_json_value(review_targets_raw.as_deref()),
-                    "forgeLink": parse_json_value(forge_link_raw.as_deref()),
-                    "status": row.get::<_, String>(8).map_err(|e| e.to_string())?,
-                    "isPinned": row.get::<_, i64>(9).map_err(|e| e.to_string())? != 0,
-                    "pinnedAt": row.get::<_, Option<String>>(10).map_err(|e| e.to_string())?,
-                    "lastOpenedAt": row.get::<_, Option<String>>(11).map_err(|e| e.to_string())?,
-                    "createdAt": row.get::<_, Option<String>>(12).map_err(|e| e.to_string())?,
-                    "updatedAt": row.get::<_, Option<String>>(13).map_err(|e| e.to_string())?,
-                    "lastGitActivityAt": row.get::<_, Option<String>>(14).map_err(|e| e.to_string())?,
+                    "description": Value::Null,
+                    "baseBranch": base_branch.clone(),
+                    "branch": base_branch,
+                    "worktreePath": row.get::<_, Option<String>>(4).map_err(|e| e.to_string())?,
+                    "reviewTargets": Value::Null,
+                    "forgeLink": Value::Null,
+                    "status": row.get::<_, String>(6).map_err(|e| e.to_string())?,
+                    "isPinned": false,
+                    "pinnedAt": Value::Null,
+                    "lastOpenedAt": row.get::<_, Option<String>>(8).map_err(|e| e.to_string())?,
+                    "createdAt": row.get::<_, Option<String>>(7).map_err(|e| e.to_string())?,
+                    "updatedAt": row.get::<_, Option<String>>(8).map_err(|e| e.to_string())?,
+                    "lastGitActivityAt": Value::Null,
+                }));
+            }
+            Ok(Value::Array(out))
+        })
+    }
+
+    /// Live session list for the mobile companion, mapped onto the
+    /// `SessionSearchResult` shape. Sources from `dcc_sessions` joined to the
+    /// live `dcc_workspaces` — the INNER JOIN drops orphaned sessions whose
+    /// worktree was deleted/recreated (the stale FTS index keeps those around
+    /// and is what made the phone show threads the desktop no longer lists).
+    pub fn list_live_sessions(&self, limit: u64) -> Result<Value, String> {
+        let safe_limit = limit.clamp(1, 200) as i64;
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT s.id, COALESCE(NULLIF(t.title, ''), w.name) AS thread_title,
+                            s.workspace_id, w.name AS workspace_name, w.base_branch,
+                            w.project_id, w.root_path, s.provider_id, s.model,
+                            s.updated_at, t.archived_at
+                     FROM dcc_sessions s
+                     JOIN dcc_workspaces w ON w.id = s.workspace_id
+                     LEFT JOIN dcc_threads t ON t.session_id = s.id
+                     WHERE w.state != 'archived'
+                     ORDER BY s.updated_at DESC
+                     LIMIT ?1",
+                )
+                .map_err(|e| e.to_string())?;
+            let mut rows = stmt.query([safe_limit]).map_err(|e| e.to_string())?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+                let root_path: Option<String> = row.get(6).map_err(|e| e.to_string())?;
+                let project_name = root_path
+                    .as_deref()
+                    .map(|p| p.trim_end_matches('/'))
+                    .and_then(|p| p.rsplit('/').next())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+                out.push(serde_json::json!({
+                    "sessionId": row.get::<_, String>(0).map_err(|e| e.to_string())?,
+                    "threadTitle": row.get::<_, Option<String>>(1).map_err(|e| e.to_string())?,
+                    "snippet": Value::Null,
+                    "providerId": row.get::<_, Option<String>>(7).map_err(|e| e.to_string())?,
+                    "model": row.get::<_, Option<String>>(8).map_err(|e| e.to_string())?,
+                    "workspaceName": row.get::<_, Option<String>>(3).map_err(|e| e.to_string())?,
+                    "workspaceBranch": row.get::<_, Option<String>>(4).map_err(|e| e.to_string())?,
+                    "workspaceId": row.get::<_, Option<String>>(2).map_err(|e| e.to_string())?,
+                    "projectId": row.get::<_, Option<String>>(5).map_err(|e| e.to_string())?,
+                    "projectName": project_name,
+                    "updatedAt": row.get::<_, Option<String>>(9).map_err(|e| e.to_string())?,
+                    "archivedAt": row.get::<_, Option<String>>(10).map_err(|e| e.to_string())?,
                 }));
             }
             Ok(Value::Array(out))
@@ -1840,7 +1900,7 @@ impl DaemonService {
         if !comb_ids.is_empty() {
             let extra_paths = self.with_conn(|conn| {
                 let mut stmt = conn
-                    .prepare("SELECT worktree_path FROM combs WHERE id = ?1 AND worktree_path IS NOT NULL AND worktree_path != ''")
+                    .prepare("SELECT worktree_path FROM dcc_workspaces WHERE id = ?1 AND worktree_path IS NOT NULL AND worktree_path != ''")
                     .map_err(|e| e.to_string())?;
                 let mut out = Vec::new();
                 for comb_id in &comb_ids {
@@ -2186,6 +2246,14 @@ fn handle_rpc(service: &DaemonService, request: RpcRequest) -> RpcResponse {
                 })
                 .unwrap_or_default();
             service.diffs_bundle(worktree_paths, comb_ids)
+        }
+        "sessions.live" => {
+            let limit = request
+                .params
+                .get("limit")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(60);
+            service.list_live_sessions(limit)
         }
         _ => Err(format!("unknown method: {}", request.method)),
     };
