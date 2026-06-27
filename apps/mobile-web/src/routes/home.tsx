@@ -69,10 +69,13 @@ type PendingItem = {
 	at: string;
 };
 
+/** Per-session outcome derived from its event stream (recent threads only). */
+type LiveStatus = "running" | "completed" | "aborted";
+
 type Scan = {
 	sessions: SessionSearchResult[];
-	/** sessionId → derived live state from a recent-events sweep. */
-	running: Set<string>;
+	/** sessionId → derived state from a recent-events sweep. */
+	statuses: Map<string, LiveStatus>;
 	needsYou: PendingItem[];
 };
 
@@ -275,7 +278,7 @@ function PairedHome({ session }: { session: PairingSession }) {
 			(s) => !workspaceFilter || s.workspaceId === workspaceFilter,
 		);
 		const running = visible.filter(
-			(s) => scan.running.has(s.sessionId) && !blocked.has(s.sessionId),
+			(s) => scan.statuses.get(s.sessionId) === "running" && !blocked.has(s.sessionId),
 		);
 		const runningIds = new Set(running.map((s) => s.sessionId));
 		const recent = visible
@@ -296,19 +299,24 @@ function PairedHome({ session }: { session: PairingSession }) {
 	const filteredCombs = useMemo(() => {
 		if (!combs) return null;
 		const q = search.trim().toLowerCase();
+		const active = combs.filter((c) => c.status !== "archived");
 		const base = q
-			? combs.filter((c) =>
+			? active.filter((c) =>
 					[c.name, c.projectName, c.projectId, c.branch]
 						.filter(Boolean)
 						.join(" ")
 						.toLowerCase()
 						.includes(q),
 				)
-			: combs;
-		return [...base].sort((a, b) =>
-			(b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? ""),
-		);
-	}, [combs, search]);
+			: active;
+		// Workspaces with threads float up; ties broken by recency.
+		return [...base].sort((a, b) => {
+			const an = sessionsByWorkspace.get(a.id) ?? 0;
+			const bn = sessionsByWorkspace.get(b.id) ?? 0;
+			if ((an > 0) !== (bn > 0)) return bn - an;
+			return (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? "");
+		});
+	}, [combs, search, sessionsByWorkspace]);
 
 	const activeWorkspace = workspaceFilter
 		? combs?.find((c) => c.id === workspaceFilter) ?? null
@@ -391,19 +399,19 @@ function PairedHome({ session }: { session: PairingSession }) {
 				{tab === "workspaces" ? (
 					<WorkspacesList
 						combs={filteredCombs}
-						sessionCount={sessionsByWorkspace}
+						sessions={sessions ?? []}
+						statuses={scan?.statuses ?? new Map()}
 						diffs={diffs}
-						onPick={(id) => {
-							setWorkspaceFilter(id);
-							setTab("agents");
-							setSearch("");
-						}}
 					/>
 				) : flatSearch !== null ? (
-					<FlatResults sessions={flatSearch} running={scan?.running ?? new Set()} />
+					<FlatResults
+						sessions={flatSearch}
+						statuses={scan?.statuses ?? new Map()}
+					/>
 				) : (
 					<Triage
 						groups={groups}
+						statuses={scan?.statuses ?? new Map()}
 						resolving={resolving}
 						onRespond={(item, choice) => void respond(item, choice)}
 					/>
@@ -511,10 +519,12 @@ function DaemonBar({
 
 function Triage({
 	groups,
+	statuses,
 	resolving,
 	onRespond,
 }: {
 	groups: { needsYou: PendingItem[]; running: SessionSearchResult[]; recent: SessionSearchResult[] } | null;
+	statuses: Map<string, LiveStatus>;
 	resolving: Set<string>;
 	onRespond: (item: PendingItem, choice: string) => void;
 }) {
@@ -568,7 +578,7 @@ function Triage({
 					<ul className="space-y-2">
 						{running.map((s) => (
 							<li key={s.sessionId}>
-								<SessionRow session={s} state="live" />
+								<SessionRow session={s} status="running" />
 							</li>
 						))}
 					</ul>
@@ -581,7 +591,7 @@ function Triage({
 					<ul className="space-y-2">
 						{recent.map((s) => (
 							<li key={s.sessionId}>
-								<SessionRow session={s} state="idle" />
+								<SessionRow session={s} status={statuses.get(s.sessionId)} />
 							</li>
 						))}
 					</ul>
@@ -593,10 +603,10 @@ function Triage({
 
 function FlatResults({
 	sessions,
-	running,
+	statuses,
 }: {
 	sessions: SessionSearchResult[];
-	running: Set<string>;
+	statuses: Map<string, LiveStatus>;
 }) {
 	if (sessions.length === 0) {
 		return <Rest title="Nenhum resultado">Tente outro termo.</Rest>;
@@ -605,10 +615,7 @@ function FlatResults({
 		<ul className="space-y-2">
 			{sessions.map((s) => (
 				<li key={s.sessionId}>
-					<SessionRow
-						session={s}
-						state={running.has(s.sessionId) ? "live" : "idle"}
-					/>
+					<SessionRow session={s} status={statuses.get(s.sessionId)} />
 				</li>
 			))}
 		</ul>
@@ -674,61 +681,93 @@ function NeedsYouCard({
 	);
 }
 
+const DOT_FOR_STATUS: Record<LiveStatus, AgentState> = {
+	running: "live",
+	completed: "idle",
+	aborted: "fail",
+};
+
 function SessionRow({
 	session,
-	state,
+	status,
 }: {
 	session: SessionSearchResult;
-	state: AgentState;
+	status?: LiveStatus;
 }) {
 	const title = sessionTitle(session);
-	const place = workspaceLabel(session);
+	const workspace = session.workspaceName ?? session.projectId;
 	return (
 		<Link
 			to="/threads/$threadId"
 			params={{ threadId: session.sessionId }}
 			className="flex items-center gap-3 rounded-xl border border-border bg-panel px-3.5 py-3 active:bg-elevated"
 		>
-			<StateDot state={state} className="mt-0.5 self-start" />
+			<StateDot
+				state={status ? DOT_FOR_STATUS[status] : "idle"}
+				className="mt-0.5 self-start"
+			/>
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-2">
 					<p className="truncate text-[13.5px] font-medium">{title}</p>
 					<ProviderTag providerId={session.providerId} />
 				</div>
-				{place ? (
+				{workspace ? (
 					<p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[10px] text-mute">
+						<FolderGit2 className="size-3 shrink-0 text-faint" />
+						<span className="truncate text-foreground/70">{workspace}</span>
 						{session.workspaceBranch ? (
-							<GitBranch className="size-3 shrink-0 text-faint" />
+							<>
+								<GitBranch className="size-3 shrink-0 text-faint" />
+								<span className="truncate">{session.workspaceBranch}</span>
+							</>
 						) : null}
-						<span className="truncate">{place}</span>
 					</p>
 				) : null}
-				{state === "live" ? (
-					<p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-accent">
-						trabalhando…
-					</p>
-				) : (
-					<p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-faint">
-						{formatRelative(session.updatedAt)}
-					</p>
-				)}
+				<div className="mt-1 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider">
+					<StatusText status={status} />
+					<span className="text-faint">· {formatRelative(session.updatedAt)}</span>
+				</div>
 			</div>
 			<ChevronRight className="size-4 shrink-0 self-center text-faint" />
 		</Link>
 	);
 }
 
+function StatusText({ status }: { status?: LiveStatus }) {
+	if (status === "running")
+		return <span className="text-accent">trabalhando…</span>;
+	if (status === "completed")
+		return <span className="text-accent/80">Concluído</span>;
+	if (status === "aborted")
+		return <span className="text-danger">Interrompido</span>;
+	return <span className="text-faint">aberta</span>;
+}
+
 function WorkspacesList({
 	combs,
-	sessionCount,
+	sessions,
+	statuses,
 	diffs,
-	onPick,
 }: {
 	combs: Comb[] | null;
-	sessionCount: Map<string, number>;
+	sessions: SessionSearchResult[];
+	statuses: Map<string, LiveStatus>;
 	diffs: Map<string, WorktreeDiff> | null;
-	onPick: (id: string) => void;
 }) {
+	const threadsByWorkspace = useMemo(() => {
+		const map = new Map<string, SessionSearchResult[]>();
+		for (const s of sessions) {
+			if (!s.workspaceId) continue;
+			const list = map.get(s.workspaceId) ?? [];
+			list.push(s);
+			map.set(s.workspaceId, list);
+		}
+		for (const list of map.values()) {
+			list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+		}
+		return map;
+	}, [sessions]);
+
 	if (combs === null) {
 		return (
 			<div className="flex justify-center py-10 text-mute">
@@ -740,44 +779,66 @@ function WorkspacesList({
 		return <Rest title="Nenhum workspace">Crie um pelo app desktop.</Rest>;
 	}
 	return (
-		<ul className="space-y-2">
+		<ul className="space-y-2.5">
 			{combs.map((c) => {
-				const count = sessionCount.get(c.id) ?? 0;
 				const diff = c.worktreePath ? diffs?.get(c.worktreePath) ?? null : null;
+				const threads = threadsByWorkspace.get(c.id) ?? [];
 				return (
 					<li
 						key={c.id}
-						className="flex items-stretch overflow-hidden rounded-xl border border-border bg-panel"
+						className="overflow-hidden rounded-xl border border-border bg-panel"
 					>
-						<button
-							type="button"
-							onClick={() => onPick(c.id)}
-							className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-3 text-left active:bg-elevated"
-						>
-							<FolderGit2 className="size-4 shrink-0 text-mute" />
-							<div className="min-w-0 flex-1">
-								<p className="truncate text-[13.5px] font-medium">
-									{c.name ?? c.projectName ?? c.id}
-								</p>
-								<p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[10px] text-mute">
-									{c.branch ? <GitBranch className="size-3 text-faint" /> : null}
-									<span className="truncate">
-										{[c.projectName, c.branch].filter(Boolean).join(" · ")}
-									</span>
-									{count > 0 ? (
-										<span className="text-faint">· {count} sess</span>
-									) : null}
-								</p>
+						<div className="flex items-stretch">
+							<div className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-3">
+								<FolderGit2 className="size-4 shrink-0 text-mute" />
+								<div className="min-w-0 flex-1">
+									<p className="truncate text-[13.5px] font-medium">
+										{c.name ?? c.projectName ?? c.id}
+									</p>
+									<p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[10px] text-mute">
+										{c.branch ? <GitBranch className="size-3 shrink-0 text-faint" /> : null}
+										<span className="truncate">
+											{[c.projectName, c.branch].filter(Boolean).join(" · ")}
+										</span>
+									</p>
+								</div>
 							</div>
-						</button>
-						<Link
-							to="/diff/$combId"
-							params={{ combId: c.id }}
-							title="Ver o que mudou"
-							className="flex shrink-0 items-center gap-1.5 border-l border-border px-3 font-mono text-[11px] tabular-nums active:bg-elevated"
-						>
-							<DiffPill diff={diffs ? diff : undefined} />
-						</Link>
+							<Link
+								to="/diff/$combId"
+								params={{ combId: c.id }}
+								title="Ver o que mudou"
+								className="flex shrink-0 items-center gap-1.5 border-l border-border px-3 font-mono text-[11px] tabular-nums active:bg-elevated"
+							>
+								<DiffPill diff={diffs ? diff : undefined} />
+							</Link>
+						</div>
+						{threads.length > 0 ? (
+							<ul className="border-t border-border/60">
+								{threads.map((t) => (
+									<li key={t.sessionId}>
+										<Link
+											to="/threads/$threadId"
+											params={{ threadId: t.sessionId }}
+											className="flex items-center gap-2.5 border-t border-border/40 px-3.5 py-2.5 first:border-t-0 active:bg-elevated"
+										>
+											<StateDot
+												state={
+													statuses.get(t.sessionId)
+														? DOT_FOR_STATUS[statuses.get(t.sessionId)!]
+														: "idle"
+												}
+											/>
+											<span className="min-w-0 flex-1 truncate text-[13px]">
+												{sessionTitle(t)}
+											</span>
+											<span className="shrink-0 font-mono text-[10px] uppercase tracking-wider">
+												<StatusText status={statuses.get(t.sessionId)} />
+											</span>
+										</Link>
+									</li>
+								))}
+							</ul>
+						) : null}
 					</li>
 				);
 			})}
@@ -860,7 +921,22 @@ async function runScan(
 		apiFetch<SessionSearchResult[]>(session, "/api/v1/sessions/search?limit=60"),
 		apiFetch<Comb[]>(session, "/api/v1/combs").catch(() => [] as Comb[]),
 	]);
-	const sessions = sessRaw.filter((s) => !s.archivedAt);
+
+	// Only surface sessions whose workspace is still live: drop session-level
+	// archives, plus anything under a workspace that was archived or deleted.
+	// Deleted combs are absent from the list; archived ones carry status.
+	// Guard: if the combs fetch came back empty we can't trust the set, so we
+	// skip the workspace filter rather than hide everything.
+	const activeWorkspaces =
+		combs.length > 0
+			? new Set(combs.filter((c) => c.status !== "archived").map((c) => c.id))
+			: null;
+	const sessions = sessRaw.filter((s) => {
+		if (s.archivedAt) return false;
+		if (activeWorkspaces && s.workspaceId && !activeWorkspaces.has(s.workspaceId))
+			return false;
+		return true;
+	});
 
 	const cutoff = Date.now() - RECENT_SCAN_WINDOW_MS;
 	const recent = sessions
@@ -881,12 +957,13 @@ async function runScan(
 		),
 	);
 
-	const running = new Set<string>();
+	const statuses = new Map<string, LiveStatus>();
 	const needsYou: PendingItem[] = [];
 	for (const { thread, events } of sweeps) {
 		const requested = new Map<string, RawSessionEvent>();
 		const resolved = new Set<string>();
 		let live = false;
+		let lastEnd: "completed" | "aborted" | null = null;
 		for (const event of events) {
 			const kind = event.kind;
 			switch (kind?.type) {
@@ -894,10 +971,14 @@ async function runScan(
 					live = true;
 					break;
 				case "turn_completed":
-				case "turn_aborted":
 				case "session_completed":
+					live = false;
+					lastEnd = "completed";
+					break;
+				case "turn_aborted":
 				case "session_aborted":
 					live = false;
+					lastEnd = "aborted";
 					break;
 				case "turn_permission_requested": {
 					const id =
@@ -912,7 +993,8 @@ async function runScan(
 				}
 			}
 		}
-		if (live) running.add(thread.sessionId);
+		if (live) statuses.set(thread.sessionId, "running");
+		else if (lastEnd) statuses.set(thread.sessionId, lastEnd);
 		for (const [id, event] of requested) {
 			if (resolved.has(id)) continue;
 			const kind = event.kind ?? {};
@@ -934,5 +1016,5 @@ async function runScan(
 	}
 	needsYou.sort((a, b) => b.at.localeCompare(a.at));
 
-	return { scan: { sessions, running, needsYou }, combs };
+	return { scan: { sessions, statuses, needsYou }, combs };
 }

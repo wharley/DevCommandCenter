@@ -447,7 +447,7 @@ function MessageView({
 function UserBubble({ text }: { text: string }) {
 	return (
 		<div className="flex justify-end">
-			<div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent px-3.5 py-2 text-[14px] leading-relaxed text-[var(--color-accent-ink)]">
+			<div className="max-w-[85%] min-w-0 overflow-hidden whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-accent px-3.5 py-2 text-[14px] leading-relaxed text-[var(--color-accent-ink)]">
 				{text || <em className="opacity-60">(vazio)</em>}
 			</div>
 		</div>
@@ -465,7 +465,7 @@ function AssistantBubble({
 }) {
 	return (
 		<div className="flex justify-start">
-			<div className="max-w-[90%] rounded-2xl rounded-bl-md border border-border bg-panel px-3.5 py-2 text-foreground">
+			<div className="max-w-[90%] min-w-0 overflow-hidden rounded-2xl rounded-bl-md border border-border bg-panel px-3.5 py-2 text-foreground">
 				{text ? (
 					<Markdown text={text} />
 				) : (
@@ -509,14 +509,14 @@ function ToolRow({
 			<button
 				type="button"
 				onClick={() => setOpen((o) => !o)}
-				className="flex w-full items-center gap-2 text-left"
+				className="flex w-full min-w-0 items-center gap-2 text-left"
 			>
-				<Wrench className="size-3.5" />
-				<span className="flex-1 font-mono text-[12px]">{message.toolName}</span>
-				<span className="text-[10px] uppercase tracking-wider">
+				<Wrench className="size-3.5 shrink-0" />
+				<span className="min-w-0 flex-1 truncate font-mono text-[12px]">{message.toolName}</span>
+				<span className="shrink-0 text-[10px] uppercase tracking-wider">
 					{message.status}
 				</span>
-				{open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+				{open ? <ChevronUp className="size-3.5 shrink-0" /> : <ChevronDown className="size-3.5 shrink-0" />}
 			</button>
 			{open ? (
 				<div className="mt-2 space-y-2 border-t border-current/10 pt-2">
