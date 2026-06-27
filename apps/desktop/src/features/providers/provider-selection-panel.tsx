@@ -1,6 +1,7 @@
-import { Check, ChevronDown, Sparkles } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
+import { ProviderIcon } from "./provider-icons";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -168,6 +169,7 @@ function CompactProviderPicker({
 							<div className="flex items-start justify-between gap-3">
 								<div className="min-w-0">
 									<div className="flex items-center gap-2">
+										<ProviderIcon provider={provider.id} className="size-4" />
 										<span className="truncate text-[13px] font-medium text-foreground">
 											{provider.label}
 										</span>
@@ -237,7 +239,7 @@ export function ProviderSelectionPanel({
 						<div className="flex items-start justify-between gap-3">
 							<div className="min-w-0">
 								<div className="flex items-center gap-2">
-									<Sparkles className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+									<ProviderIcon provider={selectedProvider.id} className="size-4" />
 									<h4 className="truncate text-[14px] font-medium text-foreground">
 										{selectedProvider.label}
 									</h4>
@@ -304,6 +306,7 @@ export function ProviderSelectionPanel({
 											: "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
 									)}
 								>
+									<ProviderIcon provider={provider.id} className="mt-0.5 size-4" />
 									<div className="min-w-0 flex-1">
 										<div className="flex items-center gap-2">
 											<span className="truncate text-[13px] font-medium">
@@ -334,7 +337,7 @@ export function ProviderSelectionPanel({
 							<div className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
 								<div className="min-w-0">
 									<div className="flex items-center gap-2">
-										<Sparkles className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+										<ProviderIcon provider={selectedProvider.id} className="size-4" />
 										<h4 className="truncate text-[15px] font-medium text-foreground">
 											{selectedProvider.label}
 										</h4>

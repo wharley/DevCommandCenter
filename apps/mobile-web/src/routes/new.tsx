@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, Check, FolderGit2, Loader2 } from "lucide-react";
+import { ProviderIcon } from "@/components/provider-icon";
 import { ApiError, apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { loadSession, type PairingSession } from "@/lib/session";
@@ -228,6 +229,7 @@ export function NewThreadRoute() {
 									: "border-border active:bg-muted/20",
 							)}
 						>
+							<ProviderIcon provider={p.id} className="size-5 shrink-0" />
 							<div className="min-w-0 flex-1">
 								<p className="text-[14px] font-medium">{p.label}</p>
 								<p className="mt-0.5 text-[11px] text-mute">{p.description}</p>

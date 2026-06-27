@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckIcon, ChevronDown, Sparkles } from "lucide-react";
+import { CheckIcon, ChevronDown } from "lucide-react";
 import type { ProviderCatalog } from "@dcc/contracts";
+import { ProviderIcon } from "@/features/providers/provider-icons";
 import {
 	Command,
 	CommandEmpty,
@@ -108,9 +109,9 @@ export function ComposerProviderModelMenu({
 							"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
 					)}
 				>
-					<Sparkles
-						className="mt-0.5 size-[13px] shrink-0 self-start"
-						strokeWidth={1.8}
+					<ProviderIcon
+						provider={selectedProvider?.id ?? selectedProvider?.label}
+						className="mt-0.5 size-[15px] shrink-0 self-start"
 					/>
 					<div className="min-w-0 flex-1 text-left">
 						{selectedModel ? (
@@ -165,9 +166,9 @@ export function ComposerProviderModelMenu({
 											}}
 											className="[&>svg:last-child]:hidden flex items-center gap-2 font-mono text-[13px] tabular-nums"
 										>
-											<Sparkles
-												className="size-4 shrink-0 text-muted-foreground"
-												strokeWidth={1.6}
+											<ProviderIcon
+												provider={provider.id ?? provider.label}
+												className="size-4"
 											/>
 											<span className="min-w-0 flex-1 truncate">{model.label}</span>
 											{isActive ? (
