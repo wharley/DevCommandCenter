@@ -560,6 +560,144 @@ where
     .map_err(classify_session_error)
 }
 
+/// Run a read-only query against the app database in-process (inside dccd-http),
+/// bypassing the daemon RPC queue. The queue is served by a separate, possibly
+/// stale daemon process, so the mobile endpoints that need current data read
+/// the live tables (`dcc_workspaces`, `dcc_sessions`) directly here.
+async fn db_read<T, F>(config: Arc<RwLock<HttpConfig>>, op: F) -> Result<T, HttpApiError>
+where
+    T: Send + 'static,
+    F: FnOnce(&rusqlite::Connection) -> Result<T, String> + Send + 'static,
+{
+    let db_path = {
+        let config = config.read().await;
+        config.db_path.clone()
+    };
+    tokio::task::spawn_blocking(move || {
+        let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+        op(&conn)
+    })
+    .await
+    .map_err(|e| HttpApiError::internal(format!("db worker join failed: {e}")))?
+    .map_err(HttpApiError::internal)
+}
+
+fn root_path_basename(root_path: Option<&str>) -> Option<String> {
+    root_path
+        .map(|p| p.trim_end_matches('/'))
+        .and_then(|p| p.rsplit('/').next())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+/// Live worktrees mapped onto the comb shape the mobile companion expects.
+/// Sources `dcc_workspaces` (the legacy `combs` table is empty in current
+/// installs); the project group label is the basename of `root_path`.
+fn live_combs(conn: &rusqlite::Connection, project_id: Option<String>) -> Result<Value, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT w.id, w.project_id, w.name, w.base_branch, w.worktree_path,
+                    w.root_path, w.state, w.created_at, w.updated_at
+             FROM dcc_workspaces w
+             ORDER BY w.updated_at DESC, w.created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let row_project_id: String = row.get(1).map_err(|e| e.to_string())?;
+        if let Some(ref filter) = project_id {
+            if *filter != row_project_id {
+                continue;
+            }
+        }
+        let root_path: Option<String> = row.get(5).map_err(|e| e.to_string())?;
+        let project_name =
+            root_path_basename(root_path.as_deref()).unwrap_or_else(|| row_project_id.clone());
+        let base_branch: Option<String> = row.get(3).map_err(|e| e.to_string())?;
+        out.push(json!({
+            "id": row.get::<_, String>(0).map_err(|e| e.to_string())?,
+            "projectId": row_project_id,
+            "projectName": project_name,
+            "projectPath": root_path,
+            "name": row.get::<_, String>(2).map_err(|e| e.to_string())?,
+            "description": Value::Null,
+            "baseBranch": base_branch.clone(),
+            "branch": base_branch,
+            "worktreePath": row.get::<_, Option<String>>(4).map_err(|e| e.to_string())?,
+            "reviewTargets": Value::Null,
+            "forgeLink": Value::Null,
+            "status": row.get::<_, String>(6).map_err(|e| e.to_string())?,
+            "isPinned": false,
+            "pinnedAt": Value::Null,
+            "lastOpenedAt": row.get::<_, Option<String>>(8).map_err(|e| e.to_string())?,
+            "createdAt": row.get::<_, Option<String>>(7).map_err(|e| e.to_string())?,
+            "updatedAt": row.get::<_, Option<String>>(8).map_err(|e| e.to_string())?,
+            "lastGitActivityAt": Value::Null,
+        }));
+    }
+    Ok(Value::Array(out))
+}
+
+/// Live sessions for the mobile companion, mapped onto `SessionSearchResult`.
+/// The INNER JOIN to `dcc_workspaces` drops orphaned sessions left in the FTS
+/// index by deleted/recreated worktrees.
+fn live_sessions(conn: &rusqlite::Connection, limit: i64) -> Result<Value, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT s.id, COALESCE(NULLIF(t.title, ''), w.name) AS thread_title,
+                    s.workspace_id, w.name AS workspace_name, w.base_branch,
+                    w.project_id, w.root_path, s.provider_id, s.model,
+                    s.updated_at, t.archived_at
+             FROM dcc_sessions s
+             JOIN dcc_workspaces w ON w.id = s.workspace_id
+             LEFT JOIN dcc_threads t ON t.session_id = s.id
+             WHERE w.state != 'archived'
+             ORDER BY s.updated_at DESC
+             LIMIT ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt.query([limit]).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let root_path: Option<String> = row.get(6).map_err(|e| e.to_string())?;
+        out.push(json!({
+            "sessionId": row.get::<_, String>(0).map_err(|e| e.to_string())?,
+            "threadTitle": row.get::<_, Option<String>>(1).map_err(|e| e.to_string())?,
+            "snippet": Value::Null,
+            "providerId": row.get::<_, Option<String>>(7).map_err(|e| e.to_string())?,
+            "model": row.get::<_, Option<String>>(8).map_err(|e| e.to_string())?,
+            "workspaceName": row.get::<_, Option<String>>(3).map_err(|e| e.to_string())?,
+            "workspaceBranch": row.get::<_, Option<String>>(4).map_err(|e| e.to_string())?,
+            "workspaceId": row.get::<_, Option<String>>(2).map_err(|e| e.to_string())?,
+            "projectId": row.get::<_, Option<String>>(5).map_err(|e| e.to_string())?,
+            "projectName": root_path_basename(root_path.as_deref()),
+            "updatedAt": row.get::<_, Option<String>>(9).map_err(|e| e.to_string())?,
+            "archivedAt": row.get::<_, Option<String>>(10).map_err(|e| e.to_string())?,
+        }));
+    }
+    Ok(Value::Array(out))
+}
+
+fn resolve_worktree_paths(
+    conn: &rusqlite::Connection,
+    comb_ids: &[String],
+) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT worktree_path FROM dcc_workspaces
+             WHERE id = ?1 AND worktree_path IS NOT NULL AND worktree_path != ''",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for id in comb_ids {
+        if let Ok(path) = stmt.query_row([id.as_str()], |row| row.get::<_, String>(0)) {
+            out.push(path);
+        }
+    }
+    Ok(out)
+}
+
 async fn headless_session_state(
     config: Arc<RwLock<HttpConfig>>,
 ) -> Result<Arc<SessionCommandState>, HttpApiError> {
@@ -1663,13 +1801,9 @@ async fn list_combs_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     Query(query): Query<ProjectFilterQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let payload = rpc_value(
-        config,
-        "combs.list",
-        json!({ "projectId": query.project_id }),
-        DEFAULT_TIMEOUT,
-    )
-    .await?;
+    // In-process read of the live worktrees (see `live_combs`).
+    let project_id = query.project_id.clone();
+    let payload = db_read(config, move |conn| live_combs(conn, project_id)).await?;
     Ok(Json(payload))
 }
 
@@ -1694,13 +1828,20 @@ async fn diffs_bundle_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     Json(body): Json<BundleRequest>,
 ) -> Result<Json<Value>, HttpApiError> {
+    // Resolve comb ids → worktree paths in-process (against the live
+    // `dcc_workspaces`), then hand the daemon plain paths. The daemon's git
+    // logic is unchanged and works regardless of which table holds the combs.
+    let mut paths = body.worktree_paths.clone();
+    if !body.comb_ids.is_empty() {
+        let comb_ids = body.comb_ids.clone();
+        let resolved =
+            db_read(config.clone(), move |conn| resolve_worktree_paths(conn, &comb_ids)).await?;
+        paths.extend(resolved);
+    }
     let payload = rpc_value(
         config,
         "diffs.bundle",
-        json!({
-            "worktreePaths": body.worktree_paths,
-            "combIds": body.comb_ids,
-        }),
+        json!({ "worktreePaths": paths, "combIds": [] }),
         DEFAULT_TIMEOUT,
     )
     .await?;
@@ -1870,17 +2011,11 @@ async fn search_sessions_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     Query(query): Query<SessionSearchQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
-    // Sources from the live `dcc_sessions`/`dcc_workspaces` tables (via the
-    // daemon RPC) instead of the FTS index, which accumulates orphaned rows
-    // for deleted worktrees. The text query is applied client-side by the
-    // mobile companion, so we only forward the limit.
-    let payload = rpc_value(
-        config,
-        "sessions.live",
-        json!({ "limit": query.limit }),
-        DEFAULT_TIMEOUT,
-    )
-    .await?;
+    // Reads the live `dcc_sessions`/`dcc_workspaces` tables in-process instead
+    // of the FTS index (which accumulates orphaned rows for deleted worktrees).
+    // The text query is applied client-side by the mobile companion.
+    let limit = query.limit.clamp(1, 200) as i64;
+    let payload = db_read(config, move |conn| live_sessions(conn, limit)).await?;
     Ok(Json(payload))
 }
 

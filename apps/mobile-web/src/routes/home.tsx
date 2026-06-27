@@ -754,19 +754,30 @@ function WorkspacesList({
 	statuses: Map<string, LiveStatus>;
 	diffs: Map<string, WorktreeDiff> | null;
 }) {
-	const threadsByWorkspace = useMemo(() => {
-		const map = new Map<string, SessionSearchResult[]>();
+	// Each worktree opens its most-recent session.
+	const latestByWorkspace = useMemo(() => {
+		const map = new Map<string, SessionSearchResult>();
 		for (const s of sessions) {
 			if (!s.workspaceId) continue;
-			const list = map.get(s.workspaceId) ?? [];
-			list.push(s);
-			map.set(s.workspaceId, list);
-		}
-		for (const list of map.values()) {
-			list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+			const cur = map.get(s.workspaceId);
+			if (!cur || s.updatedAt.localeCompare(cur.updatedAt) > 0) {
+				map.set(s.workspaceId, s);
+			}
 		}
 		return map;
 	}, [sessions]);
+
+	// Group worktrees under their project (desktop's mental model).
+	const projects = useMemo(() => {
+		const map = new Map<string, Comb[]>();
+		for (const c of combs ?? []) {
+			const key = c.projectName ?? c.projectId ?? "—";
+			const list = map.get(key) ?? [];
+			list.push(c);
+			map.set(key, list);
+		}
+		return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+	}, [combs]);
 
 	if (combs === null) {
 		return (
@@ -779,70 +790,70 @@ function WorkspacesList({
 		return <Rest title="Nenhum workspace">Crie um pelo app desktop.</Rest>;
 	}
 	return (
-		<ul className="space-y-2.5">
-			{combs.map((c) => {
-				const diff = c.worktreePath ? diffs?.get(c.worktreePath) ?? null : null;
-				const threads = threadsByWorkspace.get(c.id) ?? [];
-				return (
-					<li
-						key={c.id}
-						className="overflow-hidden rounded-xl border border-border bg-panel"
-					>
-						<div className="flex items-stretch">
-							<div className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-3">
-								<FolderGit2 className="size-4 shrink-0 text-mute" />
-								<div className="min-w-0 flex-1">
-									<p className="truncate text-[13.5px] font-medium">
-										{c.name ?? c.projectName ?? c.id}
-									</p>
-									<p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[10px] text-mute">
-										{c.branch ? <GitBranch className="size-3 shrink-0 text-faint" /> : null}
-										<span className="truncate">
-											{[c.projectName, c.branch].filter(Boolean).join(" · ")}
-										</span>
-									</p>
+		<div className="space-y-5">
+			{projects.map(([projectName, projectCombs]) => (
+				<section key={projectName}>
+					<div className="mb-2 flex items-center gap-2 px-0.5">
+						<FolderGit2 className="size-3.5 shrink-0 text-mute" />
+						<span className="truncate text-[12px] font-semibold">{projectName}</span>
+						<span className="shrink-0 rounded-full bg-elevated px-1.5 font-mono text-[10px] tabular-nums text-mute">
+							{projectCombs.length}
+						</span>
+						<span className="h-px flex-1 bg-border/60" />
+					</div>
+					<ul className="space-y-2">
+						{projectCombs.map((c) => {
+							const sess = latestByWorkspace.get(c.id) ?? null;
+							const status = sess ? statuses.get(sess.sessionId) : undefined;
+							const diff = c.worktreePath ? diffs?.get(c.worktreePath) ?? null : null;
+							const body = (
+								<div className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-3">
+									<StateDot state={status ? DOT_FOR_STATUS[status] : "idle"} />
+									<div className="min-w-0 flex-1">
+										<p className="truncate text-[13.5px] font-medium">{c.name}</p>
+										<p className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-[10px] uppercase tracking-wider">
+											{c.branch ? (
+												<span className="flex items-center gap-1 text-mute">
+													<GitBranch className="size-3 shrink-0 text-faint" />
+													{c.branch}
+												</span>
+											) : null}
+											<StatusText status={status} />
+										</p>
+									</div>
 								</div>
-							</div>
-							<Link
-								to="/diff/$combId"
-								params={{ combId: c.id }}
-								title="Ver o que mudou"
-								className="flex shrink-0 items-center gap-1.5 border-l border-border px-3 font-mono text-[11px] tabular-nums active:bg-elevated"
-							>
-								<DiffPill diff={diffs ? diff : undefined} />
-							</Link>
-						</div>
-						{threads.length > 0 ? (
-							<ul className="border-t border-border/60">
-								{threads.map((t) => (
-									<li key={t.sessionId}>
+							);
+							return (
+								<li
+									key={c.id}
+									className="flex items-stretch overflow-hidden rounded-xl border border-border bg-panel"
+								>
+									{sess ? (
 										<Link
 											to="/threads/$threadId"
-											params={{ threadId: t.sessionId }}
-											className="flex items-center gap-2.5 border-t border-border/40 px-3.5 py-2.5 first:border-t-0 active:bg-elevated"
+											params={{ threadId: sess.sessionId }}
+											className="flex min-w-0 flex-1 active:bg-elevated"
 										>
-											<StateDot
-												state={
-													statuses.get(t.sessionId)
-														? DOT_FOR_STATUS[statuses.get(t.sessionId)!]
-														: "idle"
-												}
-											/>
-											<span className="min-w-0 flex-1 truncate text-[13px]">
-												{sessionTitle(t)}
-											</span>
-											<span className="shrink-0 font-mono text-[10px] uppercase tracking-wider">
-												<StatusText status={statuses.get(t.sessionId)} />
-											</span>
+											{body}
 										</Link>
-									</li>
-								))}
-							</ul>
-						) : null}
-					</li>
-				);
-			})}
-		</ul>
+									) : (
+										<div className="flex min-w-0 flex-1 opacity-60">{body}</div>
+									)}
+									<Link
+										to="/diff/$combId"
+										params={{ combId: c.id }}
+										title="Ver o que mudou"
+										className="flex shrink-0 items-center gap-1.5 border-l border-border px-3 font-mono text-[11px] tabular-nums active:bg-elevated"
+									>
+										<DiffPill diff={diffs ? diff : undefined} />
+									</Link>
+								</li>
+							);
+						})}
+					</ul>
+				</section>
+			))}
+		</div>
 	);
 }
 
