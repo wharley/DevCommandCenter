@@ -6,13 +6,16 @@ import {
 	Brain,
 	ChevronDown,
 	ChevronUp,
+	GitBranch,
 	Loader2,
 	Send,
 	StopCircle,
 	Wrench,
 } from "lucide-react";
 import { Markdown } from "@/components/Markdown";
+import { Shell, StateDot } from "@/components/ui";
 import { apiFetch } from "@/lib/api";
+import { foldEntry, type BundleEntry, type WorktreeDiff } from "@/lib/diff";
 import { cn } from "@/lib/cn";
 import { loadSession, type PairingSession } from "@/lib/session";
 import { openEventStream } from "@/lib/sseClient";
@@ -23,6 +26,13 @@ import {
 	type RawSessionEvent,
 	type ThreadState,
 } from "@/lib/threadEvents";
+
+type SessionMeta = {
+	sessionId: string;
+	workspaceId: string | null;
+	workspaceName: string | null;
+	workspaceBranch: string | null;
+};
 
 export function ThreadRoute() {
 	const params = useParams({ from: "/threads/$threadId" });
@@ -35,6 +45,8 @@ export function ThreadRoute() {
 	const [sending, setSending] = useState(false);
 	const [composer, setComposer] = useState("");
 	const [aborting, setAborting] = useState(false);
+	const [meta, setMeta] = useState<SessionMeta | null>(null);
+	const [diff, setDiff] = useState<WorktreeDiff | null>(null);
 	const scrollerRef = useRef<HTMLDivElement | null>(null);
 
 	useEffect(() => {
@@ -108,6 +120,58 @@ export function ThreadRoute() {
 
 	const isRunning =
 		lastAssistant !== null && !lastAssistant.completed && !lastAssistant.aborted;
+
+	const threadTitle = useMemo(() => {
+		const firstUser = state.messages.find(
+			(m) => m.kind === "user" && m.text.trim().length > 0,
+		);
+		if (firstUser && firstUser.kind === "user") {
+			const t = firstUser.text.trim().replace(/\s+/g, " ");
+			return t.length > 52 ? `${t.slice(0, 51)}…` : t;
+		}
+		return "Nova sessão";
+	}, [state.messages]);
+
+	// There's no per-session metadata endpoint, so locate this session in the
+	// search index once to learn which workspace (comb) it belongs to. Drives
+	// the workspace · branch subtitle and the live diff affordance.
+	useEffect(() => {
+		if (!session) return;
+		let cancelled = false;
+		apiFetch<SessionMeta[]>(session, "/api/v1/sessions/search?limit=120")
+			.then((rows) => {
+				if (cancelled) return;
+				const row = rows.find((r) => r.sessionId === threadId);
+				if (row) setMeta(row);
+			})
+			.catch(() => {
+				/* non-fatal: the header just stays minimal */
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [session, threadId]);
+
+	// Pull the worktree diff for this session's comb, refreshing whenever a
+	// turn starts or finishes — so "+142 −7" tracks the agent's edits live.
+	const combId = meta?.workspaceId ?? null;
+	useEffect(() => {
+		if (!session || !combId) return;
+		let cancelled = false;
+		apiFetch<BundleEntry[]>(session, "/api/v1/diffs/bundle", {
+			method: "POST",
+			body: JSON.stringify({ combIds: [combId], worktreePaths: [] }),
+		})
+			.then((bundle) => {
+				if (!cancelled && bundle[0]) setDiff(foldEntry(bundle[0]));
+			})
+			.catch(() => {
+				/* non-fatal */
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [session, combId, isRunning]);
 
 	const submit = async () => {
 		if (!session) return;
@@ -192,8 +256,11 @@ export function ThreadRoute() {
 	return (
 		<div className="flex h-dvh flex-col">
 			<TopBar
-				threadId={threadId}
+				title={threadTitle}
+				subtitle={workspaceLabel(meta)}
 				isRunning={isRunning}
+				combId={combId}
+				diff={diff}
 				onBack={() => void navigate({ to: "/" })}
 				onAbort={isRunning ? () => void abort() : null}
 				aborting={aborting}
@@ -238,47 +305,82 @@ export function ThreadRoute() {
 }
 
 function TopBar({
-	threadId,
+	title,
+	subtitle,
 	isRunning,
+	combId,
+	diff,
 	onBack,
 	onAbort,
 	aborting,
 }: {
-	threadId: string;
+	title: string;
+	subtitle: string | null;
 	isRunning: boolean;
+	combId: string | null;
+	diff: WorktreeDiff | null;
 	onBack: () => void;
 	onAbort: (() => void) | null;
 	aborting: boolean;
 }) {
 	return (
-		<header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-bg/95 px-4 py-2.5 backdrop-blur">
+		<header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-bg/90 px-3 py-2.5 backdrop-blur">
 			<button
 				type="button"
 				onClick={onBack}
-				className="-ml-2 rounded-lg p-2 text-mute hover:text-foreground"
+				className="-ml-1 rounded-lg p-2 text-mute hover:text-foreground"
 				title="Voltar"
 			>
 				<ArrowLeft className="size-4" />
 			</button>
+			<StateDot state={isRunning ? "live" : "idle"} />
 			<div className="min-w-0 flex-1">
-				<p className="truncate font-mono text-[11px] text-mute">{threadId}</p>
-				<p className="text-[10px] text-mute/70">
-					{isRunning ? "● rodando" : "○ ocioso"}
-				</p>
+				<p className="truncate text-[13px] font-medium leading-tight">{title}</p>
+				{subtitle ? (
+					<p className="flex items-center gap-1 truncate font-mono text-[10px] text-faint">
+						<GitBranch className="size-2.5 shrink-0" />
+						<span className="truncate">{subtitle}</span>
+					</p>
+				) : (
+					<p className="font-mono text-[10px] uppercase tracking-wider text-faint">
+						{isRunning ? "rodando" : "ocioso"}
+					</p>
+				)}
 			</div>
+			{combId && diff && !diff.clean ? (
+				<Link
+					to="/diff/$combId"
+					params={{ combId }}
+					title="Ver o que mudou"
+					className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-panel px-2.5 py-1.5 font-mono text-[11px] tabular-nums active:bg-elevated"
+				>
+					<span className="text-accent">+{diff.insertions}</span>
+					<span className="text-danger">−{diff.deletions}</span>
+				</Link>
+			) : null}
 			{onAbort ? (
 				<button
 					type="button"
 					onClick={onAbort}
 					disabled={aborting}
-					className="inline-flex items-center gap-1 rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-[11px] text-danger hover:bg-danger/15 disabled:opacity-50"
+					className="inline-flex items-center gap-1.5 rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-[11px] font-medium text-danger active:bg-danger/15 disabled:opacity-50"
 				>
-					{aborting ? <Loader2 className="size-3 animate-spin" /> : <StopCircle className="size-3" />}
-					Abortar
+					{aborting ? (
+						<Loader2 className="size-3 animate-spin" />
+					) : (
+						<StopCircle className="size-3" />
+					)}
+					Parar
 				</button>
 			) : null}
 		</header>
 	);
+}
+
+function workspaceLabel(meta: SessionMeta | null): string | null {
+	if (!meta) return null;
+	const text = [meta.workspaceName, meta.workspaceBranch].filter(Boolean).join(" · ");
+	return text || null;
 }
 
 function MessageList({
@@ -345,7 +447,7 @@ function MessageView({
 function UserBubble({ text }: { text: string }) {
 	return (
 		<div className="flex justify-end">
-			<div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent px-3.5 py-2 text-[14px] leading-relaxed text-[#04231b]">
+			<div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent px-3.5 py-2 text-[14px] leading-relaxed text-[var(--color-accent-ink)]">
 				{text || <em className="opacity-60">(vazio)</em>}
 			</div>
 		</div>
@@ -382,9 +484,9 @@ function AssistantBubble({
 
 function ReasoningRow({ label, completed }: { label: string; completed: boolean }) {
 	return (
-		<div className="flex items-center gap-2 px-1 text-[11px] text-mute/80">
+		<div className="flex items-center gap-2 px-1 font-mono text-[11px] text-faint">
 			<Brain className="size-3" />
-			<span>{label}</span>
+			<span className="italic">{label}</span>
 			{!completed ? <Loader2 className="size-3 animate-spin" /> : null}
 		</div>
 	);
@@ -401,7 +503,7 @@ function ToolRow({
 			? "border-accent/30 bg-accent/5 text-accent"
 			: message.status === "failed"
 				? "border-danger/30 bg-danger/5 text-danger"
-				: "border-border bg-panel text-mute";
+				: "border-border bg-elevated text-mute";
 	return (
 		<div className={cn("rounded-xl border px-3 py-2 text-[12px]", palette)}>
 			<button
@@ -453,12 +555,14 @@ function PermissionRow({
 }) {
 	const disabled = message.resolved;
 	return (
-		<div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 text-[13px]">
+		<div className="rounded-2xl border border-wait/40 bg-wait/[0.06] p-3 text-[13px]">
 			<div className="flex items-start gap-2">
-				<AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+				<AlertTriangle className="mt-0.5 size-4 shrink-0 text-wait" />
 				<div className="min-w-0 flex-1">
-					<p className="font-medium text-foreground">Pedido de permissão</p>
-					<p className="mt-1 text-[12px] leading-relaxed text-mute">
+					<p className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-wait">
+						Precisa de você
+					</p>
+					<p className="mt-1.5 text-[13px] leading-relaxed text-foreground/90">
 						{message.question}
 					</p>
 				</div>
@@ -471,10 +575,10 @@ function PermissionRow({
 						disabled={disabled}
 						onClick={() => onRespond(message.requestId, choice.id)}
 						className={cn(
-							"flex-1 rounded-lg border px-3 py-2 text-[13px] font-medium",
+							"flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold",
 							choice.id === "deny"
-								? "border-border bg-bg text-foreground active:bg-muted/30"
-								: "border-accent bg-accent text-[#04231b] active:opacity-80",
+								? "border border-border bg-bg text-foreground active:bg-elevated"
+								: "bg-wait text-[var(--color-wait-ink)] active:opacity-80",
 							disabled && "opacity-50",
 						)}
 					>
@@ -483,7 +587,7 @@ function PermissionRow({
 				))}
 			</div>
 			{disabled ? (
-				<p className="mt-2 text-[10px] uppercase tracking-wider text-mute">
+				<p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-faint">
 					Resolvido
 				</p>
 			) : null}
@@ -512,12 +616,21 @@ function Composer({
 	disabled: boolean;
 	placeholder: string;
 }) {
+	const ref = useRef<HTMLTextAreaElement | null>(null);
+	const grow = (el: HTMLTextAreaElement) => {
+		el.style.height = "auto";
+		el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+	};
 	return (
-		<footer className="sticky bottom-0 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur">
+		<footer className="sticky bottom-0 border-t border-border bg-bg/90 px-3 py-3 backdrop-blur">
 			<div className="mx-auto flex max-w-md items-end gap-2">
 				<textarea
+					ref={ref}
 					value={value}
-					onChange={(e) => onChange(e.target.value)}
+					onChange={(e) => {
+						onChange(e.target.value);
+						grow(e.currentTarget);
+					}}
 					onKeyDown={(e) => {
 						if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
 							e.preventDefault();
@@ -526,17 +639,21 @@ function Composer({
 					}}
 					placeholder={placeholder}
 					rows={1}
-					className="flex-1 resize-none rounded-2xl border border-border bg-panel px-3.5 py-2.5 text-[14px] text-foreground placeholder:text-mute/70 outline-none focus:border-accent/50"
-					style={{ minHeight: 40, maxHeight: 140 }}
+					className="flex-1 resize-none rounded-2xl border border-border bg-panel px-3.5 py-2.5 text-[14px] leading-snug text-foreground outline-none placeholder:text-faint focus:border-accent/50"
+					style={{ minHeight: 42, maxHeight: 140 }}
 				/>
 				<button
 					type="button"
 					onClick={onSubmit}
 					disabled={disabled || value.trim().length === 0}
-					className="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-[#04231b] disabled:opacity-40"
+					className="grid size-[42px] shrink-0 place-items-center rounded-2xl bg-accent text-[var(--color-accent-ink)] transition-opacity disabled:opacity-40"
 					title="Enviar"
 				>
-					{disabled ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+					{disabled ? (
+						<Loader2 className="size-4 animate-spin" />
+					) : (
+						<Send className="size-4" />
+					)}
 				</button>
 			</div>
 		</footer>
@@ -568,10 +685,3 @@ function ErrorBanner({
 	);
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
-	return (
-		<main className="mx-auto flex min-h-dvh max-w-md flex-col px-5 py-8">
-			{children}
-		</main>
-	);
-}

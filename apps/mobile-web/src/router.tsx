@@ -1,4 +1,5 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
+import { DiffRoute } from "./routes/diff";
 import { HomeRoute } from "./routes/home";
 import { NewThreadRoute } from "./routes/new";
 import { PairRoute } from "./routes/pair";
@@ -46,6 +47,12 @@ const settingsRoute = createRoute({
 	component: SettingsRoute,
 });
 
+const diffRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/diff/$combId",
+	component: DiffRoute,
+});
+
 const routeTree = rootRoute.addChildren([
 	indexRoute,
 	pairRoute,
@@ -53,6 +60,7 @@ const routeTree = rootRoute.addChildren([
 	newThreadRoute,
 	permissionsRoute,
 	settingsRoute,
+	diffRoute,
 ]);
 
 // The SPA is mounted at /m/ in production (served by dccd-http) and at / in

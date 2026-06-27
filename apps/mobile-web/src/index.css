@@ -2,16 +2,36 @@
 @import "highlight.js/styles/github-dark.css";
 
 @theme {
-  --color-bg: #0a0a0a;
-  --color-panel: #151515;
-  --color-border: #262626;
-  --color-fg: #f5f5f5;
-  --color-mute: #8a8a8a;
-  --color-accent: #10b981;
-  --color-danger: #ef4444;
+  /* ── Mission-control palette ──────────────────────────────────────────
+     Cool ink (not pure black) so panels read as layered instrument
+     surfaces rather than a flat void. Phosphor-green is reserved as the
+     "signal of life" — it only ever marks something live or actionable. */
+  --color-bg: #0a0b0d;
+  --color-panel: #111419;
+  --color-elevated: #181c23;
+  --color-border: #232834;
+  --color-fg: #e9edf2;
+  --color-mute: #7c8694;
+  --color-faint: #565f6b;
+  --color-muted: var(--color-elevated); /* alias for legacy bg-muted/* */
+
+  /* State system — one color per agent state, used consistently. */
+  --color-accent: #34e2a0; /* live / running / primary action */
+  --color-accent-ink: #04231b; /* text on top of accent */
+  --color-wait: #f5b13d; /* blocked, needs you */
+  --color-wait-ink: #241500;
+  --color-danger: #f5604d; /* failed */
+  --color-info: #6ea8fe; /* branch / neutral reference */
 
   --color-background: var(--color-bg);
   --color-foreground: var(--color-fg);
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  /* Mono is the brand voice here — identifiers, labels and the wordmark. */
+  --font-mono:
+    ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo,
+    monospace;
 }
 
 html,
@@ -20,12 +40,7 @@ body,
   background: var(--color-bg);
   color: var(--color-fg);
   min-height: 100vh;
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Inter",
-    system-ui,
-    sans-serif;
+  font-family: var(--font-sans);
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
 }
@@ -38,9 +53,43 @@ body {
   box-sizing: border-box;
 }
 
-/* Smaller default fonts on phones */
 html {
   font-size: 15px;
+}
+
+/* Keyboard focus is always visible — never trade a11y for aesthetics. */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* The live node: a phosphor dot with a soft breathing halo. Marks any
+   agent that is actively working. */
+@keyframes dcc-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-accent) 0%, transparent);
+  }
+}
+
+.dcc-live {
+  animation: dcc-pulse 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dcc-live {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 /* github-dark.css gives .hljs a fully opaque background + padding that
@@ -48,7 +97,7 @@ html {
 .hljs {
   background: transparent !important;
   padding: 0;
-  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
 }

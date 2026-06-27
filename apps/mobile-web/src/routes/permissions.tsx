@@ -316,7 +316,7 @@ function PermissionCard({
 	);
 
 	return (
-		<div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3">
+		<div className="rounded-2xl border border-wait/40 bg-wait/[0.06] p-3">
 			<Link
 				to="/threads/$threadId"
 				params={{ threadId: item.thread.sessionId }}
@@ -331,8 +331,8 @@ function PermissionCard({
 				<ChevronRight className="size-3.5 text-mute" />
 			</Link>
 
-			<div className="flex items-start gap-2 border-t border-amber-500/20 pt-2">
-				<AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+			<div className="flex items-start gap-2 border-t border-wait/20 pt-2">
+				<AlertTriangle className="mt-0.5 size-4 shrink-0 text-wait" />
 				<p className="min-w-0 flex-1 text-[13px] leading-relaxed text-foreground">
 					{item.question}
 				</p>
@@ -346,10 +346,10 @@ function PermissionCard({
 						disabled={isResolving}
 						onClick={() => onRespond(choice.id)}
 						className={cn(
-							"flex-1 rounded-lg border px-3 py-2 text-[13px] font-medium transition-opacity",
+							"flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold transition-opacity",
 							choice.id === "deny"
-								? "border-border bg-bg text-foreground active:bg-muted/30"
-								: "border-accent bg-accent text-[#04231b] active:opacity-80",
+								? "border border-border bg-bg text-foreground active:bg-muted/30"
+								: "bg-wait text-[var(--color-wait-ink)] active:opacity-80",
 							isResolving && "opacity-50",
 						)}
 					>
