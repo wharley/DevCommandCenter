@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
+	ChevronDown,
 	ChevronRight,
 	Cpu,
 	FolderGit2,
@@ -779,6 +780,8 @@ function WorkspacesList({
 		return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 	}, [combs]);
 
+	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+
 	if (combs === null) {
 		return (
 			<div className="flex justify-center py-10 text-mute">
@@ -789,18 +792,38 @@ function WorkspacesList({
 	if (combs.length === 0) {
 		return <Rest title="Nenhum workspace">Crie um pelo app desktop.</Rest>;
 	}
+	const toggle = (name: string) =>
+		setCollapsed((prev) => {
+			const next = new Set(prev);
+			if (next.has(name)) next.delete(name);
+			else next.add(name);
+			return next;
+		});
 	return (
-		<div className="space-y-5">
-			{projects.map(([projectName, projectCombs]) => (
+		<div className="space-y-4">
+			{projects.map(([projectName, projectCombs]) => {
+				const isCollapsed = collapsed.has(projectName);
+				return (
 				<section key={projectName}>
-					<div className="mb-2 flex items-center gap-2 px-0.5">
+					<button
+						type="button"
+						onClick={() => toggle(projectName)}
+						className="mb-2 flex w-full items-center gap-2 px-0.5"
+					>
+						<ChevronDown
+							className={cn(
+								"size-3.5 shrink-0 text-faint transition-transform",
+								isCollapsed && "-rotate-90",
+							)}
+						/>
 						<FolderGit2 className="size-3.5 shrink-0 text-mute" />
 						<span className="truncate text-[12px] font-semibold">{projectName}</span>
 						<span className="shrink-0 rounded-full bg-elevated px-1.5 font-mono text-[10px] tabular-nums text-mute">
 							{projectCombs.length}
 						</span>
 						<span className="h-px flex-1 bg-border/60" />
-					</div>
+					</button>
+					{isCollapsed ? null : (
 					<ul className="space-y-2">
 						{projectCombs.map((c) => {
 							const sess = latestByWorkspace.get(c.id) ?? null;
@@ -851,8 +874,10 @@ function WorkspacesList({
 							);
 						})}
 					</ul>
+					)}
 				</section>
-			))}
+				);
+			})}
 		</div>
 	);
 }
@@ -874,17 +899,23 @@ function DiffPill({ diff }: { diff: WorktreeDiff | null | undefined }) {
 	);
 }
 
+/** Collapse any provider variant to a clean brand word (claude_interactive →
+ *  "claude", openai/gpt → "codex", etc.). */
+function normalizeProvider(id: string): string {
+	const v = id.toLowerCase();
+	if (v.includes("claude") || v.includes("anthropic")) return "claude";
+	if (v.includes("codex") || v.includes("openai") || v.includes("gpt")) return "codex";
+	if (v.includes("cursor")) return "cursor";
+	if (v.includes("gemini") || v.includes("google")) return "gemini";
+	if (v.includes("droid") || v.includes("factory")) return "droid";
+	return v.replace(/[_-]/g, " ");
+}
+
 function ProviderTag({ providerId }: { providerId: string | null }) {
 	if (!providerId) return null;
-	const label =
-		providerId === "claude_code"
-			? "claude"
-			: providerId === "codex"
-				? "codex"
-				: providerId;
 	return (
 		<span className="shrink-0 rounded border border-border bg-bg px-1 py-px font-mono text-[9px] lowercase tracking-wide text-faint">
-			{label}
+			{normalizeProvider(providerId)}
 		</span>
 	);
 }

@@ -1,6 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, Check, FolderGit2, Loader2 } from "lucide-react";
+import {
+	AlertTriangle,
+	ArrowLeft,
+	Check,
+	FolderGit2,
+	GitBranch,
+	Loader2,
+} from "lucide-react";
 import { ProviderIcon } from "@/components/provider-icon";
 import { ApiError, apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
@@ -61,8 +68,10 @@ export function NewThreadRoute() {
 		apiFetch<Comb[]>(session, "/api/v1/combs")
 			.then((result) => {
 				setCombs(result);
-				// Pre-select the most recently opened workspace.
-				const sorted = [...result].sort((a, b) => {
+				// Pre-select the most recently opened (non-archived) worktree.
+				const sorted = [...result]
+					.filter((c) => c.status !== "archived")
+					.sort((a, b) => {
 					const av = a.lastOpenedAt ?? "";
 					const bv = b.lastOpenedAt ?? "";
 					return bv.localeCompare(av);
@@ -79,6 +88,8 @@ export function NewThreadRoute() {
 				);
 			});
 	}, [session]);
+
+	const combGroups = useMemo(() => groupCombs(combs), [combs]);
 
 	if (session === undefined) {
 		return (
@@ -158,9 +169,13 @@ export function NewThreadRoute() {
 			</header>
 
 			<section>
-				<h2 className="pb-2 text-[11px] font-medium uppercase tracking-wider text-mute">
-					Workspace
+				<h2 className="text-[11px] font-medium uppercase tracking-wider text-mute">
+					Worktree
 				</h2>
+				<p className="pb-2.5 pt-1 text-[11px] leading-relaxed text-mute">
+					A thread é criada na <span className="text-foreground/80">worktree</span> que
+					você escolher — cada projeto pode ter várias.
+				</p>
 				{loadError ? (
 					<div className="rounded-2xl border border-danger/30 bg-danger/5 p-3 text-[12px] text-danger">
 						<AlertTriangle className="mr-1 inline size-3.5" />
@@ -170,45 +185,56 @@ export function NewThreadRoute() {
 					<div className="rounded-2xl border border-dashed border-border/70 p-6 text-center text-[12px] text-mute">
 						Carregando…
 					</div>
-				) : combs.length === 0 ? (
+				) : combGroups.length === 0 ? (
 					<div className="rounded-2xl border border-dashed border-border/70 p-6 text-center text-[12px] text-mute">
-						Nenhum workspace. Crie um pelo desktop primeiro.
+						Nenhuma worktree. Crie uma pelo desktop primeiro.
 					</div>
 				) : (
-					<ul className="space-y-2">
-						{combs.map((comb) => (
-							<li key={comb.id}>
-								<button
-									type="button"
-									onClick={() => setSelectedComb(comb.id)}
-									className={cn(
-										"flex w-full items-start gap-3 rounded-2xl border bg-panel px-4 py-3 text-left transition-colors",
-										selectedComb === comb.id
-											? "border-accent bg-accent/10"
-											: "border-border active:bg-muted/20",
-									)}
-								>
-									<FolderGit2
-										className={cn(
-											"mt-0.5 size-4 shrink-0",
-											selectedComb === comb.id ? "text-accent" : "text-mute",
-										)}
-									/>
-									<div className="min-w-0 flex-1">
-										<p className="truncate text-[14px] font-medium">
-											{comb.name ?? comb.projectName ?? comb.id}
-										</p>
-										<p className="mt-0.5 truncate text-[11px] text-mute">
-											{[comb.projectName, comb.branch].filter(Boolean).join(" · ")}
-										</p>
-									</div>
-									{selectedComb === comb.id ? (
-										<Check className="size-4 shrink-0 text-accent" />
-									) : null}
-								</button>
-							</li>
+					<div className="space-y-4">
+						{combGroups.map(([projectName, projectCombs]) => (
+							<div key={projectName}>
+								<div className="mb-1.5 flex items-center gap-1.5 px-0.5">
+									<FolderGit2 className="size-3 shrink-0 text-faint" />
+									<span className="text-[11px] font-semibold">{projectName}</span>
+									<span className="h-px flex-1 bg-border/50" />
+								</div>
+								<ul className="space-y-2">
+									{projectCombs.map((comb) => (
+										<li key={comb.id}>
+											<button
+												type="button"
+												onClick={() => setSelectedComb(comb.id)}
+												className={cn(
+													"flex w-full items-center gap-3 rounded-2xl border bg-panel px-4 py-3 text-left transition-colors",
+													selectedComb === comb.id
+														? "border-accent bg-accent/10"
+														: "border-border active:bg-muted/20",
+												)}
+											>
+												<GitBranch
+													className={cn(
+														"size-4 shrink-0",
+														selectedComb === comb.id ? "text-accent" : "text-faint",
+													)}
+												/>
+												<div className="min-w-0 flex-1">
+													<p className="truncate text-[14px] font-medium">{comb.name}</p>
+													{comb.branch ? (
+														<p className="mt-0.5 truncate font-mono text-[11px] text-mute">
+															{comb.branch}
+														</p>
+													) : null}
+												</div>
+												{selectedComb === comb.id ? (
+													<Check className="size-4 shrink-0 text-accent" />
+												) : null}
+											</button>
+										</li>
+									))}
+								</ul>
+							</div>
 						))}
-					</ul>
+					</div>
 				)}
 			</section>
 
@@ -269,6 +295,20 @@ export function NewThreadRoute() {
 			</button>
 		</Shell>
 	);
+}
+
+/** Active worktrees grouped by their project, for the picker. */
+function groupCombs(combs: Comb[] | null): Array<[string, Comb[]]> {
+	if (!combs) return [];
+	const map = new Map<string, Comb[]>();
+	for (const c of combs) {
+		if (c.status === "archived") continue;
+		const key = c.projectName ?? c.projectId ?? "—";
+		const list = map.get(key) ?? [];
+		list.push(c);
+		map.set(key, list);
+	}
+	return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
