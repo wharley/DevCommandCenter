@@ -862,10 +862,6 @@ fn git_output_in_path(cwd: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn parse_json_value(raw: Option<&str>) -> Option<Value> {
-    raw.and_then(|value| serde_json::from_str::<Value>(value).ok())
-}
-
 fn buffer_append_line(buffer: &Arc<Mutex<VecDeque<String>>>, label: &str, line: &str) {
     if let Ok(mut guard) = buffer.lock() {
         let formatted = if label.is_empty() {

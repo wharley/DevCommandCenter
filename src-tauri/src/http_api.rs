@@ -107,8 +107,6 @@ struct WorkspaceSessionsQuery {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionSearchQuery {
-    #[serde(default)]
-    query: String,
     #[serde(default = "default_session_search_limit")]
     limit: usize,
 }
