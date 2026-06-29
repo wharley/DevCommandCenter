@@ -1570,10 +1570,8 @@ export function WorkspaceInspectorSidebar({
 
 	const [dockHeight, setDockHeight] = useState(DEFAULT_DOCK_HEIGHT);
 	const [sessionDockOpen, setSessionDockOpen] = useState(false);
-	// Tracks the last activity count we reacted to, so only *new* chat events
-	// pop the dock open — and whether the user deliberately collapsed it during
-	// this session, which suppresses the auto-open until the session changes.
-	const lastActivityCountRef = useRef(0);
+	// Whether the user deliberately collapsed the dock this session. Kept so a
+	// fresh plan can still override it when it surfaces for review.
 	const dockUserClosedRef = useRef(false);
 	const autoOpenedPlanMessageIdRef = useRef<string | null>(null);
 	const selectInspectorMode = useCallback((mode: InspectorMode) => {
@@ -1798,27 +1796,12 @@ export function WorkspaceInspectorSidebar({
 	useEffect(() => {
 		autoOpenedPlanMessageIdRef.current = null;
 		onTabChange("activity");
-		// New session: rest collapsed, and treat its existing history as already
-		// seen so we only react to events that stream in from here on.
+		// New session: rest collapsed. Calm mode keeps the dock closed until the
+		// user opens it (or a fresh plan surfaces) — streaming chat activity no
+		// longer auto-opens it; the collapsed footer carries the live dot + counts.
 		setSessionDockOpen(false);
 		dockUserClosedRef.current = false;
-		lastActivityCountRef.current = sessionEvents.length;
 	}, [sessionId]);
-
-	// New chat activity lifts the dock open on its own. Gated on an active
-	// session so merely loading a past session's history stays quiet, and
-	// suppressed once the user closes it on purpose this session.
-	useEffect(() => {
-		const previous = lastActivityCountRef.current;
-		lastActivityCountRef.current = sessionEvents.length;
-		if (
-			sessionEvents.length > previous &&
-			sessionState === "active" &&
-			!dockUserClosedRef.current
-		) {
-			setSessionDockOpen(true);
-		}
-	}, [sessionEvents.length, sessionState]);
 
 	useEffect(() => {
 		const planMessageId = activePlanMessage?.id ?? null;
