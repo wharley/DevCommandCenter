@@ -185,6 +185,8 @@ type WorkspaceInspectorSidebarProps = {
 	}) => void;
 	activeTab: InspectorTab;
 	onTabChange: (tab: InspectorTab) => void;
+	mode: WorkspaceInspectorMode;
+	onModeChange: (mode: WorkspaceInspectorMode) => void;
 };
 
 const MIN_SECTION_HEIGHT = 128;
@@ -192,10 +194,10 @@ const MAX_SECTION_HEIGHT = 640;
 const DEFAULT_DOCK_HEIGHT = 320;
 
 type InspectorTab = "activity" | "context" | "spec" | "plan";
-type InspectorMode = "git" | "code";
+export type WorkspaceInspectorMode = "git" | "code";
 
 const SESSION_DOCK_TABS: InspectorTab[] = ["activity", "context", "spec", "plan"];
-const INSPECTOR_MODES: InspectorMode[] = ["git", "code"];
+const INSPECTOR_MODES: WorkspaceInspectorMode[] = ["git", "code"];
 const EMPTY_CODE_FILE_PATHS: string[] = [];
 type PendingGitConfirmation = "merge" | "sync-base" | null;
 
@@ -651,8 +653,8 @@ function InspectorModeDock({
 	mode,
 	onModeChange,
 }: {
-	mode: InspectorMode;
-	onModeChange: (mode: InspectorMode) => void;
+	mode: WorkspaceInspectorMode;
+	onModeChange: (mode: WorkspaceInspectorMode) => void;
 }) {
 	const { t } = useTranslation("common");
 	return (
@@ -1032,9 +1034,10 @@ export function WorkspaceInspectorSidebar({
 	onClearMissionSpecAutoCompileFailure,
 	activeTab,
 	onTabChange,
+	mode: inspectorMode,
+	onModeChange,
 }: WorkspaceInspectorSidebarProps) {
 	const { t } = useTranslation("common");
-	const [inspectorMode, setInspectorMode] = useState<InspectorMode>("git");
 	const hasWorkspace = Boolean(workspaceId && workspaceName && workspaceBranch);
 	const pathLine =
 		workspacePath && workspacePath.length > 0
@@ -1574,9 +1577,12 @@ export function WorkspaceInspectorSidebar({
 	// fresh plan can still override it when it surfaces for review.
 	const dockUserClosedRef = useRef(false);
 	const autoOpenedPlanMessageIdRef = useRef<string | null>(null);
-	const selectInspectorMode = useCallback((mode: InspectorMode) => {
-		setInspectorMode(mode);
-	}, []);
+	const selectInspectorMode = useCallback(
+		(mode: WorkspaceInspectorMode) => {
+			onModeChange(mode);
+		},
+		[onModeChange],
+	);
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {

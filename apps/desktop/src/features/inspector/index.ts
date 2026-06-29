@@ -1,1 +1,4 @@
-export { WorkspaceInspectorSidebar } from "./workspace-inspector-sidebar";
+export {
+	WorkspaceInspectorSidebar,
+	type WorkspaceInspectorMode,
+} from "./workspace-inspector-sidebar";

@@ -45,7 +45,10 @@ import {
 	useWorkspacesPanel,
 	type ExistingRepositoryContext,
 } from "./features/workspaces";
-import { WorkspaceInspectorSidebar } from "./features/inspector";
+import {
+	WorkspaceInspectorSidebar,
+	type WorkspaceInspectorMode,
+} from "./features/inspector";
 import { SettingsDialog } from "./features/settings";
 import { SkillsDialog, getTotalSkillContextCount } from "./features/skills";
 import { compileSkills, detectSkillContext } from "./lib/skills-api";
@@ -494,6 +497,8 @@ export default function App() {
 	const [inspectorTab, setInspectorTab] = useState<
 		"activity" | "context" | "spec" | "plan"
 	>("activity");
+	const [inspectorMode, setInspectorMode] =
+		useState<WorkspaceInspectorMode>("git");
 	const [sessionSnapshotsById, setSessionSnapshotsById] = useState<
 		Record<string, RuntimeSessionSnapshot>
 	>({});
@@ -778,7 +783,20 @@ export default function App() {
 				: null)
 		);
 	}, [effectiveSelectedSessionId, selectedSessionSummary, sessionSnapshotsById]);
+	const openGitInspector = useCallback(() => {
+		setInspectorMode("git");
+		setInspectorCollapsed(false);
+	}, [setInspectorCollapsed]);
+	const toggleGitInspector = useCallback(() => {
+		if (inspectorCollapsed) {
+			setInspectorMode("git");
+			setInspectorCollapsed(false);
+			return;
+		}
+		setInspectorCollapsed(true);
+	}, [inspectorCollapsed, setInspectorCollapsed]);
 	const openPlanSidebar = useCallback(() => {
+		setInspectorMode("git");
 		setInspectorCollapsed(false);
 		setInspectorTab("plan");
 	}, [setInspectorCollapsed]);
@@ -1501,6 +1519,7 @@ export default function App() {
 			planMarkdown: string | null;
 		}) => {
 			const prompt = buildMissionValidationPrompt(input);
+			setInspectorMode("git");
 			setInspectorCollapsed(false);
 			setInspectorTab("activity");
 			void handleSubmitPrompt({
@@ -1534,6 +1553,7 @@ export default function App() {
 			}
 
 			const prompt = buildMissionReanchorPrompt(input);
+			setInspectorMode("git");
 			setInspectorCollapsed(false);
 			setInspectorTab("activity");
 			void handleSubmitPrompt({
@@ -1574,6 +1594,7 @@ export default function App() {
 			}
 
 			const prompt = buildMissionContinueCriterionPrompt(input);
+			setInspectorMode("git");
 			setInspectorCollapsed(false);
 			setInspectorTab("activity");
 			void handleSubmitPrompt({
@@ -2309,10 +2330,8 @@ export default function App() {
 									onOpenPlanSidebar={openPlanSidebar}
 									onImplementPlanInNewThread={handleImplementPlanInNewThread}
 									inspectorCollapsed={inspectorCollapsed}
-									onToggleInspector={() =>
-										setInspectorCollapsed((value) => !value)
-									}
-									onReviewChanges={() => setInspectorCollapsed(false)}
+									onToggleInspector={toggleGitInspector}
+									onReviewChanges={openGitInspector}
 									composerPrefill={
 										workspaceComposerPrefill?.workspaceId === selectedWorkspace.id
 											? {
@@ -2399,6 +2418,8 @@ export default function App() {
 								}
 								activeTab={inspectorTab}
 								onTabChange={setInspectorTab}
+								mode={inspectorMode}
+								onModeChange={setInspectorMode}
 							/>
 							</aside>
 						</>
