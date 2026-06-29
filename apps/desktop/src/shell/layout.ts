@@ -71,26 +71,34 @@ export function getInitialCollapsed(
 	return stored === "true";
 }
 
+/** One-time flag: have we already nudged this install into the calm inspector default? */
+const INSPECTOR_CALM_MIGRATION_KEY = "dcc.inspectorCalmMigratedV1";
+
 /**
- * Inspector starts collapsed ("calm" default) for brand-new installs, but keeps the
- * dense layout for anyone who already used the app, so we never yank the inspector
- * out from under an existing user. Detection: any persisted `dcc.*` layout pref means
- * this isn't a first run. Once the user explicitly toggles, the stored value wins.
+ * Inspector defaults to collapsed ("calm" mode). The first time any install loads this,
+ * we collapse it once — including existing users, whose previous "open" was never a real
+ * choice (the old UI had no collapse control at all). After this one-time nudge the user's
+ * explicit toggle is remembered and always wins.
  */
 export function getInitialInspectorCollapsed() {
 	if (typeof window === "undefined") {
 		return true;
 	}
 
+	const migrated =
+		window.localStorage.getItem(INSPECTOR_CALM_MIGRATION_KEY) === "done";
 	const stored = window.localStorage.getItem(INSPECTOR_COLLAPSED_STORAGE_KEY);
-	if (stored !== null) {
+	if (migrated && stored !== null) {
 		return stored === "true";
 	}
 
-	const isExistingInstall =
-		window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) !== null ||
-		window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) !== null ||
-		window.localStorage.getItem(INSPECTOR_WIDTH_STORAGE_KEY) !== null;
-
-	return !isExistingInstall;
+	// First load under calm mode (new install or pre-migration existing user): collapse
+	// once and record it, so future explicit toggles take over from here.
+	try {
+		window.localStorage.setItem(INSPECTOR_CALM_MIGRATION_KEY, "done");
+		window.localStorage.setItem(INSPECTOR_COLLAPSED_STORAGE_KEY, "true");
+	} catch {
+		// localStorage unavailable — fall back to calm for this session.
+	}
+	return true;
 }
