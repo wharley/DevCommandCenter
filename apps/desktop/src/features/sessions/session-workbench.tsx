@@ -69,6 +69,8 @@ type SessionWorkbenchProps = {
 	inspectorCollapsed?: boolean;
 	/** Toggles the inspector open/closed — wired to the header control. */
 	onToggleInspector?: () => void;
+	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
+	onReviewChanges?: () => void;
 };
 
 export function SessionWorkbench({
@@ -112,6 +114,7 @@ export function SessionWorkbench({
 	composerPrefill,
 	inspectorCollapsed,
 	onToggleInspector,
+	onReviewChanges,
 }: SessionWorkbenchProps) {
 	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [terminalExpanded, setTerminalExpanded] = useState(false);
@@ -221,6 +224,7 @@ export function SessionWorkbench({
 						externalComposerPrefill={composerPrefill}
 						inspectorCollapsed={inspectorCollapsed}
 						onToggleInspector={onToggleInspector}
+						onReviewChanges={onReviewChanges}
 					/>
 				</div>
 			) : null}

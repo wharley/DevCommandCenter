@@ -142,6 +142,8 @@ type WorkspacePanelProps = {
 	inspectorCollapsed?: boolean;
 	/** Toggles the inspector open/closed — wired to the header control. */
 	onToggleInspector?: () => void;
+	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
+	onReviewChanges?: () => void;
 };
 
 export function WorkspacePanel({
@@ -184,6 +186,7 @@ export function WorkspacePanel({
 	externalComposerPrefill,
 	inspectorCollapsed,
 	onToggleInspector,
+	onReviewChanges,
 }: WorkspacePanelProps) {
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
@@ -436,6 +439,7 @@ export function WorkspacePanel({
 					autoSaveMissionValidation={autoSaveMissionValidation}
 					onStartSession={onStartSession}
 					onSubmitPrompt={onSubmitPrompt}
+					onReviewChanges={onReviewChanges}
 				/>
 
 				<div className="border-t border-border/60 px-3 pb-3 pt-3 sm:px-4">

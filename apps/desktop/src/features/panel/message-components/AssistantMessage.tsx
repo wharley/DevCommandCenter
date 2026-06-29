@@ -1,5 +1,6 @@
-import { Suspense } from "react";
-import { AlertCircle, Copy } from "lucide-react";
+import { Suspense, useMemo } from "react";
+import { AlertCircle, Copy, FilePen } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
 import { Button } from "@/components/ui/button";
 import { LazyStreamdown } from "@/components/streamdown-loader";
@@ -43,6 +44,7 @@ export function AssistantMessage({
 	activeMissionSpecRelativePath,
 	activeMissionSpecHash,
 	autoSaveMissionValidation,
+	onReviewChanges,
 }: {
 	content: string;
 	streaming?: boolean;
@@ -56,8 +58,36 @@ export function AssistantMessage({
 	activeMissionSpecRelativePath?: string | null;
 	activeMissionSpecHash?: string | null;
 	autoSaveMissionValidation?: boolean;
+	/** Reveals the inspector to review this turn's edits ([Revisar]). */
+	onReviewChanges?: () => void;
 }) {
+	const { t } = useTranslation("common");
 	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
+	// Files this turn edited (deduped) — drives the closing "edits" card. Reads
+	// and shell calls are excluded; failed edits are skipped.
+	const editedFiles = useMemo(() => {
+		const seen = new Map<string, { path: string; name: string }>();
+		for (const annotation of annotations ?? []) {
+			if (annotation.type !== "tool-call" || !annotation.file) {
+				continue;
+			}
+			if (annotation.status?.type === "failed") {
+				continue;
+			}
+			const action = annotation.action ?? "";
+			if (/read/i.test(action)) {
+				continue;
+			}
+			if (!/write|edit|create|update|apply|patch/i.test(action)) {
+				continue;
+			}
+			if (!seen.has(annotation.file)) {
+				const name = annotation.file.split("/").pop() || annotation.file;
+				seen.set(annotation.file, { path: annotation.file, name });
+			}
+		}
+		return [...seen.values()];
+	}, [annotations]);
 	const validationReport = showPlanCard ? null : parseMissionValidationReport(content);
 	const isValidationStale = Boolean(
 		validationReport?.specHash &&
@@ -185,6 +215,43 @@ export function AssistantMessage({
 						</Suspense>
 					</div>
 				)}
+				{!streaming && !showPlanCard && editedFiles.length > 0 ? (
+					<div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+						<span className="flex shrink-0 items-center gap-1.5 text-[12px] font-medium text-foreground">
+							<FilePen
+								className="size-3.5 text-muted-foreground"
+								strokeWidth={1.8}
+							/>
+							{editedFiles.length === 1
+								? t("conversation.editsCard.summaryOne")
+								: t("conversation.editsCard.summaryOther", {
+										count: editedFiles.length,
+									})}
+						</span>
+						<span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+							{editedFiles.map((editedFile) => (
+								<span
+									key={editedFile.path}
+									title={editedFile.path}
+									className="truncate font-mono text-[11px] text-muted-foreground"
+								>
+									{editedFile.name}
+								</span>
+							))}
+						</span>
+						{onReviewChanges ? (
+							<Button
+								type="button"
+								variant="outline"
+								size="xs"
+								className="ml-auto shrink-0"
+								onClick={onReviewChanges}
+							>
+								{t("conversation.editsCard.review")}
+							</Button>
+						) : null}
+					</div>
+				) : null}
 				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
 					<MessageTimestamp createdAt={createdAt} />
 					{status?.type === "incomplete" ? (

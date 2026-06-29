@@ -2312,6 +2312,7 @@ export default function App() {
 									onToggleInspector={() =>
 										setInspectorCollapsed((value) => !value)
 									}
+									onReviewChanges={() => setInspectorCollapsed(false)}
 									composerPrefill={
 										workspaceComposerPrefill?.workspaceId === selectedWorkspace.id
 											? {

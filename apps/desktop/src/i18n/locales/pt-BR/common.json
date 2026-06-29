@@ -745,6 +745,13 @@
     "openBranchDetails": "Abrir detalhes do branch",
     "copyBranchName": "Copiar nome do branch"
   },
+  "conversation": {
+    "editsCard": {
+      "summaryOne": "Editou 1 arquivo",
+      "summaryOther": "Editou {{count}} arquivos",
+      "review": "Revisar"
+    }
+  },
   "workbench": {
     "noGit": "Sem Git",
     "changesPill": {
