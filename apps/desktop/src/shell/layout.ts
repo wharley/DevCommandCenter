@@ -70,3 +70,27 @@ export function getInitialCollapsed(
 
 	return stored === "true";
 }
+
+/**
+ * Inspector starts collapsed ("calm" default) for brand-new installs, but keeps the
+ * dense layout for anyone who already used the app, so we never yank the inspector
+ * out from under an existing user. Detection: any persisted `dcc.*` layout pref means
+ * this isn't a first run. Once the user explicitly toggles, the stored value wins.
+ */
+export function getInitialInspectorCollapsed() {
+	if (typeof window === "undefined") {
+		return true;
+	}
+
+	const stored = window.localStorage.getItem(INSPECTOR_COLLAPSED_STORAGE_KEY);
+	if (stored !== null) {
+		return stored === "true";
+	}
+
+	const isExistingInstall =
+		window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) !== null ||
+		window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) !== null ||
+		window.localStorage.getItem(INSPECTOR_WIDTH_STORAGE_KEY) !== null;
+
+	return !isExistingInstall;
+}

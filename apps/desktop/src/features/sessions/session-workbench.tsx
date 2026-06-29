@@ -65,6 +65,10 @@ type SessionWorkbenchProps = {
 		planTitle: string | null;
 	}) => void;
 	composerPrefill?: { text: string; nonce: number } | null;
+	/** Current inspector visibility — picks the open vs. close affordance. */
+	inspectorCollapsed?: boolean;
+	/** Toggles the inspector open/closed — wired to the header control. */
+	onToggleInspector?: () => void;
 };
 
 export function SessionWorkbench({
@@ -106,6 +110,8 @@ export function SessionWorkbench({
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
 	composerPrefill,
+	inspectorCollapsed,
+	onToggleInspector,
 }: SessionWorkbenchProps) {
 	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [terminalExpanded, setTerminalExpanded] = useState(false);
@@ -213,6 +219,8 @@ export function SessionWorkbench({
 						terminalScopes={terminalScopes}
 						onOpenTerminal={handleOpenTerminal}
 						externalComposerPrefill={composerPrefill}
+						inspectorCollapsed={inspectorCollapsed}
+						onToggleInspector={onToggleInspector}
 					/>
 				</div>
 			) : null}
