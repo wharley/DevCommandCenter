@@ -425,9 +425,20 @@ function eventSignature(event: CoreEvent): string {
 	return JSON.stringify(event);
 }
 
+function occurrenceSignature(
+	event: CoreEvent,
+	counts: Map<string, number>,
+) {
+	const base = eventSignature(event);
+	const nextCount = (counts.get(base) ?? 0) + 1;
+	counts.set(base, nextCount);
+	return `${base}#${nextCount}`;
+}
+
 function pushHistoryEvent(
 	events: TimelineEvent[],
 	seen: Set<string>,
+	counts: Map<string, number>,
 	record: SessionEventRecord,
 ) {
 	const coreEvent = recordToCoreEvent(record);
@@ -435,7 +446,7 @@ function pushHistoryEvent(
 		return;
 	}
 
-	const signature = eventSignature(coreEvent);
+	const signature = occurrenceSignature(coreEvent, counts);
 	if (seen.has(signature)) {
 		return;
 	}
@@ -451,9 +462,10 @@ function pushHistoryEvent(
 function pushLiveEvent(
 	events: TimelineEvent[],
 	seen: Set<string>,
+	counts: Map<string, number>,
 	event: CoreEvent,
 ) {
-	const signature = eventSignature(event);
+	const signature = occurrenceSignature(event, counts);
 	if (seen.has(signature)) {
 		return;
 	}
@@ -472,19 +484,21 @@ export function mergeSessionThreadEvents(
 ) {
 	const merged: TimelineEvent[] = [];
 	const seen = new Set<string>();
+	const historyCounts = new Map<string, number>();
+	const liveCounts = new Map<string, number>();
 
 	for (const record of historyEvents) {
 		if (sessionId !== null && record.sessionId !== sessionId) {
 			continue;
 		}
-		pushHistoryEvent(merged, seen, record);
+		pushHistoryEvent(merged, seen, historyCounts, record);
 	}
 
 	for (const event of liveEvents) {
 		if (sessionId !== null && getEventSessionId(event) !== sessionId) {
 			continue;
 		}
-		pushLiveEvent(merged, seen, event);
+		pushLiveEvent(merged, seen, liveCounts, event);
 	}
 
 	return merged;

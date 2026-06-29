@@ -328,6 +328,53 @@ describe("projectWorkspaceMessages", () => {
 		]);
 	});
 
+	it("preserves repeated identical streaming deltas", () => {
+		expect(
+			projectWorkspaceMessages(
+				[sessionTurnStarted("session-a", "turn-1", "Alpha")],
+				[
+					sessionTurnDelta("session-a", "turn-1", "Vou"),
+					sessionTurnDelta("session-a", "turn-1", " "),
+					sessionTurnDelta("session-a", "turn-1", "rastrear"),
+					sessionTurnDelta("session-a", "turn-1", " "),
+					sessionTurnDelta("session-a", "turn-1", "onde"),
+					sessionTurnDelta("session-a", "turn-1", " "),
+					sessionTurnDelta("session-a", "turn-1", "o"),
+				],
+				"session-a",
+			)[1],
+		).toMatchObject({
+			role: "assistant",
+			content: "Vou rastrear onde o",
+		});
+	});
+
+	it("deduplicates live deltas already present in history by occurrence", () => {
+		expect(
+			projectWorkspaceMessages(
+				[
+					sessionTurnStarted("session-a", "turn-1", "Alpha"),
+					sessionTurnDeltaRecord("session-a", "turn-1", "Vou", 2),
+					sessionTurnDeltaRecord("session-a", "turn-1", " ", 3),
+					sessionTurnDeltaRecord("session-a", "turn-1", "rastrear", 4),
+					sessionTurnDeltaRecord("session-a", "turn-1", " ", 5),
+					sessionTurnDeltaRecord("session-a", "turn-1", "onde", 6),
+				],
+				[
+					sessionTurnDelta("session-a", "turn-1", "Vou"),
+					sessionTurnDelta("session-a", "turn-1", " "),
+					sessionTurnDelta("session-a", "turn-1", "rastrear"),
+					sessionTurnDelta("session-a", "turn-1", " "),
+					sessionTurnDelta("session-a", "turn-1", "onde"),
+				],
+				"session-a",
+			)[1],
+		).toMatchObject({
+			role: "assistant",
+			content: "Vou rastrear onde",
+		});
+	});
+
 	it("projects reasoning and tool call annotations into the assistant message", () => {
 		expect(
 			projectWorkspaceMessages(
