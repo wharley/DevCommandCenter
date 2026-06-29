@@ -11,7 +11,7 @@ import {
 	Search,
 	X,
 } from "lucide-react";
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +41,9 @@ import {
 import { isSessionArchived, visibleSessions } from "./session-close";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import { cn } from "@/lib/utils";
+
+/** Marks the one-time "git lives in this control" hint as seen. */
+const INSPECTOR_HINT_STORAGE_KEY = "dcc.inspectorHintSeen";
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
@@ -107,6 +110,33 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	onToggleInspector,
 }: DccWorkbenchChatHeaderProps) {
 	const { t } = useTranslation("common");
+	// One-time, self-contained discovery hint: gently pulse the inspector control
+	// the first time it's shown collapsed, so the git panel's entry point is found.
+	const [inspectorHintActive, setInspectorHintActive] = useState(false);
+	useEffect(() => {
+		if (!onToggleInspector || !inspectorCollapsed) {
+			return;
+		}
+		let seen = true;
+		try {
+			seen = window.localStorage.getItem(INSPECTOR_HINT_STORAGE_KEY) === "seen";
+		} catch {
+			seen = true;
+		}
+		if (seen) {
+			return;
+		}
+		setInspectorHintActive(true);
+		try {
+			window.localStorage.setItem(INSPECTOR_HINT_STORAGE_KEY, "seen");
+		} catch {
+			// localStorage unavailable — the hint simply shows once this session.
+		}
+	}, [onToggleInspector, inspectorCollapsed]);
+	const handleInspectorToggle = () => {
+		setInspectorHintActive(false);
+		onToggleInspector?.();
+	};
 	const showProjectBadge = Boolean(projectBadgeLabel);
 	const resumeOk = canResumeSession(sessionSnapshot);
 	const abortOk = canAbortRun(sessionSnapshot, pendingPrompt);
@@ -211,11 +241,14 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 										type="button"
 										variant="ghost"
 										size="sm"
-										onClick={onToggleInspector}
+										onClick={handleInspectorToggle}
 										aria-label={t("workbench.changesPill.aria", {
 											count: gitChangeSummary.files,
 										})}
-										className="h-7 shrink-0 gap-1.5 rounded-md border border-border/50 bg-muted/25 px-2 text-[12px] font-normal hover:bg-accent/60"
+										className={cn(
+											"h-7 shrink-0 gap-1.5 rounded-md border border-border/50 bg-muted/25 px-2 text-[12px] font-normal hover:bg-accent/60",
+											inspectorHintActive && "inspector-hint-pulse",
+										)}
 									>
 										<FileDiff
 											className="size-3.5 text-muted-foreground"
@@ -247,13 +280,16 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 										type="button"
 										variant="ghost"
 										size="icon-sm"
-										onClick={onToggleInspector}
+										onClick={handleInspectorToggle}
 										aria-label={
 											inspectorCollapsed
 												? t("workbench.inspectorToggle.open")
 												: t("workbench.inspectorToggle.close")
 										}
-										className="shrink-0 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+										className={cn(
+											"shrink-0 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+											inspectorHintActive && "inspector-hint-pulse",
+										)}
 									>
 										{inspectorCollapsed ? (
 											<PanelRightOpen className="size-3.5" strokeWidth={1.8} />

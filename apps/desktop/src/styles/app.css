@@ -111,6 +111,29 @@
 	}
 }
 
+@keyframes inspector-enter {
+	from {
+		opacity: 0;
+		transform: translateX(10px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+@keyframes inspector-hint-pulse {
+	0% {
+		box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 55%, transparent);
+	}
+	70% {
+		box-shadow: 0 0 0 6px transparent;
+	}
+	100% {
+		box-shadow: 0 0 0 0 transparent;
+	}
+}
+
 @layer base {
 	* {
 		border-color: var(--border);
@@ -221,6 +244,14 @@
 
 	.conversation-fade-in {
 		animation: conversation-fade-in 220ms ease-out both;
+	}
+
+	.inspector-enter {
+		animation: inspector-enter 200ms ease-out both;
+	}
+
+	.inspector-hint-pulse {
+		animation: inspector-hint-pulse 1.6s ease-out 3;
 	}
 
 	.conversation-scroll-button {

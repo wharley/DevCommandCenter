@@ -2349,7 +2349,7 @@ export default function App() {
 
 							<aside
 								aria-label={t("app.inspectorSidebarAria")}
-								className="relative h-full shrink-0 overflow-hidden bg-sidebar"
+								className="inspector-enter relative h-full shrink-0 overflow-hidden bg-sidebar"
 								style={{ width: `${inspectorWidth}px` }}
 							>
 								<WorkspaceInspectorSidebar
