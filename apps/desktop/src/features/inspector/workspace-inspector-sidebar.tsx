@@ -145,6 +145,7 @@ type WorkspaceInspectorSidebarProps = {
 	sessionState: string;
 	sessionId: string | null;
 	sessionEvents: CoreEvent[];
+	sessionActivityEvents: CoreEvent[];
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	onPrefillComposer?: (text: string) => void;
@@ -1019,6 +1020,7 @@ export function WorkspaceInspectorSidebar({
 	sessionState,
 	sessionId,
 	sessionEvents,
+	sessionActivityEvents,
 	selectedPreview,
 	onSelectPreview,
 	onPrefillComposer,
@@ -2032,10 +2034,10 @@ export function WorkspaceInspectorSidebar({
 						className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
 					>
 						<SessionEventFeed
-						events={sessionEvents}
-						compact
-						currentSessionId={sessionId}
-					/>
+							events={sessionActivityEvents}
+							compact
+							currentSessionId={sessionId}
+						/>
 					</TabsContent>
 
 						<TabsContent

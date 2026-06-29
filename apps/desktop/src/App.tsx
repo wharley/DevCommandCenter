@@ -530,7 +530,8 @@ export default function App() {
 			return { ...current, [eventSessionId]: next };
 		});
 	}, []);
-	const { events: sessionEvents } = useSessionEventFeed(handleSessionEvent);
+	const { activityEvents: sessionActivityEvents, events: sessionEvents } =
+		useSessionEventFeed(handleSessionEvent);
 
 	const [surfaceSelection, setSurfaceSelection] =
 		useState<WorkspaceSurfaceSelection | null>(null);
@@ -2375,6 +2376,7 @@ export default function App() {
 									providerCatalog={providerCatalog}
 									sessionSnapshot={selectedSessionSnapshot}
 									sessionEvents={sessionEvents}
+									sessionActivityEvents={sessionActivityEvents}
 									currentRepository={
 										selectedWorkspace?.rootPath?.trim()
 											? repositoriesFromBackend.find(
