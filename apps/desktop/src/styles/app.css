@@ -7,6 +7,12 @@
 @custom-variant dark (&:is(.dark *));
 
 @source "../**/*.{tsx,ts}";
+/* Streamdown renders assistant markdown with Tailwind utility classes baked into its dist
+   (list-disc, list-decimal, pl-6, my-4, text-lg, …). Tailwind only scans app sources by
+   default, so those classes were never generated — assistant replies rendered as an
+   unstyled wall of text (no bullets, no paragraph spacing). Scanning streamdown's dist lets
+   Tailwind emit the utilities it relies on. */
+@source "../../../../node_modules/streamdown/dist/**/*.js";
 
 @theme {
 	--font-sans: "Geist Variable", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
