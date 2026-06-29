@@ -745,8 +745,23 @@
     "openBranchDetails": "Abrir detalhes do branch",
     "copyBranchName": "Copiar nome do branch"
   },
+  "conversation": {
+    "editsCard": {
+      "summaryOne": "Editou 1 arquivo",
+      "summaryOther": "Editou {{count}} arquivos",
+      "review": "Revisar"
+    }
+  },
   "workbench": {
     "noGit": "Sem Git",
+    "changesPill": {
+      "aria": "{{count}} arquivos alterados — abrir revisão Git",
+      "tooltip": "Revisar mudanças"
+    },
+    "inspectorToggle": {
+      "open": "Mostrar painel Git",
+      "close": "Ocultar painel Git"
+    },
     "sessionState": {
       "idle": "ocioso",
       "active": "ativa",

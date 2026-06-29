@@ -2308,6 +2308,11 @@ export default function App() {
 									onCloseSurface={handleCloseSurface}
 									onOpenPlanSidebar={openPlanSidebar}
 									onImplementPlanInNewThread={handleImplementPlanInNewThread}
+									inspectorCollapsed={inspectorCollapsed}
+									onToggleInspector={() =>
+										setInspectorCollapsed((value) => !value)
+									}
+									onReviewChanges={() => setInspectorCollapsed(false)}
 									composerPrefill={
 										workspaceComposerPrefill?.workspaceId === selectedWorkspace.id
 											? {

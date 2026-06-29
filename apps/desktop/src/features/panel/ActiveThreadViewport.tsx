@@ -27,6 +27,8 @@ type ActiveThreadViewportProps = {
 	autoSaveMissionValidation: boolean;
 	onStartSession: () => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
+	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
+	onReviewChanges?: () => void;
 };
 
 export function ActiveThreadViewport({
@@ -47,6 +49,7 @@ export function ActiveThreadViewport({
 	autoSaveMissionValidation,
 	onStartSession,
 	onSubmitPrompt,
+	onReviewChanges,
 }: ActiveThreadViewportProps) {
 	const { contentRef, scrollRef, scrollToBottom, isAtBottom } = useStickToBottom({
 		initial: "instant",
@@ -150,6 +153,7 @@ export function ActiveThreadViewport({
 												activeMissionSpecRelativePath={activeMissionSpecRelativePath}
 												activeMissionSpecHash={activeMissionSpecHash}
 												autoSaveMissionValidation={autoSaveMissionValidation}
+												onReviewChanges={onReviewChanges}
 											/>
 										</div>
 									);

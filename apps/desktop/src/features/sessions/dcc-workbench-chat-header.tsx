@@ -2,7 +2,10 @@ import {
 	AlertCircle,
 	CircleStop,
 	Clock3,
+	FileDiff,
 	History,
+	PanelRightClose,
+	PanelRightOpen,
 	Plus,
 	RefreshCw,
 	Search,
@@ -62,6 +65,16 @@ export type DccWorkbenchChatHeaderProps = {
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
 	onInstallUpdate: () => void;
+	/** Uncommitted git changes summary; drives the calm-mode changes pill. */
+	gitChangeSummary?: {
+		files: number;
+		additions: number;
+		deletions: number;
+	} | null;
+	/** Current inspector visibility — picks the open vs. close affordance. */
+	inspectorCollapsed?: boolean;
+	/** Toggles the inspector open/closed. */
+	onToggleInspector?: () => void;
 };
 
 /** Chat column top bar with titles left and action icons right. */
@@ -89,6 +102,9 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	updateInfo,
 	isInstallingUpdate,
 	onInstallUpdate,
+	gitChangeSummary,
+	inspectorCollapsed,
+	onToggleInspector,
 }: DccWorkbenchChatHeaderProps) {
 	const { t } = useTranslation("common");
 	const showProjectBadge = Boolean(projectBadgeLabel);
@@ -187,6 +203,73 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						onInstallNow={onInstallUpdate}
 					/>
 					<WorkspaceEditorPicker workspacePath={workspacePath} />
+					{onToggleInspector ? (
+						inspectorCollapsed && gitChangeSummary ? (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										onClick={onToggleInspector}
+										aria-label={t("workbench.changesPill.aria", {
+											count: gitChangeSummary.files,
+										})}
+										className="h-7 shrink-0 gap-1.5 rounded-md border border-border/50 bg-muted/25 px-2 text-[12px] font-normal hover:bg-accent/60"
+									>
+										<FileDiff
+											className="size-3.5 text-muted-foreground"
+											strokeWidth={1.8}
+										/>
+										<span className="tabular-nums text-foreground">
+											{gitChangeSummary.files}
+										</span>
+										{gitChangeSummary.additions > 0 ? (
+											<span className="tabular-nums text-emerald-600 dark:text-emerald-400">
+												+{gitChangeSummary.additions}
+											</span>
+										) : null}
+										{gitChangeSummary.deletions > 0 ? (
+											<span className="tabular-nums text-destructive">
+												−{gitChangeSummary.deletions}
+											</span>
+										) : null}
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="bottom">
+									{t("workbench.changesPill.tooltip")}
+								</TooltipContent>
+							</Tooltip>
+						) : (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-sm"
+										onClick={onToggleInspector}
+										aria-label={
+											inspectorCollapsed
+												? t("workbench.inspectorToggle.open")
+												: t("workbench.inspectorToggle.close")
+										}
+										className="shrink-0 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+									>
+										{inspectorCollapsed ? (
+											<PanelRightOpen className="size-3.5" strokeWidth={1.8} />
+										) : (
+											<PanelRightClose className="size-3.5" strokeWidth={1.8} />
+										)}
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="bottom">
+									{inspectorCollapsed
+										? t("workbench.inspectorToggle.open")
+										: t("workbench.inspectorToggle.close")}
+								</TooltipContent>
+							</Tooltip>
+						)
+					) : null}
 				</div>
 			</div>
 

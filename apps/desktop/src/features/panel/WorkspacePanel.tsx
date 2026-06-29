@@ -27,6 +27,7 @@ import { projectWorkspaceMessages } from "./thread-projection";
 import type { ProviderCatalog, CoreEvent } from "@dcc/contracts";
 import { derivePlanFollowUpState } from "./plan-follow-up";
 import { useWorkspaceMissionSpecs } from "@/features/inspector/use-workspace-mission-specs";
+import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-status";
 import {
 	buildMissionSpecFilename,
 	getComposerEffortKey,
@@ -137,6 +138,12 @@ type WorkspacePanelProps = {
 	terminalScopes?: TerminalScopeTarget[];
 	onOpenTerminal?: (request: OpenTerminalRequest) => void;
 	externalComposerPrefill?: ComposerPrefill | null;
+	/** Current inspector visibility — picks the open vs. close affordance. */
+	inspectorCollapsed?: boolean;
+	/** Toggles the inspector open/closed — wired to the header control. */
+	onToggleInspector?: () => void;
+	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
+	onReviewChanges?: () => void;
 };
 
 export function WorkspacePanel({
@@ -177,6 +184,9 @@ export function WorkspacePanel({
 	terminalScopes,
 	onOpenTerminal,
 	externalComposerPrefill,
+	inspectorCollapsed,
+	onToggleInspector,
+	onReviewChanges,
 }: WorkspacePanelProps) {
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
@@ -289,6 +299,26 @@ export function WorkspacePanel({
 	const sessionState = sessionSnapshot?.state ?? null;
 	const lastTurnState = sessionSnapshot?.lastTurnState ?? null;
 	const isGitRepo = Boolean(workspaceBranch) || Boolean(workspacePath);
+	// Hoisted here (always mounted) so the header's changes pill has data even while
+	// the inspector is collapsed. Shares React Query's cache with the inspector's own
+	// useWorkspaceGitStatus call — one network request, not two.
+	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
+	const gitChangeSummary = useMemo(() => {
+		const data = gitStatusQuery.data;
+		if (!data) {
+			return null;
+		}
+		const entries = [...data.staged, ...data.unstaged];
+		const files = new Set(entries.map((entry) => entry.path)).size;
+		if (files === 0) {
+			return null;
+		}
+		return {
+			files,
+			additions: entries.reduce((sum, entry) => sum + entry.insertions, 0),
+			deletions: entries.reduce((sum, entry) => sum + entry.deletions, 0),
+		};
+	}, [gitStatusQuery.data]);
 	const messages = useMemo(
 		() =>
 			projectWorkspaceMessages(
@@ -384,6 +414,9 @@ export function WorkspacePanel({
 					isInstallingUpdate={isInstallingUpdate}
 					onInstallUpdate={onInstallUpdate}
 					workspacePath={workspacePath}
+					gitChangeSummary={gitChangeSummary}
+					inspectorCollapsed={inspectorCollapsed}
+					onToggleInspector={onToggleInspector}
 				/>
 			</header>
 
@@ -406,6 +439,7 @@ export function WorkspacePanel({
 					autoSaveMissionValidation={autoSaveMissionValidation}
 					onStartSession={onStartSession}
 					onSubmitPrompt={onSubmitPrompt}
+					onReviewChanges={onReviewChanges}
 				/>
 
 				<div className="border-t border-border/60 px-3 pb-3 pt-3 sm:px-4">

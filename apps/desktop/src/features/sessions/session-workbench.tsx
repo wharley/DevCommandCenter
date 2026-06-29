@@ -65,6 +65,12 @@ type SessionWorkbenchProps = {
 		planTitle: string | null;
 	}) => void;
 	composerPrefill?: { text: string; nonce: number } | null;
+	/** Current inspector visibility — picks the open vs. close affordance. */
+	inspectorCollapsed?: boolean;
+	/** Toggles the inspector open/closed — wired to the header control. */
+	onToggleInspector?: () => void;
+	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
+	onReviewChanges?: () => void;
 };
 
 export function SessionWorkbench({
@@ -106,6 +112,9 @@ export function SessionWorkbench({
 	onOpenPlanSidebar,
 	onImplementPlanInNewThread,
 	composerPrefill,
+	inspectorCollapsed,
+	onToggleInspector,
+	onReviewChanges,
 }: SessionWorkbenchProps) {
 	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [terminalExpanded, setTerminalExpanded] = useState(false);
@@ -213,6 +222,9 @@ export function SessionWorkbench({
 						terminalScopes={terminalScopes}
 						onOpenTerminal={handleOpenTerminal}
 						externalComposerPrefill={composerPrefill}
+						inspectorCollapsed={inspectorCollapsed}
+						onToggleInspector={onToggleInspector}
+						onReviewChanges={onReviewChanges}
 					/>
 				</div>
 			) : null}

@@ -9,6 +9,7 @@ import {
 	clampInspectorWidth,
 	clampSidebarWidth,
 	getInitialCollapsed,
+	getInitialInspectorCollapsed,
 	getInitialInspectorWidth,
 	getInitialSidebarWidth,
 	MAX_INSPECTOR_WIDTH,
@@ -52,8 +53,8 @@ export function useShellPanels() {
 	const [inspectorWidth, setInspectorWidth] = useState(() =>
 		getInitialInspectorWidth(),
 	);
-	const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
-		getInitialCollapsed(INSPECTOR_COLLAPSED_STORAGE_KEY, false),
+	const [inspectorCollapsed, setInspectorCollapsed] = useState(
+		getInitialInspectorCollapsed,
 	);
 	const [resizeState, setResizeState] = useState<ResizeState | null>(null);
 
