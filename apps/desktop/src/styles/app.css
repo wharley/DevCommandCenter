@@ -202,6 +202,31 @@
 		line-height: 1.82;
 	}
 
+	.assistant-markdown-scale :where(p, ul, ol, blockquote, pre, table):not(:first-child) {
+		margin-top: 0.75rem;
+	}
+
+	.assistant-markdown-scale :where(ul, ol) {
+		padding-left: 1.35rem;
+	}
+
+	.assistant-markdown-scale ul {
+		list-style-type: disc;
+	}
+
+	.assistant-markdown-scale ol {
+		list-style-type: decimal;
+	}
+
+	.assistant-markdown-scale li {
+		margin-top: 0.28rem;
+		line-height: 1.7;
+	}
+
+	.assistant-markdown-scale li > :where(p, ul, ol):first-child {
+		margin-top: 0;
+	}
+
 	.assistant-markdown-scale h1 {
 		font-size: 1.35em;
 		line-height: 1.3;

@@ -747,6 +747,13 @@
   },
   "conversation": {
     "scrollToBottom": "Rolar para o fim",
+    "activity": {
+      "running": "Trabalhando",
+      "completed": "Atividade",
+      "summary": "{{thoughts}} pensamentos · {{actions}} ações",
+      "failed_one": "{{count}} falhou",
+      "failed_other": "{{count}} falharam"
+    },
     "editsCard": {
       "summaryOne": "Editou 1 arquivo",
       "summaryOther": "Editou {{count}} arquivos",

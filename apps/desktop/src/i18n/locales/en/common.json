@@ -747,6 +747,13 @@
   },
   "conversation": {
     "scrollToBottom": "Scroll to bottom",
+    "activity": {
+      "running": "Working",
+      "completed": "Activity",
+      "summary": "{{thoughts}} thoughts · {{actions}} actions",
+      "failed_one": "{{count}} failed",
+      "failed_other": "{{count}} failed"
+    },
     "editsCard": {
       "summaryOne": "Edited 1 file",
       "summaryOther": "Edited {{count}} files",

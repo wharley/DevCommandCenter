@@ -1,5 +1,5 @@
-import { Suspense, useMemo } from "react";
-import { AlertCircle, Copy, FilePen } from "lucide-react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { Activity, AlertCircle, ChevronRight, Copy, FilePen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,75 @@ function AssistantTextFallback({ text }: { text: string }) {
 				{text}
 			</p>
 		</div>
+	);
+}
+
+function isActivityAnnotation(annotation: WorkspaceMessageAnnotation) {
+	return annotation.type === "reasoning" || annotation.type === "tool-call";
+}
+
+function AssistantActivityGroup({
+	annotations,
+	children,
+}: {
+	annotations: WorkspaceMessageAnnotation[];
+	children: React.ReactNode;
+}) {
+	const { t } = useTranslation("common");
+	const isLive = annotations.some((annotation) => Boolean(annotation.streaming));
+	const toolCount = annotations.filter((annotation) => annotation.type === "tool-call").length;
+	const reasoningCount = annotations.filter((annotation) => annotation.type === "reasoning").length;
+	const failedCount = annotations.filter(
+		(annotation) => annotation.type === "tool-call" && annotation.status?.type === "failed",
+	).length;
+	const [isOpen, setIsOpen] = useState(isLive || failedCount > 0);
+
+	useEffect(() => {
+		if (isLive || failedCount > 0) {
+			setIsOpen(true);
+			return;
+		}
+
+		setIsOpen(false);
+	}, [isLive, failedCount]);
+
+	return (
+		<details
+			className="mb-2 flex min-w-0 flex-col rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2"
+			open={isOpen}
+			onToggle={(event) => setIsOpen(event.currentTarget.open)}
+		>
+			<summary className="flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground [&::-webkit-details-marker]:hidden">
+				<ChevronRight
+					className={cn("size-3 shrink-0 transition-transform", isOpen && "rotate-90")}
+					aria-hidden
+				/>
+				{isLive ? (
+					<DccThinkingIndicator size={13} />
+				) : (
+					<Activity className="size-3.5 shrink-0" aria-hidden />
+				)}
+				<span className="font-medium text-foreground/85">
+					{isLive
+						? t("conversation.activity.running")
+						: t("conversation.activity.completed")}
+				</span>
+				<span className="truncate text-muted-foreground/70">
+					{t("conversation.activity.summary", {
+						actions: toolCount,
+						thoughts: reasoningCount,
+					})}
+				</span>
+				{failedCount > 0 ? (
+					<span className="ml-auto shrink-0 rounded bg-destructive/10 px-1.5 py-0.5 text-[11px] text-destructive">
+						{t("conversation.activity.failed", { count: failedCount })}
+					</span>
+				) : null}
+			</summary>
+			<div className="mt-2 flex min-w-0 flex-col gap-1.5 pl-1">
+				{children}
+			</div>
+		</details>
 	);
 }
 
@@ -63,6 +132,14 @@ export function AssistantMessage({
 }) {
 	const { t } = useTranslation("common");
 	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
+	const activityAnnotations = useMemo(
+		() => (annotations ?? []).filter(isActivityAnnotation),
+		[annotations],
+	);
+	const requestAnnotations = useMemo(
+		() => (annotations ?? []).filter((annotation) => !isActivityAnnotation(annotation)),
+		[annotations],
+	);
 	// Files this turn edited (deduped) — drives the closing "edits" card. Reads
 	// and shell calls are excluded; failed edits are skipped.
 	const editedFiles = useMemo(() => {
@@ -100,9 +177,9 @@ export function AssistantMessage({
 			className="conversation-thread-enter conversation-fade-in group/assistant flex min-w-0 justify-start"
 		>
 			<div className="relative flex min-w-0 max-w-[75%] flex-col pb-5">
-				{annotations?.length ? (
-					<div className="mb-2 flex flex-col gap-2">
-						{annotations.map((annotation) => {
+				{activityAnnotations.length ? (
+					<AssistantActivityGroup annotations={activityAnnotations}>
+						{activityAnnotations.map((annotation) => {
 							if (annotation.type === "reasoning") {
 								return (
 									<Reasoning
@@ -126,6 +203,41 @@ export function AssistantMessage({
 								);
 							}
 
+							return (
+								<ToolCall
+									key={`tool-call-${annotation.id}`}
+									action={annotation.action}
+									command={annotation.command}
+									file={annotation.file}
+									isLive={Boolean(annotation.streaming)}
+									isError={annotation.status?.type === "failed"}
+								>
+									<div className="min-w-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-5">
+										{annotation.content.trim().length > 0 ? (
+											annotation.content.trimEnd()
+										) : annotation.streaming ? (
+											<span className="flex items-center gap-1.5 font-sans text-[12px]">
+												<DccThinkingIndicator size={12} />
+												<span>Running</span>
+											</span>
+										) : annotation.status?.type === "failed" ? (
+											<span className="font-sans text-[12px]">
+												{annotation.status.reason ?? "Tool call failed"}
+											</span>
+										) : (
+											<span className="font-sans text-[12px] text-muted-foreground/70">
+												No output captured.
+											</span>
+										)}
+									</div>
+								</ToolCall>
+							);
+						})}
+					</AssistantActivityGroup>
+				) : null}
+				{requestAnnotations.length ? (
+					<div className="mb-2 flex flex-col gap-2">
+						{requestAnnotations.map((annotation) => {
 							if (annotation.type === "user-input") {
 								return (
 									<UserInputCard
@@ -156,31 +268,7 @@ export function AssistantMessage({
 								);
 							}
 
-							return (
-								<ToolCall
-									key={`tool-call-${annotation.id}`}
-									action={annotation.action}
-									command={annotation.command}
-									file={annotation.file}
-									isLive={Boolean(annotation.streaming)}
-									isError={annotation.status?.type === "failed"}
-								>
-									<div className="flex items-center gap-1.5">
-										{annotation.content.trim().length > 0 ? (
-											<span className="whitespace-pre-wrap">{annotation.content}</span>
-										) : annotation.streaming ? (
-											<>
-												<DccThinkingIndicator size={12} />
-												<span>Running</span>
-											</>
-										) : annotation.status?.type === "failed" ? (
-											<span>{annotation.status.reason ?? "Tool call failed"}</span>
-										) : (
-											<span className="text-muted-foreground/70">No output captured.</span>
-										)}
-									</div>
-								</ToolCall>
-							);
+							return null;
 						})}
 					</div>
 				) : null}
