@@ -330,7 +330,7 @@ export function SessionEventFeed({
 							className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
 						>
 							<ChevronDown className="size-3.5" strokeWidth={2} />
-							Scroll to bottom
+							{t("conversation.scrollToBottom")}
 						</button>
 					</div>
 				) : null}

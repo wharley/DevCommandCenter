@@ -1018,6 +1018,37 @@ fn validate_branch_for_fetch(root: &str, branch: &str) -> Result<(), String> {
     ))
 }
 
+fn remote_tracking_ref(remote: &str, branch: &str) -> String {
+    format!("refs/remotes/{remote}/{branch}")
+}
+
+fn remote_branch_fetch_refspec(remote: &str, branch: &str) -> String {
+    format!(
+        "+refs/heads/{branch}:{}",
+        remote_tracking_ref(remote, branch)
+    )
+}
+
+async fn persist_workspace_base_branch(
+    state: &State<'_, WorkspaceCommandState>,
+    workspace_root: &str,
+    base_branch: &str,
+) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let Some(mut workspace) = find_workspace_by_root(&repo, workspace_root).await? else {
+        return Ok(());
+    };
+    if workspace.base_branch.trim() == base_branch {
+        return Ok(());
+    }
+
+    workspace.base_branch = base_branch.to_string();
+    workspace.updated_at = Utc::now().to_rfc3339();
+    repo.save_workspace(&workspace)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub async fn workspace_git_sync_base(
     state: State<'_, WorkspaceCommandState>,
@@ -1055,19 +1086,21 @@ pub async fn workspace_git_sync_base(
         .unwrap_or_else(|| "main".to_string());
 
     validate_branch_for_fetch(root, &base_branch)?;
+    let base_ref = remote_tracking_ref(&remote, &base_branch);
+    let fetch_refspec = remote_branch_fetch_refspec(&remote, &base_branch);
     let branch = resolve_current_branch_name(root)?;
     let before = resolve_current_commit_sha(root)?.unwrap_or_default();
     let fetch = run_git_network_output_with_workspace_auth(
         &state.db_path,
         root,
-        &["fetch", &remote, &base_branch],
+        &["fetch", &remote, &fetch_refspec],
         input.forge_login.as_deref(),
     )?;
     if !fetch.status.success() {
         return Err(git_output_err("git fetch", &fetch.stderr));
     }
 
-    let merge = run_git_output(root, &["merge", "--no-edit", "FETCH_HEAD"])?;
+    let merge = run_git_output(root, &["merge", "--no-edit", &base_ref])?;
     let conflict_count = resolve_conflict_count(root).unwrap_or(0);
     if !merge.status.success() {
         let detail = git_output_err("git merge", &merge.stderr);
@@ -1080,6 +1113,7 @@ pub async fn workspace_git_sync_base(
     }
 
     let after = resolve_current_commit_sha(root)?.unwrap_or_default();
+    persist_workspace_base_branch(&state, root, &base_branch).await?;
     Ok(WorkspaceGitSyncBaseOutput {
         branch,
         base_branch,
@@ -1796,6 +1830,18 @@ mod editor_workspace_file_tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+
+    #[test]
+    fn sync_base_fetch_refspec_materializes_remote_tracking_branch() {
+        assert_eq!(
+            remote_tracking_ref("origin", "main"),
+            "refs/remotes/origin/main"
+        );
+        assert_eq!(
+            remote_branch_fetch_refspec("origin", "release/2026"),
+            "+refs/heads/release/2026:refs/remotes/origin/release/2026"
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,7 @@ export function ActiveThreadViewport({
 	onSubmitPrompt,
 	onReviewChanges,
 }: ActiveThreadViewportProps) {
+	const { t } = useTranslation("common");
 	const { contentRef, scrollRef, scrollToBottom, isAtBottom } = useStickToBottom({
 		initial: "instant",
 		resize: "smooth",
@@ -183,7 +185,7 @@ export function ActiveThreadViewport({
 						onClick={handleScrollToBottom}
 					>
 						<ChevronDown className="size-3.5" strokeWidth={2} />
-						Scroll to bottom
+						{t("conversation.scrollToBottom")}
 					</Button>
 				</div>
 			) : null}

@@ -470,6 +470,7 @@ export function CodeRabbitReviewSection({
 		: null;
 	const reviewErrorKind = review?.errorKind ?? null;
 	const reviewErrorAction = reviewErrorKind ? ERROR_ACTION[reviewErrorKind] : undefined;
+	const hasReviewContent = Boolean(review || history.length > 0 || reviewRunning);
 
 	const acceptPrivacy = useCallback(() => {
 		savePrivacyConsent(workspaceRoot);
@@ -503,6 +504,10 @@ export function CodeRabbitReviewSection({
 		selectedFindings,
 		t,
 	]);
+
+	if (!codeRabbitReady && !hasReviewContent) {
+		return null;
+	}
 
 	return (
 		<div className="min-w-0 max-w-full overflow-x-hidden border-t border-border/50 bg-background/70 font-sans">

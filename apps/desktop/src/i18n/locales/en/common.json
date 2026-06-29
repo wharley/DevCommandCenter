@@ -746,6 +746,7 @@
     "copyBranchName": "Copy branch name"
   },
   "conversation": {
+    "scrollToBottom": "Scroll to bottom",
     "editsCard": {
       "summaryOne": "Edited 1 file",
       "summaryOther": "Edited {{count}} files",
