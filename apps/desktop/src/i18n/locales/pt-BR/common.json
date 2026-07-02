@@ -169,6 +169,35 @@
       "collapse": "Recolher sessão",
       "resize": "Redimensionar painel de sessão"
     },
+    "recap": {
+      "ariaLabel": "Resumo do workspace",
+      "actions": {
+        "continue": "Continuar",
+        "review": "Ver review",
+        "activity": "Ver atividade"
+      },
+      "messages": {
+        "conflicts_one": "{{count}} conflito bloqueando esta branch — resolva antes de qualquer outra coisa.",
+        "conflicts_other": "{{count}} conflitos bloqueando esta branch — resolva antes de qualquer outra coisa.",
+        "merged": "{{pr}} mesclado. Continue este workspace a partir da base atualizada.",
+        "closed": "{{pr}} foi fechado sem merge.",
+        "working_one": "Agente trabalhando — {{count}} arquivo alterado até agora (+{{additions}} −{{deletions}}).",
+        "working_other": "Agente trabalhando — {{count}} arquivos alterados até agora (+{{additions}} −{{deletions}}).",
+        "workingClean": "Agente trabalhando — nenhuma alteração de arquivo ainda.",
+        "findings_one": "O review apontou {{count}} item no diff atual — trate antes de commitar.",
+        "findings_other": "O review apontou {{count}} itens no diff atual — trate antes de commitar.",
+        "changes_one": "{{count}} arquivo alterado (+{{additions}} −{{deletions}}) aguardando commit.",
+        "changes_other": "{{count}} arquivos alterados (+{{additions}} −{{deletions}}) aguardando commit.",
+        "ahead_one": "{{count}} commit local aguardando push.",
+        "ahead_other": "{{count}} commits locais aguardando push.",
+        "checksFailing": "{{pr}} está com checks falhando.",
+        "mergeReady": "{{pr}} está limpo e pronto para merge.",
+        "prOpen": "{{pr}} está aberto.",
+        "readyForPr_one": "{{count}} arquivo commitado sobre a base — ainda sem {{requestLabel}}.",
+        "readyForPr_other": "{{count}} arquivos commitados sobre a base — ainda sem {{requestLabel}}.",
+        "clean": "Tudo limpo e sincronizado com o remoto."
+      }
+    },
     "spec": {
       "kicker": "Spec da mission",
       "description": "Estado versionado do DCC para esta mission. Gere um plano a partir dela quando os requisitos estiverem prontos.",

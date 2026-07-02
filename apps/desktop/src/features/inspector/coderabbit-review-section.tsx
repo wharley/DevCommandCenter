@@ -510,7 +510,10 @@ export function CodeRabbitReviewSection({
 	}
 
 	return (
-		<div className="min-w-0 max-w-full overflow-x-hidden border-t border-border/50 bg-background/70 font-sans">
+		<div
+			data-coderabbit-review-section
+			className="min-w-0 max-w-full overflow-x-hidden border-t border-border/50 bg-background/70 font-sans"
+		>
 			<div className="flex items-center gap-1 px-2 py-1.5 text-[11.5px]">
 				<Button
 					type="button"

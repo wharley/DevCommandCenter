@@ -69,6 +69,7 @@ import { MissionValidationCard } from "@/features/panel/message-components/Missi
 import {
 	compileMissionSpecContext,
 	missionSpecContextStatus,
+	workspaceCodeRabbitDiffFingerprint,
 	workspaceContinueFromBaseBranch,
 	workspaceChangeRequestViewWeb,
 	workspaceChangeRequestCreate,
@@ -87,6 +88,9 @@ import {
 	WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY,
 } from "./use-workspace-git-branch-diff";
 import { useWorkspaceMissionSpecs } from "./use-workspace-mission-specs";
+import { useStoredCodeRabbitReview } from "./use-workspace-coderabbit-review";
+import { buildWorkspaceRecap } from "./workspace-recap";
+import { WorkspaceRecapStrip } from "./workspace-recap-strip";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
 import { useWorkspacePrReviewComments } from "./use-workspace-pr-review-comments";
 import {
@@ -1801,6 +1805,120 @@ export function WorkspaceInspectorSidebar({
 		setSessionDockOpen(false);
 	}, []);
 
+	// Recap strip data. The stored review + fingerprint queries share their keys
+	// with CodeRabbitReviewSection, so this adds no new requests while the git
+	// mode is on screen.
+	const { review: storedCodeRabbitReview } = useStoredCodeRabbitReview(workspacePath);
+	const codeRabbitFingerprintQuery = useQuery({
+		queryKey: [
+			"workspaceCodeRabbitDiffFingerprint",
+			workspacePath?.trim() ?? "",
+			storedCodeRabbitReview?.reviewType ?? "uncommitted",
+			reviewBranchDiffQuery.data?.baseBranch ?? null,
+			storedCodeRabbitReview?.fingerprint?.combinedHash ?? null,
+		],
+		queryFn: () =>
+			workspaceCodeRabbitDiffFingerprint({
+				workspaceRoot: workspacePath?.trim() ?? "",
+				reviewType: storedCodeRabbitReview?.reviewType ?? "uncommitted",
+				base: reviewBranchDiffQuery.data?.baseBranch ?? null,
+				baseCommit: null,
+			}),
+		enabled: Boolean(workspacePath?.trim() && storedCodeRabbitReview),
+		staleTime: 8_000,
+		refetchOnWindowFocus: true,
+	});
+	const codeRabbitReviewIsStale = Boolean(
+		storedCodeRabbitReview &&
+			codeRabbitFingerprintQuery.data &&
+			codeRabbitFingerprintQuery.data.combinedHash !==
+				storedCodeRabbitReview.fingerprint.combinedHash,
+	);
+	const pendingReviewFindingsCount =
+		storedCodeRabbitReview && !codeRabbitReviewIsStale
+			? storedCodeRabbitReview.findings.length
+			: 0;
+	const workingTreeSummary = useMemo(() => {
+		const entries = [
+			...(gitStatusQuery.data?.staged ?? []),
+			...(gitStatusQuery.data?.unstaged ?? []),
+		];
+		const files = new Set(entries.map((entry) => entry.path)).size;
+		const additions = entries.reduce((sum, entry) => sum + entry.insertions, 0);
+		const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
+		return { files, additions, deletions };
+	}, [gitStatusQuery.data]);
+	const workspaceRecap = useMemo(
+		() =>
+			buildWorkspaceRecap({
+				commitMode,
+				sessionActive: sessionState === "active",
+				changedFilesCount: workingTreeSummary.files,
+				additions: workingTreeSummary.additions,
+				deletions: workingTreeSummary.deletions,
+				aheadOfRemoteCount: gitStatusQuery.data?.aheadOfRemoteCount ?? 0,
+				conflictCount: gitStatusQuery.data?.conflictCount ?? 0,
+				committedVsBaseCount: reviewBranchDiffQuery.data?.changes.length ?? 0,
+				prNumber: prStatus?.number ?? null,
+				prState: prStatus?.state ?? null,
+				requestLabel: forgeContext.requestLabel,
+				pendingReviewFindingsCount,
+			}),
+		[
+			commitMode,
+			forgeContext.requestLabel,
+			gitStatusQuery.data,
+			pendingReviewFindingsCount,
+			prStatus?.number,
+			prStatus?.state,
+			reviewBranchDiffQuery.data?.changes.length,
+			sessionState,
+			workingTreeSummary,
+		],
+	);
+	const [isRecapActionRunning, setIsRecapActionRunning] = useState(false);
+	const handleRecapAction = useCallback(() => {
+		const action = workspaceRecap.action;
+		if (!action) {
+			return;
+		}
+		switch (action.kind) {
+			case "git": {
+				setIsRecapActionRunning(true);
+				// Errors already surface as toasts inside handleInspectorCommit.
+				void Promise.resolve(handleInspectorCommit())
+					.catch(() => undefined)
+					.finally(() => setIsRecapActionRunning(false));
+				return;
+			}
+			case "continue": {
+				void handleContinueWorkspace().catch(() => undefined);
+				return;
+			}
+			case "activity": {
+				openSessionDock("activity");
+				return;
+			}
+			case "review": {
+				selectInspectorMode("git");
+				// Wait a frame for the git mode (and the review section) to mount
+				// before scrolling to it.
+				window.setTimeout(() => {
+					rootRef.current
+						?.querySelector("[data-coderabbit-review-section]")
+						?.scrollIntoView({ block: "start", behavior: "smooth" });
+				}, 120);
+				return;
+			}
+		}
+	}, [
+		handleContinueWorkspace,
+		handleInspectorCommit,
+		openSessionDock,
+		selectInspectorMode,
+		workspaceRecap.action,
+	]);
+
 	useEffect(() => {
 		autoOpenedPlanMessageIdRef.current = null;
 		onTabChange("activity");
@@ -1945,6 +2063,15 @@ export function WorkspaceInspectorSidebar({
 						onOpenQuickOpen={onOpenQuickOpen}
 					/>
 				)}
+
+			{workspacePath && gitStatusQuery.data ? (
+				<WorkspaceRecapStrip
+					recap={workspaceRecap}
+					requestLabel={forgeContext.requestLabel}
+					busy={isRecapActionRunning || isContinuingWorkspace}
+					onAction={handleRecapAction}
+				/>
+			) : null}
 
 			{sessionDockOpen ? (
 			<>

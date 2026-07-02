@@ -169,6 +169,35 @@
       "collapse": "Collapse session",
       "resize": "Resize session panel"
     },
+    "recap": {
+      "ariaLabel": "Workspace recap",
+      "actions": {
+        "continue": "Continue",
+        "review": "View review",
+        "activity": "View activity"
+      },
+      "messages": {
+        "conflicts_one": "{{count}} conflict is blocking this branch — resolve it before anything else.",
+        "conflicts_other": "{{count}} conflicts are blocking this branch — resolve them before anything else.",
+        "merged": "{{pr}} merged. Continue this workspace from the updated base.",
+        "closed": "{{pr}} was closed without merging.",
+        "working_one": "Agent working — {{count}} file changed so far (+{{additions}} −{{deletions}}).",
+        "working_other": "Agent working — {{count}} files changed so far (+{{additions}} −{{deletions}}).",
+        "workingClean": "Agent working — no file changes yet.",
+        "findings_one": "Review flagged {{count}} finding on the current diff — handle it before committing.",
+        "findings_other": "Review flagged {{count}} findings on the current diff — handle them before committing.",
+        "changes_one": "{{count}} file changed (+{{additions}} −{{deletions}}), waiting for a commit.",
+        "changes_other": "{{count}} files changed (+{{additions}} −{{deletions}}), waiting for a commit.",
+        "ahead_one": "{{count}} local commit waiting for a push.",
+        "ahead_other": "{{count}} local commits waiting for a push.",
+        "checksFailing": "{{pr}} has failing checks.",
+        "mergeReady": "{{pr}} is clean and ready to merge.",
+        "prOpen": "{{pr}} is open.",
+        "readyForPr_one": "{{count}} file committed against the base — no {{requestLabel}} yet.",
+        "readyForPr_other": "{{count}} files committed against the base — no {{requestLabel}} yet.",
+        "clean": "All clean and in sync with the remote."
+      }
+    },
     "spec": {
       "kicker": "Mission spec",
       "description": "Versioned DCC state for this mission. Generate a plan from it when the requirements are ready.",
