@@ -33,9 +33,11 @@ pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
     ("claude-opus-4-7", "claude-opus-4-8"),
     ("opus-4.6", "claude-opus-4-6"),
     ("claude-opus-4-6-20251117", "claude-opus-4-6"),
-    ("sonnet", "claude-sonnet-4-6"),
-    ("sonnet-4.6", "claude-sonnet-4-6"),
-    ("claude-sonnet-4-6-20251117", "claude-sonnet-4-6"),
+    ("sonnet", "claude-sonnet-5"),
+    ("sonnet-5", "claude-sonnet-5"),
+    ("sonnet-4.6", "claude-sonnet-5"),
+    ("claude-sonnet-4-6", "claude-sonnet-5"),
+    ("claude-sonnet-4-6-20251117", "claude-sonnet-5"),
     ("haiku", "claude-haiku-4-5"),
     ("haiku-4.5", "claude-haiku-4-5"),
     ("claude-haiku-4-5-20251001", "claude-haiku-4-5"),
@@ -66,8 +68,11 @@ pub const GEMINI_ALIASES: &[(&str, &str)] = &[
 
 pub const DROID_ALIASES: &[(&str, &str)] = &[
     ("auto", "auto"),
-    ("sonnet", "claude-sonnet-4-6"),
-    ("claude-sonnet-4-6", "claude-sonnet-4-6"),
+    ("sonnet", "claude-sonnet-5"),
+    ("sonnet-5", "claude-sonnet-5"),
+    ("claude-sonnet-5", "claude-sonnet-5"),
+    ("sonnet-4.6", "claude-sonnet-5"),
+    ("claude-sonnet-4-6", "claude-sonnet-5"),
     ("gpt-5.4", "gpt-5.4"),
     ("5.4", "gpt-5.4"),
     ("gpt-5.5", "gpt-5.5"),
@@ -108,11 +113,11 @@ pub const CLAUDE_CODE: &[ModelEntry] = &[
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
-        id: "claude-sonnet-4-6",
-        label: "Claude Sonnet 4.6",
-        description: "Balanced default for coding and analysis.",
+        id: "claude-sonnet-5",
+        label: "Claude Sonnet 5",
+        description: "Best balance of speed and intelligence for coding and analysis.",
         recommended: true,
-        effort_levels: &["low", "medium", "high", "xhigh"],
+        effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
         id: "claude-haiku-4-5",
@@ -187,9 +192,9 @@ pub const DROID: &[ModelEntry] = &[
         effort_levels: &["low", "medium", "high"],
     },
     ModelEntry {
-        id: "claude-sonnet-4-6",
-        label: "Claude Sonnet 4.6",
-        description: "Balanced default with strong coding capability through Droid.",
+        id: "claude-sonnet-5",
+        label: "Claude Sonnet 5",
+        description: "Balanced Claude option with strong coding capability through Droid.",
         recommended: false,
         effort_levels: &["low", "medium", "high"],
     },
@@ -234,6 +239,17 @@ mod tests {
         assert_eq!(
             resolve_alias("claude_code", "claude-opus-4-7"),
             "claude-opus-4-8"
+        );
+    }
+
+    #[test]
+    fn claude_code_aliases_upgrade_sonnet_to_sonnet_5() {
+        assert_eq!(resolve_alias("claude_code", "sonnet"), "claude-sonnet-5");
+        assert_eq!(resolve_alias("claude_code", "sonnet-5"), "claude-sonnet-5");
+        assert_eq!(resolve_alias("claude_code", "sonnet-4.6"), "claude-sonnet-5");
+        assert_eq!(
+            resolve_alias("claude_code", "claude-sonnet-4-6"),
+            "claude-sonnet-5"
         );
     }
 }

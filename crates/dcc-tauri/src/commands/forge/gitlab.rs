@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -52,12 +52,16 @@ struct GitlabUserProfile {
     email: Option<String>,
 }
 
+fn trim_glab_status_prefix(raw: &str) -> &str {
+    raw.trim_start_matches(|c: char| {
+        c.is_whitespace() || c == '✓' || c == '✗' || c == '*' || c == '-' || c == '•'
+    })
+}
+
 fn parse_glab_logged_in_pairs(text: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for raw in text.lines() {
-        let body = raw.trim_start_matches(|c: char| {
-            c.is_whitespace() || c == '✓' || c == '✗' || c == '*' || c == '-' || c == '•'
-        });
+        let body = trim_glab_status_prefix(raw);
         let Some(after_to) = body.strip_prefix("Logged in to ") else {
             continue;
         };
@@ -107,15 +111,19 @@ fn looks_like_gitlab_missing_repo_access(message: &str) -> bool {
 
 fn extract_glab_token(text: &str) -> Option<String> {
     for raw in text.lines() {
-        let line = raw.trim();
+        let line = trim_glab_status_prefix(raw);
         if line.is_empty() {
             continue;
         }
         let lower = line.to_ascii_lowercase();
         if let Some((_, value)) = line.split_once(':') {
-            if lower.starts_with("token:") || lower.starts_with("access token:") {
+            let label = lower.split_once(':').map(|(label, _)| label.trim());
+            if matches!(
+                label,
+                Some("token" | "access token" | "token found" | "access token found")
+            ) {
                 let token = value.trim();
-                if !token.is_empty() {
+                if !token.is_empty() && !token.chars().all(|c| c == '*') {
                     return Some(token.to_string());
                 }
             }
@@ -717,6 +725,7 @@ pub(crate) fn create_change_request(
     let title = last_commit_title(root)?;
     let mut output = Command::new(glab);
     output.current_dir(root);
+    output.stdin(Stdio::null());
     if let Some(auth) = auth.as_ref() {
         output.envs(auth.envs.iter().map(|(key, value)| (key, value)));
     }
@@ -731,6 +740,7 @@ pub(crate) fn create_change_request(
             base_branch,
             "--title",
             &title,
+            "--yes",
         ])
         .output()
         .map_err(|e| e.to_string())?;
@@ -746,7 +756,8 @@ pub(crate) fn create_change_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_glab_authenticated_hosts, parse_glab_logged_in_pairs, parse_project_push_permission,
+        extract_glab_token, parse_glab_authenticated_hosts, parse_glab_logged_in_pairs,
+        parse_project_push_permission,
     };
 
     use crate::commands::forge::accounts::RepoAccess;
@@ -772,6 +783,30 @@ self.gitlab.example.com\n  ✓ Logged in to self.gitlab.example.com as team-user
                 "self.gitlab.example.com".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn extracts_token_from_glab_status_line_with_success_marker() {
+        let output = "gitlab.com\n  ✓ Token: glpat-real-token\n";
+        assert_eq!(
+            extract_glab_token(output),
+            Some("glpat-real-token".to_string())
+        );
+    }
+
+    #[test]
+    fn extracts_token_from_glab_token_found_line() {
+        let output = "gitlab.com\n  ✓ Token found: glpat-real-token\n";
+        assert_eq!(
+            extract_glab_token(output),
+            Some("glpat-real-token".to_string())
+        );
+    }
+
+    #[test]
+    fn ignores_masked_glab_token_status_line() {
+        let output = "gitlab.com\n  ✓ Token: **************************\n";
+        assert_eq!(extract_glab_token(output), None);
     }
 
     #[test]

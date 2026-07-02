@@ -22,13 +22,22 @@ describe("provider-model-registry", () => {
 		);
 	});
 
-	it("keeps Claude Sonnet 4.6 as the default Claude model", () => {
-		expect(getDefaultModelId("claude_code")).toBe("claude-sonnet-4-6");
+	it("keeps Claude Sonnet 5 as the default Claude model", () => {
+		expect(getDefaultModelId("claude_code")).toBe("claude-sonnet-5");
+	});
+
+	it("upgrades Claude Sonnet aliases to Claude Sonnet 5", () => {
+		expect(resolveModelAlias("claude_code", "sonnet")).toBe("claude-sonnet-5");
+		expect(resolveModelAlias("claude_code", "sonnet-5")).toBe("claude-sonnet-5");
+		expect(resolveModelAlias("claude_code", "sonnet-4.6")).toBe("claude-sonnet-5");
+		expect(resolveModelAlias("claude_code", "claude-sonnet-4-6")).toBe(
+			"claude-sonnet-5",
+		);
 	});
 
 	it("resolves Droid aliases to canonical IDs", () => {
 		expect(resolveModelAlias("droid", "auto")).toBe("auto");
-		expect(resolveModelAlias("droid", "sonnet")).toBe("claude-sonnet-4-6");
+		expect(resolveModelAlias("droid", "sonnet")).toBe("claude-sonnet-5");
 		expect(resolveModelAlias("droid", "5.4")).toBe("gpt-5.4");
 	});
 

@@ -78,11 +78,11 @@ describe("resolveSelectedModelId", () => {
 				effortLevels: ["low", "medium", "high", "xhigh", "max"],
 			},
 			{
-				id: "claude-sonnet-4-6",
-				label: "Claude Sonnet 4.6",
+				id: "claude-sonnet-5",
+				label: "Claude Sonnet 5",
 				description: "",
 				recommended: true,
-				effortLevels: ["low", "medium", "high", "xhigh"],
+				effortLevels: ["low", "medium", "high", "xhigh", "max"],
 			},
 		],
 		stable: true,
@@ -110,13 +110,22 @@ describe("resolveSelectedModelId", () => {
 		);
 	});
 
+	it("upgrades legacy Claude Sonnet selections to Claude Sonnet 5", () => {
+		expect(resolveSelectedModelId(claudeProvider, "sonnet-4.6")).toBe(
+			"claude-sonnet-5",
+		);
+		expect(resolveSelectedModelId(claudeProvider, "claude-sonnet-4-6")).toBe(
+			"claude-sonnet-5",
+		);
+	});
+
 	it("prefers the recommended model when the stored one is invalid", () => {
 		expect(resolveSelectedModelId(provider, "missing")).toBe("alpha-default");
 	});
 
-	it("keeps Claude Sonnet 4.6 as the recommended fallback", () => {
+	it("keeps Claude Sonnet 5 as the recommended fallback", () => {
 		expect(resolveSelectedModelId(claudeProvider, "missing")).toBe(
-			"claude-sonnet-4-6",
+			"claude-sonnet-5",
 		);
 	});
 
