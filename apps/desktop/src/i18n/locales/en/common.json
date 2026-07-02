@@ -754,6 +754,16 @@
       "failed_one": "{{count}} failed",
       "failed_other": "{{count}} failed"
     },
+    "reasoning": {
+      "label": "Thinking",
+      "empty": "No reasoning captured."
+    },
+    "toolCall": {
+      "running": "Running",
+      "failed": "Failed",
+      "failedFallback": "Tool call failed",
+      "noOutput": "No output captured."
+    },
     "editsCard": {
       "summaryOne": "Edited 1 file",
       "summaryOther": "Edited {{count}} files",

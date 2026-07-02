@@ -754,6 +754,16 @@
       "failed_one": "{{count}} falhou",
       "failed_other": "{{count}} falharam"
     },
+    "reasoning": {
+      "label": "Pensando",
+      "empty": "Nenhum raciocínio capturado."
+    },
+    "toolCall": {
+      "running": "Executando",
+      "failed": "Falhou",
+      "failedFallback": "A execução falhou",
+      "noOutput": "Nenhuma saída capturada."
+    },
     "editsCard": {
       "summaryOne": "Editou 1 arquivo",
       "summaryOther": "Editou {{count}} arquivos",

@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertCircle, ChevronRight, Copy, FilePen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
@@ -49,24 +49,32 @@ function AssistantActivityGroup({
 	const failedCount = annotations.filter(
 		(annotation) => annotation.type === "tool-call" && annotation.status?.type === "failed",
 	).length;
-	const [isOpen, setIsOpen] = useState(isLive || failedCount > 0);
+	const shouldStayOpen = isLive || failedCount > 0;
+	const [isOpen, setIsOpen] = useState(shouldStayOpen);
+	// Once the user toggles by hand, auto open/close stops driving this disclosure.
+	const userToggledRef = useRef(false);
 
 	useEffect(() => {
-		if (isLive || failedCount > 0) {
-			setIsOpen(true);
+		if (userToggledRef.current) {
 			return;
 		}
 
-		setIsOpen(false);
-	}, [isLive, failedCount]);
+		setIsOpen(shouldStayOpen);
+	}, [shouldStayOpen]);
 
 	return (
 		<details
 			className="mb-2 flex min-w-0 flex-col rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2"
 			open={isOpen}
-			onToggle={(event) => setIsOpen(event.currentTarget.open)}
 		>
-			<summary className="flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground [&::-webkit-details-marker]:hidden">
+			<summary
+				onClick={(event) => {
+					event.preventDefault();
+					userToggledRef.current = true;
+					setIsOpen((open) => !open);
+				}}
+				className="flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground [&::-webkit-details-marker]:hidden"
+			>
 				<ChevronRight
 					className={cn("size-3 shrink-0 transition-transform", isOpen && "rotate-90")}
 					aria-hidden
@@ -184,7 +192,7 @@ export function AssistantMessage({
 								return (
 									<Reasoning
 										key={`reasoning-${annotation.id}`}
-										label={annotation.label ?? "Thinking"}
+										label={annotation.label ?? t("conversation.reasoning.label")}
 										defaultOpen={Boolean(annotation.streaming)}
 									>
 										<div className="flex items-center gap-1.5">
@@ -193,10 +201,12 @@ export function AssistantMessage({
 											) : annotation.streaming ? (
 												<>
 													<DccThinkingIndicator size={12} />
-													<span>Thinking</span>
+													<span>{t("conversation.reasoning.label")}</span>
 												</>
 											) : (
-												<span className="text-muted-foreground/70">No reasoning captured.</span>
+												<span className="text-muted-foreground/70">
+													{t("conversation.reasoning.empty")}
+												</span>
 											)}
 										</div>
 									</Reasoning>
@@ -218,15 +228,15 @@ export function AssistantMessage({
 										) : annotation.streaming ? (
 											<span className="flex items-center gap-1.5 font-sans text-[12px]">
 												<DccThinkingIndicator size={12} />
-												<span>Running</span>
+												<span>{t("conversation.toolCall.running")}</span>
 											</span>
 										) : annotation.status?.type === "failed" ? (
 											<span className="font-sans text-[12px]">
-												{annotation.status.reason ?? "Tool call failed"}
+												{annotation.status.reason ?? t("conversation.toolCall.failedFallback")}
 											</span>
 										) : (
 											<span className="font-sans text-[12px] text-muted-foreground/70">
-												No output captured.
+												{t("conversation.toolCall.noOutput")}
 											</span>
 										)}
 									</div>
