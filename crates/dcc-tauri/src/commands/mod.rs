@@ -1,5 +1,6 @@
 pub mod coderabbit;
 pub mod common;
+pub mod delegation_commands;
 pub mod forge;
 pub mod forge_commands;
 pub mod provider_commands;
@@ -13,6 +14,9 @@ pub use coderabbit::{
     workspace_coderabbit_review_clear, workspace_coderabbit_review_history,
     workspace_coderabbit_review_job, workspace_coderabbit_review_load,
     workspace_coderabbit_review_save, workspace_coderabbit_review_start,
+};
+pub use delegation_commands::{
+    cancel_delegation, create_delegation, get_delegation, list_delegations,
 };
 pub use forge_commands::{
     workspace_backfill_forge_repo_bindings, workspace_change_request_create,

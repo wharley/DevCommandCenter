@@ -5,6 +5,8 @@ use super::{project::ProjectId, thread::Thread, workspace::WorkspaceId};
 use crate::ports::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
 use crate::ports::ProviderRuntimeConfig;
 
+use super::delegation::DelegationId;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct SessionId(pub String);
 
@@ -187,6 +189,36 @@ pub enum SessionEventKind {
         checkpoint_id: CheckpointId,
         label: String,
     },
+    DelegationRequested {
+        #[serde(rename = "delegationId")]
+        delegation_id: DelegationId,
+    },
+    DelegationStarted {
+        #[serde(rename = "delegationId")]
+        delegation_id: DelegationId,
+        #[serde(rename = "childSessionId")]
+        child_session_id: Option<SessionId>,
+    },
+    DelegationDelta {
+        #[serde(rename = "delegationId")]
+        delegation_id: DelegationId,
+        content: String,
+    },
+    DelegationCompleted {
+        #[serde(rename = "delegationId")]
+        delegation_id: DelegationId,
+        summary: Option<String>,
+    },
+    DelegationFailed {
+        #[serde(rename = "delegationId")]
+        delegation_id: DelegationId,
+        reason: Option<String>,
+    },
+    DelegationCancelled {
+        #[serde(rename = "delegationId")]
+        delegation_id: DelegationId,
+        reason: Option<String>,
+    },
     SessionCompleted,
     SessionAborted {
         reason: Option<String>,
@@ -275,7 +307,13 @@ impl SessionProjection {
             | SessionEventKind::TurnUserInputRequested { .. }
             | SessionEventKind::TurnUserInputResolved { .. }
             | SessionEventKind::TurnPermissionRequested { .. }
-            | SessionEventKind::TurnPermissionResolved { .. } => {}
+            | SessionEventKind::TurnPermissionResolved { .. }
+            | SessionEventKind::DelegationRequested { .. }
+            | SessionEventKind::DelegationStarted { .. }
+            | SessionEventKind::DelegationDelta { .. }
+            | SessionEventKind::DelegationCompleted { .. }
+            | SessionEventKind::DelegationFailed { .. }
+            | SessionEventKind::DelegationCancelled { .. } => {}
             SessionEventKind::TurnCompleted { turn_id } => {
                 self.turn_count = self.turn_count.saturating_add(1);
                 if self.active_turn_id.as_ref() == Some(turn_id) {

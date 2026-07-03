@@ -2,6 +2,8 @@
 
 
 /* Constants */
+export const DELEGATION_METHODS = {"cancelDelegation":"cancel_delegation","createDelegation":"create_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations"} as const;
+
 export const PROVIDER_METHODS = {"listProviders":"list_providers"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","closeSession":"close_session","listThreadEvents":"list_thread_events","listWorkspaceSessions":"list_workspace_sessions","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","searchSessions":"search_sessions","sendTurn":"send_turn","startThread":"start_thread"} as const;
@@ -19,6 +21,15 @@ export type AbortRunOutput = {
 	projection: SessionProjection,
 };
 
+export type CancelDelegationInput = {
+	delegationId: DelegationId,
+	reason: string | null,
+};
+
+export type CancelDelegationOutput = {
+	delegation: Delegation,
+};
+
 export type Capabilities = {
 	streaming: boolean,
 	mcp: boolean,
@@ -26,6 +37,10 @@ export type Capabilities = {
 	vision: boolean,
 	resumable: boolean,
 	experimental: boolean,
+	canBeDelegationTarget: boolean,
+	canRequestDelegation: boolean,
+	supportsReadOnlyDelegation: boolean,
+	supportsEditDelegation: boolean,
 };
 
 export type Checkpoint = {
@@ -239,6 +254,22 @@ export type CoreEvent = ({ workspacePrepared: {
 	label: string,
 } }) & { sessionAborted?: never; sessionCompleted?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnPermissionRequested?: never; sessionTurnPermissionResolved?: never; sessionTurnReasoningCompleted?: never; sessionTurnReasoningDelta?: never; sessionTurnReasoningStarted?: never; sessionTurnStarted?: never; sessionTurnToolCallCompleted?: never; sessionTurnToolCallDelta?: never; sessionTurnToolCallFailed?: never; sessionTurnToolCallStarted?: never; sessionTurnUserInputRequested?: never; sessionTurnUserInputResolved?: never; workspacePrepared?: never; workspaceReady?: never };
 
+export type CreateDelegationInput = {
+	parentSessionId: SessionId,
+	parentTurnId: TurnId | null,
+	childSessionId: SessionId | null,
+	workspaceId: WorkspaceId,
+	targetProviderId: ProviderId,
+	mode: DelegationMode,
+	prompt: string,
+	contextPolicy?: DelegationContextPolicy,
+	budget?: DelegationBudget,
+};
+
+export type CreateDelegationOutput = {
+	delegation: Delegation,
+};
+
 export type CreateWorkspaceForRepoInput = {
 	projectId: ProjectId,
 	workspaceRoot: string,
@@ -265,6 +296,36 @@ export type CreateWorkspaceFromUrlOutput = {
 	setupHints: WorkspaceSetupHint[],
 	setupReport: WorkspaceSetupReport,
 };
+
+export type Delegation = {
+	id: DelegationId,
+	parentSessionId: SessionId,
+	parentTurnId: TurnId | null,
+	childSessionId: SessionId | null,
+	workspaceId: WorkspaceId,
+	targetProviderId: ProviderId,
+	mode: DelegationMode,
+	status: DelegationStatus,
+	prompt: string,
+	contextPolicy: DelegationContextPolicy,
+	budget: DelegationBudget,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type DelegationBudget = {
+	turnLimit: number | null,
+	timeoutSeconds: number | null,
+	allowFileEdits: boolean,
+};
+
+export type DelegationContextPolicy = { type: "minimal" } | { type: "review_current_diff" } | { type: "spec_plan" } | { type: "selected_files"; paths: string[] } | { type: "full_reanchor" };
+
+export type DelegationId = string;
+
+export type DelegationMode = "review" | "implement" | "explain" | "test" | "research";
+
+export type DelegationStatus = "draft" | "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export type ForgeCliAccountEntry = {
 	login: string,
@@ -332,6 +393,14 @@ export type ForgeCliStatusOutput = {
 
 export type ForgeCliStatusState = "ready" | "error";
 
+export type GetDelegationInput = {
+	delegationId: DelegationId,
+};
+
+export type GetDelegationOutput = {
+	delegation: Delegation | null,
+};
+
 export type GithubCliStatusInput = Record<string, never>;
 
 export type GithubCliStatusOutput = {
@@ -357,6 +426,15 @@ export type ListChildDirectoriesInput = {
 
 export type ListChildDirectoriesOutput = {
 	paths: string[],
+};
+
+export type ListDelegationsInput = {
+	workspaceId: WorkspaceId | null,
+	parentSessionId: SessionId | null,
+};
+
+export type ListDelegationsOutput = {
+	delegations: Delegation[],
 };
 
 export type ListGitTrackedFilesInput = {
@@ -611,7 +689,7 @@ export type Session = {
 	updatedAt: string,
 };
 
-export type SessionEventKind = { type: "session_started"; workspaceId: WorkspaceId; projectId: ProjectId; providerId: string; model: string | null } | { type: "turn_started"; turnId: TurnId; prompt: string; planMode?: boolean | null } | { type: "turn_delta"; turnId: TurnId; content: string } | { type: "turn_reasoning_started"; turnId: TurnId; reasoningId: string; label: string | null } | { type: "turn_reasoning_delta"; turnId: TurnId; reasoningId: string; content: string } | { type: "turn_reasoning_completed"; turnId: TurnId; reasoningId: string } | { type: "turn_tool_call_started"; turnId: TurnId; toolCallId: string; action: string; command: string | null; file: string | null } | { type: "turn_tool_call_delta"; turnId: TurnId; toolCallId: string; content: string } | { type: "turn_tool_call_completed"; turnId: TurnId; toolCallId: string } | { type: "turn_tool_call_failed"; turnId: TurnId; toolCallId: string; reason: string | null } | { type: "turn_user_input_requested"; turnId: TurnId; requestId: string; questions: ProviderUserInputQuestion[] } | { type: "turn_user_input_resolved"; turnId: TurnId; requestId: string; answers: ProviderUserInputAnswer[] } | { type: "turn_permission_requested"; turnId: TurnId; requestId: string; toolName: string; title: string | null; description: string | null; command: string | null; file: string | null } | { type: "turn_permission_resolved"; turnId: TurnId; requestId: string; behavior: string } | { type: "turn_completed"; turnId: TurnId } | { type: "turn_aborted"; turnId: TurnId; reason: string | null } | { type: "checkpoint_created"; checkpointId: CheckpointId; label: string } | { type: "session_completed" } | { type: "session_aborted"; reason: string | null } | { type: "session_resumed" };
+export type SessionEventKind = { type: "session_started"; workspaceId: WorkspaceId; projectId: ProjectId; providerId: string; model: string | null } | { type: "turn_started"; turnId: TurnId; prompt: string; planMode?: boolean | null } | { type: "turn_delta"; turnId: TurnId; content: string } | { type: "turn_reasoning_started"; turnId: TurnId; reasoningId: string; label: string | null } | { type: "turn_reasoning_delta"; turnId: TurnId; reasoningId: string; content: string } | { type: "turn_reasoning_completed"; turnId: TurnId; reasoningId: string } | { type: "turn_tool_call_started"; turnId: TurnId; toolCallId: string; action: string; command: string | null; file: string | null } | { type: "turn_tool_call_delta"; turnId: TurnId; toolCallId: string; content: string } | { type: "turn_tool_call_completed"; turnId: TurnId; toolCallId: string } | { type: "turn_tool_call_failed"; turnId: TurnId; toolCallId: string; reason: string | null } | { type: "turn_user_input_requested"; turnId: TurnId; requestId: string; questions: ProviderUserInputQuestion[] } | { type: "turn_user_input_resolved"; turnId: TurnId; requestId: string; answers: ProviderUserInputAnswer[] } | { type: "turn_permission_requested"; turnId: TurnId; requestId: string; toolName: string; title: string | null; description: string | null; command: string | null; file: string | null } | { type: "turn_permission_resolved"; turnId: TurnId; requestId: string; behavior: string } | { type: "turn_completed"; turnId: TurnId } | { type: "turn_aborted"; turnId: TurnId; reason: string | null } | { type: "checkpoint_created"; checkpointId: CheckpointId; label: string } | { type: "delegation_requested"; delegationId: DelegationId } | { type: "delegation_started"; delegationId: DelegationId; childSessionId: SessionId | null } | { type: "delegation_delta"; delegationId: DelegationId; content: string } | { type: "delegation_completed"; delegationId: DelegationId; summary: string | null } | { type: "delegation_failed"; delegationId: DelegationId; reason: string | null } | { type: "delegation_cancelled"; delegationId: DelegationId; reason: string | null } | { type: "session_completed" } | { type: "session_aborted"; reason: string | null } | { type: "session_resumed" };
 
 export type SessionEventRecord = {
 	eventId: string,

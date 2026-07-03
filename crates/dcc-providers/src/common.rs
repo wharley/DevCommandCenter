@@ -1413,6 +1413,10 @@ pub fn stable_cli_capabilities() -> Capabilities {
         vision: true,
         resumable: true,
         experimental: false,
+        can_be_delegation_target: true,
+        can_request_delegation: false,
+        supports_read_only_delegation: true,
+        supports_edit_delegation: true,
     }
 }
 
@@ -1424,6 +1428,10 @@ pub fn experimental_cli_capabilities() -> Capabilities {
         vision: false,
         resumable: false,
         experimental: true,
+        can_be_delegation_target: true,
+        can_request_delegation: false,
+        supports_read_only_delegation: true,
+        supports_edit_delegation: true,
     }
 }
 

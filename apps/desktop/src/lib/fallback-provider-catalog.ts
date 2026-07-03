@@ -15,6 +15,10 @@ const stableCapabilities = {
 	vision: true,
 	resumable: true,
 	experimental: false,
+	canBeDelegationTarget: true,
+	canRequestDelegation: false,
+	supportsReadOnlyDelegation: true,
+	supportsEditDelegation: true,
 } as const;
 
 const experimentalCapabilities = {
@@ -24,6 +28,10 @@ const experimentalCapabilities = {
 	vision: false,
 	resumable: false,
 	experimental: true,
+	canBeDelegationTarget: true,
+	canRequestDelegation: false,
+	supportsReadOnlyDelegation: true,
+	supportsEditDelegation: true,
 } as const;
 
 export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {

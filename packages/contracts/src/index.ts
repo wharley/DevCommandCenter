@@ -1,4 +1,9 @@
-export { PROVIDER_METHODS, SESSION_METHODS, WORKSPACE_METHODS } from "./generated/bindings";
+export {
+	DELEGATION_METHODS,
+	PROVIDER_METHODS,
+	SESSION_METHODS,
+	WORKSPACE_METHODS,
+} from "./generated/bindings";
 export type {
 	AbortRunInput,
 	AbortRunOutput,

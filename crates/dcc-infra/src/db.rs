@@ -8,16 +8,22 @@ use serde_json::{from_str, to_string};
 
 use dcc_core::{
     domain::{
+        delegation::{
+            Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
+            DelegationStatus,
+        },
         project::ProjectId,
         repository::{Repository, RepositoryId},
         session::{
             Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection,
-            SessionSearchResult, SessionState, WorkspaceSessionSummary,
+            SessionSearchResult, SessionState, TurnId, WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
         workspace::{Workspace, WorkspaceId, WorkspaceState},
     },
-    ports::{RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo},
+    ports::{
+        DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
+    },
     Result,
 };
 
@@ -127,6 +133,39 @@ CREATE VIRTUAL TABLE IF NOT EXISTS dcc_session_search USING fts5(
 	updated_at UNINDEXED,
 	tokenize = 'unicode61'
 );
+"#;
+
+const DELEGATION_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_delegations (
+	id TEXT PRIMARY KEY NOT NULL,
+	parent_session_id TEXT NOT NULL,
+	parent_turn_id TEXT NULL,
+	child_session_id TEXT NULL,
+	workspace_id TEXT NOT NULL,
+	target_provider_id TEXT NOT NULL,
+	mode TEXT NOT NULL,
+	status TEXT NOT NULL,
+	prompt TEXT NOT NULL,
+	context_policy_json TEXT NOT NULL,
+	budget_json TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY (parent_session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE,
+	FOREIGN KEY (child_session_id) REFERENCES dcc_sessions(id) ON DELETE SET NULL,
+	FOREIGN KEY (workspace_id) REFERENCES dcc_workspaces(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_delegations_workspace_id
+	ON dcc_delegations(workspace_id);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_delegations_parent_session_id
+	ON dcc_delegations(parent_session_id);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_delegations_child_session_id
+	ON dcc_delegations(child_session_id);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_delegations_status
+	ON dcc_delegations(status);
 "#;
 
 #[derive(Clone)]
@@ -424,7 +463,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{DELEGATION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::rebuild_search_index_sync(&conn)?;
@@ -455,6 +494,103 @@ impl SqliteSessionRepo {
                 )),
             )),
         }
+    }
+
+    fn delegation_mode_as_str(mode: &DelegationMode) -> &'static str {
+        match mode {
+            DelegationMode::Review => "review",
+            DelegationMode::Implement => "implement",
+            DelegationMode::Explain => "explain",
+            DelegationMode::Test => "test",
+            DelegationMode::Research => "research",
+        }
+    }
+
+    fn delegation_mode_from_str(mode: &str, column: usize) -> rusqlite::Result<DelegationMode> {
+        match mode {
+            "review" => Ok(DelegationMode::Review),
+            "implement" => Ok(DelegationMode::Implement),
+            "explain" => Ok(DelegationMode::Explain),
+            "test" => Ok(DelegationMode::Test),
+            "research" => Ok(DelegationMode::Research),
+            other => Err(rusqlite::Error::FromSqlConversionFailure(
+                column,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown delegation mode: {other}"),
+                )),
+            )),
+        }
+    }
+
+    fn delegation_status_as_str(status: &DelegationStatus) -> &'static str {
+        match status {
+            DelegationStatus::Draft => "draft",
+            DelegationStatus::Queued => "queued",
+            DelegationStatus::Running => "running",
+            DelegationStatus::Completed => "completed",
+            DelegationStatus::Failed => "failed",
+            DelegationStatus::Cancelled => "cancelled",
+        }
+    }
+
+    fn delegation_status_from_str(
+        status: &str,
+        column: usize,
+    ) -> rusqlite::Result<DelegationStatus> {
+        match status {
+            "draft" => Ok(DelegationStatus::Draft),
+            "queued" => Ok(DelegationStatus::Queued),
+            "running" => Ok(DelegationStatus::Running),
+            "completed" => Ok(DelegationStatus::Completed),
+            "failed" => Ok(DelegationStatus::Failed),
+            "cancelled" => Ok(DelegationStatus::Cancelled),
+            other => Err(rusqlite::Error::FromSqlConversionFailure(
+                column,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown delegation status: {other}"),
+                )),
+            )),
+        }
+    }
+
+    fn delegation_from_row(row: &Row<'_>) -> rusqlite::Result<Delegation> {
+        let context_policy_json = row.get::<_, String>(9)?;
+        let context_policy =
+            from_str::<DelegationContextPolicy>(&context_policy_json).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    9,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?;
+        let budget_json = row.get::<_, String>(10)?;
+        let budget = from_str::<DelegationBudget>(&budget_json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                10,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
+
+        Ok(Delegation {
+            id: DelegationId(row.get::<_, String>(0)?),
+            parent_session_id: SessionId(row.get::<_, String>(1)?),
+            parent_turn_id: row.get::<_, Option<String>>(2)?.map(TurnId),
+            child_session_id: row.get::<_, Option<String>>(3)?.map(SessionId),
+            workspace_id: WorkspaceId(row.get::<_, String>(4)?),
+            target_provider_id: dcc_core::domain::provider::ProviderId(row.get::<_, String>(5)?),
+            mode: Self::delegation_mode_from_str(&row.get::<_, String>(6)?, 6)?,
+            status: Self::delegation_status_from_str(&row.get::<_, String>(7)?, 7)?,
+            prompt: row.get::<_, String>(8)?,
+            context_policy,
+            budget,
+            created_at: row.get::<_, String>(11)?,
+            updated_at: row.get::<_, String>(12)?,
+        })
     }
 
     fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
@@ -720,6 +856,12 @@ impl SqliteSessionRepo {
                 | SessionEventKind::TurnReasoningCompleted { .. }
                 | SessionEventKind::TurnToolCallCompleted { .. }
                 | SessionEventKind::SessionCompleted
+                | SessionEventKind::DelegationRequested { .. }
+                | SessionEventKind::DelegationStarted { .. }
+                | SessionEventKind::DelegationDelta { .. }
+                | SessionEventKind::DelegationCompleted { .. }
+                | SessionEventKind::DelegationFailed { .. }
+                | SessionEventKind::DelegationCancelled { .. }
                 | SessionEventKind::SessionResumed => {}
             }
         }
@@ -1580,11 +1722,194 @@ impl SessionEventRepo for SqliteSessionRepo {
     }
 }
 
+#[async_trait]
+impl DelegationRepo for SqliteSessionRepo {
+    async fn save_delegation(&self, delegation: &Delegation) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let context_policy_json = to_string(&delegation.context_policy)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let budget_json = to_string(&delegation.budget)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+
+        conn.execute(
+            r#"
+			INSERT INTO dcc_delegations (
+				id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
+				target_provider_id, mode, status, prompt, context_policy_json, budget_json,
+				created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+			ON CONFLICT(id) DO UPDATE SET
+				parent_session_id = excluded.parent_session_id,
+				parent_turn_id = excluded.parent_turn_id,
+				child_session_id = excluded.child_session_id,
+				workspace_id = excluded.workspace_id,
+				target_provider_id = excluded.target_provider_id,
+				mode = excluded.mode,
+				status = excluded.status,
+				prompt = excluded.prompt,
+				context_policy_json = excluded.context_policy_json,
+				budget_json = excluded.budget_json,
+				created_at = excluded.created_at,
+				updated_at = excluded.updated_at
+			"#,
+            params![
+                delegation.id.0.clone(),
+                delegation.parent_session_id.0.clone(),
+                delegation
+                    .parent_turn_id
+                    .as_ref()
+                    .map(|turn_id| turn_id.0.clone()),
+                delegation
+                    .child_session_id
+                    .as_ref()
+                    .map(|session_id| session_id.0.clone()),
+                delegation.workspace_id.0.clone(),
+                delegation.target_provider_id.0.clone(),
+                Self::delegation_mode_as_str(&delegation.mode),
+                Self::delegation_status_as_str(&delegation.status),
+                delegation.prompt.clone(),
+                context_policy_json,
+                budget_json,
+                delegation.created_at.clone(),
+                delegation.updated_at.clone(),
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn get_delegation(&self, id: &DelegationId) -> Result<Option<Delegation>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            r#"
+			SELECT id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
+			       target_provider_id, mode, status, prompt, context_policy_json, budget_json,
+			       created_at, updated_at
+			  FROM dcc_delegations
+			 WHERE id = ?1
+			"#,
+            params![id.0.clone()],
+            Self::delegation_from_row,
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    async fn list_delegations(
+        &self,
+        workspace_id: Option<&WorkspaceId>,
+        parent_session_id: Option<&SessionId>,
+    ) -> Result<Vec<Delegation>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let base_sql = r#"
+			SELECT id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
+			       target_provider_id, mode, status, prompt, context_policy_json, budget_json,
+			       created_at, updated_at
+			  FROM dcc_delegations
+		"#;
+        let order_sql = " ORDER BY updated_at DESC, created_at DESC";
+        let rows = match (workspace_id, parent_session_id) {
+            (Some(workspace_id), Some(parent_session_id)) => {
+                let sql = format!(
+                    "{base_sql} WHERE workspace_id = ?1 AND parent_session_id = ?2{order_sql}"
+                );
+                let mut stmt = conn
+                    .prepare(&sql)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                let rows = stmt
+                    .query_map(
+                        params![workspace_id.0.clone(), parent_session_id.0.clone()],
+                        Self::delegation_from_row,
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+                    .collect::<rusqlite::Result<Vec<_>>>();
+                rows
+            }
+            (Some(workspace_id), None) => {
+                let sql = format!("{base_sql} WHERE workspace_id = ?1{order_sql}");
+                let mut stmt = conn
+                    .prepare(&sql)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                let rows = stmt
+                    .query_map(params![workspace_id.0.clone()], Self::delegation_from_row)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+                    .collect::<rusqlite::Result<Vec<_>>>();
+                rows
+            }
+            (None, Some(parent_session_id)) => {
+                let sql = format!("{base_sql} WHERE parent_session_id = ?1{order_sql}");
+                let mut stmt = conn
+                    .prepare(&sql)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                let rows = stmt
+                    .query_map(
+                        params![parent_session_id.0.clone()],
+                        Self::delegation_from_row,
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+                    .collect::<rusqlite::Result<Vec<_>>>();
+                rows
+            }
+            (None, None) => {
+                let sql = format!("{base_sql}{order_sql}");
+                let mut stmt = conn
+                    .prepare(&sql)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                let rows = stmt
+                    .query_map([], Self::delegation_from_row)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+                    .collect::<rusqlite::Result<Vec<_>>>();
+                rows
+            }
+        }
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(rows)
+    }
+
+    async fn update_delegation_status(
+        &self,
+        id: &DelegationId,
+        status: DelegationStatus,
+        updated_at: String,
+    ) -> Result<Option<Delegation>> {
+        {
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            conn.execute(
+                "UPDATE dcc_delegations SET status = ?1, updated_at = ?2 WHERE id = ?3",
+                params![
+                    Self::delegation_status_as_str(&status),
+                    updated_at,
+                    id.0.clone()
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        self.get_delegation(id).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use dcc_core::{
         domain::{
+            delegation::{
+                Delegation, DelegationBudget, DelegationContextPolicy, DelegationId,
+                DelegationMode, DelegationStatus,
+            },
+            provider::ProviderId,
             repository::{Repository, RepositoryId},
             session::{SessionEventKind, SessionState, TurnId},
             workspace::{
@@ -1592,7 +1917,10 @@ mod tests {
                 WorkspaceState,
             },
         },
-        ports::{RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo},
+        ports::{
+            DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo,
+            WorkspaceRepo,
+        },
     };
 
     fn in_memory_conn() -> Arc<Mutex<Connection>> {
@@ -1756,6 +2084,105 @@ mod tests {
         let recents = repo.search_sessions("", 10).expect("recent sessions");
         assert_eq!(recents.len(), 1);
         assert_eq!(recents[0].session_id.0, "session-search");
+    }
+
+    #[test]
+    fn sqlite_session_repo_persists_delegations_and_status_updates() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).expect("create session repo");
+        let workspace_repo =
+            SqliteWorkspaceRepo::from_connection(conn).expect("create workspace repo");
+        let workspace = Workspace {
+            id: WorkspaceId("workspace-1".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            name: Some("Delegation Workspace".to_string()),
+            root_path: "/tmp/delegation".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: Some("/tmp/delegation".to_string()),
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let parent_session = Session {
+            id: SessionId("parent-session".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            workspace_id: workspace.id.clone(),
+            provider_id: "codex".to_string(),
+            model: Some("gpt-5".to_string()),
+            provider_runtime: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let child_session = Session {
+            id: SessionId("child-session".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            workspace_id: workspace.id.clone(),
+            provider_id: "gemini".to_string(),
+            model: None,
+            provider_runtime: None,
+            state: SessionState::Draft,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        futures::executor::block_on(workspace_repo.save_workspace(&workspace))
+            .expect("save workspace");
+        futures::executor::block_on(repo.save_session(&parent_session))
+            .expect("save parent session");
+        futures::executor::block_on(repo.save_session(&child_session)).expect("save child session");
+
+        let delegation = Delegation {
+            id: DelegationId("delegation-1".to_string()),
+            parent_session_id: parent_session.id.clone(),
+            parent_turn_id: Some(TurnId("turn-1".to_string())),
+            child_session_id: Some(child_session.id.clone()),
+            workspace_id: workspace.id.clone(),
+            target_provider_id: ProviderId("gemini".to_string()),
+            mode: DelegationMode::Review,
+            status: DelegationStatus::Draft,
+            prompt: "Review the current diff".to_string(),
+            context_policy: DelegationContextPolicy::ReviewCurrentDiff,
+            budget: DelegationBudget {
+                turn_limit: Some(1),
+                timeout_seconds: Some(300),
+                allow_file_edits: false,
+            },
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        futures::executor::block_on(repo.save_delegation(&delegation)).expect("save delegation");
+        let fetched = futures::executor::block_on(repo.get_delegation(&delegation.id))
+            .expect("get delegation")
+            .expect("delegation exists");
+        assert_eq!(fetched.parent_session_id.0, "parent-session");
+        assert_eq!(
+            fetched.child_session_id.as_ref().map(|id| id.0.as_str()),
+            Some("child-session")
+        );
+        assert_eq!(
+            fetched.context_policy,
+            DelegationContextPolicy::ReviewCurrentDiff
+        );
+
+        let listed = futures::executor::block_on(
+            repo.list_delegations(Some(&workspace.id), Some(&parent_session.id)),
+        )
+        .expect("list delegations");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id.0, "delegation-1");
+
+        let cancelled = futures::executor::block_on(repo.update_delegation_status(
+            &delegation.id,
+            DelegationStatus::Cancelled,
+            "2026-01-01T00:01:00Z".to_string(),
+        ))
+        .expect("cancel delegation")
+        .expect("delegation exists after update");
+        assert_eq!(cancelled.status, DelegationStatus::Cancelled);
+        assert_eq!(cancelled.updated_at, "2026-01-01T00:01:00Z");
     }
 
     #[test]

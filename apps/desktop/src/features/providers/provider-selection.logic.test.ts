@@ -27,6 +27,10 @@ function makeProvider(id: string, stable: boolean) {
 			resumable: false,
 			vision: false,
 			experimental: false,
+			canBeDelegationTarget: true,
+			canRequestDelegation: false,
+			supportsReadOnlyDelegation: true,
+			supportsEditDelegation: true,
 		},
 		health: "Healthy" as const,
 	};
@@ -93,6 +97,10 @@ describe("resolveSelectedModelId", () => {
 			resumable: false,
 			vision: false,
 			experimental: false,
+			canBeDelegationTarget: true,
+			canRequestDelegation: false,
+			supportsReadOnlyDelegation: true,
+			supportsEditDelegation: true,
 		},
 		health: "Healthy" as const,
 	};

@@ -1,3 +1,4 @@
+pub mod delegation;
 pub mod model_registry;
 pub mod project;
 pub mod provider;
@@ -6,6 +7,10 @@ pub mod session;
 pub mod thread;
 pub mod workspace;
 
+pub use delegation::{
+    Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
+    DelegationStatus,
+};
 pub use project::{Project, ProjectId};
 pub use provider::{
     Capabilities, HealthStatus, ProviderCatalog, ProviderDescriptor, ProviderEvent, ProviderId,

@@ -18,6 +18,7 @@ pub struct SessionHandle {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     pub streaming: bool,
     pub mcp: bool,
@@ -25,6 +26,10 @@ pub struct Capabilities {
     pub vision: bool,
     pub resumable: bool,
     pub experimental: bool,
+    pub can_be_delegation_target: bool,
+    pub can_request_delegation: bool,
+    pub supports_read_only_delegation: bool,
+    pub supports_edit_delegation: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

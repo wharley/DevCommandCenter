@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use dcc_core::{
     domain::{
+        delegation::{Delegation, DelegationId, DelegationStatus},
         project::{Project, ProjectId},
         provider::{ProviderEvent, SessionHandle},
         repository::{Repository, RepositoryId},
@@ -24,8 +25,8 @@ use dcc_core::{
         workspace::{Workspace, WorkspaceId},
     },
     ports::{
-        EventBus, Input, ProjectRepo, Provider, ProviderRuntimeConfig, RepositoryRepo,
-        SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
+        DelegationRepo, EventBus, Input, ProjectRepo, Provider, ProviderRuntimeConfig,
+        RepositoryRepo, SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
     },
     Result,
 };
@@ -778,6 +779,34 @@ impl SessionEventRepo for SessionCommandState {
 
     async fn delete_events_by_session(&self, session_id: &SessionId) -> Result<()> {
         SessionEventRepo::delete_events_by_session(&self.session_repo, session_id).await
+    }
+}
+
+#[async_trait]
+impl DelegationRepo for SessionCommandState {
+    async fn save_delegation(&self, delegation: &Delegation) -> Result<()> {
+        DelegationRepo::save_delegation(&self.session_repo, delegation).await
+    }
+
+    async fn get_delegation(&self, id: &DelegationId) -> Result<Option<Delegation>> {
+        DelegationRepo::get_delegation(&self.session_repo, id).await
+    }
+
+    async fn list_delegations(
+        &self,
+        workspace_id: Option<&WorkspaceId>,
+        parent_session_id: Option<&SessionId>,
+    ) -> Result<Vec<Delegation>> {
+        DelegationRepo::list_delegations(&self.session_repo, workspace_id, parent_session_id).await
+    }
+
+    async fn update_delegation_status(
+        &self,
+        id: &DelegationId,
+        status: DelegationStatus,
+        updated_at: String,
+    ) -> Result<Option<Delegation>> {
+        DelegationRepo::update_delegation_status(&self.session_repo, id, status, updated_at).await
     }
 }
 

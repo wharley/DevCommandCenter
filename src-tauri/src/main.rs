@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod coderabbit_commands;
+mod delegation_commands;
 mod forge_commands;
 mod git_support;
 mod session_commands;
@@ -53,6 +54,7 @@ use coderabbit_commands::{
     workspace_coderabbit_review_job, workspace_coderabbit_review_load,
     workspace_coderabbit_review_save, workspace_coderabbit_review_start,
 };
+use delegation_commands::{cancel_delegation, create_delegation, get_delegation, list_delegations};
 use forge_commands::{
     workspace_backfill_forge_repo_bindings, workspace_change_request_create,
     workspace_change_request_merge, workspace_change_request_view_web,
@@ -6887,6 +6889,10 @@ pub fn run() {
             workspace_pr_status,
             workspace_run_setup,
             workspace_continue_from_base_branch,
+            create_delegation,
+            list_delegations,
+            get_delegation,
+            cancel_delegation,
             session_commands::start_thread,
             session_commands::send_turn,
             session_commands::abort_run,

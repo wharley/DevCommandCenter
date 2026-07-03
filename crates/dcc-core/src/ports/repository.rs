@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 use crate::{
     domain::{
+        delegation::{Delegation, DelegationId, DelegationStatus},
         project::{Project, ProjectId},
         repository::{Repository, RepositoryId},
         session::{Session, SessionEventRecord, SessionId},
@@ -48,6 +49,23 @@ pub trait SessionEventRepo: Send + Sync {
         session_id: &SessionId,
     ) -> Result<Vec<SessionEventRecord>>;
     async fn delete_events_by_session(&self, session_id: &SessionId) -> Result<()>;
+}
+
+#[async_trait]
+pub trait DelegationRepo: Send + Sync {
+    async fn save_delegation(&self, delegation: &Delegation) -> Result<()>;
+    async fn get_delegation(&self, id: &DelegationId) -> Result<Option<Delegation>>;
+    async fn list_delegations(
+        &self,
+        workspace_id: Option<&WorkspaceId>,
+        parent_session_id: Option<&SessionId>,
+    ) -> Result<Vec<Delegation>>;
+    async fn update_delegation_status(
+        &self,
+        id: &DelegationId,
+        status: DelegationStatus,
+        updated_at: String,
+    ) -> Result<Option<Delegation>>;
 }
 
 #[async_trait]

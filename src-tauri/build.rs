@@ -8,6 +8,10 @@ use dcc_core::{
         SendTurnOutput, StartThreadInput, StartThreadOutput,
     },
     domain::{
+        delegation::{
+            Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
+            DelegationStatus,
+        },
         project::ProjectId,
         provider::{ProviderCatalog, ProviderDescriptor},
         repository::{Repository, RepositoryId},
@@ -37,6 +41,11 @@ use dcc_tauri::commands::{
         WorkspaceCodeRabbitReviewOutput, WorkspaceCodeRabbitReviewStartOutput,
         WorkspaceCodeRabbitSaveReviewInput, WorkspaceCodeRabbitStoredReviewInput,
         WorkspaceCodeRabbitStoredReviewOutput,
+    },
+    delegation_commands::{
+        CancelDelegationInput, CancelDelegationOutput, CreateDelegationInput,
+        CreateDelegationOutput, GetDelegationInput, GetDelegationOutput, ListDelegationsInput,
+        ListDelegationsOutput,
     },
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
@@ -159,6 +168,15 @@ struct ProviderMethods {
     list_providers: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+struct DelegationMethods {
+    create_delegation: String,
+    list_delegations: String,
+    get_delegation: String,
+    cancel_delegation: String,
+}
+
 fn main() {
     tauri_build::build();
 
@@ -182,6 +200,12 @@ fn main() {
         .typ::<ProviderDescriptor>()
         .typ::<ProviderRuntimeConfig>()
         .typ::<dcc_core::domain::provider::HealthStatus>()
+        .typ::<DelegationId>()
+        .typ::<DelegationMode>()
+        .typ::<DelegationStatus>()
+        .typ::<DelegationContextPolicy>()
+        .typ::<DelegationBudget>()
+        .typ::<Delegation>()
         .typ::<SessionState>()
         .typ::<TurnState>()
         .typ::<Turn>()
@@ -309,6 +333,14 @@ fn main() {
         .typ::<RespondToPermissionRequestInput>()
         .typ::<RespondToPermissionRequestOutput>()
         .typ::<SearchSessionsInput>()
+        .typ::<CreateDelegationInput>()
+        .typ::<CreateDelegationOutput>()
+        .typ::<ListDelegationsInput>()
+        .typ::<ListDelegationsOutput>()
+        .typ::<GetDelegationInput>()
+        .typ::<GetDelegationOutput>()
+        .typ::<CancelDelegationInput>()
+        .typ::<CancelDelegationOutput>()
         .typ::<CoreEvent>()
         .constant(
             "WORKSPACE_METHODS",
@@ -402,6 +434,16 @@ fn main() {
         "PROVIDER_METHODS",
         ProviderMethods {
             list_providers: "list_providers".to_string(),
+        },
+    );
+
+    let builder = builder.constant(
+        "DELEGATION_METHODS",
+        DelegationMethods {
+            create_delegation: "create_delegation".to_string(),
+            list_delegations: "list_delegations".to_string(),
+            get_delegation: "get_delegation".to_string(),
+            cancel_delegation: "cancel_delegation".to_string(),
         },
     );
 
