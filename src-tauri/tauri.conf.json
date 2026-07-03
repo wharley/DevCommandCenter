@@ -5,7 +5,7 @@
   "identifier": "com.devcommandcenter.app",
   "build": {
     "beforeDevCommand": "node scripts/build-sidecars.mjs --dev && node scripts/ensure-node.mjs && yarn vite",
-    "beforeBuildCommand": "node scripts/build-sidecars.mjs && yarn workspace @dcc/mobile-web build && yarn vite:build",
+    "beforeBuildCommand": "yarn workspace @dcc/mobile-web build && node scripts/build-sidecars.mjs && yarn vite:build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
