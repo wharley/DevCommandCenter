@@ -427,12 +427,12 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
 ///   3. `<exe_dir>/mobile-web` (release layouts that bundle next to the binary)
 ///   4. `<exe_dir>/resources/mobile-web` (Linux package layouts)
 ///   5. `<app>/Contents/Resources/mobile-web` (macOS Tauri app bundle)
-fn mobile_spa_service() -> ServeDir<ServeFile> {
+fn mobile_spa_dist_candidates() -> Vec<PathBuf> {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(PathBuf::from));
 
-    let candidates: Vec<PathBuf> = [
+    [
         std::env::var("DCC_MOBILE_WEB_DIST").ok().map(PathBuf::from),
         Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../apps/mobile-web/dist")),
         exe_dir.as_ref().map(|p| p.join("mobile-web")),
@@ -446,13 +446,34 @@ fn mobile_spa_service() -> ServeDir<ServeFile> {
     ]
     .into_iter()
     .flatten()
-    .collect();
+    .collect()
+}
 
-    let dist = candidates
+fn mobile_spa_dist_path() -> PathBuf {
+    let candidates = mobile_spa_dist_candidates();
+
+    candidates
         .iter()
         .find(|p| p.join("index.html").is_file())
         .cloned()
-        .unwrap_or_else(|| candidates.into_iter().next().unwrap_or_else(|| PathBuf::from(".")));
+        .unwrap_or_else(|| {
+            candidates
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| PathBuf::from("."))
+        })
+}
+
+fn mobile_spa_diagnostics() -> Value {
+    let dist = mobile_spa_dist_path();
+    json!({
+        "available": dist.join("index.html").is_file(),
+        "distPath": dist.to_string_lossy(),
+    })
+}
+
+fn mobile_spa_service() -> ServeDir<ServeFile> {
+    let dist = mobile_spa_dist_path();
 
     let fallback = ServeFile::new(dist.join("index.html"));
     ServeDir::new(dist).fallback(fallback)
@@ -1189,6 +1210,7 @@ async fn health_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Respon
                     "version": env!("CARGO_PKG_VERSION"),
                     "protocolVersion": DCC_HTTP_PROTOCOL_VERSION,
                 },
+                "mobileWeb": mobile_spa_diagnostics(),
                 "database": database,
                 "daemonHealth": payload,
             })),
@@ -1204,6 +1226,7 @@ async fn health_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Respon
                     "version": env!("CARGO_PKG_VERSION"),
                     "protocolVersion": DCC_HTTP_PROTOCOL_VERSION,
                 },
+                "mobileWeb": mobile_spa_diagnostics(),
                 "database": database,
                 "error": {
                     "code": error.code(),

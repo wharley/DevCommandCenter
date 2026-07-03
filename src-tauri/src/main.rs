@@ -3766,27 +3766,102 @@ fn http_port() -> u16 {
         .unwrap_or(9876)
 }
 
-fn http_health_ok(port: u16) -> bool {
+fn http_get_local(port: u16, path: &str) -> Option<(u16, String)> {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(250))
     else {
-        return false;
+        return None;
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
-    if stream
-        .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .is_err()
-    {
-        return false;
+    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return None;
     }
-    let mut buf = [0_u8; 64];
-    let Ok(n) = stream.read(&mut buf) else {
+    let mut buf = Vec::with_capacity(8192);
+    let mut chunk = [0_u8; 1024];
+    while buf.len() < 8192 {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(_) if !buf.is_empty() => break,
+            Err(_) => return None,
+        }
+    }
+    let response = String::from_utf8_lossy(&buf).to_string();
+    let status = response
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())?;
+    Some((status, response))
+}
+
+fn http_health_ok(port: u16) -> bool {
+    let Some((status, response)) = http_get_local(port, "/health") else {
         return false;
     };
-    std::str::from_utf8(&buf[..n])
-        .map(|head| head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200"))
+    status == 200 && response.contains("DCC HTTP API")
+}
+
+fn http_health_is_dcc(port: u16) -> bool {
+    http_get_local(port, "/health")
+        .map(|(_status, response)| response.contains("DCC HTTP API"))
         .unwrap_or(false)
+}
+
+fn http_mobile_spa_ok(port: u16) -> bool {
+    let Some((status, response)) = http_get_local(port, "/m/pair") else {
+        return false;
+    };
+    status == 200 && response.contains("<div id=\"root\"")
+}
+
+fn http_server_ready_for_pairing(port: u16) -> bool {
+    http_health_ok(port) && http_mobile_spa_ok(port)
+}
+
+fn terminate_existing_http_sidecars(force: bool) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut args = vec!["/IM", "dccd-http*.exe", "/T"];
+        if force {
+            args.push("/F");
+        }
+        let _ = Command::new("taskkill")
+            .args(args)
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+
+    #[cfg(not(windows))]
+    {
+        let mut system = System::new_all();
+        system.refresh_processes();
+        let current_pid = std::process::id() as usize;
+        for (pid, process) in system.processes() {
+            if pid.as_u32() as usize == current_pid {
+                continue;
+            }
+            let name = process.name();
+            let exe_matches = process
+                .exe()
+                .and_then(|path| path.file_name())
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with("dccd-http"))
+                .unwrap_or(false);
+            if name.starts_with("dccd-http") || exe_matches {
+                let _ = if force {
+                    process.kill()
+                } else {
+                    process
+                        .kill_with(sysinfo::Signal::Term)
+                        .unwrap_or_else(|| process.kill())
+                };
+            }
+        }
+    }
 }
 
 fn locate_http_sidecar_binary(app: &AppHandle) -> Option<PathBuf> {
@@ -3821,8 +3896,20 @@ fn locate_http_sidecar_binary(app: &AppHandle) -> Option<PathBuf> {
 
 fn ensure_http_server_running(app: &AppHandle) -> Result<(), ApiError> {
     let port = http_port();
-    if http_health_ok(port) {
+    if http_server_ready_for_pairing(port) {
         return Ok(());
+    }
+
+    if http_health_is_dcc(port) {
+        terminate_existing_http_sidecars(false);
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(3) && http_health_is_dcc(port) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if http_health_is_dcc(port) {
+            terminate_existing_http_sidecars(true);
+            std::thread::sleep(Duration::from_millis(250));
+        }
     }
 
     let db_path = pairing_db_path(app)?;
@@ -3861,14 +3948,14 @@ fn ensure_http_server_running(app: &AppHandle) -> Result<(), ApiError> {
     };
     let started = Instant::now();
     while started.elapsed() < startup_timeout {
-        if http_health_ok(port) {
+        if http_server_ready_for_pairing(port) {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(100));
     }
 
     Err(db_error(format!(
-        "dccd-http did not become ready on port {port}"
+        "dccd-http did not become ready for mobile pairing on port {port}"
     )))
 }
 
