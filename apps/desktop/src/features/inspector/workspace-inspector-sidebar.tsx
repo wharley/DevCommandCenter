@@ -135,7 +135,7 @@ import type { WorkspaceStatus } from "@/features/workspaces/types";
 import { setupReportDescription } from "@/features/workspaces/workspace-setup-report";
 import type { ForgeCliProvider } from "@dcc/contracts";
 import { cn } from "@/lib/utils";
-import { listDelegations } from "@/lib/delegation-api";
+import { approveDelegation, listDelegations } from "@/lib/delegation-api";
 
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
@@ -314,6 +314,8 @@ function delegationStatusClass(status: Delegation["status"]) {
 			return "border-muted-foreground/30 bg-muted/30 text-muted-foreground";
 		case "running":
 			return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
+		case "review_pending":
+			return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
 		default:
 			return "border-border bg-muted/30 text-muted-foreground";
 	}
@@ -335,12 +337,14 @@ function DelegationsSection({
 	isLoading,
 	onSelectSession,
 	onSelectPreview,
+	onApprove,
 }: {
 	delegations: Delegation[];
 	providerCatalog: ProviderCatalog | null;
 	isLoading: boolean;
 	onSelectSession: (sessionId: string) => void;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+	onApprove: (delegation: Delegation) => Promise<void>;
 }) {
 	const { t } = useTranslation("common");
 	const visible = delegations.slice(0, 6);
@@ -400,6 +404,11 @@ function DelegationsSection({
 										{delegation.diffSummary}
 									</p>
 								) : null}
+								{delegation.validationSummary ? (
+									<p className="mt-1 line-clamp-2 whitespace-pre-line text-[10.5px] leading-4 text-muted-foreground/80">
+										{delegation.validationSummary}
+									</p>
+								) : null}
 								<div className="mt-2 flex flex-wrap gap-1.5">
 									{delegation.childSessionId ? (
 										<Button
@@ -431,6 +440,19 @@ function DelegationsSection({
 											}
 										>
 											{t("inspector.delegations.reviewDiff")}
+										</Button>
+									) : null}
+									{delegation.status === "review_pending" ? (
+										<Button
+											type="button"
+											variant="default"
+											size="xs"
+											className="h-6 px-2 text-[11px]"
+											onClick={() => {
+												void onApprove(delegation);
+											}}
+										>
+											{t("inspector.delegations.markReviewed")}
 										</Button>
 									) : null}
 								</div>
@@ -1212,6 +1234,23 @@ export function WorkspaceInspectorSidebar({
 		staleTime: 5_000,
 		refetchInterval: 10_000,
 	});
+	const handleApproveDelegation = useCallback(
+		async (delegation: Delegation) => {
+			try {
+				await approveDelegation({
+					delegationId: delegation.id,
+					summary: delegation.resultSummary,
+				});
+				await queryClient.invalidateQueries({
+					queryKey: ["delegations", workspaceId],
+				});
+				toast.success(t("inspector.delegations.reviewed"));
+			} catch (error) {
+				toast.error(error instanceof Error ? error.message : String(error));
+			}
+		},
+		[queryClient, t, workspaceId],
+	);
 
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
 	const gitBranch =
@@ -2011,7 +2050,10 @@ export function WorkspaceInspectorSidebar({
 	const pendingDelegationResultsCount = useMemo(
 		() =>
 			(delegationsQuery.data ?? []).filter((delegation) => {
-				if (delegation.status !== "completed") {
+				if (
+					delegation.status !== "completed" &&
+					delegation.status !== "review_pending"
+				) {
 					return false;
 				}
 				return Boolean(
@@ -2342,6 +2384,7 @@ export function WorkspaceInspectorSidebar({
 							isLoading={delegationsQuery.isLoading}
 							onSelectSession={onSelectSession}
 							onSelectPreview={onSelectPreview}
+							onApprove={handleApproveDelegation}
 						/>
 						<SessionEventFeed
 							events={sessionActivityEvents}

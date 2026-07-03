@@ -2,11 +2,11 @@ use tauri::{AppHandle, State};
 
 use dcc_tauri::{
     commands::delegation_commands::{
-        self as delegation_command_impl, CancelDelegationInput, CancelDelegationOutput,
-        CompleteDelegationInput, CompleteDelegationOutput, CreateDelegationInput,
-        CreateDelegationOutput, FailDelegationInput, FailDelegationOutput, GetDelegationInput,
-        GetDelegationOutput, ListDelegationsInput, ListDelegationsOutput, StartDelegationInput,
-        StartDelegationOutput,
+        self as delegation_command_impl, ApproveDelegationInput, ApproveDelegationOutput,
+        CancelDelegationInput, CancelDelegationOutput, CompleteDelegationInput,
+        CompleteDelegationOutput, CreateDelegationInput, CreateDelegationOutput,
+        FailDelegationInput, FailDelegationOutput, GetDelegationInput, GetDelegationOutput,
+        ListDelegationsInput, ListDelegationsOutput, StartDelegationInput, StartDelegationOutput,
     },
     state::SessionCommandState,
 };
@@ -61,6 +61,15 @@ pub async fn complete_delegation(
     input: CompleteDelegationInput,
 ) -> Result<CompleteDelegationOutput, String> {
     delegation_command_impl::complete_delegation(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn approve_delegation(
+    state: State<'_, SessionCommandState>,
+    app: AppHandle,
+    input: ApproveDelegationInput,
+) -> Result<ApproveDelegationOutput, String> {
+    delegation_command_impl::approve_delegation(state, app, input).await
 }
 
 #[tauri::command]

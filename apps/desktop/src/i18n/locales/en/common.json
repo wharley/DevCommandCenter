@@ -130,7 +130,9 @@
       "title": "Delegations",
       "empty": "No delegations for this workspace yet.",
       "openChild": "Open child",
-      "reviewDiff": "Review diff"
+      "reviewDiff": "Review diff",
+      "markReviewed": "Mark reviewed",
+      "reviewed": "Delegation marked reviewed"
     },
     "codeSection": {
       "kicker": "Project",

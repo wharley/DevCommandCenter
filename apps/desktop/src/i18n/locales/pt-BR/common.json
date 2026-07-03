@@ -130,7 +130,9 @@
       "title": "Delegações",
       "empty": "Ainda não há delegações neste workspace.",
       "openChild": "Abrir filha",
-      "reviewDiff": "Revisar diff"
+      "reviewDiff": "Revisar diff",
+      "markReviewed": "Marcar revisada",
+      "reviewed": "Delegação marcada como revisada"
     },
     "codeSection": {
       "kicker": "Projeto",

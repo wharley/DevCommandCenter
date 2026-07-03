@@ -43,10 +43,11 @@ use dcc_tauri::commands::{
         WorkspaceCodeRabbitStoredReviewOutput,
     },
     delegation_commands::{
-        CancelDelegationInput, CancelDelegationOutput, CompleteDelegationInput,
-        CompleteDelegationOutput, CreateDelegationInput, CreateDelegationOutput,
-        FailDelegationInput, FailDelegationOutput, GetDelegationInput, GetDelegationOutput,
-        ListDelegationsInput, ListDelegationsOutput, StartDelegationInput, StartDelegationOutput,
+        ApproveDelegationInput, ApproveDelegationOutput, CancelDelegationInput,
+        CancelDelegationOutput, CompleteDelegationInput, CompleteDelegationOutput,
+        CreateDelegationInput, CreateDelegationOutput, FailDelegationInput,
+        FailDelegationOutput, GetDelegationInput, GetDelegationOutput, ListDelegationsInput,
+        ListDelegationsOutput, StartDelegationInput, StartDelegationOutput,
     },
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
@@ -178,6 +179,7 @@ struct DelegationMethods {
     cancel_delegation: String,
     start_delegation: String,
     complete_delegation: String,
+    approve_delegation: String,
     fail_delegation: String,
 }
 
@@ -349,6 +351,8 @@ fn main() {
         .typ::<StartDelegationOutput>()
         .typ::<CompleteDelegationInput>()
         .typ::<CompleteDelegationOutput>()
+        .typ::<ApproveDelegationInput>()
+        .typ::<ApproveDelegationOutput>()
         .typ::<FailDelegationInput>()
         .typ::<FailDelegationOutput>()
         .typ::<CoreEvent>()
@@ -456,6 +460,7 @@ fn main() {
             cancel_delegation: "cancel_delegation".to_string(),
             start_delegation: "start_delegation".to_string(),
             complete_delegation: "complete_delegation".to_string(),
+            approve_delegation: "approve_delegation".to_string(),
             fail_delegation: "fail_delegation".to_string(),
         },
     );

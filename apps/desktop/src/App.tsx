@@ -247,6 +247,7 @@ type DelegationChildBinding = {
 	parentSessionId: string;
 	workspaceId: string;
 	workspacePath: string | null;
+	reviewRequired: boolean;
 	finalized: boolean;
 };
 
@@ -291,6 +292,44 @@ async function summarizeSessionForDelegation(sessionId: string) {
 	return lastAssistant
 		? truncateDelegationContext(lastAssistant.content, 1600)
 		: "Delegated session completed without assistant text.";
+}
+
+async function summarizeDelegationValidation(sessionId: string) {
+	const events = await loadSessionThreadEvents(sessionId);
+	const commands = events
+		.filter((event) => event.kind.type === "turn_tool_call_started")
+		.map((event) => {
+			if (event.kind.type !== "turn_tool_call_started") {
+				return null;
+			}
+			return event.kind.command || event.kind.action;
+		})
+		.filter((value): value is string => Boolean(value?.trim()));
+	const uniqueCommands = Array.from(new Set(commands));
+	const validationCommands = uniqueCommands.filter((command) =>
+		/\b(test|check|lint|typecheck|vitest|jest|cargo|pnpm|npm|yarn)\b/i.test(
+			command,
+		),
+	);
+
+	if (uniqueCommands.length === 0) {
+		return "No tool commands observed in the delegated session.";
+	}
+
+	const lines = [
+		"Observed child-session commands:",
+		...uniqueCommands.slice(0, 12).map((command) => `- ${command}`),
+	];
+	if (uniqueCommands.length > 12) {
+		lines.push(`- ... ${uniqueCommands.length - 12} more command(s)`);
+	}
+	lines.push(
+		"",
+		validationCommands.length > 0
+			? `Validation-like commands: ${validationCommands.slice(0, 6).join("; ")}`
+			: "Validation-like commands: none observed",
+	);
+	return lines.join("\n");
 }
 
 async function collectDelegationDiffArtifact(workspacePath: string | null) {
@@ -346,12 +385,23 @@ async function buildManualDelegationPrompt({
 	parentSessionTitle: string;
 	liveSessionEvents: CoreEvent[];
 }) {
+	const isImplementation = request.mode === "implement";
 	const lines = [
 		`Delegated ${request.mode} task from Dev Command Center.`,
 		"",
 		"Scope:",
-		"- Work read-only. Do not edit files, run destructive commands, or apply patches.",
-		"- Return concise findings, risks, and recommended next steps.",
+		...(isImplementation
+			? [
+					"- File edits are allowed for this delegated implementation.",
+					"- Inspect the current git status before editing and avoid overwriting unrelated work.",
+					"- Do not commit, push, delete branches, reset history, or run destructive commands.",
+					"- Run focused validation where practical and report the exact commands/results.",
+					"- Stop after implementation; Dev Command Center will require human review before marking this delegation complete.",
+				]
+			: [
+					"- Work read-only. Do not edit files, run destructive commands, or apply patches.",
+					"- Return concise findings, risks, and recommended next steps.",
+				]),
 		"",
 		"Workspace:",
 		`- Name: ${workspaceName}`,
@@ -739,12 +789,16 @@ export default function App() {
 			try {
 				if (status === "completed") {
 					const summary = await summarizeSessionForDelegation(childSessionId);
+					const validationSummary =
+						await summarizeDelegationValidation(childSessionId);
 					const artifact = await collectDelegationDiffArtifact(binding.workspacePath);
 					await completeDelegation({
 						delegationId: binding.delegationId,
 						summary,
 						touchedFiles: artifact.touchedFiles,
 						diffSummary: artifact.diffSummary,
+						validationSummary,
+						reviewRequired: binding.reviewRequired,
 					});
 					await queryClient.invalidateQueries({
 						queryKey: ["delegations", binding.workspaceId],
@@ -1387,9 +1441,17 @@ export default function App() {
 				toast.error(targetProviderBlockReason);
 				return;
 			}
+			if (
+				request.mode === "implement" &&
+				!targetProvider.capabilities.supportsEditDelegation
+			) {
+				toast.error("Selected provider does not support edit delegations.");
+				return;
+			}
 
 			const parentSessionId = selectedSessionSnapshot.sessionId;
 			const parentTitle = selectedSessionSummary?.thread.title ?? selectedWorkspace.name;
+			const allowFileEdits = request.mode === "implement";
 			const targetRuntime = draftToProviderRuntimeConfig(
 				getProviderRuntimeDraft(providerRuntimeSettings, targetProvider.id),
 			);
@@ -1464,7 +1526,7 @@ export default function App() {
 					budget: {
 						turnLimit: 1,
 						timeoutSeconds: 600,
-						allowFileEdits: false,
+						allowFileEdits,
 					},
 				});
 				delegationId = created.delegation.id;
@@ -1474,6 +1536,7 @@ export default function App() {
 					parentSessionId,
 					workspaceId: selectedWorkspace.id,
 					workspacePath: selectedLocalWorkspacePath,
+					reviewRequired: allowFileEdits,
 					finalized: false,
 				});
 				await startDelegation({ delegationId });

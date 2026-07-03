@@ -20,7 +20,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 export type ManualDelegationRequest = {
 	targetProviderId: string;
 	targetModelId: string | null;
-	mode: Extract<DelegationMode, "review" | "explain">;
+	mode: Extract<DelegationMode, "review" | "explain" | "implement">;
 	contextPolicy: DelegationContextPolicy;
 	instruction: string;
 };
@@ -75,7 +75,8 @@ export function DelegationDialog({
 		delegationProviders[0] ??
 		null;
 	const [modelId, setModelId] = useState("");
-	const [mode, setMode] = useState<Extract<DelegationMode, "review" | "explain">>("review");
+	const [mode, setMode] =
+		useState<Extract<DelegationMode, "review" | "explain" | "implement">>("review");
 	const [contextPolicy, setContextPolicy] =
 		useState<ContextPolicyKey>("review_current_diff");
 	const [instruction, setInstruction] = useState("");
@@ -104,6 +105,12 @@ export function DelegationDialog({
 					""),
 		);
 	}, [selectedProvider]);
+
+	useEffect(() => {
+		if (mode === "implement" && !selectedProvider?.capabilities.supportsEditDelegation) {
+			setMode("review");
+		}
+	}, [mode, selectedProvider]);
 
 	const submitDisabled =
 		isSubmitting ||
@@ -176,7 +183,12 @@ export function DelegationDialog({
 							type="single"
 							value={mode}
 							onValueChange={(value) => {
-								if (value === "review" || value === "explain") {
+								if (
+									value === "review" ||
+									value === "explain" ||
+									(value === "implement" &&
+										selectedProvider?.capabilities.supportsEditDelegation)
+								) {
 									setMode(value);
 								}
 							}}
@@ -188,7 +200,19 @@ export function DelegationDialog({
 							<ToggleGroupItem className="h-8 px-3" value="explain">
 								Explain
 							</ToggleGroupItem>
+							<ToggleGroupItem
+								className="h-8 px-3"
+								value="implement"
+								disabled={!selectedProvider?.capabilities.supportsEditDelegation}
+							>
+								Implement
+							</ToggleGroupItem>
 						</ToggleGroup>
+						{mode === "implement" ? (
+							<p className="text-[11.5px] leading-4 text-muted-foreground">
+								Allows file edits. Result must be reviewed in Inspector before it is marked complete.
+							</p>
+						) : null}
 					</div>
 
 					<div className="grid gap-2">

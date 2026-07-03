@@ -26,6 +26,7 @@ pub enum DelegationStatus {
     Draft,
     Queued,
     Running,
+    ReviewPending,
     Completed,
     Failed,
     Cancelled,
@@ -83,6 +84,7 @@ pub struct Delegation {
     #[serde(default)]
     pub touched_files: Vec<String>,
     pub diff_summary: Option<String>,
+    pub validation_summary: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

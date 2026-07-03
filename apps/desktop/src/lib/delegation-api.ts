@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { DELEGATION_METHODS } from "@dcc/contracts";
 import type {
+	ApproveDelegationInput,
+	ApproveDelegationOutput,
 	CancelDelegationInput,
 	CancelDelegationOutput,
 	CompleteDelegationInput,
@@ -52,6 +54,12 @@ export function completeDelegation(input: CompleteDelegationInput) {
 		DELEGATION_METHODS.completeDelegation,
 		{ input },
 	);
+}
+
+export function approveDelegation(input: ApproveDelegationInput) {
+	return invoke<ApproveDelegationOutput>(DELEGATION_METHODS.approveDelegation, {
+		input,
+	});
 }
 
 export function failDelegation(input: FailDelegationInput) {

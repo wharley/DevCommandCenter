@@ -99,11 +99,27 @@ pub struct CompleteDelegationInput {
     #[serde(default)]
     pub touched_files: Vec<String>,
     pub diff_summary: Option<String>,
+    pub validation_summary: Option<String>,
+    #[serde(default)]
+    pub review_required: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CompleteDelegationOutput {
+    pub delegation: Delegation,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ApproveDelegationInput {
+    pub delegation_id: DelegationId,
+    pub summary: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ApproveDelegationOutput {
     pub delegation: Delegation,
 }
 
@@ -162,6 +178,7 @@ fn status_label(status: DelegationStatus) -> &'static str {
         DelegationStatus::Draft => "draft",
         DelegationStatus::Queued => "queued",
         DelegationStatus::Running => "running",
+        DelegationStatus::ReviewPending => "review_pending",
         DelegationStatus::Completed => "completed",
         DelegationStatus::Failed => "failed",
         DelegationStatus::Cancelled => "cancelled",
@@ -213,6 +230,7 @@ pub async fn create_delegation(
         result_summary: None,
         touched_files: Vec::new(),
         diff_summary: None,
+        validation_summary: None,
         created_at: now.clone(),
         updated_at: now.clone(),
     };
@@ -278,6 +296,12 @@ pub async fn cancel_delegation(
             "delegation {} is already {}",
             delegation.id.0,
             status_label(delegation.status)
+        ));
+    }
+    if matches!(delegation.status, DelegationStatus::ReviewPending) {
+        return Err(format!(
+            "delegation {} is awaiting review",
+            delegation.id.0
         ));
     }
 
@@ -381,32 +405,109 @@ pub async fn complete_delegation(
 
     let now = now_iso();
     let mut updated = delegation;
-    updated.status = DelegationStatus::Completed;
+    let review_required = input.review_required || updated.budget.allow_file_edits;
+    updated.status = if review_required {
+        DelegationStatus::ReviewPending
+    } else {
+        DelegationStatus::Completed
+    };
     updated.updated_at = now.clone();
     updated.result_summary = input.summary.clone();
     updated.touched_files = input.touched_files;
     updated.diff_summary = input.diff_summary;
+    updated.validation_summary = input.validation_summary;
     DelegationRepo::save_delegation(&*state, &updated)
         .await
         .map_err(|error| error.to_string())?;
     let summary = input.summary;
+    if review_required {
+        let content = "Delegated implementation finished and is awaiting human review.".to_string();
+        append_and_publish_parent_event(
+            &state,
+            &updated.parent_session_id,
+            SessionEventKind::DelegationDelta {
+                delegation_id: updated.id.clone(),
+                content: content.clone(),
+            },
+            CoreEvent::SessionDelegationDelta {
+                session_id: updated.parent_session_id.0.clone(),
+                delegation_id: updated.id.0.clone(),
+                content,
+            },
+            now,
+        )
+        .await?;
+    } else {
+        append_and_publish_parent_event(
+            &state,
+            &updated.parent_session_id,
+            SessionEventKind::DelegationCompleted {
+                delegation_id: updated.id.clone(),
+                summary: summary.clone(),
+            },
+            CoreEvent::SessionDelegationCompleted {
+                session_id: updated.parent_session_id.0.clone(),
+                delegation_id: updated.id.0.clone(),
+                summary,
+            },
+            now,
+        )
+        .await?;
+    }
+
+    Ok(CompleteDelegationOutput {
+        delegation: updated,
+    })
+}
+
+#[tauri::command]
+pub async fn approve_delegation(
+    state: State<'_, SessionCommandState>,
+    _app: AppHandle,
+    input: ApproveDelegationInput,
+) -> Result<ApproveDelegationOutput, String> {
+    let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
+    if matches!(delegation.status, DelegationStatus::Completed) {
+        return Ok(ApproveDelegationOutput { delegation });
+    }
+    if !matches!(delegation.status, DelegationStatus::ReviewPending) {
+        return Err(format!(
+            "delegation {} is {}, not review_pending",
+            delegation.id.0,
+            status_label(delegation.status)
+        ));
+    }
+
+    let now = now_iso();
+    let mut updated = delegation;
+    updated.status = DelegationStatus::Completed;
+    updated.updated_at = now.clone();
+    if input.summary.is_some() {
+        updated.result_summary = input.summary.clone();
+    }
+    DelegationRepo::save_delegation(&*state, &updated)
+        .await
+        .map_err(|error| error.to_string())?;
     append_and_publish_parent_event(
         &state,
         &updated.parent_session_id,
         SessionEventKind::DelegationCompleted {
             delegation_id: updated.id.clone(),
-            summary: summary.clone(),
+            summary: updated.result_summary.clone(),
         },
         CoreEvent::SessionDelegationCompleted {
             session_id: updated.parent_session_id.0.clone(),
             delegation_id: updated.id.0.clone(),
-            summary,
+            summary: updated.result_summary.clone(),
         },
         now,
     )
     .await?;
 
-    Ok(CompleteDelegationOutput {
+    Ok(ApproveDelegationOutput {
         delegation: updated,
     })
 }

@@ -55,8 +55,8 @@ use coderabbit_commands::{
     workspace_coderabbit_review_save, workspace_coderabbit_review_start,
 };
 use delegation_commands::{
-    cancel_delegation, complete_delegation, create_delegation, fail_delegation, get_delegation,
-    list_delegations, start_delegation,
+    approve_delegation, cancel_delegation, complete_delegation, create_delegation,
+    fail_delegation, get_delegation, list_delegations, start_delegation,
 };
 use forge_commands::{
     workspace_backfill_forge_repo_bindings, workspace_change_request_create,
@@ -6898,6 +6898,7 @@ pub fn run() {
             cancel_delegation,
             start_delegation,
             complete_delegation,
+            approve_delegation,
             fail_delegation,
             session_commands::start_thread,
             session_commands::send_turn,

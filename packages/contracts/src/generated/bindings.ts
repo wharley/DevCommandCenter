@@ -2,7 +2,7 @@
 
 
 /* Constants */
-export const DELEGATION_METHODS = {"cancelDelegation":"cancel_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","startDelegation":"start_delegation"} as const;
+export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","startDelegation":"start_delegation"} as const;
 
 export const PROVIDER_METHODS = {"listProviders":"list_providers"} as const;
 
@@ -19,6 +19,15 @@ export type AbortRunInput = {
 export type AbortRunOutput = {
 	session: Session,
 	projection: SessionProjection,
+};
+
+export type ApproveDelegationInput = {
+	delegationId: DelegationId,
+	summary: string | null,
+};
+
+export type ApproveDelegationOutput = {
+	delegation: Delegation,
 };
 
 export type CancelDelegationInput = {
@@ -157,6 +166,8 @@ export type CompleteDelegationInput = {
 	summary: string | null,
 	touchedFiles?: string[],
 	diffSummary: string | null,
+	validationSummary: string | null,
+	reviewRequired?: boolean,
 };
 
 export type CompleteDelegationOutput = {
@@ -346,6 +357,7 @@ export type Delegation = {
 	resultSummary: string | null,
 	touchedFiles?: string[],
 	diffSummary: string | null,
+	validationSummary: string | null,
 	createdAt: string,
 	updatedAt: string,
 };
@@ -362,7 +374,7 @@ export type DelegationId = string;
 
 export type DelegationMode = "review" | "implement" | "explain" | "test" | "research";
 
-export type DelegationStatus = "draft" | "queued" | "running" | "completed" | "failed" | "cancelled";
+export type DelegationStatus = "draft" | "queued" | "running" | "review_pending" | "completed" | "failed" | "cancelled";
 
 export type FailDelegationInput = {
 	delegationId: DelegationId,
