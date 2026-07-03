@@ -4,16 +4,18 @@ import {
 	AlertTriangle,
 	ArrowLeft,
 	Brain,
-	ChevronDown,
-	ChevronUp,
+	Check,
+	ChevronRight,
 	GitBranch,
 	Loader2,
 	Send,
+	ShieldCheck,
 	StopCircle,
 	Wrench,
+	X,
 } from "lucide-react";
 import { Markdown } from "@/components/Markdown";
-import { Shell, StateDot } from "@/components/ui";
+import { Rest, Shell, StateDot } from "@/components/ui";
 import { apiFetch } from "@/lib/api";
 import { foldEntry, type BundleEntry, type WorktreeDiff } from "@/lib/diff";
 import { cn } from "@/lib/cn";
@@ -118,16 +120,27 @@ export function ThreadRoute() {
 		return null;
 	}, [state.messages]);
 
-	const lastAssistant = useMemo(() => {
+	// Running = anything in flight: a streaming answer, a live tool call or
+	// reasoning block, or a prompt that hasn't produced output yet. Walking
+	// backwards means the freshest signal wins.
+	const isRunning = useMemo(() => {
 		for (let i = state.messages.length - 1; i >= 0; i--) {
 			const m = state.messages[i];
-			if (m?.kind === "assistant") return m;
+			if (!m) continue;
+			if (m.kind === "assistant") return !m.completed && !m.aborted;
+			if (m.kind === "tool") {
+				if (m.status === "running") return true;
+				continue;
+			}
+			if (m.kind === "reasoning") {
+				if (!m.completed) return true;
+				continue;
+			}
+			if (m.kind === "user") return true;
+			if (m.kind === "system") return false;
 		}
-		return null;
+		return false;
 	}, [state.messages]);
-
-	const isRunning =
-		lastAssistant !== null && !lastAssistant.completed && !lastAssistant.aborted;
 
 	const threadTitle = useMemo(() => {
 		const firstUser = state.messages.find(
@@ -292,12 +305,10 @@ export function ThreadRoute() {
 				combId={combId}
 				diff={diff}
 				onBack={() => void navigate({ to: "/" })}
-				onAbort={isRunning ? () => void abort() : null}
-				aborting={aborting}
 			/>
 
 			<div ref={scrollerRef} className="flex-1 overflow-y-auto">
-				<div className="mx-auto max-w-md px-4 py-4">
+				<div className="mx-auto max-w-md px-4 py-5">
 					{loading ? (
 						<div className="flex h-[40vh] items-center justify-center text-mute">
 							<Loader2 className="size-5 animate-spin" />
@@ -305,9 +316,10 @@ export function ThreadRoute() {
 					) : loadError ? (
 						<ErrorBanner message={loadError} onDismiss={() => setLoadError(null)} />
 					) : state.messages.length === 0 ? (
-						<p className="rounded-2xl border border-dashed border-border/70 p-6 text-center text-[12px] text-mute">
-							Sem mensagens ainda. Mande um prompt abaixo.
-						</p>
+						<Rest title="Sem mensagens ainda">
+							Descreva a primeira tarefa no campo abaixo para colocar o agente
+							pra trabalhar.
+						</Rest>
 					) : (
 						<MessageList
 							messages={state.messages}
@@ -321,13 +333,16 @@ export function ThreadRoute() {
 				value={composer}
 				onChange={setComposer}
 				onSubmit={() => void submit()}
-				disabled={sending || !!loadError}
+				sending={sending}
+				running={isRunning}
+				aborting={aborting}
+				onAbort={() => void abort()}
 				placeholder={
 					lastTurnId === null
-						? "Envie a primeira mensagem…"
+						? "Descreva a primeira tarefa…"
 						: isRunning
-							? "Aguardando resposta…"
-							: "Digite uma instrução…"
+							? "Fila: será enviado após a resposta…"
+							: "Responda ou mande a próxima instrução…"
 				}
 			/>
 		</div>
@@ -341,8 +356,6 @@ function TopBar({
 	combId,
 	diff,
 	onBack,
-	onAbort,
-	aborting,
 }: {
 	title: string;
 	subtitle: string | null;
@@ -350,8 +363,6 @@ function TopBar({
 	combId: string | null;
 	diff: WorktreeDiff | null;
 	onBack: () => void;
-	onAbort: (() => void) | null;
-	aborting: boolean;
 }) {
 	return (
 		<header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-bg/90 px-3 py-2.5 backdrop-blur">
@@ -388,21 +399,6 @@ function TopBar({
 					<span className="text-danger">−{diff.deletions}</span>
 				</Link>
 			) : null}
-			{onAbort ? (
-				<button
-					type="button"
-					onClick={onAbort}
-					disabled={aborting}
-					className="inline-flex items-center gap-1.5 rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-[11px] font-medium text-danger active:bg-danger/15 disabled:opacity-50"
-				>
-					{aborting ? (
-						<Loader2 className="size-3 animate-spin" />
-					) : (
-						<StopCircle className="size-3" />
-					)}
-					Parar
-				</button>
-			) : null}
 		</header>
 	);
 }
@@ -413,6 +409,51 @@ function workspaceLabel(meta: SessionMeta | null): string | null {
 	return text || null;
 }
 
+/* ── Message grouping ─────────────────────────────────────────────────────
+   The raw stream interleaves conversation (user/assistant) with machinery
+   (reasoning, tool calls, resolved permissions). Rendering the machinery at
+   the same visual level as the conversation is what made the thread feel
+   chaotic — so contiguous runs of machinery fold into one collapsible
+   "trace" capsule, and the chat reads user → trace → answer again.
+   Unresolved permissions stay standalone: they need the user's thumb. */
+
+type TraceStep = Extract<
+	ChatMessage,
+	{ kind: "reasoning" } | { kind: "tool" } | { kind: "permission" }
+>;
+
+type RenderItem =
+	| { type: "single"; key: string; message: ChatMessage }
+	| { type: "trace"; key: string; steps: TraceStep[] };
+
+function groupMessages(messages: ChatMessage[]): RenderItem[] {
+	const items: RenderItem[] = [];
+	let run: TraceStep[] = [];
+	const flush = () => {
+		if (run.length > 0) {
+			const first = run[0]!;
+			items.push({ type: "trace", key: `trace-${messageKey(first, 0)}`, steps: run });
+			run = [];
+		}
+	};
+	for (let i = 0; i < messages.length; i++) {
+		const msg = messages[i];
+		if (!msg) continue;
+		const isStep =
+			msg.kind === "reasoning" ||
+			msg.kind === "tool" ||
+			(msg.kind === "permission" && msg.resolved);
+		if (isStep) {
+			run.push(msg as TraceStep);
+			continue;
+		}
+		flush();
+		items.push({ type: "single", key: messageKey(msg, i), message: msg });
+	}
+	flush();
+	return items;
+}
+
 function MessageList({
 	messages,
 	onRespondPermission,
@@ -420,15 +461,27 @@ function MessageList({
 	messages: ChatMessage[];
 	onRespondPermission: (requestId: string, choice: string) => void;
 }) {
+	const items = useMemo(() => groupMessages(messages), [messages]);
 	return (
 		<div className="space-y-3">
-			{messages.map((msg, i) => (
-				<MessageView
-					key={messageKey(msg, i)}
-					message={msg}
-					onRespondPermission={onRespondPermission}
-				/>
-			))}
+			{items.map((item, i) => {
+				// A user message opens a new turn — give it extra air above so
+				// turns read as paragraphs, not one continuous feed.
+				const opensTurn =
+					item.type === "single" && item.message.kind === "user" && i > 0;
+				return (
+					<div key={item.key} className={cn(opensTurn && "pt-4")}>
+						{item.type === "trace" ? (
+							<TraceBlock steps={item.steps} />
+						) : (
+							<MessageView
+								message={item.message}
+								onRespondPermission={onRespondPermission}
+							/>
+						)}
+					</div>
+				);
+			})}
 		</div>
 	);
 }
@@ -462,15 +515,22 @@ function MessageView({
 		case "user":
 			return <UserBubble text={message.text} />;
 		case "assistant":
-			return <AssistantBubble text={message.text} completed={message.completed} aborted={message.aborted} />;
-		case "reasoning":
-			return <ReasoningRow label={message.label} completed={message.completed} />;
-		case "tool":
-			return <ToolRow message={message} />;
+			return (
+				<AssistantBlock
+					text={message.text}
+					completed={message.completed}
+					aborted={message.aborted}
+				/>
+			);
 		case "permission":
 			return <PermissionRow message={message} onRespond={onRespondPermission} />;
 		case "system":
 			return <SystemRow text={message.text} />;
+		// Reasoning/tools normally render inside a TraceBlock; this is only
+		// reached if one arrives outside a run (defensive fallback).
+		case "reasoning":
+		case "tool":
+			return <TraceBlock steps={[message]} />;
 	}
 }
 
@@ -484,7 +544,10 @@ function UserBubble({ text }: { text: string }) {
 	);
 }
 
-function AssistantBubble({
+/** The agent's answer: full-width prose, no box. The user bubble on the
+ *  right is enough to tell the two voices apart, and markdown needs the
+ *  whole viewport on a phone. */
+function AssistantBlock({
 	text,
 	completed,
 	aborted,
@@ -494,68 +557,153 @@ function AssistantBubble({
 	aborted: boolean;
 }) {
 	return (
-		<div className="flex justify-start">
-			<div className="max-w-[90%] min-w-0 overflow-hidden rounded-2xl rounded-bl-md border border-border bg-panel px-3.5 py-2 text-foreground">
-				{text ? (
-					<Markdown text={text} />
-				) : (
-					<Loader2 className="size-3.5 animate-spin text-mute" />
-				)}
-				{!completed && text ? (
-					<span className="ml-1 inline-block size-2 animate-pulse rounded-full bg-accent align-middle" />
-				) : null}
-				{aborted ? (
-					<p className="mt-2 text-[11px] uppercase tracking-wider text-mute">abortado</p>
-				) : null}
-			</div>
+		<div className="min-w-0 px-0.5">
+			{text ? (
+				<Markdown text={text} />
+			) : !completed ? (
+				<Loader2 className="size-3.5 animate-spin text-mute" />
+			) : null}
+			{!completed && text ? (
+				<span className="ml-1 inline-block size-2 animate-pulse rounded-full bg-accent align-middle" />
+			) : null}
+			{aborted ? (
+				<p className="mt-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-danger/80">
+					interrompido
+				</p>
+			) : null}
 		</div>
 	);
 }
 
-function ReasoningRow({ label, completed }: { label: string; completed: boolean }) {
-	return (
-		<div className="flex items-center gap-2 px-1 font-mono text-[11px] text-faint">
-			<Brain className="size-3" />
-			<span className="italic">{label}</span>
-			{!completed ? <Loader2 className="size-3 animate-spin" /> : null}
-		</div>
-	);
+/* ── Trace capsule ──────────────────────────────────────────────────────── */
+
+function stepIsLive(step: TraceStep): boolean {
+	if (step.kind === "reasoning") return !step.completed;
+	if (step.kind === "tool") return step.status === "running";
+	return false;
 }
 
-function ToolRow({
-	message,
-}: {
-	message: Extract<ChatMessage, { kind: "tool" }>;
-}) {
+function stepLabel(step: TraceStep): string {
+	if (step.kind === "reasoning") return step.label;
+	if (step.kind === "tool") return step.toolName;
+	return firstLine(step.question) || "permissão";
+}
+
+function firstLine(text: string): string {
+	return text.split("\n", 1)[0]?.trim() ?? "";
+}
+
+function TraceBlock({ steps }: { steps: TraceStep[] }) {
 	const [open, setOpen] = useState(false);
-	const palette =
-		message.status === "running"
-			? "border-accent/30 bg-accent/5 text-accent"
-			: message.status === "failed"
-				? "border-danger/30 bg-danger/5 text-danger"
-				: "border-border bg-elevated text-mute";
+	const live = steps.some(stepIsLive);
+	const failedCount = steps.filter(
+		(s) => s.kind === "tool" && s.status === "failed",
+	).length;
+	const current = live ? [...steps].reverse().find(stepIsLive) : null;
 	return (
-		<div className={cn("rounded-xl border px-3 py-2 text-[12px]", palette)}>
+		<div className="overflow-hidden rounded-xl border border-border/60 bg-panel/50">
 			<button
 				type="button"
 				onClick={() => setOpen((o) => !o)}
-				className="flex w-full min-w-0 items-center gap-2 text-left"
+				className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left active:bg-elevated/60"
 			>
-				<Wrench className="size-3.5 shrink-0" />
-				<span className="min-w-0 flex-1 truncate font-mono text-[12px]">{message.toolName}</span>
-				<span className="shrink-0 text-[10px] uppercase tracking-wider">
-					{message.status}
+				{live ? (
+					<StateDot state="live" />
+				) : (
+					<ChevronRight
+						className={cn(
+							"size-3 shrink-0 text-faint transition-transform",
+							open && "rotate-90",
+						)}
+					/>
+				)}
+				<span className="shrink-0 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-mute">
+					atividade
 				</span>
-				{open ? <ChevronUp className="size-3.5 shrink-0" /> : <ChevronDown className="size-3.5 shrink-0" />}
+				<span className="grid min-w-[17px] shrink-0 place-items-center rounded-full bg-elevated px-1 font-mono text-[10px] font-bold tabular-nums text-mute">
+					{steps.length}
+				</span>
+				{live && current ? (
+					<span className="min-w-0 flex-1 truncate font-mono text-[11px] text-accent/90">
+						{stepLabel(current)}
+					</span>
+				) : (
+					<span className="flex-1" />
+				)}
+				{failedCount > 0 ? (
+					<span className="shrink-0 font-mono text-[10px] tabular-nums text-danger">
+						{failedCount} ✗
+					</span>
+				) : null}
+				{live ? (
+					<ChevronRight
+						className={cn(
+							"size-3 shrink-0 text-faint transition-transform",
+							open && "rotate-90",
+						)}
+					/>
+				) : null}
 			</button>
 			{open ? (
-				<div className="mt-2 space-y-2 border-t border-current/10 pt-2">
-					{message.input !== undefined && message.input !== null ? (
-						<Snippet label="input" value={message.input} />
+				<div className="space-y-0.5 border-t border-border/60 px-1.5 py-1.5">
+					{steps.map((step, i) => (
+						<StepRow key={messageKey(step, i)} step={step} />
+					))}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+function StepRow({ step }: { step: TraceStep }) {
+	const [open, setOpen] = useState(false);
+	const live = stepIsLive(step);
+	const failed = step.kind === "tool" && step.status === "failed";
+	const Icon =
+		step.kind === "reasoning" ? Brain : step.kind === "tool" ? Wrench : ShieldCheck;
+	const expandable =
+		step.kind === "tool" &&
+		(step.input != null || step.output != null || step.error != null);
+	const row = (
+		<>
+			<Icon className={cn("size-3 shrink-0", live ? "text-accent" : "text-faint")} />
+			<span
+				className={cn(
+					"min-w-0 flex-1 truncate font-mono text-[11.5px]",
+					failed ? "text-danger" : live ? "text-accent/90" : "text-foreground/75",
+				)}
+			>
+				{stepLabel(step)}
+			</span>
+			{live ? (
+				<Loader2 className="size-3 shrink-0 animate-spin text-accent" />
+			) : failed ? (
+				<X className="size-3 shrink-0 text-danger" />
+			) : (
+				<Check className="size-3 shrink-0 text-faint" />
+			)}
+		</>
+	);
+	if (!expandable) {
+		return <div className="flex items-center gap-2 rounded-lg px-1.5 py-1.5">{row}</div>;
+	}
+	return (
+		<div>
+			<button
+				type="button"
+				onClick={() => setOpen((o) => !o)}
+				className="flex w-full min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left active:bg-elevated"
+			>
+				{row}
+			</button>
+			{open && step.kind === "tool" ? (
+				<div className="mb-1 ml-5 space-y-1.5 pr-1.5">
+					{step.input !== undefined && step.input !== null ? (
+						<Snippet label="input" value={step.input} />
 					) : null}
-					{message.output ? <Snippet label="output" value={message.output} /> : null}
-					{message.error ? (
-						<p className="font-mono text-[11px] text-danger">{message.error}</p>
+					{step.output ? <Snippet label="output" value={step.output} /> : null}
+					{step.error ? (
+						<p className="font-mono text-[11px] text-danger">{step.error}</p>
 					) : null}
 				</div>
 			) : null}
@@ -568,8 +716,10 @@ function Snippet({ label, value }: { label: string; value: unknown }) {
 		typeof value === "string" ? value : JSON.stringify(value, null, 2);
 	return (
 		<div>
-			<p className="mb-1 text-[9px] uppercase tracking-wider opacity-70">{label}</p>
-			<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-bg px-2 py-1.5 font-mono text-[11px] text-foreground/90">
+			<p className="mb-1 font-mono text-[9px] uppercase tracking-wider text-faint">
+				{label}
+			</p>
+			<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-bg px-2 py-1.5 font-mono text-[11px] text-foreground/90">
 				{text}
 			</pre>
 		</div>
@@ -592,7 +742,7 @@ function PermissionRow({
 					<p className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-wait">
 						Precisa de você
 					</p>
-					<p className="mt-1.5 text-[13px] leading-relaxed text-foreground/90">
+					<p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
 						{message.question}
 					</p>
 				</div>
@@ -627,9 +777,13 @@ function PermissionRow({
 
 function SystemRow({ text }: { text: string }) {
 	return (
-		<p className="text-center text-[10px] uppercase tracking-wider text-mute/60">
-			— {text} —
-		</p>
+		<div className="flex items-center gap-3 px-4 py-1">
+			<span className="h-px flex-1 bg-border/60" />
+			<span className="font-mono text-[10px] uppercase tracking-[0.18em] text-faint">
+				{text}
+			</span>
+			<span className="h-px flex-1 bg-border/60" />
+		</div>
 	);
 }
 
@@ -637,13 +791,19 @@ function Composer({
 	value,
 	onChange,
 	onSubmit,
-	disabled,
+	sending,
+	running,
+	aborting,
+	onAbort,
 	placeholder,
 }: {
 	value: string;
 	onChange: (v: string) => void;
 	onSubmit: () => void;
-	disabled: boolean;
+	sending: boolean;
+	running: boolean;
+	aborting: boolean;
+	onAbort: () => void;
 	placeholder: string;
 }) {
 	const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -652,39 +812,62 @@ function Composer({
 		el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
 	};
 	return (
-		<footer className="sticky bottom-0 border-t border-border bg-bg/90 px-3 py-3 backdrop-blur">
-			<div className="mx-auto flex max-w-md items-end gap-2">
-				<textarea
-					ref={ref}
-					value={value}
-					onChange={(e) => {
-						onChange(e.target.value);
-						grow(e.currentTarget);
-					}}
-					onKeyDown={(e) => {
-						if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-							e.preventDefault();
-							onSubmit();
-						}
-					}}
-					placeholder={placeholder}
-					rows={1}
-					className="flex-1 resize-none rounded-2xl border border-border bg-panel px-3.5 py-2.5 text-[14px] leading-snug text-foreground outline-none placeholder:text-faint focus:border-accent/50"
-					style={{ minHeight: 42, maxHeight: 140 }}
-				/>
-				<button
-					type="button"
-					onClick={onSubmit}
-					disabled={disabled || value.trim().length === 0}
-					className="grid size-[42px] shrink-0 place-items-center rounded-2xl bg-accent text-[var(--color-accent-ink)] transition-opacity disabled:opacity-40"
-					title="Enviar"
-				>
-					{disabled ? (
-						<Loader2 className="size-4 animate-spin" />
-					) : (
-						<Send className="size-4" />
-					)}
-				</button>
+		<footer className="sticky bottom-0 border-t border-border bg-bg/95 px-3 pb-3 pt-2 backdrop-blur">
+			<div className="mx-auto max-w-md">
+				{running ? (
+					<div className="mb-2 flex items-center gap-2 px-1.5">
+						<StateDot state="live" />
+						<span className="flex-1 font-mono text-[11px] text-mute">
+							Agente trabalhando…
+						</span>
+						<button
+							type="button"
+							onClick={onAbort}
+							disabled={aborting}
+							className="inline-flex items-center gap-1.5 rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1 text-[11px] font-medium text-danger active:bg-danger/15 disabled:opacity-50"
+						>
+							{aborting ? (
+								<Loader2 className="size-3 animate-spin" />
+							) : (
+								<StopCircle className="size-3" />
+							)}
+							Parar
+						</button>
+					</div>
+				) : null}
+				<div className="flex items-end gap-1.5 rounded-2xl border border-border bg-panel p-1.5 transition-colors focus-within:border-accent/50">
+					<textarea
+						ref={ref}
+						value={value}
+						onChange={(e) => {
+							onChange(e.target.value);
+							grow(e.currentTarget);
+						}}
+						onKeyDown={(e) => {
+							if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+								e.preventDefault();
+								onSubmit();
+							}
+						}}
+						placeholder={placeholder}
+						rows={1}
+						className="min-w-0 flex-1 resize-none bg-transparent px-2.5 py-2 text-[14px] leading-snug text-foreground outline-none placeholder:text-faint focus:outline-none focus-visible:outline-none"
+						style={{ minHeight: 38, maxHeight: 140 }}
+					/>
+					<button
+						type="button"
+						onClick={onSubmit}
+						disabled={sending || value.trim().length === 0}
+						className="grid size-[38px] shrink-0 place-items-center rounded-xl bg-accent text-[var(--color-accent-ink)] transition-opacity disabled:opacity-40"
+						title="Enviar"
+					>
+						{sending ? (
+							<Loader2 className="size-4 animate-spin" />
+						) : (
+							<Send className="size-4" />
+						)}
+					</button>
+				</div>
 			</div>
 		</footer>
 	);
