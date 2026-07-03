@@ -91,16 +91,17 @@ async fn main() {
 
     let config = Arc::new(RwLock::new(config));
     let app = build_router(config.clone());
+    let bind_addrs = bind_addresses(primary_addr, lan_addr);
 
-    println!("[DCC HTTP] Listening on http://{primary_addr}");
+    println!("[DCC HTTP] Listening on http://{}", bind_addrs.primary);
     if let Some(ip) = dev_command_center_tauri::net_info::detect_lan_ip() {
-        if lan_addr.is_some() {
+        if bind_addrs.external.is_some() {
             println!(
                 "[DCC HTTP] LAN reachable at:  http://{ip}:{}  (mobile clients connect here)",
-                primary_addr.port()
+                bind_addrs.primary.port()
             );
         }
-    } else if lan_addr.is_some() {
+    } else if bind_addrs.external.is_some() {
         println!("[DCC HTTP] LAN listener ready but no LAN IPv4 detected yet.");
     }
     println!("[DCC HTTP] Endpoints:");
@@ -140,15 +141,18 @@ async fn main() {
     println!("[DCC HTTP]   POST /api/v1/sessions/:session_id/respond-user-input");
     println!("[DCC HTTP]   POST /api/v1/sessions/:session_id/respond-permission");
 
-    let primary_listener = match tokio::net::TcpListener::bind(&primary_addr).await {
+    let primary_listener = match tokio::net::TcpListener::bind(&bind_addrs.primary).await {
         Ok(listener) => listener,
         Err(error) => {
-            eprintln!("[DCC HTTP] Failed to bind to {primary_addr}: {error}");
+            eprintln!(
+                "[DCC HTTP] Failed to bind to {}: {error}",
+                bind_addrs.primary
+            );
             std::process::exit(1);
         }
     };
 
-    let lan_listener = if let Some(addr) = lan_addr {
+    let lan_listener = if let Some(addr) = bind_addrs.secondary {
         match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => Some(listener),
             Err(error) => {
@@ -183,6 +187,43 @@ async fn main() {
         let _ = tokio::try_join!(primary_task, lan);
     } else {
         let _ = primary_task.await;
+    }
+}
+
+struct BindAddresses {
+    primary: SocketAddr,
+    secondary: Option<SocketAddr>,
+    external: Option<SocketAddr>,
+}
+
+fn bind_addresses(primary: SocketAddr, lan: Option<SocketAddr>) -> BindAddresses {
+    let Some(lan) = lan else {
+        return BindAddresses {
+            primary,
+            secondary: None,
+            external: None,
+        };
+    };
+
+    if is_wildcard(lan.ip()) {
+        return BindAddresses {
+            primary: lan,
+            secondary: None,
+            external: Some(lan),
+        };
+    }
+
+    BindAddresses {
+        primary,
+        secondary: Some(lan),
+        external: Some(lan),
+    }
+}
+
+fn is_wildcard(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => ip.is_unspecified(),
+        IpAddr::V6(ip) => ip.is_unspecified(),
     }
 }
 

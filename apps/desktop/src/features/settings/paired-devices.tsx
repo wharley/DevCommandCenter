@@ -455,7 +455,10 @@ function PairDeviceDialog({
 	// Endpoints reachable from a phone, in display order. Loopback is hidden
 	// from the picker but still selectable as a debug fallback.
 	const externalEndpoints = useMemo(
-		() => (endpoints ?? []).filter((e) => e.reachability !== "loopback"),
+		() =>
+			(endpoints ?? []).filter(
+				(e) => e.reachability !== "loopback" && e.status !== "unavailable",
+			),
 		[endpoints],
 	);
 

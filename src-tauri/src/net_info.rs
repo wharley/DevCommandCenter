@@ -6,7 +6,7 @@
 //! private-network, public) so the UI can present them with sensible defaults.
 
 use serde::Serialize;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -58,15 +58,21 @@ pub struct LanEndpoint {
 
 /// Resolves the primary LAN IPv4. Rejects loopback / link-local / unspecified.
 pub fn detect_lan_ip() -> Option<String> {
-    let primary = local_ip_address::local_ip().ok()?;
-    let v4 = match primary {
-        IpAddr::V4(addr) => addr,
-        IpAddr::V6(_) => return None,
-    };
-    if v4.is_loopback() || v4.is_link_local() || v4.is_unspecified() {
-        return None;
+    for (_, ip) in local_ip_address::list_afinet_netifas().ok()? {
+        let IpAddr::V4(v4) = ip else {
+            continue;
+        };
+        if v4.is_loopback()
+            || v4.is_link_local()
+            || v4.is_unspecified()
+            || !v4.is_private()
+            || is_tailscale_ipv4(&v4.to_string())
+        {
+            continue;
+        }
+        return Some(v4.to_string());
     }
-    Some(v4.to_string())
+    None
 }
 
 pub fn lan_endpoint(port: u16) -> LanEndpoint {
@@ -102,6 +108,37 @@ fn is_tailscale_ipv4(addr: &str) -> bool {
         return false;
     }
     matches!((a, b, c, d), (Some(100), Some(b), Some(_), Some(_)) if (64..=127).contains(&b))
+}
+
+fn detect_tailscale_ipv4_addrs() -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let Ok(ifaces) = local_ip_address::list_afinet_netifas() else {
+        return out;
+    };
+
+    for (_, ip) in ifaces {
+        let IpAddr::V4(v4) = ip else {
+            continue;
+        };
+        let addr = v4.to_string();
+        if is_tailscale_ipv4(&addr) && seen.insert(addr.clone()) {
+            out.push(addr);
+        }
+    }
+
+    out
+}
+
+fn tcp_endpoint_status(ip: &str, port: u16) -> EndpointStatus {
+    let Ok(ip_addr) = ip.parse::<IpAddr>() else {
+        return EndpointStatus::Unknown;
+    };
+    let addr = SocketAddr::from((ip_addr, port));
+    match TcpStream::connect_timeout(&addr, Duration::from_millis(250)) {
+        Ok(_) => EndpointStatus::Available,
+        Err(_) => EndpointStatus::Unavailable,
+    }
 }
 
 /// Runs `tailscale status --json` with a short timeout and parses the relevant
@@ -165,17 +202,38 @@ pub fn read_tailscale_status() -> Option<TailscaleStatus> {
 /// then loopback as a fallback the user can still see.
 pub fn discover_endpoints(port: u16) -> Vec<AdvertisedEndpoint> {
     let mut out: Vec<AdvertisedEndpoint> = Vec::new();
+    let mut seen_tailscale_ips = std::collections::HashSet::new();
 
-    // Tailscale (zero or more endpoints).
+    // Tailscale IPs are network interfaces on this machine. Read them directly
+    // so the HTTP endpoint remains available even when `tailscale status` is
+    // blocked, slow, or prompts on macOS sandboxed Tailscale installs.
+    for ip in detect_tailscale_ipv4_addrs() {
+        seen_tailscale_ips.insert(ip.clone());
+        out.push(AdvertisedEndpoint {
+            id: format!("tailscale-ip:{ip}"),
+            label: "Tailscale".to_string(),
+            provider: "tailscale",
+            url: format!("http://{ip}:{port}"),
+            reachability: Reachability::PrivateNetwork,
+            status: tcp_endpoint_status(&ip, port),
+            description: "Funciona em qualquer rede (4G, hotel WiFi, etc) se o celular também estiver no Tailnet.".to_string(),
+        });
+    }
+
+    // Tailscale CLI is still useful for MagicDNS and as a fallback source of
+    // IPs, but the interface scan above is the authoritative path for HTTP.
     if let Some(ts) = read_tailscale_status() {
         for ip in &ts.tailnet_ipv4 {
+            if !seen_tailscale_ips.insert(ip.clone()) {
+                continue;
+            }
             out.push(AdvertisedEndpoint {
                 id: format!("tailscale-ip:{ip}"),
                 label: "Tailscale".to_string(),
                 provider: "tailscale",
                 url: format!("http://{ip}:{port}"),
                 reachability: Reachability::PrivateNetwork,
-                status: EndpointStatus::Available,
+                status: tcp_endpoint_status(ip, port),
                 description: "Funciona em qualquer rede (4G, hotel WiFi, etc) se o celular também estiver no Tailnet.".to_string(),
             });
         }
@@ -198,13 +256,14 @@ pub fn discover_endpoints(port: u16) -> Vec<AdvertisedEndpoint> {
 
     // LAN.
     if let Some(ip) = detect_lan_ip() {
+        let status = tcp_endpoint_status(&ip, port);
         out.push(AdvertisedEndpoint {
             id: format!("lan:{ip}"),
             label: "LAN".to_string(),
             provider: "core",
             url: format!("http://{ip}:{port}"),
             reachability: Reachability::Lan,
-            status: EndpointStatus::Available,
+            status,
             description: "Celular precisa estar na mesma WiFi que o desktop.".to_string(),
         });
     }

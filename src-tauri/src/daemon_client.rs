@@ -65,16 +65,15 @@ fn target_triple() -> &'static str {
     }
 }
 
-pub fn sidecar_binary_candidates() -> Vec<String> {
+pub fn sidecar_binary_candidates_for(binary_stem: &str) -> Vec<String> {
     vec![
-        format!("{}{}", binary_stem(), binary_extension()),
-        format!(
-            "{}-{}{}",
-            binary_stem(),
-            target_triple(),
-            binary_extension()
-        ),
+        format!("{}{}", binary_stem, binary_extension()),
+        format!("{}-{}{}", binary_stem, target_triple(), binary_extension()),
     ]
+}
+
+pub fn sidecar_binary_candidates() -> Vec<String> {
+    sidecar_binary_candidates_for(binary_stem())
 }
 
 fn open_connection(db_path: &Path) -> Result<Connection, String> {

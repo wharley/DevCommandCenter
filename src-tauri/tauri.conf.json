@@ -5,7 +5,7 @@
   "identifier": "com.devcommandcenter.app",
   "build": {
     "beforeDevCommand": "node scripts/build-sidecars.mjs --dev && node scripts/ensure-node.mjs && yarn vite",
-    "beforeBuildCommand": "node scripts/build-sidecars.mjs && yarn vite:build",
+    "beforeBuildCommand": "node scripts/build-sidecars.mjs && yarn workspace @dcc/mobile-web build && yarn vite:build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
@@ -39,10 +39,12 @@
     "externalBin": [
       "target/release/dcc",
       "target/release/dccd",
+      "target/release/dccd-http",
       "../sidecar/dist/dcc-claude-sidecar"
     ],
     "resources": {
-      "../sidecar/dist/vendor/": "vendor"
+      "../sidecar/dist/vendor/": "vendor",
+      "../apps/mobile-web/dist/": "mobile-web"
     },
     "icon": [
       "icons/32x32.png",

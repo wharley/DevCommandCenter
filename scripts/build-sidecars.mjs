@@ -108,7 +108,7 @@ function copyCompiledClaudeSidecar(hostTriple) {
 
 const hostTriple = detectHostTriple();
 mkdirSync(releaseDir, { recursive: true });
-for (const baseName of ['dcc', 'dccd']) {
+for (const baseName of ['dcc', 'dccd', 'dccd-http']) {
   ensurePlaceholder(releaseDir, baseName, hostTriple);
 }
 
@@ -145,9 +145,12 @@ run('cargo', [
   'dcc',
   '--bin',
   'dccd',
+  '--bin',
+  'dccd-http',
 ]);
 
 copySidecar('dcc', hostTriple);
 copySidecar('dccd', hostTriple);
+copySidecar('dccd-http', hostTriple);
 
-console.log(`[build-sidecars] prepared dcc, dccd and Claude sidecar for ${hostTriple}`);
+console.log(`[build-sidecars] prepared dcc, dccd, dccd-http and Claude sidecar for ${hostTriple}`);

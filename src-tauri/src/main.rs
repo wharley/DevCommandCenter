@@ -13,7 +13,7 @@ use dcc_tauri::{
     state::{SessionCommandState, WorkspaceCommandState},
 };
 use dev_command_center_tauri::daemon_client::{
-    ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo,
+    ensure_sidecar_running, rpc_with_info, sidecar_binary_candidates_for, DaemonRuntimeInfo,
 };
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
@@ -3759,12 +3759,126 @@ fn open_pairing_conn(app: &AppHandle) -> Result<Connection, ApiError> {
     Connection::open(&path).map_err(|e| db_error(e.to_string()))
 }
 
+fn http_port() -> u16 {
+    std::env::var("DCC_HTTP_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(9876)
+}
+
+fn http_health_ok(port: u16) -> bool {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(250))
+    else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+    if stream
+        .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut buf = [0_u8; 64];
+    let Ok(n) = stream.read(&mut buf) else {
+        return false;
+    };
+    std::str::from_utf8(&buf[..n])
+        .map(|head| head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200"))
+        .unwrap_or(false)
+}
+
+fn locate_http_sidecar_binary(app: &AppHandle) -> Option<PathBuf> {
+    if cfg!(dev) {
+        return None;
+    }
+
+    let binary_names = sidecar_binary_candidates_for("dccd-http");
+    let mut candidates = Vec::new();
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        for name in &binary_names {
+            candidates.push(resource_dir.join(name));
+        }
+    }
+
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            for name in &binary_names {
+                candidates.push(parent.join(name));
+            }
+            if let Some(grand_parent) = parent.parent() {
+                for name in &binary_names {
+                    candidates.push(grand_parent.join(name));
+                }
+            }
+        }
+    }
+
+    candidates.into_iter().find(|candidate| candidate.exists())
+}
+
+fn ensure_http_server_running(app: &AppHandle) -> Result<(), ApiError> {
+    let port = http_port();
+    if http_health_ok(port) {
+        return Ok(());
+    }
+
+    let db_path = pairing_db_path(app)?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| db_error(format!("app data dir unavailable: {e}")))?;
+
+    let mut command = if let Some(binary) = locate_http_sidecar_binary(app) {
+        Command::new(binary)
+    } else {
+        let mut cargo = Command::new("cargo");
+        cargo
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .env(
+                "CARGO_TARGET_DIR",
+                std::env::temp_dir().join("dcc-sidecar-target"),
+            )
+            .args(["run", "--quiet", "--bin", "dccd-http", "--"]);
+        cargo
+    };
+
+    command
+        .env("DCC_HTTP_DB_PATH", db_path)
+        .env("DCC_APP_DATA_DIR", app_data_dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| db_error(format!("failed to start dccd-http: {e}")))?;
+
+    let startup_timeout = if cfg!(dev) {
+        Duration::from_secs(30)
+    } else {
+        Duration::from_secs(6)
+    };
+    let started = Instant::now();
+    while started.elapsed() < startup_timeout {
+        if http_health_ok(port) {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    Err(db_error(format!(
+        "dccd-http did not become ready on port {port}"
+    )))
+}
+
 fn pairing_error_to_api(err: dev_command_center_tauri::pairing::PairingError) -> ApiError {
     db_error(err.to_string())
 }
 
 #[tauri::command]
 async fn pair_init(app: AppHandle) -> ApiResult<Value> {
+    ensure_http_server_running(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let conn = open_pairing_conn(&app)?;
         let challenge = dev_command_center_tauri::pairing::create_pairing_nonce(&conn)
@@ -3865,11 +3979,9 @@ async fn pair_purge_expired(app: AppHandle) -> ApiResult<Value> {
 /// `ip: null` when no usable interface is up — the UI uses that to show
 /// "no LAN detected" rather than rendering a broken QR.
 #[tauri::command]
-async fn pair_get_lan_url() -> ApiResult<Value> {
-    let port = std::env::var("DCC_HTTP_PORT")
-        .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(9876);
+async fn pair_get_lan_url(app: AppHandle) -> ApiResult<Value> {
+    ensure_http_server_running(&app)?;
+    let port = http_port();
     let endpoint = dev_command_center_tauri::net_info::lan_endpoint(port);
     Ok(serde_json::to_value(endpoint).map_err(|e| db_error(e.to_string()))?)
 }
@@ -3879,11 +3991,9 @@ async fn pair_get_lan_url() -> ApiResult<Value> {
 /// Detection runs synchronously inside a spawn_blocking so the (short) shell-out
 /// to `tailscale status` does not block the Tauri runtime.
 #[tauri::command]
-async fn pair_get_endpoints() -> ApiResult<Value> {
-    let port = std::env::var("DCC_HTTP_PORT")
-        .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(9876);
+async fn pair_get_endpoints(app: AppHandle) -> ApiResult<Value> {
+    ensure_http_server_running(&app)?;
+    let port = http_port();
     let endpoints = tauri::async_runtime::spawn_blocking(move || {
         dev_command_center_tauri::net_info::discover_endpoints(port)
     })
