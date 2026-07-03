@@ -43,9 +43,10 @@ use dcc_tauri::commands::{
         WorkspaceCodeRabbitStoredReviewOutput,
     },
     delegation_commands::{
-        CancelDelegationInput, CancelDelegationOutput, CreateDelegationInput,
-        CreateDelegationOutput, GetDelegationInput, GetDelegationOutput, ListDelegationsInput,
-        ListDelegationsOutput,
+        CancelDelegationInput, CancelDelegationOutput, CompleteDelegationInput,
+        CompleteDelegationOutput, CreateDelegationInput, CreateDelegationOutput,
+        FailDelegationInput, FailDelegationOutput, GetDelegationInput, GetDelegationOutput,
+        ListDelegationsInput, ListDelegationsOutput, StartDelegationInput, StartDelegationOutput,
     },
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
@@ -175,6 +176,9 @@ struct DelegationMethods {
     list_delegations: String,
     get_delegation: String,
     cancel_delegation: String,
+    start_delegation: String,
+    complete_delegation: String,
+    fail_delegation: String,
 }
 
 fn main() {
@@ -341,6 +345,12 @@ fn main() {
         .typ::<GetDelegationOutput>()
         .typ::<CancelDelegationInput>()
         .typ::<CancelDelegationOutput>()
+        .typ::<StartDelegationInput>()
+        .typ::<StartDelegationOutput>()
+        .typ::<CompleteDelegationInput>()
+        .typ::<CompleteDelegationOutput>()
+        .typ::<FailDelegationInput>()
+        .typ::<FailDelegationOutput>()
         .typ::<CoreEvent>()
         .constant(
             "WORKSPACE_METHODS",
@@ -444,6 +454,9 @@ fn main() {
             list_delegations: "list_delegations".to_string(),
             get_delegation: "get_delegation".to_string(),
             cancel_delegation: "cancel_delegation".to_string(),
+            start_delegation: "start_delegation".to_string(),
+            complete_delegation: "complete_delegation".to_string(),
+            fail_delegation: "fail_delegation".to_string(),
         },
     );
 

@@ -27,6 +27,7 @@ type ActiveThreadViewportProps = {
 	activeMissionSpecHash: string | null;
 	autoSaveMissionValidation: boolean;
 	onStartSession: () => void;
+	onSelectSession: (sessionId: string) => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
 	onReviewChanges?: () => void;
@@ -49,6 +50,7 @@ export function ActiveThreadViewport({
 	activeMissionSpecHash,
 	autoSaveMissionValidation,
 	onStartSession,
+	onSelectSession,
 	onSubmitPrompt,
 	onReviewChanges,
 }: ActiveThreadViewportProps) {
@@ -166,6 +168,15 @@ export function ActiveThreadViewport({
 											label={message.label}
 											content={message.content}
 											createdAt={message.createdAt}
+											action={
+												message.action?.type === "open-session"
+													? {
+															label: message.action.label,
+															onClick: () =>
+																onSelectSession(message.action!.sessionId),
+														}
+													: undefined
+											}
 										/>
 									</div>
 								);

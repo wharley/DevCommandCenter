@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { Toaster } from "sonner";
 import type {
 	CoreEvent,
+	DelegationContextPolicy,
 	MissionSpecEntry,
 	SessionSearchResult,
 	WorkspaceSessionSummary,
@@ -84,15 +85,24 @@ import {
 	listMissionSpecs,
 	listRepositories,
 	listWorkspaces,
+	workspaceGitBranchDiff,
+	workspaceGitStatus,
 } from "./lib/workspace-api";
 import {
 	abortRun,
 	closeSession,
+	loadSessionThreadEvents,
 	resumeSession,
 	restoreSession,
 	sendTurn,
 	startThread,
 } from "./lib/session-api";
+import {
+	completeDelegation,
+	createDelegation,
+	failDelegation,
+	startDelegation,
+} from "./lib/delegation-api";
 import { useAppearance } from "./components/theme-provider";
 import {
 	SELECTED_PROVIDER_STORAGE_KEY,
@@ -104,6 +114,7 @@ import {
 	setSessionComposerSelection,
 } from "./features/providers/provider-selection.logic";
 import type { ComposerSubmittedTurn } from "./features/composer/composer-turn";
+import type { ManualDelegationRequest } from "./features/sessions/delegation-dialog";
 import { buildMissionSpecFilename } from "./features/composer/WorkspaceComposer.logic";
 import {
 	daemonCombToWorkspaceSummary,
@@ -229,6 +240,170 @@ type WorkspaceComposerPrefillRequest = {
 	text: string;
 	nonce: number;
 };
+
+type DelegationChildBinding = {
+	delegationId: string;
+	childSessionId: string;
+	parentSessionId: string;
+	finalized: boolean;
+};
+
+function truncateDelegationContext(value: string, maxLength: number) {
+	const trimmed = value.trim();
+	if (trimmed.length <= maxLength) {
+		return trimmed;
+	}
+	return `${trimmed.slice(0, maxLength).trimEnd()}\n\n[truncated]`;
+}
+
+function formatDelegationChangeList(
+	label: string,
+	changes: Array<{
+		path: string;
+		status: string;
+		insertions: number;
+		deletions: number;
+	}>,
+) {
+	if (changes.length === 0) {
+		return [`${label}: none`];
+	}
+	return [
+		`${label}:`,
+		...changes
+			.slice(0, 80)
+			.map(
+				(change) =>
+					`- ${change.status} ${change.path} (+${change.insertions}/-${change.deletions})`,
+			),
+		changes.length > 80 ? `- ... ${changes.length - 80} more file(s)` : "",
+	].filter(Boolean);
+}
+
+async function summarizeSessionForDelegation(sessionId: string) {
+	const events = await loadSessionThreadEvents(sessionId);
+	const messages = projectWorkspaceMessages(events, [], sessionId, null);
+	const lastAssistant = [...messages]
+		.reverse()
+		.find((message) => message.role === "assistant" && message.content.trim());
+	return lastAssistant
+		? truncateDelegationContext(lastAssistant.content, 1600)
+		: "Delegated session completed without assistant text.";
+}
+
+async function buildManualDelegationPrompt({
+	request,
+	workspaceName,
+	workspaceBranch,
+	workspacePath,
+	parentSessionId,
+	parentSessionTitle,
+	liveSessionEvents,
+}: {
+	request: ManualDelegationRequest;
+	workspaceName: string;
+	workspaceBranch: string;
+	workspacePath: string | null;
+	parentSessionId: string;
+	parentSessionTitle: string;
+	liveSessionEvents: CoreEvent[];
+}) {
+	const lines = [
+		`Delegated ${request.mode} task from Dev Command Center.`,
+		"",
+		"Scope:",
+		"- Work read-only. Do not edit files, run destructive commands, or apply patches.",
+		"- Return concise findings, risks, and recommended next steps.",
+		"",
+		"Workspace:",
+		`- Name: ${workspaceName}`,
+		`- Branch: ${workspaceBranch || "unknown"}`,
+		`- Path: ${workspacePath ?? "unknown"}`,
+		`- Parent session: ${parentSessionTitle} (${parentSessionId})`,
+		"",
+		"Instruction:",
+		request.instruction,
+	];
+
+	if (
+		workspacePath &&
+		(request.contextPolicy.type === "review_current_diff" ||
+			request.contextPolicy.type === "full_reanchor")
+	) {
+		try {
+			const [status, branchDiff] = await Promise.all([
+				workspaceGitStatus({ workspaceRoot: workspacePath }),
+				workspaceGitBranchDiff({ workspaceRoot: workspacePath }),
+			]);
+			lines.push(
+				"",
+				"Git context:",
+				`- Current branch: ${status.currentBranch ?? "unknown"}`,
+				`- Base branch: ${branchDiff.baseBranch ?? "unknown"}`,
+				`- Conflicts: ${status.conflictCount}`,
+				...formatDelegationChangeList("Staged changes", status.staged),
+				...formatDelegationChangeList("Unstaged changes", status.unstaged),
+				...formatDelegationChangeList("Branch diff", branchDiff.changes),
+			);
+		} catch (error) {
+			lines.push(
+				"",
+				"Git context:",
+				`- unavailable: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+
+	if (workspacePath && request.contextPolicy.type === "full_reanchor") {
+		try {
+			const specs = await listMissionSpecs({ workspaceRoot: workspacePath });
+			const spec = specs.specs[0] ?? null;
+			if (spec) {
+				lines.push(
+					"",
+					"Mission spec:",
+					truncateDelegationContext(spec.content, 2400),
+				);
+			}
+		} catch (error) {
+			lines.push(
+				"",
+				"Mission spec:",
+				`- unavailable: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+
+		try {
+			const historyEvents = await loadSessionThreadEvents(parentSessionId);
+			const messages = projectWorkspaceMessages(
+				historyEvents,
+				liveSessionEvents,
+				parentSessionId,
+				null,
+			);
+			const summary = messages
+				.slice(-8)
+				.map((message) => `${message.label}: ${message.content.trim()}`)
+				.filter((line) => line.trim().length > 0)
+				.join("\n\n");
+			if (summary.trim()) {
+				lines.push(
+					"",
+					"Recent parent session context:",
+					truncateDelegationContext(summary, 2400),
+				);
+			}
+		} catch (error) {
+			lines.push(
+				"",
+				"Recent parent session context:",
+				`- unavailable: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+
+	return lines.join("\n");
+}
 
 function ResizeSeparator({
 	side,
@@ -507,29 +682,82 @@ export default function App() {
 		string | null
 	>(null);
 	const autoCompiledWorkspaceSpecsRef = useRef<Set<string>>(new Set());
+	const delegatedChildSessionsRef = useRef<Map<string, DelegationChildBinding>>(
+		new Map(),
+	);
+
+	const finalizeDelegationFromChild = useCallback(
+		async (
+			childSessionId: string,
+			status: "completed" | "failed",
+			reason?: string | null,
+		) => {
+			const binding = delegatedChildSessionsRef.current.get(childSessionId);
+			if (!binding || binding.finalized) {
+				return;
+			}
+			binding.finalized = true;
+
+			try {
+				if (status === "completed") {
+					const summary = await summarizeSessionForDelegation(childSessionId);
+					await completeDelegation({
+						delegationId: binding.delegationId,
+						summary,
+					});
+				} else {
+					await failDelegation({
+						delegationId: binding.delegationId,
+						reason: reason ?? "Child session failed.",
+					});
+				}
+			} catch (error) {
+				binding.finalized = false;
+				console.error("[dcc] delegation finalization failed:", error);
+			}
+		},
+		[],
+	);
 
 	/**
 	 * Apply each live event to the snapshot of the session that owns it — not
 	 * just the selected one — so background sessions (e.g. a plan implementation
 	 * thread opened in another tab) keep advancing while their tab is inactive.
 	 */
-	const handleSessionEvent = useCallback((event: CoreEvent) => {
-		const eventSessionId = getCoreEventSessionId(event);
-		if (!eventSessionId) {
-			return;
-		}
-		setSessionSnapshotsById((current) => {
-			const prev = current[eventSessionId];
-			if (!prev) {
-				return current;
+	const handleSessionEvent = useCallback(
+		(event: CoreEvent) => {
+			const eventSessionId = getCoreEventSessionId(event);
+			if (!eventSessionId) {
+				return;
 			}
-			const next = applyCoreEventToSnapshot(prev, event);
-			if (next === prev) {
-				return current;
+			setSessionSnapshotsById((current) => {
+				const prev = current[eventSessionId];
+				if (!prev) {
+					return current;
+				}
+				const next = applyCoreEventToSnapshot(prev, event);
+				if (next === prev) {
+					return current;
+				}
+				return { ...current, [eventSessionId]: next };
+			});
+
+			if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
+				void finalizeDelegationFromChild(
+					event.sessionTurnCompleted.session_id,
+					"completed",
+				);
 			}
-			return { ...current, [eventSessionId]: next };
-		});
-	}, []);
+			if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
+				void finalizeDelegationFromChild(
+					event.sessionTurnAborted.session_id,
+					"failed",
+					event.sessionTurnAborted.reason,
+				);
+			}
+		},
+		[finalizeDelegationFromChild],
+	);
 	const { activityEvents: sessionActivityEvents, events: sessionEvents } =
 		useSessionEventFeed(handleSessionEvent);
 
@@ -1092,6 +1320,171 @@ export default function App() {
 		selectedWorkspace,
 		queryClient,
 	]);
+
+	const handleDelegate = useCallback(
+		async (request: ManualDelegationRequest) => {
+			if (!selectedWorkspace || !selectedSessionSnapshot) {
+				toast.error("Select an active parent session before delegating.");
+				return;
+			}
+
+			const targetProvider = providerChoices.find(
+				(provider) => provider.id === request.targetProviderId,
+			);
+			if (!targetProvider) {
+				toast.error("Delegation target provider is unavailable.");
+				return;
+			}
+			const targetProviderBlockReason = getProviderUnhealthyReason(targetProvider);
+			if (targetProviderBlockReason) {
+				toast.error(targetProviderBlockReason);
+				return;
+			}
+
+			const parentSessionId = selectedSessionSnapshot.sessionId;
+			const parentTitle = selectedSessionSummary?.thread.title ?? selectedWorkspace.name;
+			const targetRuntime = draftToProviderRuntimeConfig(
+				getProviderRuntimeDraft(providerRuntimeSettings, targetProvider.id),
+			);
+			const prompt = await buildManualDelegationPrompt({
+				request,
+				workspaceName: selectedWorkspace.name,
+				workspaceBranch: selectedWorkspace.branch,
+				workspacePath: selectedLocalWorkspacePath,
+				parentSessionId,
+				parentSessionTitle: parentTitle,
+				liveSessionEvents: sessionEvents,
+			});
+			const threadTitle = `Delegated ${request.mode}: ${parentTitle}`;
+
+			let delegationId: string | null = null;
+			let childSessionId: string | null = null;
+			try {
+				const started = await startThread({
+					workspaceId: selectedWorkspace.id,
+					projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
+					providerId: targetProvider.id,
+					model: request.targetModelId,
+					providerRuntime: targetRuntime,
+					title: threadTitle,
+				});
+				childSessionId = started.session.id;
+				const startedSnapshot: RuntimeSessionSnapshot = {
+					sessionId: started.session.id,
+					projectId: started.session.projectId,
+					workspaceId: started.session.workspaceId,
+					providerId: started.session.providerId,
+					model: started.session.model,
+					state: started.projection.state,
+					turnCount: started.projection.turnCount,
+					checkpointCount: started.projection.checkpointCount,
+					activeTurnId: started.projection.activeTurnId ?? null,
+					lastTurnPrompt: null,
+					lastTurnState: started.projection.activeTurnId ? "running" : null,
+				};
+				setSessionSnapshotsById((current) => ({
+					...current,
+					[started.session.id]: startedSnapshot,
+				}));
+				queryClient.setQueryData<WorkspaceSessionSummary[]>(
+					getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
+					(current = []) => {
+						const nextSummary: WorkspaceSessionSummary = {
+							session: started.session,
+							thread: started.thread,
+							projection: started.projection,
+							lastTurnPrompt: null,
+							lastTurnState: started.projection.activeTurnId ? "running" : null,
+						};
+						return [
+							nextSummary,
+							...current.filter(
+								(summary) => summary.session.id !== started.session.id,
+							),
+						];
+					},
+				);
+
+				const created = await createDelegation({
+					parentSessionId,
+					parentTurnId: selectedSessionSnapshot.activeTurnId,
+					childSessionId,
+					workspaceId: selectedWorkspace.id,
+					targetProviderId: targetProvider.id,
+					mode: request.mode,
+					prompt,
+					contextPolicy: request.contextPolicy,
+					budget: {
+						turnLimit: 1,
+						timeoutSeconds: 600,
+						allowFileEdits: false,
+					},
+				});
+				delegationId = created.delegation.id;
+				delegatedChildSessionsRef.current.set(childSessionId, {
+					delegationId,
+					childSessionId,
+					parentSessionId,
+					finalized: false,
+				});
+				await startDelegation({ delegationId });
+
+				await sendTurn({
+					sessionId: childSessionId,
+					prompt,
+					providerId: targetProvider.id,
+					model: request.targetModelId,
+					providerRuntime: targetRuntime,
+					planMode: false,
+					effort: "medium",
+					fastMode: true,
+				});
+
+				toast.success("Delegation started");
+				await queryClient.invalidateQueries({
+					queryKey: getWorkspaceSessionsCacheKey(
+						backendCacheKey,
+						selectedWorkspace.id,
+					),
+				});
+			} catch (error) {
+				const message =
+					error instanceof Error
+						? error.message
+						: typeof error === "string"
+							? error
+							: "Failed to start delegation";
+				console.error("[dcc] delegation failed:", error);
+				if (delegationId) {
+					await failDelegation({
+						delegationId,
+						reason: message,
+					}).catch((failure) => {
+						console.error("[dcc] delegation failure event failed:", failure);
+					});
+				}
+				if (childSessionId) {
+					const binding = delegatedChildSessionsRef.current.get(childSessionId);
+					if (binding) {
+						binding.finalized = true;
+					}
+				}
+				toast.error(message);
+				throw error;
+			}
+		},
+		[
+			backendCacheKey,
+			providerChoices,
+			providerRuntimeSettings,
+			queryClient,
+			selectedLocalWorkspacePath,
+			selectedSessionSnapshot,
+			selectedSessionSummary,
+			selectedWorkspace,
+			sessionEvents,
+		],
+	);
 
 	const handleImplementPlanInNewThread = useCallback(
 		async (input: { planMarkdown: string; planTitle: string | null }) => {
@@ -2322,6 +2715,7 @@ export default function App() {
 									onSubmitPrompt={handleSubmitPrompt}
 									onResumeSession={handleResumeSession}
 									onAbortSession={handleAbortSession}
+									onDelegate={handleDelegate}
 									sessionActionSessionId={sessionActionSessionId}
 									updateInfo={appUpdateInfo}
 									isInstallingUpdate={isInstallingUpdate}

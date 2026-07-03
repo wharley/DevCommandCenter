@@ -57,6 +57,24 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
         CoreEvent::SessionCheckpointCreated { .. } => {
             format!("{SESSION_EVENT_PREFIX}/checkpoint/created")
         }
+        CoreEvent::SessionDelegationRequested { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/delegation/requested")
+        }
+        CoreEvent::SessionDelegationStarted { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/delegation/started")
+        }
+        CoreEvent::SessionDelegationDelta { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/delegation/delta")
+        }
+        CoreEvent::SessionDelegationCompleted { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/delegation/completed")
+        }
+        CoreEvent::SessionDelegationFailed { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/delegation/failed")
+        }
+        CoreEvent::SessionDelegationCancelled { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/delegation/cancelled")
+        }
     }
 }
 

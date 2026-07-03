@@ -130,6 +130,35 @@ pub enum CoreEvent {
         checkpoint_id: String,
         label: String,
     },
+    SessionDelegationRequested {
+        session_id: String,
+        delegation_id: String,
+    },
+    SessionDelegationStarted {
+        session_id: String,
+        delegation_id: String,
+        child_session_id: Option<String>,
+    },
+    SessionDelegationDelta {
+        session_id: String,
+        delegation_id: String,
+        content: String,
+    },
+    SessionDelegationCompleted {
+        session_id: String,
+        delegation_id: String,
+        summary: Option<String>,
+    },
+    SessionDelegationFailed {
+        session_id: String,
+        delegation_id: String,
+        reason: Option<String>,
+    },
+    SessionDelegationCancelled {
+        session_id: String,
+        delegation_id: String,
+        reason: Option<String>,
+    },
 }
 
 #[async_trait]

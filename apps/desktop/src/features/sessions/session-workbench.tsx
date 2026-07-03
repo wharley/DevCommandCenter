@@ -11,6 +11,7 @@ import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surfa
 import type { AppUpdateInfo } from "@/features/updater";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import type { RuntimeSessionSnapshot } from "./workbench-types";
+import type { ManualDelegationRequest } from "./delegation-dialog";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import type {
 	OpenTerminalRequest,
@@ -53,6 +54,7 @@ type SessionWorkbenchProps = {
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
+	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
@@ -103,6 +105,7 @@ export function SessionWorkbench({
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
+	onDelegate,
 	sessionActionSessionId,
 	updateInfo,
 	isInstallingUpdate,
@@ -211,6 +214,7 @@ export function SessionWorkbench({
 						onSubmitPrompt={onSubmitPrompt}
 						onResumeSession={onResumeSession}
 						onAbortSession={onAbortSession}
+						onDelegate={onDelegate}
 						sessionActionSessionId={sessionActionSessionId}
 						updateInfo={updateInfo}
 						isInstallingUpdate={isInstallingUpdate}

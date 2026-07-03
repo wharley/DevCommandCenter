@@ -3,6 +3,7 @@ import {
 	CircleStop,
 	Clock3,
 	FileDiff,
+	GitFork,
 	History,
 	PanelRightClose,
 	PanelRightOpen,
@@ -64,6 +65,7 @@ export type DccWorkbenchChatHeaderProps = {
 	onOpenSessionSearch: () => void;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
+	onOpenDelegate: () => void;
 	sessionActionSessionId: string | null;
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
@@ -101,6 +103,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	onOpenSessionSearch,
 	onResumeSession,
 	onAbortSession,
+	onOpenDelegate,
 	sessionActionSessionId,
 	updateInfo,
 	isInstallingUpdate,
@@ -232,6 +235,22 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						installing={isInstallingUpdate}
 						onInstallNow={onInstallUpdate}
 					/>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								className="h-7 w-7 shrink-0 [&_svg]:size-3.5"
+								aria-label="Delegate"
+								onClick={onOpenDelegate}
+								disabled={!sessionSnapshot}
+							>
+								<GitFork strokeWidth={2} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">Delegate</TooltipContent>
+					</Tooltip>
 					<WorkspaceEditorPicker workspacePath={workspacePath} />
 					{onToggleInspector ? (
 						inspectorCollapsed && gitChangeSummary ? (

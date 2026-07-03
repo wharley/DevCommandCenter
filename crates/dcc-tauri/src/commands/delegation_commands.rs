@@ -14,7 +14,7 @@ use dcc_core::{
         session::{SessionEventKind, SessionEventRecord, SessionId, TurnId},
         workspace::WorkspaceId,
     },
-    ports::{DelegationRepo, SessionEventRepo, SessionRepo},
+    ports::{CoreEvent, DelegationRepo, EventBus, SessionEventRepo, SessionRepo},
 };
 
 use crate::state::SessionCommandState;
@@ -79,14 +79,53 @@ pub struct CancelDelegationOutput {
     pub delegation: Delegation,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StartDelegationInput {
+    pub delegation_id: DelegationId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StartDelegationOutput {
+    pub delegation: Delegation,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteDelegationInput {
+    pub delegation_id: DelegationId,
+    pub summary: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteDelegationOutput {
+    pub delegation: Delegation,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FailDelegationInput {
+    pub delegation_id: DelegationId,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FailDelegationOutput {
+    pub delegation: Delegation,
+}
+
 fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
 
-async fn append_parent_event(
+async fn append_and_publish_parent_event(
     state: &SessionCommandState,
     session_id: &SessionId,
     kind: SessionEventKind,
+    core_event: CoreEvent,
     occurred_at: String,
 ) -> Result<(), String> {
     let events = SessionEventRepo::list_events_by_session(state, session_id)
@@ -102,7 +141,28 @@ async fn append_parent_event(
     };
     SessionEventRepo::append_event(state, &event)
         .await
+        .map_err(|error| error.to_string())?;
+    EventBus::publish(state, core_event)
+        .await
         .map_err(|error| error.to_string())
+}
+
+fn is_terminal_status(status: &DelegationStatus) -> bool {
+    matches!(
+        status,
+        DelegationStatus::Completed | DelegationStatus::Failed | DelegationStatus::Cancelled
+    )
+}
+
+fn status_label(status: DelegationStatus) -> &'static str {
+    match status {
+        DelegationStatus::Draft => "draft",
+        DelegationStatus::Queued => "queued",
+        DelegationStatus::Running => "running",
+        DelegationStatus::Completed => "completed",
+        DelegationStatus::Failed => "failed",
+        DelegationStatus::Cancelled => "cancelled",
+    }
 }
 
 #[tauri::command]
@@ -154,11 +214,15 @@ pub async fn create_delegation(
     DelegationRepo::save_delegation(&*state, &delegation)
         .await
         .map_err(|error| error.to_string())?;
-    append_parent_event(
+    append_and_publish_parent_event(
         &state,
         &delegation.parent_session_id,
         SessionEventKind::DelegationRequested {
             delegation_id: delegation.id.clone(),
+        },
+        CoreEvent::SessionDelegationRequested {
+            session_id: delegation.parent_session_id.0.clone(),
+            delegation_id: delegation.id.0.clone(),
         },
         now,
     )
@@ -203,19 +267,11 @@ pub async fn cancel_delegation(
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
-    if matches!(
-        delegation.status,
-        DelegationStatus::Completed | DelegationStatus::Failed | DelegationStatus::Cancelled
-    ) {
+    if is_terminal_status(&delegation.status) {
         return Err(format!(
             "delegation {} is already {}",
             delegation.id.0,
-            match delegation.status {
-                DelegationStatus::Completed => "completed",
-                DelegationStatus::Failed => "failed",
-                DelegationStatus::Cancelled => "cancelled",
-                _ => "terminal",
-            }
+            status_label(delegation.status)
         ));
     }
 
@@ -229,18 +285,168 @@ pub async fn cancel_delegation(
     .await
     .map_err(|error| error.to_string())?
     .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
-    append_parent_event(
+    let reason = input.reason;
+    append_and_publish_parent_event(
         &state,
         &updated.parent_session_id,
         SessionEventKind::DelegationCancelled {
             delegation_id: updated.id.clone(),
-            reason: input.reason,
+            reason: reason.clone(),
+        },
+        CoreEvent::SessionDelegationCancelled {
+            session_id: updated.parent_session_id.0.clone(),
+            delegation_id: updated.id.0.clone(),
+            reason,
         },
         now,
     )
     .await?;
 
     Ok(CancelDelegationOutput {
+        delegation: updated,
+    })
+}
+
+#[tauri::command]
+pub async fn start_delegation(
+    state: State<'_, SessionCommandState>,
+    _app: AppHandle,
+    input: StartDelegationInput,
+) -> Result<StartDelegationOutput, String> {
+    let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
+    if is_terminal_status(&delegation.status) {
+        return Err(format!(
+            "delegation {} is already {}",
+            delegation.id.0,
+            status_label(delegation.status)
+        ));
+    }
+
+    let now = now_iso();
+    let updated = DelegationRepo::update_delegation_status(
+        &*state,
+        &input.delegation_id,
+        DelegationStatus::Running,
+        now.clone(),
+    )
+    .await
+    .map_err(|error| error.to_string())?
+    .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
+    append_and_publish_parent_event(
+        &state,
+        &updated.parent_session_id,
+        SessionEventKind::DelegationStarted {
+            delegation_id: updated.id.clone(),
+            child_session_id: updated.child_session_id.clone(),
+        },
+        CoreEvent::SessionDelegationStarted {
+            session_id: updated.parent_session_id.0.clone(),
+            delegation_id: updated.id.0.clone(),
+            child_session_id: updated
+                .child_session_id
+                .as_ref()
+                .map(|session_id| session_id.0.clone()),
+        },
+        now,
+    )
+    .await?;
+
+    Ok(StartDelegationOutput {
+        delegation: updated,
+    })
+}
+
+#[tauri::command]
+pub async fn complete_delegation(
+    state: State<'_, SessionCommandState>,
+    _app: AppHandle,
+    input: CompleteDelegationInput,
+) -> Result<CompleteDelegationOutput, String> {
+    let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
+    if is_terminal_status(&delegation.status) {
+        return Ok(CompleteDelegationOutput { delegation });
+    }
+
+    let now = now_iso();
+    let updated = DelegationRepo::update_delegation_status(
+        &*state,
+        &input.delegation_id,
+        DelegationStatus::Completed,
+        now.clone(),
+    )
+    .await
+    .map_err(|error| error.to_string())?
+    .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
+    let summary = input.summary;
+    append_and_publish_parent_event(
+        &state,
+        &updated.parent_session_id,
+        SessionEventKind::DelegationCompleted {
+            delegation_id: updated.id.clone(),
+            summary: summary.clone(),
+        },
+        CoreEvent::SessionDelegationCompleted {
+            session_id: updated.parent_session_id.0.clone(),
+            delegation_id: updated.id.0.clone(),
+            summary,
+        },
+        now,
+    )
+    .await?;
+
+    Ok(CompleteDelegationOutput {
+        delegation: updated,
+    })
+}
+
+#[tauri::command]
+pub async fn fail_delegation(
+    state: State<'_, SessionCommandState>,
+    _app: AppHandle,
+    input: FailDelegationInput,
+) -> Result<FailDelegationOutput, String> {
+    let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
+    if is_terminal_status(&delegation.status) {
+        return Ok(FailDelegationOutput { delegation });
+    }
+
+    let now = now_iso();
+    let updated = DelegationRepo::update_delegation_status(
+        &*state,
+        &input.delegation_id,
+        DelegationStatus::Failed,
+        now.clone(),
+    )
+    .await
+    .map_err(|error| error.to_string())?
+    .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
+    let reason = input.reason;
+    append_and_publish_parent_event(
+        &state,
+        &updated.parent_session_id,
+        SessionEventKind::DelegationFailed {
+            delegation_id: updated.id.clone(),
+            reason: reason.clone(),
+        },
+        CoreEvent::SessionDelegationFailed {
+            session_id: updated.parent_session_id.0.clone(),
+            delegation_id: updated.id.0.clone(),
+            reason,
+        },
+        now,
+    )
+    .await?;
+
+    Ok(FailDelegationOutput {
         delegation: updated,
     })
 }

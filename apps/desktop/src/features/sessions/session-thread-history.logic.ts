@@ -68,6 +68,11 @@ export type WorkspaceMessage = {
 	annotations?: WorkspaceMessageAnnotation[];
 	plan?: ParsedPlanContent | null;
 	planMode?: boolean;
+	action?: {
+		type: "open-session";
+		sessionId: string;
+		label: string;
+	};
 };
 
 type TimelineEvent = {
@@ -231,6 +236,53 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					label: record.kind.label,
 				},
 			};
+		case "delegation_requested":
+			return {
+				sessionDelegationRequested: {
+					session_id: record.sessionId,
+					delegation_id: record.kind.delegationId,
+				},
+			};
+		case "delegation_started":
+			return {
+				sessionDelegationStarted: {
+					session_id: record.sessionId,
+					delegation_id: record.kind.delegationId,
+					child_session_id: record.kind.childSessionId,
+				},
+			};
+		case "delegation_delta":
+			return {
+				sessionDelegationDelta: {
+					session_id: record.sessionId,
+					delegation_id: record.kind.delegationId,
+					content: record.kind.content,
+				},
+			};
+		case "delegation_completed":
+			return {
+				sessionDelegationCompleted: {
+					session_id: record.sessionId,
+					delegation_id: record.kind.delegationId,
+					summary: record.kind.summary,
+				},
+			};
+		case "delegation_failed":
+			return {
+				sessionDelegationFailed: {
+					session_id: record.sessionId,
+					delegation_id: record.kind.delegationId,
+					reason: record.kind.reason,
+				},
+			};
+		case "delegation_cancelled":
+			return {
+				sessionDelegationCancelled: {
+					session_id: record.sessionId,
+					delegation_id: record.kind.delegationId,
+					reason: record.kind.reason,
+				},
+			};
 		case "session_completed":
 			return {
 				sessionCompleted: {
@@ -316,6 +368,24 @@ function getEventSessionId(event: CoreEvent): string | null {
 	if ("sessionCheckpointCreated" in event && event.sessionCheckpointCreated) {
 		return event.sessionCheckpointCreated.session_id;
 	}
+	if ("sessionDelegationRequested" in event && event.sessionDelegationRequested) {
+		return event.sessionDelegationRequested.session_id;
+	}
+	if ("sessionDelegationStarted" in event && event.sessionDelegationStarted) {
+		return event.sessionDelegationStarted.session_id;
+	}
+	if ("sessionDelegationDelta" in event && event.sessionDelegationDelta) {
+		return event.sessionDelegationDelta.session_id;
+	}
+	if ("sessionDelegationCompleted" in event && event.sessionDelegationCompleted) {
+		return event.sessionDelegationCompleted.session_id;
+	}
+	if ("sessionDelegationFailed" in event && event.sessionDelegationFailed) {
+		return event.sessionDelegationFailed.session_id;
+	}
+	if ("sessionDelegationCancelled" in event && event.sessionDelegationCancelled) {
+		return event.sessionDelegationCancelled.session_id;
+	}
 	return null;
 }
 
@@ -340,6 +410,12 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionTurnCompleted" in event) return "session.turn.completed";
 	if ("sessionTurnAborted" in event) return "session.turn.aborted";
 	if ("sessionCheckpointCreated" in event) return "session.checkpoint.created";
+	if ("sessionDelegationRequested" in event) return "delegation.requested";
+	if ("sessionDelegationStarted" in event) return "delegation.running";
+	if ("sessionDelegationDelta" in event) return "delegation.update";
+	if ("sessionDelegationCompleted" in event) return "delegation.completed";
+	if ("sessionDelegationFailed" in event) return "delegation.failed";
+	if ("sessionDelegationCancelled" in event) return "delegation.cancelled";
 	if ("workspacePrepared" in event) return "workspace.prepared";
 	if ("workspaceReady" in event) return "workspace.ready";
 	return "event";
@@ -402,6 +478,26 @@ function eventSummary(event: CoreEvent): string {
 	}
 	if ("sessionCheckpointCreated" in event && event.sessionCheckpointCreated) {
 		return event.sessionCheckpointCreated.label;
+	}
+	if ("sessionDelegationRequested" in event && event.sessionDelegationRequested) {
+		return `Delegation requested · ${event.sessionDelegationRequested.delegation_id}`;
+	}
+	if ("sessionDelegationStarted" in event && event.sessionDelegationStarted) {
+		return event.sessionDelegationStarted.child_session_id
+			? `Child session ${event.sessionDelegationStarted.child_session_id} is running.`
+			: "Delegation is running.";
+	}
+	if ("sessionDelegationDelta" in event && event.sessionDelegationDelta) {
+		return event.sessionDelegationDelta.content;
+	}
+	if ("sessionDelegationCompleted" in event && event.sessionDelegationCompleted) {
+		return event.sessionDelegationCompleted.summary ?? "Delegation completed.";
+	}
+	if ("sessionDelegationFailed" in event && event.sessionDelegationFailed) {
+		return event.sessionDelegationFailed.reason ?? "Delegation failed.";
+	}
+	if ("sessionDelegationCancelled" in event && event.sessionDelegationCancelled) {
+		return event.sessionDelegationCancelled.reason ?? "Delegation cancelled.";
 	}
 	if ("workspacePrepared" in event && event.workspacePrepared) {
 		return `${event.workspacePrepared.project_id} · ${event.workspacePrepared.worktree_path}`;
@@ -853,6 +949,27 @@ export function projectWorkspaceMessages(
 				label: eventLabel(event),
 				content: eventSummary(event),
 				createdAt: occurredAt,
+			});
+			continue;
+		}
+
+		if ("sessionDelegationRequested" in event || "sessionDelegationStarted" in event || "sessionDelegationDelta" in event || "sessionDelegationCompleted" in event || "sessionDelegationFailed" in event || "sessionDelegationCancelled" in event) {
+			const action =
+				"sessionDelegationStarted" in event &&
+				event.sessionDelegationStarted?.child_session_id
+					? {
+							type: "open-session" as const,
+							sessionId: event.sessionDelegationStarted.child_session_id,
+							label: "Open child session",
+						}
+					: undefined;
+			messages.push({
+				id: `${eventLabel(event)}-${messages.length}`,
+				role: "system",
+				label: eventLabel(event),
+				content: eventSummary(event),
+				createdAt: occurredAt,
+				action,
 			});
 			continue;
 		}

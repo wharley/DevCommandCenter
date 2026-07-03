@@ -16,7 +16,8 @@ pub use coderabbit::{
     workspace_coderabbit_review_save, workspace_coderabbit_review_start,
 };
 pub use delegation_commands::{
-    cancel_delegation, create_delegation, get_delegation, list_delegations,
+    cancel_delegation, complete_delegation, create_delegation, fail_delegation, get_delegation,
+    list_delegations, start_delegation,
 };
 pub use forge_commands::{
     workspace_backfill_forge_repo_bindings, workspace_change_request_create,

@@ -9,6 +9,10 @@ import {
 import { FileTabsSurface } from "@/features/editor/file-tabs-surface";
 import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
+import {
+	DelegationDialog,
+	type ManualDelegationRequest,
+} from "@/features/sessions/delegation-dialog";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
 import { DiffReviewTray, type ReviewAnnotation } from "./diff-review-tray";
 import { WorkspaceComposer } from "@/features/composer";
@@ -124,6 +128,7 @@ type WorkspacePanelProps = {
 	) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
+	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
@@ -173,6 +178,7 @@ export function WorkspacePanel({
 	onSubmitPrompt,
 	onResumeSession,
 	onAbortSession,
+	onDelegate,
 	sessionActionSessionId,
 	updateInfo,
 	isInstallingUpdate,
@@ -194,6 +200,8 @@ export function WorkspacePanel({
 	const [reviewAnnotations, setReviewAnnotations] = useState<ReviewAnnotation[]>(
 		[],
 	);
+	const [delegateOpen, setDelegateOpen] = useState(false);
+	const [delegateSubmitting, setDelegateSubmitting] = useState(false);
 	const reviewIdRef = useRef(0);
 
 	useEffect(() => {
@@ -273,6 +281,18 @@ export function WorkspacePanel({
 			onCloseSurface();
 		},
 		[buildAnnotationTurn, onCloseSurface, onSubmitPrompt, reviewAnnotations],
+	);
+	const handleDelegateSubmit = useCallback(
+		async (request: ManualDelegationRequest) => {
+			setDelegateSubmitting(true);
+			try {
+				await onDelegate(request);
+				setDelegateOpen(false);
+			} finally {
+				setDelegateSubmitting(false);
+			}
+		},
+		[onDelegate],
 	);
 
 	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
@@ -409,6 +429,7 @@ export function WorkspacePanel({
 					onOpenSessionSearch={onOpenSessionSearch}
 					onResumeSession={onResumeSession}
 					onAbortSession={onAbortSession}
+					onOpenDelegate={() => setDelegateOpen(true)}
 					sessionActionSessionId={sessionActionSessionId}
 					updateInfo={updateInfo}
 					isInstallingUpdate={isInstallingUpdate}
@@ -438,6 +459,7 @@ export function WorkspacePanel({
 					activeMissionSpecHash={activeMissionSpecHash}
 					autoSaveMissionValidation={autoSaveMissionValidation}
 					onStartSession={onStartSession}
+					onSelectSession={onSelectSession}
 					onSubmitPrompt={onSubmitPrompt}
 					onReviewChanges={onReviewChanges}
 				/>
@@ -479,6 +501,13 @@ export function WorkspacePanel({
 				onRemove={handleRemoveReviewAnnotation}
 				onClear={handleClearReview}
 				onSubmit={handleSubmitReview}
+			/>
+			<DelegationDialog
+				open={delegateOpen}
+				providers={providerChoices}
+				isSubmitting={delegateSubmitting}
+				onOpenChange={setDelegateOpen}
+				onSubmit={handleDelegateSubmit}
 			/>
 		</>
 	);

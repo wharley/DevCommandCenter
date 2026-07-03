@@ -1,13 +1,19 @@
 import { MessageTimestamp } from "./message-metadata";
+import { Button } from "@/components/ui/button";
 
 export function SystemMessage({
 	label,
 	content,
 	createdAt,
+	action,
 }: {
 	label: string;
 	content: string;
 	createdAt?: string;
+	action?: {
+		label: string;
+		onClick: () => void;
+	};
 }) {
 	return (
 		<div
@@ -22,6 +28,17 @@ export function SystemMessage({
 				<span className="ml-2 inline-flex items-center gap-1 text-[11px] leading-none text-muted-foreground/60">
 					<MessageTimestamp createdAt={createdAt} />
 				</span>
+				{action ? (
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="ml-2 h-6 px-2 text-[11px]"
+						onClick={action.onClick}
+					>
+						{action.label}
+					</Button>
+				) : null}
 			</div>
 		</div>
 	);

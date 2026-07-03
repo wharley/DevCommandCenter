@@ -107,6 +107,12 @@ const SESSION_EVENT_NAMES = [
 	"dcc/session/turn/completed",
 	"dcc/session/turn/aborted",
 	"dcc/session/checkpoint/created",
+	"dcc/session/delegation/requested",
+	"dcc/session/delegation/started",
+	"dcc/session/delegation/delta",
+	"dcc/session/delegation/completed",
+	"dcc/session/delegation/failed",
+	"dcc/session/delegation/cancelled",
 ] as const;
 
 export async function listenSessionEvents(
