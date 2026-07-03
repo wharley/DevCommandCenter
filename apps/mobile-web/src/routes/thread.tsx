@@ -21,7 +21,9 @@ import { loadSession, type PairingSession } from "@/lib/session";
 import { openEventStream } from "@/lib/sseClient";
 import {
 	applyEvents,
+	applyIncomingEvent,
 	createThreadState,
+	incomingEventSessionId,
 	type ChatMessage,
 	type RawSessionEvent,
 	type ThreadState,
@@ -32,6 +34,14 @@ type SessionMeta = {
 	workspaceId: string | null;
 	workspaceName: string | null;
 	workspaceBranch: string | null;
+};
+
+type SendTurnOutput = {
+	turn?: {
+		id?: string;
+		content?: string;
+		createdAt?: string;
+	};
 };
 
 export function ThreadRoute() {
@@ -83,10 +93,8 @@ export function ThreadRoute() {
 		if (!session) return;
 		const stop = openEventStream(session, "/api/v1/events/stream", {
 			onMessage: (payload) => {
-				if (!payload || typeof payload !== "object") return;
-				const event = payload as RawSessionEvent;
-				if (event.sessionId !== threadId) return;
-				setState((prev) => applyEvents(prev, [event]));
+				if (incomingEventSessionId(payload) !== threadId) return;
+				setState((prev) => applyIncomingEvent(prev, payload));
 			},
 			onError: () => {
 				/* reconnect handled inside openEventStream */
@@ -100,7 +108,7 @@ export function ThreadRoute() {
 		const el = scrollerRef.current;
 		if (!el) return;
 		el.scrollTop = el.scrollHeight;
-	}, [state.messages.length]);
+	}, [state.cursor, state.messages.length]);
 
 	const lastTurnId = useMemo(() => {
 		for (let i = state.messages.length - 1; i >= 0; i--) {
@@ -179,10 +187,32 @@ export function ThreadRoute() {
 		if (!text || sending) return;
 		setSending(true);
 		try {
-			await apiFetch(session, `/api/v1/sessions/${encodeURIComponent(threadId)}/turns`, {
-				method: "POST",
-				body: JSON.stringify({ sessionId: threadId, prompt: text }),
-			});
+			const result = await apiFetch<SendTurnOutput>(
+				session,
+				`/api/v1/sessions/${encodeURIComponent(threadId)}/turns`,
+				{
+					method: "POST",
+					body: JSON.stringify({ sessionId: threadId, prompt: text }),
+				},
+			);
+			const turnId = result.turn?.id;
+			if (turnId) {
+				setState((prev) =>
+					applyEvents(prev, [
+						{
+							eventId: `local:${turnId}`,
+							sessionId: threadId,
+							sequence: prev.cursor + 1,
+							occurredAt: result.turn?.createdAt ?? new Date().toISOString(),
+							kind: {
+								type: "turn_started",
+								turnId,
+								prompt: result.turn?.content ?? text,
+							},
+						},
+					]),
+				);
+			}
 			setComposer("");
 		} catch (err) {
 			setLoadError(err instanceof Error ? err.message : "Falha ao enviar.");
@@ -217,7 +247,7 @@ export function ThreadRoute() {
 					body: JSON.stringify({
 						sessionId: threadId,
 						requestId,
-						choice,
+						behavior: choice,
 					}),
 				},
 			);
@@ -684,4 +714,3 @@ function ErrorBanner({
 		</div>
 	);
 }
-

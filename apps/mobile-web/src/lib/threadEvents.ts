@@ -99,6 +99,8 @@ export type ThreadState = {
 	byPermission: Map<string, number>;
 };
 
+type CorePayload = Record<string, unknown>;
+
 export function createThreadState(): ThreadState {
 	return {
 		cursor: 0,
@@ -132,6 +134,231 @@ export function applyEvents(state: ThreadState, events: RawSessionEvent[]): Thre
 	return next;
 }
 
+export function applyIncomingEvent(
+	state: ThreadState,
+	payload: unknown,
+): ThreadState {
+	if (isRawSessionEvent(payload)) {
+		return applyEvents(state, [payload]);
+	}
+
+	const event = coreEventToRawSessionEvent(payload, state.cursor + 1);
+	return event ? applyEvents(state, [event]) : state;
+}
+
+export function incomingEventSessionId(payload: unknown): string | null {
+	if (isRawSessionEvent(payload)) {
+		return payload.sessionId;
+	}
+	if (!payload || typeof payload !== "object") return null;
+	const core = payload as CorePayload;
+	const rawBody = Object.values(core).find(
+		(value) => !!value && typeof value === "object",
+	);
+	if (!rawBody || typeof rawBody !== "object") return null;
+	return stringField(rawBody as CorePayload, "session_id") ?? null;
+}
+
+export function incomingEventKindType(payload: unknown): string | null {
+	if (isRawSessionEvent(payload)) {
+		return payload.kind.type;
+	}
+	return coreEventToRawSessionEvent(payload, 0)?.kind.type ?? null;
+}
+
+function isRawSessionEvent(value: unknown): value is RawSessionEvent {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as Partial<RawSessionEvent>;
+	return (
+		typeof candidate.eventId === "string" &&
+		typeof candidate.sessionId === "string" &&
+		typeof candidate.sequence === "number" &&
+		typeof candidate.occurredAt === "string" &&
+		!!candidate.kind &&
+		typeof candidate.kind === "object" &&
+		typeof candidate.kind.type === "string"
+	);
+}
+
+function coreEventToRawSessionEvent(
+	payload: unknown,
+	sequence: number,
+): RawSessionEvent | null {
+	if (!payload || typeof payload !== "object") return null;
+	const core = payload as CorePayload;
+	const [name, rawBody] =
+		Object.entries(core).find(([, value]) => !!value && typeof value === "object") ?? [];
+	if (!name || !rawBody || typeof rawBody !== "object") return null;
+
+	const body = rawBody as CorePayload;
+	const sessionId = stringField(body, "session_id");
+	if (!sessionId) return null;
+
+	const at = new Date().toISOString();
+	const base = {
+		eventId: `core:${name}:${sequence}`,
+		sessionId,
+		sequence,
+		occurredAt: at,
+	};
+
+	switch (name) {
+		case "sessionStarted":
+			return {
+				...base,
+				kind: {
+					type: "session_started",
+					workspaceId: stringField(body, "workspace_id"),
+					projectId: stringField(body, "project_id"),
+					providerId: stringField(body, "provider_id"),
+					model: stringField(body, "model"),
+				},
+			};
+		case "sessionCompleted":
+			return { ...base, kind: { type: "session_completed" } };
+		case "sessionAborted":
+			return {
+				...base,
+				kind: { type: "session_aborted", reason: stringField(body, "reason") },
+			};
+		case "sessionResumed":
+			return { ...base, kind: { type: "session_resumed" } };
+		case "sessionTurnStarted":
+			return {
+				...base,
+				kind: {
+					type: "turn_started",
+					turnId: stringField(body, "turn_id"),
+					prompt: stringField(body, "prompt") ?? "",
+					planMode: booleanField(body, "plan_mode"),
+				},
+			};
+		case "sessionTurnDelta":
+			return {
+				...base,
+				kind: {
+					type: "turn_delta",
+					turnId: stringField(body, "turn_id"),
+					content: stringField(body, "content") ?? "",
+				},
+			};
+		case "sessionTurnReasoningStarted":
+			return {
+				...base,
+				kind: {
+					type: "turn_reasoning_started",
+					turnId: stringField(body, "turn_id"),
+					reasoningId: stringField(body, "reasoning_id"),
+					label: stringField(body, "label") ?? "Thinking",
+				},
+			};
+		case "sessionTurnReasoningCompleted":
+			return {
+				...base,
+				kind: {
+					type: "turn_reasoning_completed",
+					turnId: stringField(body, "turn_id"),
+					reasoningId: stringField(body, "reasoning_id"),
+				},
+			};
+		case "sessionTurnToolCallStarted":
+			return {
+				...base,
+				kind: {
+					type: "turn_tool_call_started",
+					turnId: stringField(body, "turn_id"),
+					toolCallId: stringField(body, "tool_call_id"),
+					toolName: stringField(body, "action") ?? stringField(body, "tool_name") ?? "tool",
+					toolInput: {
+						command: stringField(body, "command"),
+						file: stringField(body, "file"),
+					},
+				},
+			};
+		case "sessionTurnToolCallCompleted":
+			return {
+				...base,
+				kind: {
+					type: "turn_tool_call_completed",
+					turnId: stringField(body, "turn_id"),
+					toolCallId: stringField(body, "tool_call_id"),
+				},
+			};
+		case "sessionTurnToolCallFailed":
+			return {
+				...base,
+				kind: {
+					type: "turn_tool_call_failed",
+					turnId: stringField(body, "turn_id"),
+					toolCallId: stringField(body, "tool_call_id"),
+					error: stringField(body, "reason") ?? "Tool call failed.",
+				},
+			};
+		case "sessionTurnPermissionRequested":
+			return {
+				...base,
+				kind: {
+					type: "turn_permission_requested",
+					turnId: stringField(body, "turn_id"),
+					requestId: stringField(body, "request_id"),
+					question: permissionQuestion(body),
+					choices: [
+						{ id: "allow", label: "Permitir" },
+						{ id: "deny", label: "Negar" },
+					],
+				},
+			};
+		case "sessionTurnPermissionResolved":
+			return {
+				...base,
+				kind: {
+					type: "turn_permission_resolved",
+					turnId: stringField(body, "turn_id"),
+					requestId: stringField(body, "request_id"),
+					behavior: stringField(body, "behavior"),
+				},
+			};
+		case "sessionTurnCompleted":
+			return {
+				...base,
+				kind: { type: "turn_completed", turnId: stringField(body, "turn_id") },
+			};
+		case "sessionTurnAborted":
+			return {
+				...base,
+				kind: {
+					type: "turn_aborted",
+					turnId: stringField(body, "turn_id"),
+					reason: stringField(body, "reason"),
+				},
+			};
+		default:
+			return null;
+	}
+}
+
+function stringField(source: CorePayload, key: string): string | undefined {
+	const value = source[key];
+	return typeof value === "string" ? value : undefined;
+}
+
+function booleanField(source: CorePayload, key: string): boolean | undefined {
+	const value = source[key];
+	return typeof value === "boolean" ? value : undefined;
+}
+
+function permissionQuestion(body: CorePayload): string {
+	const text = [
+		stringField(body, "title"),
+		stringField(body, "description"),
+		stringField(body, "command"),
+		stringField(body, "file"),
+	]
+		.filter((value): value is string => !!value && value.trim().length > 0)
+		.join("\n");
+	return text || "Pedido de permissão";
+}
+
 function applyOne(state: ThreadState, event: RawSessionEvent) {
 	const kind = event.kind ?? { type: "" };
 	const turnId = kind.turnId ?? "";
@@ -153,6 +380,9 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 		case "turn_started": {
 			const text = typeof kind.prompt === "string" ? kind.prompt : "";
 			const refs = state.byTurn.get(turnId) ?? {};
+			if (refs.user !== undefined) {
+				break;
+			}
 			state.messages.push({
 				kind: "user",
 				turnId,
@@ -214,6 +444,9 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 		case "turn_reasoning_started": {
 			const id =
 				typeof kind.reasoningId === "string" ? kind.reasoningId : event.eventId;
+			if (state.byReasoning.has(id)) {
+				break;
+			}
 			state.messages.push({
 				kind: "reasoning",
 				turnId,
@@ -240,12 +473,19 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 		case "turn_tool_call_started": {
 			const id =
 				typeof kind.toolCallId === "string" ? kind.toolCallId : event.eventId;
+			if (state.byTool.has(id)) {
+				break;
+			}
 			state.messages.push({
 				kind: "tool",
 				turnId,
 				toolCallId: id,
 				toolName:
-					typeof kind.toolName === "string" ? kind.toolName : "tool",
+					typeof kind.toolName === "string"
+						? kind.toolName
+						: typeof kind.action === "string"
+							? kind.action
+							: "tool",
 				input: kind.toolInput,
 				output: null,
 				error: null,
@@ -276,7 +516,11 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 				const msg = state.messages[idx] as Extract<ChatMessage, { kind: "tool" }>;
 				msg.status = "failed";
 				msg.error =
-					typeof kind.error === "string" ? kind.error : "Tool call failed.";
+					typeof kind.error === "string"
+						? kind.error
+						: typeof kind.reason === "string"
+							? kind.reason
+							: "Tool call failed.";
 			}
 			break;
 		}
@@ -284,6 +528,9 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 		case "turn_permission_requested": {
 			const id =
 				typeof kind.requestId === "string" ? kind.requestId : event.eventId;
+			if (state.byPermission.has(id)) {
+				break;
+			}
 			const choices = Array.isArray(kind.choices)
 				? (kind.choices as Array<{ id: string; label: string }>)
 				: [
@@ -297,7 +544,7 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 				question:
 					typeof kind.question === "string"
 						? kind.question
-						: "Pedido de permissão",
+						: permissionQuestion(kind),
 				choices,
 				at: event.occurredAt,
 				resolved: false,

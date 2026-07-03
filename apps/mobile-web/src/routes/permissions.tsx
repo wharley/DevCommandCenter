@@ -12,7 +12,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { loadSession, type PairingSession } from "@/lib/session";
 import { openEventStream } from "@/lib/sseClient";
-import type { RawSessionEvent } from "@/lib/threadEvents";
+import { incomingEventKindType, type RawSessionEvent } from "@/lib/threadEvents";
 
 type SessionSearchResult = {
 	sessionId: string;
@@ -138,8 +138,7 @@ export function PermissionsRoute() {
 		if (!session) return;
 		const stop = openEventStream(session, "/api/v1/events/stream", {
 			onMessage: (payload) => {
-				const event = payload as RawSessionEvent;
-				const kind = event?.kind?.type;
+				const kind = incomingEventKindType(payload);
 				if (kind === "turn_permission_requested" || kind === "turn_permission_resolved") {
 					void scan(session);
 				}
@@ -161,7 +160,7 @@ export function PermissionsRoute() {
 					body: JSON.stringify({
 						sessionId: item.thread.sessionId,
 						requestId: item.requestId,
-						choice,
+						behavior: choice,
 					}),
 				},
 			);
