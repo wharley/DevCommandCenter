@@ -12,6 +12,7 @@ import type { AppUpdateInfo } from "@/features/updater";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import type { RuntimeSessionSnapshot } from "./workbench-types";
 import type { ManualDelegationRequest } from "./delegation-dialog";
+import type { AgentInitiatedDelegationRequest } from "./agent-delegation-request";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import type {
 	OpenTerminalRequest,
@@ -55,6 +56,7 @@ type SessionWorkbenchProps = {
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
+	onAgentDelegate: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
@@ -106,6 +108,7 @@ export function SessionWorkbench({
 	onResumeSession,
 	onAbortSession,
 	onDelegate,
+	onAgentDelegate,
 	sessionActionSessionId,
 	updateInfo,
 	isInstallingUpdate,
@@ -215,6 +218,7 @@ export function SessionWorkbench({
 						onResumeSession={onResumeSession}
 						onAbortSession={onAbortSession}
 						onDelegate={onDelegate}
+						onAgentDelegate={onAgentDelegate}
 						sessionActionSessionId={sessionActionSessionId}
 						updateInfo={updateInfo}
 						isInstallingUpdate={isInstallingUpdate}

@@ -1,6 +1,6 @@
 use dcc_core::domain::{
     model_registry,
-    provider::{HealthStatus, ProviderDescriptor, ProviderId},
+    provider::{Capabilities, HealthStatus, ProviderDescriptor, ProviderId},
 };
 
 use crate::{claude_sdk_sidecar::ClaudeSdkSidecarAdapter, common::stable_cli_capabilities};
@@ -10,9 +10,15 @@ pub fn adapter() -> ClaudeSdkSidecarAdapter {
         "claude_code",
         "Claude Code",
         "Claude SDK-backed provider for agentic coding and tool use.",
-        stable_cli_capabilities(),
+        claude_code_capabilities(),
         true,
     )
+}
+
+fn claude_code_capabilities() -> Capabilities {
+    let mut capabilities = stable_cli_capabilities();
+    capabilities.can_request_delegation = true;
+    capabilities
 }
 
 pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
@@ -24,7 +30,7 @@ pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
             .iter()
             .map(|m| m.to_descriptor())
             .collect(),
-        capabilities: stable_cli_capabilities(),
+        capabilities: claude_code_capabilities(),
         health,
         stable: true,
     }

@@ -21,6 +21,11 @@ const stableCapabilities = {
 	supportsEditDelegation: true,
 } as const;
 
+const delegationRequesterCapabilities = {
+	...stableCapabilities,
+	canRequestDelegation: true,
+} as const;
+
 const experimentalCapabilities = {
 	streaming: true,
 	mcp: false,
@@ -47,7 +52,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...stableCapabilities },
+			capabilities: { ...delegationRequesterCapabilities },
 			health: stableHealth,
 			stable: true,
 		},
@@ -62,7 +67,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...stableCapabilities },
+			capabilities: { ...delegationRequesterCapabilities },
 			health: stableHealth,
 			stable: true,
 		},

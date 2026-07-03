@@ -13,6 +13,7 @@ import {
 	DelegationDialog,
 	type ManualDelegationRequest,
 } from "@/features/sessions/delegation-dialog";
+import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
 import { DiffReviewTray, type ReviewAnnotation } from "./diff-review-tray";
 import { WorkspaceComposer } from "@/features/composer";
@@ -129,6 +130,7 @@ type WorkspacePanelProps = {
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
+	onAgentDelegate: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
@@ -179,6 +181,7 @@ export function WorkspacePanel({
 	onResumeSession,
 	onAbortSession,
 	onDelegate,
+	onAgentDelegate,
 	sessionActionSessionId,
 	updateInfo,
 	isInstallingUpdate,
@@ -462,6 +465,7 @@ export function WorkspacePanel({
 					onSelectSession={onSelectSession}
 					onSubmitPrompt={onSubmitPrompt}
 					onReviewChanges={onReviewChanges}
+					onDelegateTaskApprove={onAgentDelegate}
 				/>
 
 				<div className="border-t border-border/60 px-3 pb-3 pt-3 sm:px-4">

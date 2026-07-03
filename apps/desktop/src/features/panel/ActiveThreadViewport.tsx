@@ -9,6 +9,7 @@ import type { WorkspaceMessage } from "./thread-projection";
 import { AssistantMessage, SystemMessage, UserMessage } from "./message-components";
 import { EmptyState } from "./EmptyState";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
+import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 
 type ActiveThreadViewportProps = {
 	messages: WorkspaceMessage[];
@@ -31,6 +32,7 @@ type ActiveThreadViewportProps = {
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
 	onReviewChanges?: () => void;
+	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 };
 
 export function ActiveThreadViewport({
@@ -53,6 +55,7 @@ export function ActiveThreadViewport({
 	onSelectSession,
 	onSubmitPrompt,
 	onReviewChanges,
+	onDelegateTaskApprove,
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
 	const { contentRef, scrollRef, scrollToBottom, isAtBottom } = useStickToBottom({
@@ -158,6 +161,7 @@ export function ActiveThreadViewport({
 												activeMissionSpecHash={activeMissionSpecHash}
 												autoSaveMissionValidation={autoSaveMissionValidation}
 												onReviewChanges={onReviewChanges}
+												onDelegateTaskApprove={onDelegateTaskApprove}
 											/>
 										</div>
 									);

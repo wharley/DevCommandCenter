@@ -11,6 +11,7 @@ import { MessageTimestamp } from "./message-metadata";
 import { PlanReviewCard } from "./PlanReviewCard";
 import { MissionValidationCard } from "./MissionValidationCard";
 import { ApprovalCard } from "./ApprovalCard";
+import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import { UserInputCard } from "./UserInputCard";
 import type { ParsedPlanContent } from "@/features/panel/plan-content";
 import { parseMissionValidationReport } from "@/features/spec/mission-spec-content";
@@ -122,6 +123,7 @@ export function AssistantMessage({
 	activeMissionSpecHash,
 	autoSaveMissionValidation,
 	onReviewChanges,
+	onDelegateTaskApprove,
 }: {
 	content: string;
 	streaming?: boolean;
@@ -137,6 +139,7 @@ export function AssistantMessage({
 	autoSaveMissionValidation?: boolean;
 	/** Reveals the inspector to review this turn's edits ([Revisar]). */
 	onReviewChanges?: () => void;
+	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 }) {
 	const { t } = useTranslation("common");
 	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
@@ -274,6 +277,7 @@ export function AssistantMessage({
 										file={annotation.file}
 										behavior={annotation.behavior}
 										isLive={Boolean(annotation.streaming)}
+										onDelegateTaskApprove={onDelegateTaskApprove}
 									/>
 								);
 							}

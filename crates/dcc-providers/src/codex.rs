@@ -6,7 +6,7 @@ use dcc_core::domain::{
 use crate::{codex_app_server::CodexAppServerAdapter, common::stable_cli_capabilities};
 
 pub fn adapter() -> CodexAppServerAdapter {
-    CodexAppServerAdapter::new(stable_cli_capabilities())
+    CodexAppServerAdapter::new(stable_codex_capabilities())
 }
 
 pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
@@ -18,12 +18,14 @@ pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
             .iter()
             .map(|m| m.to_descriptor())
             .collect(),
-        capabilities: stable_cli_capabilities(),
+        capabilities: stable_codex_capabilities(),
         health,
         stable: true,
     }
 }
 
 pub fn stable_codex_capabilities() -> Capabilities {
-    stable_cli_capabilities()
+    let mut capabilities = stable_cli_capabilities();
+    capabilities.can_request_delegation = true;
+    capabilities
 }

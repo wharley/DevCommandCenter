@@ -3,6 +3,11 @@ import { Ban, CheckCircle2, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { respondToPermissionRequest } from "@/lib/session-api";
 import { toast } from "sonner";
+import {
+	isDelegateTaskTool,
+	parseAgentInitiatedDelegationRequest,
+	type AgentInitiatedDelegationRequest,
+} from "@/features/sessions/agent-delegation-request";
 
 type ApprovalCardProps = {
 	sessionId: string | null;
@@ -14,6 +19,7 @@ type ApprovalCardProps = {
 	file?: string;
 	behavior?: string;
 	isLive: boolean;
+	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 };
 
 function behaviorLabel(behavior: string | undefined) {
@@ -36,6 +42,7 @@ export function ApprovalCard({
 	file,
 	behavior,
 	isLive,
+	onDelegateTaskApprove,
 }: ApprovalCardProps) {
 	const [submitting, setSubmitting] = useState<"allow" | "deny" | null>(null);
 	const resolved = !isLive && typeof behavior === "string" && behavior.length > 0;
@@ -46,6 +53,19 @@ export function ApprovalCard({
 		}
 		setSubmitting(nextBehavior);
 		try {
+			if (nextBehavior === "allow" && isDelegateTaskTool(toolName)) {
+				const request = parseAgentInitiatedDelegationRequest({
+					command,
+					description,
+				});
+				if (!request) {
+					throw new Error("delegate_task request is missing an instruction.");
+				}
+				if (!onDelegateTaskApprove) {
+					throw new Error("delegate_task is unavailable in this context.");
+				}
+				await onDelegateTaskApprove(request);
+			}
 			await respondToPermissionRequest({
 				sessionId,
 				requestId,

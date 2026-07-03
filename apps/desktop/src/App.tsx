@@ -16,6 +16,7 @@ import type {
 	CoreEvent,
 	DelegationContextPolicy,
 	MissionSpecEntry,
+	ProviderCatalog,
 	SessionSearchResult,
 	WorkspaceSessionSummary,
 } from "@dcc/contracts";
@@ -115,6 +116,7 @@ import {
 } from "./features/providers/provider-selection.logic";
 import type { ComposerSubmittedTurn } from "./features/composer/composer-turn";
 import type { ManualDelegationRequest } from "./features/sessions/delegation-dialog";
+import type { AgentInitiatedDelegationRequest } from "./features/sessions/agent-delegation-request";
 import { buildMissionSpecFilename } from "./features/composer/WorkspaceComposer.logic";
 import {
 	daemonCombToWorkspaceSummary,
@@ -491,6 +493,62 @@ async function buildManualDelegationPrompt({
 	}
 
 	return lines.join("\n");
+}
+
+function buildDelegateTaskToolInstructions(
+	providers: ProviderCatalog["providers"],
+	currentProviderId: string | null,
+) {
+	const targets = providers.filter(
+		(provider) =>
+			provider.id !== currentProviderId &&
+			provider.capabilities.canBeDelegationTarget &&
+			provider.capabilities.supportsReadOnlyDelegation,
+	);
+	if (targets.length === 0) {
+		return "";
+	}
+
+	return [
+		"",
+		"Dev Command Center tool: delegate_task",
+		"You may ask the human to delegate a bounded subtask to another provider by emitting a DCC permission request.",
+		"Use it only when another provider can provide materially useful review, explanation, or implementation help.",
+		"Emit exactly this JSON event through the provider permission channel:",
+		JSON.stringify({
+			type: "dcc_permission_request",
+			request_id: "delegate-task-short-id",
+			tool_name: "delegate_task",
+			title: "Delegate task",
+			description: "One sentence explaining why delegation is useful.",
+			command: JSON.stringify({
+				instruction: "Specific task for the delegated provider.",
+				mode: "review",
+				contextPolicy: "review_current_diff",
+				targetProviderId: targets[0]?.id ?? null,
+			}),
+		}),
+		"Allowed modes: review, explain, implement. Use implement only when file edits are necessary; DCC will require human review before completion.",
+		`Available delegation targets: ${targets
+			.map((provider) => `${provider.id} (${provider.label})`)
+			.join(", ")}.`,
+	].join("\n");
+}
+
+function withDelegateTaskToolInstructions({
+	prompt,
+	provider,
+	providers,
+}: {
+	prompt: string;
+	provider: ProviderCatalog["providers"][number] | null | undefined;
+	providers: ProviderCatalog["providers"];
+}) {
+	if (!provider?.capabilities.canRequestDelegation) {
+		return prompt;
+	}
+	const instructions = buildDelegateTaskToolInstructions(providers, provider.id);
+	return instructions ? `${prompt}\n\n${instructions}` : prompt;
 }
 
 function ResizeSeparator({
@@ -1585,16 +1643,68 @@ export default function App() {
 				throw error;
 			}
 		},
-		[
-			backendCacheKey,
-			providerChoices,
+			[
+				backendCacheKey,
+				providerChoices,
 			providerRuntimeSettings,
 			queryClient,
 			selectedLocalWorkspacePath,
 			selectedSessionSnapshot,
 			selectedSessionSummary,
+				selectedWorkspace,
+				sessionEvents,
+			],
+		);
+
+	const handleAgentDelegate = useCallback(
+		async (request: AgentInitiatedDelegationRequest) => {
+			if (!selectedProvider?.capabilities.canRequestDelegation) {
+				throw new Error("The active provider cannot request delegation.");
+			}
+			if (!selectedSessionSnapshot || !selectedWorkspace) {
+				throw new Error("Select an active parent session before delegating.");
+			}
+
+			const needsEdit = request.mode === "implement";
+			const candidates = providerChoices.filter(
+				(provider) =>
+					provider.capabilities.canBeDelegationTarget &&
+					provider.capabilities.supportsReadOnlyDelegation &&
+					(!needsEdit || provider.capabilities.supportsEditDelegation),
+			);
+			const targetProvider =
+				(request.targetProviderId
+					? candidates.find((provider) => provider.id === request.targetProviderId)
+					: null) ??
+				candidates.find((provider) => provider.id !== selectedProvider.id) ??
+				candidates[0] ??
+				null;
+			if (!targetProvider) {
+				throw new Error("No delegation target provider is available.");
+			}
+
+			const targetModelId =
+				request.targetModelId &&
+				targetProvider.models.some((model) => model.id === request.targetModelId)
+					? request.targetModelId
+					: (targetProvider.models.find((model) => model.recommended)?.id ??
+						targetProvider.models[0]?.id ??
+						null);
+
+			await handleDelegate({
+				targetProviderId: targetProvider.id,
+				targetModelId,
+				mode: request.mode,
+				contextPolicy: request.contextPolicy,
+				instruction: request.instruction,
+			});
+		},
+		[
+			handleDelegate,
+			providerChoices,
+			selectedProvider,
+			selectedSessionSnapshot,
 			selectedWorkspace,
-			sessionEvents,
 		],
 	);
 
@@ -1822,19 +1932,24 @@ export default function App() {
 				return;
 			}
 
-			setPendingPrompt(trimmedPrompt);
-			setPendingPromptSessionId(currentSessionId);
+				setPendingPrompt(trimmedPrompt);
+				setPendingPromptSessionId(currentSessionId);
+				const providerPrompt = withDelegateTaskToolInstructions({
+					prompt: trimmedPrompt,
+					provider: selectedProvider,
+					providers: providerChoices,
+				});
 
-			const result = await sendTurn({
-				sessionId: currentSessionId,
-				prompt: trimmedPrompt,
-				providerId: selectedProvider?.id ?? null,
-				model: selectedModel?.id ?? null,
-				providerRuntime: selectedProviderRuntime,
-				planMode: turn.envelope.planMode,
-				effort: turn.envelope.effort,
-				fastMode: turn.envelope.fastMode,
-			});
+				const result = await sendTurn({
+					sessionId: currentSessionId,
+					prompt: providerPrompt,
+					providerId: selectedProvider?.id ?? null,
+					model: selectedModel?.id ?? null,
+					providerRuntime: selectedProviderRuntime,
+					planMode: turn.envelope.planMode,
+					effort: turn.envelope.effort,
+					fastMode: turn.envelope.fastMode,
+				});
 
 			const resultSnapshot: RuntimeSessionSnapshot = {
 				sessionId: result.session.id,
@@ -1986,12 +2101,13 @@ export default function App() {
 			setPendingPromptSessionId((current) =>
 				current === currentSessionId ? null : current,
 			);
-		}
-	}, [
-		backendCacheKey,
-		queryClient,
-		registerMissionSpecAutoCompileAttempt,
-		selectedModel,
+			}
+		}, [
+			backendCacheKey,
+			providerChoices,
+			queryClient,
+			registerMissionSpecAutoCompileAttempt,
+			selectedModel,
 		selectedProvider,
 		selectedProviderBlockReason,
 		selectedProviderRuntime,
@@ -2828,6 +2944,7 @@ export default function App() {
 									onResumeSession={handleResumeSession}
 									onAbortSession={handleAbortSession}
 									onDelegate={handleDelegate}
+									onAgentDelegate={handleAgentDelegate}
 									sessionActionSessionId={sessionActionSessionId}
 									updateInfo={appUpdateInfo}
 									isInstallingUpdate={isInstallingUpdate}
