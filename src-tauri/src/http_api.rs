@@ -424,14 +424,25 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
 /// reloaded directly from the phone. Resolution order:
 ///   1. `DCC_MOBILE_WEB_DIST` env var
 ///   2. `<repo>/apps/mobile-web/dist` (dev: works when running from source)
-///   3. `<exe_dir>/mobile-web` (release: bundled next to the binary)
+///   3. `<exe_dir>/mobile-web` (release layouts that bundle next to the binary)
+///   4. `<exe_dir>/resources/mobile-web` (Linux package layouts)
+///   5. `<app>/Contents/Resources/mobile-web` (macOS Tauri app bundle)
 fn mobile_spa_service() -> ServeDir<ServeFile> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from));
+
     let candidates: Vec<PathBuf> = [
         std::env::var("DCC_MOBILE_WEB_DIST").ok().map(PathBuf::from),
         Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../apps/mobile-web/dist")),
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(|p| p.join("mobile-web"))),
+        exe_dir.as_ref().map(|p| p.join("mobile-web")),
+        exe_dir.as_ref().map(|p| p.join("resources/mobile-web")),
+        exe_dir
+            .as_ref()
+            .and_then(|p| p.parent().map(|contents| contents.join("Resources/mobile-web"))),
+        exe_dir
+            .as_ref()
+            .and_then(|p| p.parent().map(|parent| parent.join("resources/mobile-web"))),
     ]
     .into_iter()
     .flatten()
