@@ -5,6 +5,7 @@ import {
 	ChevronRight,
 	ChevronUp,
 	Code2,
+	GitFork,
 	GitBranch,
 	Info,
 	Loader2,
@@ -100,6 +101,7 @@ import {
 import { EmptyState } from "@/features/panel";
 import type {
 	CoreEvent,
+	Delegation,
 	MissionSpecEntry,
 	ProviderCatalog,
 	Repository,
@@ -133,6 +135,7 @@ import type { WorkspaceStatus } from "@/features/workspaces/types";
 import { setupReportDescription } from "@/features/workspaces/workspace-setup-report";
 import type { ForgeCliProvider } from "@dcc/contracts";
 import { cn } from "@/lib/utils";
+import { listDelegations } from "@/lib/delegation-api";
 
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
@@ -152,6 +155,7 @@ type WorkspaceInspectorSidebarProps = {
 	sessionActivityEvents: CoreEvent[];
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+	onSelectSession: (sessionId: string) => void;
 	onPrefillComposer?: (text: string) => void;
 	onOpenCodeFile: (input: { path: string; name: string }) => void;
 	selectedCodePath: string | null;
@@ -297,6 +301,145 @@ function ForgeAccountAvatar({
 		>
 			{forgeIdentityInitials(label)}
 		</span>
+	);
+}
+
+function delegationStatusClass(status: Delegation["status"]) {
+	switch (status) {
+		case "completed":
+			return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+		case "failed":
+			return "border-destructive/30 bg-destructive/10 text-destructive";
+		case "cancelled":
+			return "border-muted-foreground/30 bg-muted/30 text-muted-foreground";
+		case "running":
+			return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
+		default:
+			return "border-border bg-muted/30 text-muted-foreground";
+	}
+}
+
+function providerLabelForDelegation(
+	providerCatalog: ProviderCatalog | null,
+	providerId: string,
+) {
+	return (
+		providerCatalog?.providers.find((provider) => provider.id === providerId)?.label ??
+		providerId
+	);
+}
+
+function DelegationsSection({
+	delegations,
+	providerCatalog,
+	isLoading,
+	onSelectSession,
+	onSelectPreview,
+}: {
+	delegations: Delegation[];
+	providerCatalog: ProviderCatalog | null;
+	isLoading: boolean;
+	onSelectSession: (sessionId: string) => void;
+	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+}) {
+	const { t } = useTranslation("common");
+	const visible = delegations.slice(0, 6);
+
+	return (
+		<div className="shrink-0 border-b border-border/40 bg-sidebar px-3 py-2">
+			<div className="mb-2 flex items-center justify-between gap-2">
+				<div className="flex min-w-0 items-center gap-1.5">
+					<GitFork className="size-3.5 text-muted-foreground" strokeWidth={2} />
+					<p className="truncate text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+						{t("inspector.delegations.title")}
+					</p>
+				</div>
+				<Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">
+					{isLoading ? "..." : delegations.length}
+				</Badge>
+			</div>
+			{visible.length === 0 ? (
+				<p className="rounded-md border border-dashed border-border/50 bg-muted/10 px-2 py-2 text-[11.5px] text-muted-foreground">
+					{t("inspector.delegations.empty")}
+				</p>
+			) : (
+				<div className="space-y-1.5">
+					{visible.map((delegation) => {
+						const touchedFiles = delegation.touchedFiles ?? [];
+						const firstTouchedFile = touchedFiles[0] ?? null;
+						const providerLabel = providerLabelForDelegation(
+							providerCatalog,
+							delegation.targetProviderId,
+						);
+						return (
+							<div
+								key={delegation.id}
+								className="rounded-md border border-border/50 bg-muted/10 px-2 py-2"
+							>
+								<div className="flex items-center gap-2">
+									<Badge
+										variant="outline"
+										className={cn(
+											"h-5 shrink-0 px-1.5 text-[10px] font-medium",
+											delegationStatusClass(delegation.status),
+										)}
+									>
+										{delegation.status}
+									</Badge>
+									<p className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-foreground">
+										{delegation.mode} · {providerLabel}
+									</p>
+								</div>
+								<p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
+									{delegation.resultSummary ??
+										delegation.diffSummary ??
+										delegation.prompt}
+								</p>
+								{delegation.diffSummary ? (
+									<p className="mt-1 truncate font-mono text-[10.5px] text-muted-foreground/80">
+										{delegation.diffSummary}
+									</p>
+								) : null}
+								<div className="mt-2 flex flex-wrap gap-1.5">
+									{delegation.childSessionId ? (
+										<Button
+											type="button"
+											variant="outline"
+											size="xs"
+											className="h-6 px-2 text-[11px]"
+											onClick={() => onSelectSession(delegation.childSessionId!)}
+										>
+											{t("inspector.delegations.openChild")}
+										</Button>
+									) : null}
+									{firstTouchedFile ? (
+										<Button
+											type="button"
+											variant="ghost"
+											size="xs"
+											className="h-6 px-2 text-[11px]"
+											onClick={() =>
+												onSelectPreview({
+													group: "committed",
+													path: firstTouchedFile,
+													name:
+														firstTouchedFile.split("/").pop() ??
+														firstTouchedFile,
+													status: "M",
+													baseBranch: null,
+												})
+											}
+										>
+											{t("inspector.delegations.reviewDiff")}
+										</Button>
+									) : null}
+								</div>
+							</div>
+						);
+					})}
+				</div>
+			)}
+		</div>
 	);
 }
 
@@ -1027,6 +1170,7 @@ export function WorkspaceInspectorSidebar({
 	sessionActivityEvents,
 	selectedPreview,
 	onSelectPreview,
+	onSelectSession,
 	onPrefillComposer,
 	onOpenCodeFile,
 	selectedCodePath,
@@ -1052,6 +1196,22 @@ export function WorkspaceInspectorSidebar({
 				: workspacePath
 			: null;
 	const queryClient = useQueryClient();
+	const delegationsQuery = useQuery({
+		queryKey: ["delegations", workspaceId],
+		queryFn: async () => {
+			if (!workspaceId) {
+				return [] as Delegation[];
+			}
+			const output = await listDelegations({
+				workspaceId,
+				parentSessionId: null,
+			});
+			return output.delegations;
+		},
+		enabled: Boolean(workspaceId),
+		staleTime: 5_000,
+		refetchInterval: 10_000,
+	});
 
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
 	const gitBranch =
@@ -1848,6 +2008,20 @@ export function WorkspaceInspectorSidebar({
 		const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
 		return { files, additions, deletions };
 	}, [gitStatusQuery.data]);
+	const pendingDelegationResultsCount = useMemo(
+		() =>
+			(delegationsQuery.data ?? []).filter((delegation) => {
+				if (delegation.status !== "completed") {
+					return false;
+				}
+				return Boolean(
+					delegation.resultSummary ||
+						delegation.diffSummary ||
+						(delegation.touchedFiles?.length ?? 0) > 0,
+				);
+			}).length,
+		[delegationsQuery.data],
+	);
 	const workspaceRecap = useMemo(
 		() =>
 			buildWorkspaceRecap({
@@ -1863,6 +2037,7 @@ export function WorkspaceInspectorSidebar({
 				prState: prStatus?.state ?? null,
 				requestLabel: forgeContext.requestLabel,
 				pendingReviewFindingsCount,
+				pendingDelegationResultsCount,
 			}),
 		[
 			commitMode,
@@ -1871,6 +2046,7 @@ export function WorkspaceInspectorSidebar({
 			pendingReviewFindingsCount,
 			prStatus?.number,
 			prStatus?.state,
+			pendingDelegationResultsCount,
 			reviewBranchDiffQuery.data?.changes.length,
 			sessionState,
 			workingTreeSummary,
@@ -2160,6 +2336,13 @@ export function WorkspaceInspectorSidebar({
 						value="activity"
 						className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
 					>
+						<DelegationsSection
+							delegations={delegationsQuery.data ?? []}
+							providerCatalog={providerCatalog}
+							isLoading={delegationsQuery.isLoading}
+							onSelectSession={onSelectSession}
+							onSelectPreview={onSelectPreview}
+						/>
 						<SessionEventFeed
 							events={sessionActivityEvents}
 							compact

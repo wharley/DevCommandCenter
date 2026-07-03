@@ -79,6 +79,10 @@ pub struct Delegation {
     pub prompt: String,
     pub context_policy: DelegationContextPolicy,
     pub budget: DelegationBudget,
+    pub result_summary: Option<String>,
+    #[serde(default)]
+    pub touched_files: Vec<String>,
+    pub diff_summary: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

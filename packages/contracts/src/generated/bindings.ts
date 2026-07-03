@@ -155,6 +155,8 @@ export type CompiledMissionSpecContextFile = {
 export type CompleteDelegationInput = {
 	delegationId: DelegationId,
 	summary: string | null,
+	touchedFiles?: string[],
+	diffSummary: string | null,
 };
 
 export type CompleteDelegationOutput = {
@@ -341,6 +343,9 @@ export type Delegation = {
 	prompt: string,
 	contextPolicy: DelegationContextPolicy,
 	budget: DelegationBudget,
+	resultSummary: string | null,
+	touchedFiles?: string[],
+	diffSummary: string | null,
 	createdAt: string,
 	updatedAt: string,
 };

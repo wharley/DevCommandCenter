@@ -126,6 +126,12 @@
       "title": "Atividade e contexto do workspace",
       "eventsCount": "{{count}} eventos"
     },
+    "delegations": {
+      "title": "Delegações",
+      "empty": "Ainda não há delegações neste workspace.",
+      "openChild": "Abrir filha",
+      "reviewDiff": "Revisar diff"
+    },
     "codeSection": {
       "kicker": "Projeto",
       "title": "Arquivos",
@@ -184,6 +190,8 @@
         "working_one": "Agente trabalhando — {{count}} arquivo alterado até agora (+{{additions}} −{{deletions}}).",
         "working_other": "Agente trabalhando — {{count}} arquivos alterados até agora (+{{additions}} −{{deletions}}).",
         "workingClean": "Agente trabalhando — nenhuma alteração de arquivo ainda.",
+        "delegationResults_one": "{{count}} resultado de delegação pronto para revisão.",
+        "delegationResults_other": "{{count}} resultados de delegação prontos para revisão.",
         "findings_one": "O review apontou {{count}} item no diff atual — trate antes de commitar.",
         "findings_other": "O review apontou {{count}} itens no diff atual — trate antes de commitar.",
         "changes_one": "{{count}} arquivo alterado (+{{additions}} −{{deletions}}) aguardando commit.",

@@ -245,6 +245,8 @@ type DelegationChildBinding = {
 	delegationId: string;
 	childSessionId: string;
 	parentSessionId: string;
+	workspaceId: string;
+	workspacePath: string | null;
 	finalized: boolean;
 };
 
@@ -289,6 +291,42 @@ async function summarizeSessionForDelegation(sessionId: string) {
 	return lastAssistant
 		? truncateDelegationContext(lastAssistant.content, 1600)
 		: "Delegated session completed without assistant text.";
+}
+
+async function collectDelegationDiffArtifact(workspacePath: string | null) {
+	if (!workspacePath) {
+		return {
+			touchedFiles: [] as string[],
+			diffSummary: null as string | null,
+		};
+	}
+
+	try {
+		const [status, branchDiff] = await Promise.all([
+			workspaceGitStatus({ workspaceRoot: workspacePath }),
+			workspaceGitBranchDiff({ workspaceRoot: workspacePath }),
+		]);
+		const entries = [
+			...status.staged,
+			...status.unstaged,
+			...branchDiff.changes,
+		];
+		const touchedFiles = Array.from(new Set(entries.map((entry) => entry.path))).sort();
+		const additions = entries.reduce((sum, entry) => sum + entry.insertions, 0);
+		const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
+		const diffSummary =
+			touchedFiles.length > 0
+				? `${touchedFiles.length} file(s), +${additions}/-${deletions}`
+				: "No changed files detected.";
+		return { touchedFiles, diffSummary };
+	} catch (error) {
+		return {
+			touchedFiles: [] as string[],
+			diffSummary: `Diff unavailable: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+		};
+	}
 }
 
 async function buildManualDelegationPrompt({
@@ -701,14 +739,23 @@ export default function App() {
 			try {
 				if (status === "completed") {
 					const summary = await summarizeSessionForDelegation(childSessionId);
+					const artifact = await collectDelegationDiffArtifact(binding.workspacePath);
 					await completeDelegation({
 						delegationId: binding.delegationId,
 						summary,
+						touchedFiles: artifact.touchedFiles,
+						diffSummary: artifact.diffSummary,
+					});
+					await queryClient.invalidateQueries({
+						queryKey: ["delegations", binding.workspaceId],
 					});
 				} else {
 					await failDelegation({
 						delegationId: binding.delegationId,
 						reason: reason ?? "Child session failed.",
+					});
+					await queryClient.invalidateQueries({
+						queryKey: ["delegations", binding.workspaceId],
 					});
 				}
 			} catch (error) {
@@ -716,7 +763,7 @@ export default function App() {
 				console.error("[dcc] delegation finalization failed:", error);
 			}
 		},
-		[],
+		[queryClient],
 	);
 
 	/**
@@ -1425,6 +1472,8 @@ export default function App() {
 					delegationId,
 					childSessionId,
 					parentSessionId,
+					workspaceId: selectedWorkspace.id,
+					workspacePath: selectedLocalWorkspacePath,
 					finalized: false,
 				});
 				await startDelegation({ delegationId });
@@ -2774,27 +2823,29 @@ export default function App() {
 									currentRepository={
 										selectedWorkspace?.rootPath?.trim()
 											? repositoriesFromBackend.find(
-												(repository) =>
-													repository.rootPath.trim() === selectedWorkspace.rootPath!.trim(),
-											) ?? null
-										: null
-								}
-								workspaceId={selectedWorkspace?.id ?? null}
-								workspaceName={selectedWorkspace?.name ?? null}
-								workspaceBranch={selectedWorkspace?.branch ?? null}
-								workspacePath={selectedLocalWorkspacePath}
-								workspaceStatus={selectedWorkspace?.status ?? null}
-								workspaceSetupReport={selectedWorkspace?.setupReport ?? null}
-								selectedProviderLabel={selectedProvider?.label ?? null}
-								selectedModelLabel={selectedModel?.label ?? null}
-								sessionState={selectedSessionSnapshot?.state ?? "idle"}
-								sessionId={selectedSessionSnapshot?.sessionId ?? null}
-								selectedPreview={
-									surfaceSelection?.kind === "git-diff"
-										? surfaceSelection.file
-										: null
+													(repository) =>
+														repository.rootPath.trim() ===
+														selectedWorkspace.rootPath!.trim(),
+												) ?? null
+											: null
+									}
+									workspaceId={selectedWorkspace?.id ?? null}
+									workspaceName={selectedWorkspace?.name ?? null}
+									workspaceBranch={selectedWorkspace?.branch ?? null}
+									workspacePath={selectedLocalWorkspacePath}
+									workspaceStatus={selectedWorkspace?.status ?? null}
+									workspaceSetupReport={selectedWorkspace?.setupReport ?? null}
+									selectedProviderLabel={selectedProvider?.label ?? null}
+									selectedModelLabel={selectedModel?.label ?? null}
+									sessionState={selectedSessionSnapshot?.state ?? "idle"}
+									sessionId={selectedSessionSnapshot?.sessionId ?? null}
+									selectedPreview={
+										surfaceSelection?.kind === "git-diff"
+											? surfaceSelection.file
+											: null
 									}
 									onSelectPreview={handleOpenEditorFile}
+									onSelectSession={handleSelectSession}
 									onPrefillComposer={handlePrefillComposer}
 									onOpenCodeFile={handleOpenFileFromQuickOpen}
 									selectedCodePath={
@@ -2804,19 +2855,19 @@ export default function App() {
 									}
 									onOpenQuickOpen={handleOpenQuickOpen}
 									onOpenMissionSpec={handleOpenMissionSpec}
-								onGeneratePlanFromSpec={handleGeneratePlanFromSpec}
-								onValidateMissionSpec={handleValidateMissionSpec}
-								onReanchorMissionSpec={handleReanchorMissionSpec}
-								onContinueMissionCriterion={handleContinueMissionCriterion}
-								missionSpecAutoCompileFailures={missionSpecAutoCompileFailures}
-								onClearMissionSpecAutoCompileFailure={
-									clearMissionSpecAutoCompileFailure
-								}
-								activeTab={inspectorTab}
-								onTabChange={setInspectorTab}
-								mode={inspectorMode}
-								onModeChange={setInspectorMode}
-							/>
+									onGeneratePlanFromSpec={handleGeneratePlanFromSpec}
+									onValidateMissionSpec={handleValidateMissionSpec}
+									onReanchorMissionSpec={handleReanchorMissionSpec}
+									onContinueMissionCriterion={handleContinueMissionCriterion}
+									missionSpecAutoCompileFailures={missionSpecAutoCompileFailures}
+									onClearMissionSpecAutoCompileFailure={
+										clearMissionSpecAutoCompileFailure
+									}
+									activeTab={inspectorTab}
+									onTabChange={setInspectorTab}
+									mode={inspectorMode}
+									onModeChange={setInspectorMode}
+								/>
 							</aside>
 						</>
 					)}

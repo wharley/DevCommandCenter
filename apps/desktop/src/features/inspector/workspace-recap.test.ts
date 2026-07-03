@@ -15,6 +15,7 @@ function input(overrides: Partial<WorkspaceRecapInput> = {}): WorkspaceRecapInpu
 		prState: null,
 		requestLabel: "PR",
 		pendingReviewFindingsCount: 0,
+		pendingDelegationResultsCount: 0,
 		...overrides,
 	};
 }
@@ -103,6 +104,21 @@ describe("buildWorkspaceRecap", () => {
 		expect(recap.messageKey).toBe("findings");
 		expect(recap.params.count).toBe(4);
 		expect(recap.action?.kind).toBe("review");
+	});
+
+	it("surfaces completed delegation results before committing", () => {
+		const recap = buildWorkspaceRecap(
+			input({
+				commitMode: "commit-and-push",
+				changedFilesCount: 3,
+				pendingDelegationResultsCount: 2,
+				pendingReviewFindingsCount: 4,
+			}),
+		);
+		expect(recap.messageKey).toBe("delegationResults");
+		expect(recap.params.count).toBe(2);
+		expect(recap.tone).toBe("ready");
+		expect(recap.action?.kind).toBe("activity");
 	});
 
 	it("maps commit-and-push to the changes recap", () => {

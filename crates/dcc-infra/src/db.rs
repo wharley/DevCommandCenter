@@ -148,6 +148,9 @@ CREATE TABLE IF NOT EXISTS dcc_delegations (
 	prompt TEXT NOT NULL,
 	context_policy_json TEXT NOT NULL,
 	budget_json TEXT NOT NULL,
+	result_summary TEXT NULL,
+	touched_files_json TEXT NOT NULL DEFAULT '[]',
+	diff_summary TEXT NULL,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
 	FOREIGN KEY (parent_session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE,
@@ -466,6 +469,14 @@ impl SqliteSessionRepo {
             "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{DELEGATION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        SqliteWorkspaceRepo::ensure_column(&conn, "dcc_delegations", "result_summary", "TEXT NULL")?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_delegations",
+            "touched_files_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(&conn, "dcc_delegations", "diff_summary", "TEXT NULL")?;
         Self::rebuild_search_index_sync(&conn)?;
         Ok(())
     }
@@ -575,6 +586,14 @@ impl SqliteSessionRepo {
                 Box::new(error),
             )
         })?;
+        let touched_files_json = row.get::<_, String>(12)?;
+        let touched_files = from_str::<Vec<String>>(&touched_files_json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                12,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
 
         Ok(Delegation {
             id: DelegationId(row.get::<_, String>(0)?),
@@ -588,8 +607,11 @@ impl SqliteSessionRepo {
             prompt: row.get::<_, String>(8)?,
             context_policy,
             budget,
-            created_at: row.get::<_, String>(11)?,
-            updated_at: row.get::<_, String>(12)?,
+            result_summary: row.get::<_, Option<String>>(11)?,
+            touched_files,
+            diff_summary: row.get::<_, Option<String>>(13)?,
+            created_at: row.get::<_, String>(14)?,
+            updated_at: row.get::<_, String>(15)?,
         })
     }
 
@@ -1733,14 +1755,16 @@ impl DelegationRepo for SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let budget_json = to_string(&delegation.budget)
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let touched_files_json = to_string(&delegation.touched_files)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
 
         conn.execute(
             r#"
 			INSERT INTO dcc_delegations (
 				id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
 				target_provider_id, mode, status, prompt, context_policy_json, budget_json,
-				created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+				result_summary, touched_files_json, diff_summary, created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
 			ON CONFLICT(id) DO UPDATE SET
 				parent_session_id = excluded.parent_session_id,
 				parent_turn_id = excluded.parent_turn_id,
@@ -1752,6 +1776,9 @@ impl DelegationRepo for SqliteSessionRepo {
 				prompt = excluded.prompt,
 				context_policy_json = excluded.context_policy_json,
 				budget_json = excluded.budget_json,
+				result_summary = excluded.result_summary,
+				touched_files_json = excluded.touched_files_json,
+				diff_summary = excluded.diff_summary,
 				created_at = excluded.created_at,
 				updated_at = excluded.updated_at
 			"#,
@@ -1773,6 +1800,9 @@ impl DelegationRepo for SqliteSessionRepo {
                 delegation.prompt.clone(),
                 context_policy_json,
                 budget_json,
+                delegation.result_summary.clone(),
+                touched_files_json,
+                delegation.diff_summary.clone(),
                 delegation.created_at.clone(),
                 delegation.updated_at.clone(),
             ],
@@ -1790,7 +1820,7 @@ impl DelegationRepo for SqliteSessionRepo {
             r#"
 			SELECT id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
 			       target_provider_id, mode, status, prompt, context_policy_json, budget_json,
-			       created_at, updated_at
+			       result_summary, touched_files_json, diff_summary, created_at, updated_at
 			  FROM dcc_delegations
 			 WHERE id = ?1
 			"#,
@@ -1813,7 +1843,7 @@ impl DelegationRepo for SqliteSessionRepo {
         let base_sql = r#"
 			SELECT id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
 			       target_provider_id, mode, status, prompt, context_policy_json, budget_json,
-			       created_at, updated_at
+			       result_summary, touched_files_json, diff_summary, created_at, updated_at
 			  FROM dcc_delegations
 		"#;
         let order_sql = " ORDER BY updated_at DESC, created_at DESC";
@@ -2149,6 +2179,9 @@ mod tests {
                 timeout_seconds: Some(300),
                 allow_file_edits: false,
             },
+            result_summary: Some("No blocking issues.".to_string()),
+            touched_files: vec!["src/lib.rs".to_string()],
+            diff_summary: Some("1 file changed".to_string()),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -2166,6 +2199,9 @@ mod tests {
             fetched.context_policy,
             DelegationContextPolicy::ReviewCurrentDiff
         );
+        assert_eq!(fetched.result_summary.as_deref(), Some("No blocking issues."));
+        assert_eq!(fetched.touched_files, vec!["src/lib.rs".to_string()]);
+        assert_eq!(fetched.diff_summary.as_deref(), Some("1 file changed"));
 
         let listed = futures::executor::block_on(
             repo.list_delegations(Some(&workspace.id), Some(&parent_session.id)),

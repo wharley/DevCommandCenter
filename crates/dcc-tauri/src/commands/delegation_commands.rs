@@ -96,6 +96,9 @@ pub struct StartDelegationOutput {
 pub struct CompleteDelegationInput {
     pub delegation_id: DelegationId,
     pub summary: Option<String>,
+    #[serde(default)]
+    pub touched_files: Vec<String>,
+    pub diff_summary: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -207,6 +210,9 @@ pub async fn create_delegation(
         prompt: input.prompt,
         context_policy: input.context_policy,
         budget: input.budget,
+        result_summary: None,
+        touched_files: Vec::new(),
+        diff_summary: None,
         created_at: now.clone(),
         updated_at: now.clone(),
     };
@@ -374,15 +380,15 @@ pub async fn complete_delegation(
     }
 
     let now = now_iso();
-    let updated = DelegationRepo::update_delegation_status(
-        &*state,
-        &input.delegation_id,
-        DelegationStatus::Completed,
-        now.clone(),
-    )
-    .await
-    .map_err(|error| error.to_string())?
-    .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
+    let mut updated = delegation;
+    updated.status = DelegationStatus::Completed;
+    updated.updated_at = now.clone();
+    updated.result_summary = input.summary.clone();
+    updated.touched_files = input.touched_files;
+    updated.diff_summary = input.diff_summary;
+    DelegationRepo::save_delegation(&*state, &updated)
+        .await
+        .map_err(|error| error.to_string())?;
     let summary = input.summary;
     append_and_publish_parent_event(
         &state,

@@ -37,6 +37,8 @@ export type WorkspaceRecapInput = {
 	requestLabel: "PR" | "MR";
 	/** CodeRabbit findings whose review still matches the current diff. */
 	pendingReviewFindingsCount: number;
+	/** Completed delegation results that still deserve human review. */
+	pendingDelegationResultsCount: number;
 };
 
 function gitAction(mode: CommitMode): WorkspaceRecapAction {
@@ -96,6 +98,15 @@ export function buildWorkspaceRecap(input: WorkspaceRecapInput): WorkspaceRecap 
 				deletions: input.deletions,
 			},
 			tone: "working",
+			action: { kind: "activity", labelKey: "inspector.recap.actions.activity" },
+		};
+	}
+
+	if (input.pendingDelegationResultsCount > 0) {
+		return {
+			messageKey: "delegationResults",
+			params: { count: input.pendingDelegationResultsCount },
+			tone: "ready",
 			action: { kind: "activity", labelKey: "inspector.recap.actions.activity" },
 		};
 	}

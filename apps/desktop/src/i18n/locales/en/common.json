@@ -126,6 +126,12 @@
       "title": "Activity and workspace context",
       "eventsCount": "{{count}} events"
     },
+    "delegations": {
+      "title": "Delegations",
+      "empty": "No delegations for this workspace yet.",
+      "openChild": "Open child",
+      "reviewDiff": "Review diff"
+    },
     "codeSection": {
       "kicker": "Project",
       "title": "Files",
@@ -184,6 +190,8 @@
         "working_one": "Agent working — {{count}} file changed so far (+{{additions}} −{{deletions}}).",
         "working_other": "Agent working — {{count}} files changed so far (+{{additions}} −{{deletions}}).",
         "workingClean": "Agent working — no file changes yet.",
+        "delegationResults_one": "{{count}} delegation result is ready to review.",
+        "delegationResults_other": "{{count}} delegation results are ready to review.",
         "findings_one": "Review flagged {{count}} finding on the current diff — handle it before committing.",
         "findings_other": "Review flagged {{count}} findings on the current diff — handle them before committing.",
         "changes_one": "{{count}} file changed (+{{additions}} −{{deletions}}), waiting for a commit.",
