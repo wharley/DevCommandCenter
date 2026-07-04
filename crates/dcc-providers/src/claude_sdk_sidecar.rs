@@ -407,6 +407,7 @@ impl Provider for ClaudeSdkSidecarAdapter {
                 let payload = json!({
                     "type": "input",
                     "prompt": turn.prompt,
+                    "toolInstructions": turn.tool_instructions,
                     "planMode": turn.plan_mode,
                     "effort": Self::sidecar_effort(turn.effort.as_deref()),
                     "fastMode": turn.fast_mode,

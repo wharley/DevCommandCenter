@@ -34,6 +34,8 @@ pub struct ProviderRuntimeConfig {
 pub struct ProviderTurnInput {
     pub prompt: String,
     #[serde(default)]
+    pub tool_instructions: Option<String>,
+    #[serde(default)]
     pub plan_mode: Option<bool>,
     #[serde(default)]
     pub effort: Option<String>,

@@ -941,6 +941,16 @@ struct SessionRuntime {
     events_tx: broadcast::Sender<ProviderEvent>,
 }
 
+pub(crate) fn append_tool_instructions(prompt: String, tool_instructions: Option<&str>) -> String {
+    let Some(instructions) = tool_instructions.map(str::trim).filter(|value| !value.is_empty())
+    else {
+        return prompt;
+    };
+    format!(
+        "{prompt}\n\n[DCC provider tool instructions]\n{instructions}\n[/DCC provider tool instructions]"
+    )
+}
+
 /// Namespaced env for stdin-only CLI adapters (no undocumented vendor-specific vars).
 pub(crate) fn apply_cli_spawn_environment(
     command: &mut Command,
@@ -1285,6 +1295,7 @@ impl Provider for CliProviderAdapter {
                     turn.effort.as_deref(),
                     turn.fast_mode,
                 );
+                let text = append_tool_instructions(text, turn.tool_instructions.as_deref());
                 let mut stdin = runtime.stdin.lock().await;
                 let stream = stdin.as_mut().ok_or_else(|| {
                     CoreError::Provider(format!(

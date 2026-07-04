@@ -25,7 +25,8 @@ use dcc_core::{
 };
 
 use crate::common::{
-    apply_cli_spawn_environment, augmented_path, now_iso, stable_cli_capabilities,
+    append_tool_instructions, apply_cli_spawn_environment, augmented_path, now_iso,
+    stable_cli_capabilities,
 };
 
 const PROVIDER_ID: &str = "droid";
@@ -670,17 +671,20 @@ impl Provider for DroidProvider {
         match input {
             Input::Text(text) => self.spawn_turn(runtime, text, None, None).await,
             Input::Turn(turn) => {
-                let prompt = compose_fallback_prompt_for_provider(
-                    &self.id.0,
-                    &turn.prompt,
-                    turn.plan_mode,
-                    turn.effort.as_deref(),
-                    turn.fast_mode,
-                    PromptInjectionOptions {
-                        plan: false,
-                        effort: false,
-                        fast: true,
-                    },
+                let prompt = append_tool_instructions(
+                    compose_fallback_prompt_for_provider(
+                        &self.id.0,
+                        &turn.prompt,
+                        turn.plan_mode,
+                        turn.effort.as_deref(),
+                        turn.fast_mode,
+                        PromptInjectionOptions {
+                            plan: false,
+                            effort: false,
+                            fast: true,
+                        },
+                    ),
+                    turn.tool_instructions.as_deref(),
                 );
                 self.spawn_turn(runtime, prompt, turn.plan_mode, turn.effort.as_deref())
                     .await

@@ -31,7 +31,7 @@ use dcc_core::{
     CoreError, Result,
 };
 
-use crate::common::augmented_path;
+use crate::common::{append_tool_instructions, augmented_path};
 
 // ── JSON-RPC helpers ────────────────────────────────────────────────────────
 
@@ -651,17 +651,20 @@ impl Provider for CodexAppServerAdapter {
         let (prompt, effort, summary) = match input {
             Input::Text(text) => (text, None, None),
             Input::Turn(turn) => (
-                compose_fallback_prompt_for_provider(
-                    "codex",
-                    &turn.prompt,
-                    turn.plan_mode,
-                    turn.effort.as_deref(),
-                    turn.fast_mode,
-                    PromptInjectionOptions {
-                        plan: true,
-                        effort: false,
-                        fast: false,
-                    },
+                append_tool_instructions(
+                    compose_fallback_prompt_for_provider(
+                        "codex",
+                        &turn.prompt,
+                        turn.plan_mode,
+                        turn.effort.as_deref(),
+                        turn.fast_mode,
+                        PromptInjectionOptions {
+                            plan: true,
+                            effort: false,
+                            fast: false,
+                        },
+                    ),
+                    turn.tool_instructions.as_deref(),
                 ),
                 codex_reasoning_effort(turn.effort.as_deref()),
                 if turn.fast_mode.unwrap_or(true) {

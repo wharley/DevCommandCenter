@@ -23,7 +23,7 @@ use dcc_core::{
     CoreError, Result,
 };
 
-use crate::common::experimental_cli_capabilities;
+use crate::common::{append_tool_instructions, experimental_cli_capabilities};
 
 const PROVIDER_LABEL: &str = "Cursor";
 const PROVIDER_DESCRIPTION: &str =
@@ -932,17 +932,20 @@ impl Provider for CursorProvider {
         let (prompt, plan_mode) = match input {
             Input::Text(prompt) => (prompt, None),
             Input::Turn(turn) => (
-                compose_fallback_prompt_for_provider(
-                    "cursor",
-                    &turn.prompt,
-                    turn.plan_mode,
-                    turn.effort.as_deref(),
-                    turn.fast_mode,
-                    PromptInjectionOptions {
-                        plan: false,
-                        effort: true,
-                        fast: true,
-                    },
+                append_tool_instructions(
+                    compose_fallback_prompt_for_provider(
+                        "cursor",
+                        &turn.prompt,
+                        turn.plan_mode,
+                        turn.effort.as_deref(),
+                        turn.fast_mode,
+                        PromptInjectionOptions {
+                            plan: false,
+                            effort: true,
+                            fast: true,
+                        },
+                    ),
+                    turn.tool_instructions.as_deref(),
                 ),
                 turn.plan_mode,
             ),

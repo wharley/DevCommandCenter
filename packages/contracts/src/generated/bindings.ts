@@ -716,6 +716,8 @@ export type SendTurnInput = {
 	sessionId: SessionId,
 	// Raw composer text for timeline / Turn records; provider adapters decide how to transport it.
 	prompt: string,
+	// Provider-facing tool/system instructions. Not persisted as user text.
+	toolInstructions?: string | null,
 	// When set, replaces the session provider before this turn (same workspace session).
 	providerId?: string | null,
 	// When set, replaces the session model before this turn.

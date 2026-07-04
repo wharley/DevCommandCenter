@@ -95,6 +95,7 @@ pub async fn send_turn(
 
     let provider_turn_input = ProviderTurnInput {
         prompt: input.prompt.clone(),
+        tool_instructions: input.tool_instructions.clone(),
         plan_mode: input.plan_mode,
         effort: input.effort.clone(),
         fast_mode: input.fast_mode,

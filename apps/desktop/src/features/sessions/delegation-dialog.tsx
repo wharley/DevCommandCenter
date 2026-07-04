@@ -19,6 +19,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 export type ManualDelegationRequest = {
 	targetProviderId: string;
+	targetProviderIds?: string[];
 	targetModelId: string | null;
 	mode: Extract<DelegationMode, "review" | "explain" | "implement">;
 	contextPolicy: DelegationContextPolicy;
@@ -70,6 +71,7 @@ export function DelegationDialog({
 		[providers],
 	);
 	const [providerId, setProviderId] = useState("");
+	const [providerIds, setProviderIds] = useState<string[]>([]);
 	const selectedProvider =
 		delegationProviders.find((provider) => provider.id === providerId) ??
 		delegationProviders[0] ??
@@ -85,12 +87,19 @@ export function DelegationDialog({
 		if (!open) {
 			return;
 		}
-		setProviderId((current) =>
-			delegationProviders.some((provider) => provider.id === current)
-				? current
-				: (delegationProviders[0]?.id ?? ""),
-		);
-	}, [delegationProviders, open]);
+		const nextProviderId = delegationProviders.some((provider) => provider.id === providerId)
+			? providerId
+			: (delegationProviders[0]?.id ?? "");
+		setProviderId(nextProviderId);
+		setProviderIds((current) => {
+			const availableIds = new Set(delegationProviders.map((provider) => provider.id));
+			const next = current.filter((id) => availableIds.has(id));
+			if (nextProviderId && !next.includes(nextProviderId)) {
+				next.unshift(nextProviderId);
+			}
+			return next.length > 0 ? next : nextProviderId ? [nextProviderId] : [];
+		});
+	}, [delegationProviders, open, providerId]);
 
 	useEffect(() => {
 		if (!selectedProvider) {
@@ -112,11 +121,52 @@ export function DelegationDialog({
 		}
 	}, [mode, selectedProvider]);
 
+	const multiTargetMode = mode !== "implement";
+	const selectedTargetProviderIds = useMemo(() => {
+		if (!multiTargetMode) {
+			return selectedProvider ? [selectedProvider.id] : [];
+		}
+		const availableIds = new Set(delegationProviders.map((provider) => provider.id));
+		const next = providerIds.filter((id) => availableIds.has(id));
+		if (selectedProvider && !next.includes(selectedProvider.id)) {
+			return [selectedProvider.id, ...next];
+		}
+		return next;
+	}, [delegationProviders, multiTargetMode, providerIds, selectedProvider]);
+
 	const submitDisabled =
 		isSubmitting ||
 		!selectedProvider ||
+		selectedTargetProviderIds.length === 0 ||
 		(selectedProvider.models.length > 0 && !modelId) ||
 		instruction.trim().length === 0;
+
+	const handleProviderChange = (nextProviderId: string) => {
+		setProviderId(nextProviderId);
+		setProviderIds((current) =>
+			current.includes(nextProviderId) ? current : [nextProviderId, ...current],
+		);
+	};
+
+	const toggleTargetProvider = (targetId: string, checked: boolean) => {
+		const nextSelectedIds = checked
+			? providerIds.includes(targetId)
+				? providerIds
+				: [...providerIds, targetId]
+			: providerIds.filter((id) => id !== targetId);
+		if (checked && !providerId) {
+			setProviderId(targetId);
+		} else if (!checked && providerId === targetId) {
+			setProviderId(nextSelectedIds[0] ?? "");
+		}
+		setProviderIds((current) => {
+			return checked
+				? current.includes(targetId)
+					? current
+					: [...current, targetId]
+				: current.filter((id) => id !== targetId);
+		});
+	};
 
 	const handleSubmit = async () => {
 		if (!selectedProvider || submitDisabled) {
@@ -124,6 +174,7 @@ export function DelegationDialog({
 		}
 		await onSubmit({
 			targetProviderId: selectedProvider.id,
+			targetProviderIds: selectedTargetProviderIds,
 			targetModelId: modelId || null,
 			mode,
 			contextPolicy: contextPolicyFromKey(contextPolicy),
@@ -148,7 +199,7 @@ export function DelegationDialog({
 						<select
 							id="delegate-provider"
 							value={providerId}
-							onChange={(event) => setProviderId(event.target.value)}
+							onChange={(event) => handleProviderChange(event.target.value)}
 							className="h-9 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 							disabled={isSubmitting || delegationProviders.length === 0}
 						>
@@ -159,6 +210,35 @@ export function DelegationDialog({
 							))}
 						</select>
 					</div>
+
+					{multiTargetMode ? (
+						<div className="grid gap-2">
+							<Label>Targets</Label>
+							<div className="grid gap-1.5 rounded-md border border-border/60 bg-muted/10 p-2">
+								{delegationProviders.map((provider) => (
+									<label
+										key={provider.id}
+										className="flex min-h-8 items-center gap-2 rounded-sm px-1.5 text-sm"
+									>
+										<input
+											type="checkbox"
+											className="size-4 accent-primary"
+											checked={selectedTargetProviderIds.includes(provider.id)}
+											disabled={isSubmitting}
+											onChange={(event) =>
+												toggleTargetProvider(provider.id, event.target.checked)
+											}
+										/>
+										<span className="min-w-0 flex-1 truncate">{provider.label}</span>
+									</label>
+								))}
+							</div>
+							<p className="text-[11.5px] leading-4 text-muted-foreground">
+								Selected model applies to the primary provider. Other targets use
+								their recommended model.
+							</p>
+						</div>
+					) : null}
 
 					<div className="grid gap-2">
 						<Label htmlFor="delegate-model">Model</Label>

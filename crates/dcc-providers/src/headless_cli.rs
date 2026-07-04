@@ -24,8 +24,8 @@ use dcc_core::{
 };
 
 use crate::common::{
-    apply_cli_spawn_environment, augmented_path, now_iso, parse_provider_stream_line,
-    ParsedProviderLine, ProviderStreamState,
+    append_tool_instructions, apply_cli_spawn_environment, augmented_path, now_iso,
+    parse_provider_stream_line, ParsedProviderLine, ProviderStreamState,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -667,6 +667,7 @@ impl Provider for HeadlessCliProviderAdapter {
                         },
                     ),
                 };
+                let prompt = append_tool_instructions(prompt, turn.tool_instructions.as_deref());
                 self.spawn_turn(runtime, prompt, turn.plan_mode).await
             }
             Input::UserInputResponse(_) => Err(CoreError::Provider(format!(

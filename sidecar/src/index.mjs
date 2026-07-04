@@ -72,15 +72,23 @@ function normalizeEffort(effort) {
 	}
 }
 
-function buildSystemPrompt(fastMode) {
-	if (fastMode !== true) {
+function buildSystemPrompt(fastMode, toolInstructions) {
+	const appendParts = [];
+	if (fastMode === true) {
+		appendParts.push("Prefer concise assistant replies unless the user explicitly needs detail.");
+	}
+	if (typeof toolInstructions === "string" && toolInstructions.trim().length > 0) {
+		appendParts.push(toolInstructions.trim());
+	}
+
+	if (appendParts.length === 0) {
 		return undefined;
 	}
 
 	return {
 		type: "preset",
 		preset: "claude_code",
-		append: "Prefer concise assistant replies unless the user explicitly needs detail.",
+		append: appendParts.join("\n\n"),
 	};
 }
 
@@ -342,7 +350,7 @@ async function runTurn(payload, state) {
 			includePartialMessages: true,
 			settingSources: ["user", "project", "local"],
 			effort: normalizeEffort(payload?.effort),
-			systemPrompt: buildSystemPrompt(payload?.fastMode),
+			systemPrompt: buildSystemPrompt(payload?.fastMode, payload?.toolInstructions),
 			canUseTool: async (toolName, input, options) => {
 				if (toolName === "AskUserQuestion") {
 					return handleAskUserQuestion(input, options, state);

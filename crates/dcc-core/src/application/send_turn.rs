@@ -20,6 +20,9 @@ pub struct SendTurnInput {
     pub session_id: SessionId,
     /// Raw composer text for timeline / Turn records; provider adapters decide how to transport it.
     pub prompt: String,
+    /// Provider-facing tool/system instructions. Not persisted as user text.
+    #[serde(default)]
+    pub tool_instructions: Option<String>,
     /// When set, replaces the session provider before this turn (same workspace session).
     #[serde(default)]
     pub provider_id: Option<String>,
@@ -325,6 +328,7 @@ mod tests {
             SendTurnInput {
                 session_id: session_id.clone(),
                 prompt: "hello".to_string(),
+                tool_instructions: None,
                 provider_id: None,
                 model: None,
                 provider_runtime: None,
@@ -399,6 +403,7 @@ mod tests {
             SendTurnInput {
                 session_id,
                 prompt: "hello".to_string(),
+                tool_instructions: None,
                 provider_id: Some("gemini".to_string()),
                 model: Some("gemini-2.5-pro".to_string()),
                 provider_runtime: Some(ProviderRuntimeConfig {

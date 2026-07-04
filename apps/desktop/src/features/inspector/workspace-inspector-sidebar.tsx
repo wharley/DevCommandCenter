@@ -331,6 +331,54 @@ function providerLabelForDelegation(
 	);
 }
 
+type DelegationComparisonGroup = {
+	key: string;
+	delegations: Delegation[];
+	providerLabels: string[];
+	statusCounts: Partial<Record<Delegation["status"], number>>;
+	touchedFiles: string[];
+};
+
+function buildDelegationComparisonGroups(
+	delegations: Delegation[],
+	providerCatalog: ProviderCatalog | null,
+): DelegationComparisonGroup[] {
+	const groups = new Map<string, Delegation[]>();
+	for (const delegation of delegations) {
+		const key = `${delegation.parentTurnId ?? delegation.parentSessionId}:${delegation.mode}:${delegation.prompt}`;
+		groups.set(key, [...(groups.get(key) ?? []), delegation]);
+	}
+
+	return Array.from(groups.entries())
+		.map(([key, groupDelegations]) => {
+			const providerLabels = Array.from(
+				new Set(
+					groupDelegations.map((delegation) =>
+						providerLabelForDelegation(providerCatalog, delegation.targetProviderId),
+					),
+				),
+			);
+			const statusCounts = groupDelegations.reduce<
+				Partial<Record<Delegation["status"], number>>
+			>((counts, delegation) => {
+				counts[delegation.status] = (counts[delegation.status] ?? 0) + 1;
+				return counts;
+			}, {});
+			const touchedFiles = Array.from(
+				new Set(groupDelegations.flatMap((delegation) => delegation.touchedFiles ?? [])),
+			);
+			return {
+				key,
+				delegations: groupDelegations,
+				providerLabels,
+				statusCounts,
+				touchedFiles,
+			};
+		})
+		.filter((group) => group.delegations.length > 1)
+		.slice(0, 3);
+}
+
 function DelegationsSection({
 	delegations,
 	providerCatalog,
@@ -348,6 +396,10 @@ function DelegationsSection({
 }) {
 	const { t } = useTranslation("common");
 	const visible = delegations.slice(0, 6);
+	const comparisonGroups = useMemo(
+		() => buildDelegationComparisonGroups(delegations, providerCatalog),
+		[delegations, providerCatalog],
+	);
 
 	return (
 		<div className="shrink-0 border-b border-border/40 bg-sidebar px-3 py-2">
@@ -368,6 +420,68 @@ function DelegationsSection({
 				</p>
 			) : (
 				<div className="space-y-1.5">
+					{comparisonGroups.map((group) => {
+						const statusSummary = [
+							group.statusCounts.completed
+								? t("inspector.delegations.statusCompleted", {
+										count: group.statusCounts.completed,
+									})
+								: null,
+							group.statusCounts.review_pending
+								? t("inspector.delegations.statusReview", {
+										count: group.statusCounts.review_pending,
+									})
+								: null,
+							group.statusCounts.running
+								? t("inspector.delegations.statusRunning", {
+										count: group.statusCounts.running,
+									})
+								: null,
+							group.statusCounts.failed
+								? t("inspector.delegations.statusFailed", {
+										count: group.statusCounts.failed,
+									})
+								: null,
+						]
+							.filter(Boolean)
+							.join(" · ");
+						return (
+							<div
+								key={group.key}
+								className="rounded-md border border-primary/20 bg-primary/5 px-2 py-2"
+							>
+								<div className="flex items-center justify-between gap-2">
+									<p className="min-w-0 truncate text-[11.5px] font-medium text-foreground">
+										{t("inspector.delegations.reportTitle", {
+											count: group.delegations.length,
+										})}
+									</p>
+									<Badge
+										variant="outline"
+										className="h-5 max-w-[9rem] shrink-0 truncate px-1.5 text-[10px] font-normal"
+										title={
+											statusSummary || t("inspector.delegations.statusPending")
+										}
+									>
+										{statusSummary || t("inspector.delegations.statusPending")}
+									</Badge>
+								</div>
+								<p className="mt-1 truncate text-[11px] text-muted-foreground">
+									{t("inspector.delegations.providers", {
+										providers: group.providerLabels.join(", "),
+									})}
+								</p>
+								{group.touchedFiles.length > 0 ? (
+									<p className="mt-1 truncate font-mono text-[10.5px] text-muted-foreground/80">
+										{t("inspector.delegations.files", {
+											count: group.touchedFiles.length,
+										})}
+										: {group.touchedFiles.slice(0, 3).join(", ")}
+									</p>
+								) : null}
+							</div>
+						);
+					})}
 					{visible.map((delegation) => {
 						const touchedFiles = delegation.touchedFiles ?? [];
 						const firstTouchedFile = touchedFiles[0] ?? null;
