@@ -64,6 +64,8 @@ pub struct Session {
     pub model: Option<String>,
     #[serde(default)]
     pub provider_runtime: Option<ProviderRuntimeConfig>,
+    #[serde(default)]
+    pub working_directory_override: Option<String>,
     pub state: SessionState,
     pub created_at: String,
     pub updated_at: String,

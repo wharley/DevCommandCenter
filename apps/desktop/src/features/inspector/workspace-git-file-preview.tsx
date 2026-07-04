@@ -18,6 +18,7 @@ export type WorkspaceGitPreviewSelection = {
 	path: string;
 	name: string;
 	status: string;
+	workspaceRootOverride?: string | null;
 	baseBranch?: string | null;
 	focusLine?: number | null;
 	machineAnnotations?: WorkspaceGitPreviewMachineAnnotation[];
@@ -154,10 +155,11 @@ export function WorkspaceGitFilePreview({
 	workspaceRoot,
 	selection,
 }: WorkspaceGitFilePreviewProps) {
+	const effectiveWorkspaceRoot = selection?.workspaceRootOverride ?? workspaceRoot;
 	const query = useWorkspaceGitFilePreviewContent(
-		selection && workspaceRoot
+		selection && effectiveWorkspaceRoot
 			? {
-					workspaceRoot,
+					workspaceRoot: effectiveWorkspaceRoot,
 					relativePath: selection.path,
 					status: selection.status,
 					scope: selection.group,

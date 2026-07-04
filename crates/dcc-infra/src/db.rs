@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS dcc_sessions (
 	provider_id TEXT NOT NULL,
 	model TEXT NULL,
 	provider_runtime_json TEXT NULL,
+	working_directory_override TEXT NULL,
 	state TEXT NOT NULL,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
@@ -484,6 +485,12 @@ impl SqliteSessionRepo {
             "validation_summary",
             "TEXT NULL",
         )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_sessions",
+            "working_directory_override",
+            "TEXT NULL",
+        )?;
         Self::rebuild_search_index_sync(&conn)?;
         Ok(())
     }
@@ -647,9 +654,10 @@ impl SqliteSessionRepo {
             provider_id: row.get::<_, String>(3)?,
             model: row.get::<_, Option<String>>(4)?,
             provider_runtime,
-            state: Self::session_state_from_str(&row.get::<_, String>(6)?, 6)?,
-            created_at: row.get::<_, String>(7)?,
-            updated_at: row.get::<_, String>(8)?,
+            working_directory_override: row.get::<_, Option<String>>(6)?,
+            state: Self::session_state_from_str(&row.get::<_, String>(7)?, 7)?,
+            created_at: row.get::<_, String>(8)?,
+            updated_at: row.get::<_, String>(9)?,
         })
     }
 
@@ -1170,7 +1178,8 @@ impl SqliteSessionRepo {
                 r#"
 				SELECT
 					s.id, s.project_id, s.workspace_id, s.provider_id, s.model,
-					s.provider_runtime_json, s.state, s.created_at, s.updated_at,
+					s.provider_runtime_json, s.working_directory_override,
+					s.state, s.created_at, s.updated_at,
 					t.id, t.project_id, t.session_id, t.title, t.archived_at
 				  FROM dcc_sessions s
 				  JOIN dcc_threads t ON t.session_id = s.id
@@ -1204,16 +1213,17 @@ impl SqliteSessionRepo {
                             })
                         })
                         .transpose()?,
-                    state: Self::session_state_from_str(&row.get::<_, String>(6)?, 6)?,
-                    created_at: row.get::<_, String>(7)?,
-                    updated_at: row.get::<_, String>(8)?,
+                    working_directory_override: row.get::<_, Option<String>>(6)?,
+                    state: Self::session_state_from_str(&row.get::<_, String>(7)?, 7)?,
+                    created_at: row.get::<_, String>(8)?,
+                    updated_at: row.get::<_, String>(9)?,
                 };
                 let thread = Thread {
-                    id: ThreadId(row.get::<_, String>(9)?),
-                    project_id: ProjectId(row.get::<_, String>(10)?),
-                    session_id: row.get::<_, Option<String>>(11)?.map(SessionId),
-                    title: row.get::<_, String>(12)?,
-                    archived_at: row.get::<_, Option<String>>(13)?,
+                    id: ThreadId(row.get::<_, String>(10)?),
+                    project_id: ProjectId(row.get::<_, String>(11)?),
+                    session_id: row.get::<_, Option<String>>(12)?.map(SessionId),
+                    title: row.get::<_, String>(13)?,
+                    archived_at: row.get::<_, Option<String>>(14)?,
                 };
                 Ok((session, thread))
             })
@@ -1543,14 +1553,15 @@ impl SessionRepo for SqliteSessionRepo {
             r#"
 			INSERT INTO dcc_sessions (
 				id, project_id, workspace_id, provider_id, model,
-				provider_runtime_json, state, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+				provider_runtime_json, working_directory_override, state, created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
 			ON CONFLICT(id) DO UPDATE SET
 				project_id = excluded.project_id,
 				workspace_id = excluded.workspace_id,
 				provider_id = excluded.provider_id,
 				model = excluded.model,
 				provider_runtime_json = excluded.provider_runtime_json,
+				working_directory_override = excluded.working_directory_override,
 				state = excluded.state,
 				created_at = excluded.created_at,
 				updated_at = excluded.updated_at
@@ -1562,6 +1573,7 @@ impl SessionRepo for SqliteSessionRepo {
                 session.provider_id.clone(),
                 session.model.clone(),
                 provider_runtime_json,
+                session.working_directory_override.clone(),
                 Self::session_state_as_str(&session.state),
                 session.created_at.clone(),
                 session.updated_at.clone(),
@@ -1581,7 +1593,8 @@ impl SessionRepo for SqliteSessionRepo {
         conn.query_row(
             r#"
 			SELECT id, project_id, workspace_id, provider_id, model,
-			       provider_runtime_json, state, created_at, updated_at
+			       provider_runtime_json, working_directory_override,
+			       state, created_at, updated_at
 			  FROM dcc_sessions
 			 WHERE id = ?1
 			"#,
@@ -1981,6 +1994,7 @@ mod tests {
             provider_id: "codex".to_string(),
             model: Some("gpt-5".to_string()),
             provider_runtime: None,
+            working_directory_override: None,
             state: SessionState::Active,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -2043,6 +2057,7 @@ mod tests {
             provider_id: "codex".to_string(),
             model: Some("gpt-5".to_string()),
             provider_runtime: None,
+            working_directory_override: None,
             state: SessionState::Active,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -2153,6 +2168,7 @@ mod tests {
             provider_id: "codex".to_string(),
             model: Some("gpt-5".to_string()),
             provider_runtime: None,
+            working_directory_override: None,
             state: SessionState::Active,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -2164,6 +2180,7 @@ mod tests {
             provider_id: "gemini".to_string(),
             model: None,
             provider_runtime: None,
+            working_directory_override: None,
             state: SessionState::Draft,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),

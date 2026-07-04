@@ -139,6 +139,13 @@
       "statusPending": "pendente",
       "openChild": "Abrir filha",
       "reviewDiff": "Revisar diff",
+      "applyChanges": "Aplicar mudanças",
+      "applied": "{{count}} arquivo(s) aplicado(s)",
+      "discardChanges": "Descartar",
+      "discarded": "Mudanças da delegação descartadas",
+      "applyMissingWorkspace": "Caminho do workspace indisponível.",
+      "applyMissingChild": "Sessão filha da delegação indisponível.",
+      "applyMissingWorktree": "Worktree da delegação indisponível.",
       "markReviewed": "Marcar revisada",
       "reviewed": "Delegação marcada como revisada"
     },

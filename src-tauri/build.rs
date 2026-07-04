@@ -71,13 +71,15 @@ use dcc_tauri::commands::{
         MissionSpecContextStatusInput, MissionSpecContextStatusOutput, MissionSpecEntry,
         MissionValidationEntry, ReadWorkspaceFileInput, ReadWorkspaceFileOutput, RepositoryIdInput,
         SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
-        SearchWorkspaceMatch, SearchWorkspaceOutput, WorkspaceContinueFromBaseBranchInput,
+        SearchWorkspaceMatch, SearchWorkspaceOutput, WorkspaceApplyDelegationWorktreeInput,
+        WorkspaceApplyDelegationWorktreeOutput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
         WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput,
         WorkspaceGitPathInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
         WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput,
-        WorkspaceRunSetupInput, WorkspaceRunSetupOutput, WorkspaceSetupHint,
-        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
+        WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
+        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspaceSetupHint, WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -124,6 +126,7 @@ struct WorkspaceMethods {
     workspace_pr_review_comments: String,
     workspace_pr_status: String,
     workspace_git_branch_diff: String,
+    workspace_apply_delegation_worktree: String,
     workspace_git_commit_push: String,
     workspace_git_discard_file: String,
     workspace_git_file_preview: String,
@@ -134,6 +137,8 @@ struct WorkspaceMethods {
     workspace_git_status: String,
     workspace_git_sync_base: String,
     workspace_git_unstage_file: String,
+    workspace_prepare_delegation_worktree: String,
+    workspace_remove_delegation_worktree: String,
     workspace_run_setup: String,
     workspace_coderabbit_cli_status: String,
     workspace_coderabbit_doctor: String,
@@ -295,6 +300,11 @@ fn main() {
         .typ::<WorkspaceGitPushInput>()
         .typ::<WorkspaceGitSyncBaseInput>()
         .typ::<WorkspaceGitSyncBaseOutput>()
+        .typ::<WorkspaceApplyDelegationWorktreeInput>()
+        .typ::<WorkspaceApplyDelegationWorktreeOutput>()
+        .typ::<WorkspacePrepareDelegationWorktreeInput>()
+        .typ::<WorkspacePrepareDelegationWorktreeOutput>()
+        .typ::<WorkspaceRemoveDelegationWorktreeInput>()
         .typ::<CodeRabbitCliStatusState>()
         .typ::<CodeRabbitReviewType>()
         .typ::<CodeRabbitFindingSeverity>()
@@ -398,6 +408,8 @@ fn main() {
                 workspace_pr_review_comments: "workspace_pr_review_comments".to_string(),
                 workspace_pr_status: "workspace_pr_status".to_string(),
                 workspace_git_branch_diff: "workspace_git_branch_diff".to_string(),
+                workspace_apply_delegation_worktree: "workspace_apply_delegation_worktree"
+                    .to_string(),
                 workspace_git_file_preview: "workspace_git_file_preview".to_string(),
                 workspace_git_file_preview_content: "workspace_git_file_preview_content"
                     .to_string(),
@@ -409,6 +421,10 @@ fn main() {
                 workspace_git_status: "workspace_git_status".to_string(),
                 workspace_git_sync_base: "workspace_git_sync_base".to_string(),
                 workspace_git_unstage_file: "workspace_git_unstage_file".to_string(),
+                workspace_prepare_delegation_worktree: "workspace_prepare_delegation_worktree"
+                    .to_string(),
+                workspace_remove_delegation_worktree: "workspace_remove_delegation_worktree"
+                    .to_string(),
                 workspace_run_setup: "workspace_run_setup".to_string(),
                 workspace_coderabbit_cli_status: "workspace_coderabbit_cli_status".to_string(),
                 workspace_coderabbit_doctor: "workspace_coderabbit_doctor".to_string(),

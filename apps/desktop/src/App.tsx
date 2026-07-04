@@ -88,6 +88,8 @@ import {
 	listWorkspaces,
 	workspaceGitBranchDiff,
 	workspaceGitStatus,
+	workspacePrepareDelegationWorktree,
+	workspaceRemoveDelegationWorktree,
 } from "./lib/workspace-api";
 import {
 	abortRun,
@@ -249,6 +251,7 @@ type DelegationChildBinding = {
 	parentSessionId: string;
 	workspaceId: string;
 	workspacePath: string | null;
+	cleanupWorkspacePath?: string | null;
 	reviewRequired: boolean;
 	finalized: boolean;
 };
@@ -1544,15 +1547,6 @@ export default function App() {
 					throw error;
 				}
 			}
-			const prompt = await buildManualDelegationPrompt({
-				request,
-				workspaceName: selectedWorkspace.name,
-				workspaceBranch: selectedWorkspace.branch,
-				workspacePath: selectedLocalWorkspacePath,
-				parentSessionId,
-				parentSessionTitle: parentTitle,
-				liveSessionEvents: sessionEvents,
-			});
 			const threadTitle = `Delegated ${request.mode}: ${parentTitle}`;
 			const failures: string[] = [];
 			let startedCount = 0;
@@ -1592,13 +1586,37 @@ export default function App() {
 				);
 				let delegationId: string | null = null;
 				let childSessionId: string | null = null;
+				let implementationWorktreePath: string | null = null;
 				try {
+					if (allowFileEdits) {
+						if (!selectedLocalWorkspacePath) {
+							throw new Error("Implementation delegation requires a local worktree.");
+						}
+						const preparedWorktree = await workspacePrepareDelegationWorktree({
+							workspaceRoot: selectedLocalWorkspacePath,
+							delegationKey:
+								selectedSessionSnapshot.activeTurnId ?? parentSessionId,
+						});
+						implementationWorktreePath = preparedWorktree.worktreePath;
+					}
+					const delegationWorkspacePath =
+						implementationWorktreePath ?? selectedLocalWorkspacePath;
+					const prompt = await buildManualDelegationPrompt({
+						request,
+						workspaceName: selectedWorkspace.name,
+						workspaceBranch: selectedWorkspace.branch,
+						workspacePath: delegationWorkspacePath,
+						parentSessionId,
+						parentSessionTitle: parentTitle,
+						liveSessionEvents: sessionEvents,
+					});
 					const started = await startThread({
 						workspaceId: selectedWorkspace.id,
 						projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
 						providerId: targetProvider.id,
 						model: targetModelId,
 						providerRuntime: targetRuntime,
+						workingDirectoryOverride: implementationWorktreePath,
 						title: threadTitle,
 					});
 					childSessionId = started.session.id;
@@ -1659,7 +1677,8 @@ export default function App() {
 						childSessionId,
 						parentSessionId,
 						workspaceId: selectedWorkspace.id,
-						workspacePath: selectedLocalWorkspacePath,
+						workspacePath: delegationWorkspacePath,
+						cleanupWorkspacePath: implementationWorktreePath,
 						reviewRequired: allowFileEdits,
 						finalized: false,
 					});
@@ -1697,6 +1716,18 @@ export default function App() {
 						if (binding) {
 							binding.finalized = true;
 						}
+					}
+					if (implementationWorktreePath && selectedLocalWorkspacePath) {
+						await workspaceRemoveDelegationWorktree({
+							workspaceRoot: selectedLocalWorkspacePath,
+							worktreePath: implementationWorktreePath,
+							removeBranch: true,
+						}).catch((cleanupError) => {
+							console.error(
+								"[dcc] delegation worktree cleanup failed:",
+								cleanupError,
+							);
+						});
 					}
 					failures.push(`${targetProvider.label}: ${message}`);
 				}

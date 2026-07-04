@@ -13,11 +13,13 @@ use dcc_tauri::{
         MissionSpecContextStatusInput, MissionSpecContextStatusOutput, RepositoryIdInput,
         SaveMissionValidationInput, SaveMissionValidationOutput,
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
+        WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
         WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
         WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceIdInput,
-        WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
+        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
     },
     state::WorkspaceCommandState,
 };
@@ -147,6 +149,33 @@ pub async fn workspace_git_status(
     input: WorkspaceGitStatusInput,
 ) -> Result<WorkspaceGitStatusOutput, String> {
     dcc_tauri::commands::workspace_commands::workspace_git_status(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_prepare_delegation_worktree(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePrepareDelegationWorktreeInput,
+) -> Result<WorkspacePrepareDelegationWorktreeOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_prepare_delegation_worktree(state, input)
+        .await
+}
+
+#[tauri::command]
+pub async fn workspace_remove_delegation_worktree(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRemoveDelegationWorktreeInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_remove_delegation_worktree(state, input)
+        .await
+}
+
+#[tauri::command]
+pub async fn workspace_apply_delegation_worktree(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceApplyDelegationWorktreeInput,
+) -> Result<WorkspaceApplyDelegationWorktreeOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_apply_delegation_worktree(state, input)
+        .await
 }
 
 #[tauri::command]

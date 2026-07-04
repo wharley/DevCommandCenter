@@ -63,6 +63,11 @@ import type {
 	WorkspaceGitStatusOutput,
 	WorkspaceGitSyncBaseInput,
 	WorkspaceGitSyncBaseOutput,
+	WorkspaceApplyDelegationWorktreeInput,
+	WorkspaceApplyDelegationWorktreeOutput,
+	WorkspacePrepareDelegationWorktreeInput,
+	WorkspacePrepareDelegationWorktreeOutput,
+	WorkspaceRemoveDelegationWorktreeInput,
 	SaveMissionValidationInput,
 	SaveMissionValidationOutput,
 	WorkspaceForgeContextInput,
@@ -315,6 +320,30 @@ export function workspaceGitStatus(input: WorkspaceGitStatusInput) {
 	return invoke<WorkspaceGitStatusOutput>(WORKSPACE_METHODS.workspaceGitStatus, {
 		input,
 	});
+}
+
+export function workspaceApplyDelegationWorktree(
+	input: WorkspaceApplyDelegationWorktreeInput,
+) {
+	return invoke<WorkspaceApplyDelegationWorktreeOutput>(
+		WORKSPACE_METHODS.workspaceApplyDelegationWorktree,
+		{ input },
+	);
+}
+
+export function workspacePrepareDelegationWorktree(
+	input: WorkspacePrepareDelegationWorktreeInput,
+) {
+	return invoke<WorkspacePrepareDelegationWorktreeOutput>(
+		WORKSPACE_METHODS.workspacePrepareDelegationWorktree,
+		{ input },
+	);
+}
+
+export function workspaceRemoveDelegationWorktree(
+	input: WorkspaceRemoveDelegationWorktreeInput,
+) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceRemoveDelegationWorktree, { input });
 }
 
 export function workspaceGitStageFile(input: WorkspaceGitPathInput) {

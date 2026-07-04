@@ -223,6 +223,7 @@ mod tests {
             provider_id: "codex".to_string(),
             model: Some("gpt-5".to_string()),
             provider_runtime: None,
+            working_directory_override: None,
             state: SessionState::Active,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),

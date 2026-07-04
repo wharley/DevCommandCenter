@@ -1,13 +1,16 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
 use tauri::{AppHandle, State};
+use uuid::Uuid;
 
 use dcc_core::{
     application::{
@@ -26,7 +29,10 @@ use dcc_core::{
 };
 use dcc_infra::{
     db::SqliteWorkspaceRepo,
-    git::{detect_workspace_setup_suggestions, list_local_branch_names, CommandGitOps},
+    git::{
+        create_worktree_branch_from_ref, detect_workspace_setup_suggestions,
+        list_local_branch_names, remove_worktree, CommandGitOps,
+    },
 };
 
 use crate::{
@@ -42,8 +48,9 @@ use crate::{
     },
     events::TauriEventBus,
     git::{
-        git_command_succeeds, git_output_err, parse_name_status_z, parse_numstat_z,
-        run_git_network_output, run_git_output, run_git_output_owned, split_null_terminated_fields,
+        configure_git_command, git_command_succeeds, git_output_err, parse_name_status_z,
+        parse_numstat_z, run_git_network_output, run_git_output, run_git_output_owned,
+        split_null_terminated_fields,
     },
     state::WorkspaceCommandState,
     workspace_setup::run_detected_workspace_setup,
@@ -357,6 +364,43 @@ pub struct WorkspaceGitStatusOutput {
     pub ahead_of_remote_count: u32,
     pub behind_of_remote_count: u32,
     pub conflict_count: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePrepareDelegationWorktreeInput {
+    pub workspace_root: String,
+    pub delegation_key: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePrepareDelegationWorktreeOutput {
+    pub worktree_path: String,
+    pub branch: String,
+    pub base_commit: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRemoveDelegationWorktreeInput {
+    pub workspace_root: String,
+    pub worktree_path: String,
+    #[serde(default)]
+    pub remove_branch: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceApplyDelegationWorktreeInput {
+    pub workspace_root: String,
+    pub worktree_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceApplyDelegationWorktreeOutput {
+    pub changed_files: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1238,6 +1282,219 @@ pub async fn workspace_git_status(
     workspace_git_status_inner(&input.workspace_root)
 }
 
+fn delegation_worktrees_root(active_root: &Path) -> PathBuf {
+    let parent = active_root.parent().unwrap_or(active_root);
+    let worktrees_root = if parent.file_name().and_then(|name| name.to_str())
+        == Some(".dcc-worktrees")
+    {
+        parent.to_path_buf()
+    } else {
+        parent.join(".dcc-worktrees")
+    };
+    worktrees_root.join(".dcc-delegations")
+}
+
+fn delegation_key_suffix(key: Option<&str>) -> String {
+    let suffix: String = key
+        .unwrap_or_default()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .take(12)
+        .collect();
+    if suffix.is_empty() {
+        Uuid::new_v4().simple().to_string()[..12].to_string()
+    } else {
+        suffix
+    }
+}
+
+fn validate_delegation_worktree_path(root: &str, value: &str) -> Result<PathBuf, String> {
+    let worktree_path = PathBuf::from(value.trim());
+    if !worktree_path.is_absolute() {
+        return Err("delegation worktree path must be absolute".to_string());
+    }
+    let allowed_root = delegation_worktrees_root(Path::new(root));
+    let canonical_allowed_root =
+        fs::canonicalize(&allowed_root).unwrap_or_else(|_| allowed_root.clone());
+    let canonical_worktree_path =
+        fs::canonicalize(&worktree_path).unwrap_or_else(|_| worktree_path.clone());
+    if !canonical_worktree_path.starts_with(&canonical_allowed_root) {
+        return Err(
+            "refusing to use a path outside the DCC delegation worktree root".to_string(),
+        );
+    }
+    Ok(worktree_path)
+}
+
+#[tauri::command]
+pub async fn workspace_prepare_delegation_worktree(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePrepareDelegationWorktreeInput,
+) -> Result<WorkspacePrepareDelegationWorktreeOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+
+    let status = workspace_git_status_inner(root)?;
+    if status.conflict_count > 0 {
+        return Err(format!(
+            "resolve {} conflict{} before creating a delegation worktree",
+            status.conflict_count,
+            if status.conflict_count == 1 { "" } else { "s" },
+        ));
+    }
+    let changed_count = status.staged.len() + status.unstaged.len();
+    if changed_count > 0 {
+        return Err(format!(
+            "commit, stash, or discard {changed_count} existing worktree change{} before creating a delegation worktree",
+            if changed_count == 1 { "" } else { "s" },
+        ));
+    }
+
+    let base_commit = resolve_current_commit_sha(root)?
+        .filter(|commit| !commit.trim().is_empty())
+        .ok_or_else(|| "failed to resolve current HEAD".to_string())?;
+    let suffix = delegation_key_suffix(input.delegation_key.as_deref());
+    let raw_branch = format!("dcc/delegation/{suffix}");
+    let branch = next_available_branch_name(root, &raw_branch);
+    let worktree_root = delegation_worktrees_root(Path::new(root));
+    let worktree_path = worktree_root.join(branch.replace('/', "-"));
+
+    create_worktree_branch_from_ref(Path::new(root), &worktree_path, &branch, &base_commit)
+        .map_err(|error| error.to_string())?;
+
+    Ok(WorkspacePrepareDelegationWorktreeOutput {
+        worktree_path: worktree_path.to_string_lossy().to_string(),
+        branch,
+        base_commit,
+    })
+}
+
+#[tauri::command]
+pub async fn workspace_remove_delegation_worktree(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRemoveDelegationWorktreeInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    let worktree_path = validate_delegation_worktree_path(root, &input.worktree_path)?;
+
+    if worktree_path.exists() {
+        remove_worktree(Path::new(root), &worktree_path).map_err(|error| error.to_string())?;
+        if worktree_path.exists() {
+            fs::remove_dir_all(&worktree_path).map_err(|error| error.to_string())?;
+        }
+    }
+
+    if input.remove_branch {
+        let branch = worktree_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_prefix("dcc-delegation-"))
+            .map(|suffix| format!("dcc/delegation/{suffix}"));
+        if let Some(branch) = branch {
+            let _ = run_git_output(root, &["branch", "-D", &branch]);
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_patch_to_worktree(root: &str, patch: &[u8]) -> Result<(), String> {
+    let mut command = Command::new("git");
+    configure_git_command(&mut command);
+    command
+        .current_dir(root)
+        .arg("apply")
+        .arg("--whitespace=nowarn")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("failed to run git apply: {error}"))?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| "failed to open git apply stdin".to_string())?
+        .write_all(patch)
+        .map_err(|error| format!("failed to write git apply patch: {error}"))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("git apply failed: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(git_output_err("git apply", &output.stderr))
+}
+
+#[tauri::command]
+pub async fn workspace_apply_delegation_worktree(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceApplyDelegationWorktreeInput,
+) -> Result<WorkspaceApplyDelegationWorktreeOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    let worktree_path = validate_delegation_worktree_path(root, &input.worktree_path)?;
+    let worktree_root = worktree_path.to_string_lossy().to_string();
+
+    let status = workspace_git_status_inner(root)?;
+    let changed_count = status.staged.len() + status.unstaged.len();
+    if status.conflict_count > 0 || changed_count > 0 {
+        return Err(
+            "apply requires a clean destination worktree; commit, stash, or discard local changes first"
+                .to_string(),
+        );
+    }
+
+    let destination_head = resolve_current_commit_sha(root)?
+        .filter(|commit| !commit.trim().is_empty())
+        .ok_or_else(|| "failed to resolve destination HEAD".to_string())?;
+    let delegation_head = resolve_current_commit_sha(&worktree_root)?
+        .filter(|commit| !commit.trim().is_empty())
+        .ok_or_else(|| "failed to resolve delegation worktree HEAD".to_string())?;
+    if destination_head != delegation_head {
+        return Err(
+            "destination worktree HEAD differs from delegation baseline; rebase or recreate the delegation before applying"
+                .to_string(),
+        );
+    }
+
+    let changed_output = run_git_output(
+        &worktree_root,
+        &["diff", "--name-only", "-z", "--", "."],
+    )?;
+    if !changed_output.status.success() {
+        return Err(git_output_err("git diff --name-only", &changed_output.stderr));
+    }
+    let changed_files = split_null_terminated_fields(&changed_output.stdout);
+    if changed_files.is_empty() {
+        return Err("delegation worktree has no changes to apply".to_string());
+    }
+
+    let diff_output = run_git_output(
+        &worktree_root,
+        &["diff", "--binary", "--full-index", "--", "."],
+    )?;
+    if !diff_output.status.success() {
+        return Err(git_output_err("git diff", &diff_output.stderr));
+    }
+    if diff_output.stdout.is_empty() {
+        return Err("delegation worktree has no patch to apply".to_string());
+    }
+    apply_patch_to_worktree(root, &diff_output.stdout)?;
+
+    Ok(WorkspaceApplyDelegationWorktreeOutput { changed_files })
+}
+
 #[tauri::command]
 pub async fn workspace_continue_from_base_branch(
     state: State<'_, WorkspaceCommandState>,
@@ -1857,6 +2114,46 @@ mod editor_workspace_file_tests {
         assert!(validate_git_relative_path("../secret").is_err());
         assert!(validate_git_relative_path("src/../secret").is_err());
         assert!(validate_git_relative_path("/tmp/secret").is_err());
+    }
+
+    #[test]
+    fn delegation_worktree_paths_are_scoped_to_delegation_root() {
+        let repo = TestDir::new("delegation-paths");
+        let active_root = repo.path.join(".dcc-worktrees").join("main-123");
+        let delegation_root = repo.path.join(".dcc-worktrees").join(".dcc-delegations");
+        let delegation_path = delegation_root.join("dcc-delegation-abc");
+        fs::create_dir_all(&delegation_path).expect("create delegation worktree");
+
+        assert_eq!(
+            delegation_worktrees_root(&active_root),
+            delegation_root,
+        );
+        assert_eq!(
+            validate_delegation_worktree_path(
+                active_root.to_str().expect("utf-8 active root"),
+                delegation_path.to_str().expect("utf-8 delegation path"),
+            )
+            .expect("delegation path is accepted"),
+            delegation_path,
+        );
+
+        let outside = repo.path.join(".dcc-worktrees").join("main-456");
+        fs::create_dir_all(&outside).expect("create outside worktree");
+        assert!(validate_delegation_worktree_path(
+            active_root.to_str().expect("utf-8 active root"),
+            outside.to_str().expect("utf-8 outside path"),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn delegation_key_suffix_sanitizes_user_controlled_keys() {
+        assert_eq!(
+            delegation_key_suffix(Some("turn-123_../../escape")),
+            "turn123escap"
+        );
+        assert_eq!(delegation_key_suffix(Some("abcDEF123456789")), "abcDEF123456");
+        assert_eq!(delegation_key_suffix(Some("!!!")).len(), 12);
     }
 
     #[test]

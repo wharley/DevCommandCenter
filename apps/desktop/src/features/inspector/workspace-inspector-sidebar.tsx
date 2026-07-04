@@ -77,11 +77,14 @@ import {
 	workspaceChangeRequestMerge,
 	workspaceGitCommitPush,
 	listGitTrackedFiles,
+	workspaceApplyDelegationWorktree,
 	workspaceGitStageAll,
 	workspaceGitPush,
+	workspaceRemoveDelegationWorktree,
 	workspaceGitSyncBase,
 	workspaceRunSetup,
 } from "@/lib/workspace-api";
+import { loadWorkspaceSessions } from "@/lib/session-api";
 import { buildMissionSpecFilename } from "@/features/composer/WorkspaceComposer.logic";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import {
@@ -135,7 +138,7 @@ import type { WorkspaceStatus } from "@/features/workspaces/types";
 import { setupReportDescription } from "@/features/workspaces/workspace-setup-report";
 import type { ForgeCliProvider } from "@dcc/contracts";
 import { cn } from "@/lib/utils";
-import { approveDelegation, listDelegations } from "@/lib/delegation-api";
+import { approveDelegation, cancelDelegation, listDelegations } from "@/lib/delegation-api";
 
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
@@ -385,14 +388,20 @@ function DelegationsSection({
 	isLoading,
 	onSelectSession,
 	onSelectPreview,
+	onApply,
+	onDiscard,
 	onApprove,
+	onResolveWorktreePath,
 }: {
 	delegations: Delegation[];
 	providerCatalog: ProviderCatalog | null;
 	isLoading: boolean;
 	onSelectSession: (sessionId: string) => void;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+	onApply: (delegation: Delegation) => Promise<void>;
+	onDiscard: (delegation: Delegation) => Promise<void>;
 	onApprove: (delegation: Delegation) => Promise<void>;
+	onResolveWorktreePath: (delegation: Delegation) => Promise<string | null>;
 }) {
 	const { t } = useTranslation("common");
 	const visible = delegations.slice(0, 6);
@@ -541,25 +550,78 @@ function DelegationsSection({
 											variant="ghost"
 											size="xs"
 											className="h-6 px-2 text-[11px]"
-											onClick={() =>
-												onSelectPreview({
-													group: "committed",
-													path: firstTouchedFile,
-													name:
-														firstTouchedFile.split("/").pop() ??
-														firstTouchedFile,
-													status: "M",
-													baseBranch: null,
-												})
-											}
+											onClick={() => {
+												void (async () => {
+													let workspaceRootOverride: string | null = null;
+													if (
+														delegation.mode === "implement" &&
+														delegation.status === "review_pending"
+													) {
+														try {
+															workspaceRootOverride =
+																await onResolveWorktreePath(delegation);
+														} catch (error) {
+															toast.error(
+																error instanceof Error
+																	? error.message
+																	: String(error),
+															);
+															return;
+														}
+													}
+													onSelectPreview({
+														group:
+															delegation.mode === "implement" &&
+															delegation.status === "completed"
+																? "unstaged"
+																: "committed",
+														path: firstTouchedFile,
+														name:
+															firstTouchedFile.split("/").pop() ??
+															firstTouchedFile,
+														status: "M",
+														workspaceRootOverride,
+														baseBranch: null,
+													});
+												})();
+											}}
 										>
 											{t("inspector.delegations.reviewDiff")}
 										</Button>
 									) : null}
 									{delegation.status === "review_pending" ? (
+										delegation.mode === "implement" ? (
+											<Button
+												type="button"
+												variant="default"
+												size="xs"
+												className="h-6 px-2 text-[11px]"
+												onClick={() => {
+													void onApply(delegation);
+												}}
+											>
+												{t("inspector.delegations.applyChanges")}
+											</Button>
+										) : null
+									) : null}
+									{delegation.status === "review_pending" &&
+									delegation.mode === "implement" ? (
 										<Button
 											type="button"
-											variant="default"
+											variant="destructive"
+											size="xs"
+											className="h-6 px-2 text-[11px]"
+											onClick={() => {
+												void onDiscard(delegation);
+											}}
+										>
+											{t("inspector.delegations.discardChanges")}
+										</Button>
+									) : null}
+									{delegation.status === "review_pending" ? (
+										<Button
+											type="button"
+											variant={delegation.mode === "implement" ? "outline" : "default"}
 											size="xs"
 											className="h-6 px-2 text-[11px]"
 											onClick={() => {
@@ -1364,6 +1426,102 @@ export function WorkspaceInspectorSidebar({
 			}
 		},
 		[queryClient, t, workspaceId],
+	);
+
+	const resolveDelegationWorktreePath = useCallback(
+		async (delegation: Delegation) => {
+			if (!delegation.childSessionId) {
+				throw new Error(t("inspector.delegations.applyMissingChild"));
+			}
+			const sessions = workspaceId ? await loadWorkspaceSessions(workspaceId) : [];
+			const childSession = sessions.find(
+				(summary) => summary.session.id === delegation.childSessionId,
+			);
+			const worktreePath =
+				childSession?.session.workingDirectoryOverride?.trim() ?? "";
+			if (!worktreePath) {
+				throw new Error(t("inspector.delegations.applyMissingWorktree"));
+			}
+			return worktreePath;
+		},
+		[t, workspaceId],
+	);
+
+	const handleApplyDelegation = useCallback(
+		async (delegation: Delegation) => {
+			const root = workspacePath?.trim();
+			if (!root) {
+				toast.error(t("inspector.delegations.applyMissingWorkspace"));
+				return;
+			}
+
+			try {
+				const worktreePath = await resolveDelegationWorktreePath(delegation);
+
+				const result = await workspaceApplyDelegationWorktree({
+					workspaceRoot: root,
+					worktreePath,
+				});
+				await approveDelegation({
+					delegationId: delegation.id,
+					summary: delegation.resultSummary,
+				});
+				await workspaceRemoveDelegationWorktree({
+					workspaceRoot: root,
+					worktreePath,
+					removeBranch: true,
+				}).catch((cleanupError) => {
+					console.error("[inspector] delegation worktree cleanup failed", cleanupError);
+				});
+				await queryClient.invalidateQueries({
+					queryKey: ["delegations", workspaceId],
+				});
+				await queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+				});
+				await queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+				});
+				toast.success(
+					t("inspector.delegations.applied", {
+						count: result.changedFiles.length,
+					}),
+				);
+			} catch (error) {
+				toast.error(error instanceof Error ? error.message : String(error));
+			}
+		},
+		[queryClient, resolveDelegationWorktreePath, t, workspaceId, workspacePath],
+	);
+
+	const handleDiscardDelegation = useCallback(
+		async (delegation: Delegation) => {
+			const root = workspacePath?.trim();
+			if (!root) {
+				toast.error(t("inspector.delegations.applyMissingWorkspace"));
+				return;
+			}
+
+			try {
+				const worktreePath = await resolveDelegationWorktreePath(delegation);
+				await workspaceRemoveDelegationWorktree({
+					workspaceRoot: root,
+					worktreePath,
+					removeBranch: true,
+				});
+				await cancelDelegation({
+					delegationId: delegation.id,
+					reason: "Discarded isolated implementation worktree.",
+				});
+				await queryClient.invalidateQueries({
+					queryKey: ["delegations", workspaceId],
+				});
+				toast.success(t("inspector.delegations.discarded"));
+			} catch (error) {
+				toast.error(error instanceof Error ? error.message : String(error));
+			}
+		},
+		[queryClient, resolveDelegationWorktreePath, t, workspaceId, workspacePath],
 	);
 
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
@@ -2498,7 +2656,10 @@ export function WorkspaceInspectorSidebar({
 							isLoading={delegationsQuery.isLoading}
 							onSelectSession={onSelectSession}
 							onSelectPreview={onSelectPreview}
+							onApply={handleApplyDelegation}
+							onDiscard={handleDiscardDelegation}
 							onApprove={handleApproveDelegation}
+							onResolveWorktreePath={resolveDelegationWorktreePath}
 						/>
 						<SessionEventFeed
 							events={sessionActivityEvents}

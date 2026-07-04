@@ -237,11 +237,18 @@ impl SessionCommandState {
                     session.id.0
                 ))
             })?;
-        let working_directory = workspace
-            .worktree_path
+        let working_directory = session
+            .working_directory_override
             .as_ref()
             .filter(|value| !value.trim().is_empty())
             .cloned()
+            .or_else(|| {
+                workspace
+                    .worktree_path
+                    .as_ref()
+                    .filter(|value| !value.trim().is_empty())
+                    .cloned()
+            })
             .unwrap_or_else(|| workspace.root_path.clone());
 
         let provider = provider_runtime(&session.provider_id).ok_or_else(|| {

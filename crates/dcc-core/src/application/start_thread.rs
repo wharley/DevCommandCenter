@@ -27,6 +27,8 @@ pub struct StartThreadInput {
     pub model: Option<String>,
     #[serde(default)]
     pub provider_runtime: Option<ProviderRuntimeConfig>,
+    #[serde(default)]
+    pub working_directory_override: Option<String>,
     pub title: Option<String>,
 }
 
@@ -75,6 +77,7 @@ where
         provider_id: input.provider_id.clone(),
         model: input.model.clone(),
         provider_runtime: input.provider_runtime.clone(),
+        working_directory_override: input.working_directory_override.clone(),
         state: SessionState::Active,
         created_at: now.clone(),
         updated_at: now.clone(),
@@ -281,6 +284,7 @@ mod tests {
                 provider_id: "codex".to_string(),
                 model: Some("gpt-5-codex".to_string()),
                 provider_runtime: None,
+                working_directory_override: None,
                 title: Some("Launch session".to_string()),
             },
         ))

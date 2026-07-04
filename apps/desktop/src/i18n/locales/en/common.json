@@ -139,6 +139,13 @@
       "statusPending": "pending",
       "openChild": "Open child",
       "reviewDiff": "Review diff",
+      "applyChanges": "Apply changes",
+      "applied": "Applied {{count}} file(s)",
+      "discardChanges": "Discard",
+      "discarded": "Delegation changes discarded",
+      "applyMissingWorkspace": "Workspace path unavailable.",
+      "applyMissingChild": "Delegation child session is unavailable.",
+      "applyMissingWorktree": "Delegation worktree is unavailable.",
       "markReviewed": "Mark reviewed",
       "reviewed": "Delegation marked reviewed"
     },
