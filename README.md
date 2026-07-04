@@ -12,6 +12,14 @@ Dev Command Center (DCC) is a local-first desktop workbench for software enginee
 
 ![Dev Command Center screenshot](docs/assets/app-screenshot-new.png)
 
+## Core capabilities
+
+- **Workspace-first agent sessions**: run AI coding work inside isolated Git worktrees while keeping session history, runtime context, terminals, and reviews connected to the active workspace.
+- **Delegation agents**: hand off review, explanation, or implementation tasks to child sessions, inspect their work in the Inspector, send feedback back to the child agent, and apply or discard the isolated worktree output. See [Delegation agents](docs/DELEGATION_AGENTS.md).
+- **Mobile companion pairing**: pair a phone with the desktop app through QR code + PIN and use companion workflows on the same trusted network or through Tailscale. See [Mobile web companion](docs/MOBILE_WEB.md).
+- **Provider-neutral workflows**: use Claude, Gemini, Codex, Cursor, and other provider integrations from the same workbench surface.
+- **Built-in review surface**: inspect changed files, real diffs, branch status, CodeRabbit feedback, and PR-ready state without leaving DCC.
+
 ## What you can do in DCC
 
 - Create isolated workspaces and git worktrees for parallel tasks without juggling `git stash`.
@@ -108,6 +116,7 @@ DCC was shaped by the broader ecosystem of AI coding tools, terminal-native deve
 - [Contributing guide](CONTRIBUTING.md)
 - [Support](SUPPORT.md)
 - [Release guide](docs/RELEASING.md)
+- [Delegation agents](docs/DELEGATION_AGENTS.md)
 - [Mobile web companion](docs/MOBILE_WEB.md)
 - [Mobile pairing security model](docs/SECURITY_MOBILE_PAIRING.md)
 - [CodeRabbit integration](docs/CODERABBIT.md)
