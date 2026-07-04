@@ -19,6 +19,7 @@ export type WorkspaceGitPreviewSelection = {
 	name: string;
 	status: string;
 	workspaceRootOverride?: string | null;
+	targetSessionId?: string | null;
 	baseBranch?: string | null;
 	focusLine?: number | null;
 	machineAnnotations?: WorkspaceGitPreviewMachineAnnotation[];

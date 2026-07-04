@@ -125,7 +125,7 @@ type WorkspacePanelProps = {
 	onOpenSessionSearch: () => void;
 	onSubmitPrompt: (
 		turn: ComposerSubmittedTurn,
-		options?: { forceNewSession?: boolean },
+		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
 	) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
@@ -255,9 +255,14 @@ export function WorkspacePanel({
 			const turn = buildAnnotationTurn(
 				buildAnnotationContent(request, instruction),
 			);
-			void onSubmitPrompt(turn, { forceNewSession: newSession });
+			void onSubmitPrompt(turn, {
+				forceNewSession: newSession,
+				targetSessionId: surfaceSelection?.kind === "git-diff"
+					? surfaceSelection.file.targetSessionId ?? null
+					: null,
+			});
 		},
-		[buildAnnotationTurn, onSubmitPrompt],
+		[buildAnnotationTurn, onSubmitPrompt, surfaceSelection],
 	);
 	const handleEditAnnotationInComposer = useCallback(
 		({

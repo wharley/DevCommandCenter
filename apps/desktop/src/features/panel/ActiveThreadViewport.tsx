@@ -37,7 +37,10 @@ type ActiveThreadViewportProps = {
 	autoSaveMissionValidation: boolean;
 	onStartSession: () => void;
 	onSelectSession: (sessionId: string) => void;
-	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
+	onSubmitPrompt: (
+		turn: ComposerSubmittedTurn,
+		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
+	) => Promise<void>;
 	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
 	onReviewChanges?: () => void;
 	onReviewDelegation?: (delegationId: string) => void;

@@ -755,6 +755,7 @@ type InspectorChangesSectionProps = {
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	onPrefillComposer?: (text: string) => void;
 	reviewCommentsByPath?: Map<string, WorkspacePrReviewComment[]>;
+	targetSessionId?: string | null;
 };
 
 export function InspectorChangesSection({
@@ -763,6 +764,7 @@ export function InspectorChangesSection({
 	onSelectPreview,
 	onPrefillComposer,
 	reviewCommentsByPath = EMPTY_REVIEW_COMMENTS_BY_PATH,
+	targetSessionId = null,
 }: InspectorChangesSectionProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -814,10 +816,11 @@ export function InspectorChangesSection({
 			onSelectPreview({
 				...selection,
 				workspaceRootOverride: selection.workspaceRootOverride ?? root,
+				targetSessionId: selection.targetSessionId ?? targetSessionId,
 				reviewComments: reviewCommentsByPath.get(selection.path) ?? [],
 			});
 		},
-		[onSelectPreview, reviewCommentsByPath],
+		[onSelectPreview, reviewCommentsByPath, root, targetSessionId],
 	);
 
 	const unstageAll = useCallback(

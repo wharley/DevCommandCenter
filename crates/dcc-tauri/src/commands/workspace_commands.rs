@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
@@ -1434,6 +1434,80 @@ fn apply_patch_to_worktree(root: &str, patch: &[u8]) -> Result<(), String> {
     Err(git_output_err("git apply", &output.stderr))
 }
 
+fn list_untracked_files(root: &str) -> Result<Vec<String>, String> {
+    let output = run_git_output(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    if !output.status.success() {
+        return Err(git_output_err("git ls-files --others", &output.stderr));
+    }
+    split_null_terminated_fields(&output.stdout)
+        .into_iter()
+        .map(|path| validate_git_relative_path(&path))
+        .collect()
+}
+
+fn preflight_untracked_delegation_files(
+    source_root: &Path,
+    destination_root: &Path,
+    paths: &[String],
+) -> Result<(), String> {
+    for path in paths {
+        let rel = validate_git_relative_path(path)?;
+        let source_path = source_root.join(&rel);
+        let destination_path = destination_root.join(&rel);
+        let source_metadata = fs::symlink_metadata(&source_path).map_err(|error| {
+            format!(
+                "failed to read delegation file {}: {}",
+                source_path.display(),
+                error
+            )
+        })?;
+        if !source_metadata.is_file() {
+            return Err(format!(
+                "delegation untracked path is not a regular file: {}",
+                source_path.display()
+            ));
+        }
+        if fs::symlink_metadata(&destination_path).is_ok() {
+            return Err(format!(
+                "destination already contains untracked delegation file: {}",
+                destination_path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn copy_untracked_delegation_files(
+    source_root: &Path,
+    destination_root: &Path,
+    paths: &[String],
+) -> Result<(), String> {
+    preflight_untracked_delegation_files(source_root, destination_root, paths)?;
+    for path in paths {
+        let rel = validate_git_relative_path(path)?;
+        let source_path = source_root.join(&rel);
+        let destination_path = destination_root.join(&rel);
+        if let Some(parent) = destination_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "failed to create destination directory {}: {}",
+                    parent.display(),
+                    error
+                )
+            })?;
+        }
+        fs::copy(&source_path, &destination_path).map_err(|error| {
+            format!(
+                "failed to copy delegation file {} to {}: {}",
+                source_path.display(),
+                destination_path.display(),
+                error
+            )
+        })?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn workspace_apply_delegation_worktree(
     state: State<'_, WorkspaceCommandState>,
@@ -1471,27 +1545,46 @@ pub async fn workspace_apply_delegation_worktree(
 
     let changed_output = run_git_output(
         &worktree_root,
-        &["diff", "--name-only", "-z", "--", "."],
+        &["diff", "HEAD", "--name-only", "-z", "--", "."],
     )?;
     if !changed_output.status.success() {
-        return Err(git_output_err("git diff --name-only", &changed_output.stderr));
+        return Err(git_output_err(
+            "git diff HEAD --name-only",
+            &changed_output.stderr,
+        ));
     }
-    let changed_files = split_null_terminated_fields(&changed_output.stdout);
+    let untracked_files = list_untracked_files(&worktree_root)?;
+    let mut changed_files_set: BTreeSet<String> =
+        split_null_terminated_fields(&changed_output.stdout)
+            .into_iter()
+            .map(|path| validate_git_relative_path(&path))
+            .collect::<Result<_, _>>()?;
+    changed_files_set.extend(untracked_files.iter().cloned());
+    let changed_files = changed_files_set.into_iter().collect::<Vec<_>>();
     if changed_files.is_empty() {
         return Err("delegation worktree has no changes to apply".to_string());
     }
+    preflight_untracked_delegation_files(
+        Path::new(&worktree_root),
+        Path::new(root),
+        &untracked_files,
+    )?;
 
     let diff_output = run_git_output(
         &worktree_root,
-        &["diff", "--binary", "--full-index", "--", "."],
+        &["diff", "HEAD", "--binary", "--full-index", "--", "."],
     )?;
     if !diff_output.status.success() {
-        return Err(git_output_err("git diff", &diff_output.stderr));
+        return Err(git_output_err("git diff HEAD", &diff_output.stderr));
     }
-    if diff_output.stdout.is_empty() {
-        return Err("delegation worktree has no patch to apply".to_string());
+    if !diff_output.stdout.is_empty() {
+        apply_patch_to_worktree(root, &diff_output.stdout)?;
     }
-    apply_patch_to_worktree(root, &diff_output.stdout)?;
+    copy_untracked_delegation_files(
+        Path::new(&worktree_root),
+        Path::new(root),
+        &untracked_files,
+    )?;
 
     Ok(WorkspaceApplyDelegationWorktreeOutput { changed_files })
 }
@@ -2145,6 +2238,51 @@ mod editor_workspace_file_tests {
             outside.to_str().expect("utf-8 outside path"),
         )
         .is_err());
+    }
+
+    #[test]
+    fn copy_untracked_delegation_files_copies_nested_files() {
+        let parent = TestDir::new("delegation-parent");
+        let child = TestDir::new("delegation-child");
+        let migration = "apps/api/prisma/migrations/20260703120000_add_flag/migration.sql";
+        let source_path = child.path.join(migration);
+        fs::create_dir_all(source_path.parent().expect("migration parent"))
+            .expect("create migration dir");
+        fs::write(&source_path, "alter table users add column flag boolean;\n")
+            .expect("write migration");
+
+        copy_untracked_delegation_files(&child.path, &parent.path, &[migration.to_string()])
+            .expect("copy untracked migration");
+
+        assert_eq!(
+            fs::read_to_string(parent.path.join(migration)).expect("read copied migration"),
+            "alter table users add column flag boolean;\n",
+        );
+    }
+
+    #[test]
+    fn copy_untracked_delegation_files_refuses_existing_destination() {
+        let parent = TestDir::new("delegation-parent-existing");
+        let child = TestDir::new("delegation-child-existing");
+        let relative_path = "db/migrations/001.sql";
+        let source_path = child.path.join(relative_path);
+        let destination_path = parent.path.join(relative_path);
+        fs::create_dir_all(source_path.parent().expect("source parent")).expect("source dir");
+        fs::create_dir_all(destination_path.parent().expect("destination parent"))
+            .expect("destination dir");
+        fs::write(&source_path, "select 1;\n").expect("write source");
+        fs::write(&destination_path, "select 0;\n").expect("write destination");
+
+        assert!(copy_untracked_delegation_files(
+            &child.path,
+            &parent.path,
+            &[relative_path.to_string()],
+        )
+        .is_err());
+        assert_eq!(
+            fs::read_to_string(destination_path).expect("read destination"),
+            "select 0;\n",
+        );
     }
 
     #[test]

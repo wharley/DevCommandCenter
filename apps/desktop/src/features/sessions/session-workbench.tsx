@@ -52,7 +52,10 @@ type SessionWorkbenchProps = {
 	onCloseSession: (sessionId: string) => void;
 	onRestoreSession: (sessionId: string) => void;
 	onOpenSessionSearch: () => void;
-	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
+	onSubmitPrompt: (
+		turn: ComposerSubmittedTurn,
+		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
+	) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	onDelegate: (request: ManualDelegationRequest) => Promise<void>;

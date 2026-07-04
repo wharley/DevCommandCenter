@@ -1528,7 +1528,10 @@ export function WorkspaceInspectorSidebar({
 	);
 
 	const handleApplyDelegation = useCallback(
-		async (delegation: Delegation) => {
+		async (
+			delegation: Delegation,
+			options?: { onApplied?: () => void },
+		) => {
 			const root = workspacePath?.trim();
 			if (!root) {
 				toast.error(t("inspector.delegations.applyMissingWorkspace"));
@@ -1546,6 +1549,7 @@ export function WorkspaceInspectorSidebar({
 					delegationId: delegation.id,
 					summary: delegation.resultSummary,
 				});
+				options?.onApplied?.();
 				await workspaceRemoveDelegationWorktree({
 					workspaceRoot: root,
 					worktreePath,
@@ -1575,7 +1579,10 @@ export function WorkspaceInspectorSidebar({
 	);
 
 	const handleDiscardDelegation = useCallback(
-		async (delegation: Delegation) => {
+		async (
+			delegation: Delegation,
+			options?: { onDiscarded?: () => void },
+		) => {
 			const root = workspacePath?.trim();
 			if (!root) {
 				toast.error(t("inspector.delegations.applyMissingWorkspace"));
@@ -1584,6 +1591,7 @@ export function WorkspaceInspectorSidebar({
 
 			try {
 				const worktreePath = await resolveDelegationWorktreePath(delegation);
+				options?.onDiscarded?.();
 				await workspaceRemoveDelegationWorktree({
 					workspaceRoot: root,
 					worktreePath,
@@ -1673,6 +1681,7 @@ export function WorkspaceInspectorSidebar({
 				name: filePath.split("/").pop() ?? filePath,
 				status: "M",
 				workspaceRootOverride,
+				targetSessionId: delegation.childSessionId ?? null,
 				baseBranch: null,
 			});
 			return true;
@@ -2710,15 +2719,18 @@ export function WorkspaceInspectorSidebar({
 											onClick={() => {
 												void handleApplyDelegation(
 													activeDelegationReview.delegation,
-												).then(() => {
-													setDelegationReviewRoot(null);
-													onSelectPreview(null);
-													if (activeDelegationReview.fromChildSession) {
-														onSelectSession(
-															activeDelegationReview.delegation.parentSessionId,
-														);
-													}
-												});
+													{
+														onApplied: () => {
+															setDelegationReviewRoot(null);
+															onSelectPreview(null);
+															if (activeDelegationReview.fromChildSession) {
+																onSelectSession(
+																	activeDelegationReview.delegation.parentSessionId,
+																);
+															}
+														},
+													},
+												);
 											}}
 										>
 											{t("inspector.delegations.applyShort")}
@@ -2731,15 +2743,18 @@ export function WorkspaceInspectorSidebar({
 											onClick={() => {
 												void handleDiscardDelegation(
 													activeDelegationReview.delegation,
-												).then(() => {
-													setDelegationReviewRoot(null);
-													onSelectPreview(null);
-													if (activeDelegationReview.fromChildSession) {
-														onSelectSession(
-															activeDelegationReview.delegation.parentSessionId,
-														);
-													}
-												});
+													{
+														onDiscarded: () => {
+															setDelegationReviewRoot(null);
+															onSelectPreview(null);
+															if (activeDelegationReview.fromChildSession) {
+																onSelectSession(
+																	activeDelegationReview.delegation.parentSessionId,
+																);
+															}
+														},
+													},
+												);
 											}}
 										>
 											{t("inspector.delegations.discardShort")}
@@ -2786,6 +2801,10 @@ export function WorkspaceInspectorSidebar({
 									onSelectPreview={onSelectPreview}
 									onPrefillComposer={onPrefillComposer}
 									reviewCommentsByPath={reviewCommentsByPath}
+									targetSessionId={
+										activeDelegationReview?.delegation.childSessionId ??
+										(isSessionWorktreeView ? sessionId : null)
+									}
 								/>
 							</div>
 						</div>

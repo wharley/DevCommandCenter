@@ -1994,19 +1994,44 @@ export default function App() {
 
 	const handleSubmitPrompt = useCallback(async (
 		turn: ComposerSubmittedTurn,
-		options?: { forceNewSession?: boolean },
+		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
 	) => {
 		const trimmedPrompt = turn.rawPrompt.trim();
 		if (trimmedPrompt.length === 0) {
 			return;
 		}
-		if (selectedProviderBlockReason) {
-			toast.error(selectedProviderBlockReason);
+
+		const targetSessionId = options?.targetSessionId ?? null;
+		const targetSessionSummary =
+			targetSessionId && !options?.forceNewSession
+				? workspaceSessions.find(
+						(summary) => summary.session.id === targetSessionId,
+					) ?? null
+				: null;
+		if (targetSessionId && !options?.forceNewSession && !targetSessionSummary) {
+			toast.error(t("inspector.delegations.applyMissingChild"));
 			return;
 		}
-
-		let currentSession = selectedSessionSnapshot;
-		let currentSessionId = selectedSessionId;
+		const targetSessionProvider =
+			targetSessionSummary != null
+				? providerChoices.find(
+						(provider) => provider.id === targetSessionSummary.session.providerId,
+					) ?? null
+				: null;
+		const targetProviderBlockReason = targetSessionProvider
+			? getProviderUnhealthyReason(targetSessionProvider)
+			: null;
+		const effectiveProviderBlockReason =
+			targetProviderBlockReason ?? (targetSessionSummary ? null : selectedProviderBlockReason);
+		if (effectiveProviderBlockReason) {
+			toast.error(effectiveProviderBlockReason);
+			return;
+		}
+		let currentSession =
+			targetSessionSummary != null
+				? workspaceSessionSnapshotFromSummary(targetSessionSummary)
+				: selectedSessionSnapshot;
+		let currentSessionId = targetSessionSummary?.session.id ?? selectedSessionId;
 
 		try {
 			// `forceNewSession` always spins up a fresh thread (used by the diff
@@ -2071,24 +2096,35 @@ export default function App() {
 				return;
 			}
 
-				setPendingPrompt(trimmedPrompt);
-				setPendingPromptSessionId(currentSessionId);
-				const toolInstructions = resolveDelegateTaskToolInstructions({
-					provider: selectedProvider,
-					providers: providerChoices,
-				});
+			const turnProvider = targetSessionProvider ?? selectedProvider;
+			const turnModel =
+				targetSessionSummary != null
+					? targetSessionSummary.session.model
+					: (selectedModel?.id ?? null);
+			const turnProviderRuntime =
+				targetSessionSummary?.session.providerRuntime ?? selectedProviderRuntime;
 
-				const result = await sendTurn({
-					sessionId: currentSessionId,
-					prompt: trimmedPrompt,
-					toolInstructions,
-					providerId: selectedProvider?.id ?? null,
-					model: selectedModel?.id ?? null,
-					providerRuntime: selectedProviderRuntime,
-					planMode: turn.envelope.planMode,
-					effort: turn.envelope.effort,
-					fastMode: turn.envelope.fastMode,
-				});
+			if (targetSessionSummary) {
+				setSelectedSessionId(currentSessionId);
+			}
+			setPendingPrompt(trimmedPrompt);
+			setPendingPromptSessionId(currentSessionId);
+			const toolInstructions = resolveDelegateTaskToolInstructions({
+				provider: turnProvider,
+				providers: providerChoices,
+			});
+
+			const result = await sendTurn({
+				sessionId: currentSessionId,
+				prompt: trimmedPrompt,
+				toolInstructions,
+				providerId: turnProvider?.id ?? null,
+				model: turnModel,
+				providerRuntime: turnProviderRuntime,
+				planMode: turn.envelope.planMode,
+				effort: turn.envelope.effort,
+				fastMode: turn.envelope.fastMode,
+			});
 
 			const resultSnapshot: RuntimeSessionSnapshot = {
 				sessionId: result.session.id,
@@ -2255,6 +2291,8 @@ export default function App() {
 		selectedLocalWorkspacePath,
 		selectedWorkspace,
 		sessionEvents,
+		t,
+		workspaceSessions,
 	]);
 
 	const handleGeneratePlanFromSpec = useCallback(
