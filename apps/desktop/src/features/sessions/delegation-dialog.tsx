@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type {
 	DelegationContextPolicy,
 	DelegationMode,
 	ProviderCatalog,
 } from "@dcc/contracts";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -26,15 +28,14 @@ export type ManualDelegationRequest = {
 	instruction: string;
 };
 
+type DelegationDialogMode = ManualDelegationRequest["mode"];
+
 type ContextPolicyKey = "minimal" | "review_current_diff" | "full_reanchor";
 
-const CONTEXT_POLICY_OPTIONS: Array<{
-	value: ContextPolicyKey;
-	label: string;
-}> = [
-	{ value: "review_current_diff", label: "Current diff" },
-	{ value: "full_reanchor", label: "Full reanchor" },
-	{ value: "minimal", label: "Minimal" },
+const CONTEXT_POLICY_KEYS: ContextPolicyKey[] = [
+	"review_current_diff",
+	"full_reanchor",
+	"minimal",
 ];
 
 function contextPolicyFromKey(key: ContextPolicyKey): DelegationContextPolicy {
@@ -61,6 +62,7 @@ export function DelegationDialog({
 	onOpenChange: (open: boolean) => void;
 	onSubmit: (request: ManualDelegationRequest) => Promise<void>;
 }) {
+	const { t } = useTranslation("common");
 	const delegationProviders = useMemo(
 		() =>
 			providers.filter(
@@ -77,8 +79,7 @@ export function DelegationDialog({
 		delegationProviders[0] ??
 		null;
 	const [modelId, setModelId] = useState("");
-	const [mode, setMode] =
-		useState<Extract<DelegationMode, "review" | "explain" | "implement">>("review");
+	const [mode, setMode] = useState<DelegationDialogMode>("review");
 	const [contextPolicy, setContextPolicy] =
 		useState<ContextPolicyKey>("review_current_diff");
 	const [instruction, setInstruction] = useState("");
@@ -187,78 +188,13 @@ export function DelegationDialog({
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="sm:max-w-[34rem]">
 				<DialogHeader>
-					<DialogTitle>Delegate</DialogTitle>
-					<DialogDescription>
-						Send read-only review or explanation work to another provider.
-					</DialogDescription>
+					<DialogTitle>{t("delegation.dialog.title")}</DialogTitle>
+					<DialogDescription>{t("delegation.dialog.description")}</DialogDescription>
 				</DialogHeader>
 
 				<div className="grid gap-4">
 					<div className="grid gap-2">
-						<Label htmlFor="delegate-provider">Provider</Label>
-						<select
-							id="delegate-provider"
-							value={providerId}
-							onChange={(event) => handleProviderChange(event.target.value)}
-							className="h-9 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-							disabled={isSubmitting || delegationProviders.length === 0}
-						>
-							{delegationProviders.map((provider) => (
-								<option key={provider.id} value={provider.id}>
-									{provider.label}
-								</option>
-							))}
-						</select>
-					</div>
-
-					{multiTargetMode ? (
-						<div className="grid gap-2">
-							<Label>Targets</Label>
-							<div className="grid gap-1.5 rounded-md border border-border/60 bg-muted/10 p-2">
-								{delegationProviders.map((provider) => (
-									<label
-										key={provider.id}
-										className="flex min-h-8 items-center gap-2 rounded-sm px-1.5 text-sm"
-									>
-										<input
-											type="checkbox"
-											className="size-4 accent-primary"
-											checked={selectedTargetProviderIds.includes(provider.id)}
-											disabled={isSubmitting}
-											onChange={(event) =>
-												toggleTargetProvider(provider.id, event.target.checked)
-											}
-										/>
-										<span className="min-w-0 flex-1 truncate">{provider.label}</span>
-									</label>
-								))}
-							</div>
-							<p className="text-[11.5px] leading-4 text-muted-foreground">
-								Selected model applies to the primary provider. Other targets use
-								their recommended model.
-							</p>
-						</div>
-					) : null}
-
-					<div className="grid gap-2">
-						<Label htmlFor="delegate-model">Model</Label>
-						<select
-							id="delegate-model"
-							value={modelId}
-							onChange={(event) => setModelId(event.target.value)}
-							className="h-9 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-							disabled={isSubmitting || !selectedProvider?.models.length}
-						>
-							{selectedProvider?.models.map((model) => (
-								<option key={model.id} value={model.id}>
-									{model.label}
-								</option>
-							))}
-						</select>
-					</div>
-
-					<div className="grid gap-2">
-						<Label>Mode</Label>
+						<Label>{t("delegation.dialog.mode")}</Label>
 						<ToggleGroup
 							type="single"
 							value={mode}
@@ -275,28 +211,100 @@ export function DelegationDialog({
 							className="justify-start"
 						>
 							<ToggleGroupItem className="h-8 px-3" value="review">
-								Review
+								{t("delegation.dialog.modeReview")}
 							</ToggleGroupItem>
 							<ToggleGroupItem className="h-8 px-3" value="explain">
-								Explain
+								{t("delegation.dialog.modeExplain")}
 							</ToggleGroupItem>
 							<ToggleGroupItem
 								className="h-8 px-3"
 								value="implement"
 								disabled={!selectedProvider?.capabilities.supportsEditDelegation}
 							>
-								Implement
+								{t("delegation.dialog.modeImplement")}
 							</ToggleGroupItem>
 						</ToggleGroup>
-						{mode === "implement" ? (
-							<p className="text-[11.5px] leading-4 text-muted-foreground">
-								Allows file edits. Result must be reviewed in Inspector before it is marked complete.
-							</p>
-						) : null}
+						<p className="text-[11.5px] leading-4 text-muted-foreground">
+							{t(`delegation.dialog.modeHint.${mode}`)}
+						</p>
 					</div>
 
 					<div className="grid gap-2">
-						<Label htmlFor="delegate-context">Context</Label>
+						<Label htmlFor="delegate-provider">
+							{multiTargetMode
+								? t("delegation.dialog.primaryProvider")
+								: t("delegation.dialog.provider")}
+						</Label>
+						<select
+							id="delegate-provider"
+							value={providerId}
+							onChange={(event) => handleProviderChange(event.target.value)}
+							className="h-9 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+							disabled={isSubmitting || delegationProviders.length === 0}
+						>
+							{delegationProviders.map((provider) => (
+								<option key={provider.id} value={provider.id}>
+									{provider.label}
+								</option>
+							))}
+						</select>
+					</div>
+
+					{multiTargetMode && delegationProviders.length > 1 ? (
+						<div className="grid gap-2">
+							<Label>{t("delegation.dialog.targets")}</Label>
+							<div className="grid gap-1.5 rounded-md border border-border/60 bg-muted/10 p-2">
+								{delegationProviders.map((provider) => (
+									<label
+										key={provider.id}
+										className="flex min-h-8 items-center gap-2 rounded-sm px-1.5 text-sm"
+									>
+										<input
+											type="checkbox"
+											className="size-4 accent-primary"
+											checked={selectedTargetProviderIds.includes(provider.id)}
+											disabled={isSubmitting}
+											onChange={(event) =>
+												toggleTargetProvider(provider.id, event.target.checked)
+											}
+										/>
+										<span className="min-w-0 flex-1 truncate">{provider.label}</span>
+										{provider.id === selectedProvider?.id ? (
+											<Badge
+												variant="outline"
+												className="h-5 shrink-0 px-1.5 text-[10px] font-normal text-muted-foreground"
+											>
+												{t("delegation.dialog.primaryBadge")}
+											</Badge>
+										) : null}
+									</label>
+								))}
+							</div>
+							<p className="text-[11.5px] leading-4 text-muted-foreground">
+								{t("delegation.dialog.targetsHint")}
+							</p>
+						</div>
+					) : null}
+
+					<div className="grid gap-2">
+						<Label htmlFor="delegate-model">{t("delegation.dialog.model")}</Label>
+						<select
+							id="delegate-model"
+							value={modelId}
+							onChange={(event) => setModelId(event.target.value)}
+							className="h-9 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+							disabled={isSubmitting || !selectedProvider?.models.length}
+						>
+							{selectedProvider?.models.map((model) => (
+								<option key={model.id} value={model.id}>
+									{model.label}
+								</option>
+							))}
+						</select>
+					</div>
+
+					<div className="grid gap-2">
+						<Label htmlFor="delegate-context">{t("delegation.dialog.context")}</Label>
 						<select
 							id="delegate-context"
 							value={contextPolicy}
@@ -306,21 +314,26 @@ export function DelegationDialog({
 							className="h-9 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 							disabled={isSubmitting}
 						>
-							{CONTEXT_POLICY_OPTIONS.map((option) => (
-								<option key={option.value} value={option.value}>
-									{option.label}
+							{CONTEXT_POLICY_KEYS.map((key) => (
+								<option key={key} value={key}>
+									{t(`delegation.dialog.contextOptions.${key}`)}
 								</option>
 							))}
 						</select>
+						<p className="text-[11.5px] leading-4 text-muted-foreground">
+							{t(`delegation.dialog.contextHint.${contextPolicy}`)}
+						</p>
 					</div>
 
 					<div className="grid gap-2">
-						<Label htmlFor="delegate-instruction">Instruction</Label>
+						<Label htmlFor="delegate-instruction">
+							{t("delegation.dialog.instruction")}
+						</Label>
 						<Textarea
 							id="delegate-instruction"
 							value={instruction}
 							onChange={(event) => setInstruction(event.target.value)}
-							placeholder="Review the current diff for regressions and missing tests."
+							placeholder={t("delegation.dialog.instructionPlaceholder")}
 							disabled={isSubmitting}
 							className="min-h-28"
 						/>
@@ -334,10 +347,16 @@ export function DelegationDialog({
 						onClick={() => onOpenChange(false)}
 						disabled={isSubmitting}
 					>
-						Cancel
+						{t("delegation.dialog.cancel")}
 					</Button>
 					<Button type="button" onClick={handleSubmit} disabled={submitDisabled}>
-						{isSubmitting ? "Delegating..." : "Delegate"}
+						{isSubmitting
+							? t("delegation.dialog.submitting")
+							: multiTargetMode && selectedTargetProviderIds.length > 1
+								? t("delegation.dialog.submitFanOut", {
+										count: selectedTargetProviderIds.length,
+									})
+								: t("delegation.dialog.submit")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

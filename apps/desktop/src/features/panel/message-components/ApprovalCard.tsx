@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Ban, CheckCircle2, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { respondToPermissionRequest } from "@/lib/session-api";
@@ -44,8 +45,16 @@ export function ApprovalCard({
 	isLive,
 	onDelegateTaskApprove,
 }: ApprovalCardProps) {
+	const { t } = useTranslation("common");
 	const [submitting, setSubmitting] = useState<"allow" | "deny" | null>(null);
 	const resolved = !isLive && typeof behavior === "string" && behavior.length > 0;
+	const delegationRequest = useMemo(
+		() =>
+			isDelegateTaskTool(toolName)
+				? parseAgentInitiatedDelegationRequest({ command, description })
+				: null,
+		[command, description, toolName],
+	);
 
 	async function submit(nextBehavior: "allow" | "deny") {
 		if (!sessionId) {
@@ -90,7 +99,8 @@ export function ApprovalCard({
 						Approval
 					</p>
 					<p className="mt-1 text-sm text-foreground">
-						{title ?? toolName}
+						{title ??
+							(delegationRequest ? t("delegation.approval.title") : toolName)}
 					</p>
 				</div>
 				{resolved ? (
@@ -105,34 +115,89 @@ export function ApprovalCard({
 				) : null}
 			</div>
 
-			{description ? (
+			{description && !delegationRequest ? (
 				<p className="mb-3 text-sm text-muted-foreground">{description}</p>
 			) : null}
 
-			<div className="space-y-2">
-				<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-					Tool
-				</p>
-				<p className="text-sm text-foreground">{toolName}</p>
-				{command ? (
+			{delegationRequest ? (
+				<div className="space-y-3">
 					<div>
 						<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-							Command
+							{t("delegation.approval.instruction")}
 						</p>
-						<pre className="mt-1 overflow-x-auto rounded-xl bg-background/70 px-3 py-2 text-xs text-foreground">
-							<code>{command}</code>
-						</pre>
-					</div>
-				) : null}
-				{file ? (
-					<div>
-						<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-							File
+						<p className="mt-1 whitespace-pre-wrap break-words text-sm text-foreground">
+							{delegationRequest.instruction}
 						</p>
-						<p className="mt-1 break-all font-mono text-xs text-foreground">{file}</p>
 					</div>
-				) : null}
-			</div>
+					<div className="grid gap-3 sm:grid-cols-3">
+						<div>
+							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+								{t("delegation.approval.mode")}
+							</p>
+							<p className="mt-1 text-sm text-foreground">
+								{t(`inspector.delegations.mode.${delegationRequest.mode}`, {
+									defaultValue: delegationRequest.mode,
+								})}
+							</p>
+						</div>
+						<div>
+							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+								{t("delegation.approval.target")}
+							</p>
+							<p className="mt-1 text-sm text-foreground">
+								{delegationRequest.targetProviderId ??
+									t("delegation.approval.targetAuto")}
+							</p>
+						</div>
+						<div>
+							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+								{t("delegation.approval.context")}
+							</p>
+							<p className="mt-1 text-sm text-foreground">
+								{t(
+									`delegation.dialog.contextOptions.${delegationRequest.contextPolicy.type}`,
+									{ defaultValue: delegationRequest.contextPolicy.type },
+								)}
+							</p>
+						</div>
+					</div>
+					{command ? (
+						<details>
+							<summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+								{t("delegation.approval.payload")}
+							</summary>
+							<pre className="mt-1 overflow-x-auto rounded-xl bg-background/70 px-3 py-2 text-xs text-foreground">
+								<code>{command}</code>
+							</pre>
+						</details>
+					) : null}
+				</div>
+			) : (
+				<div className="space-y-2">
+					<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+						Tool
+					</p>
+					<p className="text-sm text-foreground">{toolName}</p>
+					{command ? (
+						<div>
+							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+								Command
+							</p>
+							<pre className="mt-1 overflow-x-auto rounded-xl bg-background/70 px-3 py-2 text-xs text-foreground">
+								<code>{command}</code>
+							</pre>
+						</div>
+					) : null}
+					{file ? (
+						<div>
+							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+								File
+							</p>
+							<p className="mt-1 break-all font-mono text-xs text-foreground">{file}</p>
+						</div>
+					) : null}
+				</div>
+			)}
 
 			{isLive ? (
 				<div className="mt-4 flex items-center justify-end gap-2">

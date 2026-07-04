@@ -24,6 +24,8 @@ type WorkspaceCommandPaletteProps = {
 	onOpenOnboarding: () => void;
 	onOpenShortcuts: () => void;
 	onOpenSkills: () => void;
+	/** Present only when the active workspace has a session to delegate from. */
+	onDelegate?: () => void;
 };
 
 export function WorkspaceCommandPalette({
@@ -38,6 +40,7 @@ export function WorkspaceCommandPalette({
 	onOpenOnboarding,
 	onOpenShortcuts,
 	onOpenSkills,
+	onDelegate,
 }: WorkspaceCommandPaletteProps) {
 	const { t } = useTranslation("common");
 	const groupedWorkspaces = useMemo(
@@ -92,6 +95,17 @@ export function WorkspaceCommandPalette({
 				))}
 				<CommandSeparator />
 				<CommandGroup heading={t("commandPalette.actions")}>
+					{onDelegate ? (
+						<CommandItem
+							value="delegate agent delegation"
+							onSelect={() => {
+								onOpenChange(false);
+								onDelegate();
+							}}
+						>
+							{t("commandPalette.delegate")}
+						</CommandItem>
+					) : null}
 					<CommandItem
 						value="open project"
 						onSelect={() => {

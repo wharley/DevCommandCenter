@@ -9,6 +9,63 @@
     "inspectorSidebarAria": "Inspector sidebar",
     "resizeInspectorAria": "Resize inspector sidebar"
   },
+  "delegation": {
+    "button": {
+      "label": "Delegate",
+      "tooltip": "Send a scoped task from this session to another agent",
+      "tooltipNoSession": "Start a session first — delegation hands work from the active session to another agent"
+    },
+    "dialog": {
+      "title": "Delegate",
+      "description": "Hand a scoped task to another agent. DCC assembles the context, tracks the child session, and brings the result back here for review.",
+      "mode": "Mode",
+      "modeReview": "Review",
+      "modeExplain": "Explain",
+      "modeImplement": "Implement",
+      "modeHint": {
+        "review": "Read-only. The target reviews the work and reports findings.",
+        "explain": "Read-only. The target explains the code or context to re-anchor the session.",
+        "implement": "Edits files in an isolated worktree. Nothing lands until you review and apply it in the Inspector."
+      },
+      "provider": "Provider",
+      "primaryProvider": "Primary provider",
+      "targets": "Fan-out targets",
+      "targetsHint": "The selected model applies to the primary provider. Other targets use their recommended model.",
+      "primaryBadge": "Primary",
+      "model": "Model",
+      "context": "Context",
+      "contextOptions": {
+        "review_current_diff": "Current diff",
+        "full_reanchor": "Full reanchor",
+        "minimal": "Minimal"
+      },
+      "contextHint": {
+        "review_current_diff": "Sends the instruction plus the current diff and changed files.",
+        "full_reanchor": "Sends a summary of this session plus spec, plan, and diff.",
+        "minimal": "Sends only the instruction and workspace metadata."
+      },
+      "instruction": "Instruction",
+      "instructionPlaceholder": "Review the current diff for regressions and missing tests.",
+      "cancel": "Cancel",
+      "submit": "Delegate",
+      "submitFanOut": "Delegate to {{count}} targets",
+      "submitting": "Delegating..."
+    },
+    "card": {
+      "title": "Delegation",
+      "openChild": "Open child session",
+      "reviewInInspector": "Review in Inspector"
+    },
+    "approval": {
+      "title": "Delegation request",
+      "instruction": "Instruction",
+      "mode": "Mode",
+      "target": "Target provider",
+      "targetAuto": "Chosen by DCC",
+      "context": "Context",
+      "payload": "Raw request"
+    }
+  },
   "sidebar": {
     "title": "Workspaces",
     "archived": "Archived",
@@ -57,6 +114,7 @@
     "switchWorkspace": "Switch workspace",
     "selected": "Selected",
     "actions": "Actions",
+    "delegate": "Delegate to another agent",
     "openProject": "Open project",
     "cloneFromUrl": "Clone from URL",
     "openSettings": "Open settings",
@@ -147,7 +205,23 @@
       "applyMissingChild": "Delegation child session is unavailable.",
       "applyMissingWorktree": "Delegation worktree is unavailable.",
       "markReviewed": "Mark reviewed",
-      "reviewed": "Delegation marked reviewed"
+      "reviewed": "Delegation marked reviewed",
+      "status": {
+        "draft": "Draft",
+        "queued": "Queued",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled",
+        "review_pending": "Review pending"
+      },
+      "mode": {
+        "review": "Review",
+        "explain": "Explain",
+        "implement": "Implement",
+        "test": "Test",
+        "research": "Research"
+      }
     },
     "codeSection": {
       "kicker": "Project",
@@ -690,6 +764,10 @@
       "activity": {
         "title": "Session activity",
         "body": "The Activity tab shows thread events and progress without hiding the workspace."
+      },
+      "delegate": {
+        "title": "Delegate to another agent",
+        "body": "The fork button in the session header hands a scoped task to another provider — review, explain, or implement — and the result comes back as a card in the conversation."
       },
       "spec": {
         "title": "Spec in the inspector",

@@ -7,6 +7,7 @@ import {
 	ChevronRight,
 	Command,
 	GitBranch,
+	GitFork,
 	ListTree,
 	MessageSquare,
 	Rabbit,
@@ -279,7 +280,7 @@ function WizardPanel({
 					) : null}
 
 					{step === "agents" ? (
-						<div className="grid gap-3 sm:grid-cols-3">
+						<div className="grid gap-3 sm:grid-cols-2">
 							<DetailCard
 								title={t("onboarding.agentsCards.activity.title")}
 								body={t("onboarding.agentsCards.activity.body")}
@@ -294,6 +295,11 @@ function WizardPanel({
 								title={t("onboarding.agentsCards.plan.title")}
 								body={t("onboarding.agentsCards.plan.body")}
 								icon={<ListTree className="size-4" />}
+							/>
+							<DetailCard
+								title={t("onboarding.agentsCards.delegate.title")}
+								body={t("onboarding.agentsCards.delegate.body")}
+								icon={<GitFork className="size-4" />}
 							/>
 						</div>
 					) : null}

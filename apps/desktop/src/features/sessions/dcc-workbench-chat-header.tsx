@@ -237,19 +237,32 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 					/>
 					<Tooltip>
 						<TooltipTrigger asChild>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon"
-								className="h-7 w-7 shrink-0 [&_svg]:size-3.5"
-								aria-label="Delegate"
-								onClick={onOpenDelegate}
-								disabled={!sessionSnapshot}
+							{/* Span wrapper keeps the tooltip alive while the button is
+							    disabled (Button sets disabled:pointer-events-none). */}
+							<span
+								className={cn(
+									"inline-flex shrink-0",
+									!sessionSnapshot && "cursor-not-allowed",
+								)}
 							>
-								<GitFork strokeWidth={2} />
-							</Button>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="h-7 w-7 shrink-0 cursor-pointer [&_svg]:size-3.5"
+									aria-label={t("delegation.button.label")}
+									onClick={onOpenDelegate}
+									disabled={!sessionSnapshot}
+								>
+									<GitFork strokeWidth={2} />
+								</Button>
+							</span>
 						</TooltipTrigger>
-						<TooltipContent side="bottom">Delegate</TooltipContent>
+						<TooltipContent side="bottom">
+							{sessionSnapshot
+								? t("delegation.button.tooltip")
+								: t("delegation.button.tooltipNoSession")}
+						</TooltipContent>
 					</Tooltip>
 					<WorkspaceEditorPicker workspacePath={workspacePath} />
 					{onToggleInspector ? (

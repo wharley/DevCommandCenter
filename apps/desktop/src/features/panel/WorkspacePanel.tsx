@@ -151,6 +151,8 @@ type WorkspacePanelProps = {
 	onToggleInspector?: () => void;
 	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
 	onReviewChanges?: () => void;
+	/** Increment to open the Delegate dialog from outside (command palette). */
+	delegateSignal?: number;
 };
 
 export function WorkspacePanel({
@@ -196,6 +198,7 @@ export function WorkspacePanel({
 	inspectorCollapsed,
 	onToggleInspector,
 	onReviewChanges,
+	delegateSignal,
 }: WorkspacePanelProps) {
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
@@ -206,6 +209,15 @@ export function WorkspacePanel({
 	const [delegateOpen, setDelegateOpen] = useState(false);
 	const [delegateSubmitting, setDelegateSubmitting] = useState(false);
 	const reviewIdRef = useRef(0);
+	const lastDelegateSignalRef = useRef(delegateSignal ?? 0);
+
+	useEffect(() => {
+		const signal = delegateSignal ?? 0;
+		if (signal > lastDelegateSignalRef.current) {
+			lastDelegateSignalRef.current = signal;
+			setDelegateOpen(true);
+		}
+	}, [delegateSignal]);
 
 	useEffect(() => {
 		if (externalComposerPrefill) {
@@ -456,6 +468,8 @@ export function WorkspacePanel({
 					lastTurnState={lastTurnState}
 					pendingPrompt={pendingPrompt}
 					workspacePath={workspacePath}
+					workspaceId={workspaceId}
+					providers={providerChoices}
 					planMessageId={latestPlanMessage?.id ?? null}
 					sessionId={effectiveSessionId}
 					activeMissionSpecRelativePath={activeMissionSpecRelativePath}

@@ -779,6 +779,7 @@ export default function App() {
 	} = useWorkspacesPanel(workspacesFromBackend);
 	const queryClient = useQueryClient();
 	const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+	const [delegateSignal, setDelegateSignal] = useState(0);
 	const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
 	const [workspaceCreationMode, setWorkspaceCreationMode] = useState<"open" | "clone">(
 		"open",
@@ -2995,6 +2996,11 @@ export default function App() {
 								onOpenOnboarding={() => setIsOnboardingOpen(true)}
 								onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
 								onOpenSkills={() => setIsSkillsOpen(true)}
+								onDelegate={
+									selectedSessionSnapshot
+										? () => setDelegateSignal((signal) => signal + 1)
+										: undefined
+								}
 							/>
 							<SessionSearchDialog
 								open={isSessionSearchOpen}
@@ -3070,6 +3076,7 @@ export default function App() {
 									inspectorCollapsed={inspectorCollapsed}
 									onToggleInspector={toggleGitInspector}
 									onReviewChanges={openGitInspector}
+									delegateSignal={delegateSignal}
 									composerPrefill={
 										workspaceComposerPrefill?.workspaceId === selectedWorkspace.id
 											? {

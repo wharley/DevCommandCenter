@@ -139,6 +139,7 @@ import { setupReportDescription } from "@/features/workspaces/workspace-setup-re
 import type { ForgeCliProvider } from "@dcc/contracts";
 import { cn } from "@/lib/utils";
 import { approveDelegation, cancelDelegation, listDelegations } from "@/lib/delegation-api";
+import { delegationStatusClass } from "@/features/sessions/delegation-status";
 
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
@@ -305,23 +306,6 @@ function ForgeAccountAvatar({
 			{forgeIdentityInitials(label)}
 		</span>
 	);
-}
-
-function delegationStatusClass(status: Delegation["status"]) {
-	switch (status) {
-		case "completed":
-			return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-		case "failed":
-			return "border-destructive/30 bg-destructive/10 text-destructive";
-		case "cancelled":
-			return "border-muted-foreground/30 bg-muted/30 text-muted-foreground";
-		case "running":
-			return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
-		case "review_pending":
-			return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-		default:
-			return "border-border bg-muted/30 text-muted-foreground";
-	}
 }
 
 function providerLabelForDelegation(
@@ -498,6 +482,13 @@ function DelegationsSection({
 							providerCatalog,
 							delegation.targetProviderId,
 						);
+						const statusLabel = t(
+							`inspector.delegations.status.${delegation.status}`,
+							{ defaultValue: delegation.status },
+						);
+						const modeLabel = t(`inspector.delegations.mode.${delegation.mode}`, {
+							defaultValue: delegation.mode,
+						});
 						return (
 							<div
 								key={delegation.id}
@@ -511,10 +502,16 @@ function DelegationsSection({
 											delegationStatusClass(delegation.status),
 										)}
 									>
-										{delegation.status}
+										{delegation.status === "running" ? (
+											<span
+												aria-hidden
+												className="mr-1 inline-block size-1.5 animate-pulse rounded-full bg-current"
+											/>
+										) : null}
+										{statusLabel}
 									</Badge>
 									<p className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-foreground">
-										{delegation.mode} · {providerLabel}
+										{modeLabel} · {providerLabel}
 									</p>
 								</div>
 								<p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">

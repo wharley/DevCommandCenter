@@ -57,6 +57,14 @@ export type WorkspaceMessageAnnotation =
 			createdAt?: string;
 	  };
 
+export type WorkspaceMessageDelegation = {
+	id: string;
+	phase: "requested" | "running" | "completed" | "failed" | "cancelled";
+	childSessionId?: string | null;
+	summary?: string | null;
+	reason?: string | null;
+};
+
 export type WorkspaceMessage = {
 	id: string;
 	role: WorkspaceMessageRole;
@@ -73,6 +81,7 @@ export type WorkspaceMessage = {
 		sessionId: string;
 		label: string;
 	};
+	delegation?: WorkspaceMessageDelegation;
 };
 
 type TimelineEvent = {
@@ -652,6 +661,7 @@ export function projectWorkspaceMessages(
 ): WorkspaceMessage[] {
 	const messages: WorkspaceMessage[] = [];
 	const assistantBuckets = new Map<string, WorkspaceMessage>();
+	const delegationBuckets = new Map<string, WorkspaceMessage>();
 	const completedTurns = new Set<string>();
 	const abortedTurns = new Map<string, string>();
 	const turnStartedAtByTurnId = new Map<string, string>();
@@ -954,23 +964,79 @@ export function projectWorkspaceMessages(
 		}
 
 		if ("sessionDelegationRequested" in event || "sessionDelegationStarted" in event || "sessionDelegationDelta" in event || "sessionDelegationCompleted" in event || "sessionDelegationFailed" in event || "sessionDelegationCancelled" in event) {
-			const action =
-				"sessionDelegationStarted" in event &&
-				event.sessionDelegationStarted?.child_session_id
-					? {
-							type: "open-session" as const,
-							sessionId: event.sessionDelegationStarted.child_session_id,
-							label: "Open child session",
-						}
-					: undefined;
-			messages.push({
-				id: `${eventLabel(event)}-${messages.length}`,
-				role: "system",
-				label: eventLabel(event),
-				content: eventSummary(event),
-				createdAt: occurredAt,
-				action,
-			});
+			const delegationId =
+				("sessionDelegationRequested" in event &&
+					event.sessionDelegationRequested?.delegation_id) ||
+				("sessionDelegationStarted" in event &&
+					event.sessionDelegationStarted?.delegation_id) ||
+				("sessionDelegationDelta" in event &&
+					event.sessionDelegationDelta?.delegation_id) ||
+				("sessionDelegationCompleted" in event &&
+					event.sessionDelegationCompleted?.delegation_id) ||
+				("sessionDelegationFailed" in event &&
+					event.sessionDelegationFailed?.delegation_id) ||
+				("sessionDelegationCancelled" in event &&
+					event.sessionDelegationCancelled?.delegation_id) ||
+				null;
+			if (!delegationId) {
+				continue;
+			}
+
+			let message = delegationBuckets.get(delegationId);
+			if (!message) {
+				message = {
+					id: `delegation-${delegationId}`,
+					role: "system",
+					label: "delegation",
+					content: eventSummary(event),
+					createdAt: occurredAt,
+					delegation: {
+						id: delegationId,
+						phase: "requested",
+					},
+				};
+				delegationBuckets.set(delegationId, message);
+				messages.push(message);
+			}
+			const delegation = message.delegation;
+			if (!delegation) {
+				continue;
+			}
+
+			if ("sessionDelegationStarted" in event && event.sessionDelegationStarted) {
+				delegation.phase = "running";
+				delegation.childSessionId =
+					event.sessionDelegationStarted.child_session_id ??
+					delegation.childSessionId;
+				if (delegation.childSessionId) {
+					message.action = {
+						type: "open-session",
+						sessionId: delegation.childSessionId,
+						label: "Open child session",
+					};
+				}
+				message.content = eventSummary(event);
+			} else if ("sessionDelegationDelta" in event && event.sessionDelegationDelta) {
+				message.content = event.sessionDelegationDelta.content;
+			} else if (
+				"sessionDelegationCompleted" in event &&
+				event.sessionDelegationCompleted
+			) {
+				delegation.phase = "completed";
+				delegation.summary = event.sessionDelegationCompleted.summary ?? null;
+				message.content = eventSummary(event);
+			} else if ("sessionDelegationFailed" in event && event.sessionDelegationFailed) {
+				delegation.phase = "failed";
+				delegation.reason = event.sessionDelegationFailed.reason ?? null;
+				message.content = eventSummary(event);
+			} else if (
+				"sessionDelegationCancelled" in event &&
+				event.sessionDelegationCancelled
+			) {
+				delegation.phase = "cancelled";
+				delegation.reason = event.sessionDelegationCancelled.reason ?? null;
+				message.content = eventSummary(event);
+			}
 			continue;
 		}
 

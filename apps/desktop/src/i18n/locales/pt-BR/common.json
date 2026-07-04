@@ -9,6 +9,63 @@
     "inspectorSidebarAria": "Barra lateral do inspetor",
     "resizeInspectorAria": "Redimensionar inspetor"
   },
+  "delegation": {
+    "button": {
+      "label": "Delegar",
+      "tooltip": "Envie uma tarefa delimitada desta sessão para outro agente",
+      "tooltipNoSession": "Inicie uma sessão primeiro — a delegação envia trabalho da sessão ativa para outro agente"
+    },
+    "dialog": {
+      "title": "Delegar",
+      "description": "Envie uma tarefa delimitada para outro agente. O DCC monta o contexto, acompanha a sessão filha e traz o resultado de volta para revisão.",
+      "mode": "Modo",
+      "modeReview": "Review",
+      "modeExplain": "Explicar",
+      "modeImplement": "Implementar",
+      "modeHint": {
+        "review": "Somente leitura. O alvo revisa o trabalho e reporta findings.",
+        "explain": "Somente leitura. O alvo explica o código ou contexto para reancorar a sessão.",
+        "implement": "Edita arquivos em um worktree isolado. Nada é aplicado até você revisar e aplicar no Inspector."
+      },
+      "provider": "Provider",
+      "primaryProvider": "Provider primário",
+      "targets": "Alvos do fan-out",
+      "targetsHint": "O modelo selecionado vale para o provider primário. Os demais alvos usam o modelo recomendado.",
+      "primaryBadge": "Primário",
+      "model": "Modelo",
+      "context": "Contexto",
+      "contextOptions": {
+        "review_current_diff": "Diff atual",
+        "full_reanchor": "Reancoragem completa",
+        "minimal": "Mínimo"
+      },
+      "contextHint": {
+        "review_current_diff": "Envia a instrução com o diff atual e os arquivos alterados.",
+        "full_reanchor": "Envia um resumo desta sessão com spec, plano e diff.",
+        "minimal": "Envia apenas a instrução e os metadados do workspace."
+      },
+      "instruction": "Instrução",
+      "instructionPlaceholder": "Revise o diff atual buscando regressões e testes faltando.",
+      "cancel": "Cancelar",
+      "submit": "Delegar",
+      "submitFanOut": "Delegar para {{count}} alvos",
+      "submitting": "Delegando..."
+    },
+    "card": {
+      "title": "Delegação",
+      "openChild": "Abrir sessão filha",
+      "reviewInInspector": "Revisar no Inspector"
+    },
+    "approval": {
+      "title": "Pedido de delegação",
+      "instruction": "Instrução",
+      "mode": "Modo",
+      "target": "Provider alvo",
+      "targetAuto": "Escolhido pelo DCC",
+      "context": "Contexto",
+      "payload": "Payload bruto"
+    }
+  },
   "sidebar": {
     "title": "Workspaces",
     "archived": "Arquivados",
@@ -57,6 +114,7 @@
     "switchWorkspace": "Trocar workspace",
     "selected": "Selecionado",
     "actions": "Ações",
+    "delegate": "Delegar para outro agente",
     "openProject": "Abrir projeto",
     "cloneFromUrl": "Clone from URL",
     "openSettings": "Abrir configurações",
@@ -147,7 +205,23 @@
       "applyMissingChild": "Sessão filha da delegação indisponível.",
       "applyMissingWorktree": "Worktree da delegação indisponível.",
       "markReviewed": "Marcar revisada",
-      "reviewed": "Delegação marcada como revisada"
+      "reviewed": "Delegação marcada como revisada",
+      "status": {
+        "draft": "Rascunho",
+        "queued": "Na fila",
+        "running": "Executando",
+        "completed": "Concluída",
+        "failed": "Falhou",
+        "cancelled": "Cancelada",
+        "review_pending": "Aguardando revisão"
+      },
+      "mode": {
+        "review": "Review",
+        "explain": "Explicar",
+        "implement": "Implementar",
+        "test": "Teste",
+        "research": "Pesquisa"
+      }
     },
     "codeSection": {
       "kicker": "Projeto",
@@ -690,6 +764,10 @@
       "activity": {
         "title": "Atividade da sessão",
         "body": "A aba de Activity mostra eventos e progresso do thread sem esconder o workspace."
+      },
+      "delegate": {
+        "title": "Delegue para outro agente",
+        "body": "O botão de fork no header da sessão envia uma tarefa delimitada para outro provider — review, explicar ou implementar — e o resultado volta como um card na conversa."
       },
       "spec": {
         "title": "Spec no inspetor",

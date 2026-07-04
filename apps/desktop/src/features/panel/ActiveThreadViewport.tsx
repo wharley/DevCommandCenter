@@ -5,8 +5,14 @@ import { useStickToBottom } from "use-stick-to-bottom";
 import { Button } from "@/components/ui/button";
 import { ConversationExecutionState } from "./ConversationExecutionState";
 import { ConversationLaunchState } from "./ConversationLaunchState";
+import type { ProviderCatalog } from "@dcc/contracts";
 import type { WorkspaceMessage } from "./thread-projection";
-import { AssistantMessage, SystemMessage, UserMessage } from "./message-components";
+import {
+	AssistantMessage,
+	DelegationCard,
+	SystemMessage,
+	UserMessage,
+} from "./message-components";
 import { EmptyState } from "./EmptyState";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
@@ -22,6 +28,8 @@ type ActiveThreadViewportProps = {
 	lastTurnState: string | null;
 	pendingPrompt: string | null;
 	workspacePath: string | null;
+	workspaceId?: string | null;
+	providers?: ProviderCatalog["providers"];
 	planMessageId: string | null;
 	sessionId: string | null;
 	activeMissionSpecRelativePath: string | null;
@@ -46,6 +54,8 @@ export function ActiveThreadViewport({
 	lastTurnState,
 	pendingPrompt,
 	workspacePath,
+	workspaceId,
+	providers,
 	planMessageId,
 	sessionId,
 	activeMissionSpecRelativePath,
@@ -162,6 +172,21 @@ export function ActiveThreadViewport({
 												autoSaveMissionValidation={autoSaveMissionValidation}
 												onReviewChanges={onReviewChanges}
 												onDelegateTaskApprove={onDelegateTaskApprove}
+											/>
+										</div>
+									);
+								}
+								if (message.delegation) {
+									return (
+										<div key={message.id} className="pb-4">
+											<DelegationCard
+												delegation={message.delegation}
+												fallbackContent={message.content}
+												createdAt={message.createdAt}
+												workspaceId={workspaceId ?? null}
+												providers={providers ?? []}
+												onSelectSession={onSelectSession}
+												onReviewChanges={onReviewChanges}
 											/>
 										</div>
 									);
