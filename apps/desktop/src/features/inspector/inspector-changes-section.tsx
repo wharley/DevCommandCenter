@@ -813,6 +813,7 @@ export function InspectorChangesSection({
 			}
 			onSelectPreview({
 				...selection,
+				workspaceRootOverride: selection.workspaceRootOverride ?? root,
 				reviewComments: reviewCommentsByPath.get(selection.path) ?? [],
 			});
 		},

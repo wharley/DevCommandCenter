@@ -39,6 +39,8 @@ export type GitSectionHeaderProps = {
   prNumber?: number | null;
   prProvider?: string | null;
   identitySlot?: ReactNode;
+  hideCommitAction?: boolean;
+  suppressCommitButton?: boolean;
   className?: string;
 };
 
@@ -56,6 +58,8 @@ export function GitSectionHeader({
   prNumber = null,
   prProvider = null,
   identitySlot = null,
+  hideCommitAction = false,
+  suppressCommitButton = false,
   className,
 }: GitSectionHeaderProps) {
   const highlightClass = gitSectionHeaderHighlightClass(commitMode);
@@ -144,7 +148,7 @@ export function GitSectionHeader({
             <TooltipContent side="bottom">{retrySetupLabel}</TooltipContent>
           </Tooltip>
         ) : null}
-        {!showContinue ? (
+        {!showContinue && !hideCommitAction && !suppressCommitButton ? (
           <WorkspaceCommitButton
             mode={commitMode}
             prProvider={prProvider}

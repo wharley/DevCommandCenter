@@ -151,6 +151,8 @@ type WorkspacePanelProps = {
 	onToggleInspector?: () => void;
 	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
 	onReviewChanges?: () => void;
+	/** Opens the inspector and previews an implementation delegation diff. */
+	onReviewDelegation?: (delegationId: string) => void;
 	/** Increment to open the Delegate dialog from outside (command palette). */
 	delegateSignal?: number;
 };
@@ -198,6 +200,7 @@ export function WorkspacePanel({
 	inspectorCollapsed,
 	onToggleInspector,
 	onReviewChanges,
+	onReviewDelegation,
 	delegateSignal,
 }: WorkspacePanelProps) {
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
@@ -479,6 +482,7 @@ export function WorkspacePanel({
 					onSelectSession={onSelectSession}
 					onSubmitPrompt={onSubmitPrompt}
 					onReviewChanges={onReviewChanges}
+					onReviewDelegation={onReviewDelegation}
 					onDelegateTaskApprove={onAgentDelegate}
 				/>
 

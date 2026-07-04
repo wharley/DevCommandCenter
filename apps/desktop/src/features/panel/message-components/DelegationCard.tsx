@@ -25,6 +25,7 @@ export function DelegationCard({
 	providers,
 	onSelectSession,
 	onReviewChanges,
+	onReviewDelegation,
 }: {
 	delegation: WorkspaceMessageDelegation;
 	fallbackContent: string;
@@ -33,6 +34,7 @@ export function DelegationCard({
 	providers: ProviderCatalog["providers"];
 	onSelectSession: (sessionId: string) => void;
 	onReviewChanges?: () => void;
+	onReviewDelegation?: (delegationId: string) => void;
 }) {
 	const { t } = useTranslation("common");
 	// Shares queryKey and options with the Inspector's Delegations section so
@@ -76,8 +78,15 @@ export function DelegationCard({
 	const touchedFiles = record?.touchedFiles ?? [];
 	const childSessionId = record?.childSessionId ?? delegation.childSessionId ?? null;
 	const showReview =
-		Boolean(onReviewChanges) &&
+		Boolean(onReviewDelegation || onReviewChanges) &&
 		(status === "review_pending" || touchedFiles.length > 0);
+	const handleReview = () => {
+		if (onReviewDelegation) {
+			onReviewDelegation(delegation.id);
+			return;
+		}
+		onReviewChanges?.();
+	};
 
 	return (
 		<div
@@ -144,7 +153,7 @@ export function DelegationCard({
 							variant={status === "review_pending" ? "default" : "ghost"}
 							size="sm"
 							className="h-6 px-2 text-[11px]"
-							onClick={onReviewChanges}
+							onClick={handleReview}
 						>
 							{t("delegation.card.reviewInInspector")}
 						</Button>

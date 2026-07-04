@@ -149,6 +149,7 @@ type WorkspaceInspectorSidebarProps = {
 	workspaceName: string | null;
 	workspaceBranch: string | null;
 	workspacePath: string | null;
+	sessionWorkspacePath?: string | null;
 	workspaceStatus: WorkspaceStatus | null;
 	workspaceSetupReport: WorkspaceSetupReport | null;
 	selectedProviderLabel: string | null;
@@ -159,6 +160,7 @@ type WorkspaceInspectorSidebarProps = {
 	sessionActivityEvents: CoreEvent[];
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+	reviewDelegationRequest?: { delegationId: string; nonce: number } | null;
 	onSelectSession: (sessionId: string) => void;
 	onPrefillComposer?: (text: string) => void;
 	onOpenCodeFile: (input: { path: string; name: string }) => void;
@@ -370,25 +372,37 @@ function DelegationsSection({
 	delegations,
 	providerCatalog,
 	isLoading,
+	reviewDelegationId,
 	onSelectSession,
-	onSelectPreview,
+	onSelectDelegationFile,
 	onApply,
 	onDiscard,
 	onApprove,
-	onResolveWorktreePath,
 }: {
 	delegations: Delegation[];
 	providerCatalog: ProviderCatalog | null;
 	isLoading: boolean;
+	reviewDelegationId?: string | null;
 	onSelectSession: (sessionId: string) => void;
-	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+	onSelectDelegationFile: (delegation: Delegation, path: string) => Promise<boolean>;
 	onApply: (delegation: Delegation) => Promise<void>;
 	onDiscard: (delegation: Delegation) => Promise<void>;
 	onApprove: (delegation: Delegation) => Promise<void>;
-	onResolveWorktreePath: (delegation: Delegation) => Promise<string | null>;
 }) {
 	const { t } = useTranslation("common");
-	const visible = delegations.slice(0, 6);
+	const visible = useMemo(() => {
+		if (!reviewDelegationId) {
+			return delegations.slice(0, 6);
+		}
+		const selected = delegations.find((delegation) => delegation.id === reviewDelegationId);
+		if (!selected) {
+			return delegations.slice(0, 6);
+		}
+		return [
+			selected,
+			...delegations.filter((delegation) => delegation.id !== selected.id),
+		].slice(0, 6);
+	}, [delegations, reviewDelegationId]);
 	const comparisonGroups = useMemo(
 		() => buildDelegationComparisonGroups(delegations, providerCatalog),
 		[delegations, providerCatalog],
@@ -492,7 +506,12 @@ function DelegationsSection({
 						return (
 							<div
 								key={delegation.id}
-								className="rounded-md border border-border/50 bg-muted/10 px-2 py-2"
+								className={cn(
+									"rounded-md border px-2 py-2",
+									delegation.id === reviewDelegationId
+										? "border-primary/50 bg-primary/10"
+										: "border-border/50 bg-muted/10",
+								)}
 							>
 								<div className="flex items-center gap-2">
 									<Badge
@@ -529,6 +548,48 @@ function DelegationsSection({
 										{delegation.validationSummary}
 									</p>
 								) : null}
+								{touchedFiles.length > 0 ? (
+									<div className="mt-2 space-y-1">
+										<p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
+											{t("inspector.delegations.files", {
+												count: touchedFiles.length,
+											})}
+										</p>
+										<div className="flex flex-wrap gap-1">
+											{touchedFiles.slice(0, 8).map((path) => (
+												<Button
+													key={path}
+													type="button"
+													variant="ghost"
+													size="xs"
+													className="h-6 max-w-full px-1.5 font-mono text-[10.5px]"
+													title={path}
+													onClick={() => {
+														void onSelectDelegationFile(delegation, path).catch(
+															(error) => {
+																toast.error(
+																	error instanceof Error
+																		? error.message
+																		: String(error),
+																);
+															},
+														);
+													}}
+												>
+													<span className="max-w-[14rem] truncate">{path}</span>
+												</Button>
+											))}
+											{touchedFiles.length > 8 ? (
+												<Badge
+													variant="outline"
+													className="h-6 px-1.5 text-[10px] font-normal"
+												>
+													+{touchedFiles.length - 8}
+												</Badge>
+											) : null}
+										</div>
+									</div>
+								) : null}
 								<div className="mt-2 flex flex-wrap gap-1.5">
 									{delegation.childSessionId ? (
 										<Button
@@ -548,39 +609,14 @@ function DelegationsSection({
 											size="xs"
 											className="h-6 px-2 text-[11px]"
 											onClick={() => {
-												void (async () => {
-													let workspaceRootOverride: string | null = null;
-													if (
-														delegation.mode === "implement" &&
-														delegation.status === "review_pending"
-													) {
-														try {
-															workspaceRootOverride =
-																await onResolveWorktreePath(delegation);
-														} catch (error) {
-															toast.error(
-																error instanceof Error
-																	? error.message
-																	: String(error),
-															);
-															return;
-														}
-													}
-													onSelectPreview({
-														group:
-															delegation.mode === "implement" &&
-															delegation.status === "completed"
-																? "unstaged"
-																: "committed",
-														path: firstTouchedFile,
-														name:
-															firstTouchedFile.split("/").pop() ??
-															firstTouchedFile,
-														status: "M",
-														workspaceRootOverride,
-														baseBranch: null,
-													});
-												})();
+												void onSelectDelegationFile(
+													delegation,
+													firstTouchedFile,
+												).catch((error) => {
+													toast.error(
+														error instanceof Error ? error.message : String(error),
+													);
+												});
 											}}
 										>
 											{t("inspector.delegations.reviewDiff")}
@@ -1355,6 +1391,7 @@ export function WorkspaceInspectorSidebar({
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
+	sessionWorkspacePath,
 	workspaceStatus,
 	workspaceSetupReport,
 	selectedProviderLabel,
@@ -1365,6 +1402,7 @@ export function WorkspaceInspectorSidebar({
 	sessionActivityEvents,
 	selectedPreview,
 	onSelectPreview,
+	reviewDelegationRequest,
 	onSelectSession,
 	onPrefillComposer,
 	onOpenCodeFile,
@@ -1384,11 +1422,28 @@ export function WorkspaceInspectorSidebar({
 }: WorkspaceInspectorSidebarProps) {
 	const { t } = useTranslation("common");
 	const hasWorkspace = Boolean(workspaceId && workspaceName && workspaceBranch);
-	const pathLine =
-		workspacePath && workspacePath.length > 0
-			? workspacePath.length > 56
-				? `…${workspacePath.slice(-55)}`
-				: workspacePath
+	const [delegationReviewRoot, setDelegationReviewRoot] = useState<{
+		delegationId: string;
+		workspaceRoot: string;
+		label: string;
+		delegation: Delegation;
+	} | null>(null);
+	const normalizedSessionWorkspacePath = sessionWorkspacePath?.trim() || null;
+	const normalizedWorkspacePath = workspacePath?.trim() || null;
+	const isSessionWorktreeView = Boolean(
+		normalizedSessionWorkspacePath &&
+			normalizedWorkspacePath &&
+			normalizedSessionWorkspacePath !== normalizedWorkspacePath,
+	);
+	const changesWorkspaceRoot =
+		delegationReviewRoot?.workspaceRoot ??
+		normalizedSessionWorkspacePath ??
+		workspacePath;
+	const changesPathLine =
+		changesWorkspaceRoot && changesWorkspaceRoot.length > 0
+			? changesWorkspaceRoot.length > 56
+				? `…${changesWorkspaceRoot.slice(-55)}`
+				: changesWorkspaceRoot
 			: null;
 	const queryClient = useQueryClient();
 	const delegationsQuery = useQuery({
@@ -1407,6 +1462,34 @@ export function WorkspaceInspectorSidebar({
 		staleTime: 5_000,
 		refetchInterval: 10_000,
 	});
+	const selectedChildReviewDelegation = useMemo(
+		() =>
+			(delegationsQuery.data ?? []).find(
+				(delegation) =>
+					delegation.childSessionId === sessionId &&
+					delegation.mode === "implement" &&
+					delegation.status === "review_pending",
+			) ?? null,
+		[delegationsQuery.data, sessionId],
+	);
+	const selectedChildReviewRoot = useMemo(() => {
+		if (!selectedChildReviewDelegation || !normalizedSessionWorkspacePath) {
+			return null;
+		}
+		return {
+			delegationId: selectedChildReviewDelegation.id,
+			workspaceRoot: normalizedSessionWorkspacePath,
+			label: providerLabelForDelegation(
+				providerCatalog,
+				selectedChildReviewDelegation.targetProviderId,
+			),
+			delegation: selectedChildReviewDelegation,
+			fromChildSession: true,
+		};
+	}, [normalizedSessionWorkspacePath, providerCatalog, selectedChildReviewDelegation]);
+	const activeDelegationReview = delegationReviewRoot
+		? { ...delegationReviewRoot, fromChildSession: false }
+		: selectedChildReviewRoot;
 	const handleApproveDelegation = useCallback(
 		async (delegation: Delegation) => {
 			try {
@@ -1519,6 +1602,82 @@ export function WorkspaceInspectorSidebar({
 			}
 		},
 		[queryClient, resolveDelegationWorktreePath, t, workspaceId, workspacePath],
+	);
+
+	const handledReviewDelegationNonceRef = useRef<number | null>(null);
+	useEffect(() => {
+		if (!reviewDelegationRequest) {
+			return;
+		}
+		if (handledReviewDelegationNonceRef.current === reviewDelegationRequest.nonce) {
+			return;
+		}
+		const delegation = (delegationsQuery.data ?? []).find(
+			(item) => item.id === reviewDelegationRequest.delegationId,
+		);
+		if (!delegation) {
+			return;
+		}
+		handledReviewDelegationNonceRef.current = reviewDelegationRequest.nonce;
+
+		if (delegation.mode !== "implement" || delegation.status !== "review_pending") {
+			setDelegationReviewRoot(null);
+			return;
+		}
+
+		void (async () => {
+			try {
+				const workspaceRoot = await resolveDelegationWorktreePath(delegation);
+				setDelegationReviewRoot({
+					delegationId: delegation.id,
+					workspaceRoot,
+					label: providerLabelForDelegation(providerCatalog, delegation.targetProviderId),
+					delegation,
+				});
+				onSelectPreview(null);
+			} catch (error) {
+				toast.error(error instanceof Error ? error.message : String(error));
+			}
+		})();
+	}, [
+		delegationsQuery.data,
+		onSelectPreview,
+		providerCatalog,
+		resolveDelegationWorktreePath,
+		reviewDelegationRequest,
+	]);
+
+	useEffect(() => {
+		setDelegationReviewRoot(null);
+		handledReviewDelegationNonceRef.current = null;
+	}, [sessionId, workspaceId]);
+
+	const selectDelegationPreview = useCallback(
+		async (delegation: Delegation, path: string) => {
+			const filePath = path.trim();
+			if (!filePath) {
+				return false;
+			}
+			let workspaceRootOverride: string | null = null;
+			if (delegation.mode === "implement" && delegation.status === "review_pending") {
+				workspaceRootOverride = await resolveDelegationWorktreePath(delegation);
+			}
+			onSelectPreview({
+				group:
+					delegation.mode === "implement" &&
+					(delegation.status === "review_pending" ||
+						delegation.status === "completed")
+						? "unstaged"
+						: "committed",
+				path: filePath,
+				name: filePath.split("/").pop() ?? filePath,
+				status: "M",
+				workspaceRootOverride,
+				baseBranch: null,
+			});
+			return true;
+		},
+		[onSelectPreview, resolveDelegationWorktreePath],
 	);
 
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
@@ -1654,6 +1813,9 @@ export function WorkspaceInspectorSidebar({
 		prStatus,
 		gitStatus: gitStatusQuery.data ?? null,
 	});
+	const committedVsBaseCount = reviewBranchDiffQuery.data?.changes.length ?? 0;
+	const suppressEmptyCreatePr =
+		commitMode === "create-pr" && committedVsBaseCount === 0;
 
 	const handleInspectorCommit = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -2343,7 +2505,7 @@ export function WorkspaceInspectorSidebar({
 				deletions: workingTreeSummary.deletions,
 				aheadOfRemoteCount: gitStatusQuery.data?.aheadOfRemoteCount ?? 0,
 				conflictCount: gitStatusQuery.data?.conflictCount ?? 0,
-				committedVsBaseCount: reviewBranchDiffQuery.data?.changes.length ?? 0,
+				committedVsBaseCount,
 				prNumber: prStatus?.number ?? null,
 				prState: prStatus?.state ?? null,
 				requestLabel: forgeContext.requestLabel,
@@ -2358,7 +2520,7 @@ export function WorkspaceInspectorSidebar({
 			prStatus?.number,
 			prStatus?.state,
 			pendingDelegationResultsCount,
-			reviewBranchDiffQuery.data?.changes.length,
+			committedVsBaseCount,
 			sessionState,
 			workingTreeSummary,
 		],
@@ -2491,6 +2653,8 @@ export function WorkspaceInspectorSidebar({
 							prUrl={prStatus?.url ?? null}
 							prNumber={prStatus?.number ?? null}
 							prProvider={prStatus?.provider ?? null}
+							hideCommitAction={Boolean(activeDelegationReview) || isSessionWorktreeView}
+							suppressCommitButton={suppressEmptyCreatePr}
 							identitySlot={
 								forgeConnected && forgeIdentityLogin ? (
 									<ForgeIdentityChip
@@ -2509,18 +2673,103 @@ export function WorkspaceInspectorSidebar({
 							<div className="shrink-0">
 								<BranchToolbar
 									branch={currentBranch}
-									workspacePath={workspacePath}
+									workspacePath={changesWorkspaceRoot}
 									behindOfRemoteCount={gitStatusQuery.data?.behindOfRemoteCount ?? 0}
 									isSyncingBase={isSyncingBase}
 									onSyncBase={handleSyncBase}
 								/>
 							</div>
-							{pathLine ? (
+							{activeDelegationReview ? (
+								<div className="flex shrink-0 items-center gap-1.5 overflow-hidden rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5">
+									<GitFork
+										className="size-3.5 shrink-0 text-amber-800 dark:text-amber-200"
+										strokeWidth={2}
+									/>
+									<div className="min-w-0 flex-1">
+										<p className="truncate text-[11px] font-medium text-amber-800 dark:text-amber-200">
+											{t("inspector.delegations.reviewingOutputCompact", {
+												provider: activeDelegationReview.label,
+											})}
+										</p>
+									</div>
+									<Badge
+										variant="outline"
+										className="hidden h-6 shrink-0 border-amber-500/30 bg-background/40 px-1.5 text-[10px] font-normal text-amber-800 sm:inline-flex dark:text-amber-200"
+									>
+										{t("inspector.delegations.files", {
+											count:
+												activeDelegationReview.delegation.touchedFiles?.length ?? 0,
+										})}
+									</Badge>
+									<div className="ml-auto flex shrink-0 items-center gap-1">
+										<Button
+											type="button"
+											variant="default"
+											size="xs"
+											className="h-6 shrink-0 px-2 text-[11px]"
+											onClick={() => {
+												void handleApplyDelegation(
+													activeDelegationReview.delegation,
+												).then(() => {
+													setDelegationReviewRoot(null);
+													onSelectPreview(null);
+													if (activeDelegationReview.fromChildSession) {
+														onSelectSession(
+															activeDelegationReview.delegation.parentSessionId,
+														);
+													}
+												});
+											}}
+										>
+											{t("inspector.delegations.applyShort")}
+										</Button>
+										<Button
+											type="button"
+											variant="destructive"
+											size="xs"
+											className="h-6 shrink-0 px-2 text-[11px]"
+											onClick={() => {
+												void handleDiscardDelegation(
+													activeDelegationReview.delegation,
+												).then(() => {
+													setDelegationReviewRoot(null);
+													onSelectPreview(null);
+													if (activeDelegationReview.fromChildSession) {
+														onSelectSession(
+															activeDelegationReview.delegation.parentSessionId,
+														);
+													}
+												});
+											}}
+										>
+											{t("inspector.delegations.discardShort")}
+										</Button>
+										<Button
+											type="button"
+											variant="ghost"
+											size="xs"
+											className="h-6 shrink-0 px-2 text-[11px]"
+											onClick={() => {
+												setDelegationReviewRoot(null);
+												onSelectPreview(null);
+												if (activeDelegationReview.fromChildSession) {
+													onSelectSession(
+														activeDelegationReview.delegation.parentSessionId,
+													);
+												}
+											}}
+										>
+											{t("inspector.delegations.backShort")}
+										</Button>
+									</div>
+								</div>
+							) : null}
+							{changesPathLine ? (
 								<p
 									className="shrink-0 truncate text-[11px] text-muted-foreground"
-									title={workspacePath ?? undefined}
+									title={changesWorkspaceRoot ?? undefined}
 								>
-									{pathLine}
+									{changesPathLine}
 								</p>
 							) : null}
 							{isSetupPending && setupReportSummary ? (
@@ -2532,7 +2781,7 @@ export function WorkspaceInspectorSidebar({
 							) : null}
 							<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 								<InspectorChangesSection
-									workspaceRoot={workspacePath}
+									workspaceRoot={changesWorkspaceRoot}
 									selectedPreview={selectedPreview}
 									onSelectPreview={onSelectPreview}
 									onPrefillComposer={onPrefillComposer}
@@ -2651,12 +2900,12 @@ export function WorkspaceInspectorSidebar({
 							delegations={delegationsQuery.data ?? []}
 							providerCatalog={providerCatalog}
 							isLoading={delegationsQuery.isLoading}
+							reviewDelegationId={activeDelegationReview?.delegationId ?? null}
 							onSelectSession={onSelectSession}
-							onSelectPreview={onSelectPreview}
+							onSelectDelegationFile={selectDelegationPreview}
 							onApply={handleApplyDelegation}
 							onDiscard={handleDiscardDelegation}
 							onApprove={handleApproveDelegation}
-							onResolveWorktreePath={resolveDelegationWorktreePath}
 						/>
 						<SessionEventFeed
 							events={sessionActivityEvents}

@@ -40,6 +40,7 @@ type ActiveThreadViewportProps = {
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
 	onReviewChanges?: () => void;
+	onReviewDelegation?: (delegationId: string) => void;
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 };
 
@@ -65,6 +66,7 @@ export function ActiveThreadViewport({
 	onSelectSession,
 	onSubmitPrompt,
 	onReviewChanges,
+	onReviewDelegation,
 	onDelegateTaskApprove,
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
@@ -187,6 +189,7 @@ export function ActiveThreadViewport({
 												providers={providers ?? []}
 												onSelectSession={onSelectSession}
 												onReviewChanges={onReviewChanges}
+												onReviewDelegation={onReviewDelegation}
 											/>
 										</div>
 									);

@@ -780,6 +780,10 @@ export default function App() {
 	const queryClient = useQueryClient();
 	const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 	const [delegateSignal, setDelegateSignal] = useState(0);
+	const [reviewDelegationRequest, setReviewDelegationRequest] = useState<{
+		delegationId: string;
+		nonce: number;
+	} | null>(null);
 	const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
 	const [workspaceCreationMode, setWorkspaceCreationMode] = useState<"open" | "clone">(
 		"open",
@@ -1198,10 +1202,30 @@ export default function App() {
 				: null)
 		);
 	}, [effectiveSelectedSessionId, selectedSessionSummary, sessionSnapshotsById]);
+	const selectedSessionWorkspacePath = useMemo(() => {
+		if (isRemoteBackend) {
+			return null;
+		}
+		const sessionOverride =
+			selectedSessionSummary?.session.workingDirectoryOverride?.trim() ?? "";
+		return sessionOverride.length > 0 ? sessionOverride : selectedLocalWorkspacePath;
+	}, [isRemoteBackend, selectedLocalWorkspacePath, selectedSessionSummary]);
 	const openGitInspector = useCallback(() => {
 		setInspectorMode("git");
 		setInspectorCollapsed(false);
 	}, [setInspectorCollapsed]);
+	const handleReviewDelegation = useCallback(
+		(delegationId: string) => {
+			setInspectorMode("git");
+			setInspectorCollapsed(false);
+			setSurfaceSelection(null);
+			setReviewDelegationRequest((current) => ({
+				delegationId,
+				nonce: (current?.nonce ?? 0) + 1,
+			}));
+		},
+		[setInspectorCollapsed],
+	);
 	const toggleGitInspector = useCallback(() => {
 		if (inspectorCollapsed) {
 			setInspectorMode("git");
@@ -3035,11 +3059,12 @@ export default function App() {
 									workspaceId={selectedWorkspace.id}
 									workspaceName={selectedWorkspace.name}
 									workspaceBranch={selectedWorkspace.branch}
-									workspacePath={selectedLocalWorkspacePath}
+									workspacePath={selectedSessionWorkspacePath}
 									projectId={selectedWorkspace.projectId ?? selectedWorkspace.id}
 									terminalRootPath={selectedWorkspace.rootPath ?? null}
 									terminalWorktreePath={
-										isRemoteBackend ? null : (selectedWorkspace.worktreePath ?? null)
+										selectedSessionWorkspacePath ??
+										(isRemoteBackend ? null : (selectedWorkspace.worktreePath ?? null))
 									}
 									sessionQueryScope={backendCacheKey}
 									selectedProviderLabel={selectedProvider?.label ?? null}
@@ -3076,6 +3101,7 @@ export default function App() {
 									inspectorCollapsed={inspectorCollapsed}
 									onToggleInspector={toggleGitInspector}
 									onReviewChanges={openGitInspector}
+									onReviewDelegation={handleReviewDelegation}
 									delegateSignal={delegateSignal}
 									composerPrefill={
 										workspaceComposerPrefill?.workspaceId === selectedWorkspace.id
@@ -3134,6 +3160,7 @@ export default function App() {
 									workspaceName={selectedWorkspace?.name ?? null}
 									workspaceBranch={selectedWorkspace?.branch ?? null}
 									workspacePath={selectedLocalWorkspacePath}
+									sessionWorkspacePath={selectedSessionWorkspacePath}
 									workspaceStatus={selectedWorkspace?.status ?? null}
 									workspaceSetupReport={selectedWorkspace?.setupReport ?? null}
 									selectedProviderLabel={selectedProvider?.label ?? null}
@@ -3164,6 +3191,7 @@ export default function App() {
 									onClearMissionSpecAutoCompileFailure={
 										clearMissionSpecAutoCompileFailure
 									}
+									reviewDelegationRequest={reviewDelegationRequest}
 									activeTab={inspectorTab}
 									onTabChange={setInspectorTab}
 									mode={inspectorMode}
