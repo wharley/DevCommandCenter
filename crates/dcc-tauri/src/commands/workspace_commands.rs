@@ -25,14 +25,15 @@ use dcc_core::{
             WorkspaceSetupStepReport, WorkspaceState,
         },
     },
-    ports::{RepositoryRepo, WorkspaceRepo},
+    ports::{DelegationRepo, RepositoryRepo, SessionRepo, WorkspaceRepo},
 };
 use dcc_infra::{
-    db::SqliteWorkspaceRepo,
-    git::{
-        create_worktree_branch_from_ref, detect_workspace_setup_suggestions,
-        list_local_branch_names, remove_worktree, CommandGitOps,
-    },
+	db::{SqliteSessionRepo, SqliteWorkspaceRepo},
+	git::{
+		broken_worktree_reason, create_worktree_branch_from_ref,
+		detect_workspace_setup_suggestions, is_git_repo, list_local_branch_names,
+		remove_worktree, CommandGitOps,
+	},
 };
 
 use crate::{
@@ -3069,18 +3070,88 @@ pub async fn restore_workspace(
 
 #[tauri::command]
 pub async fn delete_workspace(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceIdInput,
+	state: State<'_, WorkspaceCommandState>,
+	input: WorkspaceIdInput,
 ) -> Result<(), String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
-    let id = WorkspaceId(input.workspace_id);
-    let workspace = repo
-        .get_workspace(&id)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
-    cleanup_workspace_files(&workspace)?;
-    repo.delete_workspace(&id).await.map_err(|e| e.to_string())
+	let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
+	let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
+	let id = WorkspaceId(input.workspace_id);
+	let workspace = repo
+		.get_workspace(&id)
+		.await
+		.map_err(|e| e.to_string())?
+		.ok_or_else(|| format!("workspace not found: {}", id.0))?;
+	cleanup_delegation_worktrees(&session_repo, &workspace).await?;
+	cleanup_workspace_files(&workspace)?;
+	repo.delete_workspace(&id).await.map_err(|e| e.to_string())
+}
+
+async fn cleanup_delegation_worktrees(
+	session_repo: &SqliteSessionRepo,
+	workspace: &Workspace,
+) -> Result<(), String> {
+	let delegations = DelegationRepo::list_delegations(
+		session_repo,
+		Some(&workspace.id),
+		None,
+	)
+	.await
+	.map_err(|e| e.to_string())?;
+	let workspace_root = Path::new(workspace.root_path.trim());
+	let workspace_worktree = workspace.worktree_path.as_deref().map(str::trim).unwrap_or("");
+
+	for delegation in delegations {
+		let Some(child_session_id) = delegation.child_session_id.as_ref() else {
+			continue;
+		};
+		let Some(child_session) = SessionRepo::get_session(session_repo, child_session_id)
+			.await
+			.map_err(|e| e.to_string())?
+		else {
+			continue;
+		};
+		let Some(worktree_root) = child_session
+			.working_directory_override
+			.as_deref()
+			.map(str::trim)
+			.filter(|value| !value.is_empty())
+		else {
+			continue;
+		};
+		if worktree_root == workspace.root_path.trim() || worktree_root == workspace_worktree {
+			continue;
+		}
+
+		let worktree_path = Path::new(worktree_root);
+		if !worktree_path.exists() {
+			continue;
+		}
+
+		if !workspace.root_path.trim().is_empty()
+			&& is_git_repo(workspace_root)
+			&& worktree_path.join(".git").exists()
+		{
+			match remove_worktree(workspace_root, worktree_path) {
+				Ok(()) => continue,
+				Err(error) if broken_worktree_reason(worktree_path).is_none() => {
+					return Err(error.to_string());
+				}
+				Err(_) => {
+					// Fall through to direct removal for already-broken worktree metadata.
+				}
+			}
+		}
+
+		fs::remove_dir_all(worktree_path).map_err(|error| {
+			format!(
+				"failed to remove delegation worktree {}: {}",
+				worktree_path.display(),
+				error
+			)
+		})?;
+	}
+
+	Ok(())
 }
 
 #[tauri::command]
