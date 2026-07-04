@@ -75,6 +75,8 @@ type SessionWorkbenchProps = {
 	onToggleInspector?: () => void;
 	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
 	onReviewChanges?: () => void;
+	/** Increment to open the Delegate dialog from outside (command palette). */
+	delegateSignal?: number;
 };
 
 export function SessionWorkbench({
@@ -121,6 +123,7 @@ export function SessionWorkbench({
 	inspectorCollapsed,
 	onToggleInspector,
 	onReviewChanges,
+	delegateSignal,
 }: SessionWorkbenchProps) {
 	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [terminalExpanded, setTerminalExpanded] = useState(false);
@@ -233,6 +236,7 @@ export function SessionWorkbench({
 						inspectorCollapsed={inspectorCollapsed}
 						onToggleInspector={onToggleInspector}
 						onReviewChanges={onReviewChanges}
+						delegateSignal={delegateSignal}
 					/>
 				</div>
 			) : null}
