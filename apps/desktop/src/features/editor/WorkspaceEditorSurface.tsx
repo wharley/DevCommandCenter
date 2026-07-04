@@ -623,10 +623,11 @@ export function WorkspaceEditorSurface({
 		[onAddToReview, pending],
 	);
 
+	const effectiveWorkspaceRoot = selection.workspaceRootOverride ?? workspaceRoot;
 	const query = useWorkspaceGitFilePreviewContent(
-		workspaceRoot
+		effectiveWorkspaceRoot
 			? {
-					workspaceRoot,
+					workspaceRoot: effectiveWorkspaceRoot,
 					relativePath: selection.path,
 					status: selection.status,
 					scope: selection.group,
