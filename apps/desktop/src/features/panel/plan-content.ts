@@ -90,6 +90,21 @@ export function buildPlanImplementationPrompt(planMarkdown: string) {
 	return `PLEASE IMPLEMENT THIS PLAN:\n${normalizePlanText(planMarkdown)}`;
 }
 
+export function buildPlanDelegationPrompt(planMarkdown: string) {
+	return [
+		"Implement the plan below using the current workspace.",
+		"",
+		normalizePlanText(planMarkdown),
+		"",
+		"Execution criteria:",
+		"- Keep the implementation scoped to this plan.",
+		"- Preserve the planner's frontend/design decisions.",
+		"- Use the repository's existing patterns and available project skills/instructions.",
+		"- Run focused validation where practical and report the exact commands/results.",
+		"- End with a concise summary of changed files, decisions, and validation.",
+	].join("\n");
+}
+
 export function buildPlanFromSpecPrompt(specMarkdown: string) {
 	return [
 		"PLEASE TURN THIS SPEC INTO AN IMPLEMENTATION PLAN.",

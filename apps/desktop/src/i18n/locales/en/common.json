@@ -551,6 +551,7 @@
       "kicker": "Plan ready",
       "fallbackTitle": "Active mission plan",
       "openPlan": "Open plan",
+      "delegatePlan": "Delegate plan",
       "implementInNewThread": "Implement in new thread"
     }
   },

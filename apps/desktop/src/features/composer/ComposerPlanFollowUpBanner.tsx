@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 
 type ComposerPlanFollowUpBannerProps = {
 	planTitle: string | null;
+	onDelegatePlan: () => void;
 	onImplementInNewThread: () => void;
 	onOpenPlanSidebar: () => void;
 };
@@ -11,6 +12,7 @@ type ComposerPlanFollowUpBannerProps = {
 export const ComposerPlanFollowUpBanner = memo(
 	function ComposerPlanFollowUpBanner({
 		planTitle,
+		onDelegatePlan,
 		onImplementInNewThread,
 		onOpenPlanSidebar,
 	}: ComposerPlanFollowUpBannerProps) {
@@ -36,6 +38,15 @@ export const ComposerPlanFollowUpBanner = memo(
 							onClick={onOpenPlanSidebar}
 						>
 							{t("composer.planFollowUp.openPlan")}
+						</Button>
+						<Button
+							type="button"
+							size="sm"
+							className="rounded-full"
+							variant="outline"
+							onClick={onDelegatePlan}
+						>
+							{t("composer.planFollowUp.delegatePlan")}
 						</Button>
 						<Button
 							type="button"

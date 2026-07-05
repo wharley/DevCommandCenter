@@ -126,6 +126,7 @@ type WorkspaceComposerProps = {
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onAbortSession: () => void;
 	onOpenPlanSidebar: () => void;
+	onDelegatePlan: () => void;
 	onImplementPlanInNewThread: (input: {
 		planMarkdown: string;
 		planTitle: string | null;
@@ -245,6 +246,7 @@ export function WorkspaceComposer({
 	onSubmitPrompt,
 	onAbortSession,
 	onOpenPlanSidebar,
+	onDelegatePlan,
 	onImplementPlanInNewThread,
 	terminalScopes,
 	onOpenTerminal,
@@ -549,6 +551,7 @@ export function WorkspaceComposer({
 			{showPlanFollowUpPrompt ? (
 				<ComposerPlanFollowUpBanner
 					planTitle={planTitle}
+					onDelegatePlan={onDelegatePlan}
 					onImplementInNewThread={() => {
 						if (!planMarkdown) {
 							return;

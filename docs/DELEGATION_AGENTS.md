@@ -32,6 +32,24 @@ anything is applied.
 7. Send feedback from a diff when needed; DCC routes it to the child session.
 8. Apply the result to the parent worktree or discard the delegation.
 
+## Plan Handoff Flow
+
+For planner/executor workflows, keep the planning session as the parent and
+delegate the approved plan to an implementation model.
+
+1. Start a parent session with the planner model, for example Claude Fable.
+2. Enable Plan mode and ask for the frontend/design plan.
+3. When the plan banner appears, click `Delegate plan`.
+4. DCC opens the delegation dialog prefilled with the full plan, implementation
+   criteria, `Implement` mode, `Full reanchor` context, and Codex GPT-5.5 when
+   that target is available.
+5. Review the prefilled instruction and submit the delegation.
+6. Review the child implementation diff in the Inspector.
+7. Apply the result to the parent worktree or discard the isolated worktree.
+
+This avoids copying the plan by hand while keeping the human approval checkpoint
+between planning and implementation.
+
 ## Inspector Review
 
 Implementation delegations are reviewed from the Inspector. During review, the

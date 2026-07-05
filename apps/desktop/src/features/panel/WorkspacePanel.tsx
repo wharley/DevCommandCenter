@@ -11,6 +11,7 @@ import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionS
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
 import {
 	DelegationDialog,
+	type DelegationDialogPrefill,
 	type ManualDelegationRequest,
 } from "@/features/sessions/delegation-dialog";
 import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
@@ -37,6 +38,7 @@ import {
 	buildMissionSpecFilename,
 	getComposerEffortKey,
 } from "@/features/composer/WorkspaceComposer.logic";
+import { buildPlanDelegationPrompt } from "./plan-content";
 import { loadEffortSelection } from "@/features/composer/draftStorage";
 import {
 	DEFAULT_EFFORT_LEVELS,
@@ -210,8 +212,11 @@ export function WorkspacePanel({
 		[],
 	);
 	const [delegateOpen, setDelegateOpen] = useState(false);
+	const [delegatePrefill, setDelegatePrefill] =
+		useState<DelegationDialogPrefill | null>(null);
 	const [delegateSubmitting, setDelegateSubmitting] = useState(false);
 	const reviewIdRef = useRef(0);
+	const delegatePrefillNonceRef = useRef(0);
 	const lastDelegateSignalRef = useRef(delegateSignal ?? 0);
 
 	useEffect(() => {
@@ -383,6 +388,21 @@ export function WorkspacePanel({
 	const activePlanMarkdown =
 		activePlanMessage?.plan?.markdown ?? activePlanMessage?.content ?? null;
 	const showPlanFollowUpPrompt = planFollowUpState.showPlanFollowUpPrompt;
+	const handleDelegatePlan = useCallback(() => {
+		if (!activePlanMarkdown) {
+			return;
+		}
+		delegatePrefillNonceRef.current += 1;
+		setDelegatePrefill({
+			nonce: delegatePrefillNonceRef.current,
+			instruction: buildPlanDelegationPrompt(activePlanMarkdown),
+			mode: "implement",
+			contextPolicy: "full_reanchor",
+			targetProviderId: "codex",
+			targetModelId: "gpt-5.5",
+		});
+		setDelegateOpen(true);
+	}, [activePlanMarkdown]);
 	const missionSpecsQuery = useWorkspaceMissionSpecs(workspacePath);
 	const missionSpecs = missionSpecsQuery.data?.specs ?? [];
 	const preferredSpecName = buildMissionSpecFilename(workspaceBranch);
@@ -511,6 +531,7 @@ export function WorkspacePanel({
 					onSubmitPrompt={onSubmitPrompt}
 					onAbortSession={onAbortSession}
 					onOpenPlanSidebar={onOpenPlanSidebar}
+					onDelegatePlan={handleDelegatePlan}
 					onImplementPlanInNewThread={onImplementPlanInNewThread}
 					terminalScopes={terminalScopes}
 					onOpenTerminal={onOpenTerminal}
@@ -533,6 +554,7 @@ export function WorkspacePanel({
 				open={delegateOpen}
 				providers={providerChoices}
 				isSubmitting={delegateSubmitting}
+				prefill={delegatePrefill}
 				onOpenChange={setDelegateOpen}
 				onSubmit={handleDelegateSubmit}
 			/>

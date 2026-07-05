@@ -32,6 +32,15 @@ type DelegationDialogMode = ManualDelegationRequest["mode"];
 
 type ContextPolicyKey = "minimal" | "review_current_diff" | "full_reanchor";
 
+export type DelegationDialogPrefill = {
+	nonce: number;
+	instruction: string;
+	mode?: DelegationDialogMode;
+	contextPolicy?: ContextPolicyKey;
+	targetProviderId?: string;
+	targetModelId?: string;
+};
+
 const CONTEXT_POLICY_KEYS: ContextPolicyKey[] = [
 	"review_current_diff",
 	"full_reanchor",
@@ -53,12 +62,14 @@ export function DelegationDialog({
 	open,
 	providers,
 	isSubmitting,
+	prefill,
 	onOpenChange,
 	onSubmit,
 }: {
 	open: boolean;
 	providers: ProviderCatalog["providers"];
 	isSubmitting: boolean;
+	prefill?: DelegationDialogPrefill | null;
 	onOpenChange: (open: boolean) => void;
 	onSubmit: (request: ManualDelegationRequest) => Promise<void>;
 }) {
@@ -83,6 +94,7 @@ export function DelegationDialog({
 	const [contextPolicy, setContextPolicy] =
 		useState<ContextPolicyKey>("review_current_diff");
 	const [instruction, setInstruction] = useState("");
+	const prefillNonce = prefill?.nonce ?? null;
 
 	useEffect(() => {
 		if (!open) {
@@ -121,6 +133,42 @@ export function DelegationDialog({
 			setMode("review");
 		}
 	}, [mode, selectedProvider]);
+
+	useEffect(() => {
+		if (!open || !prefill) {
+			return;
+		}
+		setInstruction(prefill.instruction);
+		if (
+			prefill.targetProviderId &&
+			delegationProviders.some((provider) => provider.id === prefill.targetProviderId)
+		) {
+			const targetProviderId = prefill.targetProviderId;
+			setProviderId(targetProviderId);
+			setProviderIds((current) =>
+				current.includes(targetProviderId)
+					? current
+					: [targetProviderId, ...current],
+			);
+		}
+		if (prefill.mode) {
+			setMode(prefill.mode);
+		}
+		if (prefill.contextPolicy) {
+			setContextPolicy(prefill.contextPolicy);
+		}
+	}, [delegationProviders, open, prefill, prefillNonce]);
+
+	useEffect(() => {
+		if (
+			!open ||
+			!prefill?.targetModelId ||
+			!selectedProvider?.models.some((model) => model.id === prefill.targetModelId)
+		) {
+			return;
+		}
+		setModelId(prefill.targetModelId);
+	}, [open, prefill, prefillNonce, selectedProvider]);
 
 	const multiTargetMode = mode !== "implement";
 	const selectedTargetProviderIds = useMemo(() => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildCollapsedPlanPreviewMarkdown,
+	buildPlanDelegationPrompt,
 	buildPlanFromSpecPrompt,
 	buildPlanImplementationPrompt,
 	buildPlanImplementationThreadTitle,
@@ -59,6 +60,16 @@ describe("plan-content", () => {
 			"PLEASE IMPLEMENT THIS PLAN:\n# Mission Plan\n\nShip the dashboard.",
 		);
 		expect(buildPlanImplementationThreadTitle(markdown)).toBe("Implement Mission Plan");
+	});
+
+	it("builds a delegation prompt containing the full plan and execution criteria", () => {
+		const markdown = "# Mission Plan\n\nShip the dashboard.";
+		const prompt = buildPlanDelegationPrompt(markdown);
+
+		expect(prompt).toContain("Implement the plan below using the current workspace.");
+		expect(prompt).toContain("# Mission Plan\n\nShip the dashboard.");
+		expect(prompt).toContain("Execution criteria:");
+		expect(prompt).toContain("changed files");
 	});
 
 	it("builds a planning prompt from a mission spec without requesting implementation", () => {
