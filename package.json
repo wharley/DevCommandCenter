@@ -14,7 +14,7 @@
   },
   "scripts": {
     "dev": "yarn dev:tauri",
-    "dev:tauri": "tauri dev",
+    "dev:tauri": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "dev:desktop": "yarn workspace @dcc/desktop dev",
     "build": "tauri build",
     "build:contracts": "yarn workspace @dcc/contracts build",
