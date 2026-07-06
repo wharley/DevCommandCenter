@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { Toaster } from "sonner";
 import type {
 	CoreEvent,
+	Delegation,
 	DelegationContextPolicy,
 	MissionSpecEntry,
 	ProviderCatalog,
@@ -104,6 +105,7 @@ import {
 	completeDelegation,
 	createDelegation,
 	failDelegation,
+	listDelegations,
 	startDelegation,
 } from "./lib/delegation-api";
 import { useAppearance } from "./components/theme-provider";
@@ -824,6 +826,35 @@ export default function App() {
 		}),
 	);
 	const workspaceSessions = workspaceSessionsQuery.data ?? [];
+	const delegationsQuery = useQuery({
+		queryKey: ["delegations", selectedWorkspace?.id ?? null],
+		queryFn: async () => {
+			if (!selectedWorkspace?.id) {
+				return [] as Delegation[];
+			}
+			const output = await listDelegations({
+				workspaceId: selectedWorkspace.id,
+				parentSessionId: null,
+			});
+			return output.delegations;
+		},
+		enabled: Boolean(selectedWorkspace?.id),
+		staleTime: 5_000,
+		refetchInterval: 10_000,
+	});
+	const pendingImplementationDelegationChildSessionIds = useMemo(() => {
+		const ids = new Set<string>();
+		for (const delegation of delegationsQuery.data ?? []) {
+			if (
+				delegation.mode === "implement" &&
+				delegation.status === "review_pending" &&
+				delegation.childSessionId
+			) {
+				ids.add(delegation.childSessionId);
+			}
+		}
+		return ids;
+	}, [delegationsQuery.data]);
 	const [selectedProviderId, setSelectedProviderId] = useState<string | null>(() => {
 		if (typeof window === "undefined") {
 			return null;
@@ -1208,8 +1239,18 @@ export default function App() {
 		}
 		const sessionOverride =
 			selectedSessionSummary?.session.workingDirectoryOverride?.trim() ?? "";
-		return sessionOverride.length > 0 ? sessionOverride : selectedLocalWorkspacePath;
-	}, [isRemoteBackend, selectedLocalWorkspacePath, selectedSessionSummary]);
+		const sessionId = selectedSessionSummary?.session.id ?? null;
+		const hasPendingImplementationReview =
+			sessionId !== null && pendingImplementationDelegationChildSessionIds.has(sessionId);
+		return sessionOverride.length > 0 && hasPendingImplementationReview
+			? sessionOverride
+			: selectedLocalWorkspacePath;
+	}, [
+		isRemoteBackend,
+		pendingImplementationDelegationChildSessionIds,
+		selectedLocalWorkspacePath,
+		selectedSessionSummary,
+	]);
 	const openGitInspector = useCallback(() => {
 		setInspectorMode("git");
 		setInspectorCollapsed(false);

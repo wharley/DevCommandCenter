@@ -1549,6 +1549,17 @@ export function WorkspaceInspectorSidebar({
 					delegationId: delegation.id,
 					summary: delegation.resultSummary,
 				});
+				if (workspaceId) {
+					queryClient.setQueryData<Delegation[]>(
+						["delegations", workspaceId],
+						(current) =>
+							current?.map((item) =>
+								item.id === delegation.id
+									? { ...item, status: "completed" }
+									: item,
+							) ?? current,
+					);
+				}
 				options?.onApplied?.();
 				await workspaceRemoveDelegationWorktree({
 					workspaceRoot: root,
@@ -1601,6 +1612,17 @@ export function WorkspaceInspectorSidebar({
 					delegationId: delegation.id,
 					reason: "Discarded isolated implementation worktree.",
 				});
+				if (workspaceId) {
+					queryClient.setQueryData<Delegation[]>(
+						["delegations", workspaceId],
+						(current) =>
+							current?.map((item) =>
+								item.id === delegation.id
+									? { ...item, status: "cancelled" }
+									: item,
+							) ?? current,
+					);
+				}
 				await queryClient.invalidateQueries({
 					queryKey: ["delegations", workspaceId],
 				});

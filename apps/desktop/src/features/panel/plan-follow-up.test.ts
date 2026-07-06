@@ -93,6 +93,28 @@ describe("derivePlanFollowUpState", () => {
 		expect(state.showPlanFollowUpPrompt).toBe(false);
 	});
 
+	it("hides the banner after a later delegation consumes the plan", () => {
+		const planMessage = makePlanMessage();
+		const state = derivePlanFollowUpState([
+			planMessage,
+			{
+				id: "delegation-1",
+				role: "system",
+				label: "delegation",
+				content: "Delegation started",
+				delegation: {
+					id: "delegation-1",
+					phase: "running",
+					childSessionId: "child-1",
+				},
+			},
+		]);
+
+		expect(state.latestPlanMessage).toBe(planMessage);
+		expect(state.activePlanMessage).toBeNull();
+		expect(state.showPlanFollowUpPrompt).toBe(false);
+	});
+
 	it("does not expose follow-up actions while the plan is still streaming", () => {
 		const planMessage = makePlanMessage({ streaming: true });
 		const state = derivePlanFollowUpState([planMessage]);

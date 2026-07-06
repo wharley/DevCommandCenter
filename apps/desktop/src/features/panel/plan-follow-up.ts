@@ -19,13 +19,13 @@ export function derivePlanFollowUpState(
 	}
 
 	const latestPlanMessage = messages[latestPlanIndex] ?? null;
-	const hasLaterConversation = messages
+	const hasLaterPlanConsumer = messages
 		.slice(latestPlanIndex + 1)
 		.some(
 			(message) =>
-				message.role === "user" || message.role === "assistant",
+				message.role === "user" || message.role === "assistant" || Boolean(message.delegation),
 		);
-	const activePlanMessage = hasLaterConversation ? null : latestPlanMessage;
+	const activePlanMessage = hasLaterPlanConsumer ? null : latestPlanMessage;
 	const showPlanFollowUpPrompt = Boolean(
 		activePlanMessage &&
 			!activePlanMessage.streaming &&
