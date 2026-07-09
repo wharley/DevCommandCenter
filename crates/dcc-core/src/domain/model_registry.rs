@@ -86,6 +86,12 @@ pub const DROID_ALIASES: &[(&str, &str)] = &[
     ("gemini-3-flash-preview", "gemini-3-flash-preview"),
 ];
 
+pub const GROK_ALIASES: &[(&str, &str)] = &[
+    ("grok", "grok-4.5"),
+    ("4.5", "grok-4.5"),
+    ("grok-4-5", "grok-4.5"),
+];
+
 /// Resolves a model alias or legacy ID to its canonical form for the given provider.
 /// Returns the input unchanged if no alias matches (pass-through for already-canonical IDs).
 pub fn resolve_alias(provider_id: &str, model: &str) -> String {
@@ -94,6 +100,7 @@ pub fn resolve_alias(provider_id: &str, model: &str) -> String {
         "codex" => CODEX_ALIASES,
         "gemini" => GEMINI_ALIASES,
         "droid" => DROID_ALIASES,
+        "grok" => GROK_ALIASES,
         _ => return model.to_string(),
     };
     aliases
@@ -248,9 +255,19 @@ pub const DROID: &[ModelEntry] = &[
     },
 ];
 
+pub const GROK: &[ModelEntry] = &[
+    ModelEntry {
+        id: "grok-4.5",
+        label: "Grok 4.5",
+        description: "Grok Build coding and agentic model through the local ACP CLI.",
+        recommended: true,
+        effort_levels: &["low", "medium", "high"],
+    },
+];
+
 #[cfg(test)]
 mod tests {
-    use super::{resolve_alias, CODEX};
+    use super::{resolve_alias, CODEX, GROK};
 
     #[test]
     fn codex_registers_gpt_56_preview_models() {
@@ -260,6 +277,13 @@ mod tests {
         assert_eq!(resolve_alias("codex", "sol"), "gpt-5.6-sol");
         assert_eq!(resolve_alias("codex", "5.6-terra"), "gpt-5.6-terra");
         assert_eq!(resolve_alias("codex", "luna"), "gpt-5.6-luna");
+    }
+
+    #[test]
+    fn grok_aliases_resolve_to_grok_45() {
+        assert_eq!(resolve_alias("grok", "grok"), "grok-4.5");
+        assert_eq!(resolve_alias("grok", "4.5"), "grok-4.5");
+        assert!(GROK.iter().any(|model| model.id == "grok-4.5"));
     }
 
     #[test]

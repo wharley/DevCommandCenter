@@ -942,7 +942,9 @@ struct SessionRuntime {
 }
 
 pub(crate) fn append_tool_instructions(prompt: String, tool_instructions: Option<&str>) -> String {
-    let Some(instructions) = tool_instructions.map(str::trim).filter(|value| !value.is_empty())
+    let Some(instructions) = tool_instructions
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
     else {
         return prompt;
     };
@@ -997,6 +999,14 @@ pub(crate) fn apply_cli_spawn_environment(
         "cursor" => {
             command.env("DCC_AGENT_RUNTIME", "cursor");
             command.env("DCC_CURSOR_ADAPTER", "experimental");
+        }
+        "grok" => {
+            command.env("DCC_AGENT_RUNTIME", "grok");
+            if let Some(home_path) = runtime_cfg.and_then(|config| config.home_path.as_deref()) {
+                if let Some(resolved_home) = resolve_runtime_home_path(Some(home_path)) {
+                    command.env("GROK_HOME", resolved_home);
+                }
+            }
         }
         _ => {}
     }

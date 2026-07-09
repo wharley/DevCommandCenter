@@ -161,6 +161,31 @@ fn wire_cursor_partial(
     lines.join("\n")
 }
 
+fn wire_grok_partial(
+    body: &str,
+    plan: Option<bool>,
+    effort: Option<&str>,
+    fast: Option<bool>,
+) -> String {
+    let mut lines = vec![
+        "[DCC · Grok Build — composer directives]".to_string(),
+        "Runtime: Grok Build ACP agent — use workspace tools deliberately and keep changes reviewable."
+            .to_string(),
+    ];
+    maybe_push_plan_line(
+        &mut lines,
+        plan,
+        "PLAN ON: present a concrete plan before editing files or running commands.",
+        "EXECUTION ON: use Grok Build tools to implement and verify the requested work.",
+    );
+    maybe_push_effort_line(&mut lines, effort);
+    maybe_push_fast_line(&mut lines, fast);
+    lines.push("[End DCC · Grok Build]".to_string());
+    lines.push(String::new());
+    lines.push(body.to_string());
+    lines.join("\n")
+}
+
 fn wire_generic_partial(
     body: &str,
     plan: Option<bool>,
@@ -194,6 +219,7 @@ fn compose_partial_prompt_for_provider(
         "codex" => wire_codex_partial(body, plan, effort, fast),
         "gemini" => wire_gemini_partial(body, plan, effort, fast),
         "cursor" => wire_cursor_partial(body, plan, effort, fast),
+        "grok" => wire_grok_partial(body, plan, effort, fast),
         _ => wire_generic_partial(body, plan, effort, fast),
     }
 }
@@ -297,6 +323,20 @@ mod tests {
         let out = compose_wire_prompt_for_provider("unknown", "z", None, None, None);
         assert!(out.contains("generic"));
         assert!(out.ends_with("z"));
+    }
+
+    #[test]
+    fn grok_prompt_includes_plan_and_effort_directives() {
+        let out = compose_wire_prompt_for_provider(
+            "grok",
+            "inspect the repo",
+            Some(true),
+            Some("high"),
+            Some(true),
+        );
+        assert!(out.contains("Grok Build"));
+        assert!(out.contains("PLAN ON"));
+        assert!(out.contains("Effort high"));
     }
 
     #[test]

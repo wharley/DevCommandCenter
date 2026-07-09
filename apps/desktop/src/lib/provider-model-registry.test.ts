@@ -52,6 +52,16 @@ describe("provider-model-registry", () => {
 		expect(resolveModelAlias("codex", "luna")).toBe("gpt-5.6-luna");
 	});
 
+	it("registers Grok 4.5 and resolves its aliases", () => {
+		expect(getDefaultModelId("grok")).toBe("grok-4.5");
+		expect(resolveModelAlias("grok", "grok")).toBe("grok-4.5");
+		expect(resolveModelAlias("grok", "4.5")).toBe("grok-4.5");
+		const provider = FALLBACK_PROVIDER_CATALOG.providers.find(
+			(candidate) => candidate.id === "grok",
+		);
+		expect(provider?.models[0]?.id).toBe("grok-4.5");
+	});
+
 	it("uses Auto as the default Droid model", () => {
 		expect(getDefaultModelId("droid")).toBe("auto");
 	});

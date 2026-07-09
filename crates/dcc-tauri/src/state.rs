@@ -141,7 +141,7 @@ impl SessionCommandState {
         provider_id: &str,
         runtime: &ProviderRuntimeConfig,
     ) -> bool {
-        if !matches!(provider_id, "claude_code" | "gemini") {
+        if !matches!(provider_id, "claude_code" | "gemini" | "grok") {
             return false;
         }
 

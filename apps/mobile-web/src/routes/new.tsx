@@ -41,6 +41,11 @@ const PROVIDERS: ProviderChoice[] = [
 		label: "Codex",
 		description: "OpenAI — GPT-5.4 por padrão",
 	},
+	{
+		id: "grok",
+		label: "Grok Build",
+		description: "SpaceXAI — Grok 4.5",
+	},
 ];
 
 type StartThreadOutput = {

@@ -2,7 +2,7 @@ import type { ProviderCatalog } from "@dcc/contracts";
 import { PROVIDER_MODEL_REGISTRY } from "./provider-model-registry";
 
 /**
- * Mirrors `crates/dcc-providers/src/{claude_code,codex,gemini,cursor}.rs` descriptors
+ * Mirrors `crates/dcc-providers/src` provider descriptors
  * so the UI always has models when `list_providers` is unavailable (e.g. Vite without Tauri).
  * Model lists are sourced from provider-model-registry — update there, not here.
  */
@@ -106,6 +106,21 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 			label: "Cursor",
 			description: "Cursor Agent CLI provider with CLI-native session resume.",
 			models: PROVIDER_MODEL_REGISTRY.cursor.map((m) => ({
+				id: m.id,
+				label: m.label,
+				description: m.description,
+				recommended: m.recommended,
+				effortLevels: m.effortLevels,
+			})),
+			capabilities: { ...experimentalCapabilities },
+			health: stableHealth,
+			stable: false,
+		},
+		{
+			id: "grok",
+			label: "Grok Build",
+			description: "Grok Build provider through the Agent Client Protocol.",
+			models: PROVIDER_MODEL_REGISTRY.grok.map((m) => ({
 				id: m.id,
 				label: m.label,
 				description: m.description,

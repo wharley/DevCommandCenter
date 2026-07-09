@@ -170,6 +170,17 @@ export const PROVIDER_MODEL_REGISTRY = {
 			effortLevels: ["low", "medium", "high"],
 		},
 	] satisfies ModelEntry[],
+
+	grok: [
+		{
+			id: "grok-4.5",
+			label: "Grok 4.5",
+			description:
+				"Grok Build coding and agentic model through the local ACP CLI.",
+			recommended: true,
+			effortLevels: ["low", "medium", "high"],
+		},
+	] satisfies ModelEntry[],
 } as const;
 
 export type ProviderRegistryKey = keyof typeof PROVIDER_MODEL_REGISTRY;
@@ -238,6 +249,11 @@ export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, s
 		"gpt-5.5": "gpt-5.5",
 		"5.5": "gpt-5.5",
 		"gemini-3-flash-preview": "gemini-3-flash-preview",
+	},
+	grok: {
+		grok: "grok-4.5",
+		"4.5": "grok-4.5",
+		"grok-4-5": "grok-4.5",
 	},
 };
 

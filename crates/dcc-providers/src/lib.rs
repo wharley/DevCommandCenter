@@ -6,6 +6,7 @@ pub mod common;
 pub mod cursor;
 pub mod droid;
 pub mod gemini;
+pub mod grok_acp;
 pub mod headless_cli;
 
 use std::{
@@ -18,17 +19,20 @@ use futures::future::join_all;
 use dcc_core::domain::provider::{HealthStatus, ProviderCatalog, ProviderDescriptor};
 use dcc_core::ports::Provider;
 
-pub const PROVIDER_IDS: [&str; 5] = ["claude_code", "codex", "gemini", "droid", "cursor"];
+pub const PROVIDER_IDS: [&str; 6] = ["claude_code", "codex", "gemini", "droid", "cursor", "grok"];
 
 fn provider_registry() -> &'static HashMap<String, Arc<dyn Provider>> {
     static REGISTRY: OnceLock<HashMap<String, Arc<dyn Provider>>> = OnceLock::new();
     REGISTRY.get_or_init(|| {
-        let providers: [Arc<dyn Provider>; 5] = [
+        let providers: [Arc<dyn Provider>; 6] = [
             Arc::new(claude_code::adapter()),
             Arc::new(codex::adapter()),
             Arc::new(gemini::adapter()),
             Arc::new(droid::adapter()),
             Arc::new(cursor::adapter()),
+            Arc::new(grok_acp::GrokAcpAdapter::new(
+                common::experimental_cli_capabilities(),
+            )),
         ];
 
         let mut registry = HashMap::with_capacity(PROVIDER_IDS.len());
@@ -70,9 +74,24 @@ pub async fn provider_catalog() -> ProviderCatalog {
     providers.push(droid::descriptor(health[3].clone()));
     let cursor_models = cursor::discover_models().await;
     providers.push(cursor::descriptor(health[4].clone(), cursor_models));
+    providers.push(grok_acp::descriptor(
+        health[5].clone(),
+        common::experimental_cli_capabilities(),
+    ));
     ProviderCatalog { providers }
 }
 
 pub async fn provider_descriptors() -> Vec<ProviderDescriptor> {
     provider_catalog().await.providers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{provider_runtime, PROVIDER_IDS};
+
+    #[test]
+    fn registers_grok_runtime() {
+        assert!(PROVIDER_IDS.contains(&"grok"));
+        assert!(provider_runtime("grok").is_some());
+    }
 }

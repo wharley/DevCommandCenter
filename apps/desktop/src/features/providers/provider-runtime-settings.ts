@@ -6,6 +6,7 @@ export const PROVIDER_RUNTIME_SUPPORTED_IDS = new Set([
 	"claude_code",
 	"codex",
 	"gemini",
+	"grok",
 ]);
 
 export type ProviderRuntimeDraft = {
@@ -139,4 +140,3 @@ export function draftToProviderRuntimeConfig(
 		shadowHomePath: shadowHomePath || null,
 	};
 }
-
