@@ -46,6 +46,30 @@ export const PROVIDER_MODEL_REGISTRY = {
 
 	codex: [
 		{
+			id: "gpt-5.6-sol",
+			label: "GPT-5.6 Sol",
+			description:
+				"Flagship GPT-5.6 model for the most demanding coding and reasoning work. Preview access required.",
+			recommended: false,
+			effortLevels: ["low", "medium", "high", "xhigh", "max"],
+		},
+		{
+			id: "gpt-5.6-terra",
+			label: "GPT-5.6 Terra",
+			description:
+				"Strong lower-cost GPT-5.6 option for coding and reasoning. Preview access required.",
+			recommended: false,
+			effortLevels: ["low", "medium", "high", "xhigh", "max"],
+		},
+		{
+			id: "gpt-5.6-luna",
+			label: "GPT-5.6 Luna",
+			description:
+				"Fastest and most cost-efficient GPT-5.6 option. Preview access required.",
+			recommended: false,
+			effortLevels: ["low", "medium", "high", "xhigh", "max"],
+		},
+		{
 			id: "gpt-5.5",
 			label: "GPT-5.5",
 			description: "Newest Codex model with the strongest reasoning.",
@@ -178,6 +202,12 @@ export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, s
 	},
 	codex: {
 		"gpt-5-codex": "gpt-5.4",
+		sol: "gpt-5.6-sol",
+		"5.6-sol": "gpt-5.6-sol",
+		terra: "gpt-5.6-terra",
+		"5.6-terra": "gpt-5.6-terra",
+		luna: "gpt-5.6-luna",
+		"5.6-luna": "gpt-5.6-luna",
 		"5.5": "gpt-5.5",
 		"5.4": "gpt-5.4",
 		"5.4-mini": "gpt-5.4-mini",

@@ -45,6 +45,12 @@ pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
 
 pub const CODEX_ALIASES: &[(&str, &str)] = &[
     ("gpt-5-codex", "gpt-5.4"),
+    ("sol", "gpt-5.6-sol"),
+    ("5.6-sol", "gpt-5.6-sol"),
+    ("terra", "gpt-5.6-terra"),
+    ("5.6-terra", "gpt-5.6-terra"),
+    ("luna", "gpt-5.6-luna"),
+    ("5.6-luna", "gpt-5.6-luna"),
     ("5.5", "gpt-5.5"),
     ("5.4", "gpt-5.4"),
     ("5.4-mini", "gpt-5.4-mini"),
@@ -129,6 +135,27 @@ pub const CLAUDE_CODE: &[ModelEntry] = &[
 ];
 
 pub const CODEX: &[ModelEntry] = &[
+    ModelEntry {
+        id: "gpt-5.6-sol",
+        label: "GPT-5.6 Sol",
+        description: "Flagship GPT-5.6 model for the most demanding coding and reasoning work. Preview access required.",
+        recommended: false,
+        effort_levels: &["low", "medium", "high", "xhigh", "max"],
+    },
+    ModelEntry {
+        id: "gpt-5.6-terra",
+        label: "GPT-5.6 Terra",
+        description: "Strong lower-cost GPT-5.6 option for coding and reasoning. Preview access required.",
+        recommended: false,
+        effort_levels: &["low", "medium", "high", "xhigh", "max"],
+    },
+    ModelEntry {
+        id: "gpt-5.6-luna",
+        label: "GPT-5.6 Luna",
+        description: "Fastest and most cost-efficient GPT-5.6 option. Preview access required.",
+        recommended: false,
+        effort_levels: &["low", "medium", "high", "xhigh", "max"],
+    },
     ModelEntry {
         id: "gpt-5.5",
         label: "GPT-5.5",
@@ -223,7 +250,17 @@ pub const DROID: &[ModelEntry] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_alias;
+    use super::{resolve_alias, CODEX};
+
+    #[test]
+    fn codex_registers_gpt_56_preview_models() {
+        for id in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+            assert!(CODEX.iter().any(|model| model.id == id));
+        }
+        assert_eq!(resolve_alias("codex", "sol"), "gpt-5.6-sol");
+        assert_eq!(resolve_alias("codex", "5.6-terra"), "gpt-5.6-terra");
+        assert_eq!(resolve_alias("codex", "luna"), "gpt-5.6-luna");
+    }
 
     #[test]
     fn claude_code_aliases_resolve_fable_5() {

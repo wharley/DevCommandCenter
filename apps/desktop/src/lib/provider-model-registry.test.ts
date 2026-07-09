@@ -4,6 +4,7 @@ import {
 } from "./fallback-provider-catalog";
 import {
 	getDefaultModelId,
+	PROVIDER_MODEL_REGISTRY,
 	resolveModelAlias,
 } from "./provider-model-registry";
 
@@ -39,6 +40,16 @@ describe("provider-model-registry", () => {
 		expect(resolveModelAlias("droid", "auto")).toBe("auto");
 		expect(resolveModelAlias("droid", "sonnet")).toBe("claude-sonnet-5");
 		expect(resolveModelAlias("droid", "5.4")).toBe("gpt-5.4");
+	});
+
+	it("registers the GPT-5.6 Codex preview models", () => {
+		const models = PROVIDER_MODEL_REGISTRY.codex;
+		expect(models.map((model) => model.id)).toEqual(
+			expect.arrayContaining(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]),
+		);
+		expect(resolveModelAlias("codex", "sol")).toBe("gpt-5.6-sol");
+		expect(resolveModelAlias("codex", "5.6-terra")).toBe("gpt-5.6-terra");
+		expect(resolveModelAlias("codex", "luna")).toBe("gpt-5.6-luna");
 	});
 
 	it("uses Auto as the default Droid model", () => {
