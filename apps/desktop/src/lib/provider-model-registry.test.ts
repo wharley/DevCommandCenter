@@ -60,6 +60,7 @@ describe("provider-model-registry", () => {
 			(candidate) => candidate.id === "grok",
 		);
 		expect(provider?.models[0]?.id).toBe("grok-4.5");
+		expect(provider?.stable).toBe(true);
 	});
 
 	it("uses Auto as the default Droid model", () => {

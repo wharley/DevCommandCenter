@@ -1,5 +1,5 @@
 import type { ReactElement, SVGProps } from "react";
-import { Sparkles } from "lucide-react";
+import { Orbit, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
  * Update here, not inline in menus — `ProviderIcon` is the single source.
  */
 
-type IconKey = "claude" | "codex" | "gemini" | "cursor" | "droid";
+type IconKey = "claude" | "codex" | "gemini" | "cursor" | "droid" | "grok";
 
 /** Maps a provider id/label to its brand mark, tolerant of catalog variants. */
 function resolveIconKey(provider: string | null | undefined): IconKey | null {
@@ -21,6 +21,7 @@ function resolveIconKey(provider: string | null | undefined): IconKey | null {
 	if (value.includes("claude") || value.includes("anthropic")) return "claude";
 	if (value.includes("codex") || value.includes("openai")) return "codex";
 	if (value.includes("gemini") || value.includes("google")) return "gemini";
+	if (value.includes("grok") || value.includes("xai")) return "grok";
 	if (value.includes("cursor")) return "cursor";
 	if (value.includes("droid") || value.includes("factory")) return "droid";
 	return null;
@@ -86,6 +87,10 @@ function DroidMark(props: SVGProps<SVGSVGElement>) {
 	);
 }
 
+function GrokMark(props: SVGProps<SVGSVGElement>) {
+	return <Orbit {...props} strokeWidth={1.7} aria-hidden />;
+}
+
 const MARKS: Record<
 	IconKey,
 	(props: SVGProps<SVGSVGElement>) => ReactElement
@@ -95,6 +100,7 @@ const MARKS: Record<
 	gemini: GeminiMark,
 	cursor: CursorMark,
 	droid: DroidMark,
+	grok: GrokMark,
 };
 
 type ProviderIconProps = {

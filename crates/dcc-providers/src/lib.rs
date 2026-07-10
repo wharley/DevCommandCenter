@@ -31,7 +31,7 @@ fn provider_registry() -> &'static HashMap<String, Arc<dyn Provider>> {
             Arc::new(droid::adapter()),
             Arc::new(cursor::adapter()),
             Arc::new(grok_acp::GrokAcpAdapter::new(
-                common::experimental_cli_capabilities(),
+                common::stable_cli_capabilities(),
             )),
         ];
 
@@ -76,7 +76,7 @@ pub async fn provider_catalog() -> ProviderCatalog {
     providers.push(cursor::descriptor(health[4].clone(), cursor_models));
     providers.push(grok_acp::descriptor(
         health[5].clone(),
-        common::experimental_cli_capabilities(),
+        common::stable_cli_capabilities(),
     ));
     ProviderCatalog { providers }
 }

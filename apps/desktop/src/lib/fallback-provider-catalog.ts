@@ -127,9 +127,9 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...experimentalCapabilities },
+			capabilities: { ...stableCapabilities },
 			health: stableHealth,
-			stable: false,
+			stable: true,
 		},
 	],
 };

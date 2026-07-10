@@ -673,7 +673,7 @@ pub fn descriptor(
             .collect(),
         capabilities,
         health,
-        stable: false,
+        stable: true,
     }
 }
 
