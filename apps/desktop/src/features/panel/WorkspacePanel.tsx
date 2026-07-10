@@ -219,10 +219,22 @@ export function WorkspacePanel({
 	const delegatePrefillNonceRef = useRef(0);
 	const lastDelegateSignalRef = useRef(delegateSignal ?? 0);
 
+	// WorkspacePanel stays mounted while the active workspace changes. Clear its
+	// transient UI state so a plan delegation from the previous workspace cannot
+	// be offered or submitted from the newly selected one.
+	useEffect(() => {
+		setComposerPrefill(null);
+		setReviewAnnotations([]);
+		setDelegateOpen(false);
+		setDelegatePrefill(null);
+		setDelegateSubmitting(false);
+	}, [workspaceId]);
+
 	useEffect(() => {
 		const signal = delegateSignal ?? 0;
 		if (signal > lastDelegateSignalRef.current) {
 			lastDelegateSignalRef.current = signal;
+			setDelegatePrefill(null);
 			setDelegateOpen(true);
 		}
 	}, [delegateSignal]);
@@ -315,6 +327,7 @@ export function WorkspacePanel({
 			setDelegateSubmitting(true);
 			try {
 				await onDelegate(request);
+				setDelegatePrefill(null);
 				setDelegateOpen(false);
 			} finally {
 				setDelegateSubmitting(false);
@@ -322,6 +335,10 @@ export function WorkspacePanel({
 		},
 		[onDelegate],
 	);
+	const handleOpenManualDelegation = useCallback(() => {
+		setDelegatePrefill(null);
+		setDelegateOpen(true);
+	}, []);
 
 	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
 	const threadHistoryQuery = useQuery(
@@ -472,7 +489,7 @@ export function WorkspacePanel({
 					onOpenSessionSearch={onOpenSessionSearch}
 					onResumeSession={onResumeSession}
 					onAbortSession={onAbortSession}
-					onOpenDelegate={() => setDelegateOpen(true)}
+					onOpenDelegate={handleOpenManualDelegation}
 					sessionActionSessionId={sessionActionSessionId}
 					updateInfo={updateInfo}
 					isInstallingUpdate={isInstallingUpdate}
@@ -551,6 +568,7 @@ export function WorkspacePanel({
 				onSubmit={handleSubmitReview}
 			/>
 			<DelegationDialog
+				key={workspaceId}
 				open={delegateOpen}
 				providers={providerChoices}
 				isSubmitting={delegateSubmitting}
