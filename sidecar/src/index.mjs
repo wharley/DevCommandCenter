@@ -8,7 +8,7 @@ import readline from "node:readline";
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
-const SIDECAR_VERSION = "0.1.18";
+const SIDECAR_VERSION = "0.1.19";
 
 function emit(value) {
 	process.stdout.write(`${JSON.stringify(value)}\n`);

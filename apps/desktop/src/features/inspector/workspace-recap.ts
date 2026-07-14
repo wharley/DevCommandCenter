@@ -23,8 +23,8 @@ export type WorkspaceRecap = {
 
 export type WorkspaceRecapInput = {
 	commitMode: CommitMode;
-	/** Runtime session snapshot is streaming ("active"). */
-	sessionActive: boolean;
+	/** A turn is currently in flight (the session itself may remain active between turns). */
+	turnRunning: boolean;
 	changedFilesCount: number;
 	additions: number;
 	deletions: number;
@@ -55,7 +55,7 @@ function prRef(input: WorkspaceRecapInput): string {
  * One-sentence answer to "where is this workspace and what now?", always paired
  * with the action that moves it forward. The next-action decision is
  * `resolveCommitMode` — this only layers the states it can't see (agent
- * streaming, pending review findings) on top; it never invents a second
+ * running turn, pending review findings) on top; it never invents a second
  * git state machine.
  */
 export function buildWorkspaceRecap(input: WorkspaceRecapInput): WorkspaceRecap {
@@ -89,7 +89,7 @@ export function buildWorkspaceRecap(input: WorkspaceRecapInput): WorkspaceRecap 
 		};
 	}
 
-	if (input.sessionActive) {
+	if (input.turnRunning) {
 		return {
 			messageKey: input.changedFilesCount > 0 ? "working" : "workingClean",
 			params: {

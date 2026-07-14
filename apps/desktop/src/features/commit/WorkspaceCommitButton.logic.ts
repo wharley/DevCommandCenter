@@ -58,10 +58,7 @@ function resolveFromContext(context: CommitModeContext) {
 	if (prState === "closed") return "open-pr" as const;
 
 	if (prState === "open") {
-		if (
-			context.prStatus?.mergeable === "CONFLICTING" ||
-			(context.gitStatus?.conflictCount ?? 0) > 0
-		) {
+		if ((context.gitStatus?.conflictCount ?? 0) > 0) {
 			return "resolve-conflicts" as const;
 		}
 		if (hasWorkingTreeChanges(context.gitStatus)) {
@@ -69,6 +66,12 @@ function resolveFromContext(context: CommitModeContext) {
 		}
 		if ((context.gitStatus?.aheadOfRemoteCount ?? 0) > 0) {
 			return "push" as const;
+		}
+		// The forge keeps reporting CONFLICTING until a local resolution is
+		// committed and pushed. Local Git state must take precedence so that the
+		// Inspector can complete that resolution flow.
+		if (context.prStatus?.mergeable === "CONFLICTING") {
+			return "resolve-conflicts" as const;
 		}
 		if (hasFailingChecks(context.prStatus)) {
 			return "fix" as const;

@@ -4,7 +4,7 @@ import { buildWorkspaceRecap, type WorkspaceRecapInput } from "./workspace-recap
 function input(overrides: Partial<WorkspaceRecapInput> = {}): WorkspaceRecapInput {
 	return {
 		commitMode: "create-pr",
-		sessionActive: false,
+		turnRunning: false,
 		changedFilesCount: 0,
 		additions: 0,
 		deletions: 0,
@@ -32,7 +32,7 @@ describe("buildWorkspaceRecap", () => {
 			input({
 				commitMode: "resolve-conflicts",
 				conflictCount: 2,
-				sessionActive: true,
+				turnRunning: true,
 				pendingReviewFindingsCount: 4,
 				changedFilesCount: 3,
 			}),
@@ -55,7 +55,7 @@ describe("buildWorkspaceRecap", () => {
 
 	it("offers continue after a merge", () => {
 		const recap = buildWorkspaceRecap(
-			input({ commitMode: "merged", prNumber: 42, sessionActive: true }),
+			input({ commitMode: "merged", prNumber: 42, turnRunning: true }),
 		);
 		expect(recap.messageKey).toBe("merged");
 		expect(recap.params.pr).toBe("PR #42");
@@ -75,7 +75,7 @@ describe("buildWorkspaceRecap", () => {
 		const recap = buildWorkspaceRecap(
 			input({
 				commitMode: "commit-and-push",
-				sessionActive: true,
+				turnRunning: true,
 				changedFilesCount: 3,
 				additions: 153,
 				deletions: 88,
@@ -89,8 +89,20 @@ describe("buildWorkspaceRecap", () => {
 	});
 
 	it("uses the no-changes variant while the agent has not edited anything", () => {
-		const recap = buildWorkspaceRecap(input({ sessionActive: true }));
+		const recap = buildWorkspaceRecap(input({ turnRunning: true }));
 		expect(recap.messageKey).toBe("workingClean");
+	});
+
+	it("returns to the git action after the turn finishes", () => {
+		const recap = buildWorkspaceRecap(
+			input({
+				commitMode: "commit-and-push",
+				turnRunning: false,
+				changedFilesCount: 2,
+			}),
+		);
+		expect(recap.messageKey).toBe("changes");
+		expect(recap.action?.kind).toBe("git");
 	});
 
 	it("puts fresh review findings ahead of committing", () => {

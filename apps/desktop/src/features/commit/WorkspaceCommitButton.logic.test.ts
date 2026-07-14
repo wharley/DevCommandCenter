@@ -33,6 +33,54 @@ describe("resolveCommitMode", () => {
 		).toBe("resolve-conflicts");
 	});
 
+	it("allows a staged conflict resolution to be committed while the forge is still conflicting", () => {
+		expect(
+			resolveCommitMode({
+				branch: "feature/statuslane",
+				prStatus: { state: "open", mergeable: "CONFLICTING", mergeStateStatus: "DIRTY" },
+				gitStatus: {
+					staged: [{}],
+					unstaged: [],
+					aheadOfRemoteCount: 0,
+					behindOfRemoteCount: 0,
+					conflictCount: 0,
+				},
+			}),
+		).toBe("commit-and-push");
+	});
+
+	it("keeps unresolved local conflicts ahead of staged changes", () => {
+		expect(
+			resolveCommitMode({
+				branch: "feature/statuslane",
+				prStatus: { state: "open", mergeable: "CONFLICTING" },
+				gitStatus: {
+					staged: [{}],
+					unstaged: [{}],
+					aheadOfRemoteCount: 0,
+					behindOfRemoteCount: 0,
+					conflictCount: 1,
+				},
+			}),
+		).toBe("resolve-conflicts");
+	});
+
+	it("allows a local resolution commit to be pushed while the forge is still conflicting", () => {
+		expect(
+			resolveCommitMode({
+				branch: "feature/statuslane",
+				prStatus: { state: "open", mergeable: "CONFLICTING", mergeStateStatus: "DIRTY" },
+				gitStatus: {
+					staged: [],
+					unstaged: [],
+					aheadOfRemoteCount: 1,
+					behindOfRemoteCount: 0,
+					conflictCount: 0,
+				},
+			}),
+		).toBe("push");
+	});
+
 	it("shows commit-and-push when the PR is open and the worktree is dirty", () => {
 		expect(
 			resolveCommitMode({

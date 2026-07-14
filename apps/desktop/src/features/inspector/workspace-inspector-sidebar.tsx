@@ -2530,7 +2530,9 @@ export function WorkspaceInspectorSidebar({
 		() =>
 			buildWorkspaceRecap({
 				commitMode,
-				sessionActive: sessionState === "active",
+				// A session stays `active` while idle between turns. The active turn id
+				// is the authoritative signal that the agent is actually working.
+				turnRunning: Boolean(sessionSnapshot?.activeTurnId?.trim()),
 				changedFilesCount: workingTreeSummary.files,
 				additions: workingTreeSummary.additions,
 				deletions: workingTreeSummary.deletions,
@@ -2552,7 +2554,7 @@ export function WorkspaceInspectorSidebar({
 			prStatus?.state,
 			pendingDelegationResultsCount,
 			committedVsBaseCount,
-			sessionState,
+			sessionSnapshot?.activeTurnId,
 			workingTreeSummary,
 		],
 	);
