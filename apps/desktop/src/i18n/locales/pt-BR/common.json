@@ -181,8 +181,8 @@
     },
     "gitSection": {
       "kicker": "Sessão",
-      "title": "Atividade e contexto do workspace",
-      "eventsCount": "{{count}} eventos"
+      "title": "Atividade e detalhes do workspace",
+      "eventsCount": "{{count}} marcos"
     },
     "delegations": {
       "title": "Delegações",
@@ -264,7 +264,7 @@
     },
     "tabs": {
       "activity": "Atividade",
-      "context": "Contexto",
+      "context": "Detalhes",
       "spec": "Spec",
       "plan": "Plano"
     },
@@ -922,11 +922,43 @@
     }
   },
   "sessionEventFeed": {
+    "title": "Atividade da sessão",
     "emptyTimeline": "Ainda não há mensagens. Inicie uma sessão e envie algo. Os eventos da sessão aparecem nesta linha do tempo.",
     "emptyForSession": "Sem atividade recente para esta sessão. Mude para \"Todas\" para ver eventos de outras sessões.",
+    "emptySummary": "Ainda não há um marco relevante. Abra Diagnóstico para inspecionar o fluxo técnico do runtime.",
     "scopeCurrent": "Esta sessão",
     "scopeAll": "Todas",
-    "thisSessionBadge": "esta sessão"
+    "thisSessionBadge": "esta sessão",
+    "viewSummary": "Resumo",
+    "viewDiagnostics": "Diagnóstico",
+    "milestones": {
+      "workspacePrepared": "Workspace preparado",
+      "workspaceReady": "Workspace pronto",
+      "sessionStarted": "Sessão iniciada",
+      "sessionResumed": "Sessão retomada",
+      "turnStarted": "Tarefa iniciada",
+      "toolFailed": "Ferramenta falhou",
+      "turnCompleted": "Resposta pronta",
+      "turnAborted": "Tarefa interrompida",
+      "checkpointCreated": "Checkpoint criado",
+      "sessionCompleted": "Sessão concluída",
+      "sessionAborted": "Sessão interrompida",
+      "event": "Workspace atualizado"
+    },
+    "details": {
+      "workspacePrepared": "Worktree preparada em {{path}}.",
+      "workspaceReady": "Worktree pronta em {{path}}.",
+      "sessionStarted": "Conectado ao {{provider}} e pronto para receber instruções.",
+      "sessionResumed": "O contexto da sessão anterior foi restaurado.",
+      "turnCompleted": "O assistente concluiu a resposta atual.",
+      "sessionCompleted": "A sessão foi concluída com sucesso.",
+      "noFailureReason": "O runtime não informou o motivo da falha.",
+      "noAbortReason": "O runtime não informou o motivo da interrupção.",
+      "event": "Uma mudança no estado do workspace foi registrada. Abra Diagnóstico para ver os detalhes técnicos."
+    },
+    "diagnostics": {
+      "noPayload": "Resumo do payload indisponível"
+    }
   },
   "branchToolbar": {
     "noBranch": "Sem branch",

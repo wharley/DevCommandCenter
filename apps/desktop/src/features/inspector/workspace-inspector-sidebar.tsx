@@ -48,6 +48,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { WorkspaceGitPreviewSelection } from "./workspace-git-file-preview";
 import { SessionEventFeed } from "@/features/sessions/session-event-feed";
+import { isSemanticSessionEvent } from "@/features/sessions/session-event-feed.logic";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workbench";
 import { InspectorChangesSection } from "./inspector-changes-section";
 import { GitSectionHeader } from "./git-section-header";
@@ -226,6 +227,29 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 				{children}
 			</div>
 		</div>
+	);
+}
+
+function DetailDisclosure({
+	title,
+	meta,
+	children,
+}: {
+	title: ReactNode;
+	meta?: ReactNode;
+	children: ReactNode;
+}) {
+	return (
+		<details className="group overflow-hidden rounded-md border border-border/50 bg-muted/10">
+			<summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 outline-none transition-colors hover:bg-muted/25 focus-visible:bg-muted/25 [&::-webkit-details-marker]:hidden">
+				<ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+				<span className="min-w-0 flex-1 text-[12px] font-semibold text-foreground">
+					{title}
+				</span>
+				{meta}
+			</summary>
+			<div className="border-t border-border/40 px-2 py-1">{children}</div>
+		</details>
 	);
 }
 
@@ -862,11 +886,13 @@ function ResizeHandle({
  */
 function SessionDockFooter({
 	activeTab,
+	tabs,
 	counts,
 	live,
 	onExpand,
 }: {
 	activeTab: InspectorTab;
+	tabs: InspectorTab[];
 	counts: Record<InspectorTab, number | null>;
 	live: boolean;
 	onExpand: (tab: InspectorTab) => void;
@@ -895,7 +921,7 @@ function SessionDockFooter({
 					</span>
 				</button>
 				<div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-					{SESSION_DOCK_TABS.map((tab) => {
+					{tabs.map((tab) => {
 						const count = counts[tab];
 						const active = tab === activeTab;
 						return (
@@ -2629,6 +2655,15 @@ export function WorkspaceInspectorSidebar({
 		}
 	}, [activePlanMessage?.id, activeTab, onTabChange]);
 
+	useEffect(() => {
+		const activeSurfaceDisappeared =
+			(activeTab === "spec" && missionSpecs.length === 0) ||
+			(activeTab === "plan" && !latestPlanMessage);
+		if (activeSurfaceDisappeared) {
+			onTabChange("activity");
+		}
+	}, [activeTab, latestPlanMessage, missionSpecs.length, onTabChange]);
+
 	function handleResizeDockStart(event: ReactMouseEvent<HTMLButtonElement>) {
 		event.preventDefault();
 		const startY = event.clientY;
@@ -2661,8 +2696,13 @@ export function WorkspaceInspectorSidebar({
 		);
 	}
 
-	const activityCount = sessionEvents.length;
+	const activityCount = sessionActivityEvents.filter(isSemanticSessionEvent).length;
 	const catalogCount = providerCatalog?.providers.length ?? 0;
+	const visibleSessionDockTabs = SESSION_DOCK_TABS.filter((tab) => {
+		if (tab === "spec") return missionSpecs.length > 0;
+		if (tab === "plan") return Boolean(latestPlanMessage);
+		return true;
+	});
 
 	return (
 		<>
@@ -2904,34 +2944,25 @@ export function WorkspaceInspectorSidebar({
 					</div>
 
 					<div className="shrink-0 border-b border-border/40 bg-muted/15 px-2">
-							<TabsList variant="line" className="h-9 w-full justify-start gap-0 border-0 bg-transparent p-0">
-								<TabsTrigger value="activity" className="h-9 rounded-none px-3 text-[12px]">
-									{t("inspector.tabs.activity")}
-								</TabsTrigger>
-								<TabsTrigger value="context" className="h-9 rounded-none px-3 text-[12px]">
-									{t("inspector.tabs.context")}
-									{catalogCount > 0 ? (
-										<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
-											({catalogCount})
-									</span>
-									) : null}
-							</TabsTrigger>
-								<TabsTrigger value="spec" className="h-9 rounded-none px-3 text-[12px]">
-									{t("inspector.tabs.spec")}
-									{missionSpecs.length > 0 ? (
-										<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
-											({missionSpecs.length})
-										</span>
-									) : null}
-								</TabsTrigger>
-								<TabsTrigger value="plan" className="h-9 rounded-none px-3 text-[12px]">
-									{t("inspector.tabs.plan")}
-									{latestPlanMessage ? (
-										<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
-											(1)
-										</span>
-									) : null}
-								</TabsTrigger>
+						<TabsList variant="line" className="h-9 w-full justify-start gap-0 border-0 bg-transparent p-0">
+							{visibleSessionDockTabs.map((tab) => {
+								const count =
+									tab === "spec" ? missionSpecs.length : tab === "plan" ? 1 : null;
+								return (
+									<TabsTrigger
+										key={tab}
+										value={tab}
+										className="h-9 rounded-none px-3 text-[12px]"
+									>
+										{t(`inspector.tabs.${tab}`)}
+										{count ? (
+											<span className="ml-1.5 tabular-nums text-[10px] text-muted-foreground">
+												({count})
+											</span>
+										) : null}
+									</TabsTrigger>
+								);
+							})}
 						</TabsList>
 					</div>
 
@@ -2988,11 +3019,14 @@ export function WorkspaceInspectorSidebar({
 									</div>
 								</div>
 
-								<div>
-									<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-										{t("inspector.groups.runtime")}
-									</p>
-									<div className="rounded-md border border-border/50 bg-muted/10 px-2">
+								<DetailDisclosure
+									title={t("inspector.groups.runtime")}
+									meta={
+										<span className="text-[11px] text-muted-foreground">
+											{sessionStateLabel(sessionState, t)}
+										</span>
+									}
+								>
 										<DetailRow label={t("inspector.fields.state")}>
 											<span className="flex flex-wrap items-center gap-2">
 												{sessionStateLabel(sessionState, t)}
@@ -3015,14 +3049,22 @@ export function WorkspaceInspectorSidebar({
 										) : (
 											<DetailRow label={t("inspector.fields.session")}>{t("inspector.sessionFallback")}</DetailRow>
 										)}
-									</div>
-								</div>
+								</DetailDisclosure>
 
-								<div>
-									<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-										{t("inspector.groups.forge")}
-									</p>
-									<div className="rounded-md border border-border/50 bg-muted/10 p-3">
+								<DetailDisclosure
+									title={t("inspector.groups.forge")}
+									meta={
+										<Badge
+											variant={forgeConnected ? "success" : "outline"}
+											className="h-5 text-[10px] font-normal"
+										>
+											{forgeConnected
+												? t("settings.account.readyBadge")
+												: t("settings.account.notReadyBadge")}
+										</Badge>
+									}
+								>
+									<div className="p-1">
 										<div className="flex items-center gap-3">
 											<ForgeAccountAvatar
 												avatarUrl={forgeIdentityAccount?.avatarUrl}
@@ -3141,13 +3183,22 @@ export function WorkspaceInspectorSidebar({
 											</div>
 										</DetailRow>
 									</div>
-								</div>
+								</DetailDisclosure>
 
-								<div>
-									<p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-										{t("inspector.groups.codeRabbit")}
-									</p>
-									<div className="rounded-md border border-border/50 bg-muted/10 p-3">
+								<DetailDisclosure
+									title={t("inspector.groups.codeRabbit")}
+									meta={
+										<Badge
+											variant={codeRabbitReady ? "success" : "outline"}
+											className="h-5 text-[10px] font-normal"
+										>
+											{codeRabbitReady
+												? t("settings.codeRabbit.readyBadge")
+												: t("settings.codeRabbit.notReadyBadge")}
+										</Badge>
+									}
+								>
+									<div className="p-1">
 										<div className="flex items-center gap-3">
 											<div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border/60 bg-background text-muted-foreground">
 												<Rabbit className="size-4" strokeWidth={1.8} />
@@ -3223,21 +3274,20 @@ export function WorkspaceInspectorSidebar({
 											</div>
 										</DetailRow>
 									</div>
-								</div>
+								</DetailDisclosure>
 
-								<div>
-									<div className="mb-2 flex items-center justify-between gap-2">
-										<p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-											{t("inspector.groups.providers")}
-										</p>
-										{catalogCount > 0 ? (
+								<DetailDisclosure
+									title={t("inspector.groups.providers")}
+									meta={
+										catalogCount > 0 ? (
 											<Badge variant="secondary" className="h-5 text-[10px] font-normal">
 												{t("inspector.providersRegistered", { count: catalogCount })}
 											</Badge>
-										) : null}
-									</div>
+										) : null
+									}
+								>
 									<ProviderCatalogDense catalog={providerCatalog} />
-								</div>
+								</DetailDisclosure>
 
 								<p className="text-[10px] leading-relaxed text-muted-foreground">
 									{t("inspector.terminalNote")}
@@ -3714,9 +3764,10 @@ export function WorkspaceInspectorSidebar({
 				) : (
 					<SessionDockFooter
 						activeTab={activeTab}
+						tabs={visibleSessionDockTabs}
 						counts={{
 							activity: activityCount,
-							context: catalogCount,
+							context: null,
 							spec: missionSpecs.length,
 							plan: latestPlanMessage ? 1 : 0,
 						}}

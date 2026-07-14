@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { CoreEvent } from "@dcc/contracts";
+import { isSemanticSessionEvent } from "./session-event-feed.logic";
 
 /** Session id that an event belongs to, or null for non-session events. */
 function eventSessionId(event: CoreEvent): string | null {
@@ -69,7 +71,94 @@ function eventTone(event: CoreEvent): "outline" | "secondary" | "success" | "war
 	return "outline";
 }
 
-function eventPayloadSummary(event: CoreEvent): string {
+function semanticEventPresentation(
+	event: CoreEvent,
+	t: TFunction<"common">,
+): { title: string; description: string } {
+	if ("workspacePrepared" in event && event.workspacePrepared) {
+		return {
+			title: t("sessionEventFeed.milestones.workspacePrepared"),
+			description: t("sessionEventFeed.details.workspacePrepared", {
+				path: event.workspacePrepared.worktree_path,
+			}),
+		};
+	}
+	if ("workspaceReady" in event && event.workspaceReady) {
+		return {
+			title: t("sessionEventFeed.milestones.workspaceReady"),
+			description: t("sessionEventFeed.details.workspaceReady", {
+				path: event.workspaceReady.worktree_path,
+			}),
+		};
+	}
+	if ("sessionStarted" in event && event.sessionStarted) {
+		return {
+			title: t("sessionEventFeed.milestones.sessionStarted"),
+			description: t("sessionEventFeed.details.sessionStarted", {
+				provider: event.sessionStarted.provider_id,
+			}),
+		};
+	}
+	if ("sessionResumed" in event && event.sessionResumed) {
+		return {
+			title: t("sessionEventFeed.milestones.sessionResumed"),
+			description: t("sessionEventFeed.details.sessionResumed"),
+		};
+	}
+	if ("sessionTurnStarted" in event && event.sessionTurnStarted) {
+		return {
+			title: t("sessionEventFeed.milestones.turnStarted"),
+			description: event.sessionTurnStarted.prompt,
+		};
+	}
+	if ("sessionTurnToolCallFailed" in event && event.sessionTurnToolCallFailed) {
+		return {
+			title: t("sessionEventFeed.milestones.toolFailed"),
+			description:
+				event.sessionTurnToolCallFailed.reason ??
+				t("sessionEventFeed.details.noFailureReason"),
+		};
+	}
+	if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
+		return {
+			title: t("sessionEventFeed.milestones.turnCompleted"),
+			description: t("sessionEventFeed.details.turnCompleted"),
+		};
+	}
+	if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
+		return {
+			title: t("sessionEventFeed.milestones.turnAborted"),
+			description:
+				event.sessionTurnAborted.reason ??
+				t("sessionEventFeed.details.noAbortReason"),
+		};
+	}
+	if ("sessionCheckpointCreated" in event && event.sessionCheckpointCreated) {
+		return {
+			title: t("sessionEventFeed.milestones.checkpointCreated"),
+			description: event.sessionCheckpointCreated.label,
+		};
+	}
+	if ("sessionCompleted" in event && event.sessionCompleted) {
+		return {
+			title: t("sessionEventFeed.milestones.sessionCompleted"),
+			description: t("sessionEventFeed.details.sessionCompleted"),
+		};
+	}
+	if ("sessionAborted" in event && event.sessionAborted) {
+		return {
+			title: t("sessionEventFeed.milestones.sessionAborted"),
+			description:
+				event.sessionAborted.reason ?? t("sessionEventFeed.details.noAbortReason"),
+		};
+	}
+	return {
+		title: t("sessionEventFeed.milestones.event"),
+		description: t("sessionEventFeed.details.event"),
+	};
+}
+
+function eventPayloadSummary(event: CoreEvent, t: TFunction<"common">): string {
 	const sessionStarted = "sessionStarted" in event ? event.sessionStarted : null;
 	if (sessionStarted) {
 		return `${sessionStarted.session_id} · ${sessionStarted.provider_id}`;
@@ -119,12 +208,17 @@ function eventPayloadSummary(event: CoreEvent): string {
 	const sessionTurnToolCallFailed =
 		"sessionTurnToolCallFailed" in event ? event.sessionTurnToolCallFailed : null;
 	if (sessionTurnToolCallFailed) {
-		return `${sessionTurnToolCallFailed.session_id} · ${sessionTurnToolCallFailed.reason ?? "tool call failed"}`;
+		return `${sessionTurnToolCallFailed.session_id} · ${
+			sessionTurnToolCallFailed.reason ??
+			t("sessionEventFeed.details.noFailureReason")
+		}`;
 	}
 	const sessionTurnAborted =
 		"sessionTurnAborted" in event ? event.sessionTurnAborted : null;
 	if (sessionTurnAborted) {
-		return `${sessionTurnAborted.session_id} · ${sessionTurnAborted.reason ?? "no reason"}`;
+		return `${sessionTurnAborted.session_id} · ${
+			sessionTurnAborted.reason ?? t("sessionEventFeed.details.noAbortReason")
+		}`;
 	}
 	const sessionCheckpointCreated =
 		"sessionCheckpointCreated" in event ? event.sessionCheckpointCreated : null;
@@ -135,7 +229,7 @@ function eventPayloadSummary(event: CoreEvent): string {
 		const payload = "workspacePrepared" in event ? event.workspacePrepared : event.workspaceReady;
 		return payload
 			? `${payload.project_id} · ${payload.worktree_path}`
-			: "No payload summary";
+			: t("sessionEventFeed.diagnostics.noPayload");
 	}
 	const sessionCompleted =
 		"sessionCompleted" in event ? event.sessionCompleted : null;
@@ -144,7 +238,9 @@ function eventPayloadSummary(event: CoreEvent): string {
 	}
 	const sessionAborted = "sessionAborted" in event ? event.sessionAborted : null;
 	if (sessionAborted) {
-		return `${sessionAborted.session_id} · ${sessionAborted.reason ?? "no reason"}`;
+		return `${sessionAborted.session_id} · ${
+			sessionAborted.reason ?? t("sessionEventFeed.details.noAbortReason")
+		}`;
 	}
 	const sessionResumed = "sessionResumed" in event ? event.sessionResumed : null;
 	if (sessionResumed) {
@@ -155,10 +251,11 @@ function eventPayloadSummary(event: CoreEvent): string {
 	if (sessionTurnCompleted) {
 		return `${sessionTurnCompleted.session_id} · ${sessionTurnCompleted.turn_id}`;
 	}
-	return "No payload summary";
+	return t("sessionEventFeed.diagnostics.noPayload");
 }
 
 type FeedScope = "current" | "all";
+type FeedView = "summary" | "diagnostics";
 
 export function SessionEventFeed({
 	events,
@@ -177,10 +274,11 @@ export function SessionEventFeed({
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const [showScrollToLatest, setShowScrollToLatest] = useState(false);
 	const [scope, setScope] = useState<FeedScope>("current");
+	const [view, setView] = useState<FeedView>("summary");
 
 	const canFilterBySession = Boolean(currentSessionId);
 	const effectiveScope: FeedScope = canFilterBySession ? scope : "all";
-	const visibleEvents = useMemo(() => {
+	const scopedEvents = useMemo(() => {
 		if (effectiveScope === "all" || !currentSessionId) {
 			return events;
 		}
@@ -189,11 +287,18 @@ export function SessionEventFeed({
 			return id === null || id === currentSessionId;
 		});
 	}, [events, effectiveScope, currentSessionId]);
+	const visibleEvents = useMemo(
+		() =>
+			view === "summary"
+				? scopedEvents.filter(isSemanticSessionEvent)
+				: scopedEvents,
+		[scopedEvents, view],
+	);
 
 	const latestEventKey = useMemo(() => {
 		const last = visibleEvents[visibleEvents.length - 1];
-		return last ? eventLabel(last) : "empty";
-	}, [visibleEvents]);
+		return last ? `${view}-${eventLabel(last)}-${visibleEvents.length}` : `${view}-empty`;
+	}, [view, visibleEvents]);
 
 	useEffect(() => {
 		const container = scrollRef.current;
@@ -229,7 +334,9 @@ export function SessionEventFeed({
 	}, [compact, latestEventKey]);
 
 	const emptyMessage =
-		effectiveScope === "current" && events.length > 0
+		view === "summary" && scopedEvents.length > 0
+			? t("sessionEventFeed.emptySummary")
+			: effectiveScope === "current" && events.length > 0
 			? t("sessionEventFeed.emptyForSession")
 			: t("sessionEventFeed.emptyTimeline");
 
@@ -246,6 +353,8 @@ export function SessionEventFeed({
 					const sessionId = eventSessionId(event);
 					const isCurrentSession =
 						sessionId !== null && sessionId === currentSessionId;
+					const semantic =
+						view === "summary" ? semanticEventPresentation(event, t) : null;
 					return (
 						<li
 							key={`${eventLabel(event)}-${index}`}
@@ -254,9 +363,9 @@ export function SessionEventFeed({
 							<div className="dcc-runtime-feed__row dcc-session-event" data-tone={eventTone(event)}>
 								<div className="dcc-session-event__header flex flex-wrap items-center gap-1.5">
 									<Badge variant={eventTone(event)} className="font-normal">
-										{eventLabel(event)}
+										{semantic?.title ?? eventLabel(event)}
 									</Badge>
-									{sessionId ? (
+									{view === "diagnostics" && sessionId ? (
 										<Badge
 											variant={isCurrentSession ? "secondary" : "outline"}
 											className="font-normal"
@@ -268,7 +377,7 @@ export function SessionEventFeed({
 									) : null}
 								</div>
 								<p className="dcc-session-event__copy text-[13px] leading-snug">
-									{eventPayloadSummary(event)}
+					{semantic?.description ?? eventPayloadSummary(event, t)}
 								</p>
 							</div>
 						</li>
@@ -296,15 +405,33 @@ export function SessionEventFeed({
 			</ToggleGroupItem>
 		</ToggleGroup>
 	) : null;
+	const viewToggle = (
+		<ToggleGroup
+			type="single"
+			value={view}
+			onValueChange={(value) => {
+				if (value === "summary" || value === "diagnostics") {
+					setView(value);
+				}
+			}}
+			className="gap-0.5 rounded-lg border border-border/50 bg-muted/20 p-0.5"
+		>
+			<ToggleGroupItem value="summary" className="h-6 px-2 text-[11px]">
+				{t("sessionEventFeed.viewSummary")}
+			</ToggleGroupItem>
+			<ToggleGroupItem value="diagnostics" className="h-6 px-2 text-[11px]">
+				{t("sessionEventFeed.viewDiagnostics")}
+			</ToggleGroupItem>
+		</ToggleGroup>
+	);
 
 	if (compact) {
 		return (
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-				{scopeToggle ? (
-					<div className="flex shrink-0 items-center justify-end px-3 pb-1 pt-2">
-						{scopeToggle}
-					</div>
-				) : null}
+				<div className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 pb-1 pt-2">
+					{viewToggle}
+					{scopeToggle}
+				</div>
 				<div className="dcc-conversation-scroll-area relative min-h-0 flex-1 overflow-hidden">
 					<div
 						ref={scrollRef}
@@ -343,8 +470,9 @@ export function SessionEventFeed({
 		<Card className="dcc-runtime-feed">
 			<CardHeader>
 				<div className="dcc-card__meta-row">
-					<CardTitle>Session events</CardTitle>
+					<CardTitle>{t("sessionEventFeed.title")}</CardTitle>
 					<div className="flex items-center gap-2">
+						{viewToggle}
 						{scopeToggle}
 						<Badge variant="outline">{visibleEvents.length}</Badge>
 					</div>

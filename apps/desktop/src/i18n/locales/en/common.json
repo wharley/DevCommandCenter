@@ -181,8 +181,8 @@
     },
     "gitSection": {
       "kicker": "Session",
-      "title": "Activity and workspace context",
-      "eventsCount": "{{count}} events"
+      "title": "Activity and workspace details",
+      "eventsCount": "{{count}} milestones"
     },
     "delegations": {
       "title": "Delegations",
@@ -264,7 +264,7 @@
     },
     "tabs": {
       "activity": "Activity",
-      "context": "Context",
+      "context": "Details",
       "spec": "Spec",
       "plan": "Plan"
     },
@@ -922,11 +922,43 @@
     }
   },
   "sessionEventFeed": {
+    "title": "Session activity",
     "emptyTimeline": "No messages yet. Start a session and send something. Session events appear in this timeline.",
     "emptyForSession": "No recent activity for this session. Switch to \"All\" to see events from other sessions.",
+    "emptySummary": "No meaningful milestone yet. Open Diagnostics to inspect the raw runtime stream.",
     "scopeCurrent": "This session",
     "scopeAll": "All",
-    "thisSessionBadge": "this session"
+    "thisSessionBadge": "this session",
+    "viewSummary": "Summary",
+    "viewDiagnostics": "Diagnostics",
+    "milestones": {
+      "workspacePrepared": "Workspace prepared",
+      "workspaceReady": "Workspace ready",
+      "sessionStarted": "Session started",
+      "sessionResumed": "Session resumed",
+      "turnStarted": "Task started",
+      "toolFailed": "Tool failed",
+      "turnCompleted": "Response ready",
+      "turnAborted": "Task interrupted",
+      "checkpointCreated": "Checkpoint created",
+      "sessionCompleted": "Session completed",
+      "sessionAborted": "Session interrupted",
+      "event": "Workspace updated"
+    },
+    "details": {
+      "workspacePrepared": "Worktree prepared at {{path}}.",
+      "workspaceReady": "Worktree ready at {{path}}.",
+      "sessionStarted": "Connected to {{provider}} and ready for instructions.",
+      "sessionResumed": "Previous session context restored.",
+      "turnCompleted": "The assistant finished the current response.",
+      "sessionCompleted": "The session finished successfully.",
+      "noFailureReason": "The runtime did not provide a failure reason.",
+      "noAbortReason": "The runtime did not provide an interruption reason.",
+      "event": "A workspace state change was recorded. Open Diagnostics for technical details."
+    },
+    "diagnostics": {
+      "noPayload": "No payload summary available"
+    }
   },
   "branchToolbar": {
     "noBranch": "No branch",
