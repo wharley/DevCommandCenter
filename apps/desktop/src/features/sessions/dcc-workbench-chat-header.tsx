@@ -1,6 +1,5 @@
 import {
 	AlertCircle,
-	CircleStop,
 	Clock3,
 	FileDiff,
 	GitFork,
@@ -10,6 +9,7 @@ import {
 	Plus,
 	RefreshCw,
 	Search,
+	SquareTerminal,
 	X,
 } from "lucide-react";
 import { memo, useEffect, useState } from "react";
@@ -35,10 +35,7 @@ import { AppUpdateButton } from "@/features/updater";
 import type { AppUpdateInfo } from "@/features/updater";
 import { WorkspaceEditorPicker } from "./workspace-editor-picker";
 import type { DccRuntimeSessionSnapshot } from "./workbench-types";
-import {
-	canAbortRun,
-	canResumeSession,
-} from "./session-chrome-state";
+import { canResumeSession } from "./session-chrome-state";
 import { isSessionArchived, visibleSessions } from "./session-close";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import { cn } from "@/lib/utils";
@@ -49,7 +46,6 @@ const INSPECTOR_HINT_STORAGE_KEY = "dcc.inspectorHintSeen";
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
 	projectBadgeLabel: string | null;
-	modelBadgeLabel: string | null;
 	isGitRepo: boolean;
 	pathCaption: string | null;
 	workspacePath: string | null;
@@ -57,19 +53,18 @@ export type DccWorkbenchChatHeaderProps = {
 	selectedSessionId: string | null;
 	isLoadingSessions: boolean;
 	sessionSnapshot: DccRuntimeSessionSnapshot | null;
-	pendingPrompt: string | null;
 	onSelectSession: (sessionId: string) => void;
 	onStartSession: () => void;
 	onCloseSession: (sessionId: string) => void;
 	onRestoreSession: (sessionId: string) => void;
 	onOpenSessionSearch: () => void;
 	onResumeSession: () => void;
-	onAbortSession: () => void;
 	onOpenDelegate: () => void;
 	sessionActionSessionId: string | null;
 	updateInfo: AppUpdateInfo;
 	isInstallingUpdate: boolean;
 	onInstallUpdate: () => void;
+	onOpenTerminal?: () => void;
 	/** Uncommitted git changes summary; drives the calm-mode changes pill. */
 	gitChangeSummary?: {
 		files: number;
@@ -87,7 +82,6 @@ export type DccWorkbenchChatHeaderProps = {
 export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	threadTitle,
 	projectBadgeLabel,
-	modelBadgeLabel,
 	isGitRepo,
 	pathCaption,
 	workspacePath,
@@ -95,19 +89,18 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	selectedSessionId,
 	isLoadingSessions,
 	sessionSnapshot,
-	pendingPrompt,
 	onSelectSession,
 	onStartSession,
 	onCloseSession,
 	onRestoreSession,
 	onOpenSessionSearch,
 	onResumeSession,
-	onAbortSession,
 	onOpenDelegate,
 	sessionActionSessionId,
 	updateInfo,
 	isInstallingUpdate,
 	onInstallUpdate,
+	onOpenTerminal,
 	gitChangeSummary,
 	inspectorCollapsed,
 	onToggleInspector,
@@ -142,7 +135,6 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	};
 	const showProjectBadge = Boolean(projectBadgeLabel);
 	const resumeOk = canResumeSession(sessionSnapshot);
-	const abortOk = canAbortRun(sessionSnapshot, pendingPrompt);
 	const visibleSessionList = visibleSessions(sessions);
 	const archivedSessionList = sessions.filter(isSessionArchived);
 	const activeSessionId = selectedSessionId ?? visibleSessionList[0]?.session.id ?? "";
@@ -160,11 +152,6 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 					{showProjectBadge ? (
 						<Badge variant="outline" className="min-w-0 shrink overflow-hidden">
 							<span className="min-w-0 truncate">{projectBadgeLabel}</span>
-						</Badge>
-					) : null}
-					{modelBadgeLabel ? (
-						<Badge variant="secondary" className="min-w-0 shrink overflow-hidden">
-							<span className="min-w-0 truncate">{modelBadgeLabel}</span>
 						</Badge>
 					) : null}
 					{showProjectBadge && !isGitRepo ? (
@@ -207,28 +194,6 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 										: t("workbench.resumeTooltipActive")}
 							</TooltipContent>
 						</Tooltip>
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon"
-									className="h-7 w-7 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive [&_svg]:size-3.5"
-									aria-label={t("workbench.abortAria")}
-									onClick={onAbortSession}
-									disabled={!sessionSnapshot || !abortOk}
-								>
-									<CircleStop className="size-3.5" strokeWidth={2} />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent side="bottom">
-								{!sessionSnapshot
-									? t("workbench.abortTooltipNone")
-									: abortOk
-										? t("workbench.abortTooltipOk")
-										: t("workbench.abortTooltipNoTurn")}
-							</TooltipContent>
-						</Tooltip>
 					</div>
 					<AppUpdateButton
 						update={updateInfo}
@@ -265,6 +230,25 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						</TooltipContent>
 					</Tooltip>
 					<WorkspaceEditorPicker workspacePath={workspacePath} />
+					{onOpenTerminal ? (
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-sm"
+									className="shrink-0 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+									onClick={onOpenTerminal}
+									aria-label={t("workbench.terminal.open")}
+								>
+									<SquareTerminal className="size-3.5" strokeWidth={1.8} />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent side="bottom">
+								{t("workbench.terminal.open")}
+							</TooltipContent>
+						</Tooltip>
+					) : null}
 					{onToggleInspector ? (
 						inspectorCollapsed && gitChangeSummary ? (
 							<Tooltip>

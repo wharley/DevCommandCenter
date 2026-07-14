@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { WorkspaceTerminalDrawer } from "@/features/terminal";
 import {
@@ -131,6 +132,7 @@ export function SessionWorkbench({
 	onReviewDelegation,
 	delegateSignal,
 }: SessionWorkbenchProps) {
+	const { t } = useTranslation("common");
 	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [terminalExpanded, setTerminalExpanded] = useState(false);
 	const [terminalScopeKind, setTerminalScopeKind] =
@@ -142,21 +144,32 @@ export function SessionWorkbench({
 		() => [
 			{
 				kind: "worktree",
-				label: "Worktree",
+				label: t("terminalDock.scopes.worktree"),
 				scopeKey: `worktree:${workspaceId}`,
 				cwd: terminalWorktreePath ?? null,
-				disabledReason: terminalWorktreePath ? null : "No worktree path available",
+				disabledReason: terminalWorktreePath
+					? null
+					: t("terminalDock.scopes.noWorktreePath"),
 			},
 			{
 				kind: "project",
-				label: "Project root",
+				label: t("terminalDock.scopes.project"),
 				scopeKey: terminalProjectKey,
 				cwd: terminalRootPath ?? workspacePath,
 				disabledReason:
-					terminalRootPath ?? workspacePath ? null : "No project root available",
+					terminalRootPath ?? workspacePath
+						? null
+						: t("terminalDock.scopes.noProjectPath"),
 			},
 		],
-		[terminalProjectKey, terminalRootPath, terminalWorktreePath, workspaceId, workspacePath],
+		[
+			t,
+			terminalProjectKey,
+			terminalRootPath,
+			terminalWorktreePath,
+			workspaceId,
+			workspacePath,
+		],
 	);
 	const activeTerminalScope =
 		terminalScopes.find((scope) => scope.kind === terminalScopeKind && scope.cwd) ??
@@ -196,7 +209,7 @@ export function SessionWorkbench({
 	const chatHidden = terminalOpen && terminalExpanded;
 
 	return (
-		<div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden bg-background">
+		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
 			{!chatHidden ? (
 				<div className="@container/header-actions flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">
 					<WorkspacePanel
@@ -257,6 +270,9 @@ export function SessionWorkbench({
 					scopeKey={activeTerminalScope.scopeKey}
 					scopeLabel={activeTerminalScope.label}
 					cwd={activeTerminalScope.cwd}
+					scopes={terminalScopes}
+					activeScopeKind={activeTerminalScope.kind}
+					onScopeChange={setTerminalScopeKind}
 					workspaceName={workspaceName}
 					workspaceBranch={workspaceBranch}
 					providerLabel={selectedProviderLabel}

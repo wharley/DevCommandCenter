@@ -242,8 +242,8 @@
     },
     "modeDock": {
       "ariaLabel": "Modo do inspector",
-      "git": "Git",
-      "code": "Código"
+      "git": "Mudanças",
+      "code": "Arquivos"
     },
     "gitConfirmation": {
       "mergeTitle": "Mesclar {{requestLabel}}?",
@@ -547,12 +547,67 @@
       "default": "Peça mudanças, mencione arquivos com @ e use /comandos",
       "plan": "Descreva o que mudar e depois clique em Solicitar mudanças"
     },
+    "controls": {
+      "addContext": "Adicionar contexto",
+      "context": "Contexto",
+      "contextCount": "Contexto {{count}}",
+      "plan": "Planejar",
+      "planMode": "Modo de planejamento",
+      "send": "Enviar",
+      "steer": "Enviar orientação",
+      "stop": "Interromper"
+    },
+    "context": {
+      "label": "Contexto",
+      "empty": "Nenhum contexto adicional",
+      "remove": "Remover {{label}}"
+    },
+    "execution": {
+      "title": "Execução",
+      "fast": "Rápida",
+      "standard": "Padrão",
+      "fastMode": "Respostas rápidas",
+      "fastModeHint": "Prefere respostas mais curtas e diretas.",
+      "effort": "Esforço de raciocínio",
+      "sessionUsage": "Estimativa da sessão · {{turns}} turnos · {{checkpoints}} checkpoints · ~{{context}}% de contexto"
+    },
+    "effort": {
+      "minimal": "Mínimo",
+      "low": "Baixo",
+      "balanced": "Equilibrado",
+      "medium": "Médio",
+      "high": "Alto",
+      "xhigh": "Muito alto",
+      "max": "Máximo",
+      "ultrathink": "Ultrathink"
+    },
     "planFollowUp": {
       "kicker": "Plano pronto",
       "fallbackTitle": "Plano ativo da missão",
       "openPlan": "Abrir plano",
       "delegatePlan": "Delegar plano",
       "implementInNewThread": "Implementar em nova thread"
+    }
+  },
+  "terminalDock": {
+    "ariaLabel": "Dock do terminal",
+    "resize": "Redimensionar dock do terminal",
+    "resizeHint": "Arraste para redimensionar",
+    "newTab": "Nova aba de terminal",
+    "newScopedTab": "Novo terminal em {{scope}}",
+    "maxTabs": "Máximo de {{count}} terminais",
+    "noPath": "Caminho do terminal indisponível",
+    "empty": "Nenhum terminal aberto",
+    "expand": "Expandir terminal",
+    "collapse": "Recolher terminal para visão dividida",
+    "collapseHint": "Recolher para visão dividida (Esc)",
+    "hide": "Ocultar dock do terminal",
+    "hideHint": "Ocultar terminal (Esc)",
+    "scopes": {
+      "worktree": "Worktree",
+      "project": "Raiz do projeto",
+      "noWorktreePath": "Caminho da worktree indisponível",
+      "noProjectPath": "Caminho da raiz do projeto indisponível"
     }
   },
   "settings": {
@@ -919,6 +974,9 @@
     "inspectorToggle": {
       "open": "Mostrar painel Git",
       "close": "Ocultar painel Git"
+    },
+    "terminal": {
+      "open": "Abrir terminal"
     },
     "sessionState": {
       "idle": "ocioso",

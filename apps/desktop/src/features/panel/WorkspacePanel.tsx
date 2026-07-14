@@ -215,6 +215,15 @@ export function WorkspacePanel({
 	const [delegatePrefill, setDelegatePrefill] =
 		useState<DelegationDialogPrefill | null>(null);
 	const [delegateSubmitting, setDelegateSubmitting] = useState(false);
+	const openPreferredTerminal = useCallback(() => {
+		if (!onOpenTerminal) return;
+		const preferredScope =
+			terminalScopes?.find((scope) => scope.kind === "worktree" && scope.cwd) ??
+			terminalScopes?.find((scope) => Boolean(scope.cwd));
+		if (preferredScope) {
+			onOpenTerminal({ scope: preferredScope.kind });
+		}
+	}, [onOpenTerminal, terminalScopes]);
 	const reviewIdRef = useRef(0);
 	const delegatePrefillNonceRef = useRef(0);
 	const lastDelegateSignalRef = useRef(delegateSignal ?? 0);
@@ -474,26 +483,24 @@ export function WorkspacePanel({
 				<DccWorkbenchChatHeader
 					threadTitle={selectedSessionTitle}
 					projectBadgeLabel={workspaceBranch || null}
-					modelBadgeLabel={selectedModelLabel}
 					isGitRepo={isGitRepo}
 					pathCaption={pathCaption}
 					sessions={sessions}
 					selectedSessionId={selectedSessionId}
 					isLoadingSessions={isLoadingSessions}
 					sessionSnapshot={sessionSnapshot}
-					pendingPrompt={pendingPrompt}
 					onSelectSession={onSelectSession}
 					onStartSession={onStartSession}
 					onCloseSession={onCloseSession}
 					onRestoreSession={onRestoreSession}
 					onOpenSessionSearch={onOpenSessionSearch}
 					onResumeSession={onResumeSession}
-					onAbortSession={onAbortSession}
 					onOpenDelegate={handleOpenManualDelegation}
 					sessionActionSessionId={sessionActionSessionId}
 					updateInfo={updateInfo}
 					isInstallingUpdate={isInstallingUpdate}
 					onInstallUpdate={onInstallUpdate}
+					onOpenTerminal={onOpenTerminal ? openPreferredTerminal : undefined}
 					workspacePath={workspacePath}
 					gitChangeSummary={gitChangeSummary}
 					inspectorCollapsed={inspectorCollapsed}
@@ -550,8 +557,6 @@ export function WorkspacePanel({
 					onOpenPlanSidebar={onOpenPlanSidebar}
 					onDelegatePlan={handleDelegatePlan}
 					onImplementPlanInNewThread={onImplementPlanInNewThread}
-					terminalScopes={terminalScopes}
-					onOpenTerminal={onOpenTerminal}
 				/>
 				</div>
 			</div>

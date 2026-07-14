@@ -506,7 +506,7 @@ function DelegationsSection({
 						return (
 							<div
 								key={delegation.id}
-								className={cn(
+									className={cn(
 									"rounded-md border px-2 py-2",
 									delegation.id === reviewDelegationId
 										? "border-primary/50 bg-primary/10"
@@ -903,7 +903,7 @@ function SessionDockFooter({
 								key={tab}
 								type="button"
 								onClick={() => onExpand(tab)}
-								className={cn(
+									className={cn(
 									"flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11.5px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
 									active
 										? "bg-muted/55 font-medium text-foreground"
@@ -1039,9 +1039,9 @@ function InspectorModeDock({
 	return (
 		<nav
 			aria-label={t("inspector.modeDock.ariaLabel")}
-			className="shrink-0 border-t border-border/60 bg-sidebar"
+			className="shrink-0 border-b border-border/60 bg-sidebar"
 		>
-			<div className="flex h-10 items-center justify-start gap-1 px-2">
+			<div className="flex h-10 items-center gap-1 px-2">
 				{INSPECTOR_MODES.map((item) => {
 					const active = item === mode;
 					const Icon = item === "git" ? GitBranch : Code2;
@@ -1066,7 +1066,7 @@ function InspectorModeDock({
 										onModeChange(item);
 									}}
 									className={cn(
-										"flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[11.5px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
+										"flex h-7 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 text-[12px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
 										active
 											? "bg-muted text-foreground shadow-sm"
 											: "text-muted-foreground hover:bg-muted/45 hover:text-foreground",
@@ -2671,6 +2671,15 @@ export function WorkspaceInspectorSidebar({
 				className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground"
 				data-dcc-inspector-root
 			>
+				<InspectorModeDock mode={inspectorMode} onModeChange={selectInspectorMode} />
+				{workspacePath && gitStatusQuery.data ? (
+					<WorkspaceRecapStrip
+						recap={workspaceRecap}
+						requestLabel={forgeContext.requestLabel}
+						busy={isRecapActionRunning || isContinuingWorkspace}
+						onAction={handleRecapAction}
+					/>
+				) : null}
 				{inspectorMode === "git" ? (
 					<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border/60">
 						<GitSectionHeader
@@ -2842,15 +2851,6 @@ export function WorkspaceInspectorSidebar({
 						onOpenQuickOpen={onOpenQuickOpen}
 					/>
 				)}
-
-			{workspacePath && gitStatusQuery.data ? (
-				<WorkspaceRecapStrip
-					recap={workspaceRecap}
-					requestLabel={forgeContext.requestLabel}
-					busy={isRecapActionRunning || isContinuingWorkspace}
-					onAction={handleRecapAction}
-				/>
-			) : null}
 
 			{sessionDockOpen ? (
 			<>
@@ -3708,24 +3708,23 @@ export function WorkspaceInspectorSidebar({
 								</div>
 							)}
 						</TabsContent>
-				</Tabs>
-			</section>
+					</Tabs>
+				</section>
 			</>
 				) : (
 					<SessionDockFooter
 						activeTab={activeTab}
-					counts={{
-						activity: activityCount,
-						context: catalogCount,
-						spec: missionSpecs.length,
-						plan: latestPlanMessage ? 1 : 0,
-					}}
-					live={sessionState === "active"}
+						counts={{
+							activity: activityCount,
+							context: catalogCount,
+							spec: missionSpecs.length,
+							plan: latestPlanMessage ? 1 : 0,
+						}}
+						live={sessionState === "active"}
 						onExpand={openSessionDock}
 					/>
 				)}
-				<InspectorModeDock mode={inspectorMode} onModeChange={selectInspectorMode} />
-				</div>
+			</div>
 			<Dialog
 				open={pendingGitConfirmation !== null}
 				onOpenChange={(open) => {

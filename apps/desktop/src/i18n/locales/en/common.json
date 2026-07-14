@@ -242,8 +242,8 @@
     },
     "modeDock": {
       "ariaLabel": "Inspector mode",
-      "git": "Git",
-      "code": "Code"
+      "git": "Changes",
+      "code": "Files"
     },
     "gitConfirmation": {
       "mergeTitle": "Merge {{requestLabel}}?",
@@ -547,12 +547,67 @@
       "default": "Ask for changes, @mention files, and run /commands",
       "plan": "Describe what to change, then click Request Changes"
     },
+    "controls": {
+      "addContext": "Add context",
+      "context": "Context",
+      "contextCount": "Context {{count}}",
+      "plan": "Plan",
+      "planMode": "Plan mode",
+      "send": "Send",
+      "steer": "Send guidance",
+      "stop": "Stop"
+    },
+    "context": {
+      "label": "Context",
+      "empty": "No extra context",
+      "remove": "Remove {{label}}"
+    },
+    "execution": {
+      "title": "Execution",
+      "fast": "Fast",
+      "standard": "Standard",
+      "fastMode": "Fast responses",
+      "fastModeHint": "Prefer shorter, more direct replies.",
+      "effort": "Reasoning effort",
+      "sessionUsage": "Session estimate · {{turns}} turns · {{checkpoints}} checkpoints · ~{{context}}% context"
+    },
+    "effort": {
+      "minimal": "Minimal",
+      "low": "Low",
+      "balanced": "Balanced",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Extra High",
+      "max": "Max",
+      "ultrathink": "Ultrathink"
+    },
     "planFollowUp": {
       "kicker": "Plan ready",
       "fallbackTitle": "Active mission plan",
       "openPlan": "Open plan",
       "delegatePlan": "Delegate plan",
       "implementInNewThread": "Implement in new thread"
+    }
+  },
+  "terminalDock": {
+    "ariaLabel": "Terminal dock",
+    "resize": "Resize terminal dock",
+    "resizeHint": "Drag to resize",
+    "newTab": "New terminal tab",
+    "newScopedTab": "New {{scope}} terminal",
+    "maxTabs": "Maximum of {{count}} terminals",
+    "noPath": "No terminal path available",
+    "empty": "No terminal open",
+    "expand": "Expand terminal",
+    "collapse": "Collapse terminal to split view",
+    "collapseHint": "Collapse to split view (Esc)",
+    "hide": "Hide terminal dock",
+    "hideHint": "Hide terminal (Esc)",
+    "scopes": {
+      "worktree": "Worktree",
+      "project": "Project root",
+      "noWorktreePath": "No worktree path available",
+      "noProjectPath": "No project root available"
     }
   },
   "settings": {
@@ -919,6 +974,9 @@
     "inspectorToggle": {
       "open": "Show Git panel",
       "close": "Hide Git panel"
+    },
+    "terminal": {
+      "open": "Open terminal"
     },
     "sessionState": {
       "idle": "idle",

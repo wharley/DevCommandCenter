@@ -6,9 +6,8 @@ import {
 	ChevronDown,
 	ClipboardList,
 	Plus,
+	SlidersHorizontal,
 	Square,
-	SquareTerminal,
-	Zap,
 } from "lucide-react";
 import type { LexicalEditor } from "lexical";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
@@ -40,9 +39,7 @@ import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
 import { ContextBar } from "./ContextBar";
 import { ComposerProviderModelMenu } from "./ComposerProviderModelMenu";
-import { ContextUsageRing } from "./ContextUsageRing";
 import { EffortBrainIcon } from "./EffortBrainIcon";
-import { UsageStatsIndicator } from "./UsageStatsIndicator";
 import { ComposerButton } from "./ComposerButton";
 import {
 	clampEffort,
@@ -91,20 +88,6 @@ import {
 	saveEffortSelection,
 } from "./draftStorage";
 import { appendComposerText, readComposerPrompt, setEditorText } from "./editorOps";
-import type {
-	OpenTerminalRequest,
-	TerminalScopeTarget,
-} from "@/features/terminal/terminal-scope";
-import {
-	getTerminalRuntimeId,
-	type TerminalTab,
-	useProjectTerminals,
-} from "@/features/terminal/terminal-tabs-store";
-import {
-	getTerminalSnapshot,
-	subscribeTerminalStore,
-	type TerminalStatus,
-} from "@/features/terminal/terminal-store";
 
 type WorkspaceComposerProps = {
 	draftKey: string;
@@ -131,101 +114,7 @@ type WorkspaceComposerProps = {
 		planMarkdown: string;
 		planTitle: string | null;
 	}) => void;
-	terminalScopes?: TerminalScopeTarget[];
-	onOpenTerminal?: (request: OpenTerminalRequest) => void;
 };
-
-type TerminalMenuRow = {
-	tab: TerminalTab;
-	status: TerminalStatus | "ready";
-};
-
-function buildTerminalMenuRows(
-	scopeKey: string,
-	tabs: TerminalTab[],
-): TerminalMenuRow[] {
-	return tabs.map((tab) => ({
-		tab,
-		status:
-			getTerminalSnapshot(getTerminalRuntimeId(scopeKey, tab.id))?.status ??
-			"ready",
-	}));
-}
-
-function statusDotClass(status: TerminalStatus | "ready") {
-	if (status === "running") return "bg-emerald-500";
-	if (status === "starting") return "bg-amber-400";
-	if (status === "error") return "bg-destructive";
-	if (status === "exited") return "bg-muted-foreground";
-	return "bg-muted-foreground/50";
-}
-
-function TerminalScopeMenuGroup({
-	scope,
-	rows,
-	onOpenTerminal,
-}: {
-	scope: TerminalScopeTarget | null;
-	rows: TerminalMenuRow[];
-	onOpenTerminal: (request: OpenTerminalRequest) => void;
-}) {
-	const label = scope?.label ?? "Terminal";
-	const disabled = !scope || !scope.cwd;
-	const kind = scope?.kind;
-
-	return (
-		<>
-			<DropdownMenuLabel>{label}</DropdownMenuLabel>
-			{rows.length > 0 ? (
-				rows.map((row) => (
-					<DropdownMenuItem
-						key={row.tab.id}
-						size="sm"
-						disabled={disabled}
-						className="justify-between gap-2"
-						onSelect={() => {
-							if (!kind) return;
-							onOpenTerminal({ scope: kind, terminalId: row.tab.id });
-						}}
-					>
-						<span className="flex min-w-0 items-center gap-1.5">
-							<span
-								className={cn(
-									"size-1.5 shrink-0 rounded-full",
-									statusDotClass(row.status),
-								)}
-							/>
-							<span className="truncate">{row.tab.title}</span>
-						</span>
-						<span className="shrink-0 text-[11px] text-muted-foreground">
-							{row.status}
-						</span>
-					</DropdownMenuItem>
-				))
-			) : (
-				<DropdownMenuItem size="sm" disabled className="text-muted-foreground">
-					No terminals yet
-				</DropdownMenuItem>
-			)}
-			<DropdownMenuItem
-				size="sm"
-				disabled={disabled}
-				onSelect={() => {
-					if (!kind) return;
-					onOpenTerminal({ scope: kind, createNew: true });
-				}}
-			>
-				<Plus className="size-3.5" strokeWidth={1.8} />
-				<span>New {label.toLowerCase()} terminal</span>
-			</DropdownMenuItem>
-			{scope?.disabledReason ? (
-				<div className="px-1.5 py-1 text-[11px] leading-snug text-muted-foreground">
-					{scope.disabledReason}
-				</div>
-			) : null}
-		</>
-	);
-}
 
 export function WorkspaceComposer({
 	draftKey,
@@ -248,8 +137,6 @@ export function WorkspaceComposer({
 	onOpenPlanSidebar,
 	onDelegatePlan,
 	onImplementPlanInNewThread,
-	terminalScopes,
-	onOpenTerminal,
 }: WorkspaceComposerProps) {
 	const { t } = useTranslation("common");
 	const [hasContent, setHasContent] = useState(false);
@@ -289,43 +176,6 @@ export function WorkspaceComposer({
 	);
 	const composerRootRef = useRef<HTMLDivElement | null>(null);
 	const editorRef = useRef<LexicalEditor | null>(null);
-	const [terminalStatusVersion, setTerminalStatusVersion] = useState(0);
-	const worktreeTerminalScope =
-		terminalScopes?.find((scope) => scope.kind === "worktree") ?? null;
-	const projectTerminalScope =
-		terminalScopes?.find((scope) => scope.kind === "project") ?? null;
-	const worktreeTerminals = useProjectTerminals(
-		worktreeTerminalScope?.scopeKey ?? "__missing-worktree-terminal-scope__",
-	);
-	const projectTerminals = useProjectTerminals(
-		projectTerminalScope?.scopeKey ?? "__missing-project-terminal-scope__",
-	);
-	const worktreeTerminalRows = useMemo(
-		() =>
-			worktreeTerminalScope
-				? buildTerminalMenuRows(worktreeTerminalScope.scopeKey, worktreeTerminals.tabs)
-				: [],
-		[terminalStatusVersion, worktreeTerminalScope, worktreeTerminals.tabs],
-	);
-	const projectTerminalRows = useMemo(
-		() =>
-			projectTerminalScope
-				? buildTerminalMenuRows(projectTerminalScope.scopeKey, projectTerminals.tabs)
-				: [],
-		[terminalStatusVersion, projectTerminalScope, projectTerminals.tabs],
-	);
-	const runningTerminalCount = useMemo(
-		() =>
-			[...worktreeTerminalRows, ...projectTerminalRows].filter(
-				(row) => row.status === "running" || row.status === "starting",
-			).length,
-		[projectTerminalRows, worktreeTerminalRows],
-	);
-
-	useEffect(
-		() => subscribeTerminalStore(() => setTerminalStatusVersion((value) => value + 1)),
-		[],
-	);
 	const lastPrefillNonceRef = useRef<number | null>(null);
 	const selectedProvider = useMemo(
 		() =>
@@ -501,6 +351,12 @@ export function WorkspaceComposer({
 		},
 		[workspaceBranch],
 	);
+	const openContextPicker = useCallback(() => {
+		const editor = editorRef.current;
+		if (!editor) return;
+		$insertAddDirTrigger(editor, null);
+		editor.focus();
+	}, []);
 
 	const inputDisabled = disabled;
 	const toolbarDisabled = disabled;
@@ -528,8 +384,13 @@ export function WorkspaceComposer({
 
 	const selectedEffortId = ultrathinkSelected ? "ultrathink" : effort;
 	const effortLabel = getEffortDisplay(selectedEffortId).label;
-	const highlightEffort =
-		ultrathinkSelected || effort === "xhigh" || effort === "max";
+	const translatedEffortLabel = t(`composer.effort.${selectedEffortId}`, {
+		defaultValue: effortLabel,
+	});
+	const extraContextDirectories = contextDirectories.filter(
+		(directory) =>
+			directory.id !== "workspace-path" && directory.id !== "workspace-branch",
+	);
 
 	useEffect(() => {
 		setContextDirectories(
@@ -564,15 +425,17 @@ export function WorkspaceComposer({
 					onOpenPlanSidebar={onOpenPlanSidebar}
 				/>
 			) : null}
-			<ContextBar
-				directories={contextDirectories}
-				disabled={inputDisabled}
-				onRemove={(directoryId) => {
-					setContextDirectories((current) =>
-						current.filter((directory) => directory.id !== directoryId),
-					);
-				}}
-			/>
+			{extraContextDirectories.length > 0 ? (
+				<ContextBar
+					directories={extraContextDirectories}
+					disabled={inputDisabled}
+					onRemove={(directoryId) => {
+						setContextDirectories((current) =>
+							current.filter((directory) => directory.id !== directoryId),
+						);
+					}}
+				/>
+			) : null}
 			{selectedProviderBlockReason ? (
 				<div className="mt-2 rounded-2xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-[12px] leading-5 text-destructive">
 					{selectedProviderBlockReason}
@@ -634,7 +497,7 @@ export function WorkspaceComposer({
 			</LexicalComposer>
 
 			<div className="mt-2.5 flex items-end justify-between gap-3">
-				<div className="flex min-w-0 flex-wrap items-center gap-2">
+				<div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
 					<ComposerProviderModelMenu
 						providers={providerChoices}
 						selectedProviderId={selectedProviderId}
@@ -643,107 +506,25 @@ export function WorkspaceComposer({
 						onSelectModel={onSelectModel}
 						disabled={toolbarDisabled}
 					/>
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<ComposerButton
-								type="button"
-								aria-label="Fast mode"
-								disabled={toolbarDisabled}
-								className={cn(
-									"relative h-7 px-1.5",
-									isFastMode
-										? "text-amber-500 hover:bg-amber-500/10 hover:text-amber-500"
-										: "text-muted-foreground",
-									toolbarDisabled &&
-										"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
-								)}
-								onClick={() => setIsFastMode((c) => !c)}
-							>
-								<span className="relative block size-[14px]">
-									<Zap
-										className={cn(
-											"absolute inset-0 z-0 size-[14px]",
-											!isFastMode && "opacity-55",
-										)}
-										strokeWidth={1.8}
-									/>
-								</span>
-							</ComposerButton>
-						</TooltipTrigger>
-						<TooltipContent side="top" sideOffset={4}>
-							<span>Fast mode{isFastMode ? " (on)" : ""}</span>
-						</TooltipContent>
-					</Tooltip>
-					<DropdownMenu>
-						<DropdownMenuTrigger
-							type="button"
-							disabled={toolbarDisabled}
-							className={cn(
-								`flex h-7 items-center gap-0.5 ${composerToolbarTriggerClassName}`,
-								highlightEffort
-									? "bg-amber-500/8 text-amber-600 hover:bg-amber-500/12 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
-									: "text-muted-foreground",
-								toolbarDisabled &&
-									"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
-							)}
-						>
-							<span className="capitalize">{effortLabel}</span>
-							<ChevronDown
-								className="size-3 text-muted-foreground/40"
-								strokeWidth={2}
-							/>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent
-							side="top"
-							align="start"
-							sideOffset={4}
-							className="min-w-[11rem]"
-						>
-							<DropdownMenuGroup>
-								<DropdownMenuLabel>Effort</DropdownMenuLabel>
-								{availableEffortLevels.map((id) => {
-									const display = getEffortDisplay(id);
-									return (
-										<DropdownMenuItem
-											key={id}
-											disabled={toolbarDisabled}
-											className="flex items-center justify-between gap-3"
-											onClick={() => {
-												updateEffortSelection({ effort: id, ultrathink: false });
-											}}
-										>
-											<div className="flex items-center gap-2.5">
-												<EffortBrainIcon level={display.icon} />
-												<span>{display.label}</span>
-											</div>
-											{id === effort && !ultrathinkSelected ? (
-												<span className="text-[11px] text-foreground">✓</span>
-											) : null}
-										</DropdownMenuItem>
-									);
-								})}
-								<DropdownMenuSeparator />
-								<DropdownMenuItem
-									disabled={toolbarDisabled}
-									className="flex items-center justify-between gap-3"
-									onClick={() => {
-										updateEffortSelection({ effort, ultrathink: true });
-									}}
-								>
-									<div className="flex items-center gap-2.5">
-										<EffortBrainIcon level="max" />
-										<span>Ultrathink</span>
-									</div>
-									{ultrathinkSelected ? (
-										<span className="text-[11px] text-foreground">✓</span>
-									) : null}
-								</DropdownMenuItem>
-							</DropdownMenuGroup>
-						</DropdownMenuContent>
-					</DropdownMenu>
 					<ComposerButton
 						type="button"
-						aria-label="Plan mode"
+						aria-label={t("composer.controls.addContext")}
+						disabled={toolbarDisabled}
+						className="h-7 shrink-0 gap-1 px-1.5 text-[11.5px] text-muted-foreground"
+						onClick={openContextPicker}
+					>
+						<Plus className="size-[13px]" strokeWidth={1.8} />
+						<span className="hidden sm:inline">
+							{extraContextDirectories.length > 0
+								? t("composer.controls.contextCount", {
+										count: extraContextDirectories.length,
+									})
+								: t("composer.controls.context")}
+						</span>
+					</ComposerButton>
+					<ComposerButton
+						type="button"
+						aria-label={t("composer.controls.planMode")}
 						disabled={toolbarDisabled}
 						className={cn(
 							"h-7 gap-1 px-1.5 text-[11px]",
@@ -762,67 +543,108 @@ export function WorkspaceComposer({
 						}
 					>
 						<ClipboardList className="size-[13px]" strokeWidth={1.8} />
-						<span>Plan</span>
+						<span>{t("composer.controls.plan")}</span>
 					</ComposerButton>
-					{onOpenTerminal ? (
-						<DropdownMenu>
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<DropdownMenuTrigger asChild>
-										<ComposerButton
-											type="button"
-											aria-label="Terminal"
-											className="relative h-7 px-1.5 text-muted-foreground"
-										>
-											<SquareTerminal className="size-[14px]" strokeWidth={1.8} />
-											{runningTerminalCount > 0 ? (
-												<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">
-													{runningTerminalCount}
-												</span>
-											) : null}
-										</ComposerButton>
-									</DropdownMenuTrigger>
-								</TooltipTrigger>
-								<TooltipContent side="top" sideOffset={4}>
-									<span>Terminal</span>
-								</TooltipContent>
-							</Tooltip>
-							<DropdownMenuContent align="start" className="w-72">
-								<TerminalScopeMenuGroup
-									scope={worktreeTerminalScope}
-									rows={worktreeTerminalRows}
-									onOpenTerminal={onOpenTerminal}
-								/>
-								<DropdownMenuSeparator />
-								<TerminalScopeMenuGroup
-									scope={projectTerminalScope}
-									rows={projectTerminalRows}
-									onOpenTerminal={onOpenTerminal}
-								/>
-							</DropdownMenuContent>
-						</DropdownMenu>
-					) : null}
 				</div>
 
-				<div className="flex shrink-0 items-center gap-1">
-					<UsageStatsIndicator
-						turnCount={turnCount}
-						checkpointCount={checkpointCount}
-						disabled={!sessionSnapshot}
-					/>
-					{sessionId ? (
-						<ContextUsageRing
-							value={contextUsageValue}
-							className="shrink-0"
-						/>
-					) : null}
+				<div className="flex shrink-0 items-center gap-1.5">
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							type="button"
+							disabled={toolbarDisabled}
+							className={cn(
+								`flex h-7 items-center gap-1.5 ${composerToolbarTriggerClassName}`,
+								"max-w-[9rem] text-muted-foreground",
+								toolbarDisabled &&
+									"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
+							)}
+						>
+							<SlidersHorizontal className="size-[13px] shrink-0" strokeWidth={1.8} />
+							<span className="truncate text-[11.5px]">
+								{isFastMode
+									? t("composer.execution.fast")
+									: t("composer.execution.standard")}
+								{" · "}
+								{translatedEffortLabel}
+							</span>
+							<ChevronDown className="size-3 shrink-0 opacity-40" strokeWidth={2} />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent
+							side="top"
+							align="end"
+							sideOffset={4}
+							className="w-64"
+						>
+							<DropdownMenuLabel>{t("composer.execution.title")}</DropdownMenuLabel>
+							<DropdownMenuItem
+								className="flex items-center justify-between gap-3"
+								onClick={() => setIsFastMode((current) => !current)}
+							>
+								<div>
+									<div>{t("composer.execution.fastMode")}</div>
+									<div className="text-[11px] text-muted-foreground">
+										{t("composer.execution.fastModeHint")}
+									</div>
+								</div>
+								<span className="text-[11px] text-foreground">
+									{isFastMode ? "✓" : ""}
+								</span>
+							</DropdownMenuItem>
+							<DropdownMenuSeparator />
+							<DropdownMenuGroup>
+								<DropdownMenuLabel>{t("composer.execution.effort")}</DropdownMenuLabel>
+								{availableEffortLevels.map((id) => {
+									const display = getEffortDisplay(id);
+									return (
+										<DropdownMenuItem
+											key={id}
+											className="flex items-center justify-between gap-3"
+											onClick={() =>
+												updateEffortSelection({ effort: id, ultrathink: false })
+											}
+										>
+											<div className="flex items-center gap-2.5">
+												<EffortBrainIcon level={display.icon} />
+												<span>
+													{t(`composer.effort.${id}`, { defaultValue: display.label })}
+												</span>
+											</div>
+											{id === effort && !ultrathinkSelected ? "✓" : null}
+										</DropdownMenuItem>
+									);
+								})}
+								<DropdownMenuItem
+									className="flex items-center justify-between gap-3"
+									onClick={() => updateEffortSelection({ effort, ultrathink: true })}
+								>
+									<div className="flex items-center gap-2.5">
+										<EffortBrainIcon level="max" />
+										<span>{t("composer.effort.ultrathink")}</span>
+									</div>
+									{ultrathinkSelected ? "✓" : null}
+								</DropdownMenuItem>
+							</DropdownMenuGroup>
+							{sessionSnapshot ? (
+								<>
+									<DropdownMenuSeparator />
+									<div className="px-2 py-1.5 text-[11px] leading-5 text-muted-foreground">
+										{t("composer.execution.sessionUsage", {
+											turns: turnCount,
+											checkpoints: checkpointCount,
+											context: contextUsageValue,
+										})}
+									</div>
+								</>
+							) : null}
+						</DropdownMenuContent>
+					</DropdownMenu>
 					{canStopRun ? (
 						<div className="ml-1.5 flex items-center gap-1.5">
 							<Button
 								type="button"
 								variant="destructive"
 								size="icon"
-								aria-label="Stop"
+								aria-label={t("composer.controls.stop")}
 								disabled={toolbarDisabled || !canStopRun}
 								className="rounded-[9px]"
 								onClick={onAbortSession}
@@ -830,27 +652,27 @@ export function WorkspaceComposer({
 								<Square className="size-3 fill-current" strokeWidth={0} />
 							</Button>
 							{hasContent ? (
-							<Button
-								type="button"
-								variant="outline"
-								size="icon"
-								aria-label="Steer"
-								disabled={steerDisabled}
-								className="rounded-[9px]"
-								onClick={() => {
-									void handleSubmitDraft();
-								}}
-							>
-								<ArrowUp className="size-[15px]" strokeWidth={2.2} />
-							</Button>
+								<Button
+									type="button"
+									variant="outline"
+									size="icon"
+									aria-label={t("composer.controls.steer")}
+									disabled={steerDisabled}
+									className="rounded-[9px]"
+									onClick={() => {
+										void handleSubmitDraft();
+									}}
+								>
+									<ArrowUp className="size-[15px]" strokeWidth={2.2} />
+								</Button>
 							) : null}
 						</div>
 					) : (
 						<Button
 							type="button"
-							variant="outline"
+							variant="default"
 							size="icon"
-							aria-label="Send"
+							aria-label={t("composer.controls.send")}
 							disabled={sendDisabled}
 							onClick={() => {
 								void handleSubmitDraft();

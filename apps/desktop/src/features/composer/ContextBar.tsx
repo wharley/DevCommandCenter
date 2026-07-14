@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ComposerContextDirectory } from "./WorkspaceComposer.logic";
@@ -15,13 +16,14 @@ export function ContextBar({
 	disabled = false,
 	onRemove,
 }: ContextBarProps) {
+	const { t } = useTranslation("common");
 	const hasOverflow = directories.length > 2;
 
 	return (
 		<div data-slot="context-bar" className="relative -mx-4 mb-2">
 			<div className="flex items-center border-b border-dashed border-border/55 px-4 pb-2 pt-0.5">
 				<span className="shrink-0 pr-2 font-mono text-[10.5px] uppercase tracking-[0.06em] text-muted-foreground">
-					context
+					{t("composer.context.label")}
 				</span>
 				<div className="relative min-w-0 flex-1">
 					<div
@@ -34,7 +36,7 @@ export function ContextBar({
 					<div className="scrollbar-none flex items-center gap-1 overflow-x-auto">
 						{directories.length === 0 ? (
 							<span className="text-[12px] text-muted-foreground/70">
-								No extra context
+								{t("composer.context.empty")}
 							</span>
 						) : (
 							directories.map((directory, index) => (
@@ -59,7 +61,9 @@ export function ContextBar({
 											size="icon-xs"
 											className="mr-1 inline-flex size-4 shrink-0 cursor-pointer items-center justify-center self-center rounded-sm text-muted-foreground/40 transition-colors hover:text-muted-foreground"
 											disabled={disabled}
-											aria-label={`Remove ${directory.label}`}
+											aria-label={t("composer.context.remove", {
+												label: directory.label,
+											})}
 											onClick={() => onRemove(directory.id)}
 										>
 											<X className="size-3" strokeWidth={1.8} />

@@ -1,12 +1,28 @@
-import { GripVertical, Maximize2, Minimize2, PanelRightClose, Plus, X } from "lucide-react";
+import {
+	ChevronDown,
+	GripHorizontal,
+	Maximize2,
+	Minimize2,
+	PanelRightClose,
+	Plus,
+	X,
+} from "lucide-react";
 import {
 	useCallback,
 	useEffect,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
 	Tooltip,
 	TooltipContent,
@@ -23,23 +39,40 @@ import {
 	setActiveTerminal,
 	useProjectTerminals,
 } from "./terminal-tabs-store";
+import {
+	getTerminalSnapshot,
+	subscribeTerminalStore,
+	type TerminalStatus,
+} from "./terminal-store";
+import type { TerminalScopeKind, TerminalScopeTarget } from "./terminal-scope";
 import { cn } from "@/lib/utils";
 
-const WIDTH_STORAGE_KEY = "dcc-workbench-terminal-dock-width-v1";
-const DEFAULT_WIDTH_PX = 520;
-const MIN_WIDTH_PX = 360;
-/** Keep the chat column breathable — never let the dock crush it below this. */
-const MIN_CHAT_WIDTH_PX = 360;
+const HEIGHT_STORAGE_KEY = "dcc-workbench-terminal-dock-height-v1";
+const DEFAULT_HEIGHT_PX = 340;
+const MIN_HEIGHT_PX = 220;
+const COMPACT_MIN_HEIGHT_PX = 160;
+/** Keep the conversation usable while the terminal rests below it. */
+const MIN_CHAT_HEIGHT_PX = 360;
 
-function maxDockWidth(): number {
-	return Math.max(MIN_WIDTH_PX, window.innerWidth - MIN_CHAT_WIDTH_PX);
+function maxDockHeight(dock: HTMLDivElement | null): number {
+	const parentHeight =
+		dock?.parentElement?.getBoundingClientRect().height ?? window.innerHeight;
+	return Math.max(COMPACT_MIN_HEIGHT_PX, parentHeight - MIN_CHAT_HEIGHT_PX);
 }
 
-function clampWidth(px: number, maxPx: number) {
-	const safe = Number.isFinite(px) ? px : DEFAULT_WIDTH_PX;
-	return Math.round(
-		Math.min(Math.max(safe, MIN_WIDTH_PX), Math.max(maxPx, MIN_WIDTH_PX)),
-	);
+function clampHeight(px: number, maxPx: number) {
+	const safe = Number.isFinite(px) ? px : DEFAULT_HEIGHT_PX;
+	const upper = Math.max(COMPACT_MIN_HEIGHT_PX, maxPx);
+	const lower = Math.min(MIN_HEIGHT_PX, upper);
+	return Math.round(Math.min(Math.max(safe, lower), upper));
+}
+
+function statusDotClass(status: TerminalStatus | "ready") {
+	if (status === "running") return "bg-emerald-500";
+	if (status === "starting") return "bg-amber-400";
+	if (status === "error") return "bg-destructive";
+	if (status === "exited") return "bg-muted-foreground";
+	return "bg-muted-foreground/45";
 }
 
 export type WorkspaceTerminalDrawerProps = {
@@ -53,6 +86,9 @@ export type WorkspaceTerminalDrawerProps = {
 	scopeLabel: string;
 	/** CWD for this terminal scope. */
 	cwd: string | null;
+	scopes: TerminalScopeTarget[];
+	activeScopeKind: TerminalScopeKind;
+	onScopeChange: (scope: TerminalScopeKind) => void;
 	workspaceName: string;
 	workspaceBranch: string;
 	providerLabel: string | null;
@@ -62,9 +98,10 @@ export type WorkspaceTerminalDrawerProps = {
 };
 
 /**
- * Side dock — general-purpose terminals (tabs) rooted at the project, outside the worktree.
+ * Bottom dock — general-purpose terminals scoped to a project or worktree.
  *
- * Default: a resizable right-hand split so chat + terminal stay visible together.
+ * Default: a resizable vertical split so the wide terminal surface does not
+ * compete with the Inspector for horizontal space.
  * Expanded: promotes to a full-bleed surface (chat hidden) for terminal-only focus.
  */
 export function WorkspaceTerminalDrawer({
@@ -75,6 +112,9 @@ export function WorkspaceTerminalDrawer({
 	scopeKey,
 	scopeLabel,
 	cwd,
+	scopes,
+	activeScopeKind,
+	onScopeChange,
 	workspaceName,
 	workspaceBranch,
 	providerLabel,
@@ -82,14 +122,33 @@ export function WorkspaceTerminalDrawer({
 	sessionId,
 	className,
 }: WorkspaceTerminalDrawerProps) {
-	const dragRef = useRef<{ startX: number; startW: number } | null>(null);
+	const { t } = useTranslation("common");
+	const dockRef = useRef<HTMLDivElement | null>(null);
+	const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 	const releaseFitRef = useRef<(() => void) | null>(null);
-	const widthRef = useRef(DEFAULT_WIDTH_PX);
-	const [widthPx, setWidthPx] = useState(DEFAULT_WIDTH_PX);
+	const heightRef = useRef(DEFAULT_HEIGHT_PX);
+	const [heightPx, setHeightPx] = useState(DEFAULT_HEIGHT_PX);
+	const [terminalStatusVersion, setTerminalStatusVersion] = useState(0);
 
 	const { tabs, activeId } = useProjectTerminals(scopeKey);
 	const activeTab = tabs.find((tab) => tab.id === activeId) ?? tabs[0] ?? null;
 	const atCap = tabs.length >= MAX_TERMINAL_TABS;
+	const terminalStatuses = useMemo(
+		() =>
+			new Map<string, TerminalStatus | "ready">(
+				tabs.map((tab): [string, TerminalStatus | "ready"] => [
+					tab.id,
+					getTerminalSnapshot(getTerminalRuntimeId(scopeKey, tab.id))?.status ??
+						"ready",
+				]),
+			),
+		[scopeKey, tabs, terminalStatusVersion],
+	);
+
+	useEffect(
+		() => subscribeTerminalStore(() => setTerminalStatusVersion((value) => value + 1)),
+		[],
+	);
 
 	// Make sure an open dock always has at least one terminal to show.
 	useEffect(() => {
@@ -99,15 +158,15 @@ export function WorkspaceTerminalDrawer({
 	}, [cwd, open, scopeKey]);
 
 	useEffect(() => {
-		widthRef.current = widthPx;
-	}, [widthPx]);
+		heightRef.current = heightPx;
+	}, [heightPx]);
 
 	useLayoutEffect(() => {
 		try {
-			const raw = localStorage.getItem(WIDTH_STORAGE_KEY);
-			const n = raw ? Number.parseInt(raw, 10) : DEFAULT_WIDTH_PX;
+			const raw = localStorage.getItem(HEIGHT_STORAGE_KEY);
+			const n = raw ? Number.parseInt(raw, 10) : DEFAULT_HEIGHT_PX;
 			if (Number.isFinite(n)) {
-				setWidthPx(clampWidth(n, maxDockWidth()));
+				setHeightPx(clampHeight(n, maxDockHeight(dockRef.current)));
 			}
 		} catch {
 			/* ignore */
@@ -137,24 +196,24 @@ export function WorkspaceTerminalDrawer({
 	}, [open, expanded, onExpandedChange, onOpenChange]);
 
 	const beginResize = useCallback(
-		(clientX: number) => {
-			dragRef.current = { startX: clientX, startW: widthPx };
+		(clientY: number) => {
+			dragRef.current = { startY: clientY, startH: heightPx };
 			// Hold xterm refits until the drag ends, then fit once — avoids
 			// flooding the PTY with resize events on every mousemove frame.
 			releaseFitRef.current = suspendTerminalFit();
 		},
-		[widthPx],
+		[heightPx],
 	);
 
-	const applyResizeMove = useCallback((clientX: number) => {
+	const applyResizeMove = useCallback((clientY: number) => {
 		const drag = dragRef.current;
 		if (!drag) {
 			return;
 		}
-		// Dock sits on the right: dragging the handle left grows it.
-		const delta = drag.startX - clientX;
-		const next = clampWidth(drag.startW + delta, maxDockWidth());
-		setWidthPx(next);
+		// Dock sits at the bottom: dragging the handle up grows it.
+		const delta = drag.startY - clientY;
+		const next = clampHeight(drag.startH + delta, maxDockHeight(dockRef.current));
+		setHeightPx(next);
 	}, []);
 
 	const endResize = useCallback(() => {
@@ -162,7 +221,7 @@ export function WorkspaceTerminalDrawer({
 		releaseFitRef.current?.();
 		releaseFitRef.current = null;
 		try {
-			localStorage.setItem(WIDTH_STORAGE_KEY, String(widthRef.current));
+			localStorage.setItem(HEIGHT_STORAGE_KEY, String(heightRef.current));
 		} catch {
 			/* ignore */
 		}
@@ -171,7 +230,7 @@ export function WorkspaceTerminalDrawer({
 	useEffect(() => {
 		const onMove = (event: MouseEvent) => {
 			if (dragRef.current) {
-				applyResizeMove(event.clientX);
+				applyResizeMove(event.clientY);
 			}
 		};
 		const onUp = () => {
@@ -188,10 +247,10 @@ export function WorkspaceTerminalDrawer({
 		};
 	}, [applyResizeMove, endResize]);
 
-	// Keep width within bounds when the window shrinks.
+	// Keep height within bounds when the window shrinks.
 	useEffect(() => {
 		const onResize = () => {
-			setWidthPx((current) => clampWidth(current, maxDockWidth()));
+			setHeightPx((current) => clampHeight(current, maxDockHeight(dockRef.current)));
 		};
 		window.addEventListener("resize", onResize);
 		return () => window.removeEventListener("resize", onResize);
@@ -203,14 +262,15 @@ export function WorkspaceTerminalDrawer({
 
 	return (
 		<div
+			ref={dockRef}
 			className={cn(
-				"dcc-workbench-terminal-dock flex min-h-0 min-w-0 flex-row overflow-hidden bg-card text-card-foreground",
-				expanded ? "min-w-0 flex-1" : "shrink-0 border-l border-border",
+				"dcc-workbench-terminal-dock flex min-h-0 min-w-0 flex-col overflow-hidden bg-card text-card-foreground",
+				expanded ? "flex-1" : "shrink-0 border-t border-border",
 				className,
 			)}
-			style={expanded ? undefined : { width: widthPx }}
+			style={expanded ? undefined : { height: heightPx }}
 			role="region"
-			aria-label="Terminal dock"
+			aria-label={t("terminalDock.ariaLabel")}
 		>
 			{!expanded ? (
 				<Tooltip>
@@ -218,30 +278,54 @@ export function WorkspaceTerminalDrawer({
 						<button
 							type="button"
 							className={cn(
-								"dcc-workbench-terminal-dock__resize group flex w-1.5 shrink-0 cursor-ew-resize items-center justify-center border-r border-border/60 bg-muted/20",
+								"dcc-workbench-terminal-dock__resize group flex h-1.5 w-full shrink-0 cursor-ns-resize items-center justify-center border-b border-border/60 bg-muted/20",
 								"hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 							)}
-							aria-label="Resize terminal dock"
+							aria-label={t("terminalDock.resize")}
 							onMouseDown={(event) => {
 								event.preventDefault();
-								beginResize(event.clientX);
+								beginResize(event.clientY);
 							}}
 						>
-							<GripVertical className="size-3 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
+							<GripHorizontal className="size-3 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
 						</button>
 					</TooltipTrigger>
-					<TooltipContent side="left">Drag to resize</TooltipContent>
+					<TooltipContent side="top">{t("terminalDock.resizeHint")}</TooltipContent>
 				</Tooltip>
 			) : null}
 
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 				<div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/60 px-2">
 					<div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-						<div className="mr-1 shrink-0 rounded-md border border-border/70 bg-muted/35 px-2 py-1 text-[11px] font-medium text-muted-foreground">
-							{scopeLabel}
-						</div>
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="mr-1 h-7 shrink-0 gap-1 rounded-md border border-border/60 bg-muted/30 px-2 text-[11px] font-medium text-muted-foreground"
+								>
+									{scopeLabel}
+									<ChevronDown className="size-3 opacity-50" />
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="start" className="w-56">
+								{scopes.map((scope) => (
+									<DropdownMenuItem
+										key={scope.kind}
+										disabled={!scope.cwd}
+										className="flex items-center justify-between gap-3"
+										onClick={() => onScopeChange(scope.kind)}
+									>
+										<span>{scope.label}</span>
+										{scope.kind === activeScopeKind ? <span>✓</span> : null}
+									</DropdownMenuItem>
+								))}
+							</DropdownMenuContent>
+						</DropdownMenu>
 						{tabs.map((tab) => {
 							const isActive = tab.id === activeTab?.id;
+							const status = terminalStatuses.get(tab.id) ?? "ready";
 							return (
 								<div
 									key={tab.id}
@@ -257,7 +341,10 @@ export function WorkspaceTerminalDrawer({
 										className="max-w-[9rem] truncate"
 										onClick={() => setActiveTerminal(scopeKey, tab.id)}
 									>
-										{tab.title}
+										<span className="flex items-center gap-1.5">
+											<span className={cn("size-1.5 rounded-full", statusDotClass(status))} />
+											<span className="truncate">{tab.title}</span>
+										</span>
 									</button>
 									<button
 										type="button"
@@ -280,7 +367,7 @@ export function WorkspaceTerminalDrawer({
 									size="sm"
 									variant="ghost"
 									className="h-7 shrink-0 px-1.5"
-									aria-label="New terminal tab"
+								aria-label={t("terminalDock.newTab")}
 									disabled={atCap || !cwd}
 									onClick={() => addTerminal(scopeKey)}
 								>
@@ -289,10 +376,10 @@ export function WorkspaceTerminalDrawer({
 							</TooltipTrigger>
 							<TooltipContent side="bottom">
 								{atCap
-									? `Max ${MAX_TERMINAL_TABS} terminals`
+									? t("terminalDock.maxTabs", { count: MAX_TERMINAL_TABS })
 									: cwd
-										? `New ${scopeLabel.toLowerCase()} terminal`
-										: "No terminal path available"}
+										? t("terminalDock.newScopedTab", { scope: scopeLabel })
+										: t("terminalDock.noPath")}
 							</TooltipContent>
 						</Tooltip>
 					</div>
@@ -303,7 +390,9 @@ export function WorkspaceTerminalDrawer({
 								size="sm"
 								variant="ghost"
 								className="h-8 shrink-0 px-2"
-								aria-label={expanded ? "Collapse terminal to split" : "Expand terminal"}
+							aria-label={
+								expanded ? t("terminalDock.collapse") : t("terminalDock.expand")
+							}
 								onClick={() => onExpandedChange(!expanded)}
 							>
 								{expanded ? (
@@ -314,7 +403,7 @@ export function WorkspaceTerminalDrawer({
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent side="bottom">
-							{expanded ? "Collapse to split (Esc)" : "Expand terminal"}
+							{expanded ? t("terminalDock.collapseHint") : t("terminalDock.expand")}
 						</TooltipContent>
 					</Tooltip>
 					<Tooltip>
@@ -324,13 +413,13 @@ export function WorkspaceTerminalDrawer({
 								size="sm"
 								variant="outline"
 								className="h-8 shrink-0 px-2"
-								aria-label="Hide terminal dock"
+							aria-label={t("terminalDock.hide")}
 								onClick={() => onOpenChange(false)}
 							>
 								<PanelRightClose className="size-4" />
 							</Button>
 						</TooltipTrigger>
-						<TooltipContent side="bottom">Hide terminal (Esc)</TooltipContent>
+					<TooltipContent side="bottom">{t("terminalDock.hideHint")}</TooltipContent>
 					</Tooltip>
 				</div>
 
@@ -342,7 +431,6 @@ export function WorkspaceTerminalDrawer({
 							terminalId={getTerminalRuntimeId(scopeKey, activeTab.id)}
 							title={activeTab.title}
 							cwd={cwd}
-							scopeLabel={scopeLabel}
 							workspaceName={workspaceName}
 							workspaceBranch={workspaceBranch}
 							providerLabel={providerLabel}
@@ -351,7 +439,7 @@ export function WorkspaceTerminalDrawer({
 						/>
 					) : (
 						<div className="flex flex-1 items-center justify-center text-[12px] text-muted-foreground">
-							{cwd ? "No terminal open" : "No terminal path available"}
+							{cwd ? t("terminalDock.empty") : t("terminalDock.noPath")}
 						</div>
 					)}
 				</div>

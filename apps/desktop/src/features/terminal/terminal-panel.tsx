@@ -29,7 +29,6 @@ type TerminalPanelProps = {
 	terminalId: string;
 	title: string;
 	cwd: string | null;
-	scopeLabel?: string;
 	workspaceName: string;
 	workspaceBranch: string;
 	providerLabel: string | null;
@@ -43,7 +42,6 @@ export function TerminalPanel({
 	terminalId,
 	title,
 	cwd,
-	scopeLabel,
 	workspaceName,
 	workspaceBranch,
 	providerLabel,
@@ -249,27 +247,7 @@ export function TerminalPanel({
 	if (variant === "drawer") {
 		return (
 			<div className="dcc-terminal dcc-terminal--drawer flex min-h-0 flex-1 flex-col">
-				<div className="dcc-terminal__toolbar flex flex-wrap items-center justify-between gap-2 border-b border-border/70 pb-2 pt-0.5">
-					<div className="flex min-w-0 flex-wrap gap-2">
-						{scopeLabel ? <Badge variant="outline">{scopeLabel}</Badge> : null}
-						<Badge variant={terminalSnapshot?.status === "running" ? "success" : "outline"}>
-							{terminalSnapshot?.status ?? "idle"}
-						</Badge>
-						<Badge variant="outline">{sessionId ? "Linked session" : "No session"}</Badge>
-						<Badge variant="outline" className="max-w-[10rem] truncate font-mono text-[11px]">
-							{terminalSnapshot?.ptyId ?? "PTY"}
-						</Badge>
-					</div>
-					<div className="flex flex-wrap gap-1.5">
-						<Button type="button" variant="secondary" size="sm" onClick={handleFocusTerminal}>
-							Focus
-						</Button>
-						<Button type="button" variant="secondary" size="sm" onClick={handleClearTerminal}>
-							Clear
-						</Button>
-					</div>
-				</div>
-				<div className="dcc-terminal__viewport flex min-h-0 flex-1 flex-col pt-2">
+				<div className="dcc-terminal__viewport flex min-h-0 flex-1 flex-col pt-1">
 					<TerminalOutput
 						terminalRef={terminalRef}
 						className="dcc-terminal__surface min-h-[11rem] flex-1"
@@ -277,9 +255,6 @@ export function TerminalPanel({
 						onData={handleTerminalData}
 						onResize={handleTerminalResize}
 					/>
-					<p className="m-0 pt-2 text-[10px] leading-snug text-muted-foreground">
-						Cwd · {cwd ?? "missing path"}
-					</p>
 				</div>
 			</div>
 		);
