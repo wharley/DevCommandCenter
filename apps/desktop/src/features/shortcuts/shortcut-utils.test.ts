@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
 	getOpenPreferredEditorShortcutKeys,
+	getCommandPaletteShortcutKeys,
+	getFocusComposerShortcutKeys,
+	getToggleTerminalShortcutKeys,
 	getInspectorCodeModeShortcutKeys,
 	getInspectorGitModeShortcutKeys,
 	getQuickOpenShortcutKeys,
@@ -8,8 +11,11 @@ import {
 	isInspectorCodeModeShortcut,
 	isInspectorGitModeShortcut,
 	isOpenPreferredEditorShortcut,
+	isCommandPaletteShortcut,
+	isFocusComposerShortcut,
 	isQuickOpenShortcut,
 	isWorkspaceSearchShortcut,
+	isToggleTerminalShortcut,
 } from "./shortcut-utils";
 
 describe("shortcut-utils", () => {
@@ -227,5 +233,23 @@ describe("shortcut-utils", () => {
 			"Shift",
 			"E",
 		]);
+	});
+
+	it("matches command palette, composer focus, and terminal shortcuts", () => {
+		const macEvent = (key: string, shiftKey: boolean) => ({
+			key,
+			metaKey: true,
+			ctrlKey: false,
+			altKey: false,
+			shiftKey,
+			defaultPrevented: false,
+		});
+		expect(isCommandPaletteShortcut(macEvent("p", true), "MacIntel")).toBe(true);
+		expect(isFocusComposerShortcut(macEvent("l", true), "MacIntel")).toBe(true);
+		expect(isToggleTerminalShortcut(macEvent("j", false), "MacIntel")).toBe(true);
+		expect(isToggleTerminalShortcut(macEvent("j", true), "MacIntel")).toBe(false);
+		expect(getCommandPaletteShortcutKeys("Win32")).toEqual(["Ctrl", "Shift", "P"]);
+		expect(getFocusComposerShortcutKeys("MacIntel")).toEqual(["Cmd", "Shift", "L"]);
+		expect(getToggleTerminalShortcutKeys("Linux")).toEqual(["Ctrl", "J"]);
 	});
 });

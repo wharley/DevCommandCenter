@@ -3,6 +3,7 @@ export type WorkbenchCommand =
 	| "composer.addContext"
 	| "composer.execution"
 	| "composer.togglePlan"
+	| "terminal.toggle"
 	| "terminal.openWorktree"
 	| "terminal.openProject"
 	| "terminal.newWorktree"

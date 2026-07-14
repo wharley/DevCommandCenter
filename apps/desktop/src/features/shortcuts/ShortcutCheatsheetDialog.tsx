@@ -9,7 +9,17 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { InlineShortcutDisplay } from "./InlineShortcutDisplay";
-import { getOpenPreferredEditorShortcutKeys } from "./shortcut-utils";
+import {
+	getCommandPaletteShortcutKeys,
+	getFocusComposerShortcutKeys,
+	getInspectorCodeModeShortcutKeys,
+	getInspectorGitModeShortcutKeys,
+	getOpenPreferredEditorShortcutKeys,
+	getPrimaryShortcutModifier,
+	getQuickOpenShortcutKeys,
+	getToggleTerminalShortcutKeys,
+	getWorkspaceSearchShortcutKeys,
+} from "./shortcut-utils";
 
 type ShortcutCheatsheetDialogProps = {
 	open: boolean;
@@ -22,26 +32,35 @@ export function ShortcutCheatsheetDialog({
 }: ShortcutCheatsheetDialogProps) {
 	const { t } = useTranslation("common");
 	const shortcutRows = useMemo(
-		() =>
-			[
-				{ actionKey: "shortcutsSheet.sendPrompt" as const, keys: ["Cmd", "Enter"] as const },
+		() => {
+			const modifier = getPrimaryShortcutModifier();
+			return [
+				{ actionKey: "shortcutsSheet.commandPalette" as const, keys: getCommandPaletteShortcutKeys() },
+				{ actionKey: "shortcutsSheet.focusComposer" as const, keys: getFocusComposerShortcutKeys() },
+				{ actionKey: "shortcutsSheet.toggleTerminal" as const, keys: getToggleTerminalShortcutKeys() },
+				{ actionKey: "shortcutsSheet.quickOpen" as const, keys: getQuickOpenShortcutKeys() },
+				{ actionKey: "shortcutsSheet.workspaceSearch" as const, keys: getWorkspaceSearchShortcutKeys() },
+				{ actionKey: "shortcutsSheet.inspectorChanges" as const, keys: getInspectorGitModeShortcutKeys() },
+				{ actionKey: "shortcutsSheet.inspectorFiles" as const, keys: getInspectorCodeModeShortcutKeys() },
+				{ actionKey: "shortcutsSheet.sendPrompt" as const, keys: [modifier, "Enter"] },
 				{
 					actionKey: "shortcutsSheet.steerSession" as const,
-					keys: ["Cmd", "Shift", "Enter"] as const,
+					keys: [modifier, "Shift", "Enter"],
 				},
-				{ actionKey: "shortcutsSheet.abortSession" as const, keys: ["Esc"] as const },
+				{ actionKey: "shortcutsSheet.abortSession" as const, keys: ["Esc"] },
 				{
 					actionKey: "shortcutsSheet.openPreferredEditor" as const,
 					keys: getOpenPreferredEditorShortcutKeys(),
 				},
-			],
+			];
+		},
 		[],
 	);
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="w-[min(92vw,520px)] max-w-[520px] rounded-2xl border-border/60 bg-background p-0 shadow-2xl">
-				<div className="p-5">
+			<DialogContent className="max-h-[min(88vh,760px)] w-[min(92vw,560px)] max-w-[560px] overflow-hidden rounded-2xl border-border/60 bg-background p-0 shadow-2xl">
+				<div className="flex min-h-0 flex-col p-5">
 					<DialogHeader className="space-y-2">
 						<Badge variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
 							{t("shortcutsSheet.badge")}
@@ -53,7 +72,7 @@ export function ShortcutCheatsheetDialog({
 							{t("shortcutsSheet.title")}
 						</DialogDescription>
 					</DialogHeader>
-					<div className="mt-5 space-y-2">
+					<div className="mt-5 min-h-0 space-y-2 overflow-y-auto pr-1">
 						{shortcutRows.map((row) => (
 							<div
 								key={row.actionKey}

@@ -12,6 +12,12 @@ import {
 } from "../../components/ui/command";
 import type { WorkspaceSummary } from "./types";
 import type { WorkbenchCommand } from "./workbench-command";
+import {
+	getFocusComposerShortcutKeys,
+	getInspectorCodeModeShortcutKeys,
+	getInspectorGitModeShortcutKeys,
+	getToggleTerminalShortcutKeys,
+} from "@/features/shortcuts/shortcut-utils";
 
 type WorkspaceCommandPaletteProps = {
 	open: boolean;
@@ -55,17 +61,17 @@ export function WorkspaceCommandPalette({
 		],
 		[t, workspaces],
 	);
-	const workbenchCommands = useMemo<Array<{ command: WorkbenchCommand; label: string; keywords: string }>>(
+	const workbenchCommands = useMemo<Array<{ command: WorkbenchCommand; label: string; keywords: string; shortcut?: string }>>(
 		() => [
-			{ command: "composer.focus", label: t("commandPalette.workbench.focusComposer"), keywords: "composer prompt focus" },
+			{ command: "composer.focus", label: t("commandPalette.workbench.focusComposer"), keywords: "composer prompt focus", shortcut: getFocusComposerShortcutKeys().join("+") },
 			{ command: "composer.addContext", label: t("commandPalette.workbench.addContext"), keywords: "composer context directory" },
 			{ command: "composer.execution", label: t("commandPalette.workbench.execution"), keywords: "composer effort fast ultrathink" },
 			{ command: "composer.togglePlan", label: t("commandPalette.workbench.togglePlan"), keywords: "composer plan mode" },
-			{ command: "terminal.openWorktree", label: t("commandPalette.workbench.terminalWorktree"), keywords: "terminal worktree" },
+			{ command: "terminal.openWorktree", label: t("commandPalette.workbench.terminalWorktree"), keywords: "terminal worktree", shortcut: getToggleTerminalShortcutKeys().join("+") },
 			{ command: "terminal.openProject", label: t("commandPalette.workbench.terminalProject"), keywords: "terminal project root" },
 			{ command: "terminal.newWorktree", label: t("commandPalette.workbench.newTerminal"), keywords: "terminal new tab" },
-			{ command: "inspector.changes", label: t("commandPalette.workbench.inspectorChanges"), keywords: "inspector git changes diff" },
-			{ command: "inspector.files", label: t("commandPalette.workbench.inspectorFiles"), keywords: "inspector files code" },
+			{ command: "inspector.changes", label: t("commandPalette.workbench.inspectorChanges"), keywords: "inspector git changes diff", shortcut: getInspectorGitModeShortcutKeys().join("+") },
+			{ command: "inspector.files", label: t("commandPalette.workbench.inspectorFiles"), keywords: "inspector files code", shortcut: getInspectorCodeModeShortcutKeys().join("+") },
 			{ command: "inspector.activity", label: t("commandPalette.workbench.inspectorActivity"), keywords: "inspector activity milestones" },
 			{ command: "inspector.details", label: t("commandPalette.workbench.inspectorDetails"), keywords: "inspector details runtime diagnostics" },
 		],
@@ -126,6 +132,9 @@ export function WorkspaceCommandPalette({
 									}}
 								>
 									{item.label}
+									{item.shortcut ? (
+										<CommandShortcut>{item.shortcut}</CommandShortcut>
+									) : null}
 								</CommandItem>
 							))}
 						</CommandGroup>

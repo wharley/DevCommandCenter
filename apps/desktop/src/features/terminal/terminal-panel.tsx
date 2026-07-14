@@ -36,6 +36,7 @@ type TerminalPanelProps = {
 	sessionId: string | null;
 	/** `drawer`: compact chrome for bottom workbench drawer (t3 ThreadTerminalDrawer style). */
 	variant?: "card" | "drawer";
+	autoFocus?: boolean;
 };
 
 export function TerminalPanel({
@@ -48,6 +49,7 @@ export function TerminalPanel({
 	sessionState,
 	sessionId,
 	variant = "card",
+	autoFocus = false,
 }: TerminalPanelProps) {
 	const terminalRef = useRef<TerminalHandle | null>(null);
 	const pendingWritesRef = useRef<string[]>([]);
@@ -208,6 +210,9 @@ export function TerminalPanel({
 			terminalRef.current?.clear();
 			replayChunks(replay);
 			bootstrappingRef.current = false;
+			if (autoFocus) {
+				requestAnimationFrame(() => terminalRef.current?.focus());
+			}
 		};
 
 		void bootstrap();
@@ -217,7 +222,7 @@ export function TerminalPanel({
 			bootstrappingRef.current = false;
 			detachTerminal(terminalId, listenerRef.current);
 		};
-	}, [replayChunks, terminalId, cwd, workspaceBranch, workspaceName]);
+	}, [autoFocus, replayChunks, terminalId, cwd, workspaceBranch, workspaceName]);
 
 	const handleFocusTerminal = () => {
 		terminalRef.current?.focus();

@@ -43,7 +43,12 @@ import {
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
 import { PairedDevicesPanel } from "@/features/settings/paired-devices";
 import type { AppUpdateInfo } from "@/features/updater";
-import { getOpenPreferredEditorShortcutKeys } from "@/features/shortcuts/shortcut-utils";
+import {
+	getCommandPaletteShortcutKeys,
+	getFocusComposerShortcutKeys,
+	getOpenPreferredEditorShortcutKeys,
+	getToggleTerminalShortcutKeys,
+} from "@/features/shortcuts/shortcut-utils";
 import type {
 	ProviderRuntimeDraft,
 	ProviderRuntimeSettings,
@@ -630,7 +635,13 @@ export function SettingsDialog({
 	const [uxMetricsVersion, setUxMetricsVersion] = useState(0);
 	const providers = providerCatalog?.providers ?? [];
 	const shortcutBadges = useMemo(
-		() => ["Cmd/Ctrl+Enter", "Esc", getOpenPreferredEditorShortcutKeys().join("+")],
+		() => [
+			getCommandPaletteShortcutKeys().join("+"),
+			getFocusComposerShortcutKeys().join("+"),
+			getToggleTerminalShortcutKeys().join("+"),
+			getOpenPreferredEditorShortcutKeys().join("+"),
+			"Esc",
+		],
 		[],
 	);
 
@@ -665,7 +676,6 @@ export function SettingsDialog({
 				label: t("settings.sections.shortcuts.label"),
 				description: t("settings.sections.shortcuts.description"),
 				icon: Keyboard,
-				status: "comingSoon",
 			},
 			{
 				id: "git",
@@ -1014,7 +1024,9 @@ export function SettingsDialog({
 												</p>
 											</div>
 											<div className="flex flex-col items-end gap-2">
-												<SectionHeaderBadge>{t("settings.statusComingSoon")}</SectionHeaderBadge>
+												<SectionHeaderBadge>
+													{t("settings.shortcuts.activeCount", { count: 11 })}
+												</SectionHeaderBadge>
 												<Button variant="outline" size="sm" onClick={onOpenShortcuts}>
 													{t("settings.shortcuts.openCheatsheet")}
 												</Button>

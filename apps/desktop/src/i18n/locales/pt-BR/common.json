@@ -558,6 +558,8 @@
     }
   },
   "composer": {
+    "ariaLabel": "Composer do workspace",
+    "inputAriaLabel": "Prompt do workspace",
     "placeholder": {
       "default": "Peça mudanças, mencione arquivos com @ e use /comandos",
       "plan": "Descreva o que mudar e depois clique em Solicitar mudanças"
@@ -579,6 +581,7 @@
     },
     "execution": {
       "title": "Execução",
+      "open": "Abrir configurações de execução",
       "fast": "Rápida",
       "standard": "Padrão",
       "fastMode": "Respostas rápidas",
@@ -609,6 +612,9 @@
     "resize": "Redimensionar dock do terminal",
     "resizeHint": "Arraste para redimensionar",
     "newTab": "Nova aba de terminal",
+    "closeTab": "Fechar {{title}}",
+    "tabsAriaLabel": "Abas do terminal",
+    "scopeSelector": "Escopo do terminal: {{scope}}",
     "newScopedTab": "Novo terminal em {{scope}}",
     "maxTabs": "Máximo de {{count}} terminais",
     "noPath": "Caminho do terminal indisponível",
@@ -691,9 +697,9 @@
     "shortcuts": {
       "keyboardShortcuts": "Atalhos de teclado",
       "keyboardShortcutsHint": "Os atalhos mais usados já estão ligados nesta interface.",
-      "activeCount": "3 atalhos",
+      "activeCount": "{{count}} atalhos",
       "openCheatsheet": "Abrir atalhos",
-      "comingSoonBody": "Os atalhos já funcionam, mas a personalização desta seção ainda não foi implementada."
+      "comingSoonBody": "Os atalhos globais estão ativos. A personalização das teclas segue planejada para uma versão futura."
     },
     "git": {
       "chromeTitle": "Chrome Git",
@@ -768,6 +774,13 @@
   "shortcutsSheet": {
     "badge": "Atalhos",
     "title": "Atalhos de teclado",
+    "commandPalette": "Abrir paleta de comandos",
+    "focusComposer": "Focar no composer",
+    "toggleTerminal": "Alternar terminal",
+    "quickOpen": "Abrir arquivo rapidamente",
+    "workspaceSearch": "Buscar no workspace",
+    "inspectorChanges": "Abrir mudanças no Inspector",
+    "inspectorFiles": "Abrir arquivos no Inspector",
     "sendPrompt": "Enviar prompt",
     "steerSession": "Controlar sessão",
     "abortSession": "Abortar sessão",

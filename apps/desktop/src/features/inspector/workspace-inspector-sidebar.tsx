@@ -2948,7 +2948,7 @@ export function WorkspaceInspectorSidebar({
 					</div>
 
 					<div className="shrink-0 border-b border-border/40 bg-muted/15 px-2">
-						<TabsList variant="line" className="h-9 w-full justify-start gap-0 border-0 bg-transparent p-0">
+						<TabsList variant="line" className="no-scrollbar h-9 w-full justify-start gap-0 overflow-x-auto border-0 bg-transparent p-0">
 							{visibleSessionDockTabs.map((tab) => {
 								const count =
 									tab === "spec" ? missionSpecs.length : tab === "plan" ? 1 : null;

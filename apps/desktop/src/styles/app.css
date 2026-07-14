@@ -154,6 +154,14 @@
 }
 
 @layer utilities {
+	@container header-actions (max-width: 560px) {
+		.dcc-composer-context-label,
+		.dcc-composer-plan-label,
+		.dcc-composer-execution-label {
+			display: none;
+		}
+	}
+
 	* {
 		scrollbar-width: thin;
 		scrollbar-color: color-mix(in oklch, var(--foreground) 18%, transparent) transparent;

@@ -436,7 +436,7 @@ export function WorkspaceComposer({
 	return (
 		<div
 			ref={composerRootRef}
-			aria-label="Workspace composer"
+			aria-label={t("composer.ariaLabel")}
 			data-focus-scope="composer"
 			className={cn(
 				"dcc-composer-surface relative flex flex-col rounded-2xl border border-border/40 bg-sidebar shadow-[var(--dcc-elevation-1)]",
@@ -485,7 +485,7 @@ export function WorkspaceComposer({
 						contentEditable={
 							<ContentEditable
 								id="workspace-input"
-								aria-label="Workspace input"
+								aria-label={t("composer.inputAriaLabel")}
 								aria-multiline
 								className={cn(
 									"composer-editor min-h-[var(--dcc-composer-input-min-height)] max-h-[240px] resize-none overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-[14px] leading-5 tracking-[-0.01em] text-foreground outline-none",
@@ -551,7 +551,7 @@ export function WorkspaceComposer({
 						onClick={openContextPicker}
 					>
 						<Plus className="size-[13px]" strokeWidth={1.8} />
-						<span className="hidden sm:inline">
+						<span className="dcc-composer-context-label">
 							{extraContextDirectories.length > 0
 								? t("composer.controls.contextCount", {
 										count: extraContextDirectories.length,
@@ -572,7 +572,7 @@ export function WorkspaceComposer({
 						onClick={togglePlanMode}
 					>
 						<ClipboardList className="size-[13px]" strokeWidth={1.8} />
-						<span>{t("composer.controls.plan")}</span>
+						<span className="dcc-composer-plan-label">{t("composer.controls.plan")}</span>
 					</ComposerButton>
 				</div>
 
@@ -586,6 +586,7 @@ export function WorkspaceComposer({
 					>
 						<DropdownMenuTrigger
 							type="button"
+							aria-label={t("composer.execution.open")}
 							disabled={toolbarDisabled}
 							className={cn(
 								`flex h-7 items-center gap-1.5 ${composerToolbarTriggerClassName}`,
@@ -595,7 +596,7 @@ export function WorkspaceComposer({
 							)}
 						>
 							<SlidersHorizontal className="size-[13px] shrink-0" strokeWidth={1.8} />
-							<span className="truncate text-[var(--dcc-daily-meta-size)]">
+							<span className="dcc-composer-execution-label truncate text-[var(--dcc-daily-meta-size)]">
 								{isFastMode
 									? t("composer.execution.fast")
 									: t("composer.execution.standard")}

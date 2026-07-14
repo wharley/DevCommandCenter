@@ -14,6 +14,7 @@ import {
 	useMemo,
 	useRef,
 	useState,
+	type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ import {
 } from "./terminal-store";
 import type { TerminalScopeKind, TerminalScopeTarget } from "./terminal-scope";
 import { cn } from "@/lib/utils";
+import { getTerminalTabNavigationTarget } from "./terminal-tab-navigation";
 
 const HEIGHT_STORAGE_KEY = "dcc-workbench-terminal-dock-height-v1";
 const DEFAULT_HEIGHT_PX = 340;
@@ -126,6 +128,7 @@ export function WorkspaceTerminalDrawer({
 	const dockRef = useRef<HTMLDivElement | null>(null);
 	const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 	const releaseFitRef = useRef<(() => void) | null>(null);
+	const terminalTabRefs = useRef(new Map<string, HTMLButtonElement>());
 	const heightRef = useRef(DEFAULT_HEIGHT_PX);
 	const [heightPx, setHeightPx] = useState(DEFAULT_HEIGHT_PX);
 	const [terminalStatusVersion, setTerminalStatusVersion] = useState(0);
@@ -227,6 +230,21 @@ export function WorkspaceTerminalDrawer({
 		}
 	}, []);
 
+	const handleTerminalTabKeyDown = useCallback(
+		(event: ReactKeyboardEvent<HTMLButtonElement>, currentId: string) => {
+			const targetId = getTerminalTabNavigationTarget(
+				tabs.map((tab) => tab.id),
+				currentId,
+				event.key,
+			);
+			if (!targetId) return;
+			event.preventDefault();
+			setActiveTerminal(scopeKey, targetId);
+			requestAnimationFrame(() => terminalTabRefs.current.get(targetId)?.focus());
+		},
+		[scopeKey, tabs],
+	);
+
 	useEffect(() => {
 		const onMove = (event: MouseEvent) => {
 			if (dragRef.current) {
@@ -304,6 +322,7 @@ export function WorkspaceTerminalDrawer({
 									variant="ghost"
 									size="sm"
 									className="mr-1 h-7 shrink-0 gap-1 rounded-md bg-muted/30 px-2 text-[var(--dcc-daily-meta-size)] font-medium text-muted-foreground"
+									aria-label={t("terminalDock.scopeSelector", { scope: scopeLabel })}
 								>
 									{scopeLabel}
 									<ChevronDown className="size-3 opacity-50" />
@@ -323,12 +342,18 @@ export function WorkspaceTerminalDrawer({
 								))}
 							</DropdownMenuContent>
 						</DropdownMenu>
-						{tabs.map((tab) => {
+						<div
+							role="tablist"
+							aria-label={t("terminalDock.tabsAriaLabel")}
+							className="flex min-w-0 items-center gap-1"
+						>
+							{tabs.map((tab) => {
 							const isActive = tab.id === activeTab?.id;
 							const status = terminalStatuses.get(tab.id) ?? "ready";
 							return (
 								<div
 									key={tab.id}
+									role="presentation"
 									className={cn(
 										"group/tab flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[var(--dcc-daily-meta-size)] transition-colors",
 										isActive
@@ -338,8 +363,18 @@ export function WorkspaceTerminalDrawer({
 								>
 									<button
 										type="button"
+										ref={(node) => {
+											if (node) terminalTabRefs.current.set(tab.id, node);
+											else terminalTabRefs.current.delete(tab.id);
+										}}
+										id={`terminal-tab-${tab.id}`}
+										role="tab"
+										aria-selected={isActive}
+										aria-controls={`terminal-panel-${tab.id}`}
+										tabIndex={isActive ? 0 : -1}
 										className="max-w-[9rem] truncate"
 										onClick={() => setActiveTerminal(scopeKey, tab.id)}
+										onKeyDown={(event) => handleTerminalTabKeyDown(event, tab.id)}
 									>
 										<span className="flex items-center gap-1.5">
 											<span className={cn("size-1.5 rounded-full", statusDotClass(status))} />
@@ -348,8 +383,8 @@ export function WorkspaceTerminalDrawer({
 									</button>
 									<button
 										type="button"
-										aria-label={`Close ${tab.title}`}
-										className="rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover/tab:opacity-100"
+										aria-label={t("terminalDock.closeTab", { title: tab.title })}
+										className="rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/tab:opacity-100"
 										onClick={(event) => {
 											event.stopPropagation();
 											removeTerminal(scopeKey, tab.id);
@@ -359,7 +394,8 @@ export function WorkspaceTerminalDrawer({
 									</button>
 								</div>
 							);
-						})}
+							})}
+						</div>
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button
@@ -423,11 +459,17 @@ export function WorkspaceTerminalDrawer({
 					</Tooltip>
 				</div>
 
-				<div className="dcc-workbench-terminal-dock__panel flex min-h-0 flex-1 flex-col px-2 pb-2 pt-1">
+				<div
+					id={activeTab ? `terminal-panel-${activeTab.id}` : undefined}
+					role="tabpanel"
+					aria-labelledby={activeTab ? `terminal-tab-${activeTab.id}` : undefined}
+					className="dcc-workbench-terminal-dock__panel flex min-h-0 flex-1 flex-col px-2 pb-2 pt-1"
+				>
 					{activeTab ? (
 						<TerminalPanel
 							key={getTerminalRuntimeId(scopeKey, activeTab.id)}
 							variant="drawer"
+							autoFocus
 							terminalId={getTerminalRuntimeId(scopeKey, activeTab.id)}
 							title={activeTab.title}
 							cwd={cwd}

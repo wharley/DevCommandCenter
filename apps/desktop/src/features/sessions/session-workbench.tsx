@@ -20,7 +20,10 @@ import type {
 	TerminalScopeKind,
 	TerminalScopeTarget,
 } from "@/features/terminal/terminal-scope";
-import { subscribeWorkbenchCommand } from "@/features/workspaces/workbench-command";
+import {
+	dispatchWorkbenchCommand,
+	subscribeWorkbenchCommand,
+} from "@/features/workspaces/workbench-command";
 import { recordUxMetric } from "@/lib/ux-metrics";
 
 export type { RuntimeSessionSnapshot } from "./workbench-types";
@@ -200,11 +203,24 @@ export function SessionWorkbench({
 		},
 		[terminalScopes],
 	);
+	const handleTerminalOpenChange = useCallback((next: boolean) => {
+		setTerminalOpen(next);
+		if (!next) {
+			setTerminalExpanded(false);
+			requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
+		}
+	}, []);
 
 	useEffect(
 		() =>
 			subscribeWorkbenchCommand((command) => {
-				if (command === "terminal.openWorktree") {
+				if (command === "terminal.toggle") {
+					if (terminalOpen) {
+						handleTerminalOpenChange(false);
+					} else {
+						handleOpenTerminal({ scope: "worktree" });
+					}
+				} else if (command === "terminal.openWorktree") {
 					handleOpenTerminal({ scope: "worktree" });
 				} else if (command === "terminal.openProject") {
 					handleOpenTerminal({ scope: "project" });
@@ -212,15 +228,8 @@ export function SessionWorkbench({
 					handleOpenTerminal({ scope: "worktree", createNew: true });
 				}
 			}),
-		[handleOpenTerminal],
+		[handleOpenTerminal, handleTerminalOpenChange, terminalOpen],
 	);
-
-	const handleTerminalOpenChange = useCallback((next: boolean) => {
-		setTerminalOpen(next);
-		if (!next) {
-			setTerminalExpanded(false);
-		}
-	}, []);
 
 	// Full-bleed terminal takeover — hide the chat column entirely.
 	const chatHidden = terminalOpen && terminalExpanded;

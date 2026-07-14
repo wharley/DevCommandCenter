@@ -59,7 +59,10 @@ import { OnboardingWizard } from "./features/onboarding";
 import { ShortcutCheatsheetDialog } from "./features/shortcuts";
 import {
 	isOpenPreferredEditorShortcut,
+	isCommandPaletteShortcut,
+	isFocusComposerShortcut,
 	isQuickOpenShortcut,
+	isToggleTerminalShortcut,
 	isWorkspaceSearchShortcut,
 	shouldIgnoreGlobalShortcutTarget,
 } from "./features/shortcuts/shortcut-utils";
@@ -1370,7 +1373,22 @@ export default function App() {
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
+			if (isCommandPaletteShortcut(event)) {
+				event.preventDefault();
+				setIsCommandPaletteOpen(true);
+				return;
+			}
 			if (!selectedWorkspacePath) {
+				return;
+			}
+			if (isToggleTerminalShortcut(event)) {
+				event.preventDefault();
+				dispatchWorkbenchCommand("terminal.toggle");
+				return;
+			}
+			if (isFocusComposerShortcut(event)) {
+				event.preventDefault();
+				dispatchWorkbenchCommand("composer.focus");
 				return;
 			}
 			// Quick Open (Cmd/Ctrl+P) is a navigation chord, so it wins even when a

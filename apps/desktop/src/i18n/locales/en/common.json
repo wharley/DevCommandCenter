@@ -558,6 +558,8 @@
     }
   },
   "composer": {
+    "ariaLabel": "Workspace composer",
+    "inputAriaLabel": "Workspace prompt",
     "placeholder": {
       "default": "Ask for changes, @mention files, and run /commands",
       "plan": "Describe what to change, then click Request Changes"
@@ -579,6 +581,7 @@
     },
     "execution": {
       "title": "Execution",
+      "open": "Open execution settings",
       "fast": "Fast",
       "standard": "Standard",
       "fastMode": "Fast responses",
@@ -609,6 +612,9 @@
     "resize": "Resize terminal dock",
     "resizeHint": "Drag to resize",
     "newTab": "New terminal tab",
+    "closeTab": "Close {{title}}",
+    "tabsAriaLabel": "Terminal tabs",
+    "scopeSelector": "Terminal scope: {{scope}}",
     "newScopedTab": "New {{scope}} terminal",
     "maxTabs": "Maximum of {{count}} terminals",
     "noPath": "No terminal path available",
@@ -691,9 +697,9 @@
     "shortcuts": {
       "keyboardShortcuts": "Keyboard shortcuts",
       "keyboardShortcutsHint": "The most-used shortcuts are already wired into this interface.",
-      "activeCount": "3 shortcuts",
+      "activeCount": "{{count}} shortcuts",
       "openCheatsheet": "Open shortcuts",
-      "comingSoonBody": "The shortcuts already work, but customization for this section has not been implemented yet."
+      "comingSoonBody": "Global shortcuts are active. Custom key bindings remain planned for a future release."
     },
     "git": {
       "chromeTitle": "Git chrome",
@@ -768,6 +774,13 @@
   "shortcutsSheet": {
     "badge": "Shortcuts",
     "title": "Keyboard shortcuts",
+    "commandPalette": "Open command palette",
+    "focusComposer": "Focus composer",
+    "toggleTerminal": "Toggle terminal",
+    "quickOpen": "Quick open file",
+    "workspaceSearch": "Search workspace",
+    "inspectorChanges": "Open Inspector changes",
+    "inspectorFiles": "Open Inspector files",
     "sendPrompt": "Send prompt",
     "steerSession": "Steer session",
     "abortSession": "Abort session",

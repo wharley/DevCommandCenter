@@ -3,9 +3,28 @@ const QUICK_OPEN_KEY = "p";
 const WORKSPACE_SEARCH_KEY = "f";
 const INSPECTOR_GIT_MODE_KEY = "g";
 const INSPECTOR_CODE_MODE_KEY = "e";
+const COMMAND_PALETTE_KEY = "p";
+const TOGGLE_TERMINAL_KEY = "j";
+const FOCUS_COMPOSER_KEY = "l";
 
 function isMacPlatform(platform: string) {
 	return /mac/i.test(platform);
+}
+
+export function getPrimaryShortcutModifier(platform = navigator.platform) {
+	return isMacPlatform(platform) ? "Cmd" : "Ctrl";
+}
+
+export function getCommandPaletteShortcutKeys(platform = navigator.platform) {
+	return [getPrimaryShortcutModifier(platform), "Shift", "P"];
+}
+
+export function getToggleTerminalShortcutKeys(platform = navigator.platform) {
+	return [getPrimaryShortcutModifier(platform), "J"];
+}
+
+export function getFocusComposerShortcutKeys(platform = navigator.platform) {
+	return [getPrimaryShortcutModifier(platform), "Shift", "L"];
 }
 
 export function getOpenPreferredEditorShortcutKeys(platform = navigator.platform) {
@@ -52,6 +71,49 @@ function isModifiedShiftShortcut(
 		return event.metaKey && !event.ctrlKey;
 	}
 	return event.ctrlKey && !event.metaKey;
+}
+
+function isModifiedShortcut(
+	event: Pick<
+		KeyboardEvent,
+		"key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "defaultPrevented"
+	>,
+	key: string,
+	shiftKey: boolean,
+	platform = navigator.platform,
+) {
+	if (
+		event.defaultPrevented ||
+		event.key.toLowerCase() !== key ||
+		event.altKey ||
+		event.shiftKey !== shiftKey
+	) {
+		return false;
+	}
+	return isMacPlatform(platform)
+		? event.metaKey && !event.ctrlKey
+		: event.ctrlKey && !event.metaKey;
+}
+
+export function isCommandPaletteShortcut(
+	event: Parameters<typeof isModifiedShortcut>[0],
+	platform = navigator.platform,
+) {
+	return isModifiedShortcut(event, COMMAND_PALETTE_KEY, true, platform);
+}
+
+export function isToggleTerminalShortcut(
+	event: Parameters<typeof isModifiedShortcut>[0],
+	platform = navigator.platform,
+) {
+	return isModifiedShortcut(event, TOGGLE_TERMINAL_KEY, false, platform);
+}
+
+export function isFocusComposerShortcut(
+	event: Parameters<typeof isModifiedShortcut>[0],
+	platform = navigator.platform,
+) {
+	return isModifiedShortcut(event, FOCUS_COMPOSER_KEY, true, platform);
 }
 
 export function isInspectorGitModeShortcut(
