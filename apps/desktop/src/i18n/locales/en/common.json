@@ -83,6 +83,7 @@
     "cloneFromUrl": "Clone from URL",
     "openProject": "Open project",
     "openSettings": "Open settings",
+    "manageSkills": "Manage skills",
     "openProjectMenu": "Open project menu",
     "projectActions": "Project actions",
     "noWorkspacesYet": "No workspaces yet",
@@ -109,8 +110,8 @@
   "commandPalette": {
     "title": "Workspace command palette",
     "description": "Jump to a workspace or run an action.",
-    "searchPlaceholder": "Search workspaces...",
-    "empty": "No workspace found.",
+    "searchPlaceholder": "Search workspaces and actions...",
+    "empty": "No workspace or action found.",
     "switchWorkspace": "Switch workspace",
     "selected": "Selected",
     "actions": "Actions",
@@ -121,7 +122,21 @@
     "rebuildContracts": "Rebuild contracts",
     "stub": "Stub",
     "openOnboarding": "Open onboarding",
-    "keyboardShortcuts": "Keyboard shortcuts"
+    "keyboardShortcuts": "Keyboard shortcuts",
+    "workbench": {
+      "title": "Current workspace",
+      "focusComposer": "Focus composer",
+      "addContext": "Add composer context",
+      "execution": "Open execution settings",
+      "togglePlan": "Toggle Plan mode",
+      "terminalWorktree": "Open Worktree terminal",
+      "terminalProject": "Open project terminal",
+      "newTerminal": "Create terminal tab",
+      "inspectorChanges": "Open Inspector changes",
+      "inspectorFiles": "Open Inspector files",
+      "inspectorActivity": "Open session activity",
+      "inspectorDetails": "Open workspace details"
+    }
   },
   "workspaceDialog": {
     "cloneTitle": "Clone repository",
@@ -626,7 +641,7 @@
       "connections": { "label": "Connections", "description": "Phones and tablets paired with this desktop." },
       "shortcuts": { "label": "Shortcuts", "description": "Active shortcuts and the cheatsheet are available." },
       "git": { "label": "Git", "description": "Git chrome in the inspector, adjustments coming soon." },
-      "experimental": { "label": "Experimental", "description": "Reserved space for future options." },
+      "experimental": { "label": "Experimental", "description": "Local UX signals and preview options." },
       "account": { "label": "Account", "description": "GitHub, GitLab, and local in-app authentication." }
     },
     "statusComingSoon": "Coming soon",
@@ -653,6 +668,10 @@
       "themeHint": "Match the shell to the system or force a fixed mode.",
       "light": "Light",
       "dark": "Dark",
+      "density": "Interface density",
+      "densityHint": "Choose more breathing room or fit more information on screen.",
+      "comfortable": "Comfortable",
+      "compact": "Compact",
       "colorSystemHint": "The color system is driven by shell tokens, so this choice changes the whole chrome instead of just the canvas."
     },
     "model": {
@@ -688,7 +707,20 @@
     "experimental": {
       "title": "Experimental",
       "body": "No preview toggles are exposed yet. This section stays ready for future options.",
-      "comingSoonBody": "No preview toggles are exposed yet. When test flags exist, they will live here."
+      "comingSoonBody": "No preview toggles are exposed yet. When test flags exist, they will live here.",
+      "uxMetricsTitle": "Local UX signals",
+      "uxMetricsHint": "Private aggregate counters and time-to-discovery values stored only on this device. Prompts, paths and IDs are never recorded.",
+      "resetMetrics": "Reset metrics",
+      "metricValue": "{{count}}× · first at {{seconds}}s",
+      "metricEmpty": "Not observed",
+      "metrics": {
+        "first_prompt": "Prompt sent",
+        "diff_discovered": "Changes discovered",
+        "terminal_discovered": "Terminal discovered",
+        "terminal_scope_switched": "Terminal scope switched",
+        "advanced_composer_control_used": "Advanced Composer control used",
+        "command_palette_action": "Command palette action used"
+      }
     },
     "account": {
       "title": "Forge accounts",

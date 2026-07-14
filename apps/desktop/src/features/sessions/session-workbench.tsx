@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { WorkspaceTerminalDrawer } from "@/features/terminal";
@@ -20,6 +20,8 @@ import type {
 	TerminalScopeKind,
 	TerminalScopeTarget,
 } from "@/features/terminal/terminal-scope";
+import { subscribeWorkbenchCommand } from "@/features/workspaces/workbench-command";
+import { recordUxMetric } from "@/lib/ux-metrics";
 
 export type { RuntimeSessionSnapshot } from "./workbench-types";
 
@@ -184,6 +186,7 @@ export function SessionWorkbench({
 			if (!scope.cwd) {
 				return;
 			}
+			recordUxMetric("terminal_discovered");
 
 			setTerminalScopeKind(scope.kind);
 			if (request.terminalId) {
@@ -196,6 +199,20 @@ export function SessionWorkbench({
 			setTerminalOpen(true);
 		},
 		[terminalScopes],
+	);
+
+	useEffect(
+		() =>
+			subscribeWorkbenchCommand((command) => {
+				if (command === "terminal.openWorktree") {
+					handleOpenTerminal({ scope: "worktree" });
+				} else if (command === "terminal.openProject") {
+					handleOpenTerminal({ scope: "project" });
+				} else if (command === "terminal.newWorktree") {
+					handleOpenTerminal({ scope: "worktree", createNew: true });
+				}
+			}),
+		[handleOpenTerminal],
 	);
 
 	const handleTerminalOpenChange = useCallback((next: boolean) => {
@@ -272,7 +289,12 @@ export function SessionWorkbench({
 					cwd={activeTerminalScope.cwd}
 					scopes={terminalScopes}
 					activeScopeKind={activeTerminalScope.kind}
-					onScopeChange={setTerminalScopeKind}
+					onScopeChange={(kind) => {
+						if (kind !== terminalScopeKind) {
+							recordUxMetric("terminal_scope_switched");
+						}
+						setTerminalScopeKind(kind);
+					}}
 					workspaceName={workspaceName}
 					workspaceBranch={workspaceBranch}
 					providerLabel={selectedProviderLabel}

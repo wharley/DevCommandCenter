@@ -11,6 +11,7 @@ import {
 	CommandShortcut,
 } from "../../components/ui/command";
 import type { WorkspaceSummary } from "./types";
+import type { WorkbenchCommand } from "./workbench-command";
 
 type WorkspaceCommandPaletteProps = {
 	open: boolean;
@@ -26,6 +27,7 @@ type WorkspaceCommandPaletteProps = {
 	onOpenSkills: () => void;
 	/** Present only when the active workspace has a session to delegate from. */
 	onDelegate?: () => void;
+	onRunWorkbenchCommand?: (command: WorkbenchCommand) => void;
 };
 
 export function WorkspaceCommandPalette({
@@ -41,6 +43,7 @@ export function WorkspaceCommandPalette({
 	onOpenShortcuts,
 	onOpenSkills,
 	onDelegate,
+	onRunWorkbenchCommand,
 }: WorkspaceCommandPaletteProps) {
 	const { t } = useTranslation("common");
 	const groupedWorkspaces = useMemo(
@@ -51,6 +54,22 @@ export function WorkspaceCommandPalette({
 			},
 		],
 		[t, workspaces],
+	);
+	const workbenchCommands = useMemo<Array<{ command: WorkbenchCommand; label: string; keywords: string }>>(
+		() => [
+			{ command: "composer.focus", label: t("commandPalette.workbench.focusComposer"), keywords: "composer prompt focus" },
+			{ command: "composer.addContext", label: t("commandPalette.workbench.addContext"), keywords: "composer context directory" },
+			{ command: "composer.execution", label: t("commandPalette.workbench.execution"), keywords: "composer effort fast ultrathink" },
+			{ command: "composer.togglePlan", label: t("commandPalette.workbench.togglePlan"), keywords: "composer plan mode" },
+			{ command: "terminal.openWorktree", label: t("commandPalette.workbench.terminalWorktree"), keywords: "terminal worktree" },
+			{ command: "terminal.openProject", label: t("commandPalette.workbench.terminalProject"), keywords: "terminal project root" },
+			{ command: "terminal.newWorktree", label: t("commandPalette.workbench.newTerminal"), keywords: "terminal new tab" },
+			{ command: "inspector.changes", label: t("commandPalette.workbench.inspectorChanges"), keywords: "inspector git changes diff" },
+			{ command: "inspector.files", label: t("commandPalette.workbench.inspectorFiles"), keywords: "inspector files code" },
+			{ command: "inspector.activity", label: t("commandPalette.workbench.inspectorActivity"), keywords: "inspector activity milestones" },
+			{ command: "inspector.details", label: t("commandPalette.workbench.inspectorDetails"), keywords: "inspector details runtime diagnostics" },
+		],
+		[t],
 	);
 
 	return (
@@ -94,6 +113,25 @@ export function WorkspaceCommandPalette({
 					</CommandGroup>
 				))}
 				<CommandSeparator />
+				{selectedWorkspaceId && onRunWorkbenchCommand ? (
+					<>
+						<CommandGroup heading={t("commandPalette.workbench.title")}>
+							{workbenchCommands.map((item) => (
+								<CommandItem
+									key={item.command}
+									value={`${item.label} ${item.keywords}`}
+									onSelect={() => {
+										onOpenChange(false);
+										onRunWorkbenchCommand(item.command);
+									}}
+								>
+									{item.label}
+								</CommandItem>
+							))}
+						</CommandGroup>
+						<CommandSeparator />
+					</>
+				) : null}
 				<CommandGroup heading={t("commandPalette.actions")}>
 					{onDelegate ? (
 						<CommandItem
@@ -142,7 +180,7 @@ export function WorkspaceCommandPalette({
 							onOpenSkills();
 						}}
 					>
-						Manage skills
+						{t("commandPalette.manageSkills")}
 					</CommandItem>
 					<CommandItem
 						value="rebuild contracts"

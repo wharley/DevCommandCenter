@@ -31,7 +31,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { DccTheme } from "@/components/theme-provider";
+import type { DccDensity, DccTheme } from "@/components/theme-provider";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
 import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
@@ -61,6 +61,11 @@ import {
 } from "@/features/settings/forge-cli-queries";
 import { useForgeCliLoginsHealth } from "@/features/settings/use-forge-cli-logins-health";
 import { WORKSPACE_FORGE_CONTEXT_QUERY_KEY } from "@/features/inspector/use-workspace-forge-context";
+import {
+	DCC_UX_METRICS_STORAGE_KEY,
+	readUxMetrics,
+	type DccUxMetricName,
+} from "@/lib/ux-metrics";
 
 type SettingsDialogProps = {
 	open: boolean;
@@ -68,6 +73,8 @@ type SettingsDialogProps = {
 	onOpenShortcuts: () => void;
 	theme: DccTheme;
 	onThemeChange: (theme: DccTheme) => void;
+	density: DccDensity;
+	onDensityChange: (density: DccDensity) => void;
 	providerCatalog: ProviderCatalog | null;
 	selectedProviderId: string | null;
 	onSelectProvider: (providerId: string) => void;
@@ -600,6 +607,8 @@ export function SettingsDialog({
 	onOpenShortcuts,
 	theme,
 	onThemeChange,
+	density,
+	onDensityChange,
 	providerCatalog,
 	selectedProviderId,
 	onSelectProvider,
@@ -618,6 +627,7 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
 	const { t, i18n } = useTranslation("common");
 	const [activeSection, setActiveSection] = useState<SettingsSectionId>("general");
+	const [uxMetricsVersion, setUxMetricsVersion] = useState(0);
 	const providers = providerCatalog?.providers ?? [];
 	const shortcutBadges = useMemo(
 		() => ["Cmd/Ctrl+Enter", "Esc", getOpenPreferredEditorShortcutKeys().join("+")],
@@ -669,7 +679,6 @@ export function SettingsDialog({
 				label: t("settings.sections.experimental.label"),
 				description: t("settings.sections.experimental.description"),
 				icon: Package,
-				status: "comingSoon",
 			},
 			{
 				id: "account",
@@ -693,6 +702,15 @@ export function SettingsDialog({
 	);
 
 	const uiLocale = i18n.language === "en" ? "en" : "pt-BR";
+	const uxMetrics = useMemo(() => readUxMetrics(), [open, uxMetricsVersion]);
+	const uxMetricNames: DccUxMetricName[] = [
+		"first_prompt",
+		"diff_discovered",
+		"terminal_discovered",
+		"terminal_scope_switched",
+		"advanced_composer_control_used",
+		"command_palette_action",
+	];
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -920,6 +938,39 @@ export function SettingsDialog({
 											))}
 										</ToggleGroup>
 									</div>
+									<div className="flex items-start justify-between gap-6 border-b border-border/40 pb-4">
+										<div>
+											<h3 className="text-[14px] font-medium text-foreground">
+												{t("settings.appearance.density")}
+											</h3>
+											<p className="mt-1 text-[12px] text-muted-foreground">
+												{t("settings.appearance.densityHint")}
+											</p>
+										</div>
+										<ToggleGroup
+											type="single"
+											value={density}
+											onValueChange={(value) => {
+												if (value === "comfortable" || value === "compact") {
+													onDensityChange(value);
+												}
+											}}
+											className="gap-1"
+										>
+											<ToggleGroupItem
+												value="comfortable"
+												className="h-8 rounded-lg border border-border/60 px-3 text-[12px]"
+											>
+												{t("settings.appearance.comfortable")}
+											</ToggleGroupItem>
+											<ToggleGroupItem
+												value="compact"
+												className="h-8 rounded-lg border border-border/60 px-3 text-[12px]"
+											>
+												{t("settings.appearance.compact")}
+											</ToggleGroupItem>
+										</ToggleGroup>
+									</div>
 									<div className="rounded-xl border border-border/60 p-4">
 										<p className="text-[12px] leading-relaxed text-muted-foreground">
 											{t("settings.appearance.colorSystemHint")}
@@ -1010,10 +1061,49 @@ export function SettingsDialog({
 
 							{activeSection === "experimental" ? (
 								<section className="space-y-4">
-									<ComingSoonCard
-										title={t("settings.experimental.title")}
-										body={t("settings.experimental.comingSoonBody")}
-									/>
+									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+										<div className="flex items-start justify-between gap-4">
+											<div>
+												<h3 className="text-[14px] font-medium text-foreground">
+													{t("settings.experimental.uxMetricsTitle")}
+												</h3>
+												<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+													{t("settings.experimental.uxMetricsHint")}
+												</p>
+											</div>
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												onClick={() => {
+													window.localStorage.removeItem(DCC_UX_METRICS_STORAGE_KEY);
+													setUxMetricsVersion((value) => value + 1);
+												}}
+											>
+												{t("settings.experimental.resetMetrics")}
+											</Button>
+										</div>
+										<div className="mt-4 divide-y divide-border/40 rounded-lg bg-background px-3">
+											{uxMetricNames.map((name) => {
+												const metric = uxMetrics[name];
+												return (
+													<div key={name} className="flex items-center justify-between gap-4 py-2.5 text-[12px]">
+														<span className="text-foreground">
+															{t(`settings.experimental.metrics.${name}`)}
+														</span>
+														<span className="tabular-nums text-muted-foreground">
+															{metric
+																? t("settings.experimental.metricValue", {
+																	count: metric.count,
+																	seconds: (metric.firstElapsedMs / 1000).toFixed(1),
+																})
+																: t("settings.experimental.metricEmpty")}
+														</span>
+													</div>
+												);
+											})}
+										</div>
+									</div>
 								</section>
 							) : null}
 

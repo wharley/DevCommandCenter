@@ -110,6 +110,11 @@ import {
 } from "./lib/delegation-api";
 import { useAppearance } from "./components/theme-provider";
 import {
+	dispatchWorkbenchCommand,
+	type WorkbenchCommand,
+} from "./features/workspaces/workbench-command";
+import { recordUxMetric } from "./lib/ux-metrics";
+import {
 	SELECTED_PROVIDER_STORAGE_KEY,
 	SELECTED_MODEL_STORAGE_KEY,
 	getProviderUnhealthyReason,
@@ -987,7 +992,7 @@ export default function App() {
 	const fileOpenRequestIdRef = useRef(0);
 	const [workspaceComposerPrefill, setWorkspaceComposerPrefill] =
 		useState<WorkspaceComposerPrefillRequest | null>(null);
-	const { theme, setTheme } = useAppearance();
+	const { theme, setTheme, density, setDensity } = useAppearance();
 	const {
 		update: appUpdateInfo,
 		currentVersion: appCurrentVersion,
@@ -1252,6 +1257,7 @@ export default function App() {
 		selectedSessionSummary,
 	]);
 	const openGitInspector = useCallback(() => {
+		recordUxMetric("diff_discovered");
 		setInspectorMode("git");
 		setInspectorCollapsed(false);
 	}, [setInspectorCollapsed]);
@@ -1269,6 +1275,7 @@ export default function App() {
 	);
 	const toggleGitInspector = useCallback(() => {
 		if (inspectorCollapsed) {
+			recordUxMetric("diff_discovered");
 			setInspectorMode("git");
 			setInspectorCollapsed(false);
 			return;
@@ -1280,6 +1287,35 @@ export default function App() {
 		setInspectorCollapsed(false);
 		setInspectorTab("plan");
 	}, [setInspectorCollapsed]);
+	const runWorkbenchCommand = useCallback(
+		(command: WorkbenchCommand) => {
+			recordUxMetric("command_palette_action");
+			switch (command) {
+				case "inspector.changes":
+					recordUxMetric("diff_discovered");
+					setInspectorMode("git");
+					setInspectorCollapsed(false);
+					return;
+				case "inspector.files":
+					setInspectorMode("code");
+					setInspectorCollapsed(false);
+					return;
+				case "inspector.activity":
+					setInspectorMode("git");
+					setInspectorTab("activity");
+					setInspectorCollapsed(false);
+					return;
+				case "inspector.details":
+					setInspectorMode("git");
+					setInspectorTab("context");
+					setInspectorCollapsed(false);
+					return;
+				default:
+					dispatchWorkbenchCommand(command);
+			}
+		},
+		[setInspectorCollapsed],
+	);
 
 	useEffect(() => {
 		if (providerChoices.length === 0) {
@@ -2166,6 +2202,7 @@ export default function App() {
 				effort: turn.envelope.effort,
 				fastMode: turn.envelope.fastMode,
 			});
+			recordUxMetric("first_prompt");
 
 			const resultSnapshot: RuntimeSessionSnapshot = {
 				sessionId: result.session.id,
@@ -3099,6 +3136,7 @@ export default function App() {
 								onOpenOnboarding={() => setIsOnboardingOpen(true)}
 								onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
 								onOpenSkills={() => setIsSkillsOpen(true)}
+								onRunWorkbenchCommand={runWorkbenchCommand}
 								onDelegate={
 									selectedSessionSnapshot
 										? () => setDelegateSignal((signal) => signal + 1)
@@ -3333,6 +3371,8 @@ export default function App() {
 				onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
 				theme={theme}
 				onThemeChange={setTheme}
+				density={density}
+				onDensityChange={setDensity}
 				providerCatalog={providerCatalog}
 				selectedProviderId={selectedProviderId}
 				selectedModelId={selectedModelId}

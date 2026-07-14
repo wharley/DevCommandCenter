@@ -88,6 +88,8 @@ import {
 	saveEffortSelection,
 } from "./draftStorage";
 import { appendComposerText, readComposerPrompt, setEditorText } from "./editorOps";
+import { subscribeWorkbenchCommand } from "@/features/workspaces/workbench-command";
+import { recordUxMetric } from "@/lib/ux-metrics";
 
 type WorkspaceComposerProps = {
 	draftKey: string;
@@ -142,6 +144,7 @@ export function WorkspaceComposer({
 	const [hasContent, setHasContent] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [isFastMode, setIsFastMode] = useState(true);
+	const [executionMenuOpen, setExecutionMenuOpen] = useState(false);
 	// Effort + ultrathink are persisted per workspace so the selection survives
 	// composer remounts (e.g. opening a git file then pressing Esc) instead of
 	// resetting to the default — mirrors the draft persistence below.
@@ -211,6 +214,16 @@ export function WorkspaceComposer({
 			}),
 		[planModeByScope, draftKey, sessionId],
 	);
+	const togglePlanMode = useCallback(() => {
+		recordUxMetric("advanced_composer_control_used");
+		setPlanModeByScope((current) =>
+			setPlanModeState(current, {
+				workspaceId: draftKey,
+				sessionId,
+				enabled: !isPlanMode,
+			}),
+		);
+	}, [draftKey, isPlanMode, sessionId]);
 
 	// Clamp effort when the model changes and no longer supports the current level.
 	useEffect(() => {
@@ -358,6 +371,28 @@ export function WorkspaceComposer({
 		editor.focus();
 	}, []);
 
+	useEffect(
+		() =>
+			subscribeWorkbenchCommand((command) => {
+				switch (command) {
+					case "composer.focus":
+						editorRef.current?.focus();
+						return;
+					case "composer.addContext":
+						openContextPicker();
+						return;
+					case "composer.execution":
+						recordUxMetric("advanced_composer_control_used");
+						setExecutionMenuOpen(true);
+						return;
+					case "composer.togglePlan":
+						togglePlanMode();
+						return;
+				}
+			}),
+		[openContextPicker, togglePlanMode],
+	);
+
 	const inputDisabled = disabled;
 	const toolbarDisabled = disabled;
 	const hasProvider = Boolean(selectedProviderId);
@@ -404,8 +439,10 @@ export function WorkspaceComposer({
 			aria-label="Workspace composer"
 			data-focus-scope="composer"
 			className={cn(
-				"relative flex flex-col rounded-2xl border border-border/40 bg-sidebar shadow-[0_-1px_8px_rgba(0,0,0,0.05),0_0_0_1px_rgba(255,255,255,0.02)]",
-				inputDisabled ? "p-0" : "px-4 pb-3 pt-3",
+				"dcc-composer-surface relative flex flex-col rounded-2xl border border-border/40 bg-sidebar shadow-[var(--dcc-elevation-1)]",
+				inputDisabled
+					? "p-0"
+					: "px-[var(--dcc-composer-padding-x)] py-[var(--dcc-composer-padding-y)]",
 				inputDisabled && "cursor-not-allowed opacity-60",
 			)}
 		>
@@ -451,7 +488,7 @@ export function WorkspaceComposer({
 								aria-label="Workspace input"
 								aria-multiline
 								className={cn(
-									"composer-editor min-h-[64px] max-h-[240px] resize-none overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-[14px] leading-5 tracking-[-0.01em] text-foreground outline-none",
+									"composer-editor min-h-[var(--dcc-composer-input-min-height)] max-h-[240px] resize-none overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-[14px] leading-5 tracking-[-0.01em] text-foreground outline-none",
 								)}
 							/>
 						}
@@ -510,7 +547,7 @@ export function WorkspaceComposer({
 						type="button"
 						aria-label={t("composer.controls.addContext")}
 						disabled={toolbarDisabled}
-						className="h-7 shrink-0 gap-1 px-1.5 text-[11.5px] text-muted-foreground"
+						className="h-7 shrink-0 gap-1 px-1.5 text-[var(--dcc-daily-meta-size)] text-muted-foreground"
 						onClick={openContextPicker}
 					>
 						<Plus className="size-[13px]" strokeWidth={1.8} />
@@ -527,20 +564,12 @@ export function WorkspaceComposer({
 						aria-label={t("composer.controls.planMode")}
 						disabled={toolbarDisabled}
 						className={cn(
-							"h-7 gap-1 px-1.5 text-[11px]",
+							"h-7 gap-1 px-1.5 text-[var(--dcc-daily-meta-size)]",
 							isPlanMode
 								? "text-[color:var(--plan)] hover:text-[color:var(--plan)]"
 								: "text-muted-foreground/70 hover:text-muted-foreground/70",
 						)}
-						onClick={() =>
-							setPlanModeByScope((current) =>
-								setPlanModeState(current, {
-									workspaceId: draftKey,
-									sessionId,
-									enabled: !isPlanMode,
-								}),
-							)
-						}
+						onClick={togglePlanMode}
 					>
 						<ClipboardList className="size-[13px]" strokeWidth={1.8} />
 						<span>{t("composer.controls.plan")}</span>
@@ -548,7 +577,13 @@ export function WorkspaceComposer({
 				</div>
 
 				<div className="flex shrink-0 items-center gap-1.5">
-					<DropdownMenu>
+					<DropdownMenu
+						open={executionMenuOpen}
+						onOpenChange={(open) => {
+							setExecutionMenuOpen(open);
+							if (open) recordUxMetric("advanced_composer_control_used");
+						}}
+					>
 						<DropdownMenuTrigger
 							type="button"
 							disabled={toolbarDisabled}
@@ -560,7 +595,7 @@ export function WorkspaceComposer({
 							)}
 						>
 							<SlidersHorizontal className="size-[13px] shrink-0" strokeWidth={1.8} />
-							<span className="truncate text-[11.5px]">
+							<span className="truncate text-[var(--dcc-daily-meta-size)]">
 								{isFastMode
 									? t("composer.execution.fast")
 									: t("composer.execution.standard")}
@@ -582,11 +617,11 @@ export function WorkspaceComposer({
 							>
 								<div>
 									<div>{t("composer.execution.fastMode")}</div>
-									<div className="text-[11px] text-muted-foreground">
+									<div className="text-[12px] text-muted-foreground">
 										{t("composer.execution.fastModeHint")}
 									</div>
 								</div>
-								<span className="text-[11px] text-foreground">
+								<span className="text-[12px] text-foreground">
 									{isFastMode ? "✓" : ""}
 								</span>
 							</DropdownMenuItem>
@@ -627,7 +662,7 @@ export function WorkspaceComposer({
 							{sessionSnapshot ? (
 								<>
 									<DropdownMenuSeparator />
-									<div className="px-2 py-1.5 text-[11px] leading-5 text-muted-foreground">
+									<div className="px-2 py-1.5 text-[12px] leading-5 text-muted-foreground">
 										{t("composer.execution.sessionUsage", {
 											turns: turnCount,
 											checkpoints: checkpointCount,

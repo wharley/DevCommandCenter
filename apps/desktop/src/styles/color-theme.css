@@ -22,7 +22,7 @@
 	--dcc-warn: var(--warning);
 	--dcc-danger: var(--destructive);
 	--dcc-info: var(--info);
-	--dcc-shadow: 0 24px 90px color-mix(in oklab, black 20%, transparent);
+	--dcc-shadow: var(--dcc-elevation-2);
 	--dcc-radius-lg: calc(var(--radius) * 2);
 	--dcc-radius-md: var(--radius);
 	--dcc-radius-sm: calc(var(--radius) * 0.75);

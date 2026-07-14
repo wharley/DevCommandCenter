@@ -111,6 +111,25 @@
 	--terminal-bright-cyan: oklch(0.55 0.09 192);
 	--terminal-bright-white: oklch(0.95 0 0);
 	--radius: 0.625rem;
+
+	/* Density and elevation primitives shared by Composer, Terminal and Inspector. */
+	--dcc-composer-padding-x: 1rem;
+	--dcc-composer-padding-y: 0.75rem;
+	--dcc-composer-input-min-height: 4rem;
+	--dcc-terminal-toolbar-height: 2.5rem;
+	--dcc-panel-row-padding: 0.375rem;
+	--dcc-daily-meta-size: 0.75rem;
+	--dcc-elevation-0: none;
+	--dcc-elevation-1: 0 1px 3px rgb(0 0 0 / 0.08), 0 0 0 1px rgb(255 255 255 / 0.02);
+	--dcc-elevation-2: 0 16px 44px rgb(0 0 0 / 0.18);
+}
+
+html[data-density="compact"] {
+	--dcc-composer-padding-x: 0.75rem;
+	--dcc-composer-padding-y: 0.5rem;
+	--dcc-composer-input-min-height: 3rem;
+	--dcc-terminal-toolbar-height: 2.125rem;
+	--dcc-panel-row-padding: 0.25rem;
 }
 
 .dark {

@@ -113,6 +113,7 @@ import type {
 	WorkspaceSetupReport,
 } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { recordUxMetric } from "@/lib/ux-metrics";
 import { getProviderChips, summarizeProviderHealth } from "@/features/providers/provider-display";
 import { CodeRabbitConnectDialog } from "@/features/settings/coderabbit-connect-dialog";
 import {
@@ -900,7 +901,7 @@ function SessionDockFooter({
 	const { t } = useTranslation("common");
 	return (
 		<div className="shrink-0 border-t border-border/50 bg-sidebar/85">
-			<div className="flex items-center gap-1 px-2 py-1.5">
+			<div className="flex items-center gap-1 px-2 py-[var(--dcc-panel-row-padding)]">
 				<button
 					type="button"
 					onClick={() => onExpand(activeTab)}
@@ -916,7 +917,7 @@ function SessionDockFooter({
 							<span className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-emerald-500 ring-2 ring-sidebar" />
 						) : null}
 					</span>
-					<span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors group-hover:text-foreground">
+					<span className="text-[var(--dcc-daily-meta-size)] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors group-hover:text-foreground">
 						{t("inspector.gitSection.kicker")}
 					</span>
 				</button>
@@ -930,7 +931,7 @@ function SessionDockFooter({
 								type="button"
 								onClick={() => onExpand(tab)}
 									className={cn(
-									"flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11.5px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
+									"flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[var(--dcc-daily-meta-size)] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
 									active
 										? "bg-muted/55 font-medium text-foreground"
 										: "text-muted-foreground hover:bg-muted/35 hover:text-foreground",
@@ -2272,6 +2273,9 @@ export function WorkspaceInspectorSidebar({
 	const autoOpenedPlanMessageIdRef = useRef<string | null>(null);
 	const selectInspectorMode = useCallback(
 		(mode: WorkspaceInspectorMode) => {
+			if (mode === "git") {
+				recordUxMetric("diff_discovered");
+			}
 			onModeChange(mode);
 		},
 		[onModeChange],

@@ -10,8 +10,10 @@ import {
 
 /** Persisted preference; canonical key for docs and tooling. */
 export const DCC_THEME_STORAGE_KEY = "dcc-theme";
+export const DCC_DENSITY_STORAGE_KEY = "dcc-density";
 
 export type DccTheme = "dark" | "light";
+export type DccDensity = "comfortable" | "compact";
 
 /** PWA/tab chrome tint — matches approximate shell `--background`. */
 export const DCC_THEME_COLOR_META: Record<DccTheme, string> = {
@@ -48,6 +50,15 @@ function getSystemTheme(): DccTheme {
 		: "light";
 }
 
+function readStoredDensity(): DccDensity {
+	if (typeof window === "undefined") {
+		return "comfortable";
+	}
+	return window.localStorage.getItem(DCC_DENSITY_STORAGE_KEY) === "compact"
+		? "compact"
+		: "comfortable";
+}
+
 export function applyDccThemeClass(theme: DccTheme) {
 	if (typeof document === "undefined") {
 		return;
@@ -63,9 +74,18 @@ export function applyDccThemeClass(theme: DccTheme) {
 	}
 }
 
+export function applyDccDensity(density: DccDensity) {
+	if (typeof document === "undefined") {
+		return;
+	}
+	document.documentElement.dataset.density = density;
+}
+
 type AppearanceContextValue = {
 	theme: DccTheme;
 	setTheme: (theme: DccTheme) => void;
+	density: DccDensity;
+	setDensity: (density: DccDensity) => void;
 };
 
 const AppearanceContext = createContext<AppearanceContextValue | null>(null);
@@ -88,6 +108,11 @@ export function ThemeProvider({
 		applyDccThemeClass(initial);
 		return initial;
 	});
+	const [density, setDensityState] = useState<DccDensity>(() => {
+		const initial = readStoredDensity();
+		applyDccDensity(initial);
+		return initial;
+	});
 
 	const setTheme = useCallback((next: DccTheme) => {
 		setThemeState(next);
@@ -97,6 +122,16 @@ export function ThemeProvider({
 			/* localStorage unavailable */
 		}
 		applyDccThemeClass(next);
+	}, []);
+
+	const setDensity = useCallback((next: DccDensity) => {
+		setDensityState(next);
+		try {
+			window.localStorage.setItem(DCC_DENSITY_STORAGE_KEY, next);
+		} catch {
+			/* localStorage unavailable */
+		}
+		applyDccDensity(next);
 	}, []);
 
 	useEffect(() => {
@@ -114,7 +149,10 @@ export function ThemeProvider({
 			});
 	}, [theme]);
 
-	const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
+	const value = useMemo(
+		() => ({ theme, setTheme, density, setDensity }),
+		[density, setDensity, setTheme, theme],
+	);
 
 	return (
 		<AppearanceContext.Provider value={value}>

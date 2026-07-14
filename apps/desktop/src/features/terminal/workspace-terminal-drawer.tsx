@@ -295,7 +295,7 @@ export function WorkspaceTerminalDrawer({
 			) : null}
 
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
-				<div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/60 px-2">
+				<div className="flex h-[var(--dcc-terminal-toolbar-height)] shrink-0 items-center gap-2 border-b border-border/60 px-2">
 					<div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
@@ -303,7 +303,7 @@ export function WorkspaceTerminalDrawer({
 									type="button"
 									variant="ghost"
 									size="sm"
-									className="mr-1 h-7 shrink-0 gap-1 rounded-md border border-border/60 bg-muted/30 px-2 text-[11px] font-medium text-muted-foreground"
+									className="mr-1 h-7 shrink-0 gap-1 rounded-md bg-muted/30 px-2 text-[var(--dcc-daily-meta-size)] font-medium text-muted-foreground"
 								>
 									{scopeLabel}
 									<ChevronDown className="size-3 opacity-50" />
@@ -330,10 +330,10 @@ export function WorkspaceTerminalDrawer({
 								<div
 									key={tab.id}
 									className={cn(
-										"group/tab flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[12px] transition-colors",
+										"group/tab flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[var(--dcc-daily-meta-size)] transition-colors",
 										isActive
-											? "border-border bg-background text-foreground"
-											: "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+											? "bg-background text-foreground shadow-[var(--dcc-elevation-1)]"
+											: "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
 									)}
 								>
 									<button

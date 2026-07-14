@@ -83,6 +83,7 @@
     "cloneFromUrl": "Clone from URL",
     "openProject": "Abrir projeto",
     "openSettings": "Abrir configurações",
+    "manageSkills": "Gerenciar skills",
     "openProjectMenu": "Menu de abrir projeto",
     "projectActions": "Ações do projeto",
     "noWorkspacesYet": "Ainda não há workspaces",
@@ -109,8 +110,8 @@
   "commandPalette": {
     "title": "Paleta de comandos do workspace",
     "description": "Ir para um workspace ou executar uma ação.",
-    "searchPlaceholder": "Buscar workspaces…",
-    "empty": "Nenhum workspace encontrado.",
+    "searchPlaceholder": "Buscar workspaces e ações…",
+    "empty": "Nenhum workspace ou ação encontrado.",
     "switchWorkspace": "Trocar workspace",
     "selected": "Selecionado",
     "actions": "Ações",
@@ -121,7 +122,21 @@
     "rebuildContracts": "Recompilar contracts",
     "stub": "Stub",
     "openOnboarding": "Abrir onboarding",
-    "keyboardShortcuts": "Atalhos de teclado"
+    "keyboardShortcuts": "Atalhos de teclado",
+    "workbench": {
+      "title": "Workspace atual",
+      "focusComposer": "Focar no composer",
+      "addContext": "Adicionar contexto ao composer",
+      "execution": "Abrir configurações de execução",
+      "togglePlan": "Alternar modo Plano",
+      "terminalWorktree": "Abrir terminal da worktree",
+      "terminalProject": "Abrir terminal do projeto",
+      "newTerminal": "Criar aba de terminal",
+      "inspectorChanges": "Abrir mudanças no Inspector",
+      "inspectorFiles": "Abrir arquivos no Inspector",
+      "inspectorActivity": "Abrir atividade da sessão",
+      "inspectorDetails": "Abrir detalhes do workspace"
+    }
   },
   "workspaceDialog": {
     "cloneTitle": "Clonar repositório",
@@ -626,7 +641,7 @@
       "connections": { "label": "Conexões", "description": "Celulares e tablets pareados com este desktop." },
       "shortcuts": { "label": "Atalhos", "description": "Atalhos ativos e cheatsheet disponível." },
       "git": { "label": "Git", "description": "Chrome do Git no inspetor, ajustes em breve." },
-      "experimental": { "label": "Experimental", "description": "Espaço reservado para opções futuras." },
+      "experimental": { "label": "Experimental", "description": "Sinais locais de UX e opções de preview." },
       "account": { "label": "Conta", "description": "GitHub, GitLab e autenticação local no app." }
     },
     "statusComingSoon": "Em breve",
@@ -653,6 +668,10 @@
       "themeHint": "Seguir o sistema ou fixar claro/escuro.",
       "light": "Claro",
       "dark": "Escuro",
+      "density": "Densidade da interface",
+      "densityHint": "Escolha mais respiro ou mais informação visível na tela.",
+      "comfortable": "Confortável",
+      "compact": "Compacta",
       "colorSystemHint": "O tema usa tokens do shell; a escolha afeta toda a interface."
     },
     "model": {
@@ -688,7 +707,20 @@
     "experimental": {
       "title": "Experimental",
       "body": "Nenhum toggle de preview está exposto ainda. Esta seção fica pronta para opções futuras.",
-      "comingSoonBody": "Nenhum toggle de preview está exposto ainda. Quando houver flags de teste, elas entram aqui."
+      "comingSoonBody": "Nenhum toggle de preview está exposto ainda. Quando houver flags de teste, elas entram aqui.",
+      "uxMetricsTitle": "Sinais locais de UX",
+      "uxMetricsHint": "Contadores agregados e tempos de descoberta armazenados somente neste dispositivo. Prompts, caminhos e IDs nunca são registrados.",
+      "resetMetrics": "Limpar métricas",
+      "metricValue": "{{count}}× · primeira em {{seconds}}s",
+      "metricEmpty": "Não observado",
+      "metrics": {
+        "first_prompt": "Prompt enviado",
+        "diff_discovered": "Mudanças descobertas",
+        "terminal_discovered": "Terminal descoberto",
+        "terminal_scope_switched": "Escopo do terminal alterado",
+        "advanced_composer_control_used": "Controle avançado do Composer usado",
+        "command_palette_action": "Ação da paleta de comandos usada"
+      }
     },
     "account": {
       "title": "Contas de forge",
