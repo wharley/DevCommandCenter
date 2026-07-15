@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ChevronsRight, ExternalLink, RotateCcw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceCommitButton } from "@/features/commit";
 import type { CommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
@@ -62,6 +63,7 @@ export function GitSectionHeader({
   suppressCommitButton = false,
   className,
 }: GitSectionHeaderProps) {
+  const { t } = useTranslation("common");
   const highlightClass = gitSectionHeaderHighlightClass(commitMode);
   const showContinue = commitMode === "merged" && Boolean(onContinueWorkspace);
   const showPrLink = Boolean(prUrl);
@@ -123,7 +125,7 @@ export function GitSectionHeader({
             }}
           >
             <ChevronsRight className="size-3.5" />
-            Continue
+            {t("inspector.recap.actions.continue")}
           </Button>
         ) : null}
         {showRetrySetup ? (

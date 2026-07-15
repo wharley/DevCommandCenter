@@ -291,6 +291,7 @@
     "recap": {
       "ariaLabel": "Workspace recap",
       "actions": {
+        "changes": "View changes",
         "continue": "Continue",
         "review": "View review",
         "activity": "View activity"

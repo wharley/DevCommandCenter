@@ -94,7 +94,7 @@ import {
 } from "./use-workspace-git-branch-diff";
 import { useWorkspaceMissionSpecs } from "./use-workspace-mission-specs";
 import { useStoredCodeRabbitReview } from "./use-workspace-coderabbit-review";
-import { buildWorkspaceRecap } from "./workspace-recap";
+import { buildWorkspaceRecap, workspaceRecapActionForMode } from "./workspace-recap";
 import { WorkspaceRecapStrip } from "./workspace-recap-strip";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
 import { useWorkspacePrReviewComments } from "./use-workspace-pr-review-comments";
@@ -2588,19 +2588,18 @@ export function WorkspaceInspectorSidebar({
 			workingTreeSummary,
 		],
 	);
-	const [isRecapActionRunning, setIsRecapActionRunning] = useState(false);
+	const visibleWorkspaceRecapAction = useMemo(
+		() => workspaceRecapActionForMode(workspaceRecap.action, inspectorMode),
+		[inspectorMode, workspaceRecap.action],
+	);
 	const handleRecapAction = useCallback(() => {
-		const action = workspaceRecap.action;
+		const action = visibleWorkspaceRecapAction;
 		if (!action) {
 			return;
 		}
 		switch (action.kind) {
 			case "git": {
-				setIsRecapActionRunning(true);
-				// Errors already surface as toasts inside handleInspectorCommit.
-				void Promise.resolve(handleInspectorCommit())
-					.catch(() => undefined)
-					.finally(() => setIsRecapActionRunning(false));
+				selectInspectorMode("git");
 				return;
 			}
 			case "continue": {
@@ -2625,10 +2624,9 @@ export function WorkspaceInspectorSidebar({
 		}
 	}, [
 		handleContinueWorkspace,
-		handleInspectorCommit,
 		openSessionDock,
 		selectInspectorMode,
-		workspaceRecap.action,
+		visibleWorkspaceRecapAction,
 	]);
 
 	useEffect(() => {
@@ -2719,8 +2717,9 @@ export function WorkspaceInspectorSidebar({
 				{workspacePath && gitStatusQuery.data ? (
 					<WorkspaceRecapStrip
 						recap={workspaceRecap}
+						action={visibleWorkspaceRecapAction}
 						requestLabel={forgeContext.requestLabel}
-						busy={isRecapActionRunning || isContinuingWorkspace}
+						busy={isContinuingWorkspace}
 						onAction={handleRecapAction}
 					/>
 				) : null}

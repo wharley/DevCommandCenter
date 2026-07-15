@@ -1,7 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { WorkspaceRecap, WorkspaceRecapTone } from "./workspace-recap";
+import type {
+	WorkspaceRecap,
+	WorkspaceRecapAction,
+	WorkspaceRecapTone,
+} from "./workspace-recap";
 
 const TONE_DOT_CLASS: Record<WorkspaceRecapTone, string> = {
 	neutral: "bg-muted-foreground/50",
@@ -12,17 +16,19 @@ const TONE_DOT_CLASS: Record<WorkspaceRecapTone, string> = {
 };
 
 /**
- * One-line "where is this workspace and what now?" strip pinned above the
- * session dock. The sentence is the state; the button is the next action —
- * it never shows a status without also offering the move that clears it.
+ * One-line "where is this workspace and what now?" strip pinned below the
+ * Inspector mode switch. The presentation layer owns whether the suggested
+ * action is shown here or by the authoritative surface below it.
  */
 export function WorkspaceRecapStrip({
 	recap,
+	action,
 	requestLabel,
 	busy = false,
 	onAction,
 }: {
 	recap: WorkspaceRecap;
+	action: WorkspaceRecapAction | null;
 	requestLabel: "PR" | "MR";
 	busy?: boolean;
 	onAction: () => void;
@@ -51,7 +57,7 @@ export function WorkspaceRecapStrip({
 				>
 					{message}
 				</p>
-				{recap.action ? (
+				{action ? (
 					<Button
 						type="button"
 						variant="outline"
@@ -60,7 +66,7 @@ export function WorkspaceRecapStrip({
 						disabled={busy}
 						onClick={onAction}
 					>
-						{t(recap.action.labelKey, { requestLabel })}
+						{t(action.labelKey, { requestLabel })}
 					</Button>
 				) : null}
 			</div>

@@ -252,10 +252,10 @@ export function TerminalPanel({
 	if (variant === "drawer") {
 		return (
 			<div className="dcc-terminal dcc-terminal--drawer flex min-h-0 flex-1 flex-col">
-				<div className="dcc-terminal__viewport flex min-h-0 flex-1 flex-col pt-1">
+				<div className="dcc-terminal__viewport flex min-h-0 flex-1 flex-col overflow-hidden pt-1">
 					<TerminalOutput
 						terminalRef={terminalRef}
-						className="dcc-terminal__surface min-h-[11rem] flex-1"
+						className="dcc-terminal__surface h-full min-h-0 w-full flex-1"
 						detectLinks
 						onData={handleTerminalData}
 						onResize={handleTerminalResize}

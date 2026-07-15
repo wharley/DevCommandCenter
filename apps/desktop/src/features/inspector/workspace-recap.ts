@@ -13,6 +13,8 @@ export type WorkspaceRecapAction = {
 	labelKey: string;
 };
 
+export type WorkspaceRecapMode = "git" | "code";
+
 export type WorkspaceRecap = {
 	/** i18n key under `common:inspector.recap.messages`. */
 	messageKey: string;
@@ -43,6 +45,28 @@ export type WorkspaceRecapInput = {
 
 function gitAction(mode: CommitMode): WorkspaceRecapAction {
 	return { kind: "git", labelKey: commitTranslationKey(mode, "idle") };
+}
+
+/**
+ * Keeps Git workflow actions in the Git header, where their state and
+ * consequences are visible. Outside Changes, the recap may navigate to a Git
+ * mutation or expose a transition that would otherwise be unreachable; inside
+ * Changes, repeating either CTA would create a false second decision point.
+ */
+export function workspaceRecapActionForMode(
+	action: WorkspaceRecapAction | null,
+	mode: WorkspaceRecapMode,
+): WorkspaceRecapAction | null {
+	if (!action) {
+		return action;
+	}
+	if (mode === "git" && (action.kind === "git" || action.kind === "continue")) {
+		return null;
+	}
+	if (action.kind === "git") {
+		return { kind: "git", labelKey: "inspector.recap.actions.changes" };
+	}
+	return action;
 }
 
 function prRef(input: WorkspaceRecapInput): string {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildWorkspaceRecap, type WorkspaceRecapInput } from "./workspace-recap";
+import {
+	buildWorkspaceRecap,
+	workspaceRecapActionForMode,
+	type WorkspaceRecapAction,
+	type WorkspaceRecapInput,
+} from "./workspace-recap";
 
 function input(overrides: Partial<WorkspaceRecapInput> = {}): WorkspaceRecapInput {
 	return {
@@ -199,5 +204,40 @@ describe("buildWorkspaceRecap", () => {
 			input({ commitMode: "create-pr", pendingReviewFindingsCount: 0 }),
 		);
 		expect(recap.messageKey).toBe("clean");
+	});
+});
+
+describe("workspaceRecapActionForMode", () => {
+	const gitAction: WorkspaceRecapAction = {
+		kind: "git",
+		labelKey: "commit.modes.create-pr.idle",
+	};
+
+	it("hides a duplicate Git CTA while the Changes surface is visible", () => {
+		expect(workspaceRecapActionForMode(gitAction, "git")).toBeNull();
+	});
+
+	it("turns a Git CTA into navigation while the Files surface is visible", () => {
+		expect(workspaceRecapActionForMode(gitAction, "code")).toEqual({
+			kind: "git",
+			labelKey: "inspector.recap.actions.changes",
+		});
+	});
+
+	it("leaves the post-merge Continue CTA only in the visible Git header", () => {
+		const continueAction: WorkspaceRecapAction = {
+			kind: "continue",
+			labelKey: "inspector.recap.actions.continue",
+		};
+		expect(workspaceRecapActionForMode(continueAction, "git")).toBeNull();
+		expect(workspaceRecapActionForMode(continueAction, "code")).toBe(continueAction);
+	});
+
+	it("preserves recap actions that are not duplicated by the Git header", () => {
+		const reviewAction: WorkspaceRecapAction = {
+			kind: "review",
+			labelKey: "inspector.recap.actions.review",
+		};
+		expect(workspaceRecapActionForMode(reviewAction, "git")).toBe(reviewAction);
 	});
 });

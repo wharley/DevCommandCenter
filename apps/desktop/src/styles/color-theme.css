@@ -1111,6 +1111,25 @@ a {
 	overflow: hidden;
 }
 
+/*
+ * The workbench drawer can be shorter than the standalone terminal card. Its
+ * xterm surface must follow the actual flex height so FitAddon never allocates
+ * rows below the visible dock/footer boundary.
+ */
+.dcc-terminal--drawer,
+.dcc-terminal--drawer .dcc-terminal__viewport,
+.dcc-terminal--drawer .dcc-terminal__surface {
+	min-height: 0;
+}
+
+.dcc-terminal--drawer .dcc-terminal__viewport {
+	overflow: hidden;
+}
+
+.dcc-terminal--drawer .dcc-terminal__surface {
+	height: 100%;
+}
+
 .dcc-terminal__note {
 	display: flex;
 	align-items: center;

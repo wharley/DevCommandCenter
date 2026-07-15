@@ -291,6 +291,7 @@
     "recap": {
       "ariaLabel": "Resumo do workspace",
       "actions": {
+        "changes": "Ver mudanças",
         "continue": "Continuar",
         "review": "Ver review",
         "activity": "Ver atividade"
