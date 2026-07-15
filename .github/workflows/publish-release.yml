@@ -164,6 +164,23 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile --ignore-engines
 
+      - name: Load release notes
+        id: release-notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          notes_file="docs/releases/${GITHUB_REF_NAME}.md"
+          if [[ -f "${notes_file}" ]]; then
+            {
+              echo "body<<DCC_RELEASE_NOTES_EOF"
+              cat "${notes_file}"
+              echo "DCC_RELEASE_NOTES_EOF"
+            } >> "${GITHUB_OUTPUT}"
+          else
+            echo "body=See the release assets to download and install this version." >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Publish release assets
         uses: tauri-apps/tauri-action@v0
         env:
@@ -179,7 +196,7 @@ jobs:
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
           releaseName: ${{ github.ref_type == 'tag' && format('Dev Command Center {0}', github.ref_name) || 'Dev Command Center v__VERSION__' }}
-          releaseBody: "See the release assets to download and install this version."
+          releaseBody: ${{ steps.release-notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
