@@ -8,6 +8,11 @@ import {
 } from "@/features/editor/WorkspaceEditorSurface";
 import { FileTabsSurface } from "@/features/editor/file-tabs-surface";
 import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
+import { WorkspaceMergeConflictResolver } from "@/features/merge/WorkspaceMergeConflictResolver";
+import type {
+	AgentResolutionRunRequest,
+	AgentResolutionRunResult,
+} from "@/features/merge/agent-conflict-resolution";
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
 import {
 	DelegationDialog,
@@ -38,6 +43,7 @@ import type {
 import { derivePlanFollowUpState } from "./plan-follow-up";
 import { useWorkspaceMissionSpecs } from "@/features/inspector/use-workspace-mission-specs";
 import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-status";
+import { workspaceRailDisplayTitle } from "@/features/workspaces/workspace-rail-shared";
 import {
 	buildMissionSpecFilename,
 	getComposerEffortKey,
@@ -160,6 +166,10 @@ type WorkspacePanelProps = {
 	onReviewChanges?: () => void;
 	/** Opens the inspector and previews an implementation delegation diff. */
 	onReviewDelegation?: (delegationId: string) => void;
+	onResolveConflictWithAgent: (
+		request: AgentResolutionRunRequest,
+	) => Promise<AgentResolutionRunResult>;
+	onMergeConflictStateChanged: (workspaceRoot: string) => Promise<void> | void;
 	/** Increment to open the Delegate dialog from outside (command palette). */
 	delegateSignal?: number;
 };
@@ -209,6 +219,8 @@ export function WorkspacePanel({
 	onToggleInspector,
 	onReviewChanges,
 	onReviewDelegation,
+	onResolveConflictWithAgent,
+	onMergeConflictStateChanged,
 	delegateSignal,
 }: WorkspacePanelProps) {
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
@@ -451,7 +463,22 @@ export function WorkspacePanel({
 		parseMissionValidationPersistence(activeMissionSpec.content) === "auto";
 
 	const surfaceContent = surfaceSelection ? (
-		surfaceSelection.kind === "git-diff" ? (
+		surfaceSelection.kind === "merge-conflict" ? (
+			<WorkspaceMergeConflictResolver
+				workspaceRoot={surfaceSelection.workspaceRoot}
+				currentWorkspaceLabel={workspaceRailDisplayTitle({
+					name: workspaceName,
+					branch: workspaceBranch,
+				})}
+				baseBranch={surfaceSelection.baseBranch}
+				forgeLogin={surfaceSelection.forgeLogin}
+				onClose={onCloseSurface}
+				onStateChanged={() =>
+					onMergeConflictStateChanged(surfaceSelection.workspaceRoot)
+				}
+				onResolveWithAgent={onResolveConflictWithAgent}
+			/>
+		) : surfaceSelection.kind === "git-diff" ? (
 			<WorkspaceEditorSurface
 				workspaceRoot={workspacePath}
 				selection={surfaceSelection.file}

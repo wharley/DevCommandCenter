@@ -15,8 +15,10 @@ import {
 	ListChecks,
 	Loader2,
 	RotateCcw,
+	Settings2,
 	Sparkles,
 	Trash2,
+	X,
 	XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,13 +26,6 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogHeader,
-	DialogTitle,
-} from "@/components/ui/dialog";
 import {
 	workspaceGitAbortMerge,
 	workspaceGitAcceptConflict,
@@ -46,6 +41,7 @@ import {
 	type FileEditorHandle,
 	WorkspaceFileEditor,
 } from "@/features/editor/WorkspaceFileSurface";
+import { WorkspaceProjectAutomationDialog } from "@/features/automation/workspace-project-automation-dialog";
 import {
 	applyMergeConflictResolution,
 	applyMergeConflictReplacement,
@@ -65,11 +61,11 @@ import {
 const CONFLICT_STATE_QUERY_KEY = "workspaceGitConflictState";
 
 type Props = {
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
 	workspaceRoot: string;
+	currentWorkspaceLabel?: string | null;
 	baseBranch: string | null;
 	forgeLogin: string | null;
+	onClose: () => void;
 	onStateChanged: () => Promise<void> | void;
 	onResolveWithAgent: (
 		request: AgentResolutionRunRequest,
@@ -132,13 +128,41 @@ function editableGitMode(mode: string | null) {
 	return mode == null || mode.startsWith("100");
 }
 
-function SidePreview({ label, text }: { label: string; text: string }) {
+function SidePreview({
+	label,
+	text,
+	tone,
+}: {
+	label: string;
+	text: string;
+	tone: "current" | "incoming";
+}) {
 	return (
-		<div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/60 bg-muted/15">
-			<div className="shrink-0 border-b border-border/50 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-				{label}
+		<div
+			className={cn(
+				"flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-background/80 shadow-sm",
+				tone === "current"
+					? "border-sky-500/20"
+					: "border-amber-500/25",
+			)}
+		>
+			<div
+				className={cn(
+					"flex shrink-0 items-center gap-2 border-b px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em]",
+					tone === "current"
+						? "border-sky-500/15 bg-sky-500/[0.06] text-sky-700 dark:text-sky-300"
+						: "border-amber-500/15 bg-amber-500/[0.07] text-amber-800 dark:text-amber-200",
+				)}
+			>
+				<span
+					className={cn(
+						"size-1.5 rounded-full",
+						tone === "current" ? "bg-sky-500" : "bg-amber-500",
+					)}
+				/>
+				<span className="truncate" title={label}>{label}</span>
 			</div>
-			<pre className="max-h-32 min-h-16 overflow-auto whitespace-pre-wrap break-words px-2.5 py-2 font-mono text-[11px] leading-5">
+			<pre className="max-h-[28vh] min-h-24 overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 font-mono text-[11px] leading-5 selection:bg-primary/20">
 				{text || "∅"}
 			</pre>
 		</div>
@@ -146,11 +170,11 @@ function SidePreview({ label, text }: { label: string; text: string }) {
 }
 
 export function WorkspaceMergeConflictResolver({
-	open,
-	onOpenChange,
 	workspaceRoot,
+	currentWorkspaceLabel,
 	baseBranch,
 	forgeLogin,
+	onClose,
 	onStateChanged,
 	onResolveWithAgent,
 }: Props) {
@@ -166,11 +190,12 @@ export function WorkspaceMergeConflictResolver({
 		useState<AppliedAgentSuggestion | null>(null);
 	const [validationReport, setValidationReport] =
 		useState<WorkspaceGitValidationReport | null>(null);
+	const [automationOpen, setAutomationOpen] = useState(false);
 
 	const query = useQuery({
 		queryKey: [CONFLICT_STATE_QUERY_KEY, workspaceRoot],
 		queryFn: () => workspaceGitConflictState({ workspaceRoot }),
-		enabled: open && Boolean(workspaceRoot),
+		enabled: Boolean(workspaceRoot),
 		staleTime: 0,
 	});
 
@@ -179,11 +204,11 @@ export function WorkspaceMergeConflictResolver({
 	const validationConfigQuery = useQuery({
 		queryKey: ["workspaceGitValidationConfig", workspaceRoot],
 		queryFn: () => workspaceGitValidationConfig({ workspaceRoot }),
-		enabled:
-			open && state?.operation === "merge" && conflicts.length === 0,
+		enabled: state?.operation === "merge" && conflicts.length === 0,
 		staleTime: 0,
+		refetchOnWindowFocus: false,
 	});
-	if (open && conflicts.length > totalConflictsRef.current) {
+	if (conflicts.length > totalConflictsRef.current) {
 		totalConflictsRef.current = conflicts.length;
 	}
 
@@ -194,14 +219,20 @@ export function WorkspaceMergeConflictResolver({
 	const hunks = useMemo(() => parseMergeConflictHunks(buffer), [buffer]);
 	const hunk = hunks[Math.min(activeHunk, Math.max(hunks.length - 1, 0))] ?? null;
 	const dirty = selected != null && buffer !== (initialResultRef.current ?? "");
-	const currentLabel = shortRef(
+	const currentRef = shortRef(
 		state?.currentBranch,
 		t("mergeConflict.currentBranchFallback"),
 	);
-	const incomingLabel = shortRef(
+	const currentLabel = t("mergeConflict.currentWorkspaceLabel", {
+		workspace: currentWorkspaceLabel?.trim() || currentRef,
+	});
+	const incomingRef = shortRef(
 		state?.incomingRef ?? baseBranch,
 		t("mergeConflict.incomingBranchFallback"),
 	);
+	const incomingLabel = t("mergeConflict.incomingBranchLabel", {
+		branch: incomingRef,
+	});
 
 	const openEntry = useCallback((entry: WorkspaceGitConflictEntry) => {
 		const result =
@@ -214,14 +245,6 @@ export function WorkspaceMergeConflictResolver({
 	}, []);
 
 	useEffect(() => {
-		if (!open) {
-			setSelectedPath(null);
-			setBuffer("");
-			initialResultRef.current = null;
-			totalConflictsRef.current = 0;
-			setValidationReport(null);
-			return;
-		}
 		if (conflicts.length === 0) {
 			setSelectedPath(null);
 			return;
@@ -229,7 +252,7 @@ export function WorkspaceMergeConflictResolver({
 		if (!selectedPath || !conflicts.some((entry) => entry.path === selectedPath)) {
 			openEntry(conflicts[0]!);
 		}
-	}, [conflicts, open, openEntry, selectedPath]);
+	}, [conflicts, openEntry, selectedPath]);
 
 	useEffect(() => {
 		if (activeHunk >= hunks.length) {
@@ -242,9 +265,9 @@ export function WorkspaceMergeConflictResolver({
 		await onStateChanged();
 	}, [onStateChanged, query]);
 
-	const requestOpenChange = useCallback(
-		(next: boolean) => {
-			if (!next && busy) {
+	const requestClose = useCallback(
+		() => {
+			if (busy) {
 				toast.info(
 					busy === "agent"
 						? t("mergeConflict.busy.agent")
@@ -253,15 +276,14 @@ export function WorkspaceMergeConflictResolver({
 				return;
 			}
 			if (
-				!next &&
 				dirty &&
 				!window.confirm(t("mergeConflict.confirm.discardEdit"))
 			) {
 				return;
 			}
-			onOpenChange(next);
+			onClose();
 		},
-		[busy, dirty, onOpenChange, t],
+		[busy, dirty, onClose, t],
 	);
 
 	const startMerge = useCallback(async () => {
@@ -288,11 +310,11 @@ export function WorkspaceMergeConflictResolver({
 			return;
 		}
 		toast.success(t("mergeConflict.toast.updatedWithoutConflicts"));
-		onOpenChange(false);
+		onClose();
 	}, [
 		baseBranch,
 		forgeLogin,
-		onOpenChange,
+		onClose,
 		onStateChanged,
 		query,
 		t,
@@ -332,8 +354,8 @@ export function WorkspaceMergeConflictResolver({
 			{
 				path: selected.path,
 				kind: selected.kind,
-				currentRef: currentLabel,
-				incomingRef: incomingLabel,
+				currentRef,
+				incomingRef,
 				responseLanguage:
 					i18n.resolvedLanguage === "en" ? "English" : "Português (Brasil)",
 				baseText: selected.base.text,
@@ -387,10 +409,10 @@ export function WorkspaceMergeConflictResolver({
 		}
 	}, [
 		buffer,
-		currentLabel,
+		currentRef,
 		hunk,
 		i18n.resolvedLanguage,
-		incomingLabel,
+		incomingRef,
 		onResolveWithAgent,
 		selected,
 		t,
@@ -502,13 +524,13 @@ export function WorkspaceMergeConflictResolver({
 			await workspaceGitAbortMerge({ workspaceRoot });
 			await onStateChanged();
 			toast.success(t("mergeConflict.toast.mergeAborted"));
-			onOpenChange(false);
+			onClose();
 		} catch (error) {
 			toast.error(errorMessage(error));
 		} finally {
 			setBusy(null);
 		}
-	}, [onOpenChange, onStateChanged, t, workspaceRoot]);
+	}, [onClose, onStateChanged, t, workspaceRoot]);
 
 	const completeMerge = useCallback(async () => {
 		const commands = validationConfigQuery.data?.commands ?? [];
@@ -539,7 +561,7 @@ export function WorkspaceMergeConflictResolver({
 			}
 			await onStateChanged();
 			toast.success(t("mergeConflict.toast.mergeCompleted"));
-			onOpenChange(false);
+				onClose();
 		} catch (error) {
 			toast.error(errorMessage(error));
 		} finally {
@@ -547,7 +569,7 @@ export function WorkspaceMergeConflictResolver({
 		}
 	}, [
 		forgeLogin,
-		onOpenChange,
+		onClose,
 		onStateChanged,
 		validationConfigQuery.data?.commands,
 		validationConfigQuery.data?.configHash,
@@ -566,26 +588,43 @@ export function WorkspaceMergeConflictResolver({
 		: false;
 
 	return (
-		<Dialog open={open} onOpenChange={requestOpenChange}>
-			<DialogContent
-				showCloseButton={false}
-				className="flex h-[min(92vh,920px)] w-[min(96vw,1440px)] max-w-none flex-col gap-0 overflow-hidden p-0"
-			>
-				<DialogHeader className="shrink-0 border-b border-border/60 px-4 py-3">
-					<div className="flex items-center gap-3">
-						<div className="flex size-9 items-center justify-center rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300">
-							<GitMerge className="size-5" />
+		<>
+		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+			<header className="relative shrink-0 border-b border-border/60 bg-gradient-to-r from-amber-500/[0.08] via-background to-background px-4 py-3">
+				<div className="flex min-w-0 items-center gap-3">
+					<div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-amber-500/20 bg-amber-500/12 text-amber-700 shadow-sm dark:text-amber-300">
+						<GitMerge className="size-5" />
+					</div>
+					<div className="min-w-0 flex-1">
+						<h1 className="truncate text-sm font-semibold tracking-[-0.01em]">
+							{t("mergeConflict.title")}
+						</h1>
+						<div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+							<span className="max-w-40 truncate rounded-md border border-border/60 bg-background/70 px-1.5 py-0.5 font-mono text-foreground/80" title={`${currentLabel}\n${currentRef}`}>
+								{currentLabel}
+							</span>
+							<span aria-hidden>←</span>
+							<span className="max-w-40 truncate rounded-md border border-amber-500/20 bg-amber-500/8 px-1.5 py-0.5 font-mono text-amber-800 dark:text-amber-200" title={`${incomingLabel}\n${incomingRef}`}>
+								{incomingLabel}
+							</span>
 						</div>
-						<div className="min-w-0 flex-1">
-							<DialogTitle>{t("mergeConflict.title")}</DialogTitle>
-							<DialogDescription className="mt-1">
-								{currentLabel} ← {incomingLabel}
-							</DialogDescription>
+					</div>
+					{total > 0 ? (
+						<div className="hidden min-w-36 rounded-lg border border-border/50 bg-background/60 px-3 py-2 sm:block">
+							<div className="flex items-center justify-between text-[10px] text-muted-foreground">
+								<span>{t("mergeConflict.files")}</span>
+								<span className="font-mono text-foreground">{resolved}/{total}</span>
+							</div>
+							<div className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted">
+								<div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${total ? (resolved / total) * 100 : 0}%` }} />
+							</div>
 						</div>
+					) : null}
 						{state?.operation === "merge" ? (
 							<Button
 								variant="outline"
 								size="sm"
+								className="gap-1.5"
 								disabled={Boolean(busy)}
 								onClick={() => void abortMerge()}
 							>
@@ -595,14 +634,16 @@ export function WorkspaceMergeConflictResolver({
 						) : null}
 						<Button
 							variant="ghost"
-							size="sm"
+							size="icon-sm"
 							disabled={Boolean(busy)}
-							onClick={() => requestOpenChange(false)}
+							onClick={requestClose}
+							title={t("mergeConflict.close")}
 						>
-							{t("mergeConflict.close")}
+							<X className="size-4" />
+							<span className="sr-only">{t("mergeConflict.close")}</span>
 						</Button>
-					</div>
-				</DialogHeader>
+				</div>
+			</header>
 
 				{query.isPending ? (
 					<div className="flex flex-1 items-center justify-center gap-2 text-muted-foreground">
@@ -637,8 +678,9 @@ export function WorkspaceMergeConflictResolver({
 							<p className="mt-2 text-sm leading-6 text-muted-foreground">
 								{t("mergeConflict.start.description")}
 							</p>
+							<div className="mt-5 flex flex-wrap items-center justify-center gap-2">
 							<Button
-								className="mt-5"
+								className="gap-1.5"
 								disabled={Boolean(busy)}
 								onClick={() => void startMerge()}
 							>
@@ -681,7 +723,7 @@ export function WorkspaceMergeConflictResolver({
 								</div>
 							) : null}
 							<Button
-								className="mt-5"
+								className="mt-5 gap-1.5"
 								disabled={Boolean(busy) || validationConfigQuery.isPending || validationConfigQuery.isError}
 								onClick={() => void completeMerge()}
 							>
@@ -692,19 +734,30 @@ export function WorkspaceMergeConflictResolver({
 								)}
 								{(validationConfigQuery.data?.commands.length ?? 0) > 0 ? t("mergeConflict.completion.withValidation") : t("mergeConflict.completion.withoutValidation")}
 							</Button>
+							<Button
+								type="button"
+								variant="outline"
+								className="gap-1.5"
+								disabled={Boolean(busy)}
+								onClick={() => setAutomationOpen(true)}
+							>
+								<Settings2 className="size-4" />
+								{t("automation.open")}
+							</Button>
+							</div>
 						</div>
 					</div>
 				) : (
-					<div className="flex min-h-0 flex-1">
-						<aside className="flex w-72 shrink-0 flex-col border-r border-border/60 bg-muted/10">
-							<div className="border-b border-border/50 px-3 py-2.5">
+					<div className="flex min-h-0 flex-1 bg-muted/[0.025]">
+						<aside className="flex w-64 shrink-0 flex-col border-r border-border/60 bg-sidebar/60 2xl:w-72">
+							<div className="border-b border-border/50 bg-background/40 px-3 py-3">
 								<div className="flex items-center justify-between text-xs font-medium">
 									<span>{t("mergeConflict.files")}</span>
 									<Badge variant="secondary">
 										{resolved}/{total}
 									</Badge>
 								</div>
-								<div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+								<div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
 									<div
 										className="h-full bg-emerald-500 transition-all"
 										style={{
@@ -713,7 +766,7 @@ export function WorkspaceMergeConflictResolver({
 									/>
 								</div>
 							</div>
-							<div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+							<div className="min-h-0 flex-1 overflow-y-auto p-2">
 								{conflicts.map((entry) => (
 									<button
 										key={entry.path}
@@ -721,10 +774,10 @@ export function WorkspaceMergeConflictResolver({
 										disabled={Boolean(busy)}
 										onClick={() => openEntry(entry)}
 										className={cn(
-											"mb-1 flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors",
+											"group mb-1 flex w-full items-start gap-2.5 rounded-lg border px-2.5 py-2.5 text-left transition-all",
 											selected?.path === entry.path
-												? "bg-accent text-accent-foreground"
-												: "hover:bg-accent/60",
+												? "border-amber-500/25 bg-amber-500/[0.08] text-accent-foreground shadow-sm"
+												: "border-transparent hover:border-border/60 hover:bg-accent/50",
 										)}
 									>
 										<FileWarning className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
@@ -742,27 +795,27 @@ export function WorkspaceMergeConflictResolver({
 						</aside>
 
 						{selected ? (
-							<section className="flex min-w-0 flex-1 flex-col">
-								<div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
+							<section className="flex min-w-0 flex-1 flex-col bg-background">
+								<div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 bg-background/95 px-4 py-2.5 shadow-[0_1px_0_hsl(var(--border)/0.15)]">
 									<div className="mr-auto min-w-0"><p className="truncate font-mono text-xs font-semibold">{selected.path}</p><p className="text-[10px] text-muted-foreground">{conflictKindLabel(t, selected)}</p></div>
-									<Button variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void acceptWholeSide("current")} title={t("mergeConflict.fileActions.useFileTitle", { branch: currentLabel })}>{t("mergeConflict.fileActions.useFile", { branch: currentLabel })}</Button>
-									<Button variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void acceptWholeSide("incoming")} title={t("mergeConflict.fileActions.useFileTitle", { branch: incomingLabel })}>{t("mergeConflict.fileActions.useFile", { branch: incomingLabel })}</Button>
-									<Button variant="destructive" size="xs" disabled={Boolean(busy)} onClick={() => void deleteResult()}><Trash2 className="size-3.5" />{t("mergeConflict.fileActions.deleteResult")}</Button>
+									<Button className="max-w-56" variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void acceptWholeSide("current")} title={t("mergeConflict.fileActions.useFileTitle", { branch: currentLabel })}><span className="min-w-0 truncate">{t("mergeConflict.fileActions.useFile", { branch: currentLabel })}</span></Button>
+									<Button className="max-w-56" variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void acceptWholeSide("incoming")} title={t("mergeConflict.fileActions.useFileTitle", { branch: incomingLabel })}><span className="min-w-0 truncate">{t("mergeConflict.fileActions.useFile", { branch: incomingLabel })}</span></Button>
+									<Button className="gap-1.5" variant="destructive" size="xs" disabled={Boolean(busy)} onClick={() => void deleteResult()}><Trash2 className="size-3.5" />{t("mergeConflict.fileActions.deleteResult")}</Button>
 								</div>
 
 								{textUnavailable ? (
 									<div className="flex flex-1 items-center justify-center p-8 text-center"><div className="max-w-md"><FileWarning className="mx-auto size-8 text-amber-500" /><h3 className="mt-3 font-semibold">{t("mergeConflict.unavailable.title")}</h3><p className="mt-2 text-sm text-muted-foreground">{selected.result.truncated ? t("mergeConflict.unavailable.tooLarge") : t("mergeConflict.unavailable.unsupported")} {t("mergeConflict.unavailable.instruction")}</p></div></div>
 								) : (
 									<>
-										<div className="shrink-0 border-b border-border/60 bg-muted/5 p-3">
+										<div className="shrink-0 border-b border-border/60 bg-gradient-to-b from-muted/30 to-muted/10 p-4">
 											{hunk ? (
 												<>
 											<div className="mb-2 flex items-center gap-2"><Badge variant="outline">{t("mergeConflict.hunk.position", { current: activeHunk + 1, total: hunks.length })}</Badge><div className="ml-auto flex gap-1"><Button variant="ghost" size="icon-xs" disabled={activeHunk === 0} onClick={() => setActiveHunk((value) => Math.max(0, value - 1))}><ChevronLeft /></Button><Button variant="ghost" size="icon-xs" disabled={activeHunk >= hunks.length - 1} onClick={() => setActiveHunk((value) => Math.min(hunks.length - 1, value + 1))}><ChevronRight /></Button></div></div>
-											<div className="flex gap-2"><SidePreview label={currentLabel} text={hunk.currentText} /><SidePreview label={incomingLabel} text={hunk.incomingText} /></div>
-											<div className="mt-2 flex flex-wrap gap-1.5"><Button size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("current")}>{t("mergeConflict.hunk.accept", { branch: currentLabel })}</Button><Button size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("incoming")}>{t("mergeConflict.hunk.accept", { branch: incomingLabel })}</Button><Button size="xs" disabled={Boolean(busy)} onClick={() => applyHunk("both")}>{t("mergeConflict.hunk.acceptBoth")}</Button><Button size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{t("mergeConflict.hunk.resolveWithAgent")}</Button></div>
+											<div className="flex gap-3"><SidePreview label={currentLabel} text={hunk.currentText} tone="current" /><SidePreview label={incomingLabel} text={hunk.incomingText} tone="incoming" /></div>
+											<div className="mt-2 flex flex-wrap gap-1.5"><Button className="max-w-56" size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("current")} title={t("mergeConflict.hunk.accept", { branch: currentLabel })}><span className="min-w-0 truncate">{t("mergeConflict.hunk.accept", { branch: currentLabel })}</span></Button><Button className="max-w-56" size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("incoming")} title={t("mergeConflict.hunk.accept", { branch: incomingLabel })}><span className="min-w-0 truncate">{t("mergeConflict.hunk.accept", { branch: incomingLabel })}</span></Button><Button size="xs" disabled={Boolean(busy)} onClick={() => applyHunk("both")}>{t("mergeConflict.hunk.acceptBoth")}</Button><Button className="gap-1.5" size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{t("mergeConflict.hunk.resolveWithAgent")}</Button></div>
 										</>
 									) : (
-										<div className="flex flex-wrap items-center gap-2 text-xs text-emerald-600"><Check className="size-4" /><span className="mr-auto">{t("mergeConflict.hunk.nonePending")}</span><Button size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{t("mergeConflict.agent.reviewFile")}</Button></div>
+										<div className="flex flex-wrap items-center gap-2 text-xs text-emerald-600"><Check className="size-4" /><span className="mr-auto">{t("mergeConflict.hunk.nonePending")}</span><Button className="gap-1.5" size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{t("mergeConflict.agent.reviewFile")}</Button></div>
 									)}
 									{agentSuggestion?.path === selected.path ? (
 										<div className="mt-2 rounded-md border border-violet-500/25 bg-violet-500/5 px-3 py-2 text-[11px] leading-5">
@@ -772,15 +825,27 @@ export function WorkspaceMergeConflictResolver({
 										</div>
 									) : null}
 								</div>
+								<div className="flex shrink-0 items-center gap-2 border-b border-border/50 bg-muted/[0.08] px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"><span className="size-1.5 rounded-full bg-emerald-500" />{t("mergeConflict.result.title")}</div>
 								<div className="min-h-0 flex-1"><WorkspaceFileEditor key={selected.path} ref={editorRef} path={selected.path} content={buffer} readOnly={busy === "agent"} annotateLabel="" onChange={() => setBuffer(editorRef.current?.getValue() ?? "")} /></div>
-										<div className="flex shrink-0 items-center justify-between border-t border-border/60 px-3 py-2"><span className="text-[11px] text-muted-foreground">{hunks.length > 0 ? t("mergeConflict.hunk.pending", { count: hunks.length }) : dirty ? t("mergeConflict.result.changed") : t("mergeConflict.result.ready")}</span><Button size="sm" disabled={Boolean(busy) || hunks.length > 0} onClick={() => void saveAndResolve()}>{busy === "save" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{t("mergeConflict.result.save")}</Button></div>
+										<div className="flex shrink-0 items-center justify-between border-t border-border/60 bg-background/95 px-4 py-2.5 shadow-[0_-8px_24px_-20px_rgba(0,0,0,0.6)]"><span className="text-[11px] text-muted-foreground">{hunks.length > 0 ? t("mergeConflict.hunk.pending", { count: hunks.length }) : dirty ? t("mergeConflict.result.changed") : t("mergeConflict.result.ready")}</span><Button className="gap-1.5" size="sm" disabled={Boolean(busy) || hunks.length > 0} onClick={() => void saveAndResolve()}>{busy === "save" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{t("mergeConflict.result.save")}</Button></div>
 									</>
 								)}
 							</section>
 						) : null}
 					</div>
 				)}
-			</DialogContent>
-		</Dialog>
+		</div>
+		<WorkspaceProjectAutomationDialog
+			open={automationOpen}
+			onOpenChange={setAutomationOpen}
+			workspaceRoot={workspaceRoot}
+			onConfigSaved={() => {
+				void validationConfigQuery.refetch();
+			}}
+			onWorkspaceChanged={() => {
+				void refresh();
+			}}
+		/>
+		</>
 	);
 }

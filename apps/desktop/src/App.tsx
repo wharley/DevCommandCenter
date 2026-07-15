@@ -148,6 +148,10 @@ import {
 } from "./features/sessions/session-close";
 import { getStoredPreferredEditor } from "./features/sessions/workspace-editor-preferences";
 import type { WorkspaceGitPreviewSelection } from "./features/inspector/workspace-git-file-preview";
+import { WORKSPACE_GIT_STATUS_QUERY_KEY } from "./features/inspector/use-workspace-git-status";
+import { WORKSPACE_PR_STATUS_QUERY_KEY } from "./features/inspector/use-workspace-pr-status";
+import { WORKSPACE_FORGE_CONTEXT_QUERY_KEY } from "./features/inspector/use-workspace-forge-context";
+import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./features/inspector/use-workspace-git-branch-diff";
 import {
 	buildPlanFromSpecPrompt,
 	buildPlanImplementationPrompt,
@@ -996,6 +1000,7 @@ export default function App() {
 
 	const [surfaceSelection, setSurfaceSelection] =
 		useState<WorkspaceSurfaceSelection | null>(null);
+	const inspectorBeforeMergeRef = useRef<boolean | null>(null);
 	const fileOpenRequestIdRef = useRef(0);
 	const [workspaceComposerPrefill, setWorkspaceComposerPrefill] =
 		useState<WorkspaceComposerPrefillRequest | null>(null);
@@ -2792,6 +2797,38 @@ export default function App() {
 		[],
 	);
 
+	const handleOpenMergeConflictResolver = useCallback(
+		(input: {
+			workspaceRoot: string;
+			baseBranch: string | null;
+			forgeLogin: string | null;
+		}) => {
+			inspectorBeforeMergeRef.current = inspectorCollapsed;
+			setInspectorCollapsed(true);
+			setSurfaceSelection({ kind: "merge-conflict", ...input });
+		},
+		[inspectorCollapsed, setInspectorCollapsed],
+	);
+
+	const handleMergeConflictStateChanged = useCallback(async (workspaceRoot: string) => {
+		const root = workspaceRoot.trim();
+		if (!root) return;
+		await Promise.all([
+			queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+			}),
+			queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
+			}),
+			queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
+			}),
+			queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+			}),
+		]);
+	}, [queryClient]);
+
 	const handleOpenFileFromQuickOpen = useCallback(
 		({ path, name }: { path: string; name: string }) => {
 			fileOpenRequestIdRef.current += 1;
@@ -2847,8 +2884,15 @@ export default function App() {
 	}, []);
 
 	const handleCloseSurface = useCallback(() => {
+		if (
+			surfaceSelection?.kind === "merge-conflict" &&
+			inspectorBeforeMergeRef.current === false
+		) {
+			setInspectorCollapsed(false);
+		}
+		inspectorBeforeMergeRef.current = null;
 		setSurfaceSelection(null);
-	}, []);
+	}, [setInspectorCollapsed, surfaceSelection]);
 
 	const handleAbortSession = useCallback(async () => {
 		const visiblePendingPrompt =
@@ -3381,6 +3425,8 @@ export default function App() {
 									onToggleInspector={toggleGitInspector}
 									onReviewChanges={openGitInspector}
 									onReviewDelegation={handleReviewDelegation}
+									onResolveConflictWithAgent={handleResolveConflictWithAgent}
+									onMergeConflictStateChanged={handleMergeConflictStateChanged}
 									delegateSignal={delegateSignal}
 									composerPrefill={
 										workspaceComposerPrefill?.workspaceId === selectedWorkspace.id
@@ -3454,7 +3500,7 @@ export default function App() {
 									onSelectPreview={handleOpenEditorFile}
 									onSelectSession={handleSelectSession}
 									onPrefillComposer={handlePrefillComposer}
-									onResolveConflictWithAgent={handleResolveConflictWithAgent}
+									onOpenMergeConflictResolver={handleOpenMergeConflictResolver}
 									onOpenCodeFile={handleOpenFileFromQuickOpen}
 									selectedCodePath={
 										surfaceSelection?.kind === "file-edit"
@@ -3555,6 +3601,8 @@ export default function App() {
 				onInstallUpdate={() => {
 					void installUpdate();
 				}}
+				workspaceRoot={selectedLocalWorkspacePath}
+				workspaceName={selectedWorkspace?.name ?? null}
 			/>
 			<SkillsDialog
 				open={isSkillsOpen}

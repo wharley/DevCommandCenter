@@ -45,9 +45,9 @@ use dcc_tauri::commands::{
     delegation_commands::{
         ApproveDelegationInput, ApproveDelegationOutput, CancelDelegationInput,
         CancelDelegationOutput, CompleteDelegationInput, CompleteDelegationOutput,
-        CreateDelegationInput, CreateDelegationOutput, FailDelegationInput,
-        FailDelegationOutput, GetDelegationInput, GetDelegationOutput, ListDelegationsInput,
-        ListDelegationsOutput, StartDelegationInput, StartDelegationOutput,
+        CreateDelegationInput, CreateDelegationOutput, FailDelegationInput, FailDelegationOutput,
+        GetDelegationInput, GetDelegationOutput, ListDelegationsInput, ListDelegationsOutput,
+        StartDelegationInput, StartDelegationOutput,
     },
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
@@ -75,20 +75,22 @@ use dcc_tauri::commands::{
         SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
         SearchWorkspaceMatch, SearchWorkspaceOutput, WorkspaceApplyDelegationWorktreeInput,
         WorkspaceApplyDelegationWorktreeOutput, WorkspaceContinueFromBaseBranchInput,
-        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
-        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
+        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitAcceptConflictInput,
+        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
         WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
         WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictContent, WorkspaceGitConflictEntry,
         WorkspaceGitConflictKind, WorkspaceGitConflictOperation, WorkspaceGitConflictSide,
-        WorkspaceGitConflictStateInput,
-        WorkspaceGitConflictStateOutput, WorkspaceGitPathInput, WorkspaceGitPushInput,
-        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
-        WorkspaceGitSyncBaseInput, WorkspaceGitValidationConfigOutput,
+        WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
+        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
+        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput,
+        WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput,
         WorkspaceGitValidationReport, WorkspaceGitValidationStatus, WorkspaceGitValidationStep,
-        WorkspaceGitSyncBaseOutput, WorkspacePrepareDelegationWorktreeInput,
-        WorkspacePrepareDelegationWorktreeOutput, WorkspaceRemoveDelegationWorktreeInput,
-        WorkspaceRunSetupInput, WorkspaceRunSetupOutput, WorkspaceSetupHint,
-        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
+        WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
+        WorkspaceProjectAutomationConfigOutput, WorkspaceProjectTask, WorkspaceProjectTaskKind,
+        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunProjectTasksInput,
+        WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspaceSaveProjectAutomationInput, WorkspaceSetupHint, WriteWorkspaceFileInput,
+        WriteWorkspaceFileOutput,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -142,6 +144,9 @@ struct WorkspaceMethods {
     workspace_git_abort_merge: String,
     workspace_git_complete_merge: String,
     workspace_git_validation_config: String,
+    workspace_project_automation_config: String,
+    workspace_save_project_automation: String,
+    workspace_run_project_tasks: String,
     workspace_git_conflict_state: String,
     workspace_git_discard_file: String,
     workspace_git_file_preview: String,
@@ -332,6 +337,12 @@ fn main() {
         .typ::<WorkspaceGitValidationStep>()
         .typ::<WorkspaceGitValidationReport>()
         .typ::<WorkspaceGitValidationConfigOutput>()
+        .typ::<WorkspaceProjectTaskKind>()
+        .typ::<WorkspaceProjectTask>()
+        .typ::<WorkspaceProjectAutomationConfigOutput>()
+        .typ::<WorkspaceSaveProjectAutomationInput>()
+        .typ::<WorkspaceRunProjectTasksInput>()
+        .typ::<WorkspaceRunProjectTasksOutput>()
         .typ::<WorkspaceGitSyncBaseInput>()
         .typ::<WorkspaceGitSyncBaseOutput>()
         .typ::<WorkspaceApplyDelegationWorktreeInput>()
@@ -456,6 +467,10 @@ fn main() {
                 workspace_git_abort_merge: "workspace_git_abort_merge".to_string(),
                 workspace_git_complete_merge: "workspace_git_complete_merge".to_string(),
                 workspace_git_validation_config: "workspace_git_validation_config".to_string(),
+                workspace_project_automation_config: "workspace_project_automation_config"
+                    .to_string(),
+                workspace_save_project_automation: "workspace_save_project_automation".to_string(),
+                workspace_run_project_tasks: "workspace_run_project_tasks".to_string(),
                 workspace_git_conflict_state: "workspace_git_conflict_state".to_string(),
                 workspace_git_discard_file: "workspace_git_discard_file".to_string(),
                 workspace_git_push: "workspace_git_push".to_string(),

@@ -3,6 +3,12 @@ import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspac
 
 export type WorkspaceSurfaceSelection =
 	| {
+			kind: "merge-conflict";
+			workspaceRoot: string;
+			baseBranch: string | null;
+			forgeLogin: string | null;
+	  }
+	| {
 			kind: "git-diff";
 			file: WorkspaceGitPreviewSelection;
 	  }

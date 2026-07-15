@@ -6,23 +6,25 @@ use dcc_tauri::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
-        ReadWorkspaceFileInput, ReadWorkspaceFileOutput, WriteWorkspaceFileInput,
-        WriteWorkspaceFileOutput, SearchWorkspaceInput, SearchWorkspaceOutput,
         ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
         ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput,
-        MissionSpecContextStatusInput, MissionSpecContextStatusOutput, RepositoryIdInput,
-        SaveMissionValidationInput, SaveMissionValidationOutput,
-        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
+        MissionSpecContextStatusInput, MissionSpecContextStatusOutput, ReadWorkspaceFileInput,
+        ReadWorkspaceFileOutput, RepositoryIdInput, SaveMissionValidationInput,
+        SaveMissionValidationOutput, SearchWorkspaceInput, SearchWorkspaceOutput,
         WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
+        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
         WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
-        WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
-        WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
-        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
-        WorkspaceGitStatusOutput, WorkspaceGitValidationConfigOutput,
-        WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceIdInput,
-        WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
-        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictStateInput,
+        WorkspaceGitConflictStateOutput, WorkspaceGitFilePreviewContentOutput,
+        WorkspaceGitFilePreviewInput, WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput,
+        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
+        WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput,
+        WorkspaceIdInput, WorkspacePrepareDelegationWorktreeInput,
+        WorkspacePrepareDelegationWorktreeOutput, WorkspaceProjectAutomationConfigOutput,
+        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunProjectTasksInput,
+        WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspaceSaveProjectAutomationInput, WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
     },
     state::WorkspaceCommandState,
 };
@@ -204,6 +206,30 @@ pub async fn workspace_git_validation_config(
 }
 
 #[tauri::command]
+pub async fn workspace_project_automation_config(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitConflictStateInput,
+) -> Result<WorkspaceProjectAutomationConfigOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_project_automation_config(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_save_project_automation(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceSaveProjectAutomationInput,
+) -> Result<WorkspaceProjectAutomationConfigOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_save_project_automation(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_run_project_tasks(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRunProjectTasksInput,
+) -> Result<WorkspaceRunProjectTasksOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_run_project_tasks(state, input).await
+}
+
+#[tauri::command]
 pub async fn workspace_prepare_delegation_worktree(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspacePrepareDelegationWorktreeInput,
@@ -226,8 +252,7 @@ pub async fn workspace_apply_delegation_worktree(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceApplyDelegationWorktreeInput,
 ) -> Result<WorkspaceApplyDelegationWorktreeOutput, String> {
-    dcc_tauri::commands::workspace_commands::workspace_apply_delegation_worktree(state, input)
-        .await
+    dcc_tauri::commands::workspace_commands::workspace_apply_delegation_worktree(state, input).await
 }
 
 #[tauri::command]

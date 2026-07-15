@@ -15,6 +15,10 @@ import { WorkspacePanel } from "@/features/panel";
 import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surface";
 import type { AppUpdateInfo } from "@/features/updater";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
+import type {
+	AgentResolutionRunRequest,
+	AgentResolutionRunResult,
+} from "@/features/merge/agent-conflict-resolution";
 import type { RuntimeSessionSnapshot } from "./workbench-types";
 import type { ManualDelegationRequest } from "./delegation-dialog";
 import type { AgentInitiatedDelegationRequest } from "./agent-delegation-request";
@@ -91,6 +95,10 @@ type SessionWorkbenchProps = {
 	onReviewChanges?: () => void;
 	/** Opens the inspector and previews an implementation delegation diff. */
 	onReviewDelegation?: (delegationId: string) => void;
+	onResolveConflictWithAgent: (
+		request: AgentResolutionRunRequest,
+	) => Promise<AgentResolutionRunResult>;
+	onMergeConflictStateChanged: (workspaceRoot: string) => Promise<void> | void;
 	/** Increment to open the Delegate dialog from outside (command palette). */
 	delegateSignal?: number;
 };
@@ -141,6 +149,8 @@ export function SessionWorkbench({
 	onToggleInspector,
 	onReviewChanges,
 	onReviewDelegation,
+	onResolveConflictWithAgent,
+	onMergeConflictStateChanged,
 	delegateSignal,
 }: SessionWorkbenchProps) {
 	const { t } = useTranslation("common");
@@ -289,6 +299,8 @@ export function SessionWorkbench({
 						onToggleInspector={onToggleInspector}
 						onReviewChanges={onReviewChanges}
 						onReviewDelegation={onReviewDelegation}
+						onResolveConflictWithAgent={onResolveConflictWithAgent}
+						onMergeConflictStateChanged={onMergeConflictStateChanged}
 						delegateSignal={delegateSignal}
 					/>
 				</div>

@@ -673,7 +673,7 @@
       "model": { "label": "Providers", "description": "Models, account usage, and runtimes." },
       "connections": { "label": "Connections", "description": "Phones and tablets paired with this desktop." },
       "shortcuts": { "label": "Shortcuts", "description": "Active shortcuts and the cheatsheet are available." },
-      "git": { "label": "Git", "description": "Git chrome in the inspector, adjustments coming soon." },
+      "git": { "label": "Git", "description": "Automation and Git behavior for the current workspace." },
       "experimental": { "label": "Experimental", "description": "Local UX signals and preview options." },
       "account": { "label": "Account", "description": "GitHub, GitLab, and local in-app authentication." }
     },
@@ -748,13 +748,10 @@
       "comingSoonBody": "Global shortcuts are active. Custom key bindings remain planned for a future release."
     },
     "git": {
-      "chromeTitle": "Git chrome",
-      "chromeHint": "The branch bar and commit action live in the inspector.",
-      "prState": "PR state",
-      "badgeBranchToolbar": "Branch toolbar",
-      "badgeCommitButton": "Commit button",
-      "badgeHeaderShimmer": "Header shimmer",
-      "comingSoonBody": "The interface already shows the Git flow, but editable preferences have not been implemented yet."
+      "automationTitle": "Project automation",
+      "automationHint": "Configure setup, lint, tests, manual fixes, and checks before merge or push for the selected workspace.",
+      "sharingHint": "The .dcc.toml file is versioned with the project. Once committed and integrated into the base branch, new workspaces inherit it automatically.",
+      "noWorkspace": "Select a workspace to configure."
     },
     "experimental": {
       "title": "Experimental",
@@ -1251,6 +1248,8 @@
     "title": "Resolve conflicts",
     "currentBranchFallback": "current branch",
     "incomingBranchFallback": "base branch",
+    "currentWorkspaceLabel": "{{workspace}} · current workspace",
+    "incomingBranchLabel": "{{branch}} · base branch",
     "close": "Close",
     "abort": "Abort merge",
     "loadingGit": "Reading Git state…",
@@ -1314,7 +1313,7 @@
       "loading": "Reading project validations…",
       "invalidTitle": "Invalid validation configuration",
       "configuredTitle": "Validations configured in .dcc.toml",
-      "timeout": "{{seconds}}s timeout per command. Execution stops at the first failure.",
+      "timeout": "Largest configured timeout: {{seconds}}s. Execution stops at the first failure.",
       "empty": "No validations are configured. Add validate = [...] to the [scripts] section in .dcc.toml to run lint, typecheck, or tests.",
       "failed": "Validation failed",
       "passed": "Validations passed",
@@ -1351,10 +1350,57 @@
       "reviewNotice": "Review the result. Nothing has been saved, staged, or committed; the response is recorded in the session history."
     },
     "result": {
+      "title": "Editable result",
       "changed": "Result changed",
       "ready": "Ready to mark as resolved",
       "save": "Save and mark resolved"
     }
+  },
+  "automation": {
+    "title": "Project automation",
+    "description": "Configure workspace setup, safety checks, and manual actions without background processes.",
+    "open": "Configure automation",
+    "loading": "Loading configuration…",
+    "setupTitle": "Workspace setup",
+    "setupDescription": "Still runs only when the workspace is created or setup is retried manually.",
+    "setupPlaceholder": "yarn install",
+    "tasksTitle": "Project tasks",
+    "tasksDescription": "Checks can protect merge and push. Fix tasks only run after an explicit action.",
+    "addTask": "Add task",
+    "emptyTasks": "No tasks configured. Add lint, tests, typecheck, or a useful fix for this project.",
+    "id": "Identifier",
+    "label": "Name",
+    "cwd": "Relative folder",
+    "kindLabel": "Type",
+    "kind": {
+      "check": "Check",
+      "fix": "Fix"
+    },
+    "command": "Command",
+    "timeout": "Timeout (s)",
+    "beforeMerge": "Run before completing a merge",
+    "beforePush": "Run before push",
+    "fixManualOnly": "Fixes never run automatically.",
+    "runTask": "Run task",
+    "removeTask": "Remove task",
+    "runChecks": "Run checks",
+    "saveBeforeRun": "Save the configuration before running it.",
+    "confirmFix": "This task may change workspace files. Run it now?",
+    "saved": "Automation saved to .dcc.toml",
+    "saveFailed": "Could not save automation",
+    "runPassed": "Tasks completed successfully",
+    "runFailed": "A task failed",
+    "reportPassed": "Validation passed",
+    "reportFailed": "Validation blocked",
+    "filesChanged": "Files changed",
+    "noOutput": "The command produced no output.",
+    "beforePushRunning": "Running checks before push…",
+    "beforePushBlocked": "Push blocked: review the project checks.",
+    "noPolling": "Runs only on explicit actions — no polling.",
+    "trackedInGit": "Versioned on this branch",
+    "notTrackedInGit": "Commit required to share",
+    "close": "Close",
+    "save": "Save configuration"
   },
   "fileSurface": {
     "ariaLabel": "Whole file view",

@@ -5,6 +5,7 @@ import {
 	CircleUserRound,
 	GitBranch,
 	Keyboard,
+	ListChecks,
 	Moon,
 	Package,
 	Rabbit,
@@ -72,6 +73,9 @@ import {
 	readUxMetrics,
 	type DccUxMetricName,
 } from "@/lib/ux-metrics";
+import { WorkspaceProjectAutomationDialog } from "@/features/automation/workspace-project-automation-dialog";
+import { WORKSPACE_GIT_STATUS_QUERY_KEY } from "@/features/inspector/use-workspace-git-status";
+import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "@/features/inspector/use-workspace-git-branch-diff";
 
 type SettingsDialogProps = {
 	open: boolean;
@@ -96,6 +100,8 @@ type SettingsDialogProps = {
 	updateCheckError?: string | null;
 	onCheckForUpdate?: () => void;
 	onInstallUpdate?: () => void;
+	workspaceRoot: string | null;
+	workspaceName: string | null;
 };
 
 function forgeAccountInitials(value: string): string {
@@ -202,27 +208,6 @@ function SectionHeaderBadge({ children }: { children: string }) {
 		<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal text-muted-foreground">
 			{children}
 		</Badge>
-	);
-}
-
-function ComingSoonCard({
-	title,
-	body,
-}: {
-	title: string;
-	body: string;
-}) {
-	const { t } = useTranslation("common");
-	return (
-		<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-			<div className="flex items-start justify-between gap-4">
-				<div className="min-w-0">
-					<h3 className="text-[14px] font-medium text-foreground">{title}</h3>
-					<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{body}</p>
-				</div>
-				<SectionHeaderBadge>{t("settings.statusComingSoon")}</SectionHeaderBadge>
-			</div>
-		</div>
 	);
 }
 
@@ -630,9 +615,13 @@ export function SettingsDialog({
 	updateCheckError = null,
 	onCheckForUpdate,
 	onInstallUpdate,
+	workspaceRoot,
+	workspaceName,
 }: SettingsDialogProps) {
 	const { t, i18n } = useTranslation("common");
+	const queryClient = useQueryClient();
 	const [activeSection, setActiveSection] = useState<SettingsSectionId>("general");
+	const [automationOpen, setAutomationOpen] = useState(false);
 	const [uxMetricsVersion, setUxMetricsVersion] = useState(0);
 	const providers = providerCatalog?.providers ?? [];
 	const shortcutBadges = useMemo(
@@ -683,7 +672,6 @@ export function SettingsDialog({
 				label: t("settings.sections.git.label"),
 				description: t("settings.sections.git.description"),
 				icon: GitBranch,
-				status: "comingSoon",
 			},
 			{
 				id: "experimental",
@@ -724,6 +712,7 @@ export function SettingsDialog({
 	];
 
 	return (
+		<>
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="h-[min(84vh,760px)] w-[min(94vw,1240px)] sm:max-w-[1240px] overflow-hidden rounded-2xl border-border/60 bg-background p-0 shadow-2xl">
 				<div className="flex h-full min-h-0 w-full min-w-0 overflow-hidden">
@@ -1053,24 +1042,27 @@ export function SettingsDialog({
 
 							{activeSection === "git" ? (
 								<section className="space-y-4">
-									<ComingSoonCard
-										title={t("settings.git.chromeTitle")}
-										body={t("settings.git.comingSoonBody")}
-									/>
-									<div className="rounded-xl border border-border/60 p-4">
-										<div className="flex items-start justify-between gap-6">
-											<div>
-												<h3 className="text-[14px] font-medium text-foreground">{t("settings.git.chromeTitle")}</h3>
-												<p className="mt-1 text-[12px] text-muted-foreground">
-													{t("settings.git.chromeHint")}
-												</p>
+									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+										<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+											<div className="flex min-w-0 items-start gap-3">
+												<div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+													<ListChecks className="size-4" />
+												</div>
+												<div className="min-w-0">
+													<h3 className="text-[14px] font-medium text-foreground">{t("settings.git.automationTitle")}</h3>
+													<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{t("settings.git.automationHint")}</p>
+													<p className="mt-2 truncate font-mono text-[11px] text-muted-foreground" title={workspaceRoot ?? undefined}>
+														{workspaceName ?? workspaceRoot ?? t("settings.git.noWorkspace")}
+													</p>
+												</div>
 											</div>
-											<SectionHeaderBadge>{t("settings.git.prState")}</SectionHeaderBadge>
+											<Button type="button" size="sm" disabled={!workspaceRoot?.trim()} onClick={() => setAutomationOpen(true)}>
+												{t("automation.open")}
+											</Button>
 										</div>
-										<div className="mt-4 flex flex-wrap gap-2">
-											<Badge variant="outline">{t("settings.git.badgeBranchToolbar")}</Badge>
-											<Badge variant="outline">{t("settings.git.badgeCommitButton")}</Badge>
-											<Badge variant="outline">{t("settings.git.badgeHeaderShimmer")}</Badge>
+										<div className="mt-4 border-t border-border/50 pt-3 text-[11px] leading-relaxed text-muted-foreground">
+											<p>{t("settings.git.sharingHint")}</p>
+											<p className="mt-1">{t("automation.noPolling")}</p>
 										</div>
 									</div>
 								</section>
@@ -1146,5 +1138,17 @@ export function SettingsDialog({
 				</div>
 			</DialogContent>
 		</Dialog>
+		<WorkspaceProjectAutomationDialog
+			open={automationOpen}
+			onOpenChange={setAutomationOpen}
+			workspaceRoot={workspaceRoot}
+			onWorkspaceChanged={() => {
+				const root = workspaceRoot?.trim();
+				if (!root) return;
+				void queryClient.invalidateQueries({ queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root] });
+				void queryClient.invalidateQueries({ queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root] });
+			}}
+		/>
+		</>
 	);
 }

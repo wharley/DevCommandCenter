@@ -69,11 +69,6 @@ import {
 } from "@/features/spec/mission-spec-content";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import { MissionValidationCard } from "@/features/panel/message-components/MissionValidationCard";
-import { WorkspaceMergeConflictResolver } from "@/features/merge/WorkspaceMergeConflictResolver";
-import type {
-	AgentResolutionRunRequest,
-	AgentResolutionRunResult,
-} from "@/features/merge/agent-conflict-resolution";
 import {
 	compileMissionSpecContext,
 	missionSpecContextStatus,
@@ -87,6 +82,8 @@ import {
 	workspaceApplyDelegationWorktree,
 	workspaceGitStageAll,
 	workspaceGitPush,
+	workspaceProjectAutomationConfig,
+	workspaceRunProjectTasks,
 	workspaceRemoveDelegationWorktree,
 	workspaceGitSyncBase,
 	workspaceRunSetup,
@@ -116,6 +113,7 @@ import type {
 	ProviderCatalog,
 	Repository,
 	WorkspacePrReviewComment,
+	WorkspaceRunProjectTasksOutput,
 	WorkspaceSetupReport,
 } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -148,6 +146,10 @@ import type { ForgeCliProvider } from "@dcc/contracts";
 import { cn } from "@/lib/utils";
 import { approveDelegation, cancelDelegation, listDelegations } from "@/lib/delegation-api";
 import { delegationStatusClass } from "@/features/sessions/delegation-status";
+import {
+	WorkspaceProjectAutomationDialog,
+	WORKSPACE_AUTOMATION_QUERY_KEY,
+} from "@/features/automation/workspace-project-automation-dialog";
 
 type WorkspaceInspectorSidebarProps = {
 	providerCatalog: ProviderCatalog | null;
@@ -171,9 +173,11 @@ type WorkspaceInspectorSidebarProps = {
 	reviewDelegationRequest?: { delegationId: string; nonce: number } | null;
 	onSelectSession: (sessionId: string) => void;
 	onPrefillComposer?: (text: string) => void;
-	onResolveConflictWithAgent: (
-		request: AgentResolutionRunRequest,
-	) => Promise<AgentResolutionRunResult>;
+	onOpenMergeConflictResolver: (input: {
+		workspaceRoot: string;
+		baseBranch: string | null;
+		forgeLogin: string | null;
+	}) => void;
 	onOpenCodeFile: (input: { path: string; name: string }) => void;
 	selectedCodePath: string | null;
 	onOpenQuickOpen: () => void;
@@ -1448,7 +1452,7 @@ export function WorkspaceInspectorSidebar({
 	reviewDelegationRequest,
 	onSelectSession,
 	onPrefillComposer,
-	onResolveConflictWithAgent,
+	onOpenMergeConflictResolver,
 	onOpenCodeFile,
 	selectedCodePath,
 	onOpenQuickOpen,
@@ -1833,6 +1837,9 @@ export function WorkspaceInspectorSidebar({
 	);
 	const [forgeConnectOpen, setForgeConnectOpen] = useState(false);
 	const [codeRabbitConnectOpen, setCodeRabbitConnectOpen] = useState(false);
+	const [automationOpen, setAutomationOpen] = useState(false);
+	const [automationReport, setAutomationReport] =
+		useState<WorkspaceRunProjectTasksOutput | null>(null);
 	const codeRabbitStatusQuery = useCodeRabbitCliStatus(workspacePath, {
 		enabled: Boolean(workspacePath?.trim()),
 		includeAuthStatus: true,
@@ -1850,7 +1857,6 @@ export function WorkspaceInspectorSidebar({
 	const [isSyncingBase, setIsSyncingBase] = useState(false);
 	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
 	const [isCompilingSpecContext, setIsCompilingSpecContext] = useState(false);
-	const [conflictResolverOpen, setConflictResolverOpen] = useState(false);
 	const [pendingGitConfirmation, setPendingGitConfirmation] =
 		useState<PendingGitConfirmation>(null);
 	const rootRef = useRef<HTMLDivElement | null>(null);
@@ -1892,6 +1898,42 @@ export function WorkspaceInspectorSidebar({
 	const committedVsBaseCount = reviewBranchDiffQuery.data?.changes.length ?? 0;
 	const suppressEmptyCreatePr =
 		commitMode === "create-pr" && committedVsBaseCount === 0;
+
+	const runBeforePushChecks = useCallback(
+		async (root: string) => {
+			const config = await queryClient.fetchQuery({
+				queryKey: [WORKSPACE_AUTOMATION_QUERY_KEY, root],
+				queryFn: () => workspaceProjectAutomationConfig({ workspaceRoot: root }),
+				staleTime: 0,
+			});
+			if (config.beforePush.length === 0) return true;
+			const output = await workspaceRunProjectTasks({
+				workspaceRoot: root,
+				taskIds: config.beforePush,
+				expectedConfigHash: config.configHash,
+			});
+			setAutomationReport(output);
+			if (output.changedFiles) {
+				await Promise.all([
+					queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+					}),
+					queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+					}),
+					queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_AUTOMATION_QUERY_KEY, root],
+					}),
+				]);
+			}
+			if (output.report.status !== "passed") {
+				setAutomationOpen(true);
+				return false;
+			}
+			return true;
+		},
+		[queryClient],
+	);
 
 	const handleInspectorCommit = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -1940,6 +1982,11 @@ export function WorkspaceInspectorSidebar({
 					);
 					return;
 				case "push":
+					toast.loading(t("automation.beforePushRunning"), { id: loadingToast });
+					if (!(await runBeforePushChecks(root))) {
+						toast.error(t("automation.beforePushBlocked"), { id: loadingToast });
+						return;
+					}
 					await workspaceGitPush({
 						workspaceRoot: root,
 						forgeLogin: selectedForgeLogin,
@@ -1966,7 +2013,11 @@ export function WorkspaceInspectorSidebar({
 					break;
 				case "resolve-conflicts":
 					toast.dismiss(loadingToast);
-					setConflictResolverOpen(true);
+					onOpenMergeConflictResolver({
+						workspaceRoot: root,
+						baseBranch: prStatus?.baseBranch ?? null,
+						forgeLogin: selectedForgeLogin,
+					});
 					return;
 				case "create-pr": {
 					if (hasWorkingTreeChanges) {
@@ -1983,6 +2034,11 @@ export function WorkspaceInspectorSidebar({
 				}
 				case "commit-and-push":
 				default: {
+					toast.loading(t("automation.beforePushRunning"), { id: loadingToast });
+					if (!(await runBeforePushChecks(root))) {
+						toast.error(t("automation.beforePushBlocked"), { id: loadingToast });
+						return;
+					}
 					// Respect the user's selection: if they already staged specific
 					// files, commit only those. Stage everything only when nothing is
 					// staged yet, so the checkpoint commit isn't empty.
@@ -2034,7 +2090,10 @@ export function WorkspaceInspectorSidebar({
 		forgeContext.providerLabel,
 		forgeContext.requestLabel,
 		gitStatusQuery.data,
+		onOpenMergeConflictResolver,
+		prStatus?.baseBranch,
 		queryClient,
+		runBeforePushChecks,
 		selectedForgeLogin,
 		t,
 		workspacePath,
@@ -2138,25 +2197,6 @@ export function WorkspaceInspectorSidebar({
 	const handleSyncBase = useCallback(() => {
 		setPendingGitConfirmation("sync-base");
 	}, []);
-
-	const handleConflictStateChanged = useCallback(async () => {
-		const root = workspacePath?.trim();
-		if (!root) return;
-		await Promise.all([
-			queryClient.invalidateQueries({
-				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
-			}),
-			queryClient.invalidateQueries({
-				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
-			}),
-			queryClient.invalidateQueries({
-				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
-			}),
-			queryClient.invalidateQueries({
-				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
-			}),
-		]);
-	}, [queryClient, workspacePath]);
 
 	const handleContinueWorkspace = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -3823,17 +3863,6 @@ export function WorkspaceInspectorSidebar({
 					/>
 				)}
 			</div>
-			{workspacePath?.trim() ? (
-				<WorkspaceMergeConflictResolver
-					open={conflictResolverOpen}
-					onOpenChange={setConflictResolverOpen}
-					workspaceRoot={workspacePath.trim()}
-					baseBranch={prStatus?.baseBranch ?? null}
-					forgeLogin={selectedForgeLogin}
-					onStateChanged={handleConflictStateChanged}
-					onResolveWithAgent={onResolveConflictWithAgent}
-				/>
-			) : null}
 			<Dialog
 				open={pendingGitConfirmation !== null}
 				onOpenChange={(open) => {
@@ -3894,6 +3923,22 @@ export function WorkspaceInspectorSidebar({
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
+			<WorkspaceProjectAutomationDialog
+				open={automationOpen}
+				onOpenChange={setAutomationOpen}
+				workspaceRoot={workspacePath}
+				externalReport={automationReport}
+				onWorkspaceChanged={() => {
+					const root = workspacePath?.trim();
+					if (!root) return;
+					void queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+					});
+					void queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+					});
+				}}
+			/>
 			<ForgeConnectDialog
 				open={forgeConnectOpen}
 				onOpenChange={setForgeConnectOpen}

@@ -202,6 +202,18 @@ pub fn run_workspace_validation_command(
     run_workspace_command_with_timeout(workspace_root, script, WORKSPACE_VALIDATION_TIMEOUT)
 }
 
+pub fn run_workspace_task_command(
+    workspace_root: &str,
+    script: &str,
+    timeout_seconds: u64,
+) -> Result<WorkspaceCommandExecution, String> {
+    run_workspace_command_with_timeout(
+        workspace_root,
+        script,
+        Duration::from_secs(timeout_seconds.clamp(1, 3600)),
+    )
+}
+
 fn run_workspace_command_with_timeout(
     workspace_root: &str,
     script: &str,
@@ -244,7 +256,11 @@ fn run_workspace_command_with_timeout(
     match rx.recv_timeout(timeout) {
         Ok(Ok(output)) => {
             let _ = waiter.join();
-            Ok(command_execution_from_output(output, started.elapsed(), false))
+            Ok(command_execution_from_output(
+                output,
+                started.elapsed(),
+                false,
+            ))
         }
         Ok(Err(error)) => {
             let _ = waiter.join();

@@ -16,8 +16,8 @@ pub use coderabbit::{
     workspace_coderabbit_review_save, workspace_coderabbit_review_start,
 };
 pub use delegation_commands::{
-    approve_delegation, cancel_delegation, complete_delegation, create_delegation,
-    fail_delegation, get_delegation, list_delegations, start_delegation,
+    approve_delegation, cancel_delegation, complete_delegation, create_delegation, fail_delegation,
+    get_delegation, list_delegations, start_delegation,
 };
 pub use forge_commands::{
     workspace_backfill_forge_repo_bindings, workspace_change_request_create,
@@ -37,11 +37,12 @@ pub use workspace_commands::{
     create_workspace_from_url, delete_repository, delete_workspace, list_child_directories,
     list_git_tracked_files, list_local_branches, list_mission_specs, list_repositories,
     list_workspaces, mission_spec_context_status, restore_workspace, save_mission_validation,
-    workspace_continue_from_base_branch, workspace_git_abort_merge,
-    workspace_git_accept_conflict, workspace_git_commit_push, workspace_git_complete_merge,
-    workspace_git_conflict_state, workspace_git_discard_file, workspace_git_file_preview,
-    workspace_git_file_preview_content, workspace_git_mark_conflict_resolved, workspace_git_push,
-    workspace_git_stage_all, workspace_git_stage_file, workspace_git_status,
-    workspace_git_sync_base, workspace_git_unstage_file, workspace_git_validation_config,
-    workspace_run_setup,
+    workspace_continue_from_base_branch, workspace_git_abort_merge, workspace_git_accept_conflict,
+    workspace_git_commit_push, workspace_git_complete_merge, workspace_git_conflict_state,
+    workspace_git_discard_file, workspace_git_file_preview, workspace_git_file_preview_content,
+    workspace_git_mark_conflict_resolved, workspace_git_push, workspace_git_stage_all,
+    workspace_git_stage_file, workspace_git_status, workspace_git_sync_base,
+    workspace_git_unstage_file, workspace_git_validation_config,
+    workspace_project_automation_config, workspace_run_project_tasks, workspace_run_setup,
+    workspace_save_project_automation,
 };

@@ -29,12 +29,19 @@ use dcc_core::{
     ports::{DelegationRepo, RepositoryRepo, SessionRepo, WorkspaceRepo},
 };
 use dcc_infra::{
-	db::{SqliteSessionRepo, SqliteWorkspaceRepo},
-	git::{
-		broken_worktree_reason, create_worktree_branch_from_ref,
-		detect_workspace_setup_suggestions, is_git_repo, list_local_branch_names,
-		read_workspace_validation_config, remove_worktree, CommandGitOps,
-	},
+    db::{SqliteSessionRepo, SqliteWorkspaceRepo},
+    git::{
+        broken_worktree_reason, create_worktree_branch_from_ref,
+        detect_workspace_setup_suggestions, is_git_repo, list_local_branch_names,
+        read_workspace_automation_config, remove_worktree, validate_workspace_automation_config,
+        CommandGitOps, RepoAutomationConfig, RepoAutomationTask, RepoTaskKind,
+    },
+};
+#[cfg(test)]
+use dcc_infra::git::read_workspace_validation_config;
+use toml_edit::{
+    value as toml_value, Array as TomlArray, Document as TomlDocument, Item as TomlItem,
+    Table as TomlTable,
 };
 
 use crate::{
@@ -55,8 +62,12 @@ use crate::{
         split_null_terminated_fields,
     },
     state::WorkspaceCommandState,
-    workspace_setup::{run_detected_workspace_setup, run_workspace_validation_command, WORKSPACE_VALIDATION_TIMEOUT},
+    workspace_setup::{
+        run_detected_workspace_setup, run_workspace_task_command, WORKSPACE_VALIDATION_TIMEOUT,
+    },
 };
+#[cfg(test)]
+use crate::workspace_setup::run_workspace_validation_command;
 
 const DCC_SPEC_CONTEXT_START: &str = "<!-- dcc:spec:start -->";
 const DCC_SPEC_CONTEXT_END: &str = "<!-- dcc:spec:end -->";
@@ -472,6 +483,62 @@ pub struct WorkspaceGitValidationConfigOutput {
     pub source_path: Option<String>,
     pub timeout_seconds: u64,
     pub config_hash: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceProjectTaskKind {
+    Check,
+    Fix,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceProjectTask {
+    pub id: String,
+    pub label: Option<String>,
+    pub command: String,
+    pub kind: WorkspaceProjectTaskKind,
+    pub cwd: Option<String>,
+    pub timeout_seconds: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceProjectAutomationConfigOutput {
+    pub setup_command: Option<String>,
+    pub tasks: Vec<WorkspaceProjectTask>,
+    pub before_merge: Vec<String>,
+    pub before_push: Vec<String>,
+    pub source_path: String,
+    pub config_hash: Option<String>,
+    pub tracked_in_git: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSaveProjectAutomationInput {
+    pub workspace_root: String,
+    pub setup_command: Option<String>,
+    pub tasks: Vec<WorkspaceProjectTask>,
+    pub before_merge: Vec<String>,
+    pub before_push: Vec<String>,
+    pub expected_config_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRunProjectTasksInput {
+    pub workspace_root: String,
+    pub task_ids: Vec<String>,
+    pub expected_config_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRunProjectTasksOutput {
+    pub report: WorkspaceGitValidationReport,
+    pub changed_files: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1164,7 +1231,10 @@ fn workspace_git_accept_conflict_inner(
     if entry.stages.contains_key(&stage) {
         let checkout = run_git_output(root, &["checkout", checkout_flag, "--", &path])?;
         if !checkout.status.success() {
-            return Err(git_output_err("git checkout conflict side", &checkout.stderr));
+            return Err(git_output_err(
+                "git checkout conflict side",
+                &checkout.stderr,
+            ));
         }
         let add = run_git_output(root, &["add", "--", &path])?;
         if add.status.success() {
@@ -1256,15 +1326,376 @@ pub async fn workspace_git_validation_config(
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    let config = read_workspace_validation_config(Path::new(root))?;
+    let automation = read_workspace_automation_config(Path::new(root))?;
+    let automation_source_path = automation
+        .as_ref()
+        .map(|config| config.source_path.clone());
+    let configured_tasks = automation
+        .as_ref()
+        .map(|config| {
+            let by_id = config
+                .tasks
+                .iter()
+                .map(|task| (task.id.as_str(), task))
+                .collect::<BTreeMap<_, _>>();
+            config
+                .before_merge
+                .iter()
+                .map(|id| {
+                    by_id
+                        .get(id.as_str())
+                        .copied()
+                        .ok_or_else(|| format!("Unknown before_merge task `{id}`."))
+                })
+                .collect::<Result<Vec<_>, String>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
     Ok(WorkspaceGitValidationConfigOutput {
-        commands: config
-            .as_ref()
-            .map(|config| config.commands.clone())
-            .unwrap_or_default(),
-        source_path: config.map(|config| config.source_path),
-        timeout_seconds: WORKSPACE_VALIDATION_TIMEOUT.as_secs(),
+        commands: configured_tasks
+            .iter()
+            .map(|task| task.command.clone())
+            .collect(),
+        source_path: if configured_tasks.is_empty() {
+            None
+        } else {
+            automation_source_path
+        },
+        timeout_seconds: configured_tasks
+            .iter()
+            .map(|task| task.timeout_seconds)
+            .max()
+            .unwrap_or(WORKSPACE_VALIDATION_TIMEOUT.as_secs()),
         config_hash: workspace_validation_config_hash(root)?,
+    })
+}
+
+fn project_task_from_repo(task: RepoAutomationTask) -> WorkspaceProjectTask {
+    WorkspaceProjectTask {
+        id: task.id,
+        label: task.label,
+        command: task.command,
+        kind: match task.kind {
+            RepoTaskKind::Check => WorkspaceProjectTaskKind::Check,
+            RepoTaskKind::Fix => WorkspaceProjectTaskKind::Fix,
+        },
+        cwd: task.cwd,
+        timeout_seconds: task.timeout_seconds,
+    }
+}
+
+fn repo_task_from_project(task: &WorkspaceProjectTask) -> RepoAutomationTask {
+    RepoAutomationTask {
+        id: task.id.trim().to_string(),
+        label: task
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        command: task.command.trim().to_string(),
+        kind: match task.kind {
+            WorkspaceProjectTaskKind::Check => RepoTaskKind::Check,
+            WorkspaceProjectTaskKind::Fix => RepoTaskKind::Fix,
+        },
+        cwd: task
+            .cwd
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        timeout_seconds: task.timeout_seconds,
+    }
+}
+
+#[tauri::command]
+pub async fn workspace_project_automation_config(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitConflictStateInput,
+) -> Result<WorkspaceProjectAutomationConfigOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    let source_path = Path::new(root)
+        .join(".dcc.toml")
+        .to_string_lossy()
+        .to_string();
+    let tracked_in_git = workspace_automation_config_is_tracked(root);
+    let config = read_workspace_automation_config(Path::new(root))?;
+    Ok(match config {
+        Some(config) => WorkspaceProjectAutomationConfigOutput {
+            setup_command: config.setup_command,
+            tasks: config
+                .tasks
+                .into_iter()
+                .map(project_task_from_repo)
+                .collect(),
+            before_merge: config.before_merge,
+            before_push: config.before_push,
+            source_path: config.source_path,
+            config_hash: workspace_validation_config_hash(root)?,
+            tracked_in_git,
+        },
+        None => WorkspaceProjectAutomationConfigOutput {
+            setup_command: None,
+            tasks: Vec::new(),
+            before_merge: Vec::new(),
+            before_push: Vec::new(),
+            source_path,
+            config_hash: None,
+            tracked_in_git,
+        },
+    })
+}
+
+fn workspace_automation_config_is_tracked(root: &str) -> bool {
+    run_git_output(root, &["ls-files", "--error-unmatch", "--", ".dcc.toml"])
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+pub async fn workspace_save_project_automation(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceSaveProjectAutomationInput,
+) -> Result<WorkspaceProjectAutomationConfigOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    if workspace_validation_config_hash(root)? != input.expected_config_hash {
+        return Err("The .dcc.toml configuration changed. Reload it before saving.".to_string());
+    }
+    let source_path = Path::new(root).join(".dcc.toml");
+    let tasks = input
+        .tasks
+        .iter()
+        .map(repo_task_from_project)
+        .collect::<Vec<_>>();
+    let normalized = RepoAutomationConfig {
+        setup_command: input
+            .setup_command
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        tasks,
+        before_merge: input.before_merge.clone(),
+        before_push: input.before_push.clone(),
+        source_path: source_path.to_string_lossy().to_string(),
+    };
+    validate_workspace_automation_config(&normalized)?;
+
+    let raw = match fs::read_to_string(&source_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("failed to read .dcc.toml: {error}")),
+    };
+    let mut document = if raw.trim().is_empty() {
+        TomlDocument::new()
+    } else {
+        raw.parse::<TomlDocument>()
+            .map_err(|error| format!("invalid .dcc.toml: {error}"))?
+    };
+    document.remove("setup_command");
+    document.remove("validation_commands");
+    if !document.contains_key("scripts") {
+        document["scripts"] = TomlItem::Table(TomlTable::new());
+    }
+    if let Some(scripts) = document["scripts"].as_table_mut() {
+        scripts.remove("validate");
+        match normalized.setup_command.as_deref() {
+            Some(command) => scripts["setup"] = toml_value(command),
+            None => {
+                scripts.remove("setup");
+            }
+        }
+    }
+
+    if normalized.tasks.is_empty() {
+        document.remove("tasks");
+    } else {
+        let mut table = TomlTable::new();
+        for task in &normalized.tasks {
+            let mut item = TomlTable::new();
+            item["command"] = toml_value(&task.command);
+            item["kind"] = toml_value(match task.kind {
+                RepoTaskKind::Check => "check",
+                RepoTaskKind::Fix => "fix",
+            });
+            if let Some(label) = task.label.as_deref() {
+                item["label"] = toml_value(label);
+            }
+            if let Some(cwd) = task.cwd.as_deref() {
+                item["cwd"] = toml_value(cwd);
+            }
+            if task.timeout_seconds != WORKSPACE_VALIDATION_TIMEOUT.as_secs() {
+                item["timeout_seconds"] = toml_value(task.timeout_seconds as i64);
+            }
+            table[&task.id] = TomlItem::Table(item);
+        }
+        document["tasks"] = TomlItem::Table(table);
+    }
+
+    if normalized.before_merge.is_empty() && normalized.before_push.is_empty() {
+        document.remove("hooks");
+    } else {
+        let mut hooks = TomlTable::new();
+        for (name, ids) in [
+            ("before_merge", &normalized.before_merge),
+            ("before_push", &normalized.before_push),
+        ] {
+            let mut values = TomlArray::new();
+            for id in ids {
+                values.push(id.as_str());
+            }
+            hooks[name] = toml_value(values);
+        }
+        document["hooks"] = TomlItem::Table(hooks);
+    }
+
+    fs::write(&source_path, document.to_string())
+        .map_err(|error| format!("failed to write .dcc.toml: {error}"))?;
+    workspace_project_automation_config(
+        state,
+        WorkspaceGitConflictStateInput {
+            workspace_root: root.to_string(),
+        },
+    )
+    .await
+}
+
+fn resolve_task_execution_root(root: &str, task: &RepoAutomationTask) -> Result<String, String> {
+    let root_path = Path::new(root)
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve workspace root: {error}"))?;
+    let execution_path = match task.cwd.as_deref() {
+        Some(cwd) => root_path.join(cwd),
+        None => root_path.clone(),
+    }
+    .canonicalize()
+    .map_err(|error| format!("task `{}` cwd is unavailable: {error}", task.id))?;
+    if !execution_path.starts_with(&root_path) {
+        return Err(format!("task `{}` cwd escapes the workspace", task.id));
+    }
+    Ok(execution_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn workspace_run_project_tasks(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRunProjectTasksInput,
+) -> Result<WorkspaceRunProjectTasksOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim().to_string();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    if workspace_validation_config_hash(&root)? != input.expected_config_hash {
+        return Err(
+            "The .dcc.toml configuration changed. Review the tasks and try again.".to_string(),
+        );
+    }
+    let config = read_workspace_automation_config(Path::new(&root))?
+        .ok_or_else(|| "No project automation is configured.".to_string())?;
+    let by_id = config
+        .tasks
+        .into_iter()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+    let mut requested = Vec::new();
+    let mut seen = BTreeSet::new();
+    for id in input.task_ids {
+        if seen.insert(id.clone()) {
+            requested.push(
+                by_id
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| format!("Unknown project task `{id}`."))?,
+            );
+        }
+    }
+    if requested.is_empty() {
+        return Err("Select at least one project task.".to_string());
+    }
+    if requested.len() > 20 {
+        return Err("At most 20 project tasks can run at once.".to_string());
+    }
+    let source_path = Some(config.source_path);
+    let root_for_run = root.clone();
+    let (report, changed_files) = tauri::async_runtime::spawn_blocking(
+        move || -> Result<(WorkspaceGitValidationReport, bool), String> {
+            let mut steps = Vec::new();
+            let mut changed_files = false;
+            for task in requested {
+                let before_task = workspace_validation_fingerprint(&root_for_run)?;
+                let execution_root = resolve_task_execution_root(&root_for_run, &task)?;
+                let execution = run_workspace_task_command(
+                    &execution_root,
+                    &task.command,
+                    task.timeout_seconds,
+                )?;
+                let success = execution.success;
+                steps.push(WorkspaceGitValidationStep {
+                    command: task.command,
+                    success,
+                    exit_code: execution.exit_code,
+                    output: execution.output,
+                    timed_out: execution.timed_out,
+                    duration_ms: execution.duration_ms,
+                    truncated: execution.truncated,
+                });
+                let after_task = workspace_validation_fingerprint(&root_for_run)?;
+                let task_changed_files = before_task != after_task;
+                changed_files |= task_changed_files;
+                if task_changed_files && task.kind == RepoTaskKind::Check {
+                    steps.push(WorkspaceGitValidationStep {
+                        command: "DCC workspace consistency check".to_string(),
+                        success: false,
+                        exit_code: None,
+                        output: "A check task changed tracked files or the index. Review the changes before continuing.".to_string(),
+                        timed_out: false,
+                        duration_ms: 0,
+                        truncated: false,
+                    });
+                    return Ok((
+                        WorkspaceGitValidationReport {
+                            status: WorkspaceGitValidationStatus::Failed,
+                            source_path,
+                            steps,
+                        },
+                        changed_files,
+                    ));
+                }
+                if !success {
+                    return Ok((
+                        WorkspaceGitValidationReport {
+                            status: WorkspaceGitValidationStatus::Failed,
+                            source_path,
+                            steps,
+                        },
+                        changed_files,
+                    ));
+                }
+            }
+            Ok((
+                WorkspaceGitValidationReport {
+                    status: WorkspaceGitValidationStatus::Passed,
+                    source_path,
+                    steps,
+                },
+                changed_files,
+            ))
+        },
+    )
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(WorkspaceRunProjectTasksOutput {
+        report,
+        changed_files,
     })
 }
 
@@ -1279,11 +1710,33 @@ pub async fn workspace_git_complete_merge(
         return Err("workspace_root is empty".to_string());
     }
     require_merge_ready_to_complete(root)?;
-    let configured_validation = read_workspace_validation_config(Path::new(root))?;
-    let configured_commands = configured_validation
+    let configured_automation = read_workspace_automation_config(Path::new(root))?;
+    let configured_tasks = configured_automation
         .as_ref()
-        .map(|config| config.commands.clone())
+        .map(|config| {
+            let by_id = config
+                .tasks
+                .iter()
+                .map(|task| (task.id.as_str(), task))
+                .collect::<BTreeMap<_, _>>();
+            config
+                .before_merge
+                .iter()
+                .map(|id| {
+                    by_id
+                        .get(id.as_str())
+                        .cloned()
+                        .cloned()
+                        .ok_or_else(|| format!("Unknown before_merge task `{id}`."))
+                })
+                .collect::<Result<Vec<_>, String>>()
+        })
+        .transpose()?
         .unwrap_or_default();
+    let configured_commands = configured_tasks
+        .iter()
+        .map(|task| task.command.clone())
+        .collect::<Vec<_>>();
     if workspace_validation_config_hash(root)? != input.validation_config_hash
         || configured_commands != input.validation_commands
     {
@@ -1294,12 +1747,11 @@ pub async fn workspace_git_complete_merge(
     }
 
     let validation_root = root.to_string();
-    let validation_commands = input.validation_commands;
-    let validation_source_path = configured_validation.map(|config| config.source_path);
+    let validation_source_path = configured_automation.map(|config| config.source_path);
     let (mut validation, validated_fingerprint) = tauri::async_runtime::spawn_blocking(move || {
-        workspace_git_run_confirmed_validations_inner(
+        workspace_git_run_automation_validations_inner(
             &validation_root,
-            validation_commands,
+            configured_tasks,
             validation_source_path,
         )
     })
@@ -1353,6 +1805,81 @@ pub async fn workspace_git_complete_merge(
     })
 }
 
+fn workspace_git_run_automation_validations_inner(
+    root: &str,
+    tasks: Vec<RepoAutomationTask>,
+    source_path: Option<String>,
+) -> Result<(WorkspaceGitValidationReport, Option<String>), String> {
+    if tasks.is_empty() {
+        return Ok((
+            WorkspaceGitValidationReport {
+                status: WorkspaceGitValidationStatus::NotConfigured,
+                source_path,
+                steps: Vec::new(),
+            },
+            None,
+        ));
+    }
+    let fingerprint = workspace_validation_fingerprint(root)?;
+    let mut steps = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        let execution_root = resolve_task_execution_root(root, &task)?;
+        let execution = run_workspace_task_command(
+            &execution_root,
+            &task.command,
+            task.timeout_seconds,
+        )?;
+        let success = execution.success;
+        steps.push(WorkspaceGitValidationStep {
+            command: task.command,
+            success,
+            exit_code: execution.exit_code,
+            output: execution.output,
+            timed_out: execution.timed_out,
+            duration_ms: execution.duration_ms,
+            truncated: execution.truncated,
+        });
+        if !success {
+            return Ok((
+                WorkspaceGitValidationReport {
+                    status: WorkspaceGitValidationStatus::Failed,
+                    source_path,
+                    steps,
+                },
+                Some(fingerprint),
+            ));
+        }
+    }
+    let after = workspace_validation_fingerprint(root)?;
+    if after != fingerprint {
+        steps.push(WorkspaceGitValidationStep {
+            command: "DCC workspace consistency check".to_string(),
+            success: false,
+            exit_code: None,
+            output: "A validation command changed the staged result or tracked working-tree files. Review the changes, stage the intended result, and validate again.".to_string(),
+            timed_out: false,
+            duration_ms: 0,
+            truncated: false,
+        });
+        return Ok((
+            WorkspaceGitValidationReport {
+                status: WorkspaceGitValidationStatus::Failed,
+                source_path,
+                steps,
+            },
+            Some(fingerprint),
+        ));
+    }
+    Ok((
+        WorkspaceGitValidationReport {
+            status: WorkspaceGitValidationStatus::Passed,
+            source_path,
+            steps,
+        },
+        Some(fingerprint),
+    ))
+}
+
 fn workspace_git_complete_merge_commit_inner(root: &str) -> Result<(), String> {
     require_merge_ready_to_complete(root)?;
 
@@ -1385,13 +1912,10 @@ fn workspace_git_run_validations_inner(
     let Some(config) = read_workspace_validation_config(Path::new(root))? else {
         return workspace_git_run_confirmed_validations_inner(root, Vec::new(), None);
     };
-    workspace_git_run_confirmed_validations_inner(
-        root,
-        config.commands,
-        Some(config.source_path),
-    )
+    workspace_git_run_confirmed_validations_inner(root, config.commands, Some(config.source_path))
 }
 
+#[cfg(test)]
 fn workspace_git_run_confirmed_validations_inner(
     root: &str,
     commands: Vec<String>,
@@ -2090,13 +2614,12 @@ pub async fn workspace_git_status(
 
 fn delegation_worktrees_root(active_root: &Path) -> PathBuf {
     let parent = active_root.parent().unwrap_or(active_root);
-    let worktrees_root = if parent.file_name().and_then(|name| name.to_str())
-        == Some(".dcc-worktrees")
-    {
-        parent.to_path_buf()
-    } else {
-        parent.join(".dcc-worktrees")
-    };
+    let worktrees_root =
+        if parent.file_name().and_then(|name| name.to_str()) == Some(".dcc-worktrees") {
+            parent.to_path_buf()
+        } else {
+            parent.join(".dcc-worktrees")
+        };
     worktrees_root.join(".dcc-delegations")
 }
 
@@ -2125,9 +2648,7 @@ fn validate_delegation_worktree_path(root: &str, value: &str) -> Result<PathBuf,
     let canonical_worktree_path =
         fs::canonicalize(&worktree_path).unwrap_or_else(|_| worktree_path.clone());
     if !canonical_worktree_path.starts_with(&canonical_allowed_root) {
-        return Err(
-            "refusing to use a path outside the DCC delegation worktree root".to_string(),
-        );
+        return Err("refusing to use a path outside the DCC delegation worktree root".to_string());
     }
     Ok(worktree_path)
 }
@@ -2385,11 +2906,7 @@ pub async fn workspace_apply_delegation_worktree(
     if !diff_output.stdout.is_empty() {
         apply_patch_to_worktree(root, &diff_output.stdout)?;
     }
-    copy_untracked_delegation_files(
-        Path::new(&worktree_root),
-        Path::new(root),
-        &untracked_files,
-    )?;
+    copy_untracked_delegation_files(Path::new(&worktree_root), Path::new(root), &untracked_files)?;
 
     Ok(WorkspaceApplyDelegationWorktreeOutput { changed_files })
 }
@@ -3092,6 +3609,42 @@ mod editor_workspace_file_tests {
 
     #[cfg(unix)]
     #[test]
+    fn automation_validation_honors_task_working_directory() {
+        let repo = TestDir::new("automation-validation-cwd");
+        let git = |args: &[&str]| {
+            let output = run_git_output(repo.as_str(), args).expect("run git");
+            assert!(output.status.success(), "git {:?} failed", args);
+        };
+        git(&["init", "-b", "main"]);
+        git(&["config", "user.name", "DCC Test"]);
+        git(&["config", "user.email", "dcc@example.invalid"]);
+        fs::write(repo.path.join("app.txt"), "stable\n").expect("write tracked file");
+        fs::create_dir_all(repo.path.join("apps/web")).expect("create task cwd");
+        fs::write(repo.path.join("apps/web/marker.txt"), "ok\n").expect("write marker");
+        git(&["add", "."]);
+        git(&["commit", "-m", "base"]);
+
+        let (report, fingerprint) = workspace_git_run_automation_validations_inner(
+            repo.as_str(),
+            vec![RepoAutomationTask {
+                id: "web_check".to_string(),
+                label: Some("Web check".to_string()),
+                command: "test -f marker.txt".to_string(),
+                kind: RepoTaskKind::Check,
+                cwd: Some("apps/web".to_string()),
+                timeout_seconds: 30,
+            }],
+            Some(repo.path.join(".dcc.toml").to_string_lossy().to_string()),
+        )
+        .expect("run automation validation");
+
+        assert_eq!(report.status, WorkspaceGitValidationStatus::Passed);
+        assert_eq!(report.steps.len(), 1);
+        assert!(fingerprint.is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn configured_validation_that_changes_tracked_files_is_rejected() {
         let repo = TestDir::new("merge-validation-mutation");
         let git = |args: &[&str]| {
@@ -3178,7 +3731,10 @@ mod editor_workspace_file_tests {
             WorkspaceGitConflictSide::Incoming,
         )
         .expect("accept incoming file");
-        assert_eq!(resolve_conflict_count(repo.as_str()).expect("conflict count"), 0);
+        assert_eq!(
+            resolve_conflict_count(repo.as_str()).expect("conflict count"),
+            0
+        );
         assert_eq!(
             fs::read_to_string(repo.path.join("app.txt")).expect("read accepted file"),
             "shared\nincoming\n"
@@ -3196,11 +3752,8 @@ mod editor_workspace_file_tests {
 
         let merge = run_git_output(repo.as_str(), &["merge", "incoming"]).expect("merge again");
         assert!(!merge.status.success(), "second merge should conflict");
-        fs::write(
-            repo.path.join("app.txt"),
-            "shared\ncurrent\nincoming\n",
-        )
-        .expect("write combined result");
+        fs::write(repo.path.join("app.txt"), "shared\ncurrent\nincoming\n")
+            .expect("write combined result");
         workspace_git_mark_conflict_resolved_inner(repo.as_str(), "app.txt", false)
             .expect("mark resolved");
         workspace_git_complete_merge_commit_inner(repo.as_str()).expect("complete merge commit");
@@ -3251,7 +3804,10 @@ mod editor_workspace_file_tests {
         let merge = run_git_output(repo.as_str(), &["merge", "incoming"]).expect("merge");
         assert!(!merge.status.success(), "merge should conflict");
         let state = workspace_git_conflict_state_inner(repo.as_str()).expect("conflict state");
-        assert_eq!(state.conflicts[0].kind, WorkspaceGitConflictKind::DeletedByIncoming);
+        assert_eq!(
+            state.conflicts[0].kind,
+            WorkspaceGitConflictKind::DeletedByIncoming
+        );
 
         workspace_git_accept_conflict_inner(
             repo.as_str(),
@@ -3260,7 +3816,10 @@ mod editor_workspace_file_tests {
         )
         .expect("accept incoming deletion");
         assert!(!repo.path.join("removed.txt").exists());
-        assert_eq!(resolve_conflict_count(repo.as_str()).expect("conflict count"), 0);
+        assert_eq!(
+            resolve_conflict_count(repo.as_str()).expect("conflict count"),
+            0
+        );
 
         workspace_git_abort_merge_inner(repo.as_str()).expect("abort merge");
         assert_eq!(
@@ -3292,10 +3851,7 @@ mod editor_workspace_file_tests {
         let delegation_path = delegation_root.join("dcc-delegation-abc");
         fs::create_dir_all(&delegation_path).expect("create delegation worktree");
 
-        assert_eq!(
-            delegation_worktrees_root(&active_root),
-            delegation_root,
-        );
+        assert_eq!(delegation_worktrees_root(&active_root), delegation_root,);
         assert_eq!(
             validate_delegation_worktree_path(
                 active_root.to_str().expect("utf-8 active root"),
@@ -3365,7 +3921,10 @@ mod editor_workspace_file_tests {
             delegation_key_suffix(Some("turn-123_../../escape")),
             "turn123escap"
         );
-        assert_eq!(delegation_key_suffix(Some("abcDEF123456789")), "abcDEF123456");
+        assert_eq!(
+            delegation_key_suffix(Some("abcDEF123456789")),
+            "abcDEF123456"
+        );
         assert_eq!(delegation_key_suffix(Some("!!!")).len(), 12);
     }
 
@@ -4282,88 +4841,88 @@ pub async fn restore_workspace(
 
 #[tauri::command]
 pub async fn delete_workspace(
-	state: State<'_, WorkspaceCommandState>,
-	input: WorkspaceIdInput,
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceIdInput,
 ) -> Result<(), String> {
-	let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
-	let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
-	let id = WorkspaceId(input.workspace_id);
-	let workspace = repo
-		.get_workspace(&id)
-		.await
-		.map_err(|e| e.to_string())?
-		.ok_or_else(|| format!("workspace not found: {}", id.0))?;
-	cleanup_delegation_worktrees(&session_repo, &workspace).await?;
-	cleanup_workspace_files(&workspace)?;
-	repo.delete_workspace(&id).await.map_err(|e| e.to_string())
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
+    let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
+    let id = WorkspaceId(input.workspace_id);
+    let workspace = repo
+        .get_workspace(&id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    cleanup_delegation_worktrees(&session_repo, &workspace).await?;
+    cleanup_workspace_files(&workspace)?;
+    repo.delete_workspace(&id).await.map_err(|e| e.to_string())
 }
 
 async fn cleanup_delegation_worktrees(
-	session_repo: &SqliteSessionRepo,
-	workspace: &Workspace,
+    session_repo: &SqliteSessionRepo,
+    workspace: &Workspace,
 ) -> Result<(), String> {
-	let delegations = DelegationRepo::list_delegations(
-		session_repo,
-		Some(&workspace.id),
-		None,
-	)
-	.await
-	.map_err(|e| e.to_string())?;
-	let workspace_root = Path::new(workspace.root_path.trim());
-	let workspace_worktree = workspace.worktree_path.as_deref().map(str::trim).unwrap_or("");
+    let delegations = DelegationRepo::list_delegations(session_repo, Some(&workspace.id), None)
+        .await
+        .map_err(|e| e.to_string())?;
+    let workspace_root = Path::new(workspace.root_path.trim());
+    let workspace_worktree = workspace
+        .worktree_path
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("");
 
-	for delegation in delegations {
-		let Some(child_session_id) = delegation.child_session_id.as_ref() else {
-			continue;
-		};
-		let Some(child_session) = SessionRepo::get_session(session_repo, child_session_id)
-			.await
-			.map_err(|e| e.to_string())?
-		else {
-			continue;
-		};
-		let Some(worktree_root) = child_session
-			.working_directory_override
-			.as_deref()
-			.map(str::trim)
-			.filter(|value| !value.is_empty())
-		else {
-			continue;
-		};
-		if worktree_root == workspace.root_path.trim() || worktree_root == workspace_worktree {
-			continue;
-		}
+    for delegation in delegations {
+        let Some(child_session_id) = delegation.child_session_id.as_ref() else {
+            continue;
+        };
+        let Some(child_session) = SessionRepo::get_session(session_repo, child_session_id)
+            .await
+            .map_err(|e| e.to_string())?
+        else {
+            continue;
+        };
+        let Some(worktree_root) = child_session
+            .working_directory_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        if worktree_root == workspace.root_path.trim() || worktree_root == workspace_worktree {
+            continue;
+        }
 
-		let worktree_path = Path::new(worktree_root);
-		if !worktree_path.exists() {
-			continue;
-		}
+        let worktree_path = Path::new(worktree_root);
+        if !worktree_path.exists() {
+            continue;
+        }
 
-		if !workspace.root_path.trim().is_empty()
-			&& is_git_repo(workspace_root)
-			&& worktree_path.join(".git").exists()
-		{
-			match remove_worktree(workspace_root, worktree_path) {
-				Ok(()) => continue,
-				Err(error) if broken_worktree_reason(worktree_path).is_none() => {
-					return Err(error.to_string());
-				}
-				Err(_) => {
-					// Fall through to direct removal for already-broken worktree metadata.
-				}
-			}
-		}
+        if !workspace.root_path.trim().is_empty()
+            && is_git_repo(workspace_root)
+            && worktree_path.join(".git").exists()
+        {
+            match remove_worktree(workspace_root, worktree_path) {
+                Ok(()) => continue,
+                Err(error) if broken_worktree_reason(worktree_path).is_none() => {
+                    return Err(error.to_string());
+                }
+                Err(_) => {
+                    // Fall through to direct removal for already-broken worktree metadata.
+                }
+            }
+        }
 
-		fs::remove_dir_all(worktree_path).map_err(|error| {
-			format!(
-				"failed to remove delegation worktree {}: {}",
-				worktree_path.display(),
-				error
-			)
-		})?;
-	}
+        fs::remove_dir_all(worktree_path).map_err(|error| {
+            format!(
+                "failed to remove delegation worktree {}: {}",
+                worktree_path.display(),
+                error
+            )
+        })?;
+    }
 
-	Ok(())
+    Ok(())
 }
 
 #[tauri::command]

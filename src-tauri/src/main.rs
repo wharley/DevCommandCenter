@@ -56,8 +56,8 @@ use coderabbit_commands::{
     workspace_coderabbit_review_save, workspace_coderabbit_review_start,
 };
 use delegation_commands::{
-    approve_delegation, cancel_delegation, complete_delegation, create_delegation,
-    fail_delegation, get_delegation, list_delegations, start_delegation,
+    approve_delegation, cancel_delegation, complete_delegation, create_delegation, fail_delegation,
+    get_delegation, list_delegations, start_delegation,
 };
 use forge_commands::{
     workspace_backfill_forge_repo_bindings, workspace_change_request_create,
@@ -78,16 +78,16 @@ use workspace_commands::{
     create_workspace_from_url, delete_repository, delete_workspace, list_child_directories,
     list_git_tracked_files, list_local_branches, list_mission_specs, list_repositories,
     list_workspaces, mission_spec_context_status, read_workspace_file, restore_workspace,
-    save_mission_validation, search_workspace, workspace_continue_from_base_branch,
-    workspace_apply_delegation_worktree, workspace_git_abort_merge,
-    workspace_git_accept_conflict, workspace_git_branch_diff, workspace_git_commit_push,
-    workspace_git_complete_merge, workspace_git_conflict_state, workspace_git_discard_file,
-    workspace_git_file_preview, workspace_git_file_preview_content,
-    workspace_git_mark_conflict_resolved, workspace_git_push, workspace_git_stage_all,
-    workspace_git_stage_file, workspace_git_status, workspace_git_sync_base,
-    workspace_git_unstage_file, workspace_git_validation_config,
-    workspace_prepare_delegation_worktree,
-    workspace_remove_delegation_worktree, workspace_run_setup, write_workspace_file,
+    save_mission_validation, search_workspace, workspace_apply_delegation_worktree,
+    workspace_continue_from_base_branch, workspace_git_abort_merge, workspace_git_accept_conflict,
+    workspace_git_branch_diff, workspace_git_commit_push, workspace_git_complete_merge,
+    workspace_git_conflict_state, workspace_git_discard_file, workspace_git_file_preview,
+    workspace_git_file_preview_content, workspace_git_mark_conflict_resolved, workspace_git_push,
+    workspace_git_stage_all, workspace_git_stage_file, workspace_git_status,
+    workspace_git_sync_base, workspace_git_unstage_file, workspace_git_validation_config,
+    workspace_prepare_delegation_worktree, workspace_project_automation_config,
+    workspace_remove_delegation_worktree, workspace_run_project_tasks, workspace_run_setup,
+    workspace_save_project_automation, write_workspace_file,
 };
 
 /// Schema SQLite embutido (`src-tauri/sql/schema.sql`, CREATE IF NOT EXISTS).
@@ -6893,6 +6893,9 @@ pub fn run() {
             workspace_git_abort_merge,
             workspace_git_complete_merge,
             workspace_git_validation_config,
+            workspace_project_automation_config,
+            workspace_save_project_automation,
+            workspace_run_project_tasks,
             workspace_git_conflict_state,
             workspace_git_discard_file,
             workspace_git_push,

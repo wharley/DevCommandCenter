@@ -70,6 +70,10 @@ import type {
 	WorkspaceGitSyncBaseInput,
 	WorkspaceGitSyncBaseOutput,
 	WorkspaceGitValidationConfigOutput,
+	WorkspaceProjectAutomationConfigOutput,
+	WorkspaceRunProjectTasksInput,
+	WorkspaceRunProjectTasksOutput,
+	WorkspaceSaveProjectAutomationInput,
 	WorkspaceApplyDelegationWorktreeInput,
 	WorkspaceApplyDelegationWorktreeOutput,
 	WorkspacePrepareDelegationWorktreeInput,
@@ -353,6 +357,31 @@ export function workspaceGitAbortMerge(input: WorkspaceGitConflictStateInput) {
 export function workspaceGitValidationConfig(input: WorkspaceGitConflictStateInput) {
 	return invoke<WorkspaceGitValidationConfigOutput>(
 		WORKSPACE_METHODS.workspaceGitValidationConfig,
+		{ input },
+	);
+}
+
+export function workspaceProjectAutomationConfig(
+	input: WorkspaceGitConflictStateInput,
+) {
+	return invoke<WorkspaceProjectAutomationConfigOutput>(
+		WORKSPACE_METHODS.workspaceProjectAutomationConfig,
+		{ input },
+	);
+}
+
+export function workspaceSaveProjectAutomation(
+	input: WorkspaceSaveProjectAutomationInput,
+) {
+	return invoke<WorkspaceProjectAutomationConfigOutput>(
+		WORKSPACE_METHODS.workspaceSaveProjectAutomation,
+		{ input },
+	);
+}
+
+export function workspaceRunProjectTasks(input: WorkspaceRunProjectTasksInput) {
+	return invoke<WorkspaceRunProjectTasksOutput>(
+		WORKSPACE_METHODS.workspaceRunProjectTasks,
 		{ input },
 	);
 }
