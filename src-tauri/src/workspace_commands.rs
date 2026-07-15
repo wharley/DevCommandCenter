@@ -15,6 +15,7 @@ use dcc_tauri::{
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
+        WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
         WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
         WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceIdInput,
@@ -149,6 +150,14 @@ pub async fn workspace_git_status(
     input: WorkspaceGitStatusInput,
 ) -> Result<WorkspaceGitStatusOutput, String> {
     dcc_tauri::commands::workspace_commands::workspace_git_status(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_conflict_state(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitConflictStateInput,
+) -> Result<WorkspaceGitConflictStateOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_conflict_state(state, input).await
 }
 
 #[tauri::command]

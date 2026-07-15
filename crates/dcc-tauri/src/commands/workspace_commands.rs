@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
@@ -444,6 +444,65 @@ pub struct WorkspaceGitSyncBaseOutput {
     pub conflict_count: u32,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitConflictStateInput {
+    pub workspace_root: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceGitConflictOperation {
+    None,
+    Merge,
+    Rebase,
+    CherryPick,
+    Revert,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceGitConflictKind {
+    BothModified,
+    BothAdded,
+    DeletedByCurrent,
+    DeletedByIncoming,
+    BothDeleted,
+    Other,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitConflictContent {
+    pub exists: bool,
+    pub binary: bool,
+    pub truncated: bool,
+    pub byte_count: u64,
+    pub mode: Option<String>,
+    pub text: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitConflictEntry {
+    pub path: String,
+    pub kind: WorkspaceGitConflictKind,
+    pub base: WorkspaceGitConflictContent,
+    pub current: WorkspaceGitConflictContent,
+    pub incoming: WorkspaceGitConflictContent,
+    pub result: WorkspaceGitConflictContent,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitConflictStateOutput {
+    pub operation: WorkspaceGitConflictOperation,
+    pub current_branch: Option<String>,
+    pub incoming_ref: Option<String>,
+    pub conflicts: Vec<WorkspaceGitConflictEntry>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceGitPreviewScope {
@@ -692,6 +751,264 @@ fn resolve_conflict_count(root: &str) -> Result<u32, String> {
         .filter(|line| !line.is_empty())
         .count();
     Ok(count as u32)
+}
+
+const MAX_CONFLICT_TEXT_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UnmergedIndexStage {
+    mode: String,
+    object_id: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct UnmergedIndexEntry {
+    path: String,
+    stages: BTreeMap<u8, UnmergedIndexStage>,
+}
+
+fn parse_unmerged_index_entries(stdout: &[u8]) -> Result<Vec<UnmergedIndexEntry>, String> {
+    let mut entries = BTreeMap::<String, UnmergedIndexEntry>::new();
+
+    for record in stdout
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        let separator = record
+            .iter()
+            .position(|byte| *byte == b'\t')
+            .ok_or_else(|| "invalid git ls-files -u record: missing path separator".to_string())?;
+        let metadata = std::str::from_utf8(&record[..separator])
+            .map_err(|_| "invalid git ls-files -u metadata".to_string())?;
+        let mut fields = metadata.split_whitespace();
+        let mode = fields
+            .next()
+            .ok_or_else(|| "invalid git ls-files -u record: missing mode".to_string())?;
+        let object_id = fields
+            .next()
+            .ok_or_else(|| "invalid git ls-files -u record: missing object id".to_string())?;
+        let stage = fields
+            .next()
+            .and_then(|value| value.parse::<u8>().ok())
+            .filter(|value| (1..=3).contains(value))
+            .ok_or_else(|| "invalid git ls-files -u record: invalid stage".to_string())?;
+        if fields.next().is_some()
+            || !object_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || object_id.len() < 40
+        {
+            return Err("invalid git ls-files -u metadata".to_string());
+        }
+
+        let path = String::from_utf8_lossy(&record[(separator + 1)..]).to_string();
+        validate_git_relative_path(&path)?;
+        let entry = entries
+            .entry(path.clone())
+            .or_insert_with(|| UnmergedIndexEntry {
+                path,
+                stages: BTreeMap::new(),
+            });
+        entry.stages.insert(
+            stage,
+            UnmergedIndexStage {
+                mode: mode.to_string(),
+                object_id: object_id.to_string(),
+            },
+        );
+    }
+
+    Ok(entries.into_values().collect())
+}
+
+fn classify_unmerged_entry(entry: &UnmergedIndexEntry) -> WorkspaceGitConflictKind {
+    match (
+        entry.stages.contains_key(&1),
+        entry.stages.contains_key(&2),
+        entry.stages.contains_key(&3),
+    ) {
+        (true, true, true) => WorkspaceGitConflictKind::BothModified,
+        (false, true, true) => WorkspaceGitConflictKind::BothAdded,
+        (true, false, true) => WorkspaceGitConflictKind::DeletedByCurrent,
+        (true, true, false) => WorkspaceGitConflictKind::DeletedByIncoming,
+        (true, false, false) => WorkspaceGitConflictKind::BothDeleted,
+        _ => WorkspaceGitConflictKind::Other,
+    }
+}
+
+fn conflict_content(bytes: Option<Vec<u8>>, mode: Option<String>) -> WorkspaceGitConflictContent {
+    let Some(bytes) = bytes else {
+        return WorkspaceGitConflictContent {
+            exists: false,
+            binary: false,
+            truncated: false,
+            byte_count: 0,
+            mode,
+            text: None,
+        };
+    };
+
+    let byte_count = bytes.len() as u64;
+    let truncated = bytes.len() > MAX_CONFLICT_TEXT_BYTES;
+    let contains_nul = bytes.contains(&0);
+    let utf8_valid = std::str::from_utf8(&bytes).is_ok();
+    let text = if truncated || contains_nul || !utf8_valid {
+        None
+    } else {
+        String::from_utf8(bytes).ok()
+    };
+    let binary = contains_nul || !utf8_valid;
+
+    WorkspaceGitConflictContent {
+        exists: true,
+        binary,
+        truncated,
+        byte_count,
+        mode,
+        text,
+    }
+}
+
+fn read_unmerged_stage(
+    root: &str,
+    stage: Option<&UnmergedIndexStage>,
+) -> Result<WorkspaceGitConflictContent, String> {
+    let Some(stage) = stage else {
+        return Ok(conflict_content(None, None));
+    };
+    let output = run_git_output(root, &["cat-file", "blob", &stage.object_id])?;
+    if !output.status.success() {
+        return Err(git_output_err("git cat-file blob", &output.stderr));
+    }
+    Ok(conflict_content(
+        Some(output.stdout),
+        Some(stage.mode.clone()),
+    ))
+}
+
+fn read_conflict_result(
+    root: &str,
+    relative_path: &str,
+) -> Result<WorkspaceGitConflictContent, String> {
+    let Some(path) = resolve_worktree_file_path(root, relative_path)? else {
+        return Ok(conflict_content(None, None));
+    };
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    Ok(conflict_content(Some(bytes), None))
+}
+
+fn git_internal_path_exists(root: &str, name: &str) -> bool {
+    let Ok(output) = run_git_output(root, &["rev-parse", "--git-path", name]) else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if raw.is_empty() {
+        return false;
+    }
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        path.exists()
+    } else {
+        PathBuf::from(root).join(path).exists()
+    }
+}
+
+fn resolve_conflict_operation(root: &str, has_conflicts: bool) -> WorkspaceGitConflictOperation {
+    if git_internal_path_exists(root, "MERGE_HEAD") {
+        WorkspaceGitConflictOperation::Merge
+    } else if git_internal_path_exists(root, "rebase-merge")
+        || git_internal_path_exists(root, "rebase-apply")
+    {
+        WorkspaceGitConflictOperation::Rebase
+    } else if git_internal_path_exists(root, "CHERRY_PICK_HEAD") {
+        WorkspaceGitConflictOperation::CherryPick
+    } else if git_internal_path_exists(root, "REVERT_HEAD") {
+        WorkspaceGitConflictOperation::Revert
+    } else if has_conflicts {
+        WorkspaceGitConflictOperation::Unknown
+    } else {
+        WorkspaceGitConflictOperation::None
+    }
+}
+
+fn resolve_merge_incoming_ref(root: &str) -> Option<String> {
+    let merge_head = run_git_output(root, &["rev-parse", "--verify", "MERGE_HEAD"]).ok()?;
+    if !merge_head.status.success() {
+        return None;
+    }
+    let object_id = String::from_utf8_lossy(&merge_head.stdout)
+        .trim()
+        .to_string();
+    if object_id.is_empty() {
+        return None;
+    }
+    let name = run_git_output(
+        root,
+        &["name-rev", "--name-only", "--no-undefined", &object_id],
+    )
+    .ok()?;
+    if !name.status.success() {
+        return Some(object_id);
+    }
+    let value = String::from_utf8_lossy(&name.stdout).trim().to_string();
+    if value.is_empty() {
+        Some(object_id)
+    } else {
+        Some(value.strip_prefix("remotes/").unwrap_or(&value).to_string())
+    }
+}
+
+fn workspace_git_conflict_state_inner(
+    root: &str,
+) -> Result<WorkspaceGitConflictStateOutput, String> {
+    let output = run_git_output(root, &["ls-files", "-u", "-z"])?;
+    if !output.status.success() {
+        return Err(git_output_err("git ls-files -u", &output.stderr));
+    }
+    let unmerged = parse_unmerged_index_entries(&output.stdout)?;
+    let operation = resolve_conflict_operation(root, !unmerged.is_empty());
+    let incoming_ref = if operation == WorkspaceGitConflictOperation::Merge {
+        resolve_merge_incoming_ref(root)
+    } else {
+        None
+    };
+
+    let mut conflicts = Vec::with_capacity(unmerged.len());
+    for entry in unmerged {
+        let base = read_unmerged_stage(root, entry.stages.get(&1))?;
+        let current = read_unmerged_stage(root, entry.stages.get(&2))?;
+        let incoming = read_unmerged_stage(root, entry.stages.get(&3))?;
+        let result = read_conflict_result(root, &entry.path)?;
+        conflicts.push(WorkspaceGitConflictEntry {
+            kind: classify_unmerged_entry(&entry),
+            path: entry.path,
+            base,
+            current,
+            incoming,
+            result,
+        });
+    }
+
+    Ok(WorkspaceGitConflictStateOutput {
+        operation,
+        current_branch: resolve_current_branch_name(root).ok(),
+        incoming_ref,
+        conflicts,
+    })
+}
+
+#[tauri::command]
+pub async fn workspace_git_conflict_state(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitConflictStateInput,
+) -> Result<WorkspaceGitConflictStateOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    workspace_git_conflict_state_inner(root)
 }
 
 async fn refresh_repository_forge_metadata(
@@ -2193,6 +2510,106 @@ mod editor_workspace_file_tests {
             remote_branch_fetch_refspec("origin", "release/2026"),
             "+refs/heads/release/2026:refs/remotes/origin/release/2026"
         );
+    }
+
+    #[test]
+    fn unmerged_index_parser_groups_stages_and_classifies_conflicts() {
+        let oid1 = "1".repeat(40);
+        let oid2 = "2".repeat(40);
+        let oid3 = "3".repeat(40);
+        let mut raw = Vec::new();
+        for (stage, oid) in [(1, &oid1), (2, &oid2), (3, &oid3)] {
+            raw.extend_from_slice(format!("100644 {oid} {stage}\tsrc/with\ttab.ts").as_bytes());
+            raw.push(0);
+        }
+        raw.extend_from_slice(format!("100644 {oid2} 2\tadded.ts").as_bytes());
+        raw.push(0);
+        raw.extend_from_slice(format!("100644 {oid3} 3\tadded.ts").as_bytes());
+        raw.push(0);
+
+        let entries = parse_unmerged_index_entries(&raw).expect("parse unmerged index");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].path, "added.ts");
+        assert_eq!(
+            classify_unmerged_entry(&entries[0]),
+            WorkspaceGitConflictKind::BothAdded
+        );
+        assert_eq!(entries[1].path, "src/with\ttab.ts");
+        assert_eq!(
+            classify_unmerged_entry(&entries[1]),
+            WorkspaceGitConflictKind::BothModified
+        );
+    }
+
+    #[test]
+    fn conflict_content_distinguishes_text_binary_and_large_files() {
+        let text = conflict_content(Some(b"hello\n".to_vec()), Some("100644".to_string()));
+        assert_eq!(text.text.as_deref(), Some("hello\n"));
+        assert!(!text.binary);
+        assert!(!text.truncated);
+
+        let binary = conflict_content(Some(vec![b'a', 0, b'b']), None);
+        assert!(binary.binary);
+        assert!(binary.text.is_none());
+
+        let large = conflict_content(Some(vec![b'a'; MAX_CONFLICT_TEXT_BYTES + 1]), None);
+        assert!(large.truncated);
+        assert!(!large.binary);
+        assert!(large.text.is_none());
+    }
+
+    #[test]
+    fn conflict_state_reads_git_index_stages_and_worktree_result() {
+        let repo = TestDir::new("merge-conflict-state");
+        let git = |args: &[&str]| {
+            let output = run_git_output(repo.as_str(), args).expect("run git");
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+
+        git(&["init", "-b", "current"]);
+        git(&["config", "user.name", "DCC Test"]);
+        git(&["config", "user.email", "dcc@example.invalid"]);
+        fs::write(repo.path.join("app.txt"), "shared\nbase\n").expect("write base");
+        git(&["add", "app.txt"]);
+        git(&["commit", "-m", "base"]);
+        git(&["branch", "incoming"]);
+
+        fs::write(repo.path.join("app.txt"), "shared\ncurrent\n").expect("write current");
+        git(&["add", "app.txt"]);
+        git(&["commit", "-m", "current"]);
+
+        git(&["checkout", "incoming"]);
+        fs::write(repo.path.join("app.txt"), "shared\nincoming\n").expect("write incoming");
+        git(&["add", "app.txt"]);
+        git(&["commit", "-m", "incoming"]);
+        git(&["checkout", "current"]);
+
+        let merge = run_git_output(repo.as_str(), &["merge", "incoming"]).expect("run merge");
+        assert!(!merge.status.success(), "merge should conflict");
+
+        let state = workspace_git_conflict_state_inner(repo.as_str()).expect("read conflict state");
+        assert_eq!(state.operation, WorkspaceGitConflictOperation::Merge);
+        assert_eq!(state.current_branch.as_deref(), Some("current"));
+        assert_eq!(state.conflicts.len(), 1);
+        let conflict = &state.conflicts[0];
+        assert_eq!(conflict.path, "app.txt");
+        assert_eq!(conflict.kind, WorkspaceGitConflictKind::BothModified);
+        assert_eq!(conflict.base.text.as_deref(), Some("shared\nbase\n"));
+        assert_eq!(conflict.current.text.as_deref(), Some("shared\ncurrent\n"));
+        assert_eq!(
+            conflict.incoming.text.as_deref(),
+            Some("shared\nincoming\n")
+        );
+        assert!(conflict
+            .result
+            .text
+            .as_deref()
+            .is_some_and(|text| text.contains("<<<<<<< HEAD")));
     }
 
     #[test]

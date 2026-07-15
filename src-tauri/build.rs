@@ -77,11 +77,14 @@ use dcc_tauri::commands::{
         WorkspaceApplyDelegationWorktreeOutput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
         WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput,
-        WorkspaceGitPathInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
-        WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput,
-        WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
-        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
-        WorkspaceSetupHint, WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
+        WorkspaceGitConflictContent, WorkspaceGitConflictEntry, WorkspaceGitConflictKind,
+        WorkspaceGitConflictOperation, WorkspaceGitConflictStateInput,
+        WorkspaceGitConflictStateOutput, WorkspaceGitPathInput, WorkspaceGitPushInput,
+        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput,
+        WorkspaceGitSyncBaseOutput, WorkspacePrepareDelegationWorktreeInput,
+        WorkspacePrepareDelegationWorktreeOutput, WorkspaceRemoveDelegationWorktreeInput,
+        WorkspaceRunSetupInput, WorkspaceRunSetupOutput, WorkspaceSetupHint,
+        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -130,6 +133,7 @@ struct WorkspaceMethods {
     workspace_git_branch_diff: String,
     workspace_apply_delegation_worktree: String,
     workspace_git_commit_push: String,
+    workspace_git_conflict_state: String,
     workspace_git_discard_file: String,
     workspace_git_file_preview: String,
     workspace_git_file_preview_content: String,
@@ -292,6 +296,12 @@ fn main() {
         .typ::<WorkspaceGitStatusInput>()
         .typ::<WorkspaceGitStatusOutput>()
         .typ::<WorkspaceGitChangeEntry>()
+        .typ::<WorkspaceGitConflictStateInput>()
+        .typ::<WorkspaceGitConflictStateOutput>()
+        .typ::<WorkspaceGitConflictOperation>()
+        .typ::<WorkspaceGitConflictKind>()
+        .typ::<WorkspaceGitConflictContent>()
+        .typ::<WorkspaceGitConflictEntry>()
         .typ::<WorkspaceContinueFromBaseBranchInput>()
         .typ::<WorkspaceContinueFromBaseBranchOutput>()
         .typ::<WorkspacePrStatusInput>()
@@ -422,6 +432,7 @@ fn main() {
                 workspace_git_file_preview_content: "workspace_git_file_preview_content"
                     .to_string(),
                 workspace_git_commit_push: "workspace_git_commit_push".to_string(),
+                workspace_git_conflict_state: "workspace_git_conflict_state".to_string(),
                 workspace_git_discard_file: "workspace_git_discard_file".to_string(),
                 workspace_git_push: "workspace_git_push".to_string(),
                 workspace_git_stage_all: "workspace_git_stage_all".to_string(),

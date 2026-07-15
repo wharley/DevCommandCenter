@@ -57,6 +57,8 @@ import type {
 	WorkspaceGitFilePreviewInput,
 	WorkspaceGitFilePreviewContentOutput,
 	WorkspaceGitCommitPushInput,
+	WorkspaceGitConflictStateInput,
+	WorkspaceGitConflictStateOutput,
 	WorkspaceGitPathInput,
 	WorkspaceGitPushInput,
 	WorkspaceGitStatusInput,
@@ -320,6 +322,13 @@ export function workspaceGitStatus(input: WorkspaceGitStatusInput) {
 	return invoke<WorkspaceGitStatusOutput>(WORKSPACE_METHODS.workspaceGitStatus, {
 		input,
 	});
+}
+
+export function workspaceGitConflictState(input: WorkspaceGitConflictStateInput) {
+	return invoke<WorkspaceGitConflictStateOutput>(
+		WORKSPACE_METHODS.workspaceGitConflictState,
+		{ input },
+	);
 }
 
 export function workspaceApplyDelegationWorktree(
