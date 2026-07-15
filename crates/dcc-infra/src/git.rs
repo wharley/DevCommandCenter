@@ -27,6 +27,7 @@ pub use crate::git_parsing::{
 pub use crate::workspace_setup_plan::{
     detect_workspace_setup_suggestions, WorkspaceSetupSuggestion,
 };
+pub use crate::repo_config::{read_workspace_validation_config, RepoValidationConfig};
 
 #[derive(Clone, Debug, Default)]
 pub struct CommandGitOps;

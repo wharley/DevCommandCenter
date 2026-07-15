@@ -77,11 +77,14 @@ use dcc_tauri::commands::{
         WorkspaceApplyDelegationWorktreeOutput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
         WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
-        WorkspaceGitCommitPushInput, WorkspaceGitConflictContent, WorkspaceGitConflictEntry,
+        WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
+        WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictContent, WorkspaceGitConflictEntry,
         WorkspaceGitConflictKind, WorkspaceGitConflictOperation, WorkspaceGitConflictSide,
         WorkspaceGitConflictStateInput,
         WorkspaceGitConflictStateOutput, WorkspaceGitPathInput, WorkspaceGitPushInput,
-        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput,
+        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
+        WorkspaceGitSyncBaseInput, WorkspaceGitValidationConfigOutput,
+        WorkspaceGitValidationReport, WorkspaceGitValidationStatus, WorkspaceGitValidationStep,
         WorkspaceGitSyncBaseOutput, WorkspacePrepareDelegationWorktreeInput,
         WorkspacePrepareDelegationWorktreeOutput, WorkspaceRemoveDelegationWorktreeInput,
         WorkspaceRunSetupInput, WorkspaceRunSetupOutput, WorkspaceSetupHint,
@@ -138,6 +141,7 @@ struct WorkspaceMethods {
     workspace_git_mark_conflict_resolved: String,
     workspace_git_abort_merge: String,
     workspace_git_complete_merge: String,
+    workspace_git_validation_config: String,
     workspace_git_conflict_state: String,
     workspace_git_discard_file: String,
     workspace_git_file_preview: String,
@@ -322,6 +326,12 @@ fn main() {
         .typ::<WorkspaceGitPathInput>()
         .typ::<WorkspaceGitCommitPushInput>()
         .typ::<WorkspaceGitPushInput>()
+        .typ::<WorkspaceGitCompleteMergeInput>()
+        .typ::<WorkspaceGitCompleteMergeOutput>()
+        .typ::<WorkspaceGitValidationStatus>()
+        .typ::<WorkspaceGitValidationStep>()
+        .typ::<WorkspaceGitValidationReport>()
+        .typ::<WorkspaceGitValidationConfigOutput>()
         .typ::<WorkspaceGitSyncBaseInput>()
         .typ::<WorkspaceGitSyncBaseOutput>()
         .typ::<WorkspaceApplyDelegationWorktreeInput>()
@@ -445,6 +455,7 @@ fn main() {
                     .to_string(),
                 workspace_git_abort_merge: "workspace_git_abort_merge".to_string(),
                 workspace_git_complete_merge: "workspace_git_complete_merge".to_string(),
+                workspace_git_validation_config: "workspace_git_validation_config".to_string(),
                 workspace_git_conflict_state: "workspace_git_conflict_state".to_string(),
                 workspace_git_discard_file: "workspace_git_discard_file".to_string(),
                 workspace_git_push: "workspace_git_push".to_string(),

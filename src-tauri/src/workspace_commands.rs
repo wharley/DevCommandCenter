@@ -15,10 +15,11 @@ use dcc_tauri::{
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
         WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
-        WorkspaceGitCommitPushInput, WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
+        WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
+        WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
         WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
-        WorkspaceGitStatusOutput,
+        WorkspaceGitStatusOutput, WorkspaceGitValidationConfigOutput,
         WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceIdInput,
         WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
         WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
@@ -189,9 +190,17 @@ pub async fn workspace_git_abort_merge(
 #[tauri::command]
 pub async fn workspace_git_complete_merge(
     state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
+    input: WorkspaceGitCompleteMergeInput,
+) -> Result<WorkspaceGitCompleteMergeOutput, String> {
     dcc_tauri::commands::workspace_commands::workspace_git_complete_merge(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_validation_config(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitConflictStateInput,
+) -> Result<WorkspaceGitValidationConfigOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_validation_config(state, input).await
 }
 
 #[tauri::command]

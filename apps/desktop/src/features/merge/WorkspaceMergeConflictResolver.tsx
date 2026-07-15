@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type {
 	WorkspaceGitConflictEntry,
 	WorkspaceGitConflictSide,
+	WorkspaceGitValidationReport,
 } from "@dcc/contracts";
 import {
 	AlertTriangle,
@@ -10,10 +11,12 @@ import {
 	ChevronRight,
 	FileWarning,
 	GitMerge,
+	ListChecks,
 	Loader2,
 	RotateCcw,
 	Sparkles,
 	Trash2,
+	XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -33,6 +36,7 @@ import {
 	workspaceGitConflictState,
 	workspaceGitMarkConflictResolved,
 	workspaceGitSyncBase,
+	workspaceGitValidationConfig,
 	writeWorkspaceFile,
 } from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
@@ -137,6 +141,8 @@ export function WorkspaceMergeConflictResolver({
 	const [busy, setBusy] = useState<string | null>(null);
 	const [agentSuggestion, setAgentSuggestion] =
 		useState<AppliedAgentSuggestion | null>(null);
+	const [validationReport, setValidationReport] =
+		useState<WorkspaceGitValidationReport | null>(null);
 
 	const query = useQuery({
 		queryKey: [CONFLICT_STATE_QUERY_KEY, workspaceRoot],
@@ -147,6 +153,13 @@ export function WorkspaceMergeConflictResolver({
 
 	const state = query.data;
 	const conflicts = state?.conflicts ?? [];
+	const validationConfigQuery = useQuery({
+		queryKey: ["workspaceGitValidationConfig", workspaceRoot],
+		queryFn: () => workspaceGitValidationConfig({ workspaceRoot }),
+		enabled:
+			open && state?.operation === "merge" && conflicts.length === 0,
+		staleTime: 0,
+	});
 	if (open && conflicts.length > totalConflictsRef.current) {
 		totalConflictsRef.current = conflicts.length;
 	}
@@ -177,6 +190,7 @@ export function WorkspaceMergeConflictResolver({
 			setBuffer("");
 			initialResultRef.current = null;
 			totalConflictsRef.current = 0;
+			setValidationReport(null);
 			return;
 		}
 		if (conflicts.length === 0) {
@@ -201,8 +215,12 @@ export function WorkspaceMergeConflictResolver({
 
 	const requestOpenChange = useCallback(
 		(next: boolean) => {
-			if (!next && busy === "agent") {
-				toast.info("Aguarde o agente concluir a sugestão antes de fechar.");
+			if (!next && busy) {
+				toast.info(
+					busy === "agent"
+						? "Aguarde o agente concluir a sugestão antes de fechar."
+						: "Aguarde a operação em andamento antes de fechar.",
+				);
 				return;
 			}
 			if (
@@ -454,9 +472,36 @@ export function WorkspaceMergeConflictResolver({
 	}, [onOpenChange, onStateChanged, workspaceRoot]);
 
 	const completeMerge = useCallback(async () => {
+		const commands = validationConfigQuery.data?.commands ?? [];
+		if (
+			commands.length > 0 &&
+			!window.confirm(
+				[
+					"O DCC executará estes comandos definidos pelo projeto antes do commit:",
+					"",
+					...commands.map((command) => `• ${command}`),
+					"",
+					"Continuar?",
+				].join("\n"),
+			)
+		) {
+			return;
+		}
 		setBusy("complete");
+		setValidationReport(null);
 		try {
-			await workspaceGitCompleteMerge({ workspaceRoot, forgeLogin });
+			const result = await workspaceGitCompleteMerge({
+				workspaceRoot,
+				forgeLogin,
+				validationConfigHash: validationConfigQuery.data?.configHash ?? null,
+				validationCommands: validationConfigQuery.data?.commands ?? [],
+			});
+			setValidationReport(result.validation);
+			if (!result.completed) {
+				await onStateChanged();
+				toast.error("Uma validação falhou. Revise a saída antes de tentar novamente.");
+				return;
+			}
 			await onStateChanged();
 			toast.success("Merge concluído e enviado");
 			onOpenChange(false);
@@ -465,7 +510,14 @@ export function WorkspaceMergeConflictResolver({
 		} finally {
 			setBusy(null);
 		}
-	}, [forgeLogin, onOpenChange, onStateChanged, workspaceRoot]);
+	}, [
+		forgeLogin,
+		onOpenChange,
+		onStateChanged,
+		validationConfigQuery.data?.commands,
+		validationConfigQuery.data?.configHash,
+		workspaceRoot,
+	]);
 
 	const total = Math.max(totalConflictsRef.current, conflicts.length);
 	const resolved = Math.max(total - conflicts.length, 0);
@@ -508,6 +560,7 @@ export function WorkspaceMergeConflictResolver({
 						<Button
 							variant="ghost"
 							size="sm"
+							disabled={Boolean(busy)}
 							onClick={() => requestOpenChange(false)}
 						>
 							Fechar
@@ -562,20 +615,37 @@ export function WorkspaceMergeConflictResolver({
 						</div>
 					</div>
 				) : state?.operation === "merge" && conflicts.length === 0 ? (
-					<div className="flex flex-1 items-center justify-center p-8 text-center">
-						<div className="max-w-md">
+					<div className="flex flex-1 items-center justify-center overflow-y-auto p-8 text-center">
+						<div className="w-full max-w-2xl">
 							<div className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600">
 								<Check className="size-6" />
 							</div>
 							<h3 className="mt-4 text-base font-semibold">
 								Todos os conflitos foram resolvidos
 							</h3>
-							<p className="mt-2 text-sm text-muted-foreground">
-								Conclua o commit de merge e envie a branch para atualizar o PR/MR.
-							</p>
+							<p className="mt-2 text-sm text-muted-foreground">Antes do commit, o DCC executa as validações declaradas pelo projeto.</p>
+							{validationConfigQuery.isPending ? (
+								<div className="mt-5 flex items-center justify-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Lendo validações do projeto…</div>
+							) : validationConfigQuery.isError ? (
+								<div className="mt-5 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-left text-xs text-destructive"><div className="flex items-center gap-2 font-semibold"><XCircle className="size-4" />Configuração de validação inválida</div><p className="mt-1 whitespace-pre-wrap">{errorMessage(validationConfigQuery.error)}</p></div>
+							) : (validationConfigQuery.data?.commands.length ?? 0) > 0 ? (
+								<div className="mt-5 rounded-lg border border-border/60 bg-muted/10 p-3 text-left">
+									<div className="flex items-center gap-2 text-xs font-semibold"><ListChecks className="size-4 text-violet-500" />Validações configuradas em .dcc.toml</div>
+									<div className="mt-2 space-y-1.5">{validationConfigQuery.data?.commands.map((command, index) => <code key={`${command}-${index}`} className="block rounded bg-muted px-2 py-1.5 text-[11px]">{command}</code>)}</div>
+									<p className="mt-2 text-[10px] text-muted-foreground">Timeout de {validationConfigQuery.data?.timeoutSeconds ?? 600}s por comando. A execução para no primeiro erro.</p>
+								</div>
+							) : (
+								<div className="mt-5 rounded-lg border border-border/60 bg-muted/10 p-3 text-xs text-muted-foreground">Nenhuma validação configurada. Adicione <code>validate = [...]</code> à seção <code>[scripts]</code> do <code>.dcc.toml</code> para executar lint, typecheck ou testes.</div>
+							)}
+							{validationReport ? (
+								<div className={cn("mt-4 rounded-lg border p-3 text-left", validationReport.status === "failed" ? "border-destructive/30 bg-destructive/5" : "border-emerald-500/30 bg-emerald-500/5")}>
+									<div className="flex items-center gap-2 text-xs font-semibold">{validationReport.status === "failed" ? <XCircle className="size-4 text-destructive" /> : <Check className="size-4 text-emerald-600" />}{validationReport.status === "failed" ? "Validação falhou" : validationReport.status === "passed" ? "Validações aprovadas" : "Sem validações configuradas"}</div>
+									<div className="mt-2 space-y-2">{validationReport.steps.map((step, index) => <div key={`${step.command}-${index}`} className="overflow-hidden rounded border border-border/50 bg-background/60"><div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px]"><span className={step.success ? "text-emerald-600" : "text-destructive"}>{step.success ? "✓" : "✕"}</span><code className="min-w-0 flex-1 truncate">{step.command}</code><span className="text-muted-foreground">{(step.durationMs / 1000).toFixed(1)}s{step.exitCode != null ? ` · exit ${step.exitCode}` : ""}</span></div>{step.output ? <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-border/40 px-2.5 py-2 font-mono text-[10px] leading-4 text-muted-foreground">{step.output}</pre> : null}</div>)}</div>
+								</div>
+							) : null}
 							<Button
 								className="mt-5"
-								disabled={Boolean(busy)}
+								disabled={Boolean(busy) || validationConfigQuery.isPending || validationConfigQuery.isError}
 								onClick={() => void completeMerge()}
 							>
 								{busy === "complete" ? (
@@ -583,7 +653,7 @@ export function WorkspaceMergeConflictResolver({
 								) : (
 									<GitMerge className="size-4" />
 								)}
-								Concluir merge e enviar
+								{(validationConfigQuery.data?.commands.length ?? 0) > 0 ? "Validar, concluir e enviar" : "Concluir merge e enviar"}
 							</Button>
 						</div>
 					</div>

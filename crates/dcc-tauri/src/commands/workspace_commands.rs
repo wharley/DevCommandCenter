@@ -8,6 +8,7 @@ use std::process::{Command, Stdio};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use specta::Type;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
@@ -32,7 +33,7 @@ use dcc_infra::{
 	git::{
 		broken_worktree_reason, create_worktree_branch_from_ref,
 		detect_workspace_setup_suggestions, is_git_repo, list_local_branch_names,
-		remove_worktree, CommandGitOps,
+		read_workspace_validation_config, remove_worktree, CommandGitOps,
 	},
 };
 
@@ -54,7 +55,7 @@ use crate::{
         split_null_terminated_fields,
     },
     state::WorkspaceCommandState,
-    workspace_setup::run_detected_workspace_setup,
+    workspace_setup::{run_detected_workspace_setup, run_workspace_validation_command, WORKSPACE_VALIDATION_TIMEOUT},
 };
 
 const DCC_SPEC_CONTEXT_START: &str = "<!-- dcc:spec:start -->";
@@ -425,6 +426,59 @@ pub struct WorkspaceGitCommitPushInput {
 pub struct WorkspaceGitPushInput {
     pub workspace_root: String,
     pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitCompleteMergeInput {
+    pub workspace_root: String,
+    pub forge_login: Option<String>,
+    pub validation_config_hash: Option<String>,
+    pub validation_commands: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceGitValidationStatus {
+    NotConfigured,
+    Passed,
+    Failed,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitValidationStep {
+    pub command: String,
+    pub success: bool,
+    pub exit_code: Option<i32>,
+    pub output: String,
+    pub timed_out: bool,
+    pub duration_ms: u64,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitValidationReport {
+    pub status: WorkspaceGitValidationStatus,
+    pub source_path: Option<String>,
+    pub steps: Vec<WorkspaceGitValidationStep>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitValidationConfigOutput {
+    pub commands: Vec<String>,
+    pub source_path: Option<String>,
+    pub timeout_seconds: u64,
+    pub config_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitCompleteMergeOutput {
+    pub completed: bool,
+    pub validation: WorkspaceGitValidationReport,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1193,14 +1247,96 @@ fn workspace_git_abort_merge_inner(root: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn workspace_git_complete_merge(
+pub async fn workspace_git_validation_config(
     state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
+    input: WorkspaceGitConflictStateInput,
+) -> Result<WorkspaceGitValidationConfigOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
+    }
+    let config = read_workspace_validation_config(Path::new(root))?;
+    Ok(WorkspaceGitValidationConfigOutput {
+        commands: config
+            .as_ref()
+            .map(|config| config.commands.clone())
+            .unwrap_or_default(),
+        source_path: config.map(|config| config.source_path),
+        timeout_seconds: WORKSPACE_VALIDATION_TIMEOUT.as_secs(),
+        config_hash: workspace_validation_config_hash(root)?,
+    })
+}
+
+#[tauri::command]
+pub async fn workspace_git_complete_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitCompleteMergeInput,
+) -> Result<WorkspaceGitCompleteMergeOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    require_merge_ready_to_complete(root)?;
+    let configured_validation = read_workspace_validation_config(Path::new(root))?;
+    let configured_commands = configured_validation
+        .as_ref()
+        .map(|config| config.commands.clone())
+        .unwrap_or_default();
+    if workspace_validation_config_hash(root)? != input.validation_config_hash
+        || configured_commands != input.validation_commands
+    {
+        return Err(
+            "The .dcc.toml validation configuration changed. Review the commands and confirm again."
+                .to_string(),
+        );
+    }
+
+    let validation_root = root.to_string();
+    let validation_commands = input.validation_commands;
+    let validation_source_path = configured_validation.map(|config| config.source_path);
+    let (mut validation, validated_fingerprint) = tauri::async_runtime::spawn_blocking(move || {
+        workspace_git_run_confirmed_validations_inner(
+            &validation_root,
+            validation_commands,
+            validation_source_path,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    if validation.status == WorkspaceGitValidationStatus::Failed {
+        return Ok(WorkspaceGitCompleteMergeOutput {
+            completed: false,
+            validation,
+        });
+    }
+
+    require_merge_ready_to_complete(root)?;
+    if workspace_validation_config_hash(root)? != input.validation_config_hash {
+        return Err(
+            "The .dcc.toml validation configuration changed while validations were running. Review the commands and confirm again."
+                .to_string(),
+        );
+    }
+    if let Some(validated_fingerprint) = validated_fingerprint {
+        let current_fingerprint = workspace_validation_fingerprint(root)?;
+        if current_fingerprint != validated_fingerprint {
+            validation.status = WorkspaceGitValidationStatus::Failed;
+            validation.steps.push(WorkspaceGitValidationStep {
+                command: "DCC workspace consistency check".to_string(),
+                success: false,
+                exit_code: None,
+                output: "The staged result or tracked working-tree changes changed while validations were running. Run validations again.".to_string(),
+                timed_out: false,
+                duration_ms: 0,
+                truncated: false,
+            });
+            return Ok(WorkspaceGitCompleteMergeOutput {
+                completed: false,
+                validation,
+            });
+        }
     }
     workspace_git_complete_merge_commit_inner(root)?;
 
@@ -1210,10 +1346,24 @@ pub async fn workspace_git_complete_merge(
         root,
         protected_branch.as_deref(),
         input.forge_login.as_deref(),
-    )
+    )?;
+    Ok(WorkspaceGitCompleteMergeOutput {
+        completed: true,
+        validation,
+    })
 }
 
 fn workspace_git_complete_merge_commit_inner(root: &str) -> Result<(), String> {
+    require_merge_ready_to_complete(root)?;
+
+    let commit = run_git_output(root, &["commit", "--no-edit"])?;
+    if !commit.status.success() {
+        return Err(git_output_err("git commit --no-edit", &commit.stderr));
+    }
+    Ok(())
+}
+
+fn require_merge_ready_to_complete(root: &str) -> Result<(), String> {
     if resolve_conflict_operation(root, false) != WorkspaceGitConflictOperation::Merge {
         return Err("no merge is in progress".to_string());
     }
@@ -1225,11 +1375,125 @@ fn workspace_git_complete_merge_commit_inner(root: &str) -> Result<(), String> {
         ));
     }
 
-    let commit = run_git_output(root, &["commit", "--no-edit"])?;
-    if !commit.status.success() {
-        return Err(git_output_err("git commit --no-edit", &commit.stderr));
-    }
     Ok(())
+}
+
+#[cfg(test)]
+fn workspace_git_run_validations_inner(
+    root: &str,
+) -> Result<(WorkspaceGitValidationReport, Option<String>), String> {
+    let Some(config) = read_workspace_validation_config(Path::new(root))? else {
+        return workspace_git_run_confirmed_validations_inner(root, Vec::new(), None);
+    };
+    workspace_git_run_confirmed_validations_inner(
+        root,
+        config.commands,
+        Some(config.source_path),
+    )
+}
+
+fn workspace_git_run_confirmed_validations_inner(
+    root: &str,
+    commands: Vec<String>,
+    source_path: Option<String>,
+) -> Result<(WorkspaceGitValidationReport, Option<String>), String> {
+    if commands.is_empty() {
+        return Ok((
+            WorkspaceGitValidationReport {
+                status: WorkspaceGitValidationStatus::NotConfigured,
+                source_path,
+                steps: Vec::new(),
+            },
+            None,
+        ));
+    }
+    let fingerprint = workspace_validation_fingerprint(root)?;
+    let mut steps = Vec::with_capacity(commands.len());
+    for command in commands {
+        let execution = run_workspace_validation_command(root, &command)?;
+        let success = execution.success;
+        steps.push(WorkspaceGitValidationStep {
+            command,
+            success,
+            exit_code: execution.exit_code,
+            output: execution.output,
+            timed_out: execution.timed_out,
+            duration_ms: execution.duration_ms,
+            truncated: execution.truncated,
+        });
+        if !success {
+            return Ok((
+                WorkspaceGitValidationReport {
+                    status: WorkspaceGitValidationStatus::Failed,
+                    source_path,
+                    steps,
+                },
+                Some(fingerprint),
+            ));
+        }
+    }
+    let after = workspace_validation_fingerprint(root)?;
+    if after != fingerprint {
+        steps.push(WorkspaceGitValidationStep {
+            command: "DCC workspace consistency check".to_string(),
+            success: false,
+            exit_code: None,
+            output: "A validation command changed the staged result or tracked working-tree files. Review the changes, stage the intended result, and validate again.".to_string(),
+            timed_out: false,
+            duration_ms: 0,
+            truncated: false,
+        });
+        return Ok((
+            WorkspaceGitValidationReport {
+                status: WorkspaceGitValidationStatus::Failed,
+                source_path,
+                steps,
+            },
+            Some(fingerprint),
+        ));
+    }
+    Ok((
+        WorkspaceGitValidationReport {
+            status: WorkspaceGitValidationStatus::Passed,
+            source_path,
+            steps,
+        },
+        Some(fingerprint),
+    ))
+}
+
+fn workspace_validation_fingerprint(root: &str) -> Result<String, String> {
+    let tree = run_git_output(root, &["write-tree"])?;
+    if !tree.status.success() {
+        return Err(git_output_err("git write-tree", &tree.stderr));
+    }
+    let worktree = run_git_output(root, &["diff", "--binary", "--no-ext-diff"])?;
+    if !worktree.status.success() {
+        return Err(git_output_err("git diff", &worktree.stderr));
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(&tree.stdout);
+    hasher.update([0]);
+    hasher.update(&worktree.stdout);
+    hasher.update([0]);
+    match fs::read(Path::new(root).join(".dcc.toml")) {
+        Ok(config) => hasher.update(config),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("failed to fingerprint .dcc.toml: {error}")),
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn workspace_validation_config_hash(root: &str) -> Result<Option<String>, String> {
+    match fs::read(Path::new(root).join(".dcc.toml")) {
+        Ok(config) => {
+            let mut hasher = Sha256::new();
+            hasher.update(config);
+            Ok(Some(format!("{:x}", hasher.finalize())))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("failed to fingerprint .dcc.toml: {error}")),
+    }
 }
 
 async fn refresh_repository_forge_metadata(
@@ -2780,6 +3044,79 @@ mod editor_workspace_file_tests {
         assert!(large.truncated);
         assert!(!large.binary);
         assert!(large.text.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configured_merge_validations_capture_failures_and_passes() {
+        let repo = TestDir::new("merge-validations");
+        let git = |args: &[&str]| {
+            let output = run_git_output(repo.as_str(), args).expect("run git");
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-b", "main"]);
+        git(&["config", "user.name", "DCC Test"]);
+        git(&["config", "user.email", "dcc@example.invalid"]);
+        fs::write(repo.path.join("app.txt"), "stable\n").expect("write tracked file");
+        git(&["add", "app.txt"]);
+        git(&["commit", "-m", "base"]);
+
+        fs::write(
+            repo.path.join(".dcc.toml"),
+            "[scripts]\nvalidate = \"printf 'import order error\\n'; exit 7\"\n",
+        )
+        .expect("write failing validation");
+        let (failed, _) =
+            workspace_git_run_validations_inner(repo.as_str()).expect("run validation");
+        assert_eq!(failed.status, WorkspaceGitValidationStatus::Failed);
+        assert_eq!(failed.steps[0].exit_code, Some(7));
+        assert!(failed.steps[0].output.contains("import order error"));
+
+        fs::write(
+            repo.path.join(".dcc.toml"),
+            "[scripts]\nvalidate = [\"printf 'lint ok\\n'\", \"printf 'types ok\\n'\"]\n",
+        )
+        .expect("write passing validations");
+        let (passed, fingerprint) =
+            workspace_git_run_validations_inner(repo.as_str()).expect("run validations");
+        assert_eq!(passed.status, WorkspaceGitValidationStatus::Passed);
+        assert_eq!(passed.steps.len(), 2);
+        assert!(passed.steps.iter().all(|step| step.success));
+        assert!(fingerprint.is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configured_validation_that_changes_tracked_files_is_rejected() {
+        let repo = TestDir::new("merge-validation-mutation");
+        let git = |args: &[&str]| {
+            let output = run_git_output(repo.as_str(), args).expect("run git");
+            assert!(output.status.success(), "git {:?} failed", args);
+        };
+        git(&["init", "-b", "main"]);
+        git(&["config", "user.name", "DCC Test"]);
+        git(&["config", "user.email", "dcc@example.invalid"]);
+        fs::write(repo.path.join("app.txt"), "before\n").expect("write tracked file");
+        git(&["add", "app.txt"]);
+        git(&["commit", "-m", "base"]);
+        fs::write(
+            repo.path.join(".dcc.toml"),
+            "[scripts]\nvalidate = \"printf 'after\\n' > app.txt\"\n",
+        )
+        .expect("write mutating validation");
+
+        let (report, _) =
+            workspace_git_run_validations_inner(repo.as_str()).expect("run validation");
+        assert_eq!(report.status, WorkspaceGitValidationStatus::Failed);
+        assert!(report
+            .steps
+            .last()
+            .is_some_and(|step| step.command.contains("consistency")));
     }
 
     #[test]

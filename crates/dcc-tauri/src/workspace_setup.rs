@@ -1,4 +1,9 @@
-use std::process::Command;
+use std::{
+    process::{Command, Output, Stdio},
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -18,6 +23,19 @@ pub enum WorkspaceSetupFailurePolicy {
 pub struct WorkspaceSetupExecutionOutcome {
     pub report: WorkspaceSetupReport,
     pub should_rollback: bool,
+}
+
+pub const WORKSPACE_VALIDATION_TIMEOUT: Duration = Duration::from_secs(600);
+const MAX_COMMAND_OUTPUT_BYTES: usize = 64 * 1024;
+
+#[derive(Clone, Debug)]
+pub struct WorkspaceCommandExecution {
+    pub success: bool,
+    pub exit_code: Option<i32>,
+    pub output: String,
+    pub timed_out: bool,
+    pub duration_ms: u64,
+    pub truncated: bool,
 }
 
 pub async fn run_detected_workspace_setup(
@@ -175,6 +193,174 @@ fn run_workspace_setup_command(workspace_root: &str, script: &str) -> Result<(),
     }
 
     Err(format_output_failure(&output))
+}
+
+pub fn run_workspace_validation_command(
+    workspace_root: &str,
+    script: &str,
+) -> Result<WorkspaceCommandExecution, String> {
+    run_workspace_command_with_timeout(workspace_root, script, WORKSPACE_VALIDATION_TIMEOUT)
+}
+
+fn run_workspace_command_with_timeout(
+    workspace_root: &str,
+    script: &str,
+    timeout: Duration,
+) -> Result<WorkspaceCommandExecution, String> {
+    let script = script.trim();
+    if script.is_empty() {
+        return Ok(WorkspaceCommandExecution {
+            success: true,
+            exit_code: Some(0),
+            output: String::new(),
+            timed_out: false,
+            duration_ms: 0,
+            truncated: false,
+        });
+    }
+
+    let mut command = validation_shell_command(workspace_root, script)?;
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("CI", "1")
+        .env("GIT_TERMINAL_PROMPT", "0");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
+    let started = Instant::now();
+    let child = command.spawn().map_err(|error| error.to_string())?;
+    let child_pid = child.id();
+    let (tx, rx) = mpsc::channel();
+    let waiter = thread::spawn(move || {
+        let result = child.wait_with_output();
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(output)) => {
+            let _ = waiter.join();
+            Ok(command_execution_from_output(output, started.elapsed(), false))
+        }
+        Ok(Err(error)) => {
+            let _ = waiter.join();
+            Err(error.to_string())
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            kill_process_tree(child_pid);
+            let _ = waiter.join();
+            let output = match rx.try_recv() {
+                Ok(Ok(output)) => output,
+                Ok(Err(error)) => return Err(error.to_string()),
+                Err(_) => {
+                    return Ok(WorkspaceCommandExecution {
+                        success: false,
+                        exit_code: None,
+                        output: format!("command timed out after {}s", timeout.as_secs()),
+                        timed_out: true,
+                        duration_ms: started.elapsed().as_millis() as u64,
+                        truncated: false,
+                    });
+                }
+            };
+            let mut execution = command_execution_from_output(output, started.elapsed(), true);
+            if execution.output.is_empty() {
+                execution.output = format!("command timed out after {}s", timeout.as_secs());
+            }
+            Ok(execution)
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = waiter.join();
+            Err("validation command waiter stopped unexpectedly".to_string())
+        }
+    }
+}
+
+fn validation_shell_command(workspace_root: &str, script: &str) -> Result<Command, String> {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("cmd");
+        command.args(["/C", script]).current_dir(workspace_root);
+        command.creation_flags(0x08000000);
+        return Ok(command);
+    }
+
+    #[cfg(not(windows))]
+    {
+        let shell = [
+            std::env::var("SHELL").ok(),
+            Some("/bin/zsh".to_string()),
+            Some("/bin/bash".to_string()),
+            Some("/bin/sh".to_string()),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|shell| std::path::Path::new(shell).is_file())
+        .ok_or_else(|| "no shell available to execute validations".to_string())?;
+        let mut command = Command::new(shell);
+        command.args(["-lc", script]).current_dir(workspace_root);
+        Ok(command)
+    }
+}
+
+fn kill_process_tree(child_pid: u32) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(child_pid as libc::pid_t), libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .arg("/PID")
+            .arg(child_pid.to_string())
+            .arg("/T")
+            .arg("/F")
+            .output();
+    }
+}
+
+fn command_execution_from_output(
+    output: Output,
+    duration: Duration,
+    timed_out: bool,
+) -> WorkspaceCommandExecution {
+    let success = !timed_out && output.status.success();
+    let exit_code = output.status.code();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
+        (false, false) => format!("{}\n{}", stdout.trim_end(), stderr.trim_end()),
+        (false, true) => stdout.trim_end().to_string(),
+        (true, false) => stderr.trim_end().to_string(),
+        (true, true) => String::new(),
+    };
+    let (output, truncated) = truncate_command_output(combined);
+    WorkspaceCommandExecution {
+        success,
+        exit_code,
+        output,
+        timed_out,
+        duration_ms: duration.as_millis() as u64,
+        truncated,
+    }
+}
+
+fn truncate_command_output(value: String) -> (String, bool) {
+    if value.len() <= MAX_COMMAND_OUTPUT_BYTES {
+        return (value, false);
+    }
+    let mut end = MAX_COMMAND_OUTPUT_BYTES;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    (
+        format!("{}\n\n[output truncated by DCC]", &value[..end]),
+        true,
+    )
 }
 
 #[cfg(not(windows))]
