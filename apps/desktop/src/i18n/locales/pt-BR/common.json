@@ -506,6 +506,20 @@
       "commitAs": "Você vai commitar como {{handle}}{{location}}",
       "mismatch": "Conta ativa {{handle}} difere da vinculada ao workspace (@{{bound}})"
     },
+    "gitAction": {
+      "createRequest": "Criar {{requestLabel}}",
+      "openRequest": "Abrir {{requestLabel}}",
+      "commitAndPush": "Commitar e enviar",
+      "push": "Enviar",
+      "fixCi": "Corrigir CI",
+      "resolveConflicts": "Resolver conflitos",
+      "merge": "Mesclar",
+      "merged": "Mesclado",
+      "closed": "Fechado",
+      "action": "Ação",
+      "failed": "{{action}} falhou: {{message}}",
+      "unknownError": "Falha na ação"
+    },
     "fields": {
       "name": "Nome",
       "id": "Id",
@@ -1232,6 +1246,115 @@
     "openOnGithub": "GitHub",
     "composer": "Composer",
     "sendToAgent": "Enviar ao agente"
+  },
+  "mergeConflict": {
+    "title": "Resolver conflitos",
+    "currentBranchFallback": "branch atual",
+    "incomingBranchFallback": "branch base",
+    "close": "Fechar",
+    "abort": "Abortar merge",
+    "loadingGit": "Lendo estado do Git…",
+    "files": "Arquivos",
+    "conflictKind": {
+      "bothModified": "Alterado nos dois lados",
+      "bothAdded": "Adicionado nos dois lados",
+      "deletedByCurrent": "Excluído na branch atual",
+      "deletedByIncoming": "Excluído na branch base",
+      "bothDeleted": "Excluído nos dois lados",
+      "other": "Conflito Git"
+    },
+    "busy": {
+      "agent": "Aguarde o agente concluir a sugestão antes de fechar.",
+      "operation": "Aguarde a operação em andamento antes de fechar."
+    },
+    "confirm": {
+      "discardEdit": "Descartar a edição ainda não salva deste conflito?",
+      "remainingMarkers": "Ainda existem linhas parecidas com marcadores de conflito. Marcar como resolvido mesmo assim?",
+      "deleteResult": "Excluir {{path}} como resultado deste merge?",
+      "abort": "Abortar o merge e descartar todas as resoluções realizadas?",
+      "validationCommands": "O DCC executará estes comandos definidos pelo projeto antes do commit:\n\n{{commands}}\n\nContinuar?"
+    },
+    "toast": {
+      "mergeStarted": "Merge iniciado. Resolva os arquivos indicados.",
+      "updatedWithoutConflicts": "Branch atualizada sem conflitos. Agora ela pode ser enviada.",
+      "hunkChanged": "O bloco mudou. Selecione-o novamente antes de pedir a sugestão.",
+      "agentApplied": "Sugestão do agente aplicada somente ao editor",
+      "resolveAllHunks": "Resolva todos os blocos deste arquivo antes de marcá-lo como resolvido.",
+      "fileChanged": "O arquivo mudou no disco. Reabra o conflito antes de sobrescrever.",
+      "markedResolved": "{{path}} marcado como resolvido",
+      "resolvedWith": "{{path}} resolvido com {{branch}}",
+      "removedResolved": "{{path}} removido e marcado como resolvido",
+      "mergeAborted": "Merge abortado",
+      "validationFailed": "Uma validação falhou. Revise a saída antes de tentar novamente.",
+      "mergeCompleted": "Merge concluído e enviado"
+    },
+    "errors": {
+      "agentResultChanged": "O resultado foi alterado enquanto o agente analisava. A sugestão ficou na sessão e não foi aplicada.",
+      "agentContract": "O agente não retornou o contrato de resolução esperado. A resposta ficou registrada na sessão para revisão.",
+      "agentInvalid": "O agente retornou uma sugestão inválida. A resposta ficou registrada na sessão para revisão.",
+      "agentIncomplete": "A sugestão do agente está incompleta.",
+      "agentResultInvalid": "A sugestão do agente não contém um resultado válido."
+    },
+    "unsupported": {
+      "title": "Operação {{operation}} detectada",
+      "description": "Este fluxo resolve merges. Continue ou aborte esta operação pelo terminal."
+    },
+    "start": {
+      "title": "Trazer {{incoming}} para {{current}}",
+      "description": "O DCC vai buscar a base mais recente e iniciar o merge local. Se houver conflitos, eles aparecerão aqui.",
+      "action": "Iniciar resolução"
+    },
+    "completion": {
+      "title": "Todos os conflitos foram resolvidos",
+      "description": "Antes do commit, o DCC executa as validações declaradas pelo projeto.",
+      "withValidation": "Validar, concluir e enviar",
+      "withoutValidation": "Concluir merge e enviar"
+    },
+    "validation": {
+      "loading": "Lendo validações do projeto…",
+      "invalidTitle": "Configuração de validação inválida",
+      "configuredTitle": "Validações configuradas em .dcc.toml",
+      "timeout": "Timeout de {{seconds}}s por comando. A execução para no primeiro erro.",
+      "empty": "Nenhuma validação configurada. Adicione validate = [...] à seção [scripts] do .dcc.toml para executar lint, typecheck ou testes.",
+      "failed": "Validação falhou",
+      "passed": "Validações aprovadas",
+      "notConfigured": "Sem validações configuradas",
+      "stepMeta": "{{seconds}}s{{exitCode}}",
+      "exitCode": " · saída {{code}}"
+    },
+    "fileActions": {
+      "useFile": "Usar arquivo {{branch}}",
+      "useFileTitle": "Aceita e marca o arquivo inteiro usando {{branch}}",
+      "deleteResult": "Excluir resultado"
+    },
+    "unavailable": {
+      "title": "Conteúdo indisponível no editor",
+      "tooLarge": "O arquivo excede o limite seguro do editor.",
+      "unsupported": "O arquivo é binário, não UTF-8 ou existe somente como objeto especial do Git.",
+      "instruction": "Escolha uma das versões completas ou a exclusão."
+    },
+    "hunk": {
+      "position": "Bloco {{current}} de {{total}}",
+      "accept": "Aceitar {{branch}}",
+      "acceptBoth": "Aceitar ambos",
+      "resolveWithAgent": "Resolver este bloco com agente",
+      "nonePending": "Sem blocos pendentes. Revise o resultado e marque o arquivo como resolvido.",
+      "pending_one": "{{count}} bloco ainda pendente",
+      "pending_other": "{{count}} blocos ainda pendentes"
+    },
+    "agent": {
+      "reviewFile": "Pedir revisão do arquivo ao agente",
+      "sessionTitle": "Resolver conflito: {{path}}",
+      "suggestionAppliedHunk": "Sugestão do agente aplicada ao bloco",
+      "suggestionAppliedFile": "Sugestão do agente aplicada ao arquivo",
+      "sessionLabel": "Sessão {{sessionId}}",
+      "reviewNotice": "Revise o resultado. Nada foi salvo, adicionado ao índice ou commitado; a resposta está registrada no histórico da sessão."
+    },
+    "result": {
+      "changed": "Resultado alterado",
+      "ready": "Pronto para marcar como resolvido",
+      "save": "Salvar e marcar resolvido"
+    }
   },
   "fileSurface": {
     "ariaLabel": "Visualização do arquivo inteiro",

@@ -4,6 +4,7 @@ import type {
 	WorkspaceGitConflictSide,
 	WorkspaceGitValidationReport,
 } from "@dcc/contracts";
+import type { TFunction } from "i18next";
 import {
 	AlertTriangle,
 	Check,
@@ -19,6 +20,7 @@ import {
 	XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,6 +54,7 @@ import {
 	type MergeConflictResolution,
 } from "./merge-conflict-hunks";
 import {
+	AgentConflictResolutionError,
 	buildAgentConflictResolutionPrompt,
 	createAgentResolutionToken,
 	parseAgentConflictResolution,
@@ -84,25 +87,44 @@ function errorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
 }
 
+function agentResolutionErrorMessage(
+	t: TFunction<"common">,
+	error: AgentConflictResolutionError,
+) {
+	switch (error.code) {
+		case "contract":
+			return t("mergeConflict.errors.agentContract");
+		case "invalid":
+			return t("mergeConflict.errors.agentInvalid");
+		case "incomplete":
+			return t("mergeConflict.errors.agentIncomplete");
+		case "result-invalid":
+			return t("mergeConflict.errors.agentResultInvalid");
+	}
+}
+
 function shortRef(value: string | null | undefined, fallback: string) {
 	if (!value) return fallback;
 	return value.replace(/^refs\/(heads|remotes)\//, "").replace(/^remotes\//, "");
 }
 
-function conflictKindLabel(entry: WorkspaceGitConflictEntry) {
+function conflictKindLabel(
+	t: TFunction<"common">,
+	entry: WorkspaceGitConflictEntry,
+) {
 	switch (entry.kind) {
 		case "both-modified":
-			return "Alterado nos dois lados";
+			return t("mergeConflict.conflictKind.bothModified");
 		case "both-added":
-			return "Adicionado nos dois lados";
+			return t("mergeConflict.conflictKind.bothAdded");
 		case "deleted-by-current":
-			return "Excluído na branch atual";
+			return t("mergeConflict.conflictKind.deletedByCurrent");
 		case "deleted-by-incoming":
-			return "Excluído na branch base";
+			return t("mergeConflict.conflictKind.deletedByIncoming");
 		case "both-deleted":
-			return "Excluído nos dois lados";
+			return t("mergeConflict.conflictKind.bothDeleted");
 		default:
-			return "Conflito Git";
+			return t("mergeConflict.conflictKind.other");
 	}
 }
 
@@ -132,6 +154,7 @@ export function WorkspaceMergeConflictResolver({
 	onStateChanged,
 	onResolveWithAgent,
 }: Props) {
+	const { t, i18n } = useTranslation("common");
 	const editorRef = useRef<FileEditorHandle | null>(null);
 	const initialResultRef = useRef<string | null>(null);
 	const totalConflictsRef = useRef(0);
@@ -171,8 +194,14 @@ export function WorkspaceMergeConflictResolver({
 	const hunks = useMemo(() => parseMergeConflictHunks(buffer), [buffer]);
 	const hunk = hunks[Math.min(activeHunk, Math.max(hunks.length - 1, 0))] ?? null;
 	const dirty = selected != null && buffer !== (initialResultRef.current ?? "");
-	const currentLabel = shortRef(state?.currentBranch, "branch atual");
-	const incomingLabel = shortRef(state?.incomingRef ?? baseBranch, "branch base");
+	const currentLabel = shortRef(
+		state?.currentBranch,
+		t("mergeConflict.currentBranchFallback"),
+	);
+	const incomingLabel = shortRef(
+		state?.incomingRef ?? baseBranch,
+		t("mergeConflict.incomingBranchFallback"),
+	);
 
 	const openEntry = useCallback((entry: WorkspaceGitConflictEntry) => {
 		const result =
@@ -218,21 +247,21 @@ export function WorkspaceMergeConflictResolver({
 			if (!next && busy) {
 				toast.info(
 					busy === "agent"
-						? "Aguarde o agente concluir a sugestão antes de fechar."
-						: "Aguarde a operação em andamento antes de fechar.",
+						? t("mergeConflict.busy.agent")
+						: t("mergeConflict.busy.operation"),
 				);
 				return;
 			}
 			if (
 				!next &&
 				dirty &&
-				!window.confirm("Descartar a edição ainda não salva deste conflito?")
+				!window.confirm(t("mergeConflict.confirm.discardEdit"))
 			) {
 				return;
 			}
 			onOpenChange(next);
 		},
-		[busy, dirty, onOpenChange],
+		[busy, dirty, onOpenChange, t],
 	);
 
 	const startMerge = useCallback(async () => {
@@ -251,14 +280,14 @@ export function WorkspaceMergeConflictResolver({
 		await onStateChanged();
 		setBusy(null);
 		if ((next.data?.conflicts.length ?? 0) > 0) {
-			toast.info("Merge iniciado. Resolva os arquivos indicados.");
+			toast.info(t("mergeConflict.toast.mergeStarted"));
 			return;
 		}
 		if (failure) {
 			toast.error(errorMessage(failure));
 			return;
 		}
-		toast.success("Branch atualizada sem conflitos. Agora ela pode ser enviada.");
+		toast.success(t("mergeConflict.toast.updatedWithoutConflicts"));
 		onOpenChange(false);
 	}, [
 		baseBranch,
@@ -266,6 +295,7 @@ export function WorkspaceMergeConflictResolver({
 		onOpenChange,
 		onStateChanged,
 		query,
+		t,
 		workspaceRoot,
 	]);
 
@@ -293,7 +323,7 @@ export function WorkspaceMergeConflictResolver({
 				)
 			: null;
 		if (hunk && !requestedHunk) {
-			toast.warning("O bloco mudou. Selecione-o novamente antes de pedir a sugestão.");
+			toast.warning(t("mergeConflict.toast.hunkChanged"));
 			return;
 		}
 
@@ -304,6 +334,8 @@ export function WorkspaceMergeConflictResolver({
 				kind: selected.kind,
 				currentRef: currentLabel,
 				incomingRef: incomingLabel,
+				responseLanguage:
+					i18n.resolvedLanguage === "en" ? "English" : "Português (Brasil)",
 				baseText: selected.base.text,
 				currentText: selected.current.text,
 				incomingText: selected.incoming.text,
@@ -325,14 +357,12 @@ export function WorkspaceMergeConflictResolver({
 		try {
 			const result = await onResolveWithAgent({
 				prompt,
-				title: `Resolver conflito: ${selected.path}`,
+				title: t("mergeConflict.agent.sessionTitle", { path: selected.path }),
 			});
 			const suggestion = parseAgentConflictResolution(result.content, token);
 			const latest = editorRef.current?.getValue() ?? buffer;
 			if (latest !== source) {
-				throw new Error(
-					"O resultado foi alterado enquanto o agente analisava. A sugestão ficou na sessão e não foi aplicada.",
-				);
+				throw new Error(t("mergeConflict.errors.agentResultChanged"));
 			}
 			const next = requestedHunk
 				? applyMergeConflictReplacement(source, requestedHunk, suggestion.resolvedContent)
@@ -345,9 +375,13 @@ export function WorkspaceMergeConflictResolver({
 				sessionId: result.sessionId,
 				scope: requestedHunk ? "hunk" : "file",
 			});
-			toast.success("Sugestão do agente aplicada somente ao editor");
+			toast.success(t("mergeConflict.toast.agentApplied"));
 		} catch (error) {
-			toast.error(errorMessage(error));
+			toast.error(
+				error instanceof AgentConflictResolutionError
+					? agentResolutionErrorMessage(t, error)
+					: errorMessage(error),
+			);
 		} finally {
 			setBusy(null);
 		}
@@ -355,25 +389,23 @@ export function WorkspaceMergeConflictResolver({
 		buffer,
 		currentLabel,
 		hunk,
+		i18n.resolvedLanguage,
 		incomingLabel,
 		onResolveWithAgent,
 		selected,
+		t,
 	]);
 
 	const saveAndResolve = useCallback(async () => {
 		if (!selected) return;
 		const content = editorRef.current?.getValue() ?? buffer;
 		if (parseMergeConflictHunks(content).length > 0) {
-			toast.warning(
-				"Resolva todos os blocos deste arquivo antes de marcá-lo como resolvido.",
-			);
+			toast.warning(t("mergeConflict.toast.resolveAllHunks"));
 			return;
 		}
 		if (
 			hasMergeConflictMarkerFragments(content) &&
-			!window.confirm(
-				"Ainda existem linhas parecidas com marcadores de conflito. Marcar como resolvido mesmo assim?",
-			)
+			!window.confirm(t("mergeConflict.confirm.remainingMarkers"))
 		) {
 			return;
 		}
@@ -387,9 +419,7 @@ export function WorkspaceMergeConflictResolver({
 					expectedPrevious: selected.result.exists ? initialResultRef.current : null,
 				});
 				if (result.conflicted) {
-					throw new Error(
-						"O arquivo mudou no disco. Reabra o conflito antes de sobrescrever.",
-					);
+					throw new Error(t("mergeConflict.toast.fileChanged"));
 				}
 			}
 			await workspaceGitMarkConflictResolved({
@@ -397,14 +427,16 @@ export function WorkspaceMergeConflictResolver({
 				relativePath: selected.path,
 				delete: false,
 			});
-			toast.success(`${selected.path} marcado como resolvido`);
+			toast.success(
+				t("mergeConflict.toast.markedResolved", { path: selected.path }),
+			);
 			await refresh();
 		} catch (error) {
 			toast.error(errorMessage(error));
 		} finally {
 			setBusy(null);
 		}
-	}, [buffer, refresh, selected, workspaceRoot]);
+	}, [buffer, refresh, selected, t, workspaceRoot]);
 
 	const acceptWholeSide = useCallback(
 		async (side: WorkspaceGitConflictSide) => {
@@ -417,7 +449,10 @@ export function WorkspaceMergeConflictResolver({
 					side,
 				});
 				toast.success(
-					`${selected.path} resolvido com ${side === "current" ? currentLabel : incomingLabel}`,
+					t("mergeConflict.toast.resolvedWith", {
+						path: selected.path,
+						branch: side === "current" ? currentLabel : incomingLabel,
+					}),
 				);
 				await refresh();
 			} catch (error) {
@@ -426,12 +461,16 @@ export function WorkspaceMergeConflictResolver({
 				setBusy(null);
 			}
 		},
-		[currentLabel, incomingLabel, refresh, selected, workspaceRoot],
+		[currentLabel, incomingLabel, refresh, selected, t, workspaceRoot],
 	);
 
 	const deleteResult = useCallback(async () => {
 		if (!selected) return;
-		if (!window.confirm(`Excluir ${selected.path} como resultado deste merge?`)) {
+		if (
+			!window.confirm(
+				t("mergeConflict.confirm.deleteResult", { path: selected.path }),
+			)
+		) {
 			return;
 		}
 		setBusy("delete");
@@ -441,20 +480,20 @@ export function WorkspaceMergeConflictResolver({
 				relativePath: selected.path,
 				delete: true,
 			});
-			toast.success(`${selected.path} removido e marcado como resolvido`);
+			toast.success(
+				t("mergeConflict.toast.removedResolved", { path: selected.path }),
+			);
 			await refresh();
 		} catch (error) {
 			toast.error(errorMessage(error));
 		} finally {
 			setBusy(null);
 		}
-	}, [refresh, selected, workspaceRoot]);
+	}, [refresh, selected, t, workspaceRoot]);
 
 	const abortMerge = useCallback(async () => {
 		if (
-			!window.confirm(
-				"Abortar o merge e descartar todas as resoluções realizadas?",
-			)
+			!window.confirm(t("mergeConflict.confirm.abort"))
 		) {
 			return;
 		}
@@ -462,27 +501,23 @@ export function WorkspaceMergeConflictResolver({
 		try {
 			await workspaceGitAbortMerge({ workspaceRoot });
 			await onStateChanged();
-			toast.success("Merge abortado");
+			toast.success(t("mergeConflict.toast.mergeAborted"));
 			onOpenChange(false);
 		} catch (error) {
 			toast.error(errorMessage(error));
 		} finally {
 			setBusy(null);
 		}
-	}, [onOpenChange, onStateChanged, workspaceRoot]);
+	}, [onOpenChange, onStateChanged, t, workspaceRoot]);
 
 	const completeMerge = useCallback(async () => {
 		const commands = validationConfigQuery.data?.commands ?? [];
 		if (
 			commands.length > 0 &&
 			!window.confirm(
-				[
-					"O DCC executará estes comandos definidos pelo projeto antes do commit:",
-					"",
-					...commands.map((command) => `• ${command}`),
-					"",
-					"Continuar?",
-				].join("\n"),
+				t("mergeConflict.confirm.validationCommands", {
+					commands: commands.map((command) => `• ${command}`).join("\n"),
+				}),
 			)
 		) {
 			return;
@@ -499,11 +534,11 @@ export function WorkspaceMergeConflictResolver({
 			setValidationReport(result.validation);
 			if (!result.completed) {
 				await onStateChanged();
-				toast.error("Uma validação falhou. Revise a saída antes de tentar novamente.");
+				toast.error(t("mergeConflict.toast.validationFailed"));
 				return;
 			}
 			await onStateChanged();
-			toast.success("Merge concluído e enviado");
+			toast.success(t("mergeConflict.toast.mergeCompleted"));
 			onOpenChange(false);
 		} catch (error) {
 			toast.error(errorMessage(error));
@@ -517,6 +552,7 @@ export function WorkspaceMergeConflictResolver({
 		validationConfigQuery.data?.commands,
 		validationConfigQuery.data?.configHash,
 		workspaceRoot,
+		t,
 	]);
 
 	const total = Math.max(totalConflictsRef.current, conflicts.length);
@@ -541,7 +577,7 @@ export function WorkspaceMergeConflictResolver({
 							<GitMerge className="size-5" />
 						</div>
 						<div className="min-w-0 flex-1">
-							<DialogTitle>Resolver conflitos</DialogTitle>
+							<DialogTitle>{t("mergeConflict.title")}</DialogTitle>
 							<DialogDescription className="mt-1">
 								{currentLabel} ← {incomingLabel}
 							</DialogDescription>
@@ -554,7 +590,7 @@ export function WorkspaceMergeConflictResolver({
 								onClick={() => void abortMerge()}
 							>
 								<RotateCcw className="size-3.5" />
-								Abortar merge
+								{t("mergeConflict.abort")}
 							</Button>
 						) : null}
 						<Button
@@ -563,14 +599,14 @@ export function WorkspaceMergeConflictResolver({
 							disabled={Boolean(busy)}
 							onClick={() => requestOpenChange(false)}
 						>
-							Fechar
+							{t("mergeConflict.close")}
 						</Button>
 					</div>
 				</DialogHeader>
 
 				{query.isPending ? (
 					<div className="flex flex-1 items-center justify-center gap-2 text-muted-foreground">
-						<Loader2 className="size-4 animate-spin" /> Lendo estado do Git…
+						<Loader2 className="size-4 animate-spin" /> {t("mergeConflict.loadingGit")}
 					</div>
 				) : query.isError ? (
 					<div className="flex flex-1 items-center justify-center p-8 text-destructive">
@@ -581,11 +617,10 @@ export function WorkspaceMergeConflictResolver({
 						<div className="max-w-md">
 							<AlertTriangle className="mx-auto size-8 text-amber-500" />
 							<h3 className="mt-3 font-semibold">
-								Operação {state.operation} detectada
+								{t("mergeConflict.unsupported.title", { operation: state.operation })}
 							</h3>
 							<p className="mt-2 text-sm text-muted-foreground">
-								Esta entrega resolve merges. Continue ou aborte esta operação pelo
-								terminal.
+								{t("mergeConflict.unsupported.description")}
 							</p>
 						</div>
 					</div>
@@ -594,11 +629,13 @@ export function WorkspaceMergeConflictResolver({
 						<div className="max-w-lg">
 							<GitMerge className="mx-auto size-10 text-amber-500" />
 							<h3 className="mt-4 text-base font-semibold">
-								Trazer {incomingLabel} para {currentLabel}
+								{t("mergeConflict.start.title", {
+									incoming: incomingLabel,
+									current: currentLabel,
+								})}
 							</h3>
 							<p className="mt-2 text-sm leading-6 text-muted-foreground">
-								O DCC vai buscar a base mais recente e iniciar o merge local. Se
-								houver conflitos, eles aparecerão aqui.
+								{t("mergeConflict.start.description")}
 							</p>
 							<Button
 								className="mt-5"
@@ -610,7 +647,7 @@ export function WorkspaceMergeConflictResolver({
 								) : (
 									<GitMerge className="size-4" />
 								)}
-								Iniciar resolução
+								{t("mergeConflict.start.action")}
 							</Button>
 						</div>
 					</div>
@@ -621,26 +658,26 @@ export function WorkspaceMergeConflictResolver({
 								<Check className="size-6" />
 							</div>
 							<h3 className="mt-4 text-base font-semibold">
-								Todos os conflitos foram resolvidos
+								{t("mergeConflict.completion.title")}
 							</h3>
-							<p className="mt-2 text-sm text-muted-foreground">Antes do commit, o DCC executa as validações declaradas pelo projeto.</p>
+							<p className="mt-2 text-sm text-muted-foreground">{t("mergeConflict.completion.description")}</p>
 							{validationConfigQuery.isPending ? (
-								<div className="mt-5 flex items-center justify-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Lendo validações do projeto…</div>
+								<div className="mt-5 flex items-center justify-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />{t("mergeConflict.validation.loading")}</div>
 							) : validationConfigQuery.isError ? (
-								<div className="mt-5 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-left text-xs text-destructive"><div className="flex items-center gap-2 font-semibold"><XCircle className="size-4" />Configuração de validação inválida</div><p className="mt-1 whitespace-pre-wrap">{errorMessage(validationConfigQuery.error)}</p></div>
+								<div className="mt-5 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-left text-xs text-destructive"><div className="flex items-center gap-2 font-semibold"><XCircle className="size-4" />{t("mergeConflict.validation.invalidTitle")}</div><p className="mt-1 whitespace-pre-wrap">{errorMessage(validationConfigQuery.error)}</p></div>
 							) : (validationConfigQuery.data?.commands.length ?? 0) > 0 ? (
 								<div className="mt-5 rounded-lg border border-border/60 bg-muted/10 p-3 text-left">
-									<div className="flex items-center gap-2 text-xs font-semibold"><ListChecks className="size-4 text-violet-500" />Validações configuradas em .dcc.toml</div>
+									<div className="flex items-center gap-2 text-xs font-semibold"><ListChecks className="size-4 text-violet-500" />{t("mergeConflict.validation.configuredTitle")}</div>
 									<div className="mt-2 space-y-1.5">{validationConfigQuery.data?.commands.map((command, index) => <code key={`${command}-${index}`} className="block rounded bg-muted px-2 py-1.5 text-[11px]">{command}</code>)}</div>
-									<p className="mt-2 text-[10px] text-muted-foreground">Timeout de {validationConfigQuery.data?.timeoutSeconds ?? 600}s por comando. A execução para no primeiro erro.</p>
+									<p className="mt-2 text-[10px] text-muted-foreground">{t("mergeConflict.validation.timeout", { seconds: validationConfigQuery.data?.timeoutSeconds ?? 600 })}</p>
 								</div>
 							) : (
-								<div className="mt-5 rounded-lg border border-border/60 bg-muted/10 p-3 text-xs text-muted-foreground">Nenhuma validação configurada. Adicione <code>validate = [...]</code> à seção <code>[scripts]</code> do <code>.dcc.toml</code> para executar lint, typecheck ou testes.</div>
+								<div className="mt-5 rounded-lg border border-border/60 bg-muted/10 p-3 text-xs text-muted-foreground">{t("mergeConflict.validation.empty")}</div>
 							)}
 							{validationReport ? (
 								<div className={cn("mt-4 rounded-lg border p-3 text-left", validationReport.status === "failed" ? "border-destructive/30 bg-destructive/5" : "border-emerald-500/30 bg-emerald-500/5")}>
-									<div className="flex items-center gap-2 text-xs font-semibold">{validationReport.status === "failed" ? <XCircle className="size-4 text-destructive" /> : <Check className="size-4 text-emerald-600" />}{validationReport.status === "failed" ? "Validação falhou" : validationReport.status === "passed" ? "Validações aprovadas" : "Sem validações configuradas"}</div>
-									<div className="mt-2 space-y-2">{validationReport.steps.map((step, index) => <div key={`${step.command}-${index}`} className="overflow-hidden rounded border border-border/50 bg-background/60"><div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px]"><span className={step.success ? "text-emerald-600" : "text-destructive"}>{step.success ? "✓" : "✕"}</span><code className="min-w-0 flex-1 truncate">{step.command}</code><span className="text-muted-foreground">{(step.durationMs / 1000).toFixed(1)}s{step.exitCode != null ? ` · exit ${step.exitCode}` : ""}</span></div>{step.output ? <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-border/40 px-2.5 py-2 font-mono text-[10px] leading-4 text-muted-foreground">{step.output}</pre> : null}</div>)}</div>
+									<div className="flex items-center gap-2 text-xs font-semibold">{validationReport.status === "failed" ? <XCircle className="size-4 text-destructive" /> : <Check className="size-4 text-emerald-600" />}{validationReport.status === "failed" ? t("mergeConflict.validation.failed") : validationReport.status === "passed" ? t("mergeConflict.validation.passed") : t("mergeConflict.validation.notConfigured")}</div>
+									<div className="mt-2 space-y-2">{validationReport.steps.map((step, index) => <div key={`${step.command}-${index}`} className="overflow-hidden rounded border border-border/50 bg-background/60"><div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px]"><span className={step.success ? "text-emerald-600" : "text-destructive"}>{step.success ? "✓" : "✕"}</span><code className="min-w-0 flex-1 truncate">{step.command}</code><span className="text-muted-foreground">{t("mergeConflict.validation.stepMeta", { seconds: (step.durationMs / 1000).toFixed(1), exitCode: step.exitCode != null ? t("mergeConflict.validation.exitCode", { code: step.exitCode }) : "" })}</span></div>{step.output ? <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-border/40 px-2.5 py-2 font-mono text-[10px] leading-4 text-muted-foreground">{step.output}</pre> : null}</div>)}</div>
 								</div>
 							) : null}
 							<Button
@@ -653,7 +690,7 @@ export function WorkspaceMergeConflictResolver({
 								) : (
 									<GitMerge className="size-4" />
 								)}
-								{(validationConfigQuery.data?.commands.length ?? 0) > 0 ? "Validar, concluir e enviar" : "Concluir merge e enviar"}
+								{(validationConfigQuery.data?.commands.length ?? 0) > 0 ? t("mergeConflict.completion.withValidation") : t("mergeConflict.completion.withoutValidation")}
 							</Button>
 						</div>
 					</div>
@@ -662,7 +699,7 @@ export function WorkspaceMergeConflictResolver({
 						<aside className="flex w-72 shrink-0 flex-col border-r border-border/60 bg-muted/10">
 							<div className="border-b border-border/50 px-3 py-2.5">
 								<div className="flex items-center justify-between text-xs font-medium">
-									<span>Arquivos</span>
+									<span>{t("mergeConflict.files")}</span>
 									<Badge variant="secondary">
 										{resolved}/{total}
 									</Badge>
@@ -696,7 +733,7 @@ export function WorkspaceMergeConflictResolver({
 												{entry.path}
 											</span>
 											<span className="mt-0.5 block text-[10px] text-muted-foreground">
-												{conflictKindLabel(entry)}
+												{conflictKindLabel(t, entry)}
 											</span>
 										</span>
 									</button>
@@ -707,36 +744,36 @@ export function WorkspaceMergeConflictResolver({
 						{selected ? (
 							<section className="flex min-w-0 flex-1 flex-col">
 								<div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
-									<div className="mr-auto min-w-0"><p className="truncate font-mono text-xs font-semibold">{selected.path}</p><p className="text-[10px] text-muted-foreground">{conflictKindLabel(selected)}</p></div>
-									<Button variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void acceptWholeSide("current")} title={`Aceita e marca o arquivo inteiro usando ${currentLabel}`}>Usar arquivo {currentLabel}</Button>
-									<Button variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void acceptWholeSide("incoming")} title={`Aceita e marca o arquivo inteiro usando ${incomingLabel}`}>Usar arquivo {incomingLabel}</Button>
-									<Button variant="destructive" size="xs" disabled={Boolean(busy)} onClick={() => void deleteResult()}><Trash2 className="size-3.5" />Excluir resultado</Button>
+									<div className="mr-auto min-w-0"><p className="truncate font-mono text-xs font-semibold">{selected.path}</p><p className="text-[10px] text-muted-foreground">{conflictKindLabel(t, selected)}</p></div>
+									<Button variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void acceptWholeSide("current")} title={t("mergeConflict.fileActions.useFileTitle", { branch: currentLabel })}>{t("mergeConflict.fileActions.useFile", { branch: currentLabel })}</Button>
+									<Button variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void acceptWholeSide("incoming")} title={t("mergeConflict.fileActions.useFileTitle", { branch: incomingLabel })}>{t("mergeConflict.fileActions.useFile", { branch: incomingLabel })}</Button>
+									<Button variant="destructive" size="xs" disabled={Boolean(busy)} onClick={() => void deleteResult()}><Trash2 className="size-3.5" />{t("mergeConflict.fileActions.deleteResult")}</Button>
 								</div>
 
 								{textUnavailable ? (
-									<div className="flex flex-1 items-center justify-center p-8 text-center"><div className="max-w-md"><FileWarning className="mx-auto size-8 text-amber-500" /><h3 className="mt-3 font-semibold">Conteúdo indisponível no editor</h3><p className="mt-2 text-sm text-muted-foreground">{selected.result.truncated ? "O arquivo excede o limite seguro do editor." : "O arquivo é binário, não UTF-8 ou existe somente como objeto especial do Git."} Escolha uma das versões completas ou a exclusão.</p></div></div>
+									<div className="flex flex-1 items-center justify-center p-8 text-center"><div className="max-w-md"><FileWarning className="mx-auto size-8 text-amber-500" /><h3 className="mt-3 font-semibold">{t("mergeConflict.unavailable.title")}</h3><p className="mt-2 text-sm text-muted-foreground">{selected.result.truncated ? t("mergeConflict.unavailable.tooLarge") : t("mergeConflict.unavailable.unsupported")} {t("mergeConflict.unavailable.instruction")}</p></div></div>
 								) : (
 									<>
 										<div className="shrink-0 border-b border-border/60 bg-muted/5 p-3">
 											{hunk ? (
 												<>
-													<div className="mb-2 flex items-center gap-2"><Badge variant="outline">Bloco {activeHunk + 1} de {hunks.length}</Badge><div className="ml-auto flex gap-1"><Button variant="ghost" size="icon-xs" disabled={activeHunk === 0} onClick={() => setActiveHunk((value) => Math.max(0, value - 1))}><ChevronLeft /></Button><Button variant="ghost" size="icon-xs" disabled={activeHunk >= hunks.length - 1} onClick={() => setActiveHunk((value) => Math.min(hunks.length - 1, value + 1))}><ChevronRight /></Button></div></div>
+											<div className="mb-2 flex items-center gap-2"><Badge variant="outline">{t("mergeConflict.hunk.position", { current: activeHunk + 1, total: hunks.length })}</Badge><div className="ml-auto flex gap-1"><Button variant="ghost" size="icon-xs" disabled={activeHunk === 0} onClick={() => setActiveHunk((value) => Math.max(0, value - 1))}><ChevronLeft /></Button><Button variant="ghost" size="icon-xs" disabled={activeHunk >= hunks.length - 1} onClick={() => setActiveHunk((value) => Math.min(hunks.length - 1, value + 1))}><ChevronRight /></Button></div></div>
 											<div className="flex gap-2"><SidePreview label={currentLabel} text={hunk.currentText} /><SidePreview label={incomingLabel} text={hunk.incomingText} /></div>
-											<div className="mt-2 flex flex-wrap gap-1.5"><Button size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("current")}>Aceitar {currentLabel}</Button><Button size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("incoming")}>Aceitar {incomingLabel}</Button><Button size="xs" disabled={Boolean(busy)} onClick={() => applyHunk("both")}>Aceitar ambos</Button><Button size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}Resolver este bloco com agente</Button></div>
+											<div className="mt-2 flex flex-wrap gap-1.5"><Button size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("current")}>{t("mergeConflict.hunk.accept", { branch: currentLabel })}</Button><Button size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("incoming")}>{t("mergeConflict.hunk.accept", { branch: incomingLabel })}</Button><Button size="xs" disabled={Boolean(busy)} onClick={() => applyHunk("both")}>{t("mergeConflict.hunk.acceptBoth")}</Button><Button size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{t("mergeConflict.hunk.resolveWithAgent")}</Button></div>
 										</>
 									) : (
-										<div className="flex flex-wrap items-center gap-2 text-xs text-emerald-600"><Check className="size-4" /><span className="mr-auto">Sem blocos pendentes. Revise o resultado e marque o arquivo como resolvido.</span><Button size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}Pedir revisão do arquivo ao agente</Button></div>
+										<div className="flex flex-wrap items-center gap-2 text-xs text-emerald-600"><Check className="size-4" /><span className="mr-auto">{t("mergeConflict.hunk.nonePending")}</span><Button size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{t("mergeConflict.agent.reviewFile")}</Button></div>
 									)}
 									{agentSuggestion?.path === selected.path ? (
 										<div className="mt-2 rounded-md border border-violet-500/25 bg-violet-500/5 px-3 py-2 text-[11px] leading-5">
-											<div className="flex items-center gap-1.5 font-semibold text-violet-700 dark:text-violet-300"><Sparkles className="size-3.5" />Sugestão do agente aplicada ao {agentSuggestion.scope === "hunk" ? "bloco" : "arquivo"}</div>
+											<div className="flex items-center gap-1.5 font-semibold text-violet-700 dark:text-violet-300"><Sparkles className="size-3.5" />{t(agentSuggestion.scope === "hunk" ? "mergeConflict.agent.suggestionAppliedHunk" : "mergeConflict.agent.suggestionAppliedFile")}</div>
 											<p className="mt-1 text-muted-foreground">{agentSuggestion.explanation}</p>
-							<p className="mt-1 font-medium text-foreground" title={`Sessão ${agentSuggestion.sessionId}`}>Revise o resultado. Nada foi salvo, adicionado ao índice ou commitado; a resposta está registrada no histórico da sessão.</p>
+							<p className="mt-1 font-medium text-foreground" title={t("mergeConflict.agent.sessionLabel", { sessionId: agentSuggestion.sessionId })}>{t("mergeConflict.agent.reviewNotice")}</p>
 										</div>
 									) : null}
 								</div>
 								<div className="min-h-0 flex-1"><WorkspaceFileEditor key={selected.path} ref={editorRef} path={selected.path} content={buffer} readOnly={busy === "agent"} annotateLabel="" onChange={() => setBuffer(editorRef.current?.getValue() ?? "")} /></div>
-										<div className="flex shrink-0 items-center justify-between border-t border-border/60 px-3 py-2"><span className="text-[11px] text-muted-foreground">{hunks.length > 0 ? `${hunks.length} bloco(s) ainda pendente(s)` : dirty ? "Resultado alterado" : "Pronto para marcar como resolvido"}</span><Button size="sm" disabled={Boolean(busy) || hunks.length > 0} onClick={() => void saveAndResolve()}>{busy === "save" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Salvar e marcar resolvido</Button></div>
+										<div className="flex shrink-0 items-center justify-between border-t border-border/60 px-3 py-2"><span className="text-[11px] text-muted-foreground">{hunks.length > 0 ? t("mergeConflict.hunk.pending", { count: hunks.length }) : dirty ? t("mergeConflict.result.changed") : t("mergeConflict.result.ready")}</span><Button size="sm" disabled={Boolean(busy) || hunks.length > 0} onClick={() => void saveAndResolve()}>{busy === "save" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{t("mergeConflict.result.save")}</Button></div>
 									</>
 								)}
 							</section>

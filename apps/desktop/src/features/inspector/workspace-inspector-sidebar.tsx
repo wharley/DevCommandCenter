@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-js";
+import type { TFunction } from "i18next";
 import {
 	Activity,
 	ChevronRight,
@@ -765,32 +766,39 @@ function ForgeIdentityChip({
 	);
 }
 
-function inspectorActionTitle(mode: string, requestLabel: "PR" | "MR") {
+function inspectorActionTitle(
+	t: TFunction<"common">,
+	mode: string,
+	requestLabel: "PR" | "MR",
+) {
 	switch (mode) {
 		case "create-pr":
-			return `Criar ${requestLabel}`;
+			return t("inspector.gitAction.createRequest", { requestLabel });
 		case "open-pr":
-			return `Abrir ${requestLabel}`;
+			return t("inspector.gitAction.openRequest", { requestLabel });
 		case "commit-and-push":
-			return "Commitar e enviar";
+			return t("inspector.gitAction.commitAndPush");
 		case "push":
-			return "Enviar";
+			return t("inspector.gitAction.push");
 		case "fix":
-			return "Corrigir CI";
+			return t("inspector.gitAction.fixCi");
 		case "resolve-conflicts":
-			return "Resolver conflitos";
+			return t("inspector.gitAction.resolveConflicts");
 		case "merge":
-			return "Mesclar";
+			return t("inspector.gitAction.merge");
 		case "merged":
-			return "Mesclado";
+			return t("inspector.gitAction.merged");
 		case "closed":
-			return "Fechado";
+			return t("inspector.gitAction.closed");
 		default:
-			return "Ação";
+			return t("inspector.gitAction.action");
 	}
 }
 
-function getInspectorActionErrorMessage(error: unknown): string {
+function getInspectorActionErrorMessage(
+	error: unknown,
+	t?: TFunction<"common">,
+): string {
 	if (typeof error === "string" && error.trim().length > 0) {
 		return error.trim();
 	}
@@ -809,7 +817,7 @@ function getInspectorActionErrorMessage(error: unknown): string {
 			}
 		}
 	}
-	return "Action failed";
+	return t ? t("inspector.gitAction.unknownError") : "Action failed";
 }
 
 function ProviderCatalogDense({ catalog }: { catalog: ProviderCatalog | null }) {
@@ -1898,7 +1906,7 @@ export function WorkspaceInspectorSidebar({
 		}
 
 		const loadingToast = toast.loading(
-			`${inspectorActionTitle(commitMode, forgeContext.requestLabel)}...`,
+			`${inspectorActionTitle(t, commitMode, forgeContext.requestLabel)}...`,
 		);
 
 		if (commitMode === "create-pr" && forgeNeedsConnect) {
@@ -2006,10 +2014,13 @@ export function WorkspaceInspectorSidebar({
 				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
 			});
 		} catch (error) {
-			const message = getInspectorActionErrorMessage(error);
+			const message = getInspectorActionErrorMessage(error, t);
 			console.error("[inspector] git action failed", { commitMode, root, error });
 			toast.error(
-				`${inspectorActionTitle(commitMode, forgeContext.requestLabel)} failed: ${message}`,
+				t("inspector.gitAction.failed", {
+					action: inspectorActionTitle(t, commitMode, forgeContext.requestLabel),
+					message,
+				}),
 				{
 				id: loadingToast,
 				},
@@ -2025,6 +2036,7 @@ export function WorkspaceInspectorSidebar({
 		gitStatusQuery.data,
 		queryClient,
 		selectedForgeLogin,
+		t,
 		workspacePath,
 		workspaceName,
 	]);

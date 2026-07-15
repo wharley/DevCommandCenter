@@ -506,6 +506,20 @@
       "commitAs": "You'll commit as {{handle}}{{location}}",
       "mismatch": "Active account {{handle}} differs from the one bound to this workspace (@{{bound}})"
     },
+    "gitAction": {
+      "createRequest": "Create {{requestLabel}}",
+      "openRequest": "Open {{requestLabel}}",
+      "commitAndPush": "Commit and push",
+      "push": "Push",
+      "fixCi": "Fix CI",
+      "resolveConflicts": "Resolve conflicts",
+      "merge": "Merge",
+      "merged": "Merged",
+      "closed": "Closed",
+      "action": "Action",
+      "failed": "{{action}} failed: {{message}}",
+      "unknownError": "Action failed"
+    },
     "fields": {
       "name": "Name",
       "id": "Id",
@@ -1232,6 +1246,115 @@
     "openOnGithub": "GitHub",
     "composer": "Composer",
     "sendToAgent": "Send to agent"
+  },
+  "mergeConflict": {
+    "title": "Resolve conflicts",
+    "currentBranchFallback": "current branch",
+    "incomingBranchFallback": "base branch",
+    "close": "Close",
+    "abort": "Abort merge",
+    "loadingGit": "Reading Git state…",
+    "files": "Files",
+    "conflictKind": {
+      "bothModified": "Modified on both sides",
+      "bothAdded": "Added on both sides",
+      "deletedByCurrent": "Deleted on the current branch",
+      "deletedByIncoming": "Deleted on the base branch",
+      "bothDeleted": "Deleted on both sides",
+      "other": "Git conflict"
+    },
+    "busy": {
+      "agent": "Wait for the agent to finish its suggestion before closing.",
+      "operation": "Wait for the current operation to finish before closing."
+    },
+    "confirm": {
+      "discardEdit": "Discard the unsaved edits for this conflict?",
+      "remainingMarkers": "Some lines still look like conflict markers. Mark this file as resolved anyway?",
+      "deleteResult": "Delete {{path}} from the merge result?",
+      "abort": "Abort the merge and discard all completed resolutions?",
+      "validationCommands": "DCC will run these project-defined commands before committing:\n\n{{commands}}\n\nContinue?"
+    },
+    "toast": {
+      "mergeStarted": "Merge started. Resolve the listed files.",
+      "updatedWithoutConflicts": "Branch updated without conflicts. It can now be pushed.",
+      "hunkChanged": "The hunk changed. Select it again before requesting a suggestion.",
+      "agentApplied": "The agent suggestion was applied only to the editor",
+      "resolveAllHunks": "Resolve every hunk in this file before marking it as resolved.",
+      "fileChanged": "The file changed on disk. Reopen the conflict before overwriting it.",
+      "markedResolved": "Marked {{path}} as resolved",
+      "resolvedWith": "Resolved {{path}} using {{branch}}",
+      "removedResolved": "Removed {{path}} and marked it as resolved",
+      "mergeAborted": "Merge aborted",
+      "validationFailed": "A validation failed. Review its output before trying again.",
+      "mergeCompleted": "Merge completed and pushed"
+    },
+    "errors": {
+      "agentResultChanged": "The result changed while the agent was analyzing it. The suggestion remains in the session and was not applied.",
+      "agentContract": "The agent did not return the expected resolution contract. Its response remains in the session for review.",
+      "agentInvalid": "The agent returned an invalid suggestion. Its response remains in the session for review.",
+      "agentIncomplete": "The agent suggestion is incomplete.",
+      "agentResultInvalid": "The agent suggestion does not contain a valid result."
+    },
+    "unsupported": {
+      "title": "{{operation}} operation detected",
+      "description": "This flow resolves merges. Continue or abort this operation in the terminal."
+    },
+    "start": {
+      "title": "Merge {{incoming}} into {{current}}",
+      "description": "DCC will fetch the latest base and start a local merge. Any conflicts will appear here.",
+      "action": "Start resolution"
+    },
+    "completion": {
+      "title": "All conflicts have been resolved",
+      "description": "Before committing, DCC runs the validations declared by the project.",
+      "withValidation": "Validate, complete, and push",
+      "withoutValidation": "Complete merge and push"
+    },
+    "validation": {
+      "loading": "Reading project validations…",
+      "invalidTitle": "Invalid validation configuration",
+      "configuredTitle": "Validations configured in .dcc.toml",
+      "timeout": "{{seconds}}s timeout per command. Execution stops at the first failure.",
+      "empty": "No validations are configured. Add validate = [...] to the [scripts] section in .dcc.toml to run lint, typecheck, or tests.",
+      "failed": "Validation failed",
+      "passed": "Validations passed",
+      "notConfigured": "No validations configured",
+      "stepMeta": "{{seconds}}s{{exitCode}}",
+      "exitCode": " · exit {{code}}"
+    },
+    "fileActions": {
+      "useFile": "Use {{branch}} file",
+      "useFileTitle": "Accept and mark the whole file using {{branch}}",
+      "deleteResult": "Delete result"
+    },
+    "unavailable": {
+      "title": "Content unavailable in the editor",
+      "tooLarge": "The file exceeds the editor's safe limit.",
+      "unsupported": "The file is binary, non-UTF-8, or exists only as a special Git object.",
+      "instruction": "Choose one of the complete versions or delete the result."
+    },
+    "hunk": {
+      "position": "Hunk {{current}} of {{total}}",
+      "accept": "Accept {{branch}}",
+      "acceptBoth": "Accept both",
+      "resolveWithAgent": "Resolve this hunk with agent",
+      "nonePending": "No hunks pending. Review the result and mark the file as resolved.",
+      "pending_one": "{{count}} hunk still pending",
+      "pending_other": "{{count}} hunks still pending"
+    },
+    "agent": {
+      "reviewFile": "Ask agent to review file",
+      "sessionTitle": "Resolve conflict: {{path}}",
+      "suggestionAppliedHunk": "Agent suggestion applied to the hunk",
+      "suggestionAppliedFile": "Agent suggestion applied to the file",
+      "sessionLabel": "Session {{sessionId}}",
+      "reviewNotice": "Review the result. Nothing has been saved, staged, or committed; the response is recorded in the session history."
+    },
+    "result": {
+      "changed": "Result changed",
+      "ready": "Ready to mark as resolved",
+      "save": "Save and mark resolved"
+    }
   },
   "fileSurface": {
     "ariaLabel": "Whole file view",
