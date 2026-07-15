@@ -12,6 +12,7 @@ import {
 	GitMerge,
 	Loader2,
 	RotateCcw,
+	Sparkles,
 	Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -41,10 +42,18 @@ import {
 } from "@/features/editor/WorkspaceFileSurface";
 import {
 	applyMergeConflictResolution,
+	applyMergeConflictReplacement,
 	hasMergeConflictMarkerFragments,
 	parseMergeConflictHunks,
 	type MergeConflictResolution,
 } from "./merge-conflict-hunks";
+import {
+	buildAgentConflictResolutionPrompt,
+	createAgentResolutionToken,
+	parseAgentConflictResolution,
+	type AgentResolutionRunRequest,
+	type AgentResolutionRunResult,
+} from "./agent-conflict-resolution";
 
 const CONFLICT_STATE_QUERY_KEY = "workspaceGitConflictState";
 
@@ -55,6 +64,16 @@ type Props = {
 	baseBranch: string | null;
 	forgeLogin: string | null;
 	onStateChanged: () => Promise<void> | void;
+	onResolveWithAgent: (
+		request: AgentResolutionRunRequest,
+	) => Promise<AgentResolutionRunResult>;
+};
+
+type AppliedAgentSuggestion = {
+	path: string;
+	explanation: string;
+	sessionId: string;
+	scope: "hunk" | "file";
 };
 
 function errorMessage(error: unknown) {
@@ -107,6 +126,7 @@ export function WorkspaceMergeConflictResolver({
 	baseBranch,
 	forgeLogin,
 	onStateChanged,
+	onResolveWithAgent,
 }: Props) {
 	const editorRef = useRef<FileEditorHandle | null>(null);
 	const initialResultRef = useRef<string | null>(null);
@@ -115,6 +135,8 @@ export function WorkspaceMergeConflictResolver({
 	const [buffer, setBuffer] = useState("");
 	const [activeHunk, setActiveHunk] = useState(0);
 	const [busy, setBusy] = useState<string | null>(null);
+	const [agentSuggestion, setAgentSuggestion] =
+		useState<AppliedAgentSuggestion | null>(null);
 
 	const query = useQuery({
 		queryKey: [CONFLICT_STATE_QUERY_KEY, workspaceRoot],
@@ -146,6 +168,7 @@ export function WorkspaceMergeConflictResolver({
 		setBuffer(result);
 		initialResultRef.current = entry.result.text;
 		setActiveHunk(0);
+		setAgentSuggestion(null);
 	}, []);
 
 	useEffect(() => {
@@ -178,6 +201,10 @@ export function WorkspaceMergeConflictResolver({
 
 	const requestOpenChange = useCallback(
 		(next: boolean) => {
+			if (!next && busy === "agent") {
+				toast.info("Aguarde o agente concluir a sugestão antes de fechar.");
+				return;
+			}
 			if (
 				!next &&
 				dirty &&
@@ -187,7 +214,7 @@ export function WorkspaceMergeConflictResolver({
 			}
 			onOpenChange(next);
 		},
-		[dirty, onOpenChange],
+		[busy, dirty, onOpenChange],
 	);
 
 	const startMerge = useCallback(async () => {
@@ -238,6 +265,82 @@ export function WorkspaceMergeConflictResolver({
 		},
 		[buffer, hunk],
 	);
+
+	const resolveWithAgent = useCallback(async () => {
+		if (!selected) return;
+		const source = editorRef.current?.getValue() ?? buffer;
+		const requestedHunk = hunk
+			? parseMergeConflictHunks(source).find(
+					(candidate) => candidate.startOffset === hunk.startOffset,
+				)
+			: null;
+		if (hunk && !requestedHunk) {
+			toast.warning("O bloco mudou. Selecione-o novamente antes de pedir a sugestão.");
+			return;
+		}
+
+		const token = createAgentResolutionToken();
+		const prompt = buildAgentConflictResolutionPrompt(
+			{
+				path: selected.path,
+				kind: selected.kind,
+				currentRef: currentLabel,
+				incomingRef: incomingLabel,
+				baseText: selected.base.text,
+				currentText: selected.current.text,
+				incomingText: selected.incoming.text,
+				resultText: source,
+				scope: requestedHunk
+					? {
+							type: "hunk",
+							startLine: requestedHunk.startLine,
+							baseText: requestedHunk.baseText,
+							currentText: requestedHunk.currentText,
+							incomingText: requestedHunk.incomingText,
+						}
+					: { type: "file" },
+			},
+			token,
+		);
+		setBusy("agent");
+		setAgentSuggestion(null);
+		try {
+			const result = await onResolveWithAgent({
+				prompt,
+				title: `Resolver conflito: ${selected.path}`,
+			});
+			const suggestion = parseAgentConflictResolution(result.content, token);
+			const latest = editorRef.current?.getValue() ?? buffer;
+			if (latest !== source) {
+				throw new Error(
+					"O resultado foi alterado enquanto o agente analisava. A sugestão ficou na sessão e não foi aplicada.",
+				);
+			}
+			const next = requestedHunk
+				? applyMergeConflictReplacement(source, requestedHunk, suggestion.resolvedContent)
+				: suggestion.resolvedContent;
+			editorRef.current?.setValue(next);
+			setBuffer(next);
+			setAgentSuggestion({
+				path: selected.path,
+				explanation: suggestion.explanation,
+				sessionId: result.sessionId,
+				scope: requestedHunk ? "hunk" : "file",
+			});
+			toast.success("Sugestão do agente aplicada somente ao editor");
+		} catch (error) {
+			toast.error(errorMessage(error));
+		} finally {
+			setBusy(null);
+		}
+	}, [
+		buffer,
+		currentLabel,
+		hunk,
+		incomingLabel,
+		onResolveWithAgent,
+		selected,
+	]);
 
 	const saveAndResolve = useCallback(async () => {
 		if (!selected) return;
@@ -508,6 +611,7 @@ export function WorkspaceMergeConflictResolver({
 									<button
 										key={entry.path}
 										type="button"
+										disabled={Boolean(busy)}
 										onClick={() => openEntry(entry)}
 										className={cn(
 											"mb-1 flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors",
@@ -547,14 +651,21 @@ export function WorkspaceMergeConflictResolver({
 											{hunk ? (
 												<>
 													<div className="mb-2 flex items-center gap-2"><Badge variant="outline">Bloco {activeHunk + 1} de {hunks.length}</Badge><div className="ml-auto flex gap-1"><Button variant="ghost" size="icon-xs" disabled={activeHunk === 0} onClick={() => setActiveHunk((value) => Math.max(0, value - 1))}><ChevronLeft /></Button><Button variant="ghost" size="icon-xs" disabled={activeHunk >= hunks.length - 1} onClick={() => setActiveHunk((value) => Math.min(hunks.length - 1, value + 1))}><ChevronRight /></Button></div></div>
-													<div className="flex gap-2"><SidePreview label={currentLabel} text={hunk.currentText} /><SidePreview label={incomingLabel} text={hunk.incomingText} /></div>
-													<div className="mt-2 flex flex-wrap gap-1.5"><Button size="xs" variant="outline" onClick={() => applyHunk("current")}>Aceitar {currentLabel}</Button><Button size="xs" variant="outline" onClick={() => applyHunk("incoming")}>Aceitar {incomingLabel}</Button><Button size="xs" onClick={() => applyHunk("both")}>Aceitar ambos</Button></div>
-												</>
-											) : (
-												<div className="flex items-center gap-2 text-xs text-emerald-600"><Check className="size-4" />Sem blocos pendentes. Revise o resultado e marque o arquivo como resolvido.</div>
-											)}
+											<div className="flex gap-2"><SidePreview label={currentLabel} text={hunk.currentText} /><SidePreview label={incomingLabel} text={hunk.incomingText} /></div>
+											<div className="mt-2 flex flex-wrap gap-1.5"><Button size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("current")}>Aceitar {currentLabel}</Button><Button size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("incoming")}>Aceitar {incomingLabel}</Button><Button size="xs" disabled={Boolean(busy)} onClick={() => applyHunk("both")}>Aceitar ambos</Button><Button size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}Resolver este bloco com agente</Button></div>
+										</>
+									) : (
+										<div className="flex flex-wrap items-center gap-2 text-xs text-emerald-600"><Check className="size-4" /><span className="mr-auto">Sem blocos pendentes. Revise o resultado e marque o arquivo como resolvido.</span><Button size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}Pedir revisão do arquivo ao agente</Button></div>
+									)}
+									{agentSuggestion?.path === selected.path ? (
+										<div className="mt-2 rounded-md border border-violet-500/25 bg-violet-500/5 px-3 py-2 text-[11px] leading-5">
+											<div className="flex items-center gap-1.5 font-semibold text-violet-700 dark:text-violet-300"><Sparkles className="size-3.5" />Sugestão do agente aplicada ao {agentSuggestion.scope === "hunk" ? "bloco" : "arquivo"}</div>
+											<p className="mt-1 text-muted-foreground">{agentSuggestion.explanation}</p>
+							<p className="mt-1 font-medium text-foreground" title={`Sessão ${agentSuggestion.sessionId}`}>Revise o resultado. Nada foi salvo, adicionado ao índice ou commitado; a resposta está registrada no histórico da sessão.</p>
 										</div>
-										<div className="min-h-0 flex-1"><WorkspaceFileEditor key={selected.path} ref={editorRef} path={selected.path} content={buffer} readOnly={false} annotateLabel="" onChange={() => setBuffer(editorRef.current?.getValue() ?? "")} /></div>
+									) : null}
+								</div>
+								<div className="min-h-0 flex-1"><WorkspaceFileEditor key={selected.path} ref={editorRef} path={selected.path} content={buffer} readOnly={busy === "agent"} annotateLabel="" onChange={() => setBuffer(editorRef.current?.getValue() ?? "")} /></div>
 										<div className="flex shrink-0 items-center justify-between border-t border-border/60 px-3 py-2"><span className="text-[11px] text-muted-foreground">{hunks.length > 0 ? `${hunks.length} bloco(s) ainda pendente(s)` : dirty ? "Resultado alterado" : "Pronto para marcar como resolvido"}</span><Button size="sm" disabled={Boolean(busy) || hunks.length > 0} onClick={() => void saveAndResolve()}>{busy === "save" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Salvar e marcar resolvido</Button></div>
 									</>
 								)}

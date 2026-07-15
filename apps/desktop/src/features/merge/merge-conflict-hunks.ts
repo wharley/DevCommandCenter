@@ -159,3 +159,11 @@ export function applyMergeConflictResolution(
 				: combineBoth(hunk);
 	return `${source.slice(0, hunk.startOffset)}${replacement}${source.slice(hunk.endOffset)}`;
 }
+
+export function applyMergeConflictReplacement(
+	source: string,
+	hunk: MergeConflictHunk,
+	replacement: string,
+) {
+	return `${source.slice(0, hunk.startOffset)}${replacement}${source.slice(hunk.endOffset)}`;
+}

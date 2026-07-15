@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	applyMergeConflictReplacement,
 	applyMergeConflictResolution,
 	hasMergeConflictMarkerFragments,
 	parseMergeConflictHunks,
@@ -39,6 +40,13 @@ describe("merge conflict hunks", () => {
 		);
 		expect(applyMergeConflictResolution(SIMPLE, hunk!, "both")).toBe(
 			"before\nconst current = true;\nconst incoming = true;\nafter\n",
+		);
+	});
+
+	it("applies an arbitrary reviewed replacement to one block", () => {
+		const [hunk] = parseMergeConflictHunks(SIMPLE);
+		expect(applyMergeConflictReplacement(SIMPLE, hunk!, "const merged = true;\n")).toBe(
+			"before\nconst merged = true;\nafter\n",
 		);
 	});
 

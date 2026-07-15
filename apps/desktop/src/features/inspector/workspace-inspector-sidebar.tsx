@@ -69,6 +69,10 @@ import {
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import { MissionValidationCard } from "@/features/panel/message-components/MissionValidationCard";
 import { WorkspaceMergeConflictResolver } from "@/features/merge/WorkspaceMergeConflictResolver";
+import type {
+	AgentResolutionRunRequest,
+	AgentResolutionRunResult,
+} from "@/features/merge/agent-conflict-resolution";
 import {
 	compileMissionSpecContext,
 	missionSpecContextStatus,
@@ -166,6 +170,9 @@ type WorkspaceInspectorSidebarProps = {
 	reviewDelegationRequest?: { delegationId: string; nonce: number } | null;
 	onSelectSession: (sessionId: string) => void;
 	onPrefillComposer?: (text: string) => void;
+	onResolveConflictWithAgent: (
+		request: AgentResolutionRunRequest,
+	) => Promise<AgentResolutionRunResult>;
 	onOpenCodeFile: (input: { path: string; name: string }) => void;
 	selectedCodePath: string | null;
 	onOpenQuickOpen: () => void;
@@ -1433,6 +1440,7 @@ export function WorkspaceInspectorSidebar({
 	reviewDelegationRequest,
 	onSelectSession,
 	onPrefillComposer,
+	onResolveConflictWithAgent,
 	onOpenCodeFile,
 	selectedCodePath,
 	onOpenQuickOpen,
@@ -3811,6 +3819,7 @@ export function WorkspaceInspectorSidebar({
 					baseBranch={prStatus?.baseBranch ?? null}
 					forgeLogin={selectedForgeLogin}
 					onStateChanged={handleConflictStateChanged}
+					onResolveWithAgent={onResolveConflictWithAgent}
 				/>
 			) : null}
 			<Dialog

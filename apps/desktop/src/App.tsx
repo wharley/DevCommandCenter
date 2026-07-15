@@ -162,6 +162,10 @@ import {
 } from "./features/spec/mission-spec-content";
 import { derivePlanFollowUpState } from "./features/panel/plan-follow-up";
 import { projectWorkspaceMessages } from "./features/panel/thread-projection";
+import type {
+	AgentResolutionRunRequest,
+	AgentResolutionRunResult,
+} from "./features/merge/agent-conflict-resolution";
 import { resolveInitialOnboardingOpen } from "./lib/dev-onboarding-override";
 import {
 	clearProviderRuntimeDraft,
@@ -1625,6 +1629,145 @@ export default function App() {
 		selectedWorkspace,
 		queryClient,
 	]);
+
+	const handleResolveConflictWithAgent = useCallback(
+		async (
+			request: AgentResolutionRunRequest,
+		): Promise<AgentResolutionRunResult> => {
+			if (!selectedProvider || !selectedWorkspace || !selectedLocalWorkspacePath) {
+				throw new Error(
+					"Selecione um workspace local e um provedor disponível para usar o agente.",
+				);
+			}
+			if (selectedProviderBlockReason) {
+				throw new Error(selectedProviderBlockReason);
+			}
+
+			const started = await startThread({
+				workspaceId: selectedWorkspace.id,
+				projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
+				providerId: selectedProvider.id,
+				model: selectedModel?.id ?? null,
+				providerRuntime: selectedProviderRuntime,
+				title: request.title,
+			});
+			const startedSnapshot: RuntimeSessionSnapshot = {
+				sessionId: started.session.id,
+				projectId: started.session.projectId,
+				workspaceId: started.session.workspaceId,
+				providerId: started.session.providerId,
+				model: started.session.model,
+				state: started.projection.state,
+				turnCount: started.projection.turnCount,
+				checkpointCount: started.projection.checkpointCount,
+				activeTurnId: started.projection.activeTurnId ?? null,
+				lastTurnPrompt: null,
+				lastTurnState: null,
+			};
+			setSessionSnapshotsById((current) => ({
+				...current,
+				[started.session.id]: startedSnapshot,
+			}));
+			queryClient.setQueryData<WorkspaceSessionSummary[]>(
+				getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
+				(current = []) => [
+					{
+						session: started.session,
+						thread: started.thread,
+						projection: started.projection,
+						lastTurnPrompt: null,
+						lastTurnState: null,
+					},
+					...current.filter(
+						(summary) => summary.session.id !== started.session.id,
+					),
+				],
+			);
+
+			try {
+				const result = await sendTurn({
+					sessionId: started.session.id,
+					prompt: request.prompt,
+					toolInstructions: [
+						"This is a read-only Git conflict analysis request.",
+						"Do not edit files or run state-changing commands.",
+						"Never run git add, commit, merge, reset, checkout, clean, or push.",
+						"Return only the exact response envelope requested by the user prompt.",
+					].join("\n"),
+					providerId: selectedProvider.id,
+					model: selectedModel?.id ?? null,
+					providerRuntime: selectedProviderRuntime,
+					planMode: false,
+					effort: "medium",
+					fastMode: false,
+				});
+				const resultSnapshot: RuntimeSessionSnapshot = {
+					sessionId: result.session.id,
+					projectId: result.session.projectId,
+					workspaceId: result.session.workspaceId,
+					providerId: result.session.providerId,
+					model: result.session.model,
+					state: result.projection.state,
+					turnCount: result.projection.turnCount,
+					checkpointCount: result.projection.checkpointCount,
+					activeTurnId: result.projection.activeTurnId ?? null,
+					lastTurnPrompt: result.turn.content,
+					lastTurnState: result.turn.state,
+				};
+				setSessionSnapshotsById((current) => ({
+					...current,
+					[result.session.id]: resultSnapshot,
+				}));
+				queryClient.setQueryData<WorkspaceSessionSummary[]>(
+					getWorkspaceSessionsCacheKey(backendCacheKey, result.session.workspaceId),
+					(current = []) =>
+						current.map((summary) =>
+							summary.session.id === result.session.id
+								? {
+										...summary,
+										session: result.session,
+										projection: result.projection,
+										lastTurnPrompt: result.turn.content,
+										lastTurnState: result.turn.state,
+									}
+								: summary,
+						),
+				);
+
+				if (result.turn.state !== "completed") {
+					throw new Error("O agente não concluiu a sugestão de resolução.");
+				}
+				const events = await loadSessionThreadEvents(result.session.id);
+				const response = [...projectWorkspaceMessages(events, [], result.session.id, null)]
+					.reverse()
+					.find(
+						(message) =>
+							message.role === "assistant" && message.content.trim().length > 0,
+					);
+				if (!response) {
+					throw new Error("O agente concluiu sem retornar uma sugestão textual.");
+				}
+				return { content: response.content, sessionId: result.session.id };
+			} finally {
+				void queryClient.invalidateQueries({
+					queryKey: getWorkspaceSessionsCacheKey(
+						backendCacheKey,
+						selectedWorkspace.id,
+					),
+				});
+			}
+		},
+		[
+			backendCacheKey,
+			queryClient,
+			selectedLocalWorkspacePath,
+			selectedModel,
+			selectedProvider,
+			selectedProviderBlockReason,
+			selectedProviderRuntime,
+			selectedWorkspace,
+		],
+	);
 
 	const handleDelegate = useCallback(
 		async (request: ManualDelegationRequest) => {
@@ -3311,6 +3454,7 @@ export default function App() {
 									onSelectPreview={handleOpenEditorFile}
 									onSelectSession={handleSelectSession}
 									onPrefillComposer={handlePrefillComposer}
+									onResolveConflictWithAgent={handleResolveConflictWithAgent}
 									onOpenCodeFile={handleOpenFileFromQuickOpen}
 									selectedCodePath={
 										surfaceSelection?.kind === "file-edit"
