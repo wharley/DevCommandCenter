@@ -1,21 +1,32 @@
-import { Code2, FileCode2, PenTool, SquareTerminal } from "lucide-react";
+import type { ComponentType, SVGProps } from "react";
+import {
+	CursorEditorIcon,
+	TraeEditorIcon,
+	VsCodeEditorIcon,
+	VsCodeInsidersEditorIcon,
+	ZedEditorIcon,
+} from "@/components/editor-brand-icons";
 
 export type EditorId = "cursor" | "zed" | "vscode" | "vscode-insiders" | "trae";
 
 export type EditorOption = {
 	id: EditorId;
 	label: string;
-	icon: typeof Code2;
+	icon: ComponentType<SVGProps<SVGSVGElement>>;
 };
 
 export const EDITOR_STORAGE_KEY = "dcc-preferred-editor";
 
 export const EDITOR_OPTIONS: EditorOption[] = [
-	{ id: "cursor", label: "Cursor", icon: Code2 },
-	{ id: "zed", label: "Zed", icon: SquareTerminal },
-	{ id: "vscode", label: "VS Code", icon: FileCode2 },
-	{ id: "vscode-insiders", label: "VS Code Insiders", icon: FileCode2 },
-	{ id: "trae", label: "Trae", icon: PenTool },
+	{ id: "cursor", label: "Cursor", icon: CursorEditorIcon },
+	{ id: "zed", label: "Zed", icon: ZedEditorIcon },
+	{ id: "vscode", label: "VS Code", icon: VsCodeEditorIcon },
+	{
+		id: "vscode-insiders",
+		label: "VS Code Insiders",
+		icon: VsCodeInsidersEditorIcon,
+	},
+	{ id: "trae", label: "Trae", icon: TraeEditorIcon },
 ];
 
 export function getStoredPreferredEditor(): EditorId {

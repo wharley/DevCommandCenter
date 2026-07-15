@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,10 +53,6 @@ export function DiffAnnotationPopover({
 		null,
 	);
 
-	useEffect(() => {
-		textareaRef.current?.focus();
-	}, []);
-
 	const { request, anchor } = pending;
 
 	// Measure the rendered card and place it fully inside the viewport: prefer
@@ -92,6 +88,46 @@ export function DiffAnnotationPopover({
 		return () => window.removeEventListener("resize", measure);
 	}, [anchor.left, anchor.top]);
 
+	const isPositioned = position !== null;
+
+	// The card is hidden until its viewport-safe position has been measured. Trying
+	// to focus the textarea during the first mount is therefore ignored by some
+	// browsers/webviews. Focus it only after the card is visible and keep this modal
+	// focus scope from being immediately stolen back by Monaco.
+	useLayoutEffect(() => {
+		if (!isPositioned) {
+			return;
+		}
+
+		const card = cardRef.current;
+		const textarea = textareaRef.current;
+		if (!card || !textarea) {
+			return;
+		}
+
+		const focusInstruction = () => {
+			textarea.focus({ preventScroll: true });
+		};
+		const keepFocusInDialog = (event: FocusEvent) => {
+			if (!(event.target instanceof Node) || !card.contains(event.target)) {
+				focusInstruction();
+			}
+		};
+
+		document.addEventListener("focusin", keepFocusInDialog);
+		focusInstruction();
+		const focusFrame = requestAnimationFrame(() => {
+			if (!card.contains(document.activeElement)) {
+				focusInstruction();
+			}
+		});
+
+		return () => {
+			document.removeEventListener("focusin", keepFocusInDialog);
+			cancelAnimationFrame(focusFrame);
+		};
+	}, [isPositioned]);
+
 	const lineLabel =
 		request.startLine === request.endLine
 			? `L${request.startLine}`
@@ -111,6 +147,7 @@ export function DiffAnnotationPopover({
 			<div
 				ref={cardRef}
 				role="dialog"
+				aria-modal="true"
 				aria-label={t("diffAnnotate.dialogLabel")}
 				className="fixed z-50 flex max-h-[calc(100vh-1.5rem)] w-[348px] max-w-[calc(100vw-1.5rem)] origin-top flex-col overflow-hidden rounded-xl border border-border/80 bg-popover text-popover-foreground shadow-xl ring-1 ring-foreground/10 animate-in fade-in-0 zoom-in-95 duration-100"
 				style={{
