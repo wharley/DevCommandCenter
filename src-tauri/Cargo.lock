@@ -822,7 +822,7 @@ dependencies = [
 
 [[package]]
 name = "dev-command-center-tauri"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "axum",
  "chrono",
