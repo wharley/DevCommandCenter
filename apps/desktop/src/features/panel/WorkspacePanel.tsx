@@ -151,7 +151,7 @@ type WorkspacePanelProps = {
 	inspectorCollapsed?: boolean;
 	/** Toggles the inspector open/closed — wired to the header control. */
 	onToggleInspector?: () => void;
-	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
+	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
 	/** Opens the inspector and previews an implementation delegation diff. */
 	onReviewDelegation?: (delegationId: string) => void;

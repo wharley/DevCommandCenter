@@ -1036,11 +1036,6 @@
       "failed": "Falhou",
       "failedFallback": "A execução falhou",
       "noOutput": "Nenhuma saída capturada."
-    },
-    "editsCard": {
-      "summaryOne": "Editou 1 arquivo",
-      "summaryOther": "Editou {{count}} arquivos",
-      "review": "Revisar"
     }
   },
   "workbench": {

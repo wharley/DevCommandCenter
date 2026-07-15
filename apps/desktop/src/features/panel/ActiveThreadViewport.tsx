@@ -41,7 +41,7 @@ type ActiveThreadViewportProps = {
 		turn: ComposerSubmittedTurn,
 		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
 	) => Promise<void>;
-	/** Reveals the inspector to review a turn's edits ([Revisar] card). */
+	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
 	onReviewDelegation?: (delegationId: string) => void;
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
@@ -175,7 +175,6 @@ export function ActiveThreadViewport({
 												activeMissionSpecRelativePath={activeMissionSpecRelativePath}
 												activeMissionSpecHash={activeMissionSpecHash}
 												autoSaveMissionValidation={autoSaveMissionValidation}
-												onReviewChanges={onReviewChanges}
 												onDelegateTaskApprove={onDelegateTaskApprove}
 											/>
 										</div>

@@ -1036,11 +1036,6 @@
       "failed": "Failed",
       "failedFallback": "Tool call failed",
       "noOutput": "No output captured."
-    },
-    "editsCard": {
-      "summaryOne": "Edited 1 file",
-      "summaryOther": "Edited {{count}} files",
-      "review": "Review"
     }
   },
   "workbench": {
