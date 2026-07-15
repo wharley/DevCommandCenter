@@ -178,6 +178,7 @@ function ChangeRow({
 	const folder = dirname(entry.path);
 	const input = { workspaceRoot, relativePath: entry.path };
 	const iconSrc = fileIconSrc ?? getMaterialFileIcon(entry.name);
+	const unmerged = /^(U|AA|DD|AU|UA|DU|UD)$/.test(entry.status.toUpperCase());
 
 	return (
 		<div
@@ -274,7 +275,7 @@ function ChangeRow({
 						<MinusIcon className="size-3.5" strokeWidth={2} />
 					</RowIconButton>
 				</span>
-			) : group === "unstaged" ? (
+			) : group === "unstaged" && !unmerged ? (
 				<span className={ROW_ACTIONS_CLASS}>
 					<RowIconButton
 						aria-label="Discard file changes"
@@ -646,6 +647,7 @@ function ChangesGroup({
 	gitBusy,
 	runGit,
 	onBatchAll,
+	batchDisabled = false,
 	batchAriaLabel,
 	BatchIcon,
 	treeView,
@@ -666,6 +668,7 @@ function ChangesGroup({
 	gitBusy: boolean;
 	runGit: (fn: () => Promise<void>) => Promise<void>;
 	onBatchAll: () => Promise<void>;
+	batchDisabled?: boolean;
 	batchAriaLabel: string;
 	BatchIcon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
 	treeView: boolean;
@@ -698,7 +701,7 @@ function ChangesGroup({
 				{entries.length > 0 ? (
 					<RowIconButton
 						aria-label={batchAriaLabel}
-						disabled={gitBusy}
+						disabled={gitBusy || batchDisabled}
 						onClick={() => void onBatchAll()}
 						className="text-transparent hover:bg-transparent group-hover/header:text-muted-foreground group-hover/header:hover:text-foreground"
 					>
@@ -913,6 +916,7 @@ export function InspectorChangesSection({
 						gitBusy={gitBusy}
 						runGit={runGit}
 						onBatchAll={stageAll}
+						batchDisabled={data.conflictCount > 0}
 						batchAriaLabel="Stage all changes"
 						BatchIcon={PlusIcon}
 						treeView={changesTreeView}

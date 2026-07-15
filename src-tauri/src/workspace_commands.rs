@@ -14,10 +14,11 @@ use dcc_tauri::{
         SaveMissionValidationInput, SaveMissionValidationOutput,
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
-        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
-        WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
+        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
+        WorkspaceGitCommitPushInput, WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
         WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput, WorkspaceGitPathInput,
-        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
+        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPushInput, WorkspaceGitStatusInput,
+        WorkspaceGitStatusOutput,
         WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceIdInput,
         WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
         WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
@@ -158,6 +159,39 @@ pub async fn workspace_git_conflict_state(
     input: WorkspaceGitConflictStateInput,
 ) -> Result<WorkspaceGitConflictStateOutput, String> {
     dcc_tauri::commands::workspace_commands::workspace_git_conflict_state(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_accept_conflict(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitAcceptConflictInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_accept_conflict(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_mark_conflict_resolved(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitMarkConflictResolvedInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_mark_conflict_resolved(state, input)
+        .await
+}
+
+#[tauri::command]
+pub async fn workspace_git_abort_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitConflictStateInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_abort_merge(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_complete_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_complete_merge(state, input).await
 }
 
 #[tauri::command]

@@ -68,6 +68,7 @@ import {
 } from "@/features/spec/mission-spec-content";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import { MissionValidationCard } from "@/features/panel/message-components/MissionValidationCard";
+import { WorkspaceMergeConflictResolver } from "@/features/merge/WorkspaceMergeConflictResolver";
 import {
 	compileMissionSpecContext,
 	missionSpecContextStatus,
@@ -1833,6 +1834,7 @@ export function WorkspaceInspectorSidebar({
 	const [isSyncingBase, setIsSyncingBase] = useState(false);
 	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
 	const [isCompilingSpecContext, setIsCompilingSpecContext] = useState(false);
+	const [conflictResolverOpen, setConflictResolverOpen] = useState(false);
 	const [pendingGitConfirmation, setPendingGitConfirmation] =
 		useState<PendingGitConfirmation>(null);
 	const rootRef = useRef<HTMLDivElement | null>(null);
@@ -1938,7 +1940,6 @@ export function WorkspaceInspectorSidebar({
 					});
 					break;
 				case "fix":
-				case "resolve-conflicts":
 					await workspaceChangeRequestViewWeb({
 						workspaceRoot: root,
 						forgeLogin: selectedForgeLogin,
@@ -1947,6 +1948,10 @@ export function WorkspaceInspectorSidebar({
 						id: loadingToast,
 					});
 					break;
+				case "resolve-conflicts":
+					toast.dismiss(loadingToast);
+					setConflictResolverOpen(true);
+					return;
 				case "create-pr": {
 					if (hasWorkingTreeChanges) {
 						throw new Error(
@@ -2113,6 +2118,25 @@ export function WorkspaceInspectorSidebar({
 	const handleSyncBase = useCallback(() => {
 		setPendingGitConfirmation("sync-base");
 	}, []);
+
+	const handleConflictStateChanged = useCallback(async () => {
+		const root = workspacePath?.trim();
+		if (!root) return;
+		await Promise.all([
+			queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+			}),
+			queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
+			}),
+			queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
+			}),
+			queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+			}),
+		]);
+	}, [queryClient, workspacePath]);
 
 	const handleContinueWorkspace = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -3779,6 +3803,16 @@ export function WorkspaceInspectorSidebar({
 					/>
 				)}
 			</div>
+			{workspacePath?.trim() ? (
+				<WorkspaceMergeConflictResolver
+					open={conflictResolverOpen}
+					onOpenChange={setConflictResolverOpen}
+					workspaceRoot={workspacePath.trim()}
+					baseBranch={prStatus?.baseBranch ?? null}
+					forgeLogin={selectedForgeLogin}
+					onStateChanged={handleConflictStateChanged}
+				/>
+			) : null}
 			<Dialog
 				open={pendingGitConfirmation !== null}
 				onOpenChange={(open) => {

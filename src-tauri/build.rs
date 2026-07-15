@@ -76,11 +76,12 @@ use dcc_tauri::commands::{
         SearchWorkspaceMatch, SearchWorkspaceOutput, WorkspaceApplyDelegationWorktreeInput,
         WorkspaceApplyDelegationWorktreeOutput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceContinueFromBaseBranchOutput, WorkspaceGitBranchDiffInput,
-        WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput,
-        WorkspaceGitConflictContent, WorkspaceGitConflictEntry, WorkspaceGitConflictKind,
-        WorkspaceGitConflictOperation, WorkspaceGitConflictStateInput,
+        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
+        WorkspaceGitCommitPushInput, WorkspaceGitConflictContent, WorkspaceGitConflictEntry,
+        WorkspaceGitConflictKind, WorkspaceGitConflictOperation, WorkspaceGitConflictSide,
+        WorkspaceGitConflictStateInput,
         WorkspaceGitConflictStateOutput, WorkspaceGitPathInput, WorkspaceGitPushInput,
-        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput,
+        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput,
         WorkspaceGitSyncBaseOutput, WorkspacePrepareDelegationWorktreeInput,
         WorkspacePrepareDelegationWorktreeOutput, WorkspaceRemoveDelegationWorktreeInput,
         WorkspaceRunSetupInput, WorkspaceRunSetupOutput, WorkspaceSetupHint,
@@ -133,6 +134,10 @@ struct WorkspaceMethods {
     workspace_git_branch_diff: String,
     workspace_apply_delegation_worktree: String,
     workspace_git_commit_push: String,
+    workspace_git_accept_conflict: String,
+    workspace_git_mark_conflict_resolved: String,
+    workspace_git_abort_merge: String,
+    workspace_git_complete_merge: String,
     workspace_git_conflict_state: String,
     workspace_git_discard_file: String,
     workspace_git_file_preview: String,
@@ -302,6 +307,9 @@ fn main() {
         .typ::<WorkspaceGitConflictKind>()
         .typ::<WorkspaceGitConflictContent>()
         .typ::<WorkspaceGitConflictEntry>()
+        .typ::<WorkspaceGitConflictSide>()
+        .typ::<WorkspaceGitAcceptConflictInput>()
+        .typ::<WorkspaceGitMarkConflictResolvedInput>()
         .typ::<WorkspaceContinueFromBaseBranchInput>()
         .typ::<WorkspaceContinueFromBaseBranchOutput>()
         .typ::<WorkspacePrStatusInput>()
@@ -432,6 +440,11 @@ fn main() {
                 workspace_git_file_preview_content: "workspace_git_file_preview_content"
                     .to_string(),
                 workspace_git_commit_push: "workspace_git_commit_push".to_string(),
+                workspace_git_accept_conflict: "workspace_git_accept_conflict".to_string(),
+                workspace_git_mark_conflict_resolved: "workspace_git_mark_conflict_resolved"
+                    .to_string(),
+                workspace_git_abort_merge: "workspace_git_abort_merge".to_string(),
+                workspace_git_complete_merge: "workspace_git_complete_merge".to_string(),
                 workspace_git_conflict_state: "workspace_git_conflict_state".to_string(),
                 workspace_git_discard_file: "workspace_git_discard_file".to_string(),
                 workspace_git_push: "workspace_git_push".to_string(),

@@ -57,8 +57,10 @@ import type {
 	WorkspaceGitFilePreviewInput,
 	WorkspaceGitFilePreviewContentOutput,
 	WorkspaceGitCommitPushInput,
+	WorkspaceGitAcceptConflictInput,
 	WorkspaceGitConflictStateInput,
 	WorkspaceGitConflictStateOutput,
+	WorkspaceGitMarkConflictResolvedInput,
 	WorkspaceGitPathInput,
 	WorkspaceGitPushInput,
 	WorkspaceGitStatusInput,
@@ -329,6 +331,24 @@ export function workspaceGitConflictState(input: WorkspaceGitConflictStateInput)
 		WORKSPACE_METHODS.workspaceGitConflictState,
 		{ input },
 	);
+}
+
+export function workspaceGitAcceptConflict(input: WorkspaceGitAcceptConflictInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGitAcceptConflict, { input });
+}
+
+export function workspaceGitMarkConflictResolved(
+	input: WorkspaceGitMarkConflictResolvedInput,
+) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGitMarkConflictResolved, { input });
+}
+
+export function workspaceGitAbortMerge(input: WorkspaceGitConflictStateInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGitAbortMerge, { input });
+}
+
+export function workspaceGitCompleteMerge(input: WorkspaceGitPushInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGitCompleteMerge, { input });
 }
 
 export function workspaceApplyDelegationWorktree(

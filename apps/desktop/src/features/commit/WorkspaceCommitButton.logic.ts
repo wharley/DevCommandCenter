@@ -18,6 +18,7 @@ export type WorkspaceGitStatusSummary = {
 	aheadOfRemoteCount?: number;
 	behindOfRemoteCount?: number;
 	conflictCount?: number;
+	mergeInProgress?: boolean;
 };
 
 export type WorkspacePrStatusSummary = {
@@ -54,13 +55,13 @@ function resolveFromContext(context: CommitModeContext) {
 	const prBelongsHere = !prHeadBranch || prHeadBranch === context.branch;
 	const prState = prBelongsHere ? context.prStatus?.state?.toLowerCase() : undefined;
 
+	if (context.gitStatus?.mergeInProgress || (context.gitStatus?.conflictCount ?? 0) > 0) {
+		return "resolve-conflicts" as const;
+	}
 	if (prState === "merged") return "merged" as const;
 	if (prState === "closed") return "open-pr" as const;
 
 	if (prState === "open") {
-		if ((context.gitStatus?.conflictCount ?? 0) > 0) {
-			return "resolve-conflicts" as const;
-		}
 		if (hasWorkingTreeChanges(context.gitStatus)) {
 			return "commit-and-push" as const;
 		}

@@ -365,6 +365,7 @@ pub struct WorkspaceGitStatusOutput {
     pub ahead_of_remote_count: u32,
     pub behind_of_remote_count: u32,
     pub conflict_count: u32,
+    pub merge_in_progress: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -501,6 +502,30 @@ pub struct WorkspaceGitConflictStateOutput {
     pub current_branch: Option<String>,
     pub incoming_ref: Option<String>,
     pub conflicts: Vec<WorkspaceGitConflictEntry>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceGitConflictSide {
+    Current,
+    Incoming,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitAcceptConflictInput {
+    pub workspace_root: String,
+    pub relative_path: String,
+    pub side: WorkspaceGitConflictSide,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitMarkConflictResolvedInput {
+    pub workspace_root: String,
+    pub relative_path: String,
+    #[serde(default)]
+    pub delete: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -888,6 +913,34 @@ fn read_conflict_result(
     root: &str,
     relative_path: &str,
 ) -> Result<WorkspaceGitConflictContent, String> {
+    let candidate = PathBuf::from(root).join(relative_path);
+    match fs::symlink_metadata(&candidate) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Ok(WorkspaceGitConflictContent {
+                exists: true,
+                binary: true,
+                truncated: false,
+                byte_count: 0,
+                mode: Some("120000".to_string()),
+                text: None,
+            });
+        }
+        Ok(metadata) if metadata.is_dir() => {
+            return Ok(WorkspaceGitConflictContent {
+                exists: true,
+                binary: true,
+                truncated: false,
+                byte_count: 0,
+                mode: Some("160000".to_string()),
+                text: None,
+            });
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(conflict_content(None, None));
+        }
+        Err(error) => return Err(error.to_string()),
+    }
     let Some(path) = resolve_worktree_file_path(root, relative_path)? else {
         return Ok(conflict_content(None, None));
     };
@@ -1009,6 +1062,174 @@ pub async fn workspace_git_conflict_state(
         return Err("workspace_root is empty".to_string());
     }
     workspace_git_conflict_state_inner(root)
+}
+
+fn load_unmerged_index_entries(root: &str) -> Result<Vec<UnmergedIndexEntry>, String> {
+    let output = run_git_output(root, &["ls-files", "-u", "-z"])?;
+    if !output.status.success() {
+        return Err(git_output_err("git ls-files -u", &output.stderr));
+    }
+    parse_unmerged_index_entries(&output.stdout)
+}
+
+fn require_merge_conflict_entry(root: &str, path: &str) -> Result<UnmergedIndexEntry, String> {
+    if resolve_conflict_operation(root, true) != WorkspaceGitConflictOperation::Merge {
+        return Err("conflict actions currently support merge operations only".to_string());
+    }
+    load_unmerged_index_entries(root)?
+        .into_iter()
+        .find(|entry| entry.path == path)
+        .ok_or_else(|| format!("path is not an unresolved merge conflict: {path}"))
+}
+
+#[tauri::command]
+pub async fn workspace_git_accept_conflict(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitAcceptConflictInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    let path = validate_git_relative_path(&input.relative_path)?;
+    workspace_git_accept_conflict_inner(root, &path, input.side)
+}
+
+fn workspace_git_accept_conflict_inner(
+    root: &str,
+    path: &str,
+    side: WorkspaceGitConflictSide,
+) -> Result<(), String> {
+    let entry = require_merge_conflict_entry(root, &path)?;
+    let (stage, checkout_flag) = match side {
+        WorkspaceGitConflictSide::Current => (2, "--ours"),
+        WorkspaceGitConflictSide::Incoming => (3, "--theirs"),
+    };
+
+    if entry.stages.contains_key(&stage) {
+        let checkout = run_git_output(root, &["checkout", checkout_flag, "--", &path])?;
+        if !checkout.status.success() {
+            return Err(git_output_err("git checkout conflict side", &checkout.stderr));
+        }
+        let add = run_git_output(root, &["add", "--", &path])?;
+        if add.status.success() {
+            Ok(())
+        } else {
+            Err(git_output_err("git add", &add.stderr))
+        }
+    } else {
+        let remove = run_git_output(root, &["rm", "-f", "--", &path])?;
+        if remove.status.success() {
+            Ok(())
+        } else {
+            Err(git_output_err("git rm", &remove.stderr))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn workspace_git_mark_conflict_resolved(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitMarkConflictResolvedInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    let path = validate_git_relative_path(&input.relative_path)?;
+    workspace_git_mark_conflict_resolved_inner(root, &path, input.delete)
+}
+
+fn workspace_git_mark_conflict_resolved_inner(
+    root: &str,
+    path: &str,
+    delete: bool,
+) -> Result<(), String> {
+    require_merge_conflict_entry(root, &path)?;
+
+    let output = if delete {
+        run_git_output(root, &["rm", "-f", "--", &path])?
+    } else {
+        let absolute = PathBuf::from(root).join(&path);
+        if !absolute.is_file() {
+            return Err("resolved file does not exist; choose deletion explicitly".to_string());
+        }
+        run_git_output(root, &["add", "--", &path])?
+    };
+    if output.status.success() {
+        Ok(())
+    } else if delete {
+        Err(git_output_err("git rm", &output.stderr))
+    } else {
+        Err(git_output_err("git add", &output.stderr))
+    }
+}
+
+#[tauri::command]
+pub async fn workspace_git_abort_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitConflictStateInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    workspace_git_abort_merge_inner(root)
+}
+
+fn workspace_git_abort_merge_inner(root: &str) -> Result<(), String> {
+    if resolve_conflict_operation(root, false) != WorkspaceGitConflictOperation::Merge {
+        return Err("no merge is in progress".to_string());
+    }
+    let output = run_git_output(root, &["merge", "--abort"])?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(git_output_err("git merge --abort", &output.stderr))
+    }
+}
+
+#[tauri::command]
+pub async fn workspace_git_complete_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    workspace_git_complete_merge_commit_inner(root)?;
+
+    let protected_branch = resolve_workspace_target_branch(&state, root).await;
+    push_current_branch(
+        &state.db_path,
+        root,
+        protected_branch.as_deref(),
+        input.forge_login.as_deref(),
+    )
+}
+
+fn workspace_git_complete_merge_commit_inner(root: &str) -> Result<(), String> {
+    if resolve_conflict_operation(root, false) != WorkspaceGitConflictOperation::Merge {
+        return Err("no merge is in progress".to_string());
+    }
+    let unresolved = resolve_conflict_count(root)?;
+    if unresolved > 0 {
+        return Err(format!(
+            "resolve {unresolved} remaining conflict{} before completing the merge",
+            if unresolved == 1 { "" } else { "s" }
+        ));
+    }
+
+    let commit = run_git_output(root, &["commit", "--no-edit"])?;
+    if !commit.status.success() {
+        return Err(git_output_err("git commit --no-edit", &commit.stderr));
+    }
+    Ok(())
 }
 
 async fn refresh_repository_forge_metadata(
@@ -1503,6 +1724,7 @@ fn workspace_git_status_inner(workspace_root: &str) -> Result<WorkspaceGitStatus
             ahead_of_remote_count: 0,
             behind_of_remote_count: 0,
             conflict_count: 0,
+            merge_in_progress: false,
         });
     }
 
@@ -1580,6 +1802,7 @@ fn workspace_git_status_inner(workspace_root: &str) -> Result<WorkspaceGitStatus
     let (ahead_of_remote_count, behind_of_remote_count) =
         resolve_upstream_branch_counts(root).unwrap_or((0, 0));
     let conflict_count = resolve_conflict_count(root).unwrap_or(0);
+    let merge_in_progress = git_internal_path_exists(root, "MERGE_HEAD");
 
     Ok(WorkspaceGitStatusOutput {
         staged,
@@ -1588,6 +1811,7 @@ fn workspace_git_status_inner(workspace_root: &str) -> Result<WorkspaceGitStatus
         ahead_of_remote_count,
         behind_of_remote_count,
         conflict_count,
+        merge_in_progress,
     })
 }
 
@@ -2610,6 +2834,102 @@ mod editor_workspace_file_tests {
             .text
             .as_deref()
             .is_some_and(|text| text.contains("<<<<<<< HEAD")));
+
+        workspace_git_accept_conflict_inner(
+            repo.as_str(),
+            "app.txt",
+            WorkspaceGitConflictSide::Incoming,
+        )
+        .expect("accept incoming file");
+        assert_eq!(resolve_conflict_count(repo.as_str()).expect("conflict count"), 0);
+        assert_eq!(
+            fs::read_to_string(repo.path.join("app.txt")).expect("read accepted file"),
+            "shared\nincoming\n"
+        );
+
+        workspace_git_abort_merge_inner(repo.as_str()).expect("abort merge");
+        assert_eq!(
+            fs::read_to_string(repo.path.join("app.txt")).expect("read restored file"),
+            "shared\ncurrent\n"
+        );
+        assert_eq!(
+            resolve_conflict_operation(repo.as_str(), false),
+            WorkspaceGitConflictOperation::None
+        );
+
+        let merge = run_git_output(repo.as_str(), &["merge", "incoming"]).expect("merge again");
+        assert!(!merge.status.success(), "second merge should conflict");
+        fs::write(
+            repo.path.join("app.txt"),
+            "shared\ncurrent\nincoming\n",
+        )
+        .expect("write combined result");
+        workspace_git_mark_conflict_resolved_inner(repo.as_str(), "app.txt", false)
+            .expect("mark resolved");
+        workspace_git_complete_merge_commit_inner(repo.as_str()).expect("complete merge commit");
+        assert_eq!(
+            resolve_conflict_operation(repo.as_str(), false),
+            WorkspaceGitConflictOperation::None
+        );
+        let parents = run_git_output(repo.as_str(), &["rev-list", "--parents", "-n", "1", "HEAD"])
+            .expect("read merge parents");
+        assert_eq!(
+            String::from_utf8_lossy(&parents.stdout)
+                .split_whitespace()
+                .count(),
+            3,
+            "merge commit should have two parents"
+        );
+    }
+
+    #[test]
+    fn accepting_deleted_side_resolves_modify_delete_conflict() {
+        let repo = TestDir::new("merge-delete-conflict");
+        let git = |args: &[&str]| {
+            let output = run_git_output(repo.as_str(), args).expect("run git");
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+
+        git(&["init", "-b", "current"]);
+        git(&["config", "user.name", "DCC Test"]);
+        git(&["config", "user.email", "dcc@example.invalid"]);
+        fs::write(repo.path.join("removed.txt"), "base\n").expect("write base");
+        git(&["add", "removed.txt"]);
+        git(&["commit", "-m", "base"]);
+        git(&["branch", "incoming"]);
+
+        fs::write(repo.path.join("removed.txt"), "current changed\n").expect("modify current");
+        git(&["add", "removed.txt"]);
+        git(&["commit", "-m", "modify current"]);
+        git(&["checkout", "incoming"]);
+        git(&["rm", "removed.txt"]);
+        git(&["commit", "-m", "delete incoming"]);
+        git(&["checkout", "current"]);
+
+        let merge = run_git_output(repo.as_str(), &["merge", "incoming"]).expect("merge");
+        assert!(!merge.status.success(), "merge should conflict");
+        let state = workspace_git_conflict_state_inner(repo.as_str()).expect("conflict state");
+        assert_eq!(state.conflicts[0].kind, WorkspaceGitConflictKind::DeletedByIncoming);
+
+        workspace_git_accept_conflict_inner(
+            repo.as_str(),
+            "removed.txt",
+            WorkspaceGitConflictSide::Incoming,
+        )
+        .expect("accept incoming deletion");
+        assert!(!repo.path.join("removed.txt").exists());
+        assert_eq!(resolve_conflict_count(repo.as_str()).expect("conflict count"), 0);
+
+        workspace_git_abort_merge_inner(repo.as_str()).expect("abort merge");
+        assert_eq!(
+            fs::read_to_string(repo.path.join("removed.txt")).expect("restored current file"),
+            "current changed\n"
+        );
     }
 
     #[test]

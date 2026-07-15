@@ -49,6 +49,22 @@ describe("resolveCommitMode", () => {
 		).toBe("commit-and-push");
 	});
 
+	it("returns to the resolver when a merge is still in progress after all files were staged", () => {
+		expect(
+			resolveCommitMode({
+				branch: "feature/statuslane",
+				prStatus: { state: "open", mergeable: "CONFLICTING" },
+				gitStatus: {
+					staged: [{}],
+					unstaged: [],
+					aheadOfRemoteCount: 0,
+					conflictCount: 0,
+					mergeInProgress: true,
+				},
+			}),
+		).toBe("resolve-conflicts");
+	});
+
 	it("keeps unresolved local conflicts ahead of staged changes", () => {
 		expect(
 			resolveCommitMode({
