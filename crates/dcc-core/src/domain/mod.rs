@@ -13,8 +13,8 @@ pub use delegation::{
 };
 pub use project::{Project, ProjectId};
 pub use provider::{
-    Capabilities, HealthStatus, ProviderCatalog, ProviderDescriptor, ProviderEvent, ProviderId,
-    SessionHandle,
+    Capabilities, HealthStatus, ProviderAccountUsage, ProviderAccountUsageState, ProviderCatalog,
+    ProviderDescriptor, ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
 };
 pub use repository::{Repository, RepositoryId};
 pub use session::{

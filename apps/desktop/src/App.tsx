@@ -3206,6 +3206,7 @@ export default function App() {
 									selectedModelLabel={selectedModel?.label ?? null}
 									selectedProviderId={selectedProviderId}
 									selectedModelId={selectedModelId}
+									selectedProviderRuntime={selectedProviderRuntime}
 									providerChoices={providerChoices}
 									sessions={workspaceSessions}
 									selectedSessionId={selectedSessionId}

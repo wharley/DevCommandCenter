@@ -63,6 +63,38 @@ pub struct ProviderCatalog {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUsageWindow {
+    pub id: String,
+    pub used_percent: f64,
+    pub remaining_percent: f64,
+    #[serde(default)]
+    pub resets_at: Option<String>,
+    #[serde(default)]
+    pub window_duration_minutes: Option<u64>,
+    pub is_exhausted: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderAccountUsageState {
+    Available,
+    AwaitingActivity,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccountUsage {
+    pub provider_id: ProviderId,
+    pub state: ProviderAccountUsageState,
+    pub windows: Vec<ProviderUsageWindow>,
+    #[serde(default)]
+    pub plan_type: Option<String>,
+    pub updated_at: String,
+    pub is_cached: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub enum ProviderEvent {
     Started {
         at: String,

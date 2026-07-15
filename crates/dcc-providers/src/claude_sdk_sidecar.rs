@@ -1,6 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, process::Stdio, sync::Arc};
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
 use serde_json::{json, Value};
 use tokio::{
@@ -12,10 +13,13 @@ use uuid::Uuid;
 
 use dcc_core::{
     domain::{
-        provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
+        provider::{
+            Capabilities, HealthStatus, ProviderAccountUsage, ProviderAccountUsageState,
+            ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
+        },
         session::SessionId,
     },
-    ports::{Input, Provider, SessionConfig},
+    ports::{Input, Provider, ProviderRuntimeConfig, SessionConfig},
     CoreError, Result,
 };
 
@@ -37,6 +41,7 @@ pub struct ClaudeSdkSidecarAdapter {
 #[derive(Default)]
 struct ProviderRuntimeState {
     sessions: Mutex<HashMap<String, Arc<SessionRuntime>>>,
+    account_usage: Mutex<HashMap<String, ProviderAccountUsage>>,
 }
 
 struct SessionRuntime {
@@ -44,6 +49,90 @@ struct SessionRuntime {
     stdin: Mutex<Option<ChildStdin>>,
     child: Mutex<Child>,
     events_tx: broadcast::Sender<ProviderEvent>,
+}
+
+fn claude_reset_time(value: &Value) -> Option<String> {
+    let raw_timestamp = value.as_i64()?;
+    let timestamp = if raw_timestamp > 10_000_000_000 {
+        raw_timestamp / 1_000
+    } else {
+        raw_timestamp
+    };
+    DateTime::<Utc>::from_timestamp(timestamp, 0).map(|value| value.to_rfc3339())
+}
+
+fn parse_claude_rate_limit_window(value: &Value) -> Option<ProviderUsageWindow> {
+    if value.get("type").and_then(Value::as_str) != Some("rate_limit_event") {
+        return None;
+    }
+    let info = value.get("rate_limit_info")?;
+    let id = info
+        .get("rateLimitType")
+        .or_else(|| info.get("rate_limit_type"))
+        .and_then(Value::as_str)
+        .unwrap_or("subscription");
+    let raw_utilization = info.get("utilization").and_then(Value::as_f64);
+    let used_percent = raw_utilization
+        .map(|value| if value <= 1.0 { value * 100.0 } else { value })
+        .unwrap_or_else(|| {
+            if info.get("status").and_then(Value::as_str) == Some("rejected") {
+                100.0
+            } else {
+                0.0
+            }
+        })
+        .clamp(0.0, 100.0);
+    let is_exhausted =
+        info.get("status").and_then(Value::as_str) == Some("rejected") || used_percent >= 100.0;
+
+    Some(ProviderUsageWindow {
+        id: id.to_string(),
+        used_percent,
+        remaining_percent: (100.0 - used_percent).clamp(0.0, 100.0),
+        resets_at: info
+            .get("resetsAt")
+            .or_else(|| info.get("resets_at"))
+            .and_then(claude_reset_time),
+        window_duration_minutes: match id {
+            "five_hour" => Some(300),
+            "seven_day" | "seven_day_opus" | "seven_day_sonnet" => Some(10_080),
+            _ => None,
+        },
+        is_exhausted,
+    })
+}
+
+fn provider_runtime_cache_key(runtime: Option<&ProviderRuntimeConfig>) -> String {
+    let home = runtime
+        .and_then(|config| config.home_path.as_deref())
+        .unwrap_or_default();
+    let shadow_home = runtime
+        .and_then(|config| config.shadow_home_path.as_deref())
+        .unwrap_or_default();
+    format!("{home}\n{shadow_home}")
+}
+
+async fn cache_claude_account_usage(state: &ProviderRuntimeState, cache_key: &str, value: &Value) {
+    let Some(window) = parse_claude_rate_limit_window(value) else {
+        return;
+    };
+    let mut cache = state.account_usage.lock().await;
+    let usage = cache
+        .entry(cache_key.to_string())
+        .or_insert_with(|| ProviderAccountUsage {
+            provider_id: ProviderId("claude_code".to_string()),
+            state: ProviderAccountUsageState::Available,
+            windows: Vec::new(),
+            plan_type: None,
+            updated_at: Utc::now().to_rfc3339(),
+            is_cached: true,
+        });
+    if let Some(existing) = usage.windows.iter_mut().find(|item| item.id == window.id) {
+        *existing = window;
+    } else {
+        usage.windows.push(window);
+    }
+    usage.updated_at = Utc::now().to_rfc3339();
 }
 
 impl ClaudeSdkSidecarAdapter {
@@ -201,6 +290,7 @@ impl ClaudeSdkSidecarAdapter {
     }
 
     async fn start_runtime(&self, cfg: SessionConfig) -> Result<SessionHandle> {
+        let account_usage_key = provider_runtime_cache_key(cfg.provider_runtime.as_ref());
         let mut command = self.interactive_command()?;
         apply_cli_spawn_environment(&mut command, &self.id.0, &cfg)?;
         if let Some(ref working_directory) = cfg.working_directory {
@@ -269,6 +359,9 @@ impl ClaudeSdkSidecarAdapter {
                 let content = line.trim_end().to_string();
                 if content.is_empty() {
                     continue;
+                }
+                if let Ok(value) = serde_json::from_str::<Value>(&content) {
+                    cache_claude_account_usage(&runtime_state, &account_usage_key, &value).await;
                 }
                 match parse_provider_stream_line(&content, &mut stream_state) {
                     ParsedProviderLine::Event(event) => {
@@ -630,5 +723,51 @@ impl Provider for ClaudeSdkSidecarAdapter {
                 reason: format!("failed to execute Claude sidecar version check: {error}"),
             }),
         }
+    }
+
+    async fn account_usage(
+        &self,
+        runtime: Option<&ProviderRuntimeConfig>,
+    ) -> Result<Option<ProviderAccountUsage>> {
+        let cache_key = provider_runtime_cache_key(runtime);
+        let usage = self
+            .runtime
+            .account_usage
+            .lock()
+            .await
+            .get(&cache_key)
+            .cloned()
+            .unwrap_or_else(|| ProviderAccountUsage {
+                provider_id: self.id.clone(),
+                state: ProviderAccountUsageState::AwaitingActivity,
+                windows: Vec::new(),
+                plan_type: None,
+                updated_at: Utc::now().to_rfc3339(),
+                is_cached: true,
+            });
+        Ok(Some(usage))
+    }
+}
+
+#[cfg(test)]
+mod account_usage_tests {
+    use super::*;
+
+    #[test]
+    fn parses_claude_rate_limit_fraction_as_percent() {
+        let window = parse_claude_rate_limit_window(&json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "allowed_warning",
+                "rateLimitType": "five_hour",
+                "utilization": 0.83,
+                "resetsAt": 1_800_000_000
+            }
+        }))
+        .expect("rate limit event should parse");
+
+        assert_eq!(window.used_percent, 83.0);
+        assert_eq!(window.remaining_percent, 17.0);
+        assert_eq!(window.window_duration_minutes, Some(300));
     }
 }

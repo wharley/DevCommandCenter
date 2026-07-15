@@ -27,7 +27,7 @@ pub use forge_commands::{
     workspace_gh_pr_merge, workspace_gh_pr_view_web, workspace_github_cli_status,
     workspace_pr_review_comments, workspace_pr_status, workspace_retry_repository_forge_binding,
 };
-pub use provider_commands::list_providers;
+pub use provider_commands::{list_providers, provider_account_usage};
 pub use session_commands::{
     abort_run, list_thread_events, respond_to_permission_request, respond_to_user_input,
     resume_session, send_turn, start_thread,

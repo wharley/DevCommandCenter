@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
 	ArrowUp,
+	AlertTriangle,
 	ChevronDown,
 	ClipboardList,
 	Plus,
@@ -32,7 +33,7 @@ import {
 } from "@/components/ui/tooltip";
 import { pathBasename } from "@/lib/path-basename";
 import { cn } from "@/lib/utils";
-import type { ProviderCatalog } from "@dcc/contracts";
+import type { ProviderCatalog, ProviderRuntimeConfig } from "@dcc/contracts";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import { canAbortRun } from "@/features/sessions/session-chrome-state";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
@@ -90,6 +91,12 @@ import {
 import { appendComposerText, readComposerPrompt, setEditorText } from "./editorOps";
 import { subscribeWorkbenchCommand } from "@/features/workspaces/workbench-command";
 import { recordUxMetric } from "@/lib/ux-metrics";
+import {
+	mostConstrainedUsageWindow,
+	providerUsageSeverity,
+	supportsProviderAccountUsage,
+	useProviderAccountUsage,
+} from "@/features/providers/provider-account-usage";
 
 type WorkspaceComposerProps = {
 	draftKey: string;
@@ -97,6 +104,7 @@ type WorkspaceComposerProps = {
 	providerChoices: ProviderCatalog["providers"];
 	selectedProviderId: string | null;
 	selectedModelId: string | null;
+	selectedProviderRuntime: ProviderRuntimeConfig | null;
 	sessionSnapshot: RuntimeSessionSnapshot | null;
 	pendingPrompt: string | null;
 	/** Text to append to the draft (e.g. a diff annotation); nonce re-fires it. */
@@ -124,6 +132,7 @@ export function WorkspaceComposer({
 	providerChoices,
 	selectedProviderId,
 	selectedModelId,
+	selectedProviderRuntime,
 	sessionSnapshot,
 	pendingPrompt,
 	prefill,
@@ -397,8 +406,27 @@ export function WorkspaceComposer({
 	const toolbarDisabled = disabled;
 	const hasProvider = Boolean(selectedProviderId);
 	const turnCount = sessionSnapshot?.turnCount ?? 0;
-	const checkpointCount = sessionSnapshot?.checkpointCount ?? 0;
-	const contextUsageValue = Math.min(100, turnCount * 12 + checkpointCount * 8);
+	const accountUsageQuery = useProviderAccountUsage(
+		selectedProviderId,
+		selectedProviderRuntime,
+	);
+	const activeTurnId = sessionSnapshot?.activeTurnId ?? null;
+	useEffect(() => {
+		if (
+			turnCount > 0 &&
+			activeTurnId === null &&
+			supportsProviderAccountUsage(selectedProviderId)
+		) {
+			void accountUsageQuery.refetch();
+		}
+	}, [
+		accountUsageQuery.refetch,
+		activeTurnId,
+		selectedProviderId,
+		turnCount,
+	]);
+	const accountUsageWindow = mostConstrainedUsageWindow(accountUsageQuery.data);
+	const accountUsageAlert = providerUsageSeverity(accountUsageWindow);
 
 	const canStopRun =
 		canAbortRun(sessionSnapshot, pendingPrompt) || isSubmitting;
@@ -539,6 +567,14 @@ export function WorkspaceComposer({
 						providers={providerChoices}
 						selectedProviderId={selectedProviderId}
 						selectedModelId={selectedModelId}
+						accountUsage={accountUsageQuery.data}
+						isAccountUsageFetching={accountUsageQuery.isFetching}
+						hasAccountUsageError={accountUsageQuery.isError}
+						onRefreshAccountUsage={() => {
+							if (supportsProviderAccountUsage(selectedProviderId)) {
+								void accountUsageQuery.refetch();
+							}
+						}}
 						onSelectProvider={onSelectProvider}
 						onSelectModel={onSelectModel}
 						disabled={toolbarDisabled}
@@ -660,20 +696,32 @@ export function WorkspaceComposer({
 									{ultrathinkSelected ? "✓" : null}
 								</DropdownMenuItem>
 							</DropdownMenuGroup>
-							{sessionSnapshot ? (
-								<>
-									<DropdownMenuSeparator />
-									<div className="px-2 py-1.5 text-[12px] leading-5 text-muted-foreground">
-										{t("composer.execution.sessionUsage", {
-											turns: turnCount,
-											checkpoints: checkpointCount,
-											context: contextUsageValue,
-										})}
-									</div>
-								</>
-							) : null}
 						</DropdownMenuContent>
 					</DropdownMenu>
+					{accountUsageAlert && accountUsageWindow ? (
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<span
+									className={cn(
+										"flex items-center gap-1 text-[11px] font-medium tabular-nums",
+										accountUsageAlert === "warning" &&
+											"text-amber-600 dark:text-amber-400",
+										accountUsageAlert === "critical" && "text-destructive",
+									)}
+								>
+									<AlertTriangle className="size-3" strokeWidth={2} />
+									{t("composer.accountUsage.remaining", {
+										percent: Math.round(accountUsageWindow.remainingPercent),
+									})}
+								</span>
+							</TooltipTrigger>
+							<TooltipContent>
+								{accountUsageWindow.isExhausted
+									? t("composer.accountUsage.limitReached")
+									: t("composer.accountUsage.lowLimit")}
+							</TooltipContent>
+						</Tooltip>
+					) : null}
 					{canStopRun ? (
 						<div className="ml-1.5 flex items-center gap-1.5">
 							<Button

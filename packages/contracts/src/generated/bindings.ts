@@ -4,7 +4,7 @@
 /* Constants */
 export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","startDelegation":"start_delegation"} as const;
 
-export const PROVIDER_METHODS = {"listProviders":"list_providers"} as const;
+export const PROVIDER_METHODS = {"listProviders":"list_providers","providerAccountUsage":"provider_account_usage"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","closeSession":"close_session","listThreadEvents":"list_thread_events","listWorkspaceSessions":"list_workspace_sessions","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","searchSessions":"search_sessions","sendTurn":"send_turn","startThread":"start_thread"} as const;
 
@@ -564,6 +564,26 @@ export type MissionValidationEntry = {
 
 export type ProjectId = string;
 
+export type ProviderAccountUsage = {
+	providerId: ProviderId,
+	state: ProviderAccountUsageState,
+	windows: ProviderUsageWindow[],
+	planType?: string | null,
+	updatedAt: string,
+	isCached: boolean,
+};
+
+export type ProviderAccountUsageInput = {
+	providerId: string,
+	providerRuntime?: ProviderRuntimeConfig | null,
+};
+
+export type ProviderAccountUsageOutput = {
+	usage: ProviderAccountUsage | null,
+};
+
+export type ProviderAccountUsageState = "available" | "awaitingActivity";
+
 export type ProviderCatalog = {
 	providers: ProviderDescriptor[],
 };
@@ -595,6 +615,15 @@ export type ProviderModelDescriptor = {
 export type ProviderRuntimeConfig = {
 	homePath?: string | null,
 	shadowHomePath?: string | null,
+};
+
+export type ProviderUsageWindow = {
+	id: string,
+	usedPercent: number,
+	remainingPercent: number,
+	resetsAt?: string | null,
+	windowDurationMinutes?: number | null,
+	isExhausted: boolean,
 };
 
 export type ProviderUserInputAnswer = {

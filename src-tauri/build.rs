@@ -56,7 +56,9 @@ use dcc_tauri::commands::{
         WorkspacePrReviewComment, WorkspacePrReviewCommentAuthor, WorkspacePrReviewCommentsInput,
         WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
     },
-    provider_commands::ListProvidersOutput,
+    provider_commands::{
+        ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
+    },
     session_commands::{
         RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
         RespondToUserInputOutput, SearchSessionsInput,
@@ -173,6 +175,7 @@ struct SessionMethods {
 #[serde(rename_all = "camelCase")]
 struct ProviderMethods {
     list_providers: String,
+    provider_account_usage: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -209,6 +212,9 @@ fn main() {
         .typ::<CheckpointId>()
         .typ::<ProviderCatalog>()
         .typ::<ProviderDescriptor>()
+        .typ::<dcc_core::domain::provider::ProviderAccountUsage>()
+        .typ::<dcc_core::domain::provider::ProviderAccountUsageState>()
+        .typ::<dcc_core::domain::provider::ProviderUsageWindow>()
         .typ::<ProviderRuntimeConfig>()
         .typ::<dcc_core::domain::provider::HealthStatus>()
         .typ::<DelegationId>()
@@ -332,6 +338,8 @@ fn main() {
         .typ::<WorkspaceCodeRabbitReviewHistoryEntry>()
         .typ::<WorkspaceCodeRabbitReviewHistoryOutput>()
         .typ::<ListProvidersOutput>()
+        .typ::<ProviderAccountUsageInput>()
+        .typ::<ProviderAccountUsageOutput>()
         .typ::<StartThreadInput>()
         .typ::<StartThreadOutput>()
         .typ::<SendTurnInput>()
@@ -464,6 +472,7 @@ fn main() {
         "PROVIDER_METHODS",
         ProviderMethods {
             list_providers: "list_providers".to_string(),
+            provider_account_usage: "provider_account_usage".to_string(),
         },
     );
 

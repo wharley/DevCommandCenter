@@ -30,7 +30,11 @@ import type {
 	TerminalScopeTarget,
 } from "@/features/terminal/terminal-scope";
 import { projectWorkspaceMessages } from "./thread-projection";
-import type { ProviderCatalog, CoreEvent } from "@dcc/contracts";
+import type {
+	ProviderCatalog,
+	CoreEvent,
+	ProviderRuntimeConfig,
+} from "@dcc/contracts";
 import { derivePlanFollowUpState } from "./plan-follow-up";
 import { useWorkspaceMissionSpecs } from "@/features/inspector/use-workspace-mission-specs";
 import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-status";
@@ -111,6 +115,7 @@ type WorkspacePanelProps = {
 	selectedModelLabel: string | null;
 	selectedProviderId: string | null;
 	selectedModelId: string | null;
+	selectedProviderRuntime: ProviderRuntimeConfig | null;
 	providerChoices: ProviderCatalog["providers"];
 	sessions: WorkspaceSessionSummary[];
 	selectedSessionId: string | null;
@@ -169,6 +174,7 @@ export function WorkspacePanel({
 	selectedModelLabel,
 	selectedProviderId,
 	selectedModelId,
+	selectedProviderRuntime,
 	providerChoices,
 	sessions,
 	selectedSessionId,
@@ -542,6 +548,7 @@ export function WorkspacePanel({
 						providerChoices={providerChoices}
 						selectedProviderId={selectedProviderId}
 						selectedModelId={selectedModelId}
+						selectedProviderRuntime={selectedProviderRuntime}
 						sessionSnapshot={sessionSnapshot}
 						pendingPrompt={pendingPrompt}
 						prefill={composerPrefill}

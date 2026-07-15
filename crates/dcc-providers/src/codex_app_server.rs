@@ -9,12 +9,12 @@ use std::{
 };
 
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
     process::{Child, ChildStdin, Command},
     sync::{broadcast, oneshot, Mutex},
     time::timeout,
@@ -24,10 +24,13 @@ use uuid::Uuid;
 use dcc_core::{
     application::{compose_fallback_prompt_for_provider, PromptInjectionOptions},
     domain::{
-        provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
+        provider::{
+            Capabilities, HealthStatus, ProviderAccountUsage, ProviderAccountUsageState,
+            ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
+        },
         session::SessionId,
     },
-    ports::{Input, Provider, SessionConfig},
+    ports::{Input, Provider, ProviderRuntimeConfig, SessionConfig},
     CoreError, Result,
 };
 
@@ -90,6 +93,161 @@ struct Incoming {
     error: Option<Value>,
     #[serde(default)]
     params: Option<Value>,
+}
+
+fn codex_reset_time(value: &Value) -> Option<String> {
+    let timestamp = value.as_i64()?;
+    DateTime::<Utc>::from_timestamp(timestamp, 0).map(|value| value.to_rfc3339())
+}
+
+fn codex_usage_window(id: &str, value: &Value) -> Option<ProviderUsageWindow> {
+    let used_percent = value.get("usedPercent")?.as_f64()?.clamp(0.0, 100.0);
+    Some(ProviderUsageWindow {
+        id: id.to_string(),
+        used_percent,
+        remaining_percent: (100.0 - used_percent).clamp(0.0, 100.0),
+        resets_at: value.get("resetsAt").and_then(codex_reset_time),
+        window_duration_minutes: value.get("windowDurationMins").and_then(Value::as_u64),
+        is_exhausted: used_percent >= 100.0,
+    })
+}
+
+fn parse_codex_account_usage(value: &Value) -> Result<ProviderAccountUsage> {
+    let limits = value.get("rateLimits").unwrap_or(value);
+    let mut windows = Vec::new();
+    for id in ["primary", "secondary"] {
+        if let Some(window) = limits
+            .get(id)
+            .and_then(|value| codex_usage_window(id, value))
+        {
+            windows.push(window);
+        }
+    }
+    let limit_reached = limits
+        .get("rateLimitReachedType")
+        .is_some_and(|value| !value.is_null());
+    if limit_reached {
+        for window in &mut windows {
+            window.is_exhausted = true;
+        }
+    }
+
+    if windows.is_empty() {
+        return Err(CoreError::Provider(
+            "codex account/rateLimits/read returned no usage windows".to_string(),
+        ));
+    }
+
+    Ok(ProviderAccountUsage {
+        provider_id: ProviderId("codex".to_string()),
+        state: ProviderAccountUsageState::Available,
+        windows,
+        plan_type: limits
+            .get("planType")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        updated_at: Utc::now().to_rfc3339(),
+        is_cached: false,
+    })
+}
+
+async fn read_rpc_response<R>(lines: &mut Lines<R>, expected_id: u64) -> Result<Value>
+where
+    R: AsyncBufRead + Unpin,
+{
+    loop {
+        let line = timeout(Duration::from_secs(15), lines.next_line())
+            .await
+            .map_err(|_| CoreError::Provider("codex account usage request timed out".to_string()))?
+            .map_err(|error| CoreError::Provider(format!("codex stdout read: {error}")))?
+            .ok_or_else(|| {
+                CoreError::Provider("codex app-server exited before responding".to_string())
+            })?;
+        let message = serde_json::from_str::<Incoming>(&line).map_err(|error| {
+            CoreError::Provider(format!("invalid codex app-server response: {error}"))
+        })?;
+        if message.id.as_ref().and_then(Value::as_u64) != Some(expected_id) {
+            continue;
+        }
+        if let Some(error) = message.error {
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("rpc error");
+            return Err(CoreError::Provider(format!(
+                "codex account usage error: {message}"
+            )));
+        }
+        return message.result.ok_or_else(|| {
+            CoreError::Provider("codex account usage response had no result".to_string())
+        });
+    }
+}
+
+async fn fetch_codex_account_usage(
+    runtime_config: Option<&ProviderRuntimeConfig>,
+) -> Result<ProviderAccountUsage> {
+    let mut command = Command::new("codex");
+    command
+        .arg("app-server")
+        .arg("-c")
+        .arg("notify=[]")
+        .env("PATH", augmented_path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(home) = runtime_config.and_then(|config| config.home_path.as_deref()) {
+        command.env("CODEX_HOME", home);
+    }
+
+    let mut child = command.spawn().map_err(|error| {
+        CoreError::Provider(format!("failed to start codex for account usage: {error}"))
+    })?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| CoreError::Provider("codex app-server missing stdin".to_string()))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| CoreError::Provider("codex app-server missing stdout".to_string()))?;
+    let stderr = child.stderr.take();
+    let stderr_task = tokio::spawn(async move {
+        if let Some(stderr) = stderr {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(_)) = lines.next_line().await {}
+        }
+    });
+    let mut lines = BufReader::new(stdout).lines();
+
+    let result = async {
+        write_line(
+            &mut stdin,
+            &rpc_request(
+                1,
+                "initialize",
+                json!({
+                    "clientInfo": { "name": "dcc", "version": env!("CARGO_PKG_VERSION") },
+                    "capabilities": {},
+                }),
+            ),
+        )
+        .await?;
+        read_rpc_response(&mut lines, 1).await?;
+        write_line(&mut stdin, &rpc_notification("initialized")).await?;
+        write_line(
+            &mut stdin,
+            &rpc_request(2, "account/rateLimits/read", Value::Null),
+        )
+        .await?;
+        let response = read_rpc_response(&mut lines, 2).await?;
+        parse_codex_account_usage(&response)
+    }
+    .await;
+
+    let _ = child.kill().await;
+    let _ = stderr_task.await;
+    result
 }
 
 // ── Notification → ProviderEvent ────────────────────────────────────────────
@@ -772,6 +930,13 @@ impl Provider for CodexAppServerAdapter {
             }),
         }
     }
+
+    async fn account_usage(
+        &self,
+        runtime: Option<&ProviderRuntimeConfig>,
+    ) -> Result<Option<ProviderAccountUsage>> {
+        fetch_codex_account_usage(runtime).await.map(Some)
+    }
 }
 
 #[cfg(test)]
@@ -827,5 +992,29 @@ mod tests {
             "error": { "message": "Reconnecting... 2/5" }
         });
         assert_eq!(codex_error_message(&payload), "Reconnecting... 2/5");
+    }
+
+    #[test]
+    fn parses_codex_account_usage_windows() {
+        let usage = parse_codex_account_usage(&json!({
+            "rateLimits": {
+                "primary": {
+                    "usedPercent": 82.5,
+                    "windowDurationMins": 300,
+                    "resetsAt": 1_800_000_000
+                },
+                "secondary": {
+                    "usedPercent": 25.0,
+                    "windowDurationMins": 10_080,
+                    "resetsAt": 1_800_100_000
+                },
+                "planType": "plus"
+            }
+        }))
+        .expect("usage should parse");
+
+        assert_eq!(usage.windows.len(), 2);
+        assert_eq!(usage.windows[0].remaining_percent, 17.5);
+        assert_eq!(usage.plan_type.as_deref(), Some("plus"));
     }
 }

@@ -4,6 +4,7 @@ mod coderabbit_commands;
 mod delegation_commands;
 mod forge_commands;
 mod git_support;
+mod provider_commands;
 mod session_commands;
 mod skills_commands;
 mod workspace_commands;
@@ -6904,6 +6905,7 @@ pub fn run() {
             complete_delegation,
             approve_delegation,
             fail_delegation,
+            provider_commands::provider_account_usage,
             session_commands::start_thread,
             session_commands::send_turn,
             session_commands::abort_run,

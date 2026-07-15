@@ -35,6 +35,7 @@ import type { DccDensity, DccTheme } from "@/components/theme-provider";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
 import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
+import { ProviderAccountUsagePanel } from "@/features/providers/provider-account-usage-panel";
 import { CodeRabbitConnectDialog } from "@/features/settings/coderabbit-connect-dialog";
 import {
 	invalidateCodeRabbitCliQueries,
@@ -991,6 +992,10 @@ export function SettingsDialog({
 
 							{activeSection === "model" ? (
 								<section className="space-y-4">
+									<ProviderAccountUsagePanel
+										providers={providers}
+										runtimeSettings={providerRuntimeSettings}
+									/>
 									<ProviderSelectionPanel
 										title={t("settings.model.providersTitle")}
 										description={t("settings.model.providersHint")}

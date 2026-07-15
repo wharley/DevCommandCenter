@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
+import type {
+	CoreEvent,
+	ProviderCatalog,
+	ProviderRuntimeConfig,
+} from "@dcc/contracts";
 import { WorkspaceTerminalDrawer } from "@/features/terminal";
 import {
 	addTerminal as addTerminalTab,
@@ -44,6 +48,7 @@ type SessionWorkbenchProps = {
 	selectedModelLabel: string | null;
 	selectedProviderId: string | null;
 	selectedModelId: string | null;
+	selectedProviderRuntime: ProviderRuntimeConfig | null;
 	providerChoices: ProviderCatalog["providers"];
 	sessions: WorkspaceSessionSummary[];
 	selectedSessionId: string | null;
@@ -103,6 +108,7 @@ export function SessionWorkbench({
 	selectedModelLabel,
 	selectedProviderId,
 	selectedModelId,
+	selectedProviderRuntime,
 	providerChoices,
 	sessions,
 	selectedSessionId,
@@ -248,6 +254,7 @@ export function SessionWorkbench({
 						selectedModelLabel={selectedModelLabel}
 						selectedProviderId={selectedProviderId}
 						selectedModelId={selectedModelId}
+						selectedProviderRuntime={selectedProviderRuntime}
 						providerChoices={providerChoices}
 						sessions={sessions}
 						selectedSessionId={selectedSessionId}

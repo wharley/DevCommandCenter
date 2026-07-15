@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::{
-    domain::provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
+    domain::provider::{
+        Capabilities, HealthStatus, ProviderAccountUsage, ProviderEvent, ProviderId, SessionHandle,
+    },
     domain::session::SessionId,
     domain::workspace::WorkspaceId,
     Result,
@@ -115,4 +117,10 @@ pub trait Provider: Send + Sync {
     async fn cancel(&self, handle: &SessionHandle) -> Result<()>;
     async fn resume(&self, previous: &SessionId) -> Result<SessionHandle>;
     async fn healthcheck(&self) -> Result<HealthStatus>;
+    async fn account_usage(
+        &self,
+        _runtime: Option<&ProviderRuntimeConfig>,
+    ) -> Result<Option<ProviderAccountUsage>> {
+        Ok(None)
+    }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckIcon, ChevronDown } from "lucide-react";
-import type { ProviderCatalog } from "@dcc/contracts";
+import { useTranslation } from "react-i18next";
+import { CheckIcon, ChevronDown, LoaderCircle, RefreshCcw } from "lucide-react";
+import type { ProviderAccountUsage, ProviderCatalog } from "@dcc/contracts";
 import { ProviderIcon } from "@/features/providers/provider-icons";
 import {
 	Command,
@@ -16,6 +17,10 @@ import {
 	PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import {
+	providerUsageSeverity,
+	supportsProviderAccountUsage,
+} from "@/features/providers/provider-account-usage";
 import { composerToolbarTriggerClassName } from "./WorkspaceComposer.logic";
 
 export const DCC_OPEN_MODEL_PICKER_EVENT = "dcc:open-model-picker";
@@ -26,6 +31,10 @@ type ComposerProviderModelMenuProps = {
 	selectedModelId: string | null;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
+	accountUsage?: ProviderAccountUsage | null;
+	isAccountUsageFetching?: boolean;
+	hasAccountUsageError?: boolean;
+	onRefreshAccountUsage?: () => void;
 	disabled?: boolean;
 };
 
@@ -39,20 +48,26 @@ export function ComposerProviderModelMenu({
 	selectedModelId,
 	onSelectProvider,
 	onSelectModel,
+	accountUsage = null,
+	isAccountUsageFetching = false,
+	hasAccountUsageError = false,
+	onRefreshAccountUsage,
 	disabled = false,
 }: ComposerProviderModelMenuProps) {
+	const { t } = useTranslation("common");
 	const [open, setOpen] = useState(false);
 
 	useEffect(() => {
 		const openPicker = () => {
 			if (!disabled && providers.length > 0) {
 				setOpen(true);
+				onRefreshAccountUsage?.();
 			}
 		};
 		window.addEventListener(DCC_OPEN_MODEL_PICKER_EVENT, openPicker);
 		return () =>
 			window.removeEventListener(DCC_OPEN_MODEL_PICKER_EVENT, openPicker);
-	}, [disabled, providers.length]);
+	}, [disabled, onRefreshAccountUsage, providers.length]);
 
 	// Model IDs (e.g. "auto") are only unique *within* a provider — droid and
 	// cursor both expose an "auto" model. Always trust the explicit provider
@@ -95,7 +110,13 @@ export function ComposerProviderModelMenu({
 			: (selectedModel?.label ?? selectedModelId ?? "Select model");
 
 	return (
-		<Popover open={open} onOpenChange={setOpen}>
+		<Popover
+			open={open}
+			onOpenChange={(nextOpen) => {
+				setOpen(nextOpen);
+				if (nextOpen) onRefreshAccountUsage?.();
+			}}
+		>
 			<PopoverTrigger asChild>
 				<button
 					type="button"
@@ -186,6 +207,74 @@ export function ComposerProviderModelMenu({
 							</CommandGroup>
 						))}
 					</CommandList>
+					{supportsProviderAccountUsage(selectedProvider?.id ?? null) ? (
+						<div className="border-t border-border/60 px-3 py-2.5">
+							<div className="mb-1.5 flex items-center justify-between gap-3">
+								<span className="text-[11px] font-medium text-foreground">
+									{t("composer.accountUsage.title")}
+								</span>
+								<button
+									type="button"
+									className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+									aria-label={t("composer.accountUsage.refresh")}
+									disabled={isAccountUsageFetching}
+									onClick={onRefreshAccountUsage}
+								>
+									{isAccountUsageFetching ? (
+										<LoaderCircle className="size-3 animate-spin" />
+									) : (
+										<RefreshCcw className="size-3" />
+									)}
+								</button>
+							</div>
+							{accountUsage?.state === "available" && accountUsage.windows.length ? (
+								<div className="space-y-1">
+									{accountUsage.windows.map((window) => {
+										const severity = providerUsageSeverity(window);
+										return (
+											<div
+												key={window.id}
+												className="flex items-center justify-between gap-3 text-[11px]"
+											>
+												<span className="truncate text-muted-foreground">
+													{window.windowDurationMinutes === 300
+														? t("composer.accountUsage.fiveHour")
+														: window.windowDurationMinutes === 10_080
+															? t("composer.accountUsage.sevenDay")
+															: window.id.replaceAll("_", " ")}
+												</span>
+												<span
+													className={cn(
+														"shrink-0 font-medium tabular-nums",
+														severity === "warning" && "text-amber-600 dark:text-amber-400",
+														severity === "critical" && "text-destructive",
+													)}
+												>
+													{t("composer.accountUsage.remaining", {
+														percent: Math.round(window.remainingPercent),
+													})}
+												</span>
+											</div>
+										);
+									})}
+								</div>
+							) : accountUsage?.state === "awaitingActivity" ? (
+								<p className="text-[11px] leading-relaxed text-muted-foreground">
+									{t("composer.accountUsage.awaitingActivity")}
+								</p>
+							) : hasAccountUsageError ? (
+								<p className="text-[11px] text-destructive">
+									{t("composer.accountUsage.error")}
+								</p>
+							) : (
+								<p className="text-[11px] text-muted-foreground">
+									{isAccountUsageFetching
+										? t("composer.accountUsage.loading")
+										: t("composer.accountUsage.openToLoad")}
+								</p>
+							)}
+						</div>
+					) : null}
 				</Command>
 			</PopoverContent>
 		</Popover>

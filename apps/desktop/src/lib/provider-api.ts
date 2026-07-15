@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { PROVIDER_METHODS } from "@dcc/contracts";
-import type { ListProvidersOutput, ProviderCatalog } from "@dcc/contracts";
+import type {
+	ListProvidersOutput,
+	ProviderAccountUsageOutput,
+	ProviderCatalog,
+	ProviderRuntimeConfig,
+} from "@dcc/contracts";
 import { FALLBACK_PROVIDER_CATALOG } from "./fallback-provider-catalog";
 
 function isTauriRuntime(): boolean {
@@ -41,4 +46,22 @@ export async function listProviders(): Promise<ListProvidersOutput> {
 		console.warn("[dcc] list_providers failed, using bundled catalog", error);
 		return { catalog: FALLBACK_PROVIDER_CATALOG };
 	}
+}
+
+export async function getProviderAccountUsage(
+	providerId: string,
+	providerRuntime: ProviderRuntimeConfig | null,
+): Promise<ProviderAccountUsageOutput> {
+	if (!isTauriRuntime()) {
+		return { usage: null };
+	}
+	return invoke<ProviderAccountUsageOutput>(
+		PROVIDER_METHODS.providerAccountUsage,
+		{
+			input: {
+				providerId,
+				providerRuntime,
+			},
+		},
+	);
 }
