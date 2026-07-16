@@ -284,7 +284,7 @@
 	}
 
 	.inspector-hint-pulse {
-		animation: inspector-hint-pulse 1.6s ease-out 3;
+		animation: inspector-hint-pulse 1.6s ease-out infinite;
 	}
 
 	.conversation-scroll-button {

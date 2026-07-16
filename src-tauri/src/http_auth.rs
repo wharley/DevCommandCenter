@@ -105,7 +105,9 @@ async fn try_paired_session_bearer(
     match outcome {
         Ok(_) => Some(Ok(())),
         Err(pairing::PairingError::UnknownDevice) => None,
-        Err(pairing::PairingError::DeviceRevoked) => Some(Err(AuthError::SignedRequestRevokedDevice)),
+        Err(pairing::PairingError::DeviceRevoked) => {
+            Some(Err(AuthError::SignedRequestRevokedDevice))
+        }
         Err(pairing::PairingError::SessionExpired) => {
             Some(Err(AuthError::SignedRequestSessionExpired))
         }
@@ -306,26 +308,20 @@ impl IntoResponse for AuthError {
                 "Signed request verification failed (internal)",
                 None,
             ),
-            AuthError::SignedRequestUnknownDevice => (
-                StatusCode::UNAUTHORIZED,
-                "Device not paired",
-                None,
-            ),
-            AuthError::SignedRequestRevokedDevice => (
-                StatusCode::FORBIDDEN,
-                "Device has been revoked",
-                None,
-            ),
+            AuthError::SignedRequestUnknownDevice => {
+                (StatusCode::UNAUTHORIZED, "Device not paired", None)
+            }
+            AuthError::SignedRequestRevokedDevice => {
+                (StatusCode::FORBIDDEN, "Device has been revoked", None)
+            }
             AuthError::SignedRequestStaleTimestamp => (
                 StatusCode::FORBIDDEN,
                 "Timestamp outside the replay window",
                 None,
             ),
-            AuthError::SignedRequestInvalidSignature => (
-                StatusCode::FORBIDDEN,
-                "Signature verification failed",
-                None,
-            ),
+            AuthError::SignedRequestInvalidSignature => {
+                (StatusCode::FORBIDDEN, "Signature verification failed", None)
+            }
             AuthError::SignedRequestSessionExpired => (
                 StatusCode::FORBIDDEN,
                 "Device session expired; please re-pair",
@@ -447,10 +443,7 @@ mod tests {
 
         let challenge = pairing::create_pairing_nonce(&conn).expect("nonce");
         let signing = SigningKey::random(&mut OsRng);
-        let pubkey_der = signing
-            .verifying_key()
-            .to_public_key_der()
-            .expect("spki");
+        let pubkey_der = signing.verifying_key().to_public_key_der().expect("spki");
         let pubkey_b64 = BASE64.encode(pubkey_der.as_bytes());
 
         let device_id = pairing::complete_pairing(
@@ -480,7 +473,10 @@ mod tests {
         Router::new()
             .route("/protected", get(|| async { "ok" }))
             .route("/echo", post(|body: String| async move { body }))
-            .route_layer(axum_middleware::from_fn_with_state(config.clone(), auth_middleware))
+            .route_layer(axum_middleware::from_fn_with_state(
+                config.clone(),
+                auth_middleware,
+            ))
             .with_state(config)
     }
 

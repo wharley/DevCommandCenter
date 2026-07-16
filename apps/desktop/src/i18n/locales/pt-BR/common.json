@@ -1057,8 +1057,9 @@
     "syncBase": "Atualizar com base",
     "syncBaseBehind": "Atualizar · {{count}} atrás",
     "syncingBase": "Atualizando...",
-    "openBranchDetails": "Abrir detalhes do branch",
-    "copyBranchName": "Copiar nome do branch"
+    "copyBranchName": "Copiar nome do branch",
+    "copyBranchNameSuccess": "Nome do branch copiado",
+    "copyBranchNameError": "Não foi possível copiar o nome do branch"
   },
   "conversation": {
     "scrollToBottom": "Rolar para o fim",

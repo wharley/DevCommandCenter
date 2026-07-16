@@ -617,13 +617,7 @@ pub fn verify_bearer_session(
 ) -> Result<PairedDeviceSummary, PairingError> {
     let token_hash = hash_session_token(token);
 
-    let row: Option<(
-        String,
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-    )> = conn
+    let row: Option<(String, String, Option<String>, String, Option<String>)> = conn
         .query_row(
             "SELECT device_id, device_name, user_agent, created_at, revoked_at
              FROM paired_devices
@@ -677,14 +671,10 @@ pub fn verify_bearer_session(
 
 /// Canonical string the mobile signs:
 /// `METHOD\nPATH\nTIMESTAMP\nSHA256_HEX(body)`
-pub fn canonical_request_bytes(
-    method: &str,
-    path: &str,
-    timestamp: &str,
-    body: &[u8],
-) -> Vec<u8> {
+pub fn canonical_request_bytes(method: &str, path: &str, timestamp: &str, body: &[u8]) -> Vec<u8> {
     let body_digest = hex::encode(Sha256::digest(body));
-    let mut out = Vec::with_capacity(method.len() + path.len() + timestamp.len() + body_digest.len() + 3);
+    let mut out =
+        Vec::with_capacity(method.len() + path.len() + timestamp.len() + body_digest.len() + 3);
     out.extend_from_slice(method.as_bytes());
     out.push(b'\n');
     out.extend_from_slice(path.as_bytes());
@@ -716,9 +706,9 @@ pub fn verify_signed_request(
     let signature_bytes = BASE64
         .decode(headers.signature_b64.trim())
         .map_err(|_| PairingError::InvalidSignature)?;
-    let signature =
-        Signature::from_der(&signature_bytes).or_else(|_| Signature::from_slice(&signature_bytes))
-            .map_err(|_| PairingError::InvalidSignature)?;
+    let signature = Signature::from_der(&signature_bytes)
+        .or_else(|_| Signature::from_slice(&signature_bytes))
+        .map_err(|_| PairingError::InvalidSignature)?;
 
     let row: Option<(String, Vec<u8>, Option<String>, String, Option<String>)> = conn
         .query_row(
@@ -754,8 +744,8 @@ pub fn verify_signed_request(
         }
     }
 
-    let verifying_key =
-        VerifyingKey::from_public_key_der(&pubkey_spki).map_err(|_| PairingError::InvalidPublicKey)?;
+    let verifying_key = VerifyingKey::from_public_key_der(&pubkey_spki)
+        .map_err(|_| PairingError::InvalidPublicKey)?;
 
     let canonical = canonical_request_bytes(method, path, headers.timestamp, body);
     verifying_key
@@ -793,7 +783,9 @@ pub fn list_paired_devices(
          FROM paired_devices WHERE revoked_at IS NULL ORDER BY created_at DESC"
     };
 
-    let mut stmt = conn.prepare(sql).map_err(|e| PairingError::Database(e.to_string()))?;
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|e| PairingError::Database(e.to_string()))?;
     let rows = stmt
         .query_map([], |row| {
             let revoked_at: Option<String> = row.get(6)?;
@@ -1214,8 +1206,8 @@ mod tests {
         .unwrap();
 
         // Backdate created_at past the SESSION_MAX_AGE_DAYS cap.
-        let way_back = (chrono::Utc::now() - chrono::Duration::days(SESSION_MAX_AGE_DAYS + 1))
-            .to_rfc3339();
+        let way_back =
+            (chrono::Utc::now() - chrono::Duration::days(SESSION_MAX_AGE_DAYS + 1)).to_rfc3339();
         conn.execute(
             "UPDATE paired_devices SET created_at = ?1 WHERE device_id = ?2",
             rusqlite::params![way_back, device_id],
@@ -1277,15 +1269,9 @@ mod tests {
     fn bearer_session_rejects_revoked_device() {
         let conn = fresh_db();
         let challenge = create_pairing_nonce(&conn).unwrap();
-        let (device_id, token) = complete_pairing_bearer(
-            &conn,
-            &challenge.nonce,
-            &challenge.pin,
-            "phone",
-            None,
-            None,
-        )
-        .unwrap();
+        let (device_id, token) =
+            complete_pairing_bearer(&conn, &challenge.nonce, &challenge.pin, "phone", None, None)
+                .unwrap();
 
         revoke_device(&conn, &device_id, None).unwrap();
         let result = verify_bearer_session(&conn, &token, None);

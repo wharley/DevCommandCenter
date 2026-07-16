@@ -299,10 +299,7 @@ pub async fn cancel_delegation(
         ));
     }
     if matches!(delegation.status, DelegationStatus::ReviewPending) {
-        return Err(format!(
-            "delegation {} is awaiting review",
-            delegation.id.0
-        ));
+        return Err(format!("delegation {} is awaiting review", delegation.id.0));
     }
 
     let now = now_iso();

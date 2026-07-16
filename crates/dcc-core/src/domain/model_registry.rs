@@ -255,15 +255,13 @@ pub const DROID: &[ModelEntry] = &[
     },
 ];
 
-pub const GROK: &[ModelEntry] = &[
-    ModelEntry {
-        id: "grok-4.5",
-        label: "Grok 4.5",
-        description: "Grok Build coding and agentic model through the local ACP CLI.",
-        recommended: true,
-        effort_levels: &["low", "medium", "high"],
-    },
-];
+pub const GROK: &[ModelEntry] = &[ModelEntry {
+    id: "grok-4.5",
+    label: "Grok 4.5",
+    description: "Grok Build coding and agentic model through the local ACP CLI.",
+    recommended: true,
+    effort_levels: &["low", "medium", "high"],
+}];
 
 #[cfg(test)]
 mod tests {
@@ -307,7 +305,10 @@ mod tests {
     fn claude_code_aliases_upgrade_sonnet_to_sonnet_5() {
         assert_eq!(resolve_alias("claude_code", "sonnet"), "claude-sonnet-5");
         assert_eq!(resolve_alias("claude_code", "sonnet-5"), "claude-sonnet-5");
-        assert_eq!(resolve_alias("claude_code", "sonnet-4.6"), "claude-sonnet-5");
+        assert_eq!(
+            resolve_alias("claude_code", "sonnet-4.6"),
+            "claude-sonnet-5"
+        );
         assert_eq!(
             resolve_alias("claude_code", "claude-sonnet-4-6"),
             "claude-sonnet-5"

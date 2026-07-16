@@ -399,7 +399,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         )
         .route("/auth/pair-init", post(pair_init_handler))
         .route("/auth/devices", get(list_paired_devices_handler))
-        .route("/auth/devices/:device_id", axum::routing::delete(revoke_device_handler))
+        .route(
+            "/auth/devices/:device_id",
+            axum::routing::delete(revoke_device_handler),
+        )
         .route_layer(middleware::from_fn_with_state(
             config.clone(),
             auth_middleware,
@@ -437,9 +440,10 @@ fn mobile_spa_dist_candidates() -> Vec<PathBuf> {
         Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../apps/mobile-web/dist")),
         exe_dir.as_ref().map(|p| p.join("mobile-web")),
         exe_dir.as_ref().map(|p| p.join("resources/mobile-web")),
-        exe_dir
-            .as_ref()
-            .and_then(|p| p.parent().map(|contents| contents.join("Resources/mobile-web"))),
+        exe_dir.as_ref().and_then(|p| {
+            p.parent()
+                .map(|contents| contents.join("Resources/mobile-web"))
+        }),
         exe_dir
             .as_ref()
             .and_then(|p| p.parent().map(|parent| parent.join("resources/mobile-web"))),
@@ -1866,8 +1870,10 @@ async fn diffs_bundle_handler(
     let mut paths = body.worktree_paths.clone();
     if !body.comb_ids.is_empty() {
         let comb_ids = body.comb_ids.clone();
-        let resolved =
-            db_read(config.clone(), move |conn| resolve_worktree_paths(conn, &comb_ids)).await?;
+        let resolved = db_read(config.clone(), move |conn| {
+            resolve_worktree_paths(conn, &comb_ids)
+        })
+        .await?;
         paths.extend(resolved);
     }
     let payload = rpc_value(
@@ -2400,9 +2406,9 @@ fn pairing_error_to_http(err: PairingError) -> HttpApiError {
         P::Expired => HttpApiError::bad_request("pairing expired"),
         P::AlreadyConsumed => HttpApiError::bad_request("pairing already used"),
         P::NonceLocked => HttpApiError::bad_request("too many invalid PIN attempts"),
-        P::DeviceLimitReached => HttpApiError::bad_request(
-            "device limit reached; revoke an existing device first",
-        ),
+        P::DeviceLimitReached => {
+            HttpApiError::bad_request("device limit reached; revoke an existing device first")
+        }
         P::SessionExpired => HttpApiError::bad_request("device session expired"),
         P::InvalidPublicKey => HttpApiError::bad_request("invalid public key"),
         P::InvalidSignature => HttpApiError::bad_request("invalid signature"),
@@ -2415,10 +2421,7 @@ fn pairing_error_to_http(err: PairingError) -> HttpApiError {
     }
 }
 
-async fn with_pairing_db<T, F>(
-    config: Arc<RwLock<HttpConfig>>,
-    op: F,
-) -> Result<T, HttpApiError>
+async fn with_pairing_db<T, F>(config: Arc<RwLock<HttpConfig>>, op: F) -> Result<T, HttpApiError>
 where
     T: Send + 'static,
     F: FnOnce(&rusqlite::Connection) -> Result<T, PairingError> + Send + 'static,
@@ -2502,7 +2505,9 @@ async fn complete_pairing_handler(
         .and_then(|s| s.split(',').next())
         .map(|s| s.trim().to_string());
 
-    let rate_key = forwarded_ip.clone().unwrap_or_else(|| "unknown".to_string());
+    let rate_key = forwarded_ip
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
     if !pair_rate_limit_check(&rate_key) {
         return Err(HttpApiError::bad_request(
             "rate limit exceeded for /auth/pair",
@@ -2582,7 +2587,9 @@ async fn revoke_device_handler(
     .await?;
 
     if !revoked {
-        return Err(HttpApiError::not_found("device not found or already revoked"));
+        return Err(HttpApiError::not_found(
+            "device not found or already revoked",
+        ));
     }
 
     Ok(Json(json!({ "ok": true })))

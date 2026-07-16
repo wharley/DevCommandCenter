@@ -1,5 +1,6 @@
-import { ChevronDown, GitBranch, GitCommitHorizontal, RefreshCw } from "lucide-react";
+import { ChevronDown, Copy, GitBranch, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -27,10 +28,19 @@ export function BranchToolbar({
 }) {
 	const { t } = useTranslation("common");
 	const canSyncBase = Boolean(onSyncBase);
+	const canCopyBranchName = Boolean(branch);
 	const isBehind = behindOfRemoteCount > 0;
 	// When the branch is behind its base, surface the fix as a first-class
 	// inline action right next to the signal. Otherwise it stays in the overflow.
 	const showInlineSync = canSyncBase && (isBehind || isSyncingBase);
+	const handleCopyBranchName = async () => {
+		try {
+			await navigator.clipboard.writeText(branch);
+			toast.success(t("branchToolbar.copyBranchNameSuccess"));
+		} catch {
+			toast.error(t("branchToolbar.copyBranchNameError"));
+		}
+	};
 
 	return (
 		<div
@@ -103,12 +113,14 @@ export function BranchToolbar({
 								: t("branchToolbar.syncBase")}
 						</DropdownMenuItem>
 					) : null}
-					<DropdownMenuItem className="gap-2 text-[13px]">
-						<GitCommitHorizontal className="size-4" aria-hidden />
-						{t("branchToolbar.openBranchDetails")}
-					</DropdownMenuItem>
-					<DropdownMenuItem className="gap-2 text-[13px]">
-						<GitBranch className="size-4" aria-hidden />
+					<DropdownMenuItem
+						className="gap-2 text-[13px]"
+						disabled={!canCopyBranchName}
+						onSelect={() => {
+							void handleCopyBranchName();
+						}}
+					>
+						<Copy className="size-4" aria-hidden />
 						{t("branchToolbar.copyBranchName")}
 					</DropdownMenuItem>
 				</DropdownMenuContent>

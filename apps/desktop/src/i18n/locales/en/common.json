@@ -1057,8 +1057,9 @@
     "syncBase": "Update with base",
     "syncBaseBehind": "Update · {{count}} behind",
     "syncingBase": "Updating...",
-    "openBranchDetails": "Open branch details",
-    "copyBranchName": "Copy branch name"
+    "copyBranchName": "Copy branch name",
+    "copyBranchNameSuccess": "Branch name copied",
+    "copyBranchNameError": "Could not copy the branch name"
   },
   "conversation": {
     "scrollToBottom": "Scroll to bottom",

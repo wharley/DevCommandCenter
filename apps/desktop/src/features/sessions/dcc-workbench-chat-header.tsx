@@ -12,7 +12,7 @@ import {
 	SquareTerminal,
 	X,
 } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
@@ -39,9 +39,6 @@ import { canResumeSession } from "./session-chrome-state";
 import { isSessionArchived, visibleSessions } from "./session-close";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import { cn } from "@/lib/utils";
-
-/** Marks the one-time "review Git changes here" hint as seen. */
-const GIT_CHANGES_HINT_STORAGE_KEY = "dcc.gitChangesHintSeen";
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
@@ -106,40 +103,8 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	onToggleInspector,
 }: DccWorkbenchChatHeaderProps) {
 	const { t } = useTranslation("common");
-	// One-time discovery hint: gently pulse only when there are real Git changes
-	// to review and the inspector is collapsed.
-	const [inspectorHintActive, setInspectorHintActive] = useState(false);
-	const inspectorHintSeenInSession = useRef(false);
-	useEffect(() => {
-		if (
-			!onToggleInspector ||
-			!inspectorCollapsed ||
-			!gitChangeSummary ||
-			inspectorHintSeenInSession.current
-		) {
-			return;
-		}
-		let seen = false;
-		try {
-			seen =
-				window.localStorage.getItem(GIT_CHANGES_HINT_STORAGE_KEY) === "seen";
-		} catch {
-			// The in-memory guard below still keeps the hint one-time this session.
-		}
-		if (seen) {
-			inspectorHintSeenInSession.current = true;
-			return;
-		}
-		inspectorHintSeenInSession.current = true;
-		setInspectorHintActive(true);
-		try {
-			window.localStorage.setItem(GIT_CHANGES_HINT_STORAGE_KEY, "seen");
-		} catch {
-			// localStorage unavailable — the in-memory guard handles this session.
-		}
-	}, [gitChangeSummary, onToggleInspector, inspectorCollapsed]);
+	const inspectorHintActive = Boolean(inspectorCollapsed && gitChangeSummary);
 	const handleInspectorToggle = () => {
-		setInspectorHintActive(false);
 		onToggleInspector?.();
 	};
 	const showProjectBadge = Boolean(projectBadgeLabel);

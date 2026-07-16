@@ -471,7 +471,12 @@ impl SqliteSessionRepo {
             "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{DELEGATION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        SqliteWorkspaceRepo::ensure_column(&conn, "dcc_delegations", "result_summary", "TEXT NULL")?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_delegations",
+            "result_summary",
+            "TEXT NULL",
+        )?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_delegations",
@@ -2229,7 +2234,10 @@ mod tests {
             fetched.context_policy,
             DelegationContextPolicy::ReviewCurrentDiff
         );
-        assert_eq!(fetched.result_summary.as_deref(), Some("No blocking issues."));
+        assert_eq!(
+            fetched.result_summary.as_deref(),
+            Some("No blocking issues.")
+        );
         assert_eq!(fetched.touched_files, vec!["src/lib.rs".to_string()]);
         assert_eq!(fetched.diff_summary.as_deref(), Some("1 file changed"));
         assert_eq!(

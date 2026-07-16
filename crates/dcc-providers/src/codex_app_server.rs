@@ -151,37 +151,52 @@ fn parse_codex_account_usage(value: &Value) -> Result<ProviderAccountUsage> {
     })
 }
 
+async fn read_rpc_response_with_timeout<R>(
+    lines: &mut Lines<R>,
+    expected_id: u64,
+    response_timeout: Duration,
+) -> Result<Value>
+where
+    R: AsyncBufRead + Unpin,
+{
+    timeout(response_timeout, async {
+        loop {
+            let line = lines
+                .next_line()
+                .await
+                .map_err(|error| CoreError::Provider(format!("codex stdout read: {error}")))?
+                .ok_or_else(|| {
+                    CoreError::Provider("codex app-server exited before responding".to_string())
+                })?;
+            let message = serde_json::from_str::<Incoming>(&line).map_err(|error| {
+                CoreError::Provider(format!("invalid codex app-server response: {error}"))
+            })?;
+            if message.id.as_ref().and_then(Value::as_u64) != Some(expected_id) {
+                continue;
+            }
+            if let Some(error) = message.error {
+                let message = error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("rpc error");
+                return Err(CoreError::Provider(format!(
+                    "codex account usage error: {message}"
+                )));
+            }
+            return message.result.ok_or_else(|| {
+                CoreError::Provider("codex account usage response had no result".to_string())
+            });
+        }
+    })
+    .await
+    .map_err(|_| CoreError::Provider("codex account usage request timed out".to_string()))?
+}
+
 async fn read_rpc_response<R>(lines: &mut Lines<R>, expected_id: u64) -> Result<Value>
 where
     R: AsyncBufRead + Unpin,
 {
-    loop {
-        let line = timeout(Duration::from_secs(15), lines.next_line())
-            .await
-            .map_err(|_| CoreError::Provider("codex account usage request timed out".to_string()))?
-            .map_err(|error| CoreError::Provider(format!("codex stdout read: {error}")))?
-            .ok_or_else(|| {
-                CoreError::Provider("codex app-server exited before responding".to_string())
-            })?;
-        let message = serde_json::from_str::<Incoming>(&line).map_err(|error| {
-            CoreError::Provider(format!("invalid codex app-server response: {error}"))
-        })?;
-        if message.id.as_ref().and_then(Value::as_u64) != Some(expected_id) {
-            continue;
-        }
-        if let Some(error) = message.error {
-            let message = error
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("rpc error");
-            return Err(CoreError::Provider(format!(
-                "codex account usage error: {message}"
-            )));
-        }
-        return message.result.ok_or_else(|| {
-            CoreError::Provider("codex account usage response had no result".to_string())
-        });
-    }
+    read_rpc_response_with_timeout(lines, expected_id, Duration::from_secs(15)).await
 }
 
 async fn fetch_codex_account_usage(
@@ -192,6 +207,7 @@ async fn fetch_codex_account_usage(
         .arg("app-server")
         .arg("-c")
         .arg("notify=[]")
+        .kill_on_drop(true)
         .env("PATH", augmented_path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -245,7 +261,10 @@ async fn fetch_codex_account_usage(
     }
     .await;
 
-    let _ = child.kill().await;
+    drop(stdin);
+    let _ = child.start_kill();
+    let _ = timeout(Duration::from_secs(2), child.wait()).await;
+    stderr_task.abort();
     let _ = stderr_task.await;
     result
 }
@@ -1016,5 +1035,30 @@ mod tests {
         assert_eq!(usage.windows.len(), 2);
         assert_eq!(usage.windows[0].remaining_percent, 17.5);
         assert_eq!(usage.plan_type.as_deref(), Some("plus"));
+    }
+
+    #[tokio::test]
+    async fn account_usage_response_timeout_is_not_extended_by_notifications() {
+        let (reader, mut writer) = tokio::io::duplex(1_024);
+        let writer_task = tokio::spawn(async move {
+            loop {
+                if writer
+                    .write_all(b"{\"method\":\"status/changed\",\"params\":{}}\n")
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        });
+        let mut lines = BufReader::new(reader).lines();
+
+        let error = read_rpc_response_with_timeout(&mut lines, 2, Duration::from_millis(25))
+            .await
+            .expect_err("notifications must not keep the request alive indefinitely");
+
+        assert!(error.to_string().contains("timed out"));
+        writer_task.abort();
     }
 }
