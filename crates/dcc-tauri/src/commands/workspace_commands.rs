@@ -3756,6 +3756,10 @@ mod editor_workspace_file_tests {
             .expect("write combined result");
         workspace_git_mark_conflict_resolved_inner(repo.as_str(), "app.txt", false)
             .expect("mark resolved");
+        let ready = workspace_git_conflict_state_inner(repo.as_str())
+            .expect("read merge-ready conflict state");
+        assert_eq!(ready.operation, WorkspaceGitConflictOperation::Merge);
+        assert!(ready.conflicts.is_empty());
         workspace_git_complete_merge_commit_inner(repo.as_str()).expect("complete merge commit");
         assert_eq!(
             resolve_conflict_operation(repo.as_str(), false),

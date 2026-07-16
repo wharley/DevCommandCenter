@@ -15,7 +15,6 @@ import {
 	ListChecks,
 	Loader2,
 	RotateCcw,
-	Settings2,
 	Sparkles,
 	Trash2,
 	X,
@@ -41,7 +40,6 @@ import {
 	type FileEditorHandle,
 	WorkspaceFileEditor,
 } from "@/features/editor/WorkspaceFileSurface";
-import { WorkspaceProjectAutomationDialog } from "@/features/automation/workspace-project-automation-dialog";
 import {
 	applyMergeConflictResolution,
 	applyMergeConflictReplacement,
@@ -190,7 +188,6 @@ export function WorkspaceMergeConflictResolver({
 		useState<AppliedAgentSuggestion | null>(null);
 	const [validationReport, setValidationReport] =
 		useState<WorkspaceGitValidationReport | null>(null);
-	const [automationOpen, setAutomationOpen] = useState(false);
 
 	const query = useQuery({
 		queryKey: [CONFLICT_STATE_QUERY_KEY, workspaceRoot],
@@ -204,7 +201,7 @@ export function WorkspaceMergeConflictResolver({
 	const validationConfigQuery = useQuery({
 		queryKey: ["workspaceGitValidationConfig", workspaceRoot],
 		queryFn: () => workspaceGitValidationConfig({ workspaceRoot }),
-		enabled: state?.operation === "merge" && conflicts.length === 0,
+		enabled: state?.operation === "merge",
 		staleTime: 0,
 		refetchOnWindowFocus: false,
 	});
@@ -580,6 +577,8 @@ export function WorkspaceMergeConflictResolver({
 	const total = Math.max(totalConflictsRef.current, conflicts.length);
 	const resolved = Math.max(total - conflicts.length, 0);
 	const unsupported = state && !["none", "merge"].includes(state.operation);
+	const readyToComplete =
+		state?.operation === "merge" && conflicts.length === 0;
 	const textUnavailable = selected
 		? selected.result.binary || selected.result.truncated ||
 			!editableGitMode(selected.current.mode) ||
@@ -588,7 +587,6 @@ export function WorkspaceMergeConflictResolver({
 		: false;
 
 	return (
-		<>
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
 			<header className="relative shrink-0 border-b border-border/60 bg-gradient-to-r from-amber-500/[0.08] via-background to-background px-4 py-3">
 				<div className="flex min-w-0 items-center gap-3">
@@ -678,9 +676,8 @@ export function WorkspaceMergeConflictResolver({
 							<p className="mt-2 text-sm leading-6 text-muted-foreground">
 								{t("mergeConflict.start.description")}
 							</p>
-							<div className="mt-5 flex flex-wrap items-center justify-center gap-2">
 							<Button
-								className="gap-1.5"
+								className="mt-5 gap-1.5"
 								disabled={Boolean(busy)}
 								onClick={() => void startMerge()}
 							>
@@ -693,7 +690,7 @@ export function WorkspaceMergeConflictResolver({
 							</Button>
 						</div>
 					</div>
-				) : state?.operation === "merge" && conflicts.length === 0 ? (
+				) : readyToComplete ? (
 					<div className="flex flex-1 items-center justify-center overflow-y-auto p-8 text-center">
 						<div className="w-full max-w-2xl">
 							<div className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600">
@@ -734,17 +731,6 @@ export function WorkspaceMergeConflictResolver({
 								)}
 								{(validationConfigQuery.data?.commands.length ?? 0) > 0 ? t("mergeConflict.completion.withValidation") : t("mergeConflict.completion.withoutValidation")}
 							</Button>
-							<Button
-								type="button"
-								variant="outline"
-								className="gap-1.5"
-								disabled={Boolean(busy)}
-								onClick={() => setAutomationOpen(true)}
-							>
-								<Settings2 className="size-4" />
-								{t("automation.open")}
-							</Button>
-							</div>
 						</div>
 					</div>
 				) : (
@@ -835,17 +821,5 @@ export function WorkspaceMergeConflictResolver({
 					</div>
 				)}
 		</div>
-		<WorkspaceProjectAutomationDialog
-			open={automationOpen}
-			onOpenChange={setAutomationOpen}
-			workspaceRoot={workspaceRoot}
-			onConfigSaved={() => {
-				void validationConfigQuery.refetch();
-			}}
-			onWorkspaceChanged={() => {
-				void refresh();
-			}}
-		/>
-		</>
 	);
 }
