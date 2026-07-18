@@ -201,6 +201,7 @@ impl HeadlessCliProviderAdapter {
                     "--output-format".to_string(),
                     "stream-json".to_string(),
                     "--skip-trust".to_string(),
+                    "--sandbox".to_string(),
                     "--approval-mode".to_string(),
                     approval_mode.to_string(),
                 ];
@@ -908,5 +909,6 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--include-directories", "/tmp/web"]));
+        assert!(args.iter().any(|arg| arg == "--sandbox"));
     }
 }

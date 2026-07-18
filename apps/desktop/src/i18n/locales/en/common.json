@@ -190,7 +190,19 @@
   "workspaceScope": {
     "projects": "Project under review",
     "authorizedCount": "{{count}} authorized",
-    "providerUnsupported": "{{provider}} does not offer isolated multi-workspace support in DCC yet. Choose Codex, Claude, Cursor, or Gemini."
+    "providerUnsupported": "{{provider}} does not offer isolated multi-workspace support in DCC yet. Choose Codex, Claude, Cursor, or Gemini.",
+    "delivery": {
+      "action": "Deliver {{count}}",
+      "checking": "Checking",
+      "title": "Deliver changed projects",
+      "description": "DCC will include all local changes, run required checks and, for each project below, commit, push, and create or update its PR. Each repository has its own result.",
+      "resultDescription": "Delivery does not simulate a transaction across repositories: review what completed, was skipped, or was blocked for each project.",
+      "running": "Delivering one project at a time…",
+      "confirm": "Deliver {{count}}",
+      "cancel": "Cancel",
+      "close": "Close",
+      "openRequest": "Open PR"
+    }
   },
   "bootstrap": {
     "title": "No workspace open",

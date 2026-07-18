@@ -52,6 +52,34 @@ fn rpc_notification(method: &str) -> String {
     json!({ "jsonrpc": "2.0", "method": method }).to_string()
 }
 
+fn initialize_params(experimental_api: bool) -> Value {
+    json!({
+        "clientInfo": { "name": "dcc", "version": env!("CARGO_PKG_VERSION") },
+        // runtimeWorkspaceRoots is currently part of the Codex app-server
+        // experimental API. Opt in only for multi-root sessions so the existing
+        // single-workspace and account-usage flows stay on the stable protocol.
+        "capabilities": if experimental_api {
+            json!({ "experimentalApi": true })
+        } else {
+            json!({})
+        },
+    })
+}
+
+fn thread_start_params(cwd: &str, additional_working_directories: &[String]) -> Value {
+    let mut params = json!({
+        "cwd": cwd,
+        "approvalPolicy": "never",
+        "sandbox": "workspace-write",
+    });
+    if !additional_working_directories.is_empty() {
+        let mut runtime_workspace_roots = vec![cwd.to_string()];
+        runtime_workspace_roots.extend(additional_working_directories.iter().cloned());
+        params["runtimeWorkspaceRoots"] = json!(runtime_workspace_roots);
+    }
+    params
+}
+
 fn codex_reasoning_effort(effort: Option<&str>) -> Option<&'static str> {
     match effort.map(str::trim).filter(|value| !value.is_empty()) {
         Some("none") => Some("none"),
@@ -239,14 +267,7 @@ async fn fetch_codex_account_usage(
     let result = async {
         write_line(
             &mut stdin,
-            &rpc_request(
-                1,
-                "initialize",
-                json!({
-                    "clientInfo": { "name": "dcc", "version": env!("CARGO_PKG_VERSION") },
-                    "capabilities": {},
-                }),
-            ),
+            &rpc_request(1, "initialize", initialize_params(false)),
         )
         .await?;
         read_rpc_response(&mut lines, 1).await?;
@@ -584,13 +605,11 @@ impl CodexAppServerAdapter {
 
     async fn handshake(runtime: &Arc<SessionRuntime>, cfg: &SessionConfig) -> Result<()> {
         // initialize
+        let uses_experimental_multi_root = !cfg.additional_working_directories.is_empty();
         runtime
             .send_request(
                 "initialize",
-                json!({
-                    "clientInfo": { "name": "dcc", "version": "0.1.8" },
-                    "capabilities": {},
-                }),
+                initialize_params(uses_experimental_multi_root),
             )
             .await?;
 
@@ -603,18 +622,10 @@ impl CodexAppServerAdapter {
             .as_deref()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or(".");
-        let mut runtime_workspace_roots = vec![cwd.to_string()];
-        runtime_workspace_roots.extend(cfg.additional_working_directories.iter().cloned());
-
         let result = runtime
             .send_request(
                 "thread/start",
-                json!({
-                    "cwd": cwd,
-                    "approvalPolicy": "never",
-                    "sandbox": "workspace-write",
-                    "runtimeWorkspaceRoots": runtime_workspace_roots,
-                }),
+                thread_start_params(cwd, &cfg.additional_working_directories),
             )
             .await?;
 
@@ -964,6 +975,36 @@ impl Provider for CodexAppServerAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opts_into_experimental_api_only_for_runtime_workspace_roots() {
+        let initialize = initialize_params(true);
+        assert_eq!(
+            initialize
+                .pointer("/capabilities/experimentalApi")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+
+        let thread = thread_start_params(
+            "/tmp/app",
+            &["/tmp/api".to_string(), "/tmp/shared".to_string()],
+        );
+        assert_eq!(
+            thread
+                .get("runtimeWorkspaceRoots")
+                .and_then(Value::as_array)
+                .expect("runtime roots should be sent"),
+            &vec![json!("/tmp/app"), json!("/tmp/api"), json!("/tmp/shared")]
+        );
+
+        let stable_initialize = initialize_params(false);
+        assert!(stable_initialize
+            .pointer("/capabilities/experimentalApi")
+            .is_none());
+        let single_thread = thread_start_params("/tmp/app", &[]);
+        assert!(single_thread.get("runtimeWorkspaceRoots").is_none());
+    }
 
     #[test]
     fn separates_codex_agent_message_items() {

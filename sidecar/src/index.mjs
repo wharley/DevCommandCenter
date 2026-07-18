@@ -335,7 +335,7 @@ async function handlePermissionRequest(toolName, input, options, state) {
 
 async function runTurn(payload, state) {
 	const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
-	const permissionMode = payload?.planMode === true ? "plan" : "bypassPermissions";
+	const permissionMode = payload?.planMode === true ? "plan" : "acceptEdits";
 	let additionalDirectories = [];
 	try {
 		const configuredDirectories = JSON.parse(
@@ -358,9 +358,15 @@ async function runTurn(payload, state) {
 			model: process.env.DCC_MODEL || undefined,
 			...(state.resumeSessionId ? { resume: state.resumeSessionId } : {}),
 			permissionMode,
-			...(permissionMode === "bypassPermissions"
-				? { allowDangerouslySkipPermissions: true }
-				: {}),
+			sandbox: {
+				enabled: true,
+				failIfUnavailable: true,
+				autoAllowBashIfSandboxed: true,
+				allowUnsandboxedCommands: false,
+				filesystem: {
+					allowWrite: [process.cwd(), ...additionalDirectories],
+				},
+			},
 			includePartialMessages: true,
 			settingSources: ["user", "project", "local"],
 			effort: normalizeEffort(payload?.effort),

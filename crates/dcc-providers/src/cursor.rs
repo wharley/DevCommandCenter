@@ -209,6 +209,8 @@ impl CursorProvider {
             "--output-format".to_string(),
             "stream-json".to_string(),
             "--trust".to_string(),
+            "--sandbox".to_string(),
+            "enabled".to_string(),
             "--resume".to_string(),
             chat_id.to_string(),
         ];
@@ -1179,5 +1181,6 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--add-dir", "/tmp/web"]));
+        assert!(args.windows(2).any(|pair| pair == ["--sandbox", "enabled"]));
     }
 }

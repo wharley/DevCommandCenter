@@ -190,7 +190,19 @@
   "workspaceScope": {
     "projects": "Projeto em revisão",
     "authorizedCount": "{{count}} autorizados",
-    "providerUnsupported": "{{provider}} ainda não oferece isolamento multi-workspace no DCC. Escolha Codex, Claude, Cursor ou Gemini."
+    "providerUnsupported": "{{provider}} ainda não oferece isolamento multi-workspace no DCC. Escolha Codex, Claude, Cursor ou Gemini.",
+    "delivery": {
+      "action": "Entregar {{count}}",
+      "checking": "Verificando",
+      "title": "Entregar projetos alterados",
+      "description": "O DCC incluirá todas as alterações locais, executará os checks obrigatórios e, para cada projeto abaixo, fará commit, push e criará ou atualizará o PR. Cada repositório terá seu próprio resultado.",
+      "resultDescription": "A entrega não simula uma transação entre repositórios: veja abaixo o que foi concluído, ignorado ou bloqueado em cada projeto.",
+      "running": "Entregando um projeto por vez…",
+      "confirm": "Entregar {{count}}",
+      "cancel": "Cancelar",
+      "close": "Fechar",
+      "openRequest": "Abrir PR"
+    }
   },
   "bootstrap": {
     "title": "Nenhum workspace aberto",

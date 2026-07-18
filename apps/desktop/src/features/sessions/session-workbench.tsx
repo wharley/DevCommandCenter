@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+	AlertTriangleIcon,
+	CheckCircle2Icon,
+	ExternalLinkIcon,
+	GitPullRequestArrowIcon,
+	LoaderCircleIcon,
+	MinusCircleIcon,
+} from "lucide-react";
 import type {
 	CoreEvent,
 	ProviderCatalog,
@@ -33,6 +41,18 @@ import {
 	subscribeWorkbenchCommand,
 } from "@/features/workspaces/workbench-command";
 import { recordUxMetric } from "@/lib/ux-metrics";
+import { openExternal } from "@/lib/shell-api";
+import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import type { MultiWorkspaceDeliveryResult } from "@/features/workspaces/multi-workspace-delivery";
 
 export type { RuntimeSessionSnapshot } from "./workbench-types";
 
@@ -55,6 +75,7 @@ type SessionWorkbenchProps = {
 	}>;
 	selectedWorkspaceScopeId?: string | null;
 	onSelectWorkspaceScope?: (workspaceId: string) => void;
+	onDeliverWorkspaceScope?: () => Promise<MultiWorkspaceDeliveryResult[]>;
 	sessionQueryScope?: string;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
@@ -122,6 +143,7 @@ export function SessionWorkbench({
 	workspaceScopeOptions = [],
 	selectedWorkspaceScopeId = null,
 	onSelectWorkspaceScope,
+	onDeliverWorkspaceScope,
 	sessionQueryScope = "local",
 	selectedProviderLabel,
 	selectedModelLabel,
@@ -167,6 +189,12 @@ export function SessionWorkbench({
 	const { t } = useTranslation("common");
 	const [terminalOpen, setTerminalOpen] = useState(false);
 	const [terminalExpanded, setTerminalExpanded] = useState(false);
+	const [deliveryOpen, setDeliveryOpen] = useState(false);
+	const [deliveryRunning, setDeliveryRunning] = useState(false);
+	const [deliveryResults, setDeliveryResults] = useState<
+		MultiWorkspaceDeliveryResult[] | null
+	>(null);
+	const [deliveryError, setDeliveryError] = useState<string | null>(null);
 	const [terminalScopeKind, setTerminalScopeKind] =
 		useState<TerminalScopeKind>("worktree");
 	const sessionState = sessionSnapshot?.state ?? "idle";
@@ -260,6 +288,35 @@ export function SessionWorkbench({
 
 	// Full-bleed terminal takeover — hide the chat column entirely.
 	const chatHidden = terminalOpen && terminalExpanded;
+	const changedScopeOptions = workspaceScopeOptions.filter(
+		(workspace) => workspace.hasChanges === true,
+	);
+	const scopeChangesLoading = workspaceScopeOptions.some(
+		(workspace) => workspace.hasChanges === null,
+	);
+	const handleOpenDelivery = useCallback(() => {
+		setDeliveryResults(null);
+		setDeliveryError(null);
+		setDeliveryOpen(true);
+	}, []);
+	const handleDeliver = useCallback(async () => {
+		if (!onDeliverWorkspaceScope) return;
+		setDeliveryRunning(true);
+		setDeliveryError(null);
+		try {
+			setDeliveryResults(await onDeliverWorkspaceScope());
+		} catch (error) {
+			setDeliveryError(
+				error instanceof Error
+					? error.message
+					: typeof error === "string"
+						? error
+						: String(error),
+			);
+		} finally {
+			setDeliveryRunning(false);
+		}
+	}, [onDeliverWorkspaceScope]);
 
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -305,6 +362,23 @@ export function SessionWorkbench({
 									count: workspaceScopeOptions.length,
 								})}
 							</span>
+							{onDeliverWorkspaceScope ? (
+								<Button
+									type="button"
+									variant="outline"
+									size="xs"
+									className="gap-1.5"
+									disabled={scopeChangesLoading || changedScopeOptions.length === 0}
+									onClick={handleOpenDelivery}
+								>
+									<GitPullRequestArrowIcon className="size-3.5" />
+									{scopeChangesLoading
+										? t("workspaceScope.delivery.checking")
+										: t("workspaceScope.delivery.action", {
+												count: changedScopeOptions.length,
+											})}
+								</Button>
+							) : null}
 						</div>
 					) : null}
 					<WorkspacePanel
@@ -383,6 +457,128 @@ export function SessionWorkbench({
 					sessionId={sessionId}
 				/>
 			) : null}
+
+			<Dialog
+				open={deliveryOpen}
+				onOpenChange={(open) => {
+					if (!deliveryRunning) setDeliveryOpen(open);
+				}}
+			>
+				<DialogContent className="sm:max-w-lg" showCloseButton={!deliveryRunning}>
+					<DialogHeader>
+						<DialogTitle>{t("workspaceScope.delivery.title")}</DialogTitle>
+						<DialogDescription>
+							{deliveryResults
+								? t("workspaceScope.delivery.resultDescription")
+								: t("workspaceScope.delivery.description")}
+						</DialogDescription>
+					</DialogHeader>
+
+					{deliveryResults ? (
+						<div className="max-h-[min(52vh,420px)] space-y-2 overflow-y-auto pr-1">
+							{deliveryResults.map((result) => {
+								const ResultIcon =
+									result.status === "delivered"
+										? CheckCircle2Icon
+										: result.status === "failed"
+											? AlertTriangleIcon
+											: MinusCircleIcon;
+								return (
+									<div
+										key={result.workspaceId}
+										className="flex items-start gap-2.5 rounded-lg border border-border/70 bg-muted/25 p-3"
+									>
+										<ResultIcon
+											className={`mt-0.5 size-4 shrink-0 ${
+												result.status === "delivered"
+													? "text-emerald-500"
+													: result.status === "failed"
+														? "text-destructive"
+														: "text-muted-foreground"
+											}`}
+										/>
+										<div className="min-w-0 flex-1">
+											<p className="truncate text-sm font-medium">{result.name}</p>
+											<p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+												{result.message}
+											</p>
+											{result.requestUrl ? (
+												<Button
+													type="button"
+													variant="link"
+													size="xs"
+													className="mt-1 h-auto gap-1 p-0 text-xs"
+													onClick={() => void openExternal(result.requestUrl!)}
+												>
+													{t("workspaceScope.delivery.openRequest")}
+													<ExternalLinkIcon className="size-3" />
+												</Button>
+											) : null}
+										</div>
+									</div>
+								);
+							})}
+						</div>
+					) : (
+						<div className="space-y-2">
+							{changedScopeOptions.map((workspace) => (
+								<div
+									key={workspace.id}
+									className="flex items-center gap-2 rounded-lg border border-border/70 px-3 py-2"
+								>
+									<span className="size-2 rounded-full bg-amber-400" />
+									<span className="min-w-0 flex-1 truncate text-sm font-medium">
+										{workspace.name}
+									</span>
+									<span className="truncate font-mono text-[11px] text-muted-foreground">
+										{workspace.branch}
+									</span>
+								</div>
+							))}
+						</div>
+					)}
+
+					{deliveryRunning ? (
+						<div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+							<LoaderCircleIcon className="size-4 animate-spin" />
+							{t("workspaceScope.delivery.running")}
+						</div>
+					) : null}
+					{deliveryError ? (
+						<div className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+							{deliveryError}
+						</div>
+					) : null}
+
+					<DialogFooter>
+						{deliveryResults || deliveryError ? (
+							<DialogClose asChild>
+								<Button type="button" variant="outline">
+									{t("workspaceScope.delivery.close")}
+								</Button>
+							</DialogClose>
+						) : (
+							<>
+								<DialogClose asChild>
+									<Button type="button" variant="outline" disabled={deliveryRunning}>
+										{t("workspaceScope.delivery.cancel")}
+									</Button>
+								</DialogClose>
+								<Button type="button" onClick={handleDeliver} disabled={deliveryRunning}>
+									{deliveryRunning ? (
+										<LoaderCircleIcon className="animate-spin" />
+									) : (
+										<GitPullRequestArrowIcon />
+									)}
+									{t("workspaceScope.delivery.confirm", {
+										count: changedScopeOptions.length,
+									})}
+								</Button>
+							</>
+						)}
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

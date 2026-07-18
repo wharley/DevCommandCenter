@@ -137,6 +137,10 @@ import {
 } from "./features/workspaces/use-workspaces";
 import type { WorkspaceSummary } from "./features/workspaces/types";
 import {
+	deliverMultiWorkspace,
+	type MultiWorkspaceDeliveryResult,
+} from "./features/workspaces/multi-workspace-delivery";
+import {
 	canAbortRun,
 	canResumeSession,
 } from "./features/sessions/session-chrome-state";
@@ -1103,6 +1107,7 @@ export default function App() {
 					return (
 						status.staged.length > 0 ||
 						status.unstaged.length > 0 ||
+						status.aheadOfRemoteCount > 0 ||
 						branchDiff.changes.length > 0
 					);
 				},
@@ -1123,6 +1128,38 @@ export default function App() {
 	const activeWorkspace =
 		selectedBundleMembers.find((workspace) => workspace.id === selectedBundleMemberId) ??
 		selectedWorkspace;
+	const handleDeliverWorkspaceScope = useCallback(async (): Promise<
+		MultiWorkspaceDeliveryResult[]
+	> => {
+		const members = selectedBundleMembers.map((workspace) => ({
+			workspaceId: workspace.id,
+			name: workspace.name,
+			workspaceRoot: workspace.worktreePath ?? workspace.rootPath ?? "",
+		}));
+		const invalidMember = members.find((member) => !member.workspaceRoot);
+		if (invalidMember) {
+			throw new Error(`Workspace sem caminho Git: ${invalidMember.name}`);
+		}
+
+		const results = await deliverMultiWorkspace(members);
+		await Promise.all(
+			members.flatMap((member) => [
+				queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, member.workspaceRoot],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, member.workspaceRoot],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, member.workspaceRoot],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["multiWorkspaceChanges", member.workspaceId, member.workspaceRoot],
+				}),
+			]),
+		);
+		return results;
+	}, [queryClient, selectedBundleMembers]);
 	const selectedWorkspacePath =
 		activeWorkspace?.worktreePath ?? activeWorkspace?.rootPath ?? null;
 	const selectedLocalWorkspacePath = isRemoteBackend ? null : selectedWorkspacePath;
@@ -3533,6 +3570,9 @@ export default function App() {
 									}))}
 									selectedWorkspaceScopeId={activeWorkspace?.id ?? selectedWorkspace.id}
 									onSelectWorkspaceScope={setSelectedBundleMemberId}
+									onDeliverWorkspaceScope={
+										isRemoteBackend ? undefined : handleDeliverWorkspaceScope
+									}
 									sessionQueryScope={backendCacheKey}
 									selectedProviderLabel={selectedProvider?.label ?? null}
 									selectedModelLabel={selectedModel?.label ?? null}
