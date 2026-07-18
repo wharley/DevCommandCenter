@@ -1438,6 +1438,7 @@ pub fn stable_cli_capabilities() -> Capabilities {
         can_request_delegation: false,
         supports_read_only_delegation: true,
         supports_edit_delegation: true,
+        supports_multi_root: false,
     }
 }
 
@@ -1453,6 +1454,7 @@ pub fn experimental_cli_capabilities() -> Capabilities {
         can_request_delegation: false,
         supports_read_only_delegation: true,
         supports_edit_delegation: true,
+        supports_multi_root: false,
     }
 }
 
@@ -1492,6 +1494,7 @@ mod tests {
             session_id: SessionId("session".to_string()),
             model: None,
             working_directory: None,
+            additional_working_directories: Vec::new(),
             provider_runtime: Some(ProviderRuntimeConfig {
                 home_path: Some(shared_home.to_string_lossy().to_string()),
                 shadow_home_path: Some(shadow_home.to_string_lossy().to_string()),

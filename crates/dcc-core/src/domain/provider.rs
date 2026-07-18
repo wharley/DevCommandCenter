@@ -30,6 +30,9 @@ pub struct Capabilities {
     pub can_request_delegation: bool,
     pub supports_read_only_delegation: bool,
     pub supports_edit_delegation: bool,
+    /// The adapter can safely expose more than one DCC-managed workspace root.
+    #[serde(default)]
+    pub supports_multi_root: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

@@ -9,7 +9,7 @@ import {
 	type MouseEventHandler,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Toaster } from "sonner";
 import type {
@@ -89,6 +89,7 @@ import {
 	deleteRepository,
 	listMissionSpecs,
 	listRepositories,
+	listWorkspaceBundles,
 	listWorkspaces,
 	workspaceGitBranchDiff,
 	workspaceGitStatus,
@@ -779,13 +780,62 @@ export default function App() {
 		staleTime: 60_000,
 		refetchOnWindowFocus: false,
 	});
+	const workspaceBundlesQuery = useQuery({
+		queryKey: ["workspaceBundles", backendCacheKey],
+		queryFn: async () => {
+			if (isRemoteBackend) {
+				return [];
+			}
+			const result = await listWorkspaceBundles();
+			return result.bundles;
+		},
+		staleTime: 60_000,
+		refetchOnWindowFocus: false,
+	});
 	const workspacesFromBackend = workspacesQuery.data ?? EMPTY_WORKSPACES;
 	const repositoriesFromBackend = repositoriesQuery.data ?? [];
+	const workspaceBundlesFromBackend = workspaceBundlesQuery.data ?? [];
+	const navigationWorkspaces = useMemo(() => {
+		const secondaryWorkspaceIds = new Set(
+			workspaceBundlesFromBackend.flatMap((summary) =>
+				summary.members
+					.map((member) => member.workspaceId)
+					.filter((workspaceId) => workspaceId !== summary.bundle.primaryWorkspaceId),
+			),
+		);
+		return workspacesFromBackend
+			.filter((workspace) => !secondaryWorkspaceIds.has(workspace.id))
+			.map((workspace) => {
+				const bundle = workspaceBundlesFromBackend.find(
+					(summary) => summary.bundle.primaryWorkspaceId === workspace.id,
+				);
+				if (!bundle) {
+					return workspace;
+				}
+				const memberWorkspaceIds = bundle.members.map((member) => member.workspaceId);
+				return {
+					...workspace,
+					name: bundle.bundle.name,
+					bundleId: bundle.bundle.id,
+					additionalWorkspaceIds: memberWorkspaceIds.filter(
+						(workspaceId) => workspaceId !== workspace.id,
+					),
+					memberWorkspaceIds,
+					memberNames: memberWorkspaceIds
+						.map(
+							(workspaceId) =>
+								workspacesFromBackend.find((candidate) => candidate.id === workspaceId)?.name,
+						)
+						.filter((name): name is string => Boolean(name)),
+				};
+			});
+	}, [workspaceBundlesFromBackend, workspacesFromBackend]);
 	const {
 		allWorkspaces,
 		archiveWorkspace,
 		cloneWorkspaceFromUrl,
 		createWorkspace,
+		createWorkspaceBundle,
 		deleteWorkspace,
 		deleteWorkspaces,
 		filteredWorkspaces,
@@ -794,7 +844,23 @@ export default function App() {
 		selectedWorkspace,
 		selectedWorkspaceId,
 		setSelectedWorkspaceId,
-	} = useWorkspacesPanel(workspacesFromBackend);
+	} = useWorkspacesPanel(navigationWorkspaces);
+	const selectedWorkspaceAdditionalWorkspaceIds = useMemo(() => {
+		if (!selectedWorkspace) {
+			return [];
+		}
+		if (selectedWorkspace.additionalWorkspaceIds) {
+			return selectedWorkspace.additionalWorkspaceIds;
+		}
+		const bundle = workspaceBundlesFromBackend.find(
+			(summary) => summary.bundle.primaryWorkspaceId === selectedWorkspace.id,
+		);
+		return (
+			bundle?.members
+				.map((member) => member.workspaceId)
+				.filter((workspaceId) => workspaceId !== selectedWorkspace.id) ?? []
+		);
+	}, [selectedWorkspace, workspaceBundlesFromBackend]);
 	const queryClient = useQueryClient();
 	const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 	const [delegateSignal, setDelegateSignal] = useState(0);
@@ -1015,8 +1081,50 @@ export default function App() {
 		installUpdate,
 	} = useAppUpdate();
 	const providerChoices = providerCatalog.providers;
+	const selectedBundleMembers = useMemo(
+		() =>
+			(selectedWorkspace?.memberWorkspaceIds ?? [])
+				.map((workspaceId) =>
+					workspacesFromBackend.find((workspace) => workspace.id === workspaceId),
+				)
+				.filter((workspace): workspace is NonNullable<typeof workspace> => Boolean(workspace)),
+		[selectedWorkspace?.memberWorkspaceIds, workspacesFromBackend],
+	);
+	const bundleMemberChangeQueries = useQueries({
+		queries: selectedBundleMembers.map((workspace) => {
+			const workspaceRoot = workspace.worktreePath ?? workspace.rootPath ?? "";
+			return {
+				queryKey: ["multiWorkspaceChanges", workspace.id, workspaceRoot],
+				queryFn: async () => {
+					const [status, branchDiff] = await Promise.all([
+						workspaceGitStatus({ workspaceRoot }),
+						workspaceGitBranchDiff({ workspaceRoot }),
+					]);
+					return (
+						status.staged.length > 0 ||
+						status.unstaged.length > 0 ||
+						branchDiff.changes.length > 0
+					);
+				},
+				enabled: selectedBundleMembers.length > 1 && workspaceRoot.length > 0,
+				refetchInterval: 5_000,
+				staleTime: 2_000,
+			};
+		}),
+	});
+	const [selectedBundleMemberId, setSelectedBundleMemberId] = useState<string | null>(null);
+	useEffect(() => {
+		setSelectedBundleMemberId((current) =>
+			current && selectedBundleMembers.some((workspace) => workspace.id === current)
+				? current
+				: selectedWorkspace?.id ?? null,
+		);
+	}, [selectedBundleMembers, selectedWorkspace?.id]);
+	const activeWorkspace =
+		selectedBundleMembers.find((workspace) => workspace.id === selectedBundleMemberId) ??
+		selectedWorkspace;
 	const selectedWorkspacePath =
-		selectedWorkspace?.worktreePath ?? selectedWorkspace?.rootPath ?? null;
+		activeWorkspace?.worktreePath ?? activeWorkspace?.rootPath ?? null;
 	const selectedLocalWorkspacePath = isRemoteBackend ? null : selectedWorkspacePath;
 
 	// Keep compiled skill artifacts in sync with the active worktree, so a freshly
@@ -1211,8 +1319,23 @@ export default function App() {
 		[selectedModelId, selectedProvider],
 	);
 	const selectedProviderBlockReason = useMemo(
-		() => getProviderUnhealthyReason(selectedProvider),
-		[selectedProvider],
+		() => {
+			const healthReason = getProviderUnhealthyReason(selectedProvider);
+			if (healthReason) {
+				return healthReason;
+			}
+			if (
+				selectedProvider &&
+				(selectedWorkspace?.additionalWorkspaceIds?.length ?? 0) > 0 &&
+				selectedProvider.capabilities.supportsMultiRoot !== true
+			) {
+				return t("workspaceScope.providerUnsupported", {
+					provider: selectedProvider.label,
+				});
+			}
+			return null;
+		},
+		[selectedProvider, selectedWorkspace?.additionalWorkspaceIds?.length, t],
 	);
 	const selectedProviderRuntime = useMemo(
 		() =>
@@ -1568,10 +1691,10 @@ export default function App() {
 			toast.error(selectedProviderBlockReason);
 			return;
 		}
-
 		try {
 			const result = await startThread({
 				workspaceId: selectedWorkspace.id,
+				additionalWorkspaceIds: selectedWorkspaceAdditionalWorkspaceIds,
 				projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
 				providerId: selectedProvider.id,
 				model: selectedModel?.id ?? null,
@@ -1632,6 +1755,7 @@ export default function App() {
 		selectedProviderBlockReason,
 		selectedProviderRuntime,
 		selectedWorkspace,
+		selectedWorkspaceAdditionalWorkspaceIds,
 		queryClient,
 	]);
 
@@ -1650,6 +1774,7 @@ export default function App() {
 
 			const started = await startThread({
 				workspaceId: selectedWorkspace.id,
+				additionalWorkspaceIds: selectedWorkspaceAdditionalWorkspaceIds,
 				projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
 				providerId: selectedProvider.id,
 				model: selectedModel?.id ?? null,
@@ -1771,6 +1896,7 @@ export default function App() {
 			selectedProviderBlockReason,
 			selectedProviderRuntime,
 			selectedWorkspace,
+			selectedWorkspaceAdditionalWorkspaceIds,
 		],
 	);
 
@@ -2114,6 +2240,7 @@ export default function App() {
 			try {
 				const started = await startThread({
 					workspaceId: selectedWorkspace.id,
+					additionalWorkspaceIds: selectedWorkspaceAdditionalWorkspaceIds,
 					projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
 					providerId: selectedProvider.id,
 					model: selectedModel?.id ?? null,
@@ -2232,6 +2359,7 @@ export default function App() {
 			selectedProviderBlockReason,
 			selectedProviderRuntime,
 			selectedWorkspace,
+			selectedWorkspaceAdditionalWorkspaceIds,
 		],
 	);
 
@@ -2287,6 +2415,7 @@ export default function App() {
 
 				const started = await startThread({
 					workspaceId: selectedWorkspace.id,
+					additionalWorkspaceIds: selectedWorkspaceAdditionalWorkspaceIds,
 					projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
 					providerId: selectedProvider.id,
 					model: selectedModel?.id ?? null,
@@ -2533,6 +2662,7 @@ export default function App() {
 		selectedSessionId,
 		selectedSessionSnapshot,
 		selectedLocalWorkspacePath,
+		selectedWorkspaceAdditionalWorkspaceIds,
 		selectedWorkspace,
 		sessionEvents,
 		t,
@@ -3373,7 +3503,14 @@ export default function App() {
 								repositoryContext={workspaceRepositoryContext}
 								onOpenChange={handleWorkspaceDialogOpenChange}
 								onCreateWorkspace={createWorkspace}
+								onCreateWorkspaceBundle={async (input) => {
+									const result = await createWorkspaceBundle(input);
+									void queryClient.invalidateQueries({ queryKey: ["workspaceBundles"] });
+									void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+									return result;
+								}}
 								onCloneWorkspace={cloneWorkspaceFromUrl}
+								repositories={repositoriesFromBackend}
 								isSubmitting={isCreatingWorkspace}
 							/>
 							{hasWorkspace && selectedWorkspace ? (
@@ -3382,12 +3519,20 @@ export default function App() {
 									workspaceName={selectedWorkspace.name}
 									workspaceBranch={selectedWorkspace.branch}
 									workspacePath={selectedSessionWorkspacePath}
-									projectId={selectedWorkspace.projectId ?? selectedWorkspace.id}
-									terminalRootPath={selectedWorkspace.rootPath ?? null}
+									projectId={activeWorkspace?.projectId ?? selectedWorkspace.projectId ?? selectedWorkspace.id}
+									terminalRootPath={activeWorkspace?.rootPath ?? selectedWorkspace.rootPath ?? null}
 									terminalWorktreePath={
-										selectedSessionWorkspacePath ??
-										(isRemoteBackend ? null : (selectedWorkspace.worktreePath ?? null))
+										selectedWorkspacePath ??
+										(isRemoteBackend ? null : (activeWorkspace?.worktreePath ?? null))
 									}
+									workspaceScopeOptions={selectedBundleMembers.map((workspace, index) => ({
+										id: workspace.id,
+										name: workspace.name,
+										branch: workspace.branch,
+										hasChanges: bundleMemberChangeQueries[index]?.data ?? null,
+									}))}
+									selectedWorkspaceScopeId={activeWorkspace?.id ?? selectedWorkspace.id}
+									onSelectWorkspaceScope={setSelectedBundleMemberId}
 									sessionQueryScope={backendCacheKey}
 									selectedProviderLabel={selectedProvider?.label ?? null}
 									selectedModelLabel={selectedModel?.label ?? null}

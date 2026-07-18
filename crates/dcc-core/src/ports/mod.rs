@@ -8,5 +8,5 @@ pub use git::{ClonedRepository, GitOps, PreparedWorktree};
 pub use provider::{Input, Provider, ProviderRuntimeConfig, ProviderTurnInput, SessionConfig};
 pub use repository::{
     DelegationRepo, ProjectRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo,
-    WorkspaceRepo,
+    WorkspaceBundleRepo, WorkspaceRepo,
 };

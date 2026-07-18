@@ -603,6 +603,8 @@ impl CodexAppServerAdapter {
             .as_deref()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or(".");
+        let mut runtime_workspace_roots = vec![cwd.to_string()];
+        runtime_workspace_roots.extend(cfg.additional_working_directories.iter().cloned());
 
         let result = runtime
             .send_request(
@@ -610,7 +612,8 @@ impl CodexAppServerAdapter {
                 json!({
                     "cwd": cwd,
                     "approvalPolicy": "never",
-                    "sandbox": "danger-full-access",
+                    "sandbox": "workspace-write",
+                    "runtimeWorkspaceRoots": runtime_workspace_roots,
                 }),
             )
             .await?;

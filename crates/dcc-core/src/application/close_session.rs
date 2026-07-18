@@ -220,6 +220,7 @@ mod tests {
             id: SessionId("session-1".to_string()),
             project_id: ProjectId("project-1".to_string()),
             workspace_id: WorkspaceId("workspace-1".to_string()),
+            additional_workspace_ids: Vec::new(),
             provider_id: "codex".to_string(),
             model: Some("gpt-5".to_string()),
             provider_runtime: None,

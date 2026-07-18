@@ -160,6 +160,7 @@ impl HeadlessCliProviderAdapter {
         model: Option<&str>,
         prompt: &str,
         plan_mode: Option<bool>,
+        additional_directories: &[String],
     ) -> Vec<String> {
         match self.kind {
             HeadlessCliKind::Claude => {
@@ -180,6 +181,10 @@ impl HeadlessCliProviderAdapter {
                 if let Some(model) = model.filter(|value| !value.trim().is_empty()) {
                     args.push("--model".to_string());
                     args.push(model.to_string());
+                }
+                for directory in additional_directories {
+                    args.push("--add-dir".to_string());
+                    args.push(directory.clone());
                 }
                 args.push(prompt.to_string());
                 args
@@ -209,6 +214,10 @@ impl HeadlessCliProviderAdapter {
                     args.push("--model".to_string());
                     args.push(model.to_string());
                 }
+                for directory in additional_directories {
+                    args.push("--include-directories".to_string());
+                    args.push(directory.clone());
+                }
                 args
             }
         }
@@ -236,6 +245,7 @@ impl HeadlessCliProviderAdapter {
             runtime.model.as_deref(),
             &prompt,
             plan_mode,
+            &runtime.cfg.additional_working_directories,
         );
         let mut command = self.turn_command();
         command.args(&args);
@@ -862,19 +872,41 @@ mod tests {
                 can_request_delegation: false,
                 supports_read_only_delegation: true,
                 supports_edit_delegation: true,
+                supports_multi_root: true,
             },
             true,
             HeadlessCliKind::Gemini,
         );
 
-        let plan_args = provider.build_turn_args(None, None, "ship it", Some(true));
+        let plan_args = provider.build_turn_args(None, None, "ship it", Some(true), &[]);
         assert!(plan_args
             .windows(2)
             .any(|pair| pair == ["--approval-mode", "plan"]));
 
-        let execute_args = provider.build_turn_args(None, None, "ship it", Some(false));
+        let execute_args = provider.build_turn_args(None, None, "ship it", Some(false), &[]);
         assert!(execute_args
             .windows(2)
             .any(|pair| pair == ["--approval-mode", "yolo"]));
+    }
+
+    #[test]
+    fn gemini_build_turn_args_include_each_authorized_directory() {
+        let provider = HeadlessCliProviderAdapter::new(
+            "gemini",
+            "Gemini",
+            "Gemini",
+            "gemini",
+            crate::gemini::descriptor(HealthStatus::Healthy).capabilities,
+            true,
+            HeadlessCliKind::Gemini,
+        );
+        let directories = vec!["/tmp/api".to_string(), "/tmp/web".to_string()];
+        let args = provider.build_turn_args(None, None, "ship it", Some(false), &directories);
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--include-directories", "/tmp/api"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--include-directories", "/tmp/web"]));
     }
 }

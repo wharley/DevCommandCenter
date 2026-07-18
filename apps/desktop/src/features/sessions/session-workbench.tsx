@@ -47,6 +47,14 @@ type SessionWorkbenchProps = {
 	terminalRootPath?: string | null;
 	/** Active mission worktree path. Unlike workspacePath, this does not fall back to rootPath. */
 	terminalWorktreePath?: string | null;
+	workspaceScopeOptions?: Array<{
+		id: string;
+		name: string;
+		branch: string;
+		hasChanges: boolean | null;
+	}>;
+	selectedWorkspaceScopeId?: string | null;
+	onSelectWorkspaceScope?: (workspaceId: string) => void;
 	sessionQueryScope?: string;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
@@ -111,6 +119,9 @@ export function SessionWorkbench({
 	projectId,
 	terminalRootPath,
 	terminalWorktreePath,
+	workspaceScopeOptions = [],
+	selectedWorkspaceScopeId = null,
+	onSelectWorkspaceScope,
 	sessionQueryScope = "local",
 	selectedProviderLabel,
 	selectedModelLabel,
@@ -254,6 +265,48 @@ export function SessionWorkbench({
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
 			{!chatHidden ? (
 				<div className="@container/header-actions flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">
+					{workspaceScopeOptions.length > 1 ? (
+						<div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 bg-muted/20 px-3">
+							<span className="text-[11px] font-medium text-muted-foreground">
+								{t("workspaceScope.projects")}
+							</span>
+							<div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+								{workspaceScopeOptions.map((workspace) => {
+									const selected = workspace.id === selectedWorkspaceScopeId;
+									return (
+										<button
+											type="button"
+											key={workspace.id}
+											title={`${workspace.name} · ${workspace.branch}`}
+											onClick={() => onSelectWorkspaceScope?.(workspace.id)}
+											className={`flex h-6 min-w-0 max-w-52 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[11.5px] font-medium transition-colors ${
+												selected
+													? "border-border bg-background text-foreground"
+													: "border-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+											}`}
+										>
+											<span
+												aria-hidden
+												className={`size-1.5 shrink-0 rounded-full ${
+													workspace.hasChanges === true
+														? "bg-amber-400"
+														: workspace.hasChanges === false
+															? "bg-emerald-500"
+															: "bg-muted-foreground/40"
+												}`}
+											/>
+											<span className="truncate">{workspace.name}</span>
+										</button>
+									);
+								})}
+							</div>
+							<span className="ml-auto shrink-0 rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">
+								{t("workspaceScope.authorizedCount", {
+									count: workspaceScopeOptions.length,
+								})}
+							</span>
+						</div>
+					) : null}
 					<WorkspacePanel
 						workspaceId={workspaceId}
 						workspaceName={workspaceName}

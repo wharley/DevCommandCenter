@@ -20,9 +20,14 @@ use dcc_core::{
         },
         thread::{Thread, ThreadId},
         workspace::{Workspace, WorkspaceId, WorkspaceState},
+        workspace_bundle::{
+            WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
+            WorkspaceBundleSummary,
+        },
     },
     ports::{
-        DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
+        DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo,
+        WorkspaceBundleRepo, WorkspaceRepo,
     },
     Result,
 };
@@ -67,6 +72,39 @@ CREATE INDEX IF NOT EXISTS idx_dcc_repositories_updated_at
 ON dcc_repositories(updated_at DESC);
 "#;
 
+const WORKSPACE_BUNDLE_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_workspace_bundles (
+	id TEXT PRIMARY KEY NOT NULL,
+	name TEXT NOT NULL,
+	primary_workspace_id TEXT NOT NULL,
+	state TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY (primary_workspace_id) REFERENCES dcc_workspaces(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_workspace_bundles_updated_at
+ON dcc_workspace_bundles(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS dcc_workspace_bundle_members (
+	bundle_id TEXT NOT NULL,
+	workspace_id TEXT NOT NULL UNIQUE,
+	created_for_bundle INTEGER NOT NULL DEFAULT 1,
+	position INTEGER NOT NULL DEFAULT 0,
+	-- Compatibility columns retained for databases created by the previous prototype.
+	role TEXT NOT NULL DEFAULT 'contributor',
+	allow_analysis INTEGER NOT NULL DEFAULT 1,
+	allow_implementation INTEGER NOT NULL DEFAULT 1,
+	workspace_state_before_archive TEXT NULL,
+	PRIMARY KEY (bundle_id, workspace_id),
+	FOREIGN KEY (bundle_id) REFERENCES dcc_workspace_bundles(id) ON DELETE CASCADE,
+	FOREIGN KEY (workspace_id) REFERENCES dcc_workspaces(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_workspace_bundle_members_bundle_position
+ON dcc_workspace_bundle_members(bundle_id, position);
+"#;
+
 const FORGE_LOGIN_PREFERENCE_TABLE_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS dcc_forge_login_preferences (
 	provider TEXT NOT NULL,
@@ -85,6 +123,7 @@ CREATE TABLE IF NOT EXISTS dcc_sessions (
 	model TEXT NULL,
 	provider_runtime_json TEXT NULL,
 	working_directory_override TEXT NULL,
+	additional_workspace_ids_json TEXT NOT NULL DEFAULT '[]',
 	state TEXT NOT NULL,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
@@ -207,10 +246,34 @@ impl SqliteWorkspaceRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
+        Self::ensure_column(
+            &conn,
+            "dcc_workspace_bundle_members",
+            "workspace_state_before_archive",
+            "TEXT NULL",
+        )?;
+        Self::ensure_column(
+            &conn,
+            "dcc_workspace_bundle_members",
+            "role",
+            "TEXT NOT NULL DEFAULT 'contributor'",
+        )?;
+        Self::ensure_column(
+            &conn,
+            "dcc_workspace_bundle_members",
+            "allow_analysis",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        Self::ensure_column(
+            &conn,
+            "dcc_workspace_bundle_members",
+            "allow_implementation",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
         Self::ensure_column(&conn, "dcc_repositories", "remote", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_repositories", "remote_url", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_repositories", "forge_provider", "TEXT NULL")?;
@@ -370,6 +433,71 @@ impl SqliteWorkspaceRepo {
         }
     }
 
+    fn workspace_bundle_state_as_str(state: &WorkspaceBundleState) -> &'static str {
+        match state {
+            WorkspaceBundleState::Ready => "ready",
+            WorkspaceBundleState::Archived => "archived",
+        }
+    }
+
+    fn workspace_bundle_state_from_str(
+        value: &str,
+        column: usize,
+    ) -> rusqlite::Result<WorkspaceBundleState> {
+        match value {
+            "ready" => Ok(WorkspaceBundleState::Ready),
+            "archived" => Ok(WorkspaceBundleState::Archived),
+            other => Err(rusqlite::Error::FromSqlConversionFailure(
+                column,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown workspace bundle state: {other}"),
+                )),
+            )),
+        }
+    }
+
+    fn workspace_bundle_from_row(row: &Row<'_>) -> rusqlite::Result<WorkspaceBundle> {
+        Ok(WorkspaceBundle {
+            id: WorkspaceBundleId(row.get::<_, String>(0)?),
+            name: row.get::<_, String>(1)?,
+            primary_workspace_id: WorkspaceId(row.get::<_, String>(2)?),
+            state: Self::workspace_bundle_state_from_str(&row.get::<_, String>(3)?, 3)?,
+            created_at: row.get::<_, String>(4)?,
+            updated_at: row.get::<_, String>(5)?,
+        })
+    }
+
+    fn workspace_bundle_members(
+        conn: &Connection,
+        bundle_id: &WorkspaceBundleId,
+    ) -> Result<Vec<WorkspaceBundleMember>> {
+        let mut stmt = conn
+            .prepare(
+                r#"
+				SELECT bundle_id, workspace_id, created_for_bundle, position
+				  FROM dcc_workspace_bundle_members
+				 WHERE bundle_id = ?1
+				 ORDER BY position ASC, workspace_id ASC
+				"#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = stmt
+            .query_map(params![bundle_id.0.clone()], |row| {
+                Ok(WorkspaceBundleMember {
+                    bundle_id: WorkspaceBundleId(row.get::<_, String>(0)?),
+                    workspace_id: WorkspaceId(row.get::<_, String>(1)?),
+                    created_for_bundle: row.get::<_, bool>(2)?,
+                    position: row.get::<_, u32>(3)?,
+                })
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
     fn workspace_from_row(row: &Row<'_>) -> rusqlite::Result<Workspace> {
         let state = row.get::<_, String>(6)?;
         let state = match state.as_str() {
@@ -495,6 +623,12 @@ impl SqliteSessionRepo {
             "dcc_sessions",
             "working_directory_override",
             "TEXT NULL",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_sessions",
+            "additional_workspace_ids_json",
+            "TEXT NOT NULL DEFAULT '[]'",
         )?;
         Self::rebuild_search_index_sync(&conn)?;
         Ok(())
@@ -651,6 +785,13 @@ impl SqliteSessionRepo {
                 })
             })
             .transpose()?;
+        let additional_workspace_ids = from_str(&row.get::<_, String>(7)?).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                7,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
 
         Ok(Session {
             id: SessionId(row.get::<_, String>(0)?),
@@ -660,9 +801,10 @@ impl SqliteSessionRepo {
             model: row.get::<_, Option<String>>(4)?,
             provider_runtime,
             working_directory_override: row.get::<_, Option<String>>(6)?,
-            state: Self::session_state_from_str(&row.get::<_, String>(7)?, 7)?,
-            created_at: row.get::<_, String>(8)?,
-            updated_at: row.get::<_, String>(9)?,
+            additional_workspace_ids,
+            state: Self::session_state_from_str(&row.get::<_, String>(8)?, 8)?,
+            created_at: row.get::<_, String>(9)?,
+            updated_at: row.get::<_, String>(10)?,
         })
     }
 
@@ -1184,7 +1326,7 @@ impl SqliteSessionRepo {
 				SELECT
 					s.id, s.project_id, s.workspace_id, s.provider_id, s.model,
 					s.provider_runtime_json, s.working_directory_override,
-					s.state, s.created_at, s.updated_at,
+					s.additional_workspace_ids_json, s.state, s.created_at, s.updated_at,
 					t.id, t.project_id, t.session_id, t.title, t.archived_at
 				  FROM dcc_sessions s
 				  JOIN dcc_threads t ON t.session_id = s.id
@@ -1219,16 +1361,25 @@ impl SqliteSessionRepo {
                         })
                         .transpose()?,
                     working_directory_override: row.get::<_, Option<String>>(6)?,
-                    state: Self::session_state_from_str(&row.get::<_, String>(7)?, 7)?,
-                    created_at: row.get::<_, String>(8)?,
-                    updated_at: row.get::<_, String>(9)?,
+                    additional_workspace_ids: from_str(&row.get::<_, String>(7)?).map_err(
+                        |error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                7,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        },
+                    )?,
+                    state: Self::session_state_from_str(&row.get::<_, String>(8)?, 8)?,
+                    created_at: row.get::<_, String>(9)?,
+                    updated_at: row.get::<_, String>(10)?,
                 };
                 let thread = Thread {
-                    id: ThreadId(row.get::<_, String>(10)?),
-                    project_id: ProjectId(row.get::<_, String>(11)?),
-                    session_id: row.get::<_, Option<String>>(12)?.map(SessionId),
-                    title: row.get::<_, String>(13)?,
-                    archived_at: row.get::<_, Option<String>>(14)?,
+                    id: ThreadId(row.get::<_, String>(11)?),
+                    project_id: ProjectId(row.get::<_, String>(12)?),
+                    session_id: row.get::<_, Option<String>>(13)?.map(SessionId),
+                    title: row.get::<_, String>(14)?,
+                    archived_at: row.get::<_, Option<String>>(15)?,
                 };
                 Ok((session, thread))
             })
@@ -1428,6 +1579,293 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
 }
 
 #[async_trait]
+impl WorkspaceBundleRepo for SqliteWorkspaceRepo {
+    async fn save_workspace_bundle(
+        &self,
+        bundle: &WorkspaceBundle,
+        members: &[WorkspaceBundleMember],
+    ) -> Result<()> {
+        if bundle.name.trim().is_empty() {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "workspace bundle name cannot be empty".to_string(),
+            ));
+        }
+        if members.len() < 2 {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "workspace bundle requires at least two members".to_string(),
+            ));
+        }
+        let mut workspace_ids = BTreeSet::new();
+        for member in members {
+            if member.bundle_id != bundle.id {
+                return Err(dcc_core::CoreError::InvalidInput(
+                    "workspace bundle member references a different bundle".to_string(),
+                ));
+            }
+            if !workspace_ids.insert(member.workspace_id.0.clone()) {
+                return Err(dcc_core::CoreError::InvalidInput(format!(
+                    "workspace bundle contains duplicate member: {}",
+                    member.workspace_id.0
+                )));
+            }
+        }
+        if !workspace_ids.contains(&bundle.primary_workspace_id.0) {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "workspace bundle primary workspace must be a member".to_string(),
+            ));
+        }
+
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        tx.execute(
+            r#"
+			INSERT INTO dcc_workspace_bundles (
+				id, name, primary_workspace_id, state, created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+			ON CONFLICT(id) DO UPDATE SET
+				name = excluded.name,
+				primary_workspace_id = excluded.primary_workspace_id,
+				state = excluded.state,
+				created_at = excluded.created_at,
+				updated_at = excluded.updated_at
+			"#,
+            params![
+                bundle.id.0.clone(),
+                bundle.name.clone(),
+                bundle.primary_workspace_id.0.clone(),
+                Self::workspace_bundle_state_as_str(&bundle.state),
+                bundle.created_at.clone(),
+                bundle.updated_at.clone(),
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        tx.execute(
+            "DELETE FROM dcc_workspace_bundle_members WHERE bundle_id = ?1",
+            params![bundle.id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        for member in members {
+            tx.execute(
+                r#"
+				INSERT INTO dcc_workspace_bundle_members (
+					bundle_id, workspace_id, created_for_bundle, position,
+					role, allow_analysis, allow_implementation
+				) VALUES (?1, ?2, ?3, ?4, ?5, 1, 1)
+				"#,
+                params![
+                    member.bundle_id.0.clone(),
+                    member.workspace_id.0.clone(),
+                    member.created_for_bundle,
+                    member.position,
+                    if member.workspace_id == bundle.primary_workspace_id {
+                        "primary"
+                    } else {
+                        "contributor"
+                    },
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        tx.commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn get_workspace_bundle(
+        &self,
+        id: &WorkspaceBundleId,
+    ) -> Result<Option<WorkspaceBundleSummary>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let bundle = conn
+            .query_row(
+                r#"
+				SELECT id, name, primary_workspace_id, state, created_at, updated_at
+				  FROM dcc_workspace_bundles
+				 WHERE id = ?1
+				"#,
+                params![id.0.clone()],
+                Self::workspace_bundle_from_row,
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let Some(bundle) = bundle else {
+            return Ok(None);
+        };
+        let members = Self::workspace_bundle_members(&conn, &bundle.id)?;
+        Ok(Some(WorkspaceBundleSummary { bundle, members }))
+    }
+
+    async fn get_workspace_bundle_for_workspace(
+        &self,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Option<WorkspaceBundleSummary>> {
+        let bundle_id = {
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            conn.query_row(
+                "SELECT bundle_id FROM dcc_workspace_bundle_members WHERE workspace_id = ?1",
+                params![workspace_id.0.clone()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+        };
+        let Some(bundle_id) = bundle_id else {
+            return Ok(None);
+        };
+        self.get_workspace_bundle(&WorkspaceBundleId(bundle_id))
+            .await
+    }
+
+    async fn list_workspace_bundles(&self) -> Result<Vec<WorkspaceBundleSummary>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let bundles = {
+            let mut stmt = conn
+                .prepare(
+                    r#"
+					SELECT id, name, primary_workspace_id, state, created_at, updated_at
+					  FROM dcc_workspace_bundles
+					 ORDER BY updated_at DESC, created_at DESC
+					"#,
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let rows = stmt
+                .query_map([], Self::workspace_bundle_from_row)
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+        };
+        bundles
+            .into_iter()
+            .map(|bundle| {
+                let members = Self::workspace_bundle_members(&conn, &bundle.id)?;
+                Ok(WorkspaceBundleSummary { bundle, members })
+            })
+            .collect()
+    }
+
+    async fn set_workspace_bundle_state(
+        &self,
+        id: &WorkspaceBundleId,
+        state: WorkspaceBundleState,
+        updated_at: String,
+    ) -> Result<Option<WorkspaceBundleSummary>> {
+        {
+            let mut conn = self
+                .conn
+                .lock()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let tx = conn
+                .transaction()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let updated = tx
+                .execute(
+                    "UPDATE dcc_workspace_bundles SET state = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![
+                        Self::workspace_bundle_state_as_str(&state),
+                        updated_at.clone(),
+                        id.0.clone()
+                    ],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            if updated == 0 {
+                return Ok(None);
+            }
+            match state {
+                WorkspaceBundleState::Archived => {
+                    tx.execute(
+                        r#"
+						UPDATE dcc_workspace_bundle_members
+						   SET workspace_state_before_archive = (
+						       SELECT state
+						         FROM dcc_workspaces
+						        WHERE id = dcc_workspace_bundle_members.workspace_id
+						   )
+						 WHERE bundle_id = ?1
+						   AND workspace_state_before_archive IS NULL
+						"#,
+                        params![id.0.clone()],
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                    tx.execute(
+                        r#"
+						UPDATE dcc_workspaces
+						   SET state = 'archived', updated_at = ?1
+						 WHERE id IN (
+						       SELECT workspace_id
+						         FROM dcc_workspace_bundle_members
+						        WHERE bundle_id = ?2
+						 )
+						"#,
+                        params![updated_at.clone(), id.0.clone()],
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                }
+                WorkspaceBundleState::Ready => {
+                    tx.execute(
+                        r#"
+						UPDATE dcc_workspaces
+						   SET state = COALESCE((
+						       SELECT workspace_state_before_archive
+						         FROM dcc_workspace_bundle_members
+						        WHERE bundle_id = ?2
+						          AND workspace_id = dcc_workspaces.id
+						   ), 'ready'),
+						       updated_at = ?1
+						 WHERE id IN (
+						       SELECT workspace_id
+						         FROM dcc_workspace_bundle_members
+						        WHERE bundle_id = ?2
+						 )
+						"#,
+                        params![updated_at.clone(), id.0.clone()],
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                    tx.execute(
+                        r#"
+						UPDATE dcc_workspace_bundle_members
+						   SET workspace_state_before_archive = NULL
+						 WHERE bundle_id = ?1
+						"#,
+                        params![id.0.clone()],
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                }
+            }
+            tx.commit()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        self.get_workspace_bundle(id).await
+    }
+
+    async fn delete_workspace_bundle(&self, id: &WorkspaceBundleId) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_workspace_bundles WHERE id = ?1",
+            params![id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+}
+
+#[async_trait]
 impl RepositoryRepo for SqliteWorkspaceRepo {
     async fn save_repository(&self, repository: &Repository) -> Result<()> {
         let conn = self
@@ -1553,13 +1991,16 @@ impl SessionRepo for SqliteSessionRepo {
                     .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
             })
             .transpose()?;
+        let additional_workspace_ids_json = to_string(&session.additional_workspace_ids)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
 
         conn.execute(
             r#"
 			INSERT INTO dcc_sessions (
 				id, project_id, workspace_id, provider_id, model,
-				provider_runtime_json, working_directory_override, state, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+				provider_runtime_json, working_directory_override, additional_workspace_ids_json,
+				state, created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
 			ON CONFLICT(id) DO UPDATE SET
 				project_id = excluded.project_id,
 				workspace_id = excluded.workspace_id,
@@ -1567,6 +2008,7 @@ impl SessionRepo for SqliteSessionRepo {
 				model = excluded.model,
 				provider_runtime_json = excluded.provider_runtime_json,
 				working_directory_override = excluded.working_directory_override,
+				additional_workspace_ids_json = excluded.additional_workspace_ids_json,
 				state = excluded.state,
 				created_at = excluded.created_at,
 				updated_at = excluded.updated_at
@@ -1579,6 +2021,7 @@ impl SessionRepo for SqliteSessionRepo {
                 session.model.clone(),
                 provider_runtime_json,
                 session.working_directory_override.clone(),
+                additional_workspace_ids_json,
                 Self::session_state_as_str(&session.state),
                 session.created_at.clone(),
                 session.updated_at.clone(),
@@ -1599,7 +2042,7 @@ impl SessionRepo for SqliteSessionRepo {
             r#"
 			SELECT id, project_id, workspace_id, provider_id, model,
 			       provider_runtime_json, working_directory_override,
-			       state, created_at, updated_at
+			       additional_workspace_ids_json, state, created_at, updated_at
 			  FROM dcc_sessions
 			 WHERE id = ?1
 			"#,
@@ -1976,10 +2419,13 @@ mod tests {
                 WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus, WorkspaceSetupStepReport,
                 WorkspaceState,
             },
+            workspace_bundle::{
+                WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
+            },
         },
         ports::{
             DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo,
-            WorkspaceRepo,
+            WorkspaceBundleRepo, WorkspaceRepo,
         },
     };
 
@@ -1996,6 +2442,7 @@ mod tests {
             id: SessionId("session-1".to_string()),
             project_id: ProjectId("project-1".to_string()),
             workspace_id: WorkspaceId("workspace-1".to_string()),
+            additional_workspace_ids: vec![WorkspaceId("workspace-2".to_string())],
             provider_id: "codex".to_string(),
             model: Some("gpt-5".to_string()),
             provider_runtime: None,
@@ -2033,6 +2480,10 @@ mod tests {
             .expect("list summaries");
         assert_eq!(summary.len(), 1);
         assert_eq!(summary[0].session.id.0, "session-1");
+        assert_eq!(
+            summary[0].session.additional_workspace_ids,
+            vec![WorkspaceId("workspace-2".to_string())]
+        );
         assert_eq!(summary[0].thread.id.0, "thread-1");
         assert_eq!(summary[0].projection.state, SessionState::Active);
     }
@@ -2059,6 +2510,7 @@ mod tests {
             id: SessionId("session-search".to_string()),
             project_id: ProjectId("project-1".to_string()),
             workspace_id: WorkspaceId("workspace-1".to_string()),
+            additional_workspace_ids: Vec::new(),
             provider_id: "codex".to_string(),
             model: Some("gpt-5".to_string()),
             provider_runtime: None,
@@ -2170,6 +2622,7 @@ mod tests {
             id: SessionId("parent-session".to_string()),
             project_id: ProjectId("project-1".to_string()),
             workspace_id: workspace.id.clone(),
+            additional_workspace_ids: Vec::new(),
             provider_id: "codex".to_string(),
             model: Some("gpt-5".to_string()),
             provider_runtime: None,
@@ -2182,6 +2635,7 @@ mod tests {
             id: SessionId("child-session".to_string()),
             project_id: ProjectId("project-1".to_string()),
             workspace_id: workspace.id.clone(),
+            additional_workspace_ids: Vec::new(),
             provider_id: "gemini".to_string(),
             model: None,
             provider_runtime: None,
@@ -2391,5 +2845,120 @@ mod tests {
             setup_report.steps[0].detail.as_deref(),
             Some("pnpm: command not found")
         );
+    }
+
+    #[test]
+    fn sqlite_workspace_repo_roundtrips_workspace_bundle_and_members() {
+        let repo = SqliteWorkspaceRepo::from_connection(in_memory_conn()).expect("create repo");
+        let workspaces = [
+            Workspace {
+                id: WorkspaceId("workspace-backend".to_string()),
+                project_id: ProjectId("backend".to_string()),
+                name: Some("Backend".to_string()),
+                root_path: "/tmp/backend".to_string(),
+                base_branch: "main".to_string(),
+                worktree_path: Some("/tmp/backend/.dcc-worktrees/main-a".to_string()),
+                state: WorkspaceState::SetupPending,
+                setup_report: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+            Workspace {
+                id: WorkspaceId("workspace-frontend".to_string()),
+                project_id: ProjectId("frontend".to_string()),
+                name: Some("Frontend".to_string()),
+                root_path: "/tmp/frontend".to_string(),
+                base_branch: "main".to_string(),
+                worktree_path: Some("/tmp/frontend/.dcc-worktrees/main-b".to_string()),
+                state: WorkspaceState::Ready,
+                setup_report: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+        ];
+        for workspace in &workspaces {
+            futures::executor::block_on(repo.save_workspace(workspace)).expect("save workspace");
+        }
+
+        let bundle = WorkspaceBundle {
+            id: WorkspaceBundleId("bundle-1".to_string()),
+            name: "Checkout flow".to_string(),
+            primary_workspace_id: workspaces[0].id.clone(),
+            state: WorkspaceBundleState::Ready,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let members = workspaces
+            .iter()
+            .enumerate()
+            .map(|(position, workspace)| WorkspaceBundleMember {
+                bundle_id: bundle.id.clone(),
+                workspace_id: workspace.id.clone(),
+                created_for_bundle: true,
+                position: position as u32,
+            })
+            .collect::<Vec<_>>();
+        futures::executor::block_on(repo.save_workspace_bundle(&bundle, &members))
+            .expect("save workspace bundle");
+
+        let restored = futures::executor::block_on(repo.get_workspace_bundle(&bundle.id))
+            .expect("get workspace bundle")
+            .expect("workspace bundle exists");
+        assert_eq!(restored.bundle.name, "Checkout flow");
+        assert_eq!(restored.members.len(), 2);
+        assert_eq!(restored.members[0].workspace_id, workspaces[0].id);
+        assert_eq!(restored.members[1].workspace_id, workspaces[1].id);
+        let found_by_member =
+            futures::executor::block_on(repo.get_workspace_bundle_for_workspace(&workspaces[1].id))
+                .expect("get workspace bundle by member")
+                .expect("workspace bundle exists for member");
+        assert_eq!(found_by_member.bundle.id, bundle.id);
+
+        let listed = futures::executor::block_on(repo.list_workspace_bundles())
+            .expect("list workspace bundles");
+        assert_eq!(listed.len(), 1);
+
+        let archived = futures::executor::block_on(repo.set_workspace_bundle_state(
+            &bundle.id,
+            WorkspaceBundleState::Archived,
+            "2026-01-01T00:01:00Z".to_string(),
+        ))
+        .expect("archive workspace bundle")
+        .expect("workspace bundle exists");
+        assert_eq!(archived.bundle.state, WorkspaceBundleState::Archived);
+        let archived_workspaces =
+            futures::executor::block_on(repo.list_workspaces()).expect("list workspaces");
+        assert!(archived_workspaces
+            .iter()
+            .all(|workspace| workspace.state == WorkspaceState::Archived));
+
+        let ready = futures::executor::block_on(repo.set_workspace_bundle_state(
+            &bundle.id,
+            WorkspaceBundleState::Ready,
+            "2026-01-01T00:02:00Z".to_string(),
+        ))
+        .expect("restore workspace bundle")
+        .expect("workspace bundle exists");
+        assert_eq!(ready.bundle.state, WorkspaceBundleState::Ready);
+        let restored_workspaces =
+            futures::executor::block_on(repo.list_workspaces()).expect("list restored workspaces");
+        let restored_states = restored_workspaces
+            .into_iter()
+            .map(|workspace| (workspace.id.0, workspace.state))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            restored_states.get("workspace-backend"),
+            Some(&WorkspaceState::SetupPending)
+        );
+        assert_eq!(
+            restored_states.get("workspace-frontend"),
+            Some(&WorkspaceState::Ready)
+        );
+
+        futures::executor::block_on(repo.delete_workspace(&workspaces[0].id))
+            .expect("delete primary workspace");
+        let deleted = futures::executor::block_on(repo.get_workspace_bundle(&bundle.id))
+            .expect("get deleted workspace bundle");
+        assert!(deleted.is_none());
     }
 }

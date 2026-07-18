@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -12,6 +12,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
 use dcc_core::{
+    application::StartThreadInput,
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
         project::{Project, ProjectId},
@@ -23,10 +24,12 @@ use dcc_core::{
         },
         thread::{Thread, ThreadId},
         workspace::{Workspace, WorkspaceId},
+        workspace_bundle::WorkspaceBundleState,
     },
     ports::{
         DelegationRepo, EventBus, Input, ProjectRepo, Provider, ProviderRuntimeConfig,
-        RepositoryRepo, SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
+        RepositoryRepo, SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo,
+        WorkspaceBundleRepo, WorkspaceRepo,
     },
     Result,
 };
@@ -227,36 +230,18 @@ impl SessionCommandState {
             return Ok(());
         }
 
-        let workspace_repo = SqliteWorkspaceRepo::open(&self.db_path)?;
-        let workspace = workspace_repo
-            .get_workspace(&session.workspace_id)
-            .await?
-            .ok_or_else(|| {
-                dcc_core::CoreError::Repository(format!(
-                    "workspace not found for session {}",
-                    session.id.0
-                ))
-            })?;
-        let working_directory = session
-            .working_directory_override
-            .as_ref()
-            .filter(|value| !value.trim().is_empty())
-            .cloned()
-            .or_else(|| {
-                workspace
-                    .worktree_path
-                    .as_ref()
-                    .filter(|value| !value.trim().is_empty())
-                    .cloned()
-            })
-            .unwrap_or_else(|| workspace.root_path.clone());
-
         let provider = provider_runtime(&session.provider_id).ok_or_else(|| {
             dcc_core::CoreError::Provider(format!(
                 "unknown provider runtime: {}",
                 session.provider_id
             ))
         })?;
+        let (working_directory, additional_working_directories) = self
+            .resolve_session_working_directories(
+                session,
+                provider.capabilities().supports_multi_root,
+            )
+            .await?;
         let provider_runtime =
             self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
 
@@ -266,6 +251,7 @@ impl SessionCommandState {
                 session_id: session.id.clone(),
                 model: session.model.clone(),
                 working_directory: Some(working_directory),
+                additional_working_directories,
                 provider_runtime: Some(provider_runtime),
             })
             .await?;
@@ -286,6 +272,172 @@ impl SessionCommandState {
         self.spawn_provider_bridge(session.id.clone(), binding, provider)
             .await;
         Ok(())
+    }
+
+    pub async fn validate_start_thread_scope(&self, input: &StartThreadInput) -> Result<()> {
+        if input.additional_workspace_ids.is_empty() {
+            return Ok(());
+        }
+        let provider = provider_runtime(&input.provider_id).ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "unknown provider runtime: {}",
+                input.provider_id
+            ))
+        })?;
+        let candidate = Session {
+            id: SessionId("scope-validation".to_string()),
+            project_id: input.project_id.clone(),
+            workspace_id: input.workspace_id.clone(),
+            additional_workspace_ids: input.additional_workspace_ids.clone(),
+            provider_id: input.provider_id.clone(),
+            model: input.model.clone(),
+            provider_runtime: input.provider_runtime.clone(),
+            working_directory_override: input.working_directory_override.clone(),
+            state: dcc_core::domain::session::SessionState::Draft,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        self.resolve_session_working_directories(
+            &candidate,
+            provider.capabilities().supports_multi_root,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn resolve_session_working_directories(
+        &self,
+        session: &Session,
+        provider_supports_multi_root: bool,
+    ) -> Result<(String, Vec<String>)> {
+        let workspace_repo = SqliteWorkspaceRepo::open(&self.db_path)?;
+        let primary = workspace_repo
+            .get_workspace(&session.workspace_id)
+            .await?
+            .ok_or_else(|| {
+                dcc_core::CoreError::Repository(format!(
+                    "workspace not found for session {}",
+                    session.id.0
+                ))
+            })?;
+
+        if session.additional_workspace_ids.is_empty() {
+            let working_directory = session
+                .working_directory_override
+                .as_ref()
+                .filter(|value| !value.trim().is_empty())
+                .cloned()
+                .or_else(|| {
+                    primary
+                        .worktree_path
+                        .as_ref()
+                        .filter(|value| !value.trim().is_empty())
+                        .cloned()
+                })
+                .unwrap_or_else(|| primary.root_path.clone());
+            return Ok((working_directory, Vec::new()));
+        }
+
+        if !provider_supports_multi_root {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider {} does not support isolated multi-workspace sessions yet",
+                session.provider_id
+            )));
+        }
+        if session
+            .working_directory_override
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "working_directory_override is not allowed for multi-workspace sessions"
+                    .to_string(),
+            ));
+        }
+
+        let bundle = workspace_repo
+            .get_workspace_bundle_for_workspace(&session.workspace_id)
+            .await?
+            .ok_or_else(|| {
+                dcc_core::CoreError::InvalidInput(
+                    "multi-workspace session must use a DCC workspace bundle".to_string(),
+                )
+            })?;
+        if bundle.bundle.state != WorkspaceBundleState::Ready {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "multi-workspace bundle must be ready".to_string(),
+            ));
+        }
+        if bundle.bundle.primary_workspace_id != session.workspace_id {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "session primary workspace must match the bundle primary workspace".to_string(),
+            ));
+        }
+
+        let expected_workspace_ids = bundle
+            .members
+            .iter()
+            .map(|member| member.workspace_id.clone())
+            .collect::<HashSet<_>>();
+        let mut requested_workspace_ids = HashSet::from([session.workspace_id.clone()]);
+        requested_workspace_ids.extend(session.additional_workspace_ids.iter().cloned());
+        if requested_workspace_ids != expected_workspace_ids {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "session workspace scope must contain every member of its bundle exactly once"
+                    .to_string(),
+            ));
+        }
+
+        let resolve_managed_root = |workspace: &Workspace| -> Result<String> {
+            if workspace.state != dcc_core::domain::workspace::WorkspaceState::Ready {
+                return Err(dcc_core::CoreError::InvalidInput(format!(
+                    "workspace {} must be ready",
+                    workspace.id.0
+                )));
+            }
+            let root = workspace
+                .worktree_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    dcc_core::CoreError::InvalidInput(format!(
+                        "workspace {} has no DCC-managed worktree",
+                        workspace.id.0
+                    ))
+                })?;
+            if !PathBuf::from(root).is_absolute() {
+                return Err(dcc_core::CoreError::InvalidInput(format!(
+                    "workspace {} worktree path must be absolute",
+                    workspace.id.0
+                )));
+            }
+            Ok(root.to_string())
+        };
+
+        let primary_root = resolve_managed_root(&primary)?;
+        let mut seen_roots = HashSet::from([primary_root.clone()]);
+        let mut additional_roots = Vec::with_capacity(session.additional_workspace_ids.len());
+        for workspace_id in &session.additional_workspace_ids {
+            let workspace = workspace_repo
+                .get_workspace(workspace_id)
+                .await?
+                .ok_or_else(|| {
+                    dcc_core::CoreError::Repository(format!(
+                        "workspace not found for multi-workspace session: {}",
+                        workspace_id.0
+                    ))
+                })?;
+            let root = resolve_managed_root(&workspace)?;
+            if !seen_roots.insert(root.clone()) {
+                return Err(dcc_core::CoreError::InvalidInput(
+                    "multi-workspace roots must be distinct".to_string(),
+                ));
+            }
+            additional_roots.push(root);
+        }
+
+        Ok((primary_root, additional_roots))
     }
 
     async fn spawn_provider_bridge(
@@ -658,7 +810,87 @@ impl SessionCommandState {
                 binding.provider_id
             ))
         })?;
+        let input = match input {
+            Input::Turn(mut turn) => {
+                let session = SessionRepo::get_session(&self.session_repo, session_id)
+                    .await?
+                    .ok_or_else(|| {
+                        dcc_core::CoreError::Repository(format!(
+                            "session not found while preparing provider input: {}",
+                            session_id.0
+                        ))
+                    })?;
+                if let Some(scope_instructions) =
+                    self.multi_workspace_scope_instructions(&session).await?
+                {
+                    turn.tool_instructions = Some(match turn.tool_instructions {
+                        Some(existing) if !existing.trim().is_empty() => {
+                            format!("{scope_instructions}\n\n{existing}")
+                        }
+                        _ => scope_instructions,
+                    });
+                }
+                Input::Turn(turn)
+            }
+            other => other,
+        };
         provider.send_input(&binding.handle, input).await
+    }
+
+    async fn multi_workspace_scope_instructions(
+        &self,
+        session: &Session,
+    ) -> Result<Option<String>> {
+        if session.additional_workspace_ids.is_empty() {
+            return Ok(None);
+        }
+        let workspace_repo = SqliteWorkspaceRepo::open(&self.db_path)?;
+        let bundle = workspace_repo
+            .get_workspace_bundle_for_workspace(&session.workspace_id)
+            .await?
+            .ok_or_else(|| {
+                dcc_core::CoreError::InvalidInput(
+                    "multi-workspace session bundle is no longer available".to_string(),
+                )
+            })?;
+        let mut lines = vec![
+            "DCC authorized multi-workspace scope:".to_string(),
+            "Use only the isolated worktree paths listed below for file reads and writes. Never edit the repositories' original checkouts or any unlisted local project. Decide which listed projects need changes, keep producer/consumer contracts consistent, and test the affected projects in the same task context.".to_string(),
+        ];
+        for member in &bundle.members {
+            let workspace = workspace_repo
+                .get_workspace(&member.workspace_id)
+                .await?
+                .ok_or_else(|| {
+                    dcc_core::CoreError::Repository(format!(
+                        "workspace not found while building session scope: {}",
+                        member.workspace_id.0
+                    ))
+                })?;
+            let root = workspace
+                .worktree_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    dcc_core::CoreError::InvalidInput(format!(
+                        "workspace {} has no isolated worktree",
+                        workspace.id.0
+                    ))
+                })?;
+            let role = if workspace.id == session.workspace_id {
+                "primary"
+            } else {
+                "additional"
+            };
+            lines.push(format!(
+                "- {role}: {} | project={} | base={} | worktree={root}",
+                workspace.name.as_deref().unwrap_or(&workspace.id.0),
+                workspace.project_id.0,
+                workspace.base_branch,
+            ));
+        }
+        Ok(Some(lines.join("\n")))
     }
 
     pub async fn cancel_provider_session(&self, session_id: &SessionId) -> Result<()> {
@@ -821,5 +1053,104 @@ impl DelegationRepo for SessionCommandState {
 impl EventBus for SessionCommandState {
     async fn publish(&self, event: dcc_core::ports::events::CoreEvent) -> Result<()> {
         self.event_bus.publish(event).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dcc_core::domain::{
+        session::SessionState,
+        workspace::WorkspaceState,
+        workspace_bundle::{
+            WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
+        },
+    };
+
+    fn sample_workspace(id: &str, root: &str) -> Workspace {
+        Workspace {
+            id: WorkspaceId(id.to_string()),
+            project_id: ProjectId(format!("project-{id}")),
+            name: Some(id.to_string()),
+            root_path: format!("/original/{id}"),
+            base_branch: "main".to_string(),
+            worktree_path: Some(root.to_string()),
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn multi_workspace_scope_resolves_only_bundle_worktrees_and_gates_provider() {
+        let db_path = std::env::temp_dir().join(format!("dcc-scope-{}.sqlite", Uuid::new_v4()));
+        let repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
+        let primary = sample_workspace("primary", "/tmp/dcc-primary-worktree");
+        let secondary = sample_workspace("secondary", "/tmp/dcc-secondary-worktree");
+        futures::executor::block_on(repo.save_workspace(&primary)).expect("save primary");
+        futures::executor::block_on(repo.save_workspace(&secondary)).expect("save secondary");
+        let bundle_id = WorkspaceBundleId("bundle-1".to_string());
+        futures::executor::block_on(repo.save_workspace_bundle(
+            &WorkspaceBundle {
+                id: bundle_id.clone(),
+                name: "feature".to_string(),
+                primary_workspace_id: primary.id.clone(),
+                state: WorkspaceBundleState::Ready,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+            &[
+                WorkspaceBundleMember {
+                    bundle_id: bundle_id.clone(),
+                    workspace_id: primary.id.clone(),
+                    created_for_bundle: true,
+                    position: 0,
+                },
+                WorkspaceBundleMember {
+                    bundle_id,
+                    workspace_id: secondary.id.clone(),
+                    created_for_bundle: true,
+                    position: 1,
+                },
+            ],
+        ))
+        .expect("save bundle");
+
+        let state = SessionCommandState::new_headless(db_path.clone(), std::env::temp_dir());
+        let session = Session {
+            id: SessionId("session-1".to_string()),
+            project_id: primary.project_id.clone(),
+            workspace_id: primary.id.clone(),
+            additional_workspace_ids: vec![secondary.id.clone()],
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let unsupported =
+            futures::executor::block_on(state.resolve_session_working_directories(&session, false));
+        assert!(matches!(unsupported, Err(dcc_core::CoreError::Provider(_))));
+
+        let (primary_root, additional_roots) =
+            futures::executor::block_on(state.resolve_session_working_directories(&session, true))
+                .expect("resolve multi-root scope");
+        assert_eq!(primary_root, "/tmp/dcc-primary-worktree");
+        assert_eq!(additional_roots, vec!["/tmp/dcc-secondary-worktree"]);
+        let instructions =
+            futures::executor::block_on(state.multi_workspace_scope_instructions(&session))
+                .expect("build scope instructions")
+                .expect("multi scope instructions");
+        assert!(instructions.contains("/tmp/dcc-primary-worktree"));
+        assert!(instructions.contains("/tmp/dcc-secondary-worktree"));
+        assert!(!instructions.contains("/original/primary"));
+
+        drop(state);
+        drop(repo);
+        let _ = std::fs::remove_file(db_path);
     }
 }

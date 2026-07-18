@@ -297,6 +297,7 @@ mod tests {
                 id: session_id.clone(),
                 project_id: crate::domain::project::ProjectId("project-1".to_string()),
                 workspace_id: crate::domain::workspace::WorkspaceId("workspace-1".to_string()),
+                additional_workspace_ids: Vec::new(),
                 provider_id: "codex".to_string(),
                 model: Some("gpt-5-codex".to_string()),
                 provider_runtime: None,
@@ -370,6 +371,7 @@ mod tests {
                 id: session_id.clone(),
                 project_id: crate::domain::project::ProjectId("project-1".to_string()),
                 workspace_id: crate::domain::workspace::WorkspaceId("workspace-1".to_string()),
+                additional_workspace_ids: Vec::new(),
                 provider_id: "codex".to_string(),
                 model: Some("gpt-5-codex".to_string()),
                 provider_runtime: Some(ProviderRuntimeConfig {

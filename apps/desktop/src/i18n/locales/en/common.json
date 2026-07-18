@@ -143,6 +143,16 @@
     "createTitle": "Create workspace",
     "cloneDescription": "Clone a remote repository into a local folder, then create the worktree from it. Leave base branch empty to auto-detect the remote default branch.",
     "createDescription": "New worktree from a local repo path and base branch.",
+    "singleWorkspace": "One project",
+    "multiWorkspace": "Multiple projects",
+    "selectProjects": "Authorized projects",
+    "selectProjectsDescription": "Select at least two projects. DCC will create one isolated worktree per project and open a single chat.",
+    "projectsSelected": "{{count}} project(s) selected",
+    "multiName": "Task name",
+    "multiNamePlaceholder": "Example: integrate new app data",
+    "multiSubmit": "Create multi-workspace",
+    "multiToastSuccess": "Multi-workspace created",
+    "multiToastDescription": "{{count}} isolated worktrees ready for one chat.",
     "usingTrackedRepository": "Using the repository already added to DCC: {{label}}",
     "repositoryUrl": "Repository URL",
     "projectId": "Project ID",
@@ -176,6 +186,11 @@
     "toastSetupFailedTitle": "Workspace created with setup pending",
     "toastCloneError": "Failed to clone repository",
     "toastCreateError": "Failed to create workspace"
+  },
+  "workspaceScope": {
+    "projects": "Project under review",
+    "authorizedCount": "{{count}} authorized",
+    "providerUnsupported": "{{provider}} does not offer isolated multi-workspace support in DCC yet. Choose Codex, Claude, Cursor, or Gemini."
   },
   "bootstrap": {
     "title": "No workspace open",

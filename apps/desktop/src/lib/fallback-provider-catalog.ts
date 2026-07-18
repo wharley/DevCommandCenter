@@ -19,11 +19,17 @@ const stableCapabilities = {
 	canRequestDelegation: false,
 	supportsReadOnlyDelegation: true,
 	supportsEditDelegation: true,
+	supportsMultiRoot: false,
 } as const;
 
 const delegationRequesterCapabilities = {
 	...stableCapabilities,
 	canRequestDelegation: true,
+} as const;
+
+const multiRootDelegationRequesterCapabilities = {
+	...delegationRequesterCapabilities,
+	supportsMultiRoot: true,
 } as const;
 
 const experimentalCapabilities = {
@@ -37,6 +43,12 @@ const experimentalCapabilities = {
 	canRequestDelegation: false,
 	supportsReadOnlyDelegation: true,
 	supportsEditDelegation: true,
+	supportsMultiRoot: false,
+} as const;
+
+const experimentalMultiRootCapabilities = {
+	...experimentalCapabilities,
+	supportsMultiRoot: true,
 } as const;
 
 export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
@@ -52,7 +64,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...delegationRequesterCapabilities },
+			capabilities: { ...multiRootDelegationRequesterCapabilities },
 			health: stableHealth,
 			stable: true,
 		},
@@ -67,7 +79,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...delegationRequesterCapabilities },
+			capabilities: { ...multiRootDelegationRequesterCapabilities },
 			health: stableHealth,
 			stable: true,
 		},
@@ -82,7 +94,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...stableCapabilities },
+			capabilities: { ...stableCapabilities, supportsMultiRoot: true },
 			health: stableHealth,
 			stable: true,
 		},
@@ -112,7 +124,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...experimentalCapabilities },
+			capabilities: { ...experimentalMultiRootCapabilities },
 			health: stableHealth,
 			stable: false,
 		},

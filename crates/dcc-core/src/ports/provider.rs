@@ -18,6 +18,9 @@ pub struct SessionConfig {
     pub session_id: SessionId,
     pub model: Option<String>,
     pub working_directory: Option<String>,
+    /// Additional isolated worktree roots authorized for this provider session.
+    #[serde(default)]
+    pub additional_working_directories: Vec<String>,
     #[serde(default)]
     pub provider_runtime: Option<ProviderRuntimeConfig>,
 }

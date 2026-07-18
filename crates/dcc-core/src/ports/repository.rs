@@ -8,6 +8,10 @@ use crate::{
         session::{Session, SessionEventRecord, SessionId},
         thread::{Thread, ThreadId},
         workspace::{Workspace, WorkspaceId},
+        workspace_bundle::{
+            WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
+            WorkspaceBundleSummary,
+        },
     },
     Result,
 };
@@ -18,6 +22,31 @@ pub trait WorkspaceRepo: Send + Sync {
     async fn get_workspace(&self, id: &WorkspaceId) -> Result<Option<Workspace>>;
     async fn list_workspaces(&self) -> Result<Vec<Workspace>>;
     async fn delete_workspace(&self, id: &WorkspaceId) -> Result<()>;
+}
+
+#[async_trait]
+pub trait WorkspaceBundleRepo: Send + Sync {
+    async fn save_workspace_bundle(
+        &self,
+        bundle: &WorkspaceBundle,
+        members: &[WorkspaceBundleMember],
+    ) -> Result<()>;
+    async fn get_workspace_bundle(
+        &self,
+        id: &WorkspaceBundleId,
+    ) -> Result<Option<WorkspaceBundleSummary>>;
+    async fn get_workspace_bundle_for_workspace(
+        &self,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Option<WorkspaceBundleSummary>>;
+    async fn list_workspace_bundles(&self) -> Result<Vec<WorkspaceBundleSummary>>;
+    async fn set_workspace_bundle_state(
+        &self,
+        id: &WorkspaceBundleId,
+        state: WorkspaceBundleState,
+        updated_at: String,
+    ) -> Result<Option<WorkspaceBundleSummary>>;
+    async fn delete_workspace_bundle(&self, id: &WorkspaceBundleId) -> Result<()>;
 }
 
 #[async_trait]

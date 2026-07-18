@@ -4,14 +4,16 @@ use dcc_core::application::{CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlI
 use dcc_tauri::{
     commands::workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
+        CreateWorkspaceBundleForReposInput, CreateWorkspaceBundleForReposOutput,
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
         ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
-        ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspacesOutput,
-        MissionSpecContextStatusInput, MissionSpecContextStatusOutput, ReadWorkspaceFileInput,
-        ReadWorkspaceFileOutput, RepositoryIdInput, SaveMissionValidationInput,
-        SaveMissionValidationOutput, SearchWorkspaceInput, SearchWorkspaceOutput,
-        WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
+        ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspaceBundlesOutput,
+        ListWorkspacesOutput, MissionSpecContextStatusInput, MissionSpecContextStatusOutput,
+        ReadWorkspaceFileInput, ReadWorkspaceFileOutput, RepositoryIdInput,
+        SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
+        SearchWorkspaceOutput, WorkspaceApplyDelegationWorktreeInput,
+        WorkspaceApplyDelegationWorktreeOutput, WorkspaceBundleIdInput, WorkspaceBundleStateOutput,
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
         WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
         WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
@@ -36,6 +38,40 @@ pub async fn create_workspace_for_repo(
     input: CreateWorkspaceForRepoInput,
 ) -> Result<CreateWorkspaceForRepoOutput, String> {
     dcc_tauri::commands::workspace_commands::create_workspace_for_repo(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn create_workspace_bundle_for_repos(
+    state: State<'_, WorkspaceCommandState>,
+    app: AppHandle,
+    input: CreateWorkspaceBundleForReposInput,
+) -> Result<CreateWorkspaceBundleForReposOutput, String> {
+    dcc_tauri::commands::workspace_commands::create_workspace_bundle_for_repos(state, app, input)
+        .await
+}
+
+#[tauri::command]
+pub async fn archive_workspace_bundle(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceBundleIdInput,
+) -> Result<WorkspaceBundleStateOutput, String> {
+    dcc_tauri::commands::workspace_commands::archive_workspace_bundle(state, input).await
+}
+
+#[tauri::command]
+pub async fn restore_workspace_bundle(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceBundleIdInput,
+) -> Result<WorkspaceBundleStateOutput, String> {
+    dcc_tauri::commands::workspace_commands::restore_workspace_bundle(state, input).await
+}
+
+#[tauri::command]
+pub async fn delete_workspace_bundle(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceBundleIdInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::delete_workspace_bundle(state, input).await
 }
 
 #[tauri::command]
@@ -67,6 +103,13 @@ pub async fn list_repositories(
     state: State<'_, WorkspaceCommandState>,
 ) -> Result<ListRepositoriesOutput, String> {
     dcc_tauri::commands::workspace_commands::list_repositories(state).await
+}
+
+#[tauri::command]
+pub async fn list_workspace_bundles(
+    state: State<'_, WorkspaceCommandState>,
+) -> Result<ListWorkspaceBundlesOutput, String> {
+    dcc_tauri::commands::workspace_commands::list_workspace_bundles(state).await
 }
 
 #[tauri::command]

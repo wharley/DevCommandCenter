@@ -1,5 +1,5 @@
 import { cva } from "class-variance-authority";
-import { Archive, GitBranch, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, Boxes, GitBranch, Loader2, RotateCcw, Trash2 } from "lucide-react";
 import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -125,14 +125,18 @@ export const WorkspaceRailRowItem = memo(
 						<WorkspaceRailAvatar title={displayTitle} subtitle={workspace.name} />
 						<div className="flex min-w-0 flex-1 items-center gap-2">
 							<div className="row-content-fade flex min-w-0 flex-1 items-center gap-2">
-								<GitBranch
-									className={cn(
-										"size-[13px] shrink-0",
-										workspaceRailBranchToneClasses[branchTone],
-									)}
-									strokeWidth={1.9}
-									aria-hidden
-								/>
+								{workspace.bundleId ? (
+									<Boxes className="size-[13px] shrink-0 text-cyan-400" strokeWidth={1.9} aria-hidden />
+								) : (
+									<GitBranch
+										className={cn(
+											"size-[13px] shrink-0",
+											workspaceRailBranchToneClasses[branchTone],
+										)}
+										strokeWidth={1.9}
+										aria-hidden
+									/>
+								)}
 								<span
 									className={cn(
 										"min-w-0 truncate leading-tight",
@@ -141,6 +145,11 @@ export const WorkspaceRailRowItem = memo(
 								>
 									{displayTitle}
 								</span>
+								{workspace.memberWorkspaceIds && workspace.memberWorkspaceIds.length > 1 ? (
+									<span className="shrink-0 rounded-full bg-cyan-500/15 px-1.5 text-[9.5px] font-semibold text-cyan-300">
+										{workspace.memberWorkspaceIds.length}
+									</span>
+								) : null}
 							</div>
 							{agentState && (
 								<span className="ml-auto flex shrink-0 items-center gap-1">

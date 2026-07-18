@@ -24,6 +24,10 @@ use dcc_core::{
             Workspace, WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus,
             WorkspaceSetupStepReport, WorkspaceState,
         },
+        workspace_bundle::{
+            WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
+            WorkspaceBundleSummary,
+        },
     },
     ports::{events::CoreEvent, ProviderRuntimeConfig},
 };
@@ -65,19 +69,21 @@ use dcc_tauri::commands::{
     },
     workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
-        CompiledMissionSpecContextFile, CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput,
-        ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
-        ListGitTrackedFilesOutput, ListLocalBranchesInput, ListLocalBranchesOutput,
-        ListMissionSpecsInput, ListMissionSpecsOutput, ListRepositoriesOutput,
-        ListWorkspacesOutput, MissionSpecContextFileState, MissionSpecContextFileStatus,
-        MissionSpecContextStatusInput, MissionSpecContextStatusOutput, MissionSpecEntry,
-        MissionValidationEntry, ReadWorkspaceFileInput, ReadWorkspaceFileOutput, RepositoryIdInput,
+        CompiledMissionSpecContextFile, CreateWorkspaceBundleForReposInput,
+        CreateWorkspaceBundleForReposOutput, CreateWorkspaceForRepoOutput,
+        CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
+        ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
+        ListLocalBranchesOutput, ListMissionSpecsInput, ListMissionSpecsOutput,
+        ListRepositoriesOutput, ListWorkspaceBundlesOutput, ListWorkspacesOutput,
+        MissionSpecContextFileState, MissionSpecContextFileStatus, MissionSpecContextStatusInput,
+        MissionSpecContextStatusOutput, MissionSpecEntry, MissionValidationEntry,
+        ReadWorkspaceFileInput, ReadWorkspaceFileOutput, RepositoryIdInput,
         SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
         SearchWorkspaceMatch, SearchWorkspaceOutput, WorkspaceApplyDelegationWorktreeInput,
-        WorkspaceApplyDelegationWorktreeOutput, WorkspaceContinueFromBaseBranchInput,
-        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitAcceptConflictInput,
-        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
-        WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
+        WorkspaceApplyDelegationWorktreeOutput, WorkspaceBundleIdInput, WorkspaceBundleStateOutput,
+        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
+        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
+        WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
         WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictContent, WorkspaceGitConflictEntry,
         WorkspaceGitConflictKind, WorkspaceGitConflictOperation, WorkspaceGitConflictSide,
         WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
@@ -101,10 +107,14 @@ use tauri_specta::Builder;
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceMethods {
+    archive_workspace_bundle: String,
+    create_workspace_bundle_for_repos: String,
     create_workspace_for_repo: String,
     create_workspace_from_url: String,
     archive_workspace: String,
     restore_workspace: String,
+    restore_workspace_bundle: String,
+    delete_workspace_bundle: String,
     delete_workspace: String,
     delete_repository: String,
     workspace_github_cli_status: String,
@@ -127,6 +137,7 @@ struct WorkspaceMethods {
     list_child_directories: String,
     list_workspaces: String,
     list_repositories: String,
+    list_workspace_bundles: String,
     workspace_continue_from_base_branch: String,
     workspace_change_request_create: String,
     workspace_change_request_merge: String,
@@ -224,6 +235,11 @@ fn main() {
         .typ::<RepositoryId>()
         .typ::<WorkspaceState>()
         .typ::<Workspace>()
+        .typ::<WorkspaceBundleId>()
+        .typ::<WorkspaceBundleState>()
+        .typ::<WorkspaceBundle>()
+        .typ::<WorkspaceBundleMember>()
+        .typ::<WorkspaceBundleSummary>()
         .typ::<Repository>()
         .typ::<SessionId>()
         .typ::<TurnId>()
@@ -253,6 +269,10 @@ fn main() {
         .typ::<WorkspaceSessionSummary>()
         .typ::<CreateWorkspaceForRepoInput>()
         .typ::<CreateWorkspaceForRepoOutput>()
+        .typ::<CreateWorkspaceBundleForReposInput>()
+        .typ::<CreateWorkspaceBundleForReposOutput>()
+        .typ::<WorkspaceBundleIdInput>()
+        .typ::<WorkspaceBundleStateOutput>()
         .typ::<CreateWorkspaceFromUrlInput>()
         .typ::<CreateWorkspaceFromUrlOutput>()
         .typ::<WorkspaceRunSetupInput>()
@@ -289,6 +309,7 @@ fn main() {
         .typ::<ListChildDirectoriesOutput>()
         .typ::<ListWorkspacesOutput>()
         .typ::<ListRepositoriesOutput>()
+        .typ::<ListWorkspaceBundlesOutput>()
         .typ::<RepositoryIdInput>()
         .typ::<GithubCliStatusInput>()
         .typ::<GithubCliStatusOutput>()
@@ -416,10 +437,14 @@ fn main() {
         .constant(
             "WORKSPACE_METHODS",
             WorkspaceMethods {
+                archive_workspace_bundle: "archive_workspace_bundle".to_string(),
+                create_workspace_bundle_for_repos: "create_workspace_bundle_for_repos".to_string(),
                 create_workspace_for_repo: "create_workspace_for_repo".to_string(),
                 create_workspace_from_url: "create_workspace_from_url".to_string(),
                 archive_workspace: "archive_workspace".to_string(),
                 restore_workspace: "restore_workspace".to_string(),
+                restore_workspace_bundle: "restore_workspace_bundle".to_string(),
+                delete_workspace_bundle: "delete_workspace_bundle".to_string(),
                 delete_workspace: "delete_workspace".to_string(),
                 delete_repository: "delete_repository".to_string(),
                 workspace_github_cli_status: "workspace_github_cli_status".to_string(),
@@ -444,6 +469,7 @@ fn main() {
                 list_child_directories: "list_child_directories".to_string(),
                 list_workspaces: "list_workspaces".to_string(),
                 list_repositories: "list_repositories".to_string(),
+                list_workspace_bundles: "list_workspace_bundles".to_string(),
                 workspace_continue_from_base_branch: "workspace_continue_from_base_branch"
                     .to_string(),
                 workspace_change_request_create: "workspace_change_request_create".to_string(),

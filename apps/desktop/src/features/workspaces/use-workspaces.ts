@@ -3,15 +3,21 @@ import type { DaemonComb } from "@/lib/daemon-api";
 import type { WorkspaceStatus, WorkspaceSummary } from "./types";
 import {
 	archiveWorkspace as apiArchiveWorkspace,
+	archiveWorkspaceBundle as apiArchiveWorkspaceBundle,
+	createWorkspaceBundleForRepos,
 	createWorkspaceForRepo,
 	createWorkspaceFromUrl,
 	deleteWorkspace as apiDeleteWorkspace,
+	deleteWorkspaceBundle as apiDeleteWorkspaceBundle,
 	restoreWorkspace as apiRestoreWorkspace,
+	restoreWorkspaceBundle as apiRestoreWorkspaceBundle,
 } from "../../lib/workspace-api";
 import type {
 	CreateWorkspaceForRepoInput,
+	CreateWorkspaceBundleForReposInput,
 	CreateWorkspaceFromUrlInput,
 	Workspace,
+	WorkspaceBundleSummary,
 	WorkspaceSetupHint,
 	WorkspaceSetupReport,
 } from "@dcc/contracts";
@@ -20,6 +26,12 @@ export type WorkspaceCreationResult = {
 	workspace: WorkspaceSummary;
 	setupHints: WorkspaceSetupHint[];
 	setupReport: WorkspaceSetupReport;
+};
+
+export type WorkspaceBundleCreationResult = {
+	bundle: WorkspaceBundleSummary;
+	primaryWorkspace: WorkspaceSummary;
+	workspaces: WorkspaceCreationResult[];
 };
 
 function applyStatusOverride(
@@ -224,6 +236,57 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 		}
 	}, []);
 
+	const createWorkspaceBundle = useCallback(
+		async (input: CreateWorkspaceBundleForReposInput) => {
+			setIsCreatingWorkspace(true);
+			try {
+				const result = await createWorkspaceBundleForRepos(input);
+				const created = result.workspaces.map((item) => ({
+					workspace: workspaceToSummary(item.workspace),
+					setupHints: item.setupHints,
+					setupReport: item.setupReport,
+				}));
+				const summaries = created.map((item) => item.workspace);
+				const createdPrimaryWorkspace = summaries.find(
+					(workspace) => workspace.id === result.summary.bundle.primaryWorkspaceId,
+				);
+				if (!createdPrimaryWorkspace) {
+					throw new Error("Multi-workspace created without its primary workspace");
+				}
+				const primaryWorkspace: WorkspaceSummary = {
+					...createdPrimaryWorkspace,
+					name: result.summary.bundle.name,
+					bundleId: result.summary.bundle.id,
+					additionalWorkspaceIds: result.summary.members
+						.map((member) => member.workspaceId)
+						.filter((workspaceId) => workspaceId !== createdPrimaryWorkspace.id),
+					memberWorkspaceIds: result.summary.members.map((member) => member.workspaceId),
+					memberNames: summaries.map((workspace) => workspace.name),
+				};
+				setOptimisticCreated((current) => [
+					primaryWorkspace,
+					...current.filter(
+						(workspace) => !summaries.some((createdWorkspace) => createdWorkspace.id === workspace.id),
+					),
+				]);
+				const createdIds = summaries.map((workspace) => workspace.id);
+				setHiddenWorkspaceIds((current) =>
+					current.filter((workspaceId) => !createdIds.includes(workspaceId)),
+				);
+				setStatusOverrides((current) => removeStatusOverrides(current, createdIds));
+				setSelectedWorkspaceId(primaryWorkspace.id);
+				return {
+					bundle: result.summary,
+					primaryWorkspace,
+					workspaces: created,
+				} satisfies WorkspaceBundleCreationResult;
+			} finally {
+				setIsCreatingWorkspace(false);
+			}
+		},
+		[],
+	);
+
 	const cloneWorkspaceFromUrl = useCallback(async (input: CreateWorkspaceFromUrlInput) => {
 		setIsCreatingWorkspace(true);
 		try {
@@ -251,7 +314,12 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 	}, []);
 
 	const archiveWorkspace = useCallback(async (workspaceId: string) => {
-		await apiArchiveWorkspace(workspaceId);
+		const workspace = workspaceListRef.current.find((candidate) => candidate.id === workspaceId);
+		if (workspace?.bundleId) {
+			await apiArchiveWorkspaceBundle(workspace.bundleId);
+		} else {
+			await apiArchiveWorkspace(workspaceId);
+		}
 		setStatusOverrides((current) =>
 			current[workspaceId] === "archived"
 				? current
@@ -260,7 +328,12 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 	}, []);
 
 	const restoreWorkspace = useCallback(async (workspaceId: string) => {
-		await apiRestoreWorkspace(workspaceId);
+		const workspace = workspaceListRef.current.find((candidate) => candidate.id === workspaceId);
+		if (workspace?.bundleId) {
+			await apiRestoreWorkspaceBundle(workspace.bundleId);
+		} else {
+			await apiRestoreWorkspace(workspaceId);
+		}
 		setStatusOverrides((current) =>
 			current[workspaceId] === "ready" ? current : { ...current, [workspaceId]: "ready" }
 		);
@@ -268,7 +341,14 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 
 	const deleteWorkspace = useCallback(
 		async (workspaceId: string) => {
-			await apiDeleteWorkspace(workspaceId);
+			const workspace = workspaceListRef.current.find(
+				(candidate) => candidate.id === workspaceId,
+			);
+			if (workspace?.bundleId) {
+				await apiDeleteWorkspaceBundle(workspace.bundleId);
+			} else {
+				await apiDeleteWorkspace(workspaceId);
+			}
 			const nextState = removeWorkspacesFromList(
 				workspaceListRef.current,
 				[workspaceId],
@@ -318,6 +398,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 		archiveWorkspace,
 		cloneWorkspaceFromUrl,
 		createWorkspace,
+		createWorkspaceBundle,
 		deleteWorkspace,
 		deleteWorkspaces,
 		isCreatingWorkspace,

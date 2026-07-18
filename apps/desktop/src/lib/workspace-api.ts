@@ -5,6 +5,8 @@ import type {
 	CodeRabbitReviewStreamEvent,
 	CreateWorkspaceForRepoInput,
 	CreateWorkspaceForRepoOutput,
+	CreateWorkspaceBundleForReposInput,
+	CreateWorkspaceBundleForReposOutput,
 	CreateWorkspaceFromUrlInput,
 	CreateWorkspaceFromUrlOutput,
 	CompileMissionSpecContextInput,
@@ -49,6 +51,7 @@ import type {
 	ListLocalBranchesInput,
 	ListLocalBranchesOutput,
 	ListRepositoriesOutput,
+	ListWorkspaceBundlesOutput,
 	ListWorkspacesOutput,
 	MissionSpecContextStatusInput,
 	MissionSpecContextStatusOutput,
@@ -91,6 +94,7 @@ import type {
 	WorkspacePrStatusOutput,
 	WorkspaceRunSetupInput,
 	WorkspaceRunSetupOutput,
+	WorkspaceBundleStateOutput,
 } from "@dcc/contracts";
 
 export const CODERABBIT_REVIEW_EVENT_NAME = "dcc/coderabbit/review/event";
@@ -99,6 +103,15 @@ export function createWorkspaceForRepo(input: CreateWorkspaceForRepoInput) {
 	return invoke<CreateWorkspaceForRepoOutput>(WORKSPACE_METHODS.createWorkspaceForRepo, {
 		input,
 	});
+}
+
+export function createWorkspaceBundleForRepos(
+	input: CreateWorkspaceBundleForReposInput,
+) {
+	return invoke<CreateWorkspaceBundleForReposOutput>(
+		WORKSPACE_METHODS.createWorkspaceBundleForRepos,
+		{ input },
+	);
 }
 
 export function archiveWorkspace(workspaceId: string) {
@@ -268,6 +281,28 @@ export function listWorkspaces() {
 
 export function listRepositories() {
 	return invoke<ListRepositoriesOutput>(WORKSPACE_METHODS.listRepositories);
+}
+
+export function listWorkspaceBundles() {
+	return invoke<ListWorkspaceBundlesOutput>(WORKSPACE_METHODS.listWorkspaceBundles);
+}
+
+export function archiveWorkspaceBundle(bundleId: string) {
+	return invoke<WorkspaceBundleStateOutput>(WORKSPACE_METHODS.archiveWorkspaceBundle, {
+		input: { bundleId },
+	});
+}
+
+export function restoreWorkspaceBundle(bundleId: string) {
+	return invoke<WorkspaceBundleStateOutput>(WORKSPACE_METHODS.restoreWorkspaceBundle, {
+		input: { bundleId },
+	});
+}
+
+export function deleteWorkspaceBundle(bundleId: string) {
+	return invoke<void>(WORKSPACE_METHODS.deleteWorkspaceBundle, {
+		input: { bundleId },
+	});
 }
 
 export function listGitTrackedFiles(input: ListGitTrackedFilesInput) {

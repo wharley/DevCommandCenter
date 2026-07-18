@@ -14,6 +14,10 @@ export interface WorkspaceSummary {
 	setupReport?: WorkspaceSetupReport | null;
 	createdAt?: string;
 	updatedAt?: string;
+	bundleId?: string | null;
+	additionalWorkspaceIds?: string[];
+	memberWorkspaceIds?: string[];
+	memberNames?: string[];
 }
 
 export type WorkspaceTone = "success" | "warn" | "secondary";

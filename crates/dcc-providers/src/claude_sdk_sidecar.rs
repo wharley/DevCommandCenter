@@ -293,6 +293,9 @@ impl ClaudeSdkSidecarAdapter {
         let account_usage_key = provider_runtime_cache_key(cfg.provider_runtime.as_ref());
         let mut command = self.interactive_command()?;
         apply_cli_spawn_environment(&mut command, &self.id.0, &cfg)?;
+        let additional_directories = serde_json::to_string(&cfg.additional_working_directories)
+            .map_err(|error| CoreError::Provider(error.to_string()))?;
+        command.env("DCC_ADDITIONAL_DIRECTORIES", additional_directories);
         if let Some(ref working_directory) = cfg.working_directory {
             let cwd = PathBuf::from(working_directory);
             if !working_directory.trim().is_empty() {

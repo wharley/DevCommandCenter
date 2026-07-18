@@ -18,6 +18,7 @@ pub fn adapter() -> ClaudeSdkSidecarAdapter {
 fn claude_code_capabilities() -> Capabilities {
     let mut capabilities = stable_cli_capabilities();
     capabilities.can_request_delegation = true;
+    capabilities.supports_multi_root = true;
     capabilities
 }
 

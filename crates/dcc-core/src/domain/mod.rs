@@ -6,6 +6,7 @@ pub mod repository;
 pub mod session;
 pub mod thread;
 pub mod workspace;
+pub mod workspace_bundle;
 
 pub use delegation::{
     Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
@@ -24,3 +25,7 @@ pub use session::{
 };
 pub use thread::{Thread, ThreadId};
 pub use workspace::{Workspace, WorkspaceId, WorkspaceState};
+pub use workspace_bundle::{
+    WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
+    WorkspaceBundleSummary,
+};

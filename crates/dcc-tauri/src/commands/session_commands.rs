@@ -68,6 +68,10 @@ pub async fn start_thread(
     _app: AppHandle,
     input: StartThreadInput,
 ) -> Result<StartThreadOutput, String> {
+    state
+        .validate_start_thread_scope(&input)
+        .await
+        .map_err(|error| error.to_string())?;
     let output = run_start_thread(&*state, &*state, &*state, &*state, input)
         .await
         .map_err(|error| error.to_string())?;

@@ -336,10 +336,24 @@ async function handlePermissionRequest(toolName, input, options, state) {
 async function runTurn(payload, state) {
 	const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
 	const permissionMode = payload?.planMode === true ? "plan" : "bypassPermissions";
+	let additionalDirectories = [];
+	try {
+		const configuredDirectories = JSON.parse(
+			process.env.DCC_ADDITIONAL_DIRECTORIES || "[]",
+		);
+		if (Array.isArray(configuredDirectories)) {
+			additionalDirectories = configuredDirectories.filter(
+				(value) => typeof value === "string" && value.trim().length > 0,
+			);
+		}
+	} catch {
+		// Rust validates and serializes this value. Ignore malformed manual overrides.
+	}
 	const q = query({
 		prompt,
 		options: {
 			cwd: process.cwd(),
+			additionalDirectories,
 			pathToClaudeCodeExecutable: CLAUDE_BIN_PATH,
 			model: process.env.DCC_MODEL || undefined,
 			...(state.resumeSessionId ? { resume: state.resumeSessionId } : {}),

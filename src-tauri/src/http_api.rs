@@ -2019,6 +2019,10 @@ async fn start_thread_handler(
     Json(input): Json<StartThreadInput>,
 ) -> Result<Json<Value>, HttpApiError> {
     let state = headless_session_state(config).await?;
+    state
+        .validate_start_thread_scope(&input)
+        .await
+        .map_err(|error| classify_session_error(error.to_string()))?;
     let output = start_thread(&*state, &*state, &*state, &*state, input)
         .await
         .map_err(|error| classify_session_error(error.to_string()))?;

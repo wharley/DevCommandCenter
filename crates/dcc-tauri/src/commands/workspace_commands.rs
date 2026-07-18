@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use dcc_core::{
     application::{
+        create_workspace_bundle as run_create_workspace_bundle,
         create_workspace_for_repo as run_create_workspace_for_repo,
         create_workspace_from_url as run_create_workspace_from_url, CreateWorkspaceForRepoInput,
         CreateWorkspaceFromUrlInput,
@@ -25,9 +26,12 @@ use dcc_core::{
             Workspace, WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus,
             WorkspaceSetupStepReport, WorkspaceState,
         },
+        workspace_bundle::{WorkspaceBundleId, WorkspaceBundleState, WorkspaceBundleSummary},
     },
-    ports::{DelegationRepo, RepositoryRepo, SessionRepo, WorkspaceRepo},
+    ports::{DelegationRepo, RepositoryRepo, SessionRepo, WorkspaceBundleRepo, WorkspaceRepo},
 };
+#[cfg(test)]
+use dcc_infra::git::read_workspace_validation_config;
 use dcc_infra::{
     db::{SqliteSessionRepo, SqliteWorkspaceRepo},
     git::{
@@ -37,13 +41,13 @@ use dcc_infra::{
         CommandGitOps, RepoAutomationConfig, RepoAutomationTask, RepoTaskKind,
     },
 };
-#[cfg(test)]
-use dcc_infra::git::read_workspace_validation_config;
 use toml_edit::{
     value as toml_value, Array as TomlArray, Document as TomlDocument, Item as TomlItem,
     Table as TomlTable,
 };
 
+#[cfg(test)]
+use crate::workspace_setup::run_workspace_validation_command;
 use crate::{
     commands::forge::remote::resolve_workspace_remote_info,
     commands::workspace_support::{
@@ -66,8 +70,6 @@ use crate::{
         run_detected_workspace_setup, run_workspace_task_command, WORKSPACE_VALIDATION_TIMEOUT,
     },
 };
-#[cfg(test)]
-use crate::workspace_setup::run_workspace_validation_command;
 
 const DCC_SPEC_CONTEXT_START: &str = "<!-- dcc:spec:start -->";
 const DCC_SPEC_CONTEXT_END: &str = "<!-- dcc:spec:end -->";
@@ -122,6 +124,20 @@ pub struct CreateWorkspaceFromUrlOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateWorkspaceBundleForReposInput {
+    pub name: String,
+    pub projects: Vec<CreateWorkspaceForRepoInput>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWorkspaceBundleForReposOutput {
+    pub summary: WorkspaceBundleSummary,
+    pub workspaces: Vec<CreateWorkspaceForRepoOutput>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceRunSetupInput {
     pub workspace_root: String,
 }
@@ -152,6 +168,24 @@ pub struct ListWorkspacesOutput {
 #[serde(rename_all = "camelCase")]
 pub struct ListRepositoriesOutput {
     pub repositories: Vec<Repository>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListWorkspaceBundlesOutput {
+    pub bundles: Vec<WorkspaceBundleSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBundleIdInput {
+    pub bundle_id: WorkspaceBundleId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBundleStateOutput {
+    pub summary: WorkspaceBundleSummary,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1327,9 +1361,7 @@ pub async fn workspace_git_validation_config(
         return Err("workspace_root is empty".to_string());
     }
     let automation = read_workspace_automation_config(Path::new(root))?;
-    let automation_source_path = automation
-        .as_ref()
-        .map(|config| config.source_path.clone());
+    let automation_source_path = automation.as_ref().map(|config| config.source_path.clone());
     let configured_tasks = automation
         .as_ref()
         .map(|config| {
@@ -1824,11 +1856,8 @@ fn workspace_git_run_automation_validations_inner(
     let mut steps = Vec::with_capacity(tasks.len());
     for task in tasks {
         let execution_root = resolve_task_execution_root(root, &task)?;
-        let execution = run_workspace_task_command(
-            &execution_root,
-            &task.command,
-            task.timeout_seconds,
-        )?;
+        let execution =
+            run_workspace_task_command(&execution_root, &task.command, task.timeout_seconds)?;
         let success = execution.success;
         steps.push(WorkspaceGitValidationStep {
             command: task.command,
@@ -3220,24 +3249,185 @@ pub async fn create_workspace_for_repo(
     input: CreateWorkspaceForRepoInput,
 ) -> Result<CreateWorkspaceForRepoOutput, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let git = CommandGitOps::new();
-    let events = TauriEventBus::new(app);
+    create_workspace_for_repo_with_repo(&repo, &app, input).await
+}
 
-    let finalized = run_create_workspace_for_repo(&repo, &git, &events, input)
+async fn create_workspace_for_repo_with_repo(
+    repo: &SqliteWorkspaceRepo,
+    app: &AppHandle,
+    input: CreateWorkspaceForRepoInput,
+) -> Result<CreateWorkspaceForRepoOutput, String> {
+    let git = CommandGitOps::new();
+    let events = TauriEventBus::new(app.clone());
+
+    let finalized = run_create_workspace_for_repo(repo, &git, &events, input)
         .await
         .map_err(|error| error.to_string())?;
-    refresh_repository_forge_metadata(&repo, &finalized.workspace).await?;
+    refresh_repository_forge_metadata(repo, &finalized.workspace).await?;
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
     let setup_report = execute_workspace_setup_report(&finalized.workspace).await;
     let mut workspace = finalized.workspace;
     let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
     let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
-    persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
+    persist_workspace_setup_outcome(repo, &mut workspace, &setup_report).await?;
 
     Ok(CreateWorkspaceForRepoOutput {
         workspace,
         setup_hints,
         setup_report,
+    })
+}
+
+fn validate_bundle_projects(
+    repositories: &[Repository],
+    input: &CreateWorkspaceBundleForReposInput,
+) -> Result<(), String> {
+    if input.name.trim().is_empty() {
+        return Err("workspace bundle name cannot be empty".to_string());
+    }
+    if input.projects.len() < 2 {
+        return Err("workspace bundle requires at least two projects".to_string());
+    }
+
+    let mut roots = BTreeSet::new();
+    for project in &input.projects {
+        let root = project.workspace_root.trim();
+        if root.is_empty() {
+            return Err("workspace bundle project root cannot be empty".to_string());
+        }
+        let normalized_root = root.replace('\\', "/");
+        if !roots.insert(normalized_root) {
+            return Err(format!(
+                "workspace bundle contains duplicate project root: {root}"
+            ));
+        }
+        let registered = repositories.iter().any(|repository| {
+            repository.root_path.trim() == root && repository.project_id == project.project_id
+        });
+        if !registered {
+            return Err(format!(
+                "project must be opened in DCC before it can join a multi-workspace: {root}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn rollback_bundle_workspaces(
+    repo: &SqliteWorkspaceRepo,
+    workspaces: &[Workspace],
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    for workspace in workspaces.iter().rev() {
+        if let Err(error) = cleanup_workspace_files(workspace) {
+            errors.push(format!(
+                "failed to clean workspace {}: {error}",
+                workspace.id.0
+            ));
+            continue;
+        }
+        if let Err(error) = repo.delete_workspace(&workspace.id).await {
+            errors.push(format!(
+                "failed to remove workspace record {}: {error}",
+                workspace.id.0
+            ));
+        }
+    }
+    errors
+}
+
+#[tauri::command]
+pub async fn create_workspace_bundle_for_repos(
+    state: State<'_, WorkspaceCommandState>,
+    app: AppHandle,
+    input: CreateWorkspaceBundleForReposInput,
+) -> Result<CreateWorkspaceBundleForReposOutput, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let repositories = repo
+        .list_repositories()
+        .await
+        .map_err(|error| error.to_string())?;
+    validate_bundle_projects(&repositories, &input)?;
+    let initial_workspace_ids = repo
+        .list_workspaces()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|workspace| workspace.id.0)
+        .collect::<BTreeSet<_>>();
+    let bundle_roots = input
+        .projects
+        .iter()
+        .map(|project| project.workspace_root.trim().to_string())
+        .collect::<BTreeSet<_>>();
+
+    let mut created = Vec::with_capacity(input.projects.len());
+    for mut project in input.projects {
+        if project
+            .name
+            .as_deref()
+            .is_none_or(|name| name.trim().is_empty())
+        {
+            project.name = repositories
+                .iter()
+                .find(|repository| {
+                    repository.project_id == project.project_id
+                        && repository.root_path.trim() == project.workspace_root.trim()
+                })
+                .map(|repository| repository.name.clone());
+        }
+        match create_workspace_for_repo_with_repo(&repo, &app, project).await {
+            Ok(output) => created.push(output),
+            Err(error) => {
+                let rollback_targets = repo
+                    .list_workspaces()
+                    .await
+                    .map_err(|list_error| {
+                        format!("{error}; failed to discover workspaces for rollback: {list_error}")
+                    })?
+                    .into_iter()
+                    .filter(|workspace| {
+                        !initial_workspace_ids.contains(&workspace.id.0)
+                            && bundle_roots.contains(workspace.root_path.trim())
+                    })
+                    .collect::<Vec<_>>();
+                let rollback_errors = rollback_bundle_workspaces(&repo, &rollback_targets).await;
+                if rollback_errors.is_empty() {
+                    return Err(error);
+                }
+                return Err(format!(
+                    "{error}; multi-workspace rollback was incomplete: {}",
+                    rollback_errors.join("; ")
+                ));
+            }
+        }
+    }
+
+    let workspaces = created
+        .iter()
+        .map(|output| output.workspace.clone())
+        .collect::<Vec<_>>();
+    let summary = match run_create_workspace_bundle(&repo, &input.name, &workspaces).await {
+        Ok(summary) => summary,
+        Err(error) => {
+            let rollback_targets = created
+                .iter()
+                .map(|output| output.workspace.clone())
+                .collect::<Vec<_>>();
+            let rollback_errors = rollback_bundle_workspaces(&repo, &rollback_targets).await;
+            if rollback_errors.is_empty() {
+                return Err(error.to_string());
+            }
+            return Err(format!(
+                "{error}; multi-workspace rollback was incomplete: {}",
+                rollback_errors.join("; ")
+            ));
+        }
+    };
+
+    Ok(CreateWorkspaceBundleForReposOutput {
+        summary,
+        workspaces: created,
     })
 }
 
@@ -3329,6 +3519,102 @@ pub async fn list_repositories(
         .map_err(|error| error.to_string())?;
 
     Ok(ListRepositoriesOutput { repositories })
+}
+
+#[tauri::command]
+pub async fn list_workspace_bundles(
+    state: State<'_, WorkspaceCommandState>,
+) -> Result<ListWorkspaceBundlesOutput, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let bundles = repo
+        .list_workspace_bundles()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(ListWorkspaceBundlesOutput { bundles })
+}
+
+async fn set_workspace_bundle_state(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceBundleIdInput,
+    bundle_state: WorkspaceBundleState,
+) -> Result<WorkspaceBundleStateOutput, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let summary = repo
+        .set_workspace_bundle_state(&input.bundle_id, bundle_state, Utc::now().to_rfc3339())
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("workspace bundle not found: {}", input.bundle_id.0))?;
+    Ok(WorkspaceBundleStateOutput { summary })
+}
+
+#[tauri::command]
+pub async fn archive_workspace_bundle(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceBundleIdInput,
+) -> Result<WorkspaceBundleStateOutput, String> {
+    set_workspace_bundle_state(state, input, WorkspaceBundleState::Archived).await
+}
+
+#[tauri::command]
+pub async fn restore_workspace_bundle(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceBundleIdInput,
+) -> Result<WorkspaceBundleStateOutput, String> {
+    set_workspace_bundle_state(state, input, WorkspaceBundleState::Ready).await
+}
+
+#[tauri::command]
+pub async fn delete_workspace_bundle(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceBundleIdInput,
+) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let session_repo =
+        SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let summary = repo
+        .get_workspace_bundle(&input.bundle_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("workspace bundle not found: {}", input.bundle_id.0))?;
+    let mut created_workspaces = Vec::new();
+    for member in &summary.members {
+        if !member.created_for_bundle {
+            continue;
+        }
+        let workspace = repo
+            .get_workspace(&member.workspace_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("workspace not found: {}", member.workspace_id.0))?;
+        created_workspaces.push(workspace);
+    }
+
+    let mut cleanup_errors = Vec::new();
+    for workspace in created_workspaces.iter().rev() {
+        if let Err(error) = cleanup_delegation_worktrees(&session_repo, workspace).await {
+            cleanup_errors.push(format!("{} delegations: {error}", workspace.id.0));
+            continue;
+        }
+        if let Err(error) = cleanup_workspace_files(workspace) {
+            cleanup_errors.push(format!("{}: {error}", workspace.id.0));
+        }
+    }
+    if !cleanup_errors.is_empty() {
+        return Err(format!(
+            "multi-workspace cleanup was incomplete: {}",
+            cleanup_errors.join("; ")
+        ));
+    }
+
+    repo.delete_workspace_bundle(&input.bundle_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    for workspace in created_workspaces {
+        repo.delete_workspace(&workspace.id)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -3503,6 +3789,74 @@ mod editor_workspace_file_tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+
+    fn registered_repository(project_id: &str, root: &str) -> Repository {
+        Repository {
+            id: RepositoryId(root.to_string()),
+            project_id: dcc_core::domain::project::ProjectId(project_id.to_string()),
+            name: project_id.to_string(),
+            root_path: root.to_string(),
+            base_branch: "main".to_string(),
+            remote: None,
+            remote_url: None,
+            forge_provider: None,
+            forge_login: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn bundle_project(project_id: &str, root: &str) -> CreateWorkspaceForRepoInput {
+        CreateWorkspaceForRepoInput {
+            project_id: dcc_core::domain::project::ProjectId(project_id.to_string()),
+            workspace_root: root.to_string(),
+            base_branch: "main".to_string(),
+            name: None,
+        }
+    }
+
+    #[test]
+    fn bundle_validation_accepts_distinct_registered_projects() {
+        let repositories = vec![
+            registered_repository("backend", "/tmp/backend"),
+            registered_repository("frontend", "/tmp/frontend"),
+        ];
+        let input = CreateWorkspaceBundleForReposInput {
+            name: "Checkout".to_string(),
+            projects: vec![
+                bundle_project("backend", "/tmp/backend"),
+                bundle_project("frontend", "/tmp/frontend"),
+            ],
+        };
+
+        validate_bundle_projects(&repositories, &input).expect("valid bundle projects");
+    }
+
+    #[test]
+    fn bundle_validation_rejects_unregistered_or_duplicate_projects() {
+        let repositories = vec![registered_repository("backend", "/tmp/backend")];
+        let unregistered = CreateWorkspaceBundleForReposInput {
+            name: "Checkout".to_string(),
+            projects: vec![
+                bundle_project("backend", "/tmp/backend"),
+                bundle_project("frontend", "/tmp/frontend"),
+            ],
+        };
+        assert!(validate_bundle_projects(&repositories, &unregistered)
+            .expect_err("unregistered project must fail")
+            .contains("must be opened"));
+
+        let duplicate = CreateWorkspaceBundleForReposInput {
+            name: "Checkout".to_string(),
+            projects: vec![
+                bundle_project("backend", "/tmp/backend"),
+                bundle_project("backend", "/tmp/backend"),
+            ],
+        };
+        assert!(validate_bundle_projects(&repositories, &duplicate)
+            .expect_err("duplicate project must fail")
+            .contains("duplicate"));
     }
 
     #[test]
@@ -4807,6 +5161,24 @@ pub struct WorkspaceIdInput {
     pub workspace_id: String,
 }
 
+async fn ensure_workspace_is_not_a_bundle_member(
+    repo: &SqliteWorkspaceRepo,
+    workspace_id: &WorkspaceId,
+    operation: &str,
+) -> Result<(), String> {
+    let Some(summary) = repo
+        .get_workspace_bundle_for_workspace(workspace_id)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(());
+    };
+    Err(format!(
+        "workspace {} belongs to multi-workspace '{}' ({}); {operation} the multi-workspace instead",
+        workspace_id.0, summary.bundle.name, summary.bundle.id.0
+    ))
+}
+
 #[tauri::command]
 pub async fn archive_workspace(
     state: State<'_, WorkspaceCommandState>,
@@ -4814,6 +5186,7 @@ pub async fn archive_workspace(
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = WorkspaceId(input.workspace_id);
+    ensure_workspace_is_not_a_bundle_member(&repo, &id, "archive").await?;
     let mut workspace = repo
         .get_workspace(&id)
         .await
@@ -4832,6 +5205,7 @@ pub async fn restore_workspace(
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = WorkspaceId(input.workspace_id);
+    ensure_workspace_is_not_a_bundle_member(&repo, &id, "restore").await?;
     let mut workspace = repo
         .get_workspace(&id)
         .await
@@ -4851,6 +5225,7 @@ pub async fn delete_workspace(
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = WorkspaceId(input.workspace_id);
+    ensure_workspace_is_not_a_bundle_member(&repo, &id, "delete").await?;
     let workspace = repo
         .get_workspace(&id)
         .await

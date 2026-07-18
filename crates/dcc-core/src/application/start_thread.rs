@@ -22,6 +22,8 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 pub struct StartThreadInput {
     pub workspace_id: WorkspaceId,
+    #[serde(default)]
+    pub additional_workspace_ids: Vec<WorkspaceId>,
     pub project_id: ProjectId,
     pub provider_id: String,
     pub model: Option<String>,
@@ -62,6 +64,26 @@ where
         ));
     }
 
+    if input
+        .additional_workspace_ids
+        .iter()
+        .any(|workspace_id| workspace_id == &input.workspace_id)
+    {
+        return Err(crate::CoreError::InvalidInput(
+            "additional_workspace_ids cannot contain the primary workspace".to_string(),
+        ));
+    }
+    let mut unique_workspace_ids = std::collections::HashSet::new();
+    if input
+        .additional_workspace_ids
+        .iter()
+        .any(|workspace_id| !unique_workspace_ids.insert(workspace_id.0.as_str()))
+    {
+        return Err(crate::CoreError::InvalidInput(
+            "additional_workspace_ids cannot contain duplicates".to_string(),
+        ));
+    }
+
     let session_id = SessionId(Uuid::new_v4().to_string());
     let thread_id = ThreadId(Uuid::new_v4().to_string());
     let now = now_iso();
@@ -74,6 +96,7 @@ where
         id: session_id.clone(),
         project_id: input.project_id.clone(),
         workspace_id: input.workspace_id.clone(),
+        additional_workspace_ids: input.additional_workspace_ids.clone(),
         provider_id: input.provider_id.clone(),
         model: input.model.clone(),
         provider_runtime: input.provider_runtime.clone(),
@@ -280,6 +303,7 @@ mod tests {
             &events,
             StartThreadInput {
                 workspace_id: WorkspaceId("workspace-1".to_string()),
+                additional_workspace_ids: Vec::new(),
                 project_id: ProjectId("project-1".to_string()),
                 provider_id: "codex".to_string(),
                 model: Some("gpt-5-codex".to_string()),
@@ -320,5 +344,32 @@ mod tests {
             published_events[0],
             CoreEvent::SessionStarted { .. }
         ));
+    }
+
+    #[test]
+    fn start_thread_rejects_duplicate_multi_workspace_scope() {
+        let sessions = FakeSessionRepo::default();
+        let threads = FakeThreadRepo::default();
+        let events = FakeEventBus::default();
+        let result = futures::executor::block_on(start_thread(
+            &sessions,
+            &threads,
+            &events,
+            &events,
+            StartThreadInput {
+                workspace_id: WorkspaceId("workspace-1".to_string()),
+                additional_workspace_ids: vec![
+                    WorkspaceId("workspace-2".to_string()),
+                    WorkspaceId("workspace-2".to_string()),
+                ],
+                project_id: ProjectId("project-1".to_string()),
+                provider_id: "codex".to_string(),
+                model: None,
+                provider_runtime: None,
+                working_directory_override: None,
+                title: None,
+            },
+        ));
+        assert!(matches!(result, Err(crate::CoreError::InvalidInput(_))));
     }
 }

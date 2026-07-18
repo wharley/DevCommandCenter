@@ -49,6 +49,7 @@ struct CursorSessionRuntime {
     chat_id: String,
     model: Option<String>,
     cwd: PathBuf,
+    additional_directories: Vec<PathBuf>,
     events_tx: broadcast::Sender<ProviderEvent>,
     active_turn: Mutex<Option<ActiveCursorTurn>>,
 }
@@ -65,7 +66,13 @@ struct CursorCommandResult {
 }
 
 pub fn adapter() -> CursorProvider {
-    CursorProvider::new("cursor", "cursor-agent", experimental_cli_capabilities())
+    CursorProvider::new("cursor", "cursor-agent", cursor_capabilities())
+}
+
+fn cursor_capabilities() -> Capabilities {
+    let mut capabilities = experimental_cli_capabilities();
+    capabilities.supports_multi_root = true;
+    capabilities
 }
 
 pub fn descriptor(
@@ -100,7 +107,7 @@ pub fn descriptor(
         label: PROVIDER_LABEL.to_string(),
         description: PROVIDER_DESCRIPTION.to_string(),
         models,
-        capabilities: experimental_cli_capabilities(),
+        capabilities: cursor_capabilities(),
         health,
         stable: false,
     }
@@ -195,6 +202,7 @@ impl CursorProvider {
         model: Option<&str>,
         prompt: &str,
         plan_mode: Option<bool>,
+        additional_directories: &[PathBuf],
     ) -> Vec<String> {
         let mut args = vec![
             "--print".to_string(),
@@ -211,6 +219,10 @@ impl CursorProvider {
         if let Some(model) = Self::normalize_model_arg(model) {
             args.push("--model".to_string());
             args.push(model);
+        }
+        for directory in additional_directories {
+            args.push("--add-dir".to_string());
+            args.push(directory.to_string_lossy().to_string());
         }
         args.push(prompt.to_string());
         args
@@ -236,6 +248,7 @@ impl CursorProvider {
             runtime.model.as_deref(),
             &prompt,
             plan_mode,
+            &runtime.additional_directories,
         );
         let cwd = runtime.cwd.clone();
         let mut command = self.command();
@@ -906,6 +919,11 @@ impl Provider for CursorProvider {
             chat_id,
             model: cfg.model.clone(),
             cwd,
+            additional_directories: cfg
+                .additional_working_directories
+                .iter()
+                .map(PathBuf::from)
+                .collect(),
             events_tx: broadcast::channel(64).0,
             active_turn: Mutex::new(None),
         });
@@ -1141,12 +1159,25 @@ mod tests {
     #[test]
     fn cursor_turn_args_use_native_plan_mode() {
         let provider = adapter();
-        let plan_args = provider.cursor_turn_args("chat-1", None, "ship it", Some(true));
+        let plan_args = provider.cursor_turn_args("chat-1", None, "ship it", Some(true), &[]);
         assert!(plan_args.windows(2).any(|pair| pair == ["--mode", "plan"]));
 
-        let execute_args = provider.cursor_turn_args("chat-1", None, "ship it", Some(false));
+        let execute_args = provider.cursor_turn_args("chat-1", None, "ship it", Some(false), &[]);
         assert!(!execute_args
             .windows(2)
             .any(|pair| pair == ["--mode", "plan"]));
+    }
+
+    #[test]
+    fn cursor_turn_args_include_each_authorized_directory() {
+        let provider = adapter();
+        let directories = vec![PathBuf::from("/tmp/api"), PathBuf::from("/tmp/web")];
+        let args = provider.cursor_turn_args("chat-1", None, "ship it", Some(false), &directories);
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--add-dir", "/tmp/api"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--add-dir", "/tmp/web"]));
     }
 }

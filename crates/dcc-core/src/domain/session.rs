@@ -60,6 +60,10 @@ pub struct Session {
     pub id: SessionId,
     pub project_id: ProjectId,
     pub workspace_id: WorkspaceId,
+    /// Additional DCC-managed workspaces authorized for this session.
+    /// The primary workspace remains in `workspace_id` for backwards compatibility.
+    #[serde(default)]
+    pub additional_workspace_ids: Vec<WorkspaceId>,
     pub provider_id: String,
     pub model: Option<String>,
     #[serde(default)]
