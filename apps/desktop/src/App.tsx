@@ -18,6 +18,7 @@ import type {
 	DelegationContextPolicy,
 	MissionSpecEntry,
 	ProviderCatalog,
+	SessionEventRecord,
 	SessionSearchResult,
 	WorkspaceSessionSummary,
 } from "@dcc/contracts";
@@ -173,9 +174,10 @@ import {
 } from "./features/spec/mission-spec-content";
 import { derivePlanFollowUpState } from "./features/panel/plan-follow-up";
 import { projectWorkspaceMessages } from "./features/panel/thread-projection";
-import type {
-	AgentResolutionRunRequest,
-	AgentResolutionRunResult,
+import {
+	waitForAgentResolutionTurn,
+	type AgentResolutionRunRequest,
+	type AgentResolutionRunResult,
 } from "./features/merge/agent-conflict-resolution";
 import { resolveInitialOnboardingOpen } from "./lib/dev-onboarding-override";
 import {
@@ -1923,10 +1925,49 @@ export default function App() {
 						),
 				);
 
-				if (result.turn.state !== "completed") {
-					throw new Error("O agente não concluiu a sugestão de resolução.");
+				request.onStarted?.({
+					sessionId: result.session.id,
+					turnId: result.turn.id,
+				});
+				let abortRequested = false;
+				let rejectAbortFailure: ((reason: unknown) => void) | null = null;
+				const abortFailure = new Promise<never>((_, reject) => {
+					rejectAbortFailure = reject;
+				});
+				const requestAbort = () => {
+					if (abortRequested) return;
+					abortRequested = true;
+					void abortRun({
+						sessionId: result.session.id,
+						reason: "Cancelada pelo usuário no resolvedor de conflitos",
+					}).catch((error) => rejectAbortFailure?.(error));
+				};
+				request.signal?.addEventListener("abort", requestAbort, { once: true });
+				if (request.signal?.aborted) {
+					requestAbort();
 				}
-				const events = await loadSessionThreadEvents(result.session.id);
+
+				let events: SessionEventRecord[];
+				try {
+					events = await Promise.race([
+						waitForAgentResolutionTurn(
+							result.session.id,
+							result.turn.id,
+							{
+								loadEvents: loadSessionThreadEvents,
+								onEvents: (nextEvents) =>
+									request.onProgress?.({
+										sessionId: result.session.id,
+										turnId: result.turn.id,
+										events: nextEvents,
+									}),
+							},
+						),
+						abortFailure,
+					]);
+				} finally {
+					request.signal?.removeEventListener("abort", requestAbort);
+				}
 				const response = [...projectWorkspaceMessages(events, [], result.session.id, null)]
 					.reverse()
 					.find(
@@ -3082,6 +3123,13 @@ export default function App() {
 		inspectorBeforeMergeRef.current = null;
 		setSurfaceSelection(null);
 	}, [setInspectorCollapsed, surfaceSelection]);
+	const handleOpenAgentSession = useCallback(
+		(sessionId: string) => {
+			setSelectedSessionId(sessionId);
+			handleCloseSurface();
+		},
+		[handleCloseSurface],
+	);
 
 	const handleAbortSession = useCallback(async () => {
 		const visiblePendingPrompt =
@@ -3424,6 +3472,59 @@ export default function App() {
 			setWorkspaceRepositoryContext(null);
 		}
 	}, []);
+	const refreshWorkspaceCollections = useCallback(
+		async () =>
+			Promise.all([
+				queryClient.invalidateQueries({ queryKey: ["workspaces", backendCacheKey] }),
+				queryClient.invalidateQueries({
+					queryKey: ["workspaceBundles", backendCacheKey],
+				}),
+			]),
+		[backendCacheKey, queryClient],
+	);
+	const handleArchiveWorkspace = useCallback(
+		async (workspaceId: string) => {
+			await archiveWorkspace(workspaceId);
+			await refreshWorkspaceCollections();
+		},
+		[archiveWorkspace, refreshWorkspaceCollections],
+	);
+	const handleRestoreWorkspace = useCallback(
+		async (workspaceId: string) => {
+			await restoreWorkspace(workspaceId);
+			await refreshWorkspaceCollections();
+		},
+		[refreshWorkspaceCollections, restoreWorkspace],
+	);
+	const handleDeleteWorkspace = useCallback(
+		async (workspaceId: string) => {
+			const workspace = allWorkspaces.find((candidate) => candidate.id === workspaceId);
+			const affectedWorkspaceIds =
+				workspace?.bundleId && workspace.memberWorkspaceIds?.length
+					? workspace.memberWorkspaceIds
+					: [workspaceId];
+			await deleteWorkspace(workspaceId);
+			for (const affectedWorkspaceId of affectedWorkspaceIds) {
+				queryClient.removeQueries({
+					queryKey: getWorkspaceSessionsCacheKey(
+						backendCacheKey,
+						affectedWorkspaceId,
+					),
+				});
+				queryClient.removeQueries({
+					queryKey: ["multiWorkspaceChanges", affectedWorkspaceId],
+				});
+			}
+			await refreshWorkspaceCollections();
+		},
+		[
+			allWorkspaces,
+			backendCacheKey,
+			deleteWorkspace,
+			queryClient,
+			refreshWorkspaceCollections,
+		],
+	);
 
 	const handleDeleteProject = useCallback(
 		async (input: { repositoryId: string; workspaceIds: string[] }) => {
@@ -3476,13 +3577,13 @@ export default function App() {
 							onOpenSkills={() => setIsSkillsOpen(true)}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
 							onArchiveWorkspace={
-								isRemoteBackend ? handleRemoteWorkspaceMutation : archiveWorkspace
+								isRemoteBackend ? handleRemoteWorkspaceMutation : handleArchiveWorkspace
 							}
 							onRestoreWorkspace={
-								isRemoteBackend ? handleRemoteWorkspaceMutation : restoreWorkspace
+								isRemoteBackend ? handleRemoteWorkspaceMutation : handleRestoreWorkspace
 							}
 							onDeleteWorkspace={
-								isRemoteBackend ? handleRemoteWorkspaceMutation : deleteWorkspace
+								isRemoteBackend ? handleRemoteWorkspaceMutation : handleDeleteWorkspace
 							}
 							onDeleteProject={isRemoteBackend ? undefined : handleDeleteProject}
 							repositories={repositoriesFromBackend}
@@ -3635,6 +3736,7 @@ export default function App() {
 									onReviewChanges={openGitInspector}
 									onReviewDelegation={handleReviewDelegation}
 									onResolveConflictWithAgent={handleResolveConflictWithAgent}
+									onOpenAgentSession={handleOpenAgentSession}
 									onMergeConflictStateChanged={handleMergeConflictStateChanged}
 									delegateSignal={delegateSignal}
 									composerPrefill={

@@ -1298,6 +1298,8 @@
     "confirm": {
       "discardEdit": "Discard the unsaved edits for this conflict?",
       "remainingMarkers": "Some lines still look like conflict markers. Mark this file as resolved anyway?",
+      "emptyResult": "The result is empty, but one of the conflicting versions has content. Save an empty file and mark it as resolved anyway?",
+      "openAgentSession": "Opening the session will discard the unsaved suggestion shown in this resolver. Continue?",
       "deleteResult": "Delete {{path}} from the merge result?",
       "abort": "Abort the merge and discard all completed resolutions?",
       "validationCommands": "DCC will run these project-defined commands before committing:\n\n{{commands}}\n\nContinue?"
@@ -1321,7 +1323,8 @@
       "agentContract": "The agent did not return the expected resolution contract. Its response remains in the session for review.",
       "agentInvalid": "The agent returned an invalid suggestion. Its response remains in the session for review.",
       "agentIncomplete": "The agent suggestion is incomplete.",
-      "agentResultInvalid": "The agent suggestion does not contain a valid result."
+      "agentResultInvalid": "The agent suggestion does not contain a valid result.",
+      "agentEmptyResult": "The agent returned an empty file even though the conflicting versions contain content. Nothing was applied; open the session to review the response."
     },
     "unsupported": {
       "title": "{{operation}} operation detected",
@@ -1376,13 +1379,42 @@
       "suggestionAppliedHunk": "Agent suggestion applied to the hunk",
       "suggestionAppliedFile": "Agent suggestion applied to the file",
       "sessionLabel": "Session {{sessionId}}",
-      "reviewNotice": "Review the result. Nothing has been saved, staged, or committed; the response is recorded in the session history."
+      "reviewNotice": "Review the result. Nothing has been saved, staged, or committed; the response is recorded in the session history.",
+      "run": {
+        "analyzing": "Analyzing conflict…",
+        "cancelling": "Cancelling analysis…",
+        "completed": "Analysis completed",
+        "failed": "Analysis did not complete"
+      },
+      "viewSession": "View session",
+      "cancel": "Cancel",
+      "expand": "Show agent activity",
+      "collapse": "Hide agent activity",
+      "permissionRequired": "The agent requested permission. Open the session to review and respond.",
+      "inputRequired": "The agent needs your input. Open the session to continue.",
+      "liveOutput": "Live response",
+      "waitingOutput": "Waiting for the agent response…",
+      "activity": {
+        "title": "Activity",
+        "waiting": "Preparing the agent session…",
+        "started": "Request sent to the agent",
+        "analyzing": "Analyzing the conflict versions",
+        "tool": "{{action}}{{target}}",
+        "toolFailed": "An agent action failed{{reason}}",
+        "permission": "Permission requested",
+        "input": "Input requested",
+        "completed": "Response completed",
+        "aborted": "Run stopped"
+      }
     },
     "result": {
       "title": "Editable result",
       "changed": "Result changed",
       "ready": "Ready to mark as resolved",
-      "save": "Save and mark resolved"
+      "save": "Save and mark resolved",
+      "saveTitle": "Writes exactly the displayed result and stages the file in Git. It does not create a commit or push.",
+      "stats": "{{lines}} lines · {{characters}} characters",
+      "emptyWarning": "The result is empty. Saving it will erase all file contents."
     }
   },
   "automation": {

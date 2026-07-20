@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type {
+	SessionEventRecord,
 	WorkspaceGitConflictEntry,
 	WorkspaceGitConflictSide,
 	WorkspaceGitValidationReport,
@@ -8,13 +9,17 @@ import type { TFunction } from "i18next";
 import {
 	AlertTriangle,
 	Check,
+	ChevronDown,
 	ChevronLeft,
 	ChevronRight,
+	ChevronUp,
+	ExternalLink,
 	FileWarning,
 	GitMerge,
 	ListChecks,
 	Loader2,
 	RotateCcw,
+	Square,
 	Sparkles,
 	Trash2,
 	X,
@@ -52,6 +57,7 @@ import {
 	buildAgentConflictResolutionPrompt,
 	createAgentResolutionToken,
 	parseAgentConflictResolution,
+	validateAgentConflictResolutionSuggestion,
 	type AgentResolutionRunRequest,
 	type AgentResolutionRunResult,
 } from "./agent-conflict-resolution";
@@ -68,6 +74,7 @@ type Props = {
 	onResolveWithAgent: (
 		request: AgentResolutionRunRequest,
 	) => Promise<AgentResolutionRunResult>;
+	onOpenAgentSession: (sessionId: string) => void;
 };
 
 type AppliedAgentSuggestion = {
@@ -75,6 +82,15 @@ type AppliedAgentSuggestion = {
 	explanation: string;
 	sessionId: string;
 	scope: "hunk" | "file";
+};
+
+type AgentRunState = {
+	sessionId: string | null;
+	turnId: string | null;
+	events: SessionEventRecord[];
+	status: "analyzing" | "cancelling" | "completed" | "failed";
+	expanded: boolean;
+	error: string | null;
 };
 
 function errorMessage(error: unknown) {
@@ -94,6 +110,8 @@ function agentResolutionErrorMessage(
 			return t("mergeConflict.errors.agentIncomplete");
 		case "result-invalid":
 			return t("mergeConflict.errors.agentResultInvalid");
+		case "empty-result":
+			return t("mergeConflict.errors.agentEmptyResult");
 	}
 }
 
@@ -124,6 +142,14 @@ function conflictKindLabel(
 
 function editableGitMode(mode: string | null) {
 	return mode == null || mode.startsWith("100");
+}
+
+function compactActivityTarget(value: string | null, maxLength = 96) {
+	if (!value) return null;
+	const singleLine = value.replace(/\s+/g, " ").trim();
+	return singleLine.length <= maxLength
+		? singleLine
+		: `${singleLine.slice(0, maxLength - 1)}…`;
 }
 
 function SidePreview({
@@ -175,17 +201,20 @@ export function WorkspaceMergeConflictResolver({
 	onClose,
 	onStateChanged,
 	onResolveWithAgent,
+	onOpenAgentSession,
 }: Props) {
 	const { t, i18n } = useTranslation("common");
 	const editorRef = useRef<FileEditorHandle | null>(null);
 	const initialResultRef = useRef<string | null>(null);
 	const totalConflictsRef = useRef(0);
+	const agentAbortControllerRef = useRef<AbortController | null>(null);
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
 	const [buffer, setBuffer] = useState("");
 	const [activeHunk, setActiveHunk] = useState(0);
 	const [busy, setBusy] = useState<string | null>(null);
 	const [agentSuggestion, setAgentSuggestion] =
 		useState<AppliedAgentSuggestion | null>(null);
+	const [agentRun, setAgentRun] = useState<AgentRunState | null>(null);
 	const [validationReport, setValidationReport] =
 		useState<WorkspaceGitValidationReport | null>(null);
 
@@ -230,6 +259,94 @@ export function WorkspaceMergeConflictResolver({
 	const incomingLabel = t("mergeConflict.incomingBranchLabel", {
 		branch: incomingRef,
 	});
+	const suspiciousEmptyResult =
+		selected != null &&
+		buffer.trim().length === 0 &&
+		[selected.current.text, selected.incoming.text].some(
+			(value) => value != null && value.trim().length > 0,
+		);
+	const resultLineCount = buffer.length === 0 ? 0 : buffer.split(/\r\n|\r|\n/).length;
+	const agentRunDetails = useMemo(() => {
+		if (!agentRun?.turnId) {
+			return {
+				activities: [] as string[],
+				output: "",
+				pendingPermission: false,
+				pendingInput: false,
+			};
+		}
+		const events = agentRun.events.filter((event) => {
+			const kind = event.kind;
+			return "turnId" in kind && kind.turnId === agentRun.turnId;
+		});
+		const pendingPermissionIds = new Set<string>();
+		const pendingInputIds = new Set<string>();
+		const activities: string[] = [];
+		let output = "";
+
+		for (const event of events) {
+			switch (event.kind.type) {
+				case "turn_started":
+					activities.push(t("mergeConflict.agent.activity.started"));
+					break;
+				case "turn_reasoning_started":
+					activities.push(
+						event.kind.label?.trim() ||
+							t("mergeConflict.agent.activity.analyzing"),
+					);
+					break;
+				case "turn_tool_call_started": {
+					const target = compactActivityTarget(
+						event.kind.file ?? event.kind.command,
+					);
+					activities.push(
+						t("mergeConflict.agent.activity.tool", {
+							action: event.kind.action,
+							target: target ? ` · ${target}` : "",
+						}),
+					);
+					break;
+				}
+				case "turn_tool_call_failed":
+					activities.push(
+						t("mergeConflict.agent.activity.toolFailed", {
+							reason: event.kind.reason ? ` · ${event.kind.reason}` : "",
+						}),
+					);
+					break;
+				case "turn_permission_requested":
+					pendingPermissionIds.add(event.kind.requestId);
+					activities.push(t("mergeConflict.agent.activity.permission"));
+					break;
+				case "turn_permission_resolved":
+					pendingPermissionIds.delete(event.kind.requestId);
+					break;
+				case "turn_user_input_requested":
+					pendingInputIds.add(event.kind.requestId);
+					activities.push(t("mergeConflict.agent.activity.input"));
+					break;
+				case "turn_user_input_resolved":
+					pendingInputIds.delete(event.kind.requestId);
+					break;
+				case "turn_delta":
+					output += event.kind.content;
+					break;
+				case "turn_completed":
+					activities.push(t("mergeConflict.agent.activity.completed"));
+					break;
+				case "turn_aborted":
+					activities.push(t("mergeConflict.agent.activity.aborted"));
+					break;
+			}
+		}
+
+		return {
+			activities: activities.slice(-6),
+			output,
+			pendingPermission: pendingPermissionIds.size > 0,
+			pendingInput: pendingInputIds.size > 0,
+		};
+	}, [agentRun, t]);
 
 	const openEntry = useCallback((entry: WorkspaceGitConflictEntry) => {
 		const result =
@@ -239,6 +356,7 @@ export function WorkspaceMergeConflictResolver({
 		initialResultRef.current = entry.result.text;
 		setActiveHunk(0);
 		setAgentSuggestion(null);
+		setAgentRun(null);
 	}, []);
 
 	useEffect(() => {
@@ -371,14 +489,56 @@ export function WorkspaceMergeConflictResolver({
 			},
 			token,
 		);
+		const abortController = new AbortController();
+		agentAbortControllerRef.current = abortController;
 		setBusy("agent");
 		setAgentSuggestion(null);
+		setAgentRun({
+			sessionId: null,
+			turnId: null,
+			events: [],
+			status: "analyzing",
+			expanded: true,
+			error: null,
+		});
 		try {
 			const result = await onResolveWithAgent({
 				prompt,
 				title: t("mergeConflict.agent.sessionTitle", { path: selected.path }),
+				signal: abortController.signal,
+				onStarted: (run) => {
+					setAgentRun((current) => ({
+						sessionId: run.sessionId,
+						turnId: run.turnId,
+						events: current?.events ?? [],
+						status: current?.status ?? "analyzing",
+						expanded: current?.expanded ?? true,
+						error: null,
+					}));
+				},
+				onProgress: (progress) => {
+					setAgentRun((current) => ({
+						sessionId: progress.sessionId,
+						turnId: progress.turnId,
+						events: progress.events,
+						status: current?.status ?? "analyzing",
+						expanded: current?.expanded ?? true,
+						error: null,
+					}));
+				},
 			});
-			const suggestion = parseAgentConflictResolution(result.content, token);
+			const suggestion = validateAgentConflictResolutionSuggestion(
+				parseAgentConflictResolution(result.content, token),
+				{
+					scope: requestedHunk ? "hunk" : "file",
+					currentText: requestedHunk
+						? requestedHunk.currentText
+						: selected.current.text,
+					incomingText: requestedHunk
+						? requestedHunk.incomingText
+						: selected.incoming.text,
+				},
+			);
 			const latest = editorRef.current?.getValue() ?? buffer;
 			if (latest !== source) {
 				throw new Error(t("mergeConflict.errors.agentResultChanged"));
@@ -394,14 +554,29 @@ export function WorkspaceMergeConflictResolver({
 				sessionId: result.sessionId,
 				scope: requestedHunk ? "hunk" : "file",
 			});
+			setAgentRun((current) =>
+				current
+					? { ...current, status: "completed", expanded: false, error: null }
+					: current,
+			);
 			toast.success(t("mergeConflict.toast.agentApplied"));
 		} catch (error) {
-			toast.error(
+			const message =
 				error instanceof AgentConflictResolutionError
 					? agentResolutionErrorMessage(t, error)
-					: errorMessage(error),
+					: errorMessage(error);
+			setAgentRun((current) =>
+				current
+					? { ...current, status: "failed", expanded: true, error: message }
+					: current,
+			);
+			toast.error(
+				message,
 			);
 		} finally {
+			if (agentAbortControllerRef.current === abortController) {
+				agentAbortControllerRef.current = null;
+			}
 			setBusy(null);
 		}
 	}, [
@@ -415,6 +590,23 @@ export function WorkspaceMergeConflictResolver({
 		t,
 	]);
 
+	const cancelAgentRun = useCallback(() => {
+		const controller = agentAbortControllerRef.current;
+		if (!controller || controller.signal.aborted) return;
+		setAgentRun((current) =>
+			current ? { ...current, status: "cancelling" } : current,
+		);
+		controller.abort();
+	}, []);
+
+	const openAgentSession = useCallback(() => {
+		if (!agentRun?.sessionId) return;
+		if (dirty && !window.confirm(t("mergeConflict.confirm.openAgentSession"))) {
+			return;
+		}
+		onOpenAgentSession(agentRun.sessionId);
+	}, [agentRun?.sessionId, dirty, onOpenAgentSession, t]);
+
 	const saveAndResolve = useCallback(async () => {
 		if (!selected) return;
 		const content = editorRef.current?.getValue() ?? buffer;
@@ -425,6 +617,15 @@ export function WorkspaceMergeConflictResolver({
 		if (
 			hasMergeConflictMarkerFragments(content) &&
 			!window.confirm(t("mergeConflict.confirm.remainingMarkers"))
+		) {
+			return;
+		}
+		if (
+			content.trim().length === 0 &&
+			[selected.current.text, selected.incoming.text].some(
+				(value) => value != null && value.trim().length > 0,
+			) &&
+			!window.confirm(t("mergeConflict.confirm.emptyResult"))
 		) {
 			return;
 		}
@@ -803,6 +1004,27 @@ export function WorkspaceMergeConflictResolver({
 									) : (
 										<div className="flex flex-wrap items-center gap-2 text-xs text-emerald-600"><Check className="size-4" /><span className="mr-auto">{t("mergeConflict.hunk.nonePending")}</span><Button className="gap-1.5" size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{t("mergeConflict.agent.reviewFile")}</Button></div>
 									)}
+									{agentRun ? (
+										<div className="mt-2 overflow-hidden rounded-md border border-sky-500/25 bg-sky-500/[0.04] text-[11px]">
+											<div className="flex flex-wrap items-center gap-2 px-3 py-2">
+												{agentRun.status === "analyzing" ? <Loader2 className="size-3.5 animate-spin text-sky-500" /> : agentRun.status === "cancelling" ? <Loader2 className="size-3.5 animate-spin text-amber-500" /> : agentRun.status === "completed" ? <Check className="size-3.5 text-emerald-500" /> : <AlertTriangle className="size-3.5 text-destructive" />}
+												<span className="mr-auto font-semibold">{t(`mergeConflict.agent.run.${agentRun.status}`)}</span>
+												{agentRun.sessionId ? <Button type="button" size="xs" variant="ghost" className="gap-1.5" onClick={openAgentSession}><ExternalLink className="size-3.5" />{t("mergeConflict.agent.viewSession")}</Button> : null}
+												{agentRun.status === "analyzing" || agentRun.status === "cancelling" ? <Button type="button" size="xs" variant="outline" className="gap-1.5" disabled={agentRun.status === "cancelling"} onClick={cancelAgentRun}><Square className="size-3" />{t("mergeConflict.agent.cancel")}</Button> : null}
+												<Button type="button" size="icon-xs" variant="ghost" aria-label={t(agentRun.expanded ? "mergeConflict.agent.collapse" : "mergeConflict.agent.expand")} onClick={() => setAgentRun((current) => current ? { ...current, expanded: !current.expanded } : current)}>{agentRun.expanded ? <ChevronUp /> : <ChevronDown />}</Button>
+											</div>
+											{agentRunDetails.pendingPermission || agentRunDetails.pendingInput ? (
+												<div className="flex items-start gap-2 border-t border-amber-500/20 bg-amber-500/[0.08] px-3 py-2 text-amber-800 dark:text-amber-200"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" /><span>{t(agentRunDetails.pendingPermission ? "mergeConflict.agent.permissionRequired" : "mergeConflict.agent.inputRequired")}</span></div>
+											) : null}
+											{agentRun.expanded ? (
+												<div className="grid gap-2 border-t border-border/50 p-3 lg:grid-cols-2">
+													<div className="min-w-0"><p className="mb-1 font-semibold text-foreground">{t("mergeConflict.agent.activity.title")}</p><div className="max-h-28 overflow-auto rounded border bg-background/60 px-2 py-1.5 text-muted-foreground">{agentRunDetails.activities.length > 0 ? agentRunDetails.activities.map((activity, index) => <p key={`${index}-${activity}`} className="truncate" title={activity}>• {activity}</p>) : <p>{t("mergeConflict.agent.activity.waiting")}</p>}</div></div>
+													<div className="min-w-0"><p className="mb-1 font-semibold text-foreground">{t("mergeConflict.agent.liveOutput")}</p><pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded border bg-background/60 px-2 py-1.5 font-mono text-[10px] text-muted-foreground">{agentRunDetails.output || t("mergeConflict.agent.waitingOutput")}</pre></div>
+												</div>
+											) : null}
+											{agentRun.error ? <div className="border-t border-destructive/20 bg-destructive/[0.06] px-3 py-2 text-destructive">{agentRun.error}</div> : null}
+										</div>
+									) : null}
 									{agentSuggestion?.path === selected.path ? (
 										<div className="mt-2 rounded-md border border-violet-500/25 bg-violet-500/5 px-3 py-2 text-[11px] leading-5">
 											<div className="flex items-center gap-1.5 font-semibold text-violet-700 dark:text-violet-300"><Sparkles className="size-3.5" />{t(agentSuggestion.scope === "hunk" ? "mergeConflict.agent.suggestionAppliedHunk" : "mergeConflict.agent.suggestionAppliedFile")}</div>
@@ -811,9 +1033,10 @@ export function WorkspaceMergeConflictResolver({
 										</div>
 									) : null}
 								</div>
-								<div className="flex shrink-0 items-center gap-2 border-b border-border/50 bg-muted/[0.08] px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"><span className="size-1.5 rounded-full bg-emerald-500" />{t("mergeConflict.result.title")}</div>
+								<div className="flex shrink-0 items-center gap-2 border-b border-border/50 bg-muted/[0.08] px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"><span className={cn("size-1.5 rounded-full", suspiciousEmptyResult ? "bg-destructive" : "bg-emerald-500")} />{t("mergeConflict.result.title")}</div>
+								{suspiciousEmptyResult ? <div className="flex shrink-0 items-start gap-2 border-b border-destructive/20 bg-destructive/[0.06] px-4 py-2 text-[11px] text-destructive"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" /><span>{t("mergeConflict.result.emptyWarning")}</span></div> : null}
 								<div className="min-h-0 flex-1"><WorkspaceFileEditor key={selected.path} ref={editorRef} path={selected.path} content={buffer} readOnly={busy === "agent"} annotateLabel="" onChange={() => setBuffer(editorRef.current?.getValue() ?? "")} /></div>
-										<div className="flex shrink-0 items-center justify-between border-t border-border/60 bg-background/95 px-4 py-2.5 shadow-[0_-8px_24px_-20px_rgba(0,0,0,0.6)]"><span className="text-[11px] text-muted-foreground">{hunks.length > 0 ? t("mergeConflict.hunk.pending", { count: hunks.length }) : dirty ? t("mergeConflict.result.changed") : t("mergeConflict.result.ready")}</span><Button className="gap-1.5" size="sm" disabled={Boolean(busy) || hunks.length > 0} onClick={() => void saveAndResolve()}>{busy === "save" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{t("mergeConflict.result.save")}</Button></div>
+										<div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-background/95 px-4 py-2.5 shadow-[0_-8px_24px_-20px_rgba(0,0,0,0.6)]"><div className="min-w-0"><span className="block text-[11px] text-muted-foreground">{hunks.length > 0 ? t("mergeConflict.hunk.pending", { count: hunks.length }) : dirty ? t("mergeConflict.result.changed") : t("mergeConflict.result.ready")}</span><span className={cn("block text-[10px]", suspiciousEmptyResult ? "text-destructive" : "text-muted-foreground")}>{t("mergeConflict.result.stats", { lines: resultLineCount, characters: buffer.length })}</span></div><Button className="shrink-0 gap-1.5" size="sm" title={t("mergeConflict.result.saveTitle")} disabled={Boolean(busy) || hunks.length > 0} onClick={() => void saveAndResolve()}>{busy === "save" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{t("mergeConflict.result.save")}</Button></div>
 									</>
 								)}
 							</section>

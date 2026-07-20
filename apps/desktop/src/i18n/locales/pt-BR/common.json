@@ -1298,6 +1298,8 @@
     "confirm": {
       "discardEdit": "Descartar a edição ainda não salva deste conflito?",
       "remainingMarkers": "Ainda existem linhas parecidas com marcadores de conflito. Marcar como resolvido mesmo assim?",
+      "emptyResult": "O resultado está vazio, mas uma das versões do arquivo possui conteúdo. Salvar um arquivo vazio e marcá-lo como resolvido mesmo assim?",
+      "openAgentSession": "Abrir a sessão descartará a sugestão ainda não salva exibida neste resolvedor. Continuar?",
       "deleteResult": "Excluir {{path}} como resultado deste merge?",
       "abort": "Abortar o merge e descartar todas as resoluções realizadas?",
       "validationCommands": "O DCC executará estes comandos definidos pelo projeto antes do commit:\n\n{{commands}}\n\nContinuar?"
@@ -1321,7 +1323,8 @@
       "agentContract": "O agente não retornou o contrato de resolução esperado. A resposta ficou registrada na sessão para revisão.",
       "agentInvalid": "O agente retornou uma sugestão inválida. A resposta ficou registrada na sessão para revisão.",
       "agentIncomplete": "A sugestão do agente está incompleta.",
-      "agentResultInvalid": "A sugestão do agente não contém um resultado válido."
+      "agentResultInvalid": "A sugestão do agente não contém um resultado válido.",
+      "agentEmptyResult": "O agente retornou um arquivo vazio, embora as versões em conflito possuam conteúdo. Nada foi aplicado; abra a sessão para revisar a resposta."
     },
     "unsupported": {
       "title": "Operação {{operation}} detectada",
@@ -1376,13 +1379,42 @@
       "suggestionAppliedHunk": "Sugestão do agente aplicada ao bloco",
       "suggestionAppliedFile": "Sugestão do agente aplicada ao arquivo",
       "sessionLabel": "Sessão {{sessionId}}",
-      "reviewNotice": "Revise o resultado. Nada foi salvo, adicionado ao índice ou commitado; a resposta está registrada no histórico da sessão."
+      "reviewNotice": "Revise o resultado. Nada foi salvo, adicionado ao índice ou commitado; a resposta está registrada no histórico da sessão.",
+      "run": {
+        "analyzing": "Analisando conflito…",
+        "cancelling": "Cancelando análise…",
+        "completed": "Análise concluída",
+        "failed": "A análise não foi concluída"
+      },
+      "viewSession": "Ver sessão",
+      "cancel": "Cancelar",
+      "expand": "Mostrar atividade do agente",
+      "collapse": "Ocultar atividade do agente",
+      "permissionRequired": "O agente solicitou uma permissão. Abra a sessão para revisar e responder.",
+      "inputRequired": "O agente precisa de uma resposta sua. Abra a sessão para continuar.",
+      "liveOutput": "Resposta em tempo real",
+      "waitingOutput": "Aguardando a resposta do agente…",
+      "activity": {
+        "title": "Atividade",
+        "waiting": "Preparando a sessão do agente…",
+        "started": "Solicitação enviada ao agente",
+        "analyzing": "Analisando as versões do conflito",
+        "tool": "{{action}}{{target}}",
+        "toolFailed": "Uma ação do agente falhou{{reason}}",
+        "permission": "Permissão solicitada",
+        "input": "Interação solicitada",
+        "completed": "Resposta concluída",
+        "aborted": "Execução interrompida"
+      }
     },
     "result": {
       "title": "Resultado editável",
       "changed": "Resultado alterado",
       "ready": "Pronto para marcar como resolvido",
-      "save": "Salvar e marcar resolvido"
+      "save": "Salvar e marcar resolvido",
+      "saveTitle": "Grava exatamente o resultado exibido e adiciona o arquivo ao índice Git. Não cria commit nem push.",
+      "stats": "{{lines}} linhas · {{characters}} caracteres",
+      "emptyWarning": "O resultado está vazio. Salvar neste estado apagará todo o conteúdo do arquivo."
     }
   },
   "automation": {

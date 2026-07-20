@@ -128,6 +128,7 @@ type SessionWorkbenchProps = {
 	onResolveConflictWithAgent: (
 		request: AgentResolutionRunRequest,
 	) => Promise<AgentResolutionRunResult>;
+	onOpenAgentSession: (sessionId: string) => void;
 	onMergeConflictStateChanged: (workspaceRoot: string) => Promise<void> | void;
 	/** Increment to open the Delegate dialog from outside (command palette). */
 	delegateSignal?: number;
@@ -184,6 +185,7 @@ export function SessionWorkbench({
 	onReviewChanges,
 	onReviewDelegation,
 	onResolveConflictWithAgent,
+	onOpenAgentSession,
 	onMergeConflictStateChanged,
 	delegateSignal,
 }: SessionWorkbenchProps) {
@@ -434,6 +436,7 @@ export function SessionWorkbench({
 						onReviewChanges={onReviewChanges}
 						onReviewDelegation={onReviewDelegation}
 						onResolveConflictWithAgent={onResolveConflictWithAgent}
+						onOpenAgentSession={onOpenAgentSession}
 						onMergeConflictStateChanged={onMergeConflictStateChanged}
 						delegateSignal={delegateSignal}
 					/>

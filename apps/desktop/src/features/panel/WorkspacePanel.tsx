@@ -169,6 +169,7 @@ type WorkspacePanelProps = {
 	onResolveConflictWithAgent: (
 		request: AgentResolutionRunRequest,
 	) => Promise<AgentResolutionRunResult>;
+	onOpenAgentSession: (sessionId: string) => void;
 	onMergeConflictStateChanged: (workspaceRoot: string) => Promise<void> | void;
 	/** Increment to open the Delegate dialog from outside (command palette). */
 	delegateSignal?: number;
@@ -220,6 +221,7 @@ export function WorkspacePanel({
 	onReviewChanges,
 	onReviewDelegation,
 	onResolveConflictWithAgent,
+	onOpenAgentSession,
 	onMergeConflictStateChanged,
 	delegateSignal,
 }: WorkspacePanelProps) {
@@ -477,6 +479,7 @@ export function WorkspacePanel({
 					onMergeConflictStateChanged(surfaceSelection.workspaceRoot)
 				}
 				onResolveWithAgent={onResolveConflictWithAgent}
+				onOpenAgentSession={onOpenAgentSession}
 			/>
 		) : surfaceSelection.kind === "git-diff" ? (
 			<WorkspaceEditorSurface

@@ -107,6 +107,16 @@ export function removeWorkspacesFromList(
 	};
 }
 
+export function workspaceMutationIds(
+	workspace: WorkspaceSummary | undefined,
+	fallbackWorkspaceId: string,
+) {
+	if (!workspace?.bundleId || !workspace.memberWorkspaceIds?.length) {
+		return [fallbackWorkspaceId];
+	}
+	return [...new Set(workspace.memberWorkspaceIds)];
+}
+
 export function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
 	const status =
 		workspace.state === "ready"
@@ -315,28 +325,36 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 
 	const archiveWorkspace = useCallback(async (workspaceId: string) => {
 		const workspace = workspaceListRef.current.find((candidate) => candidate.id === workspaceId);
+		const affectedWorkspaceIds = workspaceMutationIds(workspace, workspaceId);
 		if (workspace?.bundleId) {
 			await apiArchiveWorkspaceBundle(workspace.bundleId);
 		} else {
 			await apiArchiveWorkspace(workspaceId);
 		}
-		setStatusOverrides((current) =>
-			current[workspaceId] === "archived"
-				? current
-				: { ...current, [workspaceId]: "archived" }
-		);
+		setStatusOverrides((current) => {
+			const next = { ...current };
+			for (const affectedWorkspaceId of affectedWorkspaceIds) {
+				next[affectedWorkspaceId] = "archived";
+			}
+			return next;
+		});
 	}, []);
 
 	const restoreWorkspace = useCallback(async (workspaceId: string) => {
 		const workspace = workspaceListRef.current.find((candidate) => candidate.id === workspaceId);
+		const affectedWorkspaceIds = workspaceMutationIds(workspace, workspaceId);
 		if (workspace?.bundleId) {
 			await apiRestoreWorkspaceBundle(workspace.bundleId);
 		} else {
 			await apiRestoreWorkspace(workspaceId);
 		}
-		setStatusOverrides((current) =>
-			current[workspaceId] === "ready" ? current : { ...current, [workspaceId]: "ready" }
-		);
+		setStatusOverrides((current) => {
+			const next = { ...current };
+			for (const affectedWorkspaceId of affectedWorkspaceIds) {
+				next[affectedWorkspaceId] = "ready";
+			}
+			return next;
+		});
 	}, []);
 
 	const deleteWorkspace = useCallback(
@@ -344,6 +362,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 			const workspace = workspaceListRef.current.find(
 				(candidate) => candidate.id === workspaceId,
 			);
+			const affectedWorkspaceIds = workspaceMutationIds(workspace, workspaceId);
 			if (workspace?.bundleId) {
 				await apiDeleteWorkspaceBundle(workspace.bundleId);
 			} else {
@@ -351,16 +370,18 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 			}
 			const nextState = removeWorkspacesFromList(
 				workspaceListRef.current,
-				[workspaceId],
+				affectedWorkspaceIds,
 				selectedWorkspaceIdRef.current,
 			);
 			setOptimisticCreated((current) =>
-				current.filter((workspace) => workspace.id !== workspaceId),
+				current.filter((candidate) => !affectedWorkspaceIds.includes(candidate.id)),
 			);
-			setHiddenWorkspaceIds((current) =>
-				current.includes(workspaceId) ? current : [...current, workspaceId],
+			setHiddenWorkspaceIds((current) => [
+				...new Set([...current, ...affectedWorkspaceIds]),
+			]);
+			setStatusOverrides((current) =>
+				removeStatusOverrides(current, affectedWorkspaceIds),
 			);
-			setStatusOverrides((current) => removeStatusOverrides(current, [workspaceId]));
 			setSelectedWorkspaceId(nextState.selectedWorkspaceId);
 		},
 		[],

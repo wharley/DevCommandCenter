@@ -630,6 +630,22 @@ impl SqliteSessionRepo {
             "additional_workspace_ids_json",
             "TEXT NOT NULL DEFAULT '[]'",
         )?;
+        // Compatibility cleanup for bundles removed before their sessions were
+        // deleted explicitly. Keep orphaned single-workspace history unchanged;
+        // only multi-root sessions can be identified safely here.
+        conn.execute(
+            r#"
+            DELETE FROM dcc_sessions
+             WHERE TRIM(additional_workspace_ids_json) NOT IN ('', '[]', 'null')
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM dcc_workspaces w
+                    WHERE w.id = dcc_sessions.workspace_id
+               )
+            "#,
+            [],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::rebuild_search_index_sync(&conn)?;
         Ok(())
     }
@@ -2486,6 +2502,66 @@ mod tests {
         );
         assert_eq!(summary[0].thread.id.0, "thread-1");
         assert_eq!(summary[0].projection.state, SessionState::Active);
+    }
+
+    #[test]
+    fn sqlite_session_repo_cleans_only_orphaned_multi_workspace_sessions() {
+        let conn = in_memory_conn();
+        let session_repo =
+            SqliteSessionRepo::from_connection(conn.clone()).expect("create session repo");
+        let workspace_repo =
+            SqliteWorkspaceRepo::from_connection(conn.clone()).expect("create workspace repo");
+        let workspace = Workspace {
+            id: WorkspaceId("removed-workspace".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            name: Some("Removed Workspace".to_string()),
+            root_path: "/tmp/removed-workspace".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: Some("/tmp/removed-workspace".to_string()),
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(workspace_repo.save_workspace(&workspace))
+            .expect("save workspace");
+
+        let session = |id: &str, additional_workspace_ids: Vec<WorkspaceId>| Session {
+            id: SessionId(id.to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            workspace_id: workspace.id.clone(),
+            additional_workspace_ids,
+            provider_id: "codex".to_string(),
+            model: Some("gpt-5".to_string()),
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Completed,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let multi_session = session(
+            "orphaned-multi",
+            vec![WorkspaceId("secondary-workspace".to_string())],
+        );
+        let single_session = session("orphaned-single", Vec::new());
+        futures::executor::block_on(session_repo.save_session(&multi_session))
+            .expect("save multi session");
+        futures::executor::block_on(session_repo.save_session(&single_session))
+            .expect("save single session");
+        futures::executor::block_on(workspace_repo.delete_workspace(&workspace.id))
+            .expect("delete workspace");
+
+        let reopened = SqliteSessionRepo::from_connection(conn).expect("reopen session repo");
+        assert!(
+            futures::executor::block_on(reopened.get_session(&multi_session.id))
+                .expect("read multi session")
+                .is_none()
+        );
+        assert!(
+            futures::executor::block_on(reopened.get_session(&single_session.id))
+                .expect("read single session")
+                .is_some()
+        );
     }
 
     #[test]

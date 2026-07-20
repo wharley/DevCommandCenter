@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { removeWorkspacesFromList } from "./use-workspaces";
+import { removeWorkspacesFromList, workspaceMutationIds } from "./use-workspaces";
 
 describe("removeWorkspacesFromList", () => {
 	it("keeps the current selection when it is not removed", () => {
@@ -40,5 +40,27 @@ describe("removeWorkspacesFromList", () => {
 
 		expect(result.workspaceList).toEqual([]);
 		expect(result.selectedWorkspaceId).toBeNull();
+	});
+});
+
+describe("workspaceMutationIds", () => {
+	it("returns every member when removing a bundle", () => {
+		expect(
+			workspaceMutationIds(
+				{
+					id: "primary",
+					name: "Task",
+					branch: "dcc/task",
+					status: "ready",
+					bundleId: "bundle-1",
+					memberWorkspaceIds: ["primary", "api", "web"],
+				},
+				"primary",
+			),
+		).toEqual(["primary", "api", "web"]);
+	});
+
+	it("keeps single-workspace deletion unchanged", () => {
+		expect(workspaceMutationIds(undefined, "single")).toEqual(["single"]);
 	});
 });

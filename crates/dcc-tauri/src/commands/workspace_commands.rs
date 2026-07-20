@@ -3606,6 +3606,24 @@ pub async fn delete_workspace_bundle(
         ));
     }
 
+    let mut bundle_session_ids = Vec::new();
+    for workspace in &created_workspaces {
+        let sessions = session_repo
+            .list_workspace_sessions(&workspace.id)
+            .map_err(|error| error.to_string())?;
+        bundle_session_ids.extend(sessions.into_iter().map(|summary| summary.session.id));
+    }
+    for session_id in bundle_session_ids {
+        SessionRepo::delete_session(&session_repo, &session_id)
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to remove multi-workspace session {}: {error}",
+                    session_id.0
+                )
+            })?;
+    }
+
     repo.delete_workspace_bundle(&input.bundle_id)
         .await
         .map_err(|error| error.to_string())?;

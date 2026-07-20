@@ -1,6 +1,11 @@
-import type { WorkspaceGitConflictKind } from "@dcc/contracts";
+import type {
+	SessionEventRecord,
+	WorkspaceGitConflictKind,
+} from "@dcc/contracts";
 
 const MAX_CONTEXT_CHARS = 24_000;
+const AGENT_RESOLUTION_TIMEOUT_MS = 5 * 60_000;
+const AGENT_RESOLUTION_POLL_INTERVAL_MS = 250;
 
 export type AgentConflictResolutionScope =
 	| {
@@ -34,7 +39,8 @@ export type AgentConflictResolutionErrorCode =
 	| "contract"
 	| "invalid"
 	| "incomplete"
-	| "result-invalid";
+	| "result-invalid"
+	| "empty-result";
 
 export class AgentConflictResolutionError extends Error {
 	readonly code: AgentConflictResolutionErrorCode;
@@ -49,12 +55,100 @@ export class AgentConflictResolutionError extends Error {
 export type AgentResolutionRunRequest = {
 	prompt: string;
 	title: string;
+	signal?: AbortSignal;
+	onStarted?: (run: AgentResolutionRunStarted) => void;
+	onProgress?: (progress: AgentResolutionRunProgress) => void;
 };
 
 export type AgentResolutionRunResult = {
 	content: string;
 	sessionId: string;
 };
+
+export type AgentResolutionRunStarted = {
+	sessionId: string;
+	turnId: string;
+};
+
+export type AgentResolutionRunProgress = AgentResolutionRunStarted & {
+	events: SessionEventRecord[];
+};
+
+type WaitForAgentResolutionTurnOptions = {
+	loadEvents: (sessionId: string) => Promise<SessionEventRecord[]>;
+	timeoutMs?: number;
+	pollIntervalMs?: number;
+	now?: () => number;
+	delay?: (milliseconds: number) => Promise<void>;
+	onEvents?: (events: SessionEventRecord[]) => void;
+};
+
+export async function waitForAgentResolutionTurn(
+	sessionId: string,
+	turnId: string,
+	{
+		loadEvents,
+		timeoutMs = AGENT_RESOLUTION_TIMEOUT_MS,
+		pollIntervalMs = AGENT_RESOLUTION_POLL_INTERVAL_MS,
+		now = Date.now,
+		delay = (milliseconds) =>
+			new Promise((resolve) => setTimeout(resolve, milliseconds)),
+		onEvents,
+	}: WaitForAgentResolutionTurnOptions,
+) {
+	const deadline = now() + timeoutMs;
+
+	while (true) {
+		const events = await loadEvents(sessionId);
+		onEvents?.(events);
+		const terminalEvent = events.find(
+			(event) =>
+				(event.kind.type === "turn_completed" ||
+					event.kind.type === "turn_aborted") &&
+				event.kind.turnId === turnId,
+		);
+
+		if (terminalEvent?.kind.type === "turn_completed") {
+			return events;
+		}
+		if (terminalEvent?.kind.type === "turn_aborted") {
+			const reason = terminalEvent.kind.reason?.trim();
+			throw new Error(
+				reason
+					? `O agente interrompeu a sugestão de resolução: ${reason}`
+					: "O agente interrompeu a sugestão de resolução.",
+			);
+		}
+		if (now() >= deadline) {
+			throw new Error(
+				"O agente demorou demais para concluir a sugestão de resolução. Tente novamente.",
+			);
+		}
+
+		await delay(pollIntervalMs);
+	}
+}
+
+export function validateAgentConflictResolutionSuggestion(
+	suggestion: AgentConflictResolutionSuggestion,
+	input: {
+		scope: "hunk" | "file";
+		currentText: string | null;
+		incomingText: string | null;
+	},
+) {
+	const hasNonEmptyAlternative = [input.currentText, input.incomingText].some(
+		(value) => value != null && value.trim().length > 0,
+	);
+	if (
+		input.scope === "file" &&
+		hasNonEmptyAlternative &&
+		suggestion.resolvedContent.trim().length === 0
+	) {
+		throw new AgentConflictResolutionError("empty-result");
+	}
+	return suggestion;
+}
 
 function boundedContext(value: string | null, label: string) {
 	if (value == null) return `[${label} indisponível]`;
