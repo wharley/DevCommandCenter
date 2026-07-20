@@ -193,6 +193,7 @@
     "providerUnsupported": "{{provider}} ainda não oferece isolamento multi-workspace no DCC. Escolha Codex, Claude, Cursor ou Gemini.",
     "delivery": {
       "action": "Entregar {{count}}",
+      "complete": "Entregue",
       "checking": "Verificando",
       "title": "Entregar projetos alterados",
       "description": "O DCC incluirá todas as alterações locais, executará os checks obrigatórios e, para cada projeto abaixo, fará commit, push e criará ou atualizará o PR. Cada repositório terá seu próprio resultado.",

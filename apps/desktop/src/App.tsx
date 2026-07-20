@@ -93,6 +93,7 @@ import {
 	listWorkspaces,
 	workspaceGitBranchDiff,
 	workspaceGitStatus,
+	workspacePrStatus,
 	workspacePrepareDelegationWorktree,
 	workspaceRemoveDelegationWorktree,
 } from "./lib/workspace-api";
@@ -138,6 +139,7 @@ import {
 import type { WorkspaceSummary } from "./features/workspaces/types";
 import {
 	deliverMultiWorkspace,
+	resolveMultiWorkspaceDeliveryState,
 	type MultiWorkspaceDeliveryResult,
 } from "./features/workspaces/multi-workspace-delivery";
 import {
@@ -1104,12 +1106,26 @@ export default function App() {
 						workspaceGitStatus({ workspaceRoot }),
 						workspaceGitBranchDiff({ workspaceRoot }),
 					]);
-					return (
-						status.staged.length > 0 ||
-						status.unstaged.length > 0 ||
-						status.aheadOfRemoteCount > 0 ||
-						branchDiff.changes.length > 0
-					);
+					const hasBranchDiff = branchDiff.changes.length > 0;
+					let requestState: string | null = null;
+					if (hasBranchDiff) {
+						try {
+							const request = await workspacePrStatus({
+								workspaceRoot,
+								branch: status.currentBranch,
+								forgeLogin: null,
+							});
+							requestState = request.state?.toLowerCase() ?? null;
+						} catch {
+							// Keep delivery available so the coordinated action can report
+							// the provider/authentication error for this repository.
+						}
+					}
+					return resolveMultiWorkspaceDeliveryState({
+						gitStatus: status,
+						branchDiff,
+						requestState,
+					});
 				},
 				enabled: selectedBundleMembers.length > 1 && workspaceRoot.length > 0,
 				refetchInterval: 5_000,
@@ -1131,11 +1147,17 @@ export default function App() {
 	const handleDeliverWorkspaceScope = useCallback(async (): Promise<
 		MultiWorkspaceDeliveryResult[]
 	> => {
-		const members = selectedBundleMembers.map((workspace) => ({
-			workspaceId: workspace.id,
-			name: workspace.name,
-			workspaceRoot: workspace.worktreePath ?? workspace.rootPath ?? "",
-		}));
+		const members = selectedBundleMembers.flatMap((workspace, index) =>
+			bundleMemberChangeQueries[index]?.data?.needsDelivery === true
+				? [
+						{
+							workspaceId: workspace.id,
+							name: workspace.name,
+							workspaceRoot: workspace.worktreePath ?? workspace.rootPath ?? "",
+						},
+					]
+				: [],
+		);
 		const invalidMember = members.find((member) => !member.workspaceRoot);
 		if (invalidMember) {
 			throw new Error(`Workspace sem caminho Git: ${invalidMember.name}`);
@@ -1159,7 +1181,7 @@ export default function App() {
 			]),
 		);
 		return results;
-	}, [queryClient, selectedBundleMembers]);
+	}, [bundleMemberChangeQueries, queryClient, selectedBundleMembers]);
 	const selectedWorkspacePath =
 		activeWorkspace?.worktreePath ?? activeWorkspace?.rootPath ?? null;
 	const selectedLocalWorkspacePath = isRemoteBackend ? null : selectedWorkspacePath;
@@ -3562,11 +3584,13 @@ export default function App() {
 										selectedWorkspacePath ??
 										(isRemoteBackend ? null : (activeWorkspace?.worktreePath ?? null))
 									}
-									workspaceScopeOptions={selectedBundleMembers.map((workspace, index) => ({
+					workspaceScopeOptions={selectedBundleMembers.map((workspace, index) => ({
 										id: workspace.id,
 										name: workspace.name,
 										branch: workspace.branch,
-										hasChanges: bundleMemberChangeQueries[index]?.data ?? null,
+						hasChanges: bundleMemberChangeQueries[index]?.data?.hasChanges ?? null,
+						needsDelivery:
+							bundleMemberChangeQueries[index]?.data?.needsDelivery ?? null,
 									}))}
 									selectedWorkspaceScopeId={activeWorkspace?.id ?? selectedWorkspace.id}
 									onSelectWorkspaceScope={setSelectedBundleMemberId}

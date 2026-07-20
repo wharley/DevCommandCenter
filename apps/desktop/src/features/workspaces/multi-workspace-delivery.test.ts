@@ -3,13 +3,27 @@ import type {
 	MultiWorkspaceDeliveryDependencies,
 	MultiWorkspaceDeliveryMember,
 } from "./multi-workspace-delivery";
-import { deliverMultiWorkspace } from "./multi-workspace-delivery";
+import {
+	deliverMultiWorkspace,
+	resolveMultiWorkspaceDeliveryState,
+} from "./multi-workspace-delivery";
 
 const member: MultiWorkspaceDeliveryMember = {
 	workspaceId: "workspace-api",
 	name: "service-api",
 	workspaceRoot: "/worktrees/service-api",
 };
+
+function change(path: string) {
+	return {
+		path,
+		name: path.split("/").at(-1) ?? path,
+		absolutePath: `/worktrees/service-api/${path}`,
+		status: "M",
+		insertions: 1,
+		deletions: 0,
+	};
+}
 
 function status(overrides: Record<string, unknown> = {}) {
 	return {
@@ -53,6 +67,36 @@ function dependencies(
 }
 
 describe("deliverMultiWorkspace", () => {
+	it("does not offer delivery again for a clean branch with an open PR", () => {
+		expect(
+			resolveMultiWorkspaceDeliveryState({
+				gitStatus: status(),
+				branchDiff: { changes: [change("route.ts")], baseBranch: "main" },
+				requestState: "open",
+			}),
+		).toEqual({ hasChanges: true, needsDelivery: false });
+	});
+
+	it("offers delivery again when an open PR has new local work", () => {
+		expect(
+			resolveMultiWorkspaceDeliveryState({
+				gitStatus: status({ unstaged: [change("route.ts")] }),
+				branchDiff: { changes: [change("route.ts")], baseBranch: "main" },
+				requestState: "open",
+			}),
+		).toEqual({ hasChanges: true, needsDelivery: true });
+	});
+
+	it("offers delivery for an unpublished branch diff", () => {
+		expect(
+			resolveMultiWorkspaceDeliveryState({
+				gitStatus: status(),
+				branchDiff: { changes: [change("route.ts")], baseBranch: "main" },
+				requestState: null,
+			}),
+		).toEqual({ hasChanges: true, needsDelivery: true });
+	});
+
 	it("skips a project with no changes without publishing anything", async () => {
 		const deps = dependencies();
 		const [result] = await deliverMultiWorkspace([member], deps);
@@ -67,13 +111,13 @@ describe("deliverMultiWorkspace", () => {
 		const deps = dependencies({
 			gitStatus: vi
 				.fn()
-				.mockResolvedValueOnce(status({ unstaged: [{ path: "route.ts" }] }))
-				.mockResolvedValueOnce(status({ unstaged: [{ path: "route.ts" }] }))
+				.mockResolvedValueOnce(status({ unstaged: [change("route.ts")] }))
+				.mockResolvedValueOnce(status({ unstaged: [change("route.ts")] }))
 				.mockResolvedValue(status()),
 			branchDiff: vi
 				.fn()
 				.mockResolvedValueOnce({ changes: [], baseBranch: "main" })
-				.mockResolvedValue({ changes: [{ path: "route.ts" }], baseBranch: "main" }),
+				.mockResolvedValue({ changes: [change("route.ts")], baseBranch: "main" }),
 		});
 
 		const [result] = await deliverMultiWorkspace([member], deps);
@@ -96,7 +140,7 @@ describe("deliverMultiWorkspace", () => {
 				.mockResolvedValueOnce(status({ aheadOfRemoteCount: 1 }))
 				.mockResolvedValue(status()),
 			branchDiff: vi.fn().mockResolvedValue({
-				changes: [{ path: "page.tsx" }],
+				changes: [change("page.tsx")],
 				baseBranch: "main",
 			}),
 			requestStatus: vi.fn().mockResolvedValue({
@@ -115,7 +159,7 @@ describe("deliverMultiWorkspace", () => {
 
 	it("keeps processing other projects after a beforePush failure", async () => {
 		const first = dependencies({
-			gitStatus: vi.fn().mockResolvedValue(status({ unstaged: [{ path: "bad.ts" }] })),
+			gitStatus: vi.fn().mockResolvedValue(status({ unstaged: [change("bad.ts")] })),
 			projectAutomation: vi.fn().mockResolvedValue({
 				setupCommand: null,
 				tasks: [],

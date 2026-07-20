@@ -72,6 +72,7 @@ type SessionWorkbenchProps = {
 		name: string;
 		branch: string;
 		hasChanges: boolean | null;
+		needsDelivery: boolean | null;
 	}>;
 	selectedWorkspaceScopeId?: string | null;
 	onSelectWorkspaceScope?: (workspaceId: string) => void;
@@ -288,11 +289,11 @@ export function SessionWorkbench({
 
 	// Full-bleed terminal takeover — hide the chat column entirely.
 	const chatHidden = terminalOpen && terminalExpanded;
-	const changedScopeOptions = workspaceScopeOptions.filter(
-		(workspace) => workspace.hasChanges === true,
+	const deliverableScopeOptions = workspaceScopeOptions.filter(
+		(workspace) => workspace.needsDelivery === true,
 	);
 	const scopeChangesLoading = workspaceScopeOptions.some(
-		(workspace) => workspace.hasChanges === null,
+		(workspace) => workspace.needsDelivery === null,
 	);
 	const handleOpenDelivery = useCallback(() => {
 		setDeliveryResults(null);
@@ -368,15 +369,21 @@ export function SessionWorkbench({
 									variant="outline"
 									size="xs"
 									className="gap-1.5"
-									disabled={scopeChangesLoading || changedScopeOptions.length === 0}
+									disabled={scopeChangesLoading || deliverableScopeOptions.length === 0}
 									onClick={handleOpenDelivery}
 								>
-									<GitPullRequestArrowIcon className="size-3.5" />
+									{!scopeChangesLoading && deliverableScopeOptions.length === 0 ? (
+										<CheckCircle2Icon className="size-3.5 text-emerald-500" />
+									) : (
+										<GitPullRequestArrowIcon className="size-3.5" />
+									)}
 									{scopeChangesLoading
 										? t("workspaceScope.delivery.checking")
-										: t("workspaceScope.delivery.action", {
-												count: changedScopeOptions.length,
-											})}
+										: deliverableScopeOptions.length === 0
+											? t("workspaceScope.delivery.complete")
+											: t("workspaceScope.delivery.action", {
+													count: deliverableScopeOptions.length,
+												})}
 								</Button>
 							) : null}
 						</div>
@@ -521,7 +528,7 @@ export function SessionWorkbench({
 						</div>
 					) : (
 						<div className="space-y-2">
-							{changedScopeOptions.map((workspace) => (
+							{deliverableScopeOptions.map((workspace) => (
 								<div
 									key={workspace.id}
 									className="flex items-center gap-2 rounded-lg border border-border/70 px-3 py-2"
@@ -571,7 +578,7 @@ export function SessionWorkbench({
 										<GitPullRequestArrowIcon />
 									)}
 									{t("workspaceScope.delivery.confirm", {
-										count: changedScopeOptions.length,
+										count: deliverableScopeOptions.length,
 									})}
 								</Button>
 							</>

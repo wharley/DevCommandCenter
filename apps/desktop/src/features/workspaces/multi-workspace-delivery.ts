@@ -58,6 +58,34 @@ export type MultiWorkspaceDeliveryDependencies = {
 	createRequest: (workspaceRoot: string) => Promise<void>;
 };
 
+export function resolveMultiWorkspaceDeliveryState({
+	gitStatus,
+	branchDiff,
+	requestState,
+}: {
+	gitStatus: WorkspaceGitStatusOutput;
+	branchDiff: WorkspaceGitBranchDiffOutput;
+	requestState: string | null;
+}) {
+	const hasWorkingChanges =
+		gitStatus.staged.length > 0 || gitStatus.unstaged.length > 0;
+	const hasUnpushedCommits = gitStatus.aheadOfRemoteCount > 0;
+	const hasBranchDiff = branchDiff.changes.length > 0;
+	const normalizedRequestState = requestState?.toLowerCase() ?? null;
+	const requestFinished =
+		normalizedRequestState === "merged" || normalizedRequestState === "closed";
+	const needsDelivery = requestFinished
+		? false
+		: normalizedRequestState === "open"
+			? hasWorkingChanges || hasUnpushedCommits
+			: hasWorkingChanges || hasUnpushedCommits || hasBranchDiff;
+
+	return {
+		hasChanges: hasWorkingChanges || hasUnpushedCommits || hasBranchDiff,
+		needsDelivery,
+	};
+}
+
 const defaultDependencies: MultiWorkspaceDeliveryDependencies = {
 	gitStatus: (workspaceRoot) => workspaceGitStatus({ workspaceRoot }),
 	branchDiff: (workspaceRoot) => workspaceGitBranchDiff({ workspaceRoot }),
