@@ -2,6 +2,7 @@ import type {
 	SessionEventRecord,
 	WorkspaceGitConflictKind,
 } from "@dcc/contracts";
+import { hasMergeConflictMarkerFragments } from "./merge-conflict-hunks";
 
 const MAX_CONTEXT_CHARS = 24_000;
 const AGENT_RESOLUTION_TIMEOUT_MS = 5 * 60_000;
@@ -40,7 +41,8 @@ export type AgentConflictResolutionErrorCode =
 	| "invalid"
 	| "incomplete"
 	| "result-invalid"
-	| "empty-result";
+	| "empty-result"
+	| "unresolved-result";
 
 export class AgentConflictResolutionError extends Error {
 	readonly code: AgentConflictResolutionErrorCode;
@@ -147,6 +149,12 @@ export function validateAgentConflictResolutionSuggestion(
 	) {
 		throw new AgentConflictResolutionError("empty-result");
 	}
+	if (
+		input.scope === "file" &&
+		hasMergeConflictMarkerFragments(suggestion.resolvedContent)
+	) {
+		throw new AgentConflictResolutionError("unresolved-result");
+	}
 	return suggestion;
 }
 
@@ -179,7 +187,7 @@ export function buildAgentConflictResolutionPrompt(
 	const scopeInstruction =
 		input.scope.type === "hunk"
 			? `Resolva somente o bloco iniciado na linha ${input.scope.startLine}. O campo resolvedContent deve conter apenas o texto que substituirá esse bloco, sem os marcadores Git.`
-			: "Proponha o conteúdo completo do arquivo resultante no campo resolvedContent.";
+			: "Resolva em conjunto todos os blocos de conflito presentes em EDITABLE RESULT. Proponha o conteúdo completo e final do arquivo no campo resolvedContent, sem nenhum marcador Git; preserve também todo o código que não faz parte dos conflitos.";
 	const scopedSections =
 		input.scope.type === "hunk"
 			? [

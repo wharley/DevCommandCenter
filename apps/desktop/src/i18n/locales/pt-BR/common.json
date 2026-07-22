@@ -1309,6 +1309,7 @@
       "updatedWithoutConflicts": "Branch atualizada sem conflitos. Agora ela pode ser enviada.",
       "hunkChanged": "O bloco mudou. Selecione-o novamente antes de pedir a sugestão.",
       "agentApplied": "Sugestão do agente aplicada somente ao editor",
+      "sideLoadedForReview": "A versão de {{branch}} foi colocada no resultado. Revise antes de salvar.",
       "resolveAllHunks": "Resolva todos os blocos deste arquivo antes de marcá-lo como resolvido.",
       "fileChanged": "O arquivo mudou no disco. Reabra o conflito antes de sobrescrever.",
       "markedResolved": "{{path}} marcado como resolvido",
@@ -1324,7 +1325,8 @@
       "agentInvalid": "O agente retornou uma sugestão inválida. A resposta ficou registrada na sessão para revisão.",
       "agentIncomplete": "A sugestão do agente está incompleta.",
       "agentResultInvalid": "A sugestão do agente não contém um resultado válido.",
-      "agentEmptyResult": "O agente retornou um arquivo vazio, embora as versões em conflito possuam conteúdo. Nada foi aplicado; abra a sessão para revisar a resposta."
+      "agentEmptyResult": "O agente retornou um arquivo vazio, embora as versões em conflito possuam conteúdo. Nada foi aplicado; abra a sessão para revisar a resposta.",
+      "agentUnresolvedResult": "O agente deixou marcadores de conflito no resultado. Nada foi aplicado; abra a sessão para revisar a resposta ou tente novamente."
     },
     "unsupported": {
       "title": "Operação {{operation}} detectada",
@@ -1355,7 +1357,7 @@
     },
     "fileActions": {
       "useFile": "Usar arquivo {{branch}}",
-      "useFileTitle": "Aceita e marca o arquivo inteiro usando {{branch}}",
+      "useFileTitle": "Coloca a versão completa de {{branch}} no resultado para revisão",
       "deleteResult": "Excluir resultado"
     },
     "unavailable": {
@@ -1366,6 +1368,7 @@
     },
     "hunk": {
       "position": "Bloco {{current}} de {{total}}",
+      "manualHint": "Resolva manualmente este bloco ou use o agente para o arquivo inteiro.",
       "accept": "Aceitar {{branch}}",
       "acceptBoth": "Aceitar ambos",
       "resolveWithAgent": "Resolver este bloco com agente",
@@ -1374,6 +1377,8 @@
       "pending_other": "{{count}} blocos ainda pendentes"
     },
     "agent": {
+      "resolveFile": "Resolver arquivo com agente",
+      "resolveFileTitle": "O agente analisa todos os blocos deste arquivo de uma só vez e propõe o código final",
       "reviewFile": "Pedir revisão do arquivo ao agente",
       "sessionTitle": "Resolver conflito: {{path}}",
       "suggestionAppliedHunk": "Sugestão do agente aplicada ao bloco",
@@ -1409,6 +1414,14 @@
     },
     "result": {
       "title": "Resultado editável",
+      "finalLabel": "Resultado final",
+      "restore": "Restaurar",
+      "resolveHint": "Ainda há marcadores no resultado. Resolva manualmente ou peça ao agente para resolver o arquivo inteiro.",
+      "views": {
+        "edit": "Código final",
+        "compareCurrent": "Comparar com meu código",
+        "compareIncoming": "Comparar com a base"
+      },
       "changed": "Resultado alterado",
       "ready": "Pronto para marcar como resolvido",
       "save": "Salvar e marcar resolvido",

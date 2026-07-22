@@ -1309,6 +1309,7 @@
       "updatedWithoutConflicts": "Branch updated without conflicts. It can now be pushed.",
       "hunkChanged": "The hunk changed. Select it again before requesting a suggestion.",
       "agentApplied": "The agent suggestion was applied only to the editor",
+      "sideLoadedForReview": "The {{branch}} version was placed in the result. Review it before saving.",
       "resolveAllHunks": "Resolve every hunk in this file before marking it as resolved.",
       "fileChanged": "The file changed on disk. Reopen the conflict before overwriting it.",
       "markedResolved": "Marked {{path}} as resolved",
@@ -1324,7 +1325,8 @@
       "agentInvalid": "The agent returned an invalid suggestion. Its response remains in the session for review.",
       "agentIncomplete": "The agent suggestion is incomplete.",
       "agentResultInvalid": "The agent suggestion does not contain a valid result.",
-      "agentEmptyResult": "The agent returned an empty file even though the conflicting versions contain content. Nothing was applied; open the session to review the response."
+      "agentEmptyResult": "The agent returned an empty file even though the conflicting versions contain content. Nothing was applied; open the session to review the response.",
+      "agentUnresolvedResult": "The agent left conflict markers in the result. Nothing was applied; open the session to review the response or try again."
     },
     "unsupported": {
       "title": "{{operation}} operation detected",
@@ -1355,7 +1357,7 @@
     },
     "fileActions": {
       "useFile": "Use {{branch}} file",
-      "useFileTitle": "Accept and mark the whole file using {{branch}}",
+      "useFileTitle": "Place the complete {{branch}} version in the result for review",
       "deleteResult": "Delete result"
     },
     "unavailable": {
@@ -1366,6 +1368,7 @@
     },
     "hunk": {
       "position": "Hunk {{current}} of {{total}}",
+      "manualHint": "Resolve this hunk manually or use the agent for the whole file.",
       "accept": "Accept {{branch}}",
       "acceptBoth": "Accept both",
       "resolveWithAgent": "Resolve this hunk with agent",
@@ -1374,6 +1377,8 @@
       "pending_other": "{{count}} hunks still pending"
     },
     "agent": {
+      "resolveFile": "Resolve file with agent",
+      "resolveFileTitle": "The agent analyzes every hunk in this file together and proposes the final code",
       "reviewFile": "Ask agent to review file",
       "sessionTitle": "Resolve conflict: {{path}}",
       "suggestionAppliedHunk": "Agent suggestion applied to the hunk",
@@ -1409,6 +1414,14 @@
     },
     "result": {
       "title": "Editable result",
+      "finalLabel": "Final result",
+      "restore": "Restore",
+      "resolveHint": "Conflict markers remain in the result. Resolve them manually or ask the agent to resolve the whole file.",
+      "views": {
+        "edit": "Final code",
+        "compareCurrent": "Compare with my code",
+        "compareIncoming": "Compare with base"
+      },
       "changed": "Result changed",
       "ready": "Ready to mark as resolved",
       "save": "Save and mark resolved",

@@ -117,6 +117,43 @@ describe("agent conflict resolution contract", () => {
 		).toThrowError(new AgentConflictResolutionError("empty-result"));
 	});
 
+	it("rejects a whole-file result that leaves conflict markers behind", () => {
+		expect(() =>
+			validateAgentConflictResolutionSuggestion(
+				{
+					resolvedContent: "<<<<<<< HEAD\ncurrent\n=======\nincoming\n>>>>>>> main\n",
+					explanation: "Needs another pass.",
+				},
+				{
+					scope: "file",
+					currentText: "current\n",
+					incomingText: "incoming\n",
+				},
+			),
+		).toThrowError(new AgentConflictResolutionError("unresolved-result"));
+	});
+
+	it("tells a whole-file run to resolve every conflict block together", () => {
+		const prompt = buildAgentConflictResolutionPrompt(
+			{
+				path: "src/example.ts",
+				kind: "both-modified",
+				currentRef: "feature",
+				incomingRef: "main",
+				responseLanguage: "English",
+				baseText: "base",
+				currentText: "current",
+				incomingText: "incoming",
+				resultText: "two conflicted blocks",
+				scope: { type: "file" },
+			},
+			"nonce",
+		);
+
+		expect(prompt).toContain("todos os blocos de conflito");
+		expect(prompt).toContain("conteúdo completo e final do arquivo");
+	});
+
 	it("allows an empty hunk replacement because removing a block can be intentional", () => {
 		expect(
 			validateAgentConflictResolutionSuggestion(

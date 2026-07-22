@@ -25,7 +25,14 @@ import {
 	X,
 	XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -47,7 +54,6 @@ import {
 } from "@/features/editor/WorkspaceFileSurface";
 import {
 	applyMergeConflictResolution,
-	applyMergeConflictReplacement,
 	hasMergeConflictMarkerFragments,
 	parseMergeConflictHunks,
 	type MergeConflictResolution,
@@ -81,8 +87,16 @@ type AppliedAgentSuggestion = {
 	path: string;
 	explanation: string;
 	sessionId: string;
-	scope: "hunk" | "file";
 };
+
+type ResultView = "edit" | "compare-current" | "compare-incoming";
+
+type MonacoRuntimeModule = typeof import("@/lib/monaco-runtime");
+type MonacoDiffController = Awaited<
+	ReturnType<MonacoRuntimeModule["createDiffEditor"]>
+>;
+
+const MERGE_DIFF_SIDE_BY_SIDE_MIN_WIDTH = 1_000;
 
 type AgentRunState = {
 	sessionId: string | null;
@@ -112,6 +126,8 @@ function agentResolutionErrorMessage(
 			return t("mergeConflict.errors.agentResultInvalid");
 		case "empty-result":
 			return t("mergeConflict.errors.agentEmptyResult");
+		case "unresolved-result":
+			return t("mergeConflict.errors.agentUnresolvedResult");
 	}
 }
 
@@ -193,6 +209,115 @@ function SidePreview({
 	);
 }
 
+function ConflictResultDiff({
+	path,
+	originalText,
+	resultText,
+	originalLabel,
+	resultLabel,
+}: {
+	path: string;
+	originalText: string;
+	resultText: string;
+	originalLabel: string;
+	resultLabel: string;
+}) {
+	const containerRef = useRef<HTMLDivElement | null>(null);
+	const hostRef = useRef<HTMLDivElement | null>(null);
+	const controllerRef = useRef<MonacoDiffController | null>(null);
+	const requestIdRef = useRef(0);
+	const [error, setError] = useState<string | null>(null);
+	const [inline, setInline] = useState(false);
+
+	useEffect(
+		() => () => {
+			controllerRef.current?.dispose();
+			controllerRef.current = null;
+		},
+		[],
+	);
+
+	useLayoutEffect(() => {
+		const host = hostRef.current;
+		if (!host) return;
+		const shouldRenderInline =
+			(containerRef.current?.getBoundingClientRect().width ?? 0) <
+			MERGE_DIFF_SIDE_BY_SIDE_MIN_WIDTH;
+
+		const requestId = requestIdRef.current + 1;
+		requestIdRef.current = requestId;
+		let disposed = false;
+
+		controllerRef.current?.dispose();
+		controllerRef.current = null;
+		host.replaceChildren();
+		setError(null);
+
+		void (async () => {
+			try {
+				const { createDiffEditor } = await import("@/lib/monaco-runtime");
+				const controller = await createDiffEditor({
+					container: host,
+					path,
+					originalText,
+					modifiedText: resultText,
+					inline: shouldRenderInline,
+				});
+				if (disposed || requestId !== requestIdRef.current) {
+					controller.dispose();
+					return;
+				}
+				controllerRef.current = controller;
+			} catch (cause) {
+				if (!disposed) setError(errorMessage(cause));
+			}
+		})();
+
+		return () => {
+			disposed = true;
+		};
+	}, [path]);
+
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container || typeof ResizeObserver === "undefined") return;
+
+		const updateLayout = (width: number) =>
+			setInline(width < MERGE_DIFF_SIDE_BY_SIDE_MIN_WIDTH);
+		updateLayout(container.getBoundingClientRect().width);
+		const observer = new ResizeObserver(([entry]) => {
+			if (entry) updateLayout(entry.contentRect.width);
+		});
+		observer.observe(container);
+		return () => observer.disconnect();
+	}, []);
+
+	useEffect(() => {
+		controllerRef.current?.setTexts({
+			originalText,
+			modifiedText: resultText,
+			inline,
+		});
+	}, [inline, originalText, resultText]);
+
+	return (
+		<div ref={containerRef} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+			<div className={cn("shrink-0 border-b border-border/50 bg-muted/[0.08] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground", inline ? "flex items-center gap-2" : "grid grid-cols-2 px-4")}>
+				<span className={cn("truncate", inline ? "" : "pr-3")} title={originalLabel}>{originalLabel}</span>
+				{inline ? <span aria-hidden className="text-muted-foreground/50">→</span> : null}
+				<span className={cn("truncate", inline ? "text-foreground/80" : "pl-3")} title={resultLabel}>{resultLabel}</span>
+			</div>
+			{error ? (
+				<div className="flex flex-1 items-center justify-center p-6 text-sm text-destructive">
+					{error}
+				</div>
+			) : (
+				<div ref={hostRef} className="min-h-0 min-w-0 w-full flex-1 overflow-hidden" />
+			)}
+		</div>
+	);
+}
+
 export function WorkspaceMergeConflictResolver({
 	workspaceRoot,
 	currentWorkspaceLabel,
@@ -206,10 +331,12 @@ export function WorkspaceMergeConflictResolver({
 	const { t, i18n } = useTranslation("common");
 	const editorRef = useRef<FileEditorHandle | null>(null);
 	const initialResultRef = useRef<string | null>(null);
+	const initialBufferRef = useRef("");
 	const totalConflictsRef = useRef(0);
 	const agentAbortControllerRef = useRef<AbortController | null>(null);
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
 	const [buffer, setBuffer] = useState("");
+	const [resultView, setResultView] = useState<ResultView>("edit");
 	const [activeHunk, setActiveHunk] = useState(0);
 	const [busy, setBusy] = useState<string | null>(null);
 	const [agentSuggestion, setAgentSuggestion] =
@@ -244,7 +371,7 @@ export function WorkspaceMergeConflictResolver({
 	);
 	const hunks = useMemo(() => parseMergeConflictHunks(buffer), [buffer]);
 	const hunk = hunks[Math.min(activeHunk, Math.max(hunks.length - 1, 0))] ?? null;
-	const dirty = selected != null && buffer !== (initialResultRef.current ?? "");
+	const dirty = selected != null && buffer !== initialBufferRef.current;
 	const currentRef = shortRef(
 		state?.currentBranch,
 		t("mergeConflict.currentBranchFallback"),
@@ -354,10 +481,23 @@ export function WorkspaceMergeConflictResolver({
 		setSelectedPath(entry.path);
 		setBuffer(result);
 		initialResultRef.current = entry.result.text;
+		initialBufferRef.current = result;
+		setResultView("edit");
 		setActiveHunk(0);
 		setAgentSuggestion(null);
 		setAgentRun(null);
 	}, []);
+
+	const requestOpenEntry = useCallback(
+		(entry: WorkspaceGitConflictEntry) => {
+			if (entry.path === selectedPath) return;
+			if (dirty && !window.confirm(t("mergeConflict.confirm.discardEdit"))) {
+				return;
+			}
+			openEntry(entry);
+		},
+		[dirty, openEntry, selectedPath, t],
+	);
 
 	useEffect(() => {
 		if (conflicts.length === 0) {
@@ -447,6 +587,8 @@ export function WorkspaceMergeConflictResolver({
 			const next = applyMergeConflictResolution(source, nextHunk, resolution);
 			editorRef.current?.setValue(next);
 			setBuffer(next);
+			setResultView("edit");
+			setAgentSuggestion(null);
 		},
 		[buffer, hunk],
 	);
@@ -454,15 +596,6 @@ export function WorkspaceMergeConflictResolver({
 	const resolveWithAgent = useCallback(async () => {
 		if (!selected) return;
 		const source = editorRef.current?.getValue() ?? buffer;
-		const requestedHunk = hunk
-			? parseMergeConflictHunks(source).find(
-					(candidate) => candidate.startOffset === hunk.startOffset,
-				)
-			: null;
-		if (hunk && !requestedHunk) {
-			toast.warning(t("mergeConflict.toast.hunkChanged"));
-			return;
-		}
 
 		const token = createAgentResolutionToken();
 		const prompt = buildAgentConflictResolutionPrompt(
@@ -477,15 +610,7 @@ export function WorkspaceMergeConflictResolver({
 				currentText: selected.current.text,
 				incomingText: selected.incoming.text,
 				resultText: source,
-				scope: requestedHunk
-					? {
-							type: "hunk",
-							startLine: requestedHunk.startLine,
-							baseText: requestedHunk.baseText,
-							currentText: requestedHunk.currentText,
-							incomingText: requestedHunk.incomingText,
-						}
-					: { type: "file" },
+				scope: { type: "file" },
 			},
 			token,
 		);
@@ -530,29 +655,23 @@ export function WorkspaceMergeConflictResolver({
 			const suggestion = validateAgentConflictResolutionSuggestion(
 				parseAgentConflictResolution(result.content, token),
 				{
-					scope: requestedHunk ? "hunk" : "file",
-					currentText: requestedHunk
-						? requestedHunk.currentText
-						: selected.current.text,
-					incomingText: requestedHunk
-						? requestedHunk.incomingText
-						: selected.incoming.text,
+					scope: "file",
+					currentText: selected.current.text,
+					incomingText: selected.incoming.text,
 				},
 			);
 			const latest = editorRef.current?.getValue() ?? buffer;
 			if (latest !== source) {
 				throw new Error(t("mergeConflict.errors.agentResultChanged"));
 			}
-			const next = requestedHunk
-				? applyMergeConflictReplacement(source, requestedHunk, suggestion.resolvedContent)
-				: suggestion.resolvedContent;
+			const next = suggestion.resolvedContent;
 			editorRef.current?.setValue(next);
 			setBuffer(next);
+			setResultView(selected.current.text != null ? "compare-current" : "edit");
 			setAgentSuggestion({
 				path: selected.path,
 				explanation: suggestion.explanation,
 				sessionId: result.sessionId,
-				scope: requestedHunk ? "hunk" : "file",
 			});
 			setAgentRun((current) =>
 				current
@@ -582,7 +701,6 @@ export function WorkspaceMergeConflictResolver({
 	}, [
 		buffer,
 		currentRef,
-		hunk,
 		i18n.resolvedLanguage,
 		incomingRef,
 		onResolveWithAgent,
@@ -658,9 +776,27 @@ export function WorkspaceMergeConflictResolver({
 		}
 	}, [buffer, refresh, selected, t, workspaceRoot]);
 
-	const acceptWholeSide = useCallback(
+	const useWholeSide = useCallback(
 		async (side: WorkspaceGitConflictSide) => {
 			if (!selected) return;
+			const sideContent =
+				side === "current" ? selected.current.text : selected.incoming.text;
+			if (sideContent != null) {
+				editorRef.current?.setValue(sideContent);
+				setBuffer(sideContent);
+				setActiveHunk(0);
+				setResultView("edit");
+				setAgentSuggestion(null);
+				toast.info(
+					t("mergeConflict.toast.sideLoadedForReview", {
+						branch: side === "current" ? currentLabel : incomingLabel,
+					}),
+				);
+				return;
+			}
+
+			// Deleted, binary and oversized sides cannot be previewed as text. Git must
+			// apply these versions directly, which preserves the existing safe fallback.
 			setBusy(side);
 			try {
 				await workspaceGitAcceptConflict({
@@ -682,6 +818,25 @@ export function WorkspaceMergeConflictResolver({
 			}
 		},
 		[currentLabel, incomingLabel, refresh, selected, t, workspaceRoot],
+	);
+
+	const restoreOriginalResult = useCallback(() => {
+		const original = initialBufferRef.current;
+		editorRef.current?.setValue(original);
+		setBuffer(original);
+		setActiveHunk(0);
+		setResultView("edit");
+		setAgentSuggestion(null);
+	}, []);
+
+	const changeResultView = useCallback(
+		(next: ResultView) => {
+			if (resultView === "edit") {
+				setBuffer(editorRef.current?.getValue() ?? buffer);
+			}
+			setResultView(next);
+		},
+		[buffer, resultView],
 	);
 
 	const deleteResult = useCallback(async () => {
@@ -959,7 +1114,7 @@ export function WorkspaceMergeConflictResolver({
 										key={entry.path}
 										type="button"
 										disabled={Boolean(busy)}
-										onClick={() => openEntry(entry)}
+										onClick={() => requestOpenEntry(entry)}
 										className={cn(
 											"group mb-1 flex w-full items-start gap-2.5 rounded-lg border px-2.5 py-2.5 text-left transition-all",
 											selected?.path === entry.path
@@ -985,8 +1140,12 @@ export function WorkspaceMergeConflictResolver({
 							<section className="flex min-w-0 flex-1 flex-col bg-background">
 								<div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 bg-background/95 px-4 py-2.5 shadow-[0_1px_0_hsl(var(--border)/0.15)]">
 									<div className="mr-auto min-w-0"><p className="truncate font-mono text-xs font-semibold">{selected.path}</p><p className="text-[10px] text-muted-foreground">{conflictKindLabel(t, selected)}</p></div>
-									<Button className="max-w-56" variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void acceptWholeSide("current")} title={t("mergeConflict.fileActions.useFileTitle", { branch: currentLabel })}><span className="min-w-0 truncate">{t("mergeConflict.fileActions.useFile", { branch: currentLabel })}</span></Button>
-									<Button className="max-w-56" variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void acceptWholeSide("incoming")} title={t("mergeConflict.fileActions.useFileTitle", { branch: incomingLabel })}><span className="min-w-0 truncate">{t("mergeConflict.fileActions.useFile", { branch: incomingLabel })}</span></Button>
+									<Button className="max-w-56" variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void useWholeSide("current")} title={t("mergeConflict.fileActions.useFileTitle", { branch: currentLabel })}><span className="min-w-0 truncate">{t("mergeConflict.fileActions.useFile", { branch: currentLabel })}</span></Button>
+									<Button className="max-w-56" variant="outline" size="xs" disabled={Boolean(busy)} onClick={() => void useWholeSide("incoming")} title={t("mergeConflict.fileActions.useFileTitle", { branch: incomingLabel })}><span className="min-w-0 truncate">{t("mergeConflict.fileActions.useFile", { branch: incomingLabel })}</span></Button>
+									<Button className="gap-1.5" variant="secondary" size="xs" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()} title={t("mergeConflict.agent.resolveFileTitle")}>
+										{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+										{t("mergeConflict.agent.resolveFile")}
+									</Button>
 									<Button className="gap-1.5" variant="destructive" size="xs" disabled={Boolean(busy)} onClick={() => void deleteResult()}><Trash2 className="size-3.5" />{t("mergeConflict.fileActions.deleteResult")}</Button>
 								</div>
 
@@ -997,12 +1156,12 @@ export function WorkspaceMergeConflictResolver({
 										<div className="shrink-0 border-b border-border/60 bg-gradient-to-b from-muted/30 to-muted/10 p-4">
 											{hunk ? (
 												<>
-											<div className="mb-2 flex items-center gap-2"><Badge variant="outline">{t("mergeConflict.hunk.position", { current: activeHunk + 1, total: hunks.length })}</Badge><div className="ml-auto flex gap-1"><Button variant="ghost" size="icon-xs" disabled={activeHunk === 0} onClick={() => setActiveHunk((value) => Math.max(0, value - 1))}><ChevronLeft /></Button><Button variant="ghost" size="icon-xs" disabled={activeHunk >= hunks.length - 1} onClick={() => setActiveHunk((value) => Math.min(hunks.length - 1, value + 1))}><ChevronRight /></Button></div></div>
-											<div className="flex gap-3"><SidePreview label={currentLabel} text={hunk.currentText} tone="current" /><SidePreview label={incomingLabel} text={hunk.incomingText} tone="incoming" /></div>
-											<div className="mt-2 flex flex-wrap gap-1.5"><Button className="max-w-56" size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("current")} title={t("mergeConflict.hunk.accept", { branch: currentLabel })}><span className="min-w-0 truncate">{t("mergeConflict.hunk.accept", { branch: currentLabel })}</span></Button><Button className="max-w-56" size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("incoming")} title={t("mergeConflict.hunk.accept", { branch: incomingLabel })}><span className="min-w-0 truncate">{t("mergeConflict.hunk.accept", { branch: incomingLabel })}</span></Button><Button size="xs" disabled={Boolean(busy)} onClick={() => applyHunk("both")}>{t("mergeConflict.hunk.acceptBoth")}</Button><Button className="gap-1.5" size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{t("mergeConflict.hunk.resolveWithAgent")}</Button></div>
+											<div className="mb-2 flex items-center gap-2"><Badge variant="outline">{t("mergeConflict.hunk.position", { current: activeHunk + 1, total: hunks.length })}</Badge><span className="text-[11px] text-muted-foreground">{t("mergeConflict.hunk.manualHint")}</span><div className="ml-auto flex gap-1"><Button variant="ghost" size="icon-xs" disabled={activeHunk === 0} onClick={() => setActiveHunk((value) => Math.max(0, value - 1))}><ChevronLeft /></Button><Button variant="ghost" size="icon-xs" disabled={activeHunk >= hunks.length - 1} onClick={() => setActiveHunk((value) => Math.min(hunks.length - 1, value + 1))}><ChevronRight /></Button></div></div>
+											<div className="flex flex-col gap-3 xl:flex-row"><SidePreview label={currentLabel} text={hunk.currentText} tone="current" /><SidePreview label={incomingLabel} text={hunk.incomingText} tone="incoming" /></div>
+											<div className="mt-2 flex flex-wrap gap-1.5"><Button className="max-w-56" size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("current")} title={t("mergeConflict.hunk.accept", { branch: currentLabel })}><span className="min-w-0 truncate">{t("mergeConflict.hunk.accept", { branch: currentLabel })}</span></Button><Button className="max-w-56" size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => applyHunk("incoming")} title={t("mergeConflict.hunk.accept", { branch: incomingLabel })}><span className="min-w-0 truncate">{t("mergeConflict.hunk.accept", { branch: incomingLabel })}</span></Button><Button size="xs" disabled={Boolean(busy)} onClick={() => applyHunk("both")}>{t("mergeConflict.hunk.acceptBoth")}</Button></div>
 										</>
 									) : (
-										<div className="flex flex-wrap items-center gap-2 text-xs text-emerald-600"><Check className="size-4" /><span className="mr-auto">{t("mergeConflict.hunk.nonePending")}</span><Button className="gap-1.5" size="xs" variant="secondary" disabled={Boolean(busy)} onClick={() => void resolveWithAgent()}>{busy === "agent" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{t("mergeConflict.agent.reviewFile")}</Button></div>
+										<div className="flex flex-wrap items-center gap-2 text-xs text-emerald-600"><Check className="size-4" /><span className="mr-auto">{t("mergeConflict.hunk.nonePending")}</span></div>
 									)}
 									{agentRun ? (
 										<div className="mt-2 overflow-hidden rounded-md border border-sky-500/25 bg-sky-500/[0.04] text-[11px]">
@@ -1027,16 +1186,43 @@ export function WorkspaceMergeConflictResolver({
 									) : null}
 									{agentSuggestion?.path === selected.path ? (
 										<div className="mt-2 rounded-md border border-violet-500/25 bg-violet-500/5 px-3 py-2 text-[11px] leading-5">
-											<div className="flex items-center gap-1.5 font-semibold text-violet-700 dark:text-violet-300"><Sparkles className="size-3.5" />{t(agentSuggestion.scope === "hunk" ? "mergeConflict.agent.suggestionAppliedHunk" : "mergeConflict.agent.suggestionAppliedFile")}</div>
+										<div className="flex items-center gap-1.5 font-semibold text-violet-700 dark:text-violet-300"><Sparkles className="size-3.5" />{t("mergeConflict.agent.suggestionAppliedFile")}</div>
 											<p className="mt-1 text-muted-foreground">{agentSuggestion.explanation}</p>
 							<p className="mt-1 font-medium text-foreground" title={t("mergeConflict.agent.sessionLabel", { sessionId: agentSuggestion.sessionId })}>{t("mergeConflict.agent.reviewNotice")}</p>
 										</div>
 									) : null}
 								</div>
-								<div className="flex shrink-0 items-center gap-2 border-b border-border/50 bg-muted/[0.08] px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"><span className={cn("size-1.5 rounded-full", suspiciousEmptyResult ? "bg-destructive" : "bg-emerald-500")} />{t("mergeConflict.result.title")}</div>
+								<div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/50 bg-muted/[0.08] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground sm:px-4">
+									<span className={cn("size-1.5 rounded-full", suspiciousEmptyResult ? "bg-destructive" : hunks.length > 0 ? "bg-amber-500" : "bg-emerald-500")} />
+									<span className="mr-auto">{t("mergeConflict.result.title")}</span>
+									<div className="flex w-full max-w-full items-center gap-1 overflow-x-auto normal-case tracking-normal sm:w-auto">
+										<Button className="shrink-0" size="xs" variant={resultView === "edit" ? "secondary" : "ghost"} onClick={() => changeResultView("edit")}>{t("mergeConflict.result.views.edit")}</Button>
+										<Button className="shrink-0" size="xs" variant={resultView === "compare-current" ? "secondary" : "ghost"} disabled={selected.current.text == null} onClick={() => changeResultView("compare-current")}>{t("mergeConflict.result.views.compareCurrent")}</Button>
+										<Button className="shrink-0" size="xs" variant={resultView === "compare-incoming" ? "secondary" : "ghost"} disabled={selected.incoming.text == null} onClick={() => changeResultView("compare-incoming")}>{t("mergeConflict.result.views.compareIncoming")}</Button>
+										<Button size="xs" variant="ghost" className="shrink-0 gap-1" disabled={!dirty || Boolean(busy)} onClick={restoreOriginalResult}><RotateCcw className="size-3" />{t("mergeConflict.result.restore")}</Button>
+									</div>
+								</div>
 								{suspiciousEmptyResult ? <div className="flex shrink-0 items-start gap-2 border-b border-destructive/20 bg-destructive/[0.06] px-4 py-2 text-[11px] text-destructive"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" /><span>{t("mergeConflict.result.emptyWarning")}</span></div> : null}
-								<div className="min-h-0 flex-1"><WorkspaceFileEditor key={selected.path} ref={editorRef} path={selected.path} content={buffer} readOnly={busy === "agent"} annotateLabel="" onChange={() => setBuffer(editorRef.current?.getValue() ?? "")} /></div>
-										<div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-background/95 px-4 py-2.5 shadow-[0_-8px_24px_-20px_rgba(0,0,0,0.6)]"><div className="min-w-0"><span className="block text-[11px] text-muted-foreground">{hunks.length > 0 ? t("mergeConflict.hunk.pending", { count: hunks.length }) : dirty ? t("mergeConflict.result.changed") : t("mergeConflict.result.ready")}</span><span className={cn("block text-[10px]", suspiciousEmptyResult ? "text-destructive" : "text-muted-foreground")}>{t("mergeConflict.result.stats", { lines: resultLineCount, characters: buffer.length })}</span></div><Button className="shrink-0 gap-1.5" size="sm" title={t("mergeConflict.result.saveTitle")} disabled={Boolean(busy) || hunks.length > 0} onClick={() => void saveAndResolve()}>{busy === "save" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{t("mergeConflict.result.save")}</Button></div>
+								{resultView === "edit" ? (
+									<div className="flex min-h-0 min-w-0 flex-1 overflow-hidden"><WorkspaceFileEditor key={selected.path} ref={editorRef} path={selected.path} content={buffer} readOnly={busy === "agent"} annotateLabel="" onChange={() => setBuffer(editorRef.current?.getValue() ?? "")} /></div>
+								) : (
+									<ConflictResultDiff
+										key={`${selected.path}:${resultView}`}
+										path={selected.path}
+										originalText={resultView === "compare-current" ? (selected.current.text ?? "") : (selected.incoming.text ?? "")}
+										resultText={buffer}
+										originalLabel={resultView === "compare-current" ? currentLabel : incomingLabel}
+										resultLabel={t("mergeConflict.result.finalLabel")}
+									/>
+								)}
+								<div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-background/95 px-4 py-2.5 shadow-[0_-8px_24px_-20px_rgba(0,0,0,0.6)]">
+									<div className="min-w-0">
+										<span className={cn("block text-[11px]", hunks.length > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-600")}>{hunks.length > 0 ? t("mergeConflict.hunk.pending", { count: hunks.length }) : dirty ? t("mergeConflict.result.changed") : t("mergeConflict.result.ready")}</span>
+										<span className={cn("block text-[10px]", suspiciousEmptyResult ? "text-destructive" : "text-muted-foreground")}>{t("mergeConflict.result.stats", { lines: resultLineCount, characters: buffer.length })}</span>
+									</div>
+									{hunks.length > 0 ? <span className="hidden text-right text-[10px] text-muted-foreground lg:block">{t("mergeConflict.result.resolveHint")}</span> : null}
+									<Button className="shrink-0 gap-1.5" size="sm" title={hunks.length > 0 ? t("mergeConflict.result.resolveHint") : t("mergeConflict.result.saveTitle")} disabled={Boolean(busy) || hunks.length > 0} onClick={() => void saveAndResolve()}>{busy === "save" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{t("mergeConflict.result.save")}</Button>
+								</div>
 									</>
 								)}
 							</section>
