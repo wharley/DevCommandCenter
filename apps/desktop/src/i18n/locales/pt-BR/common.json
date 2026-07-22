@@ -572,7 +572,9 @@
     },
     "sessionFallback": "Nenhuma sessão ativa - inicie uma pelo composer.",
     "changes": {
-      "emptyOnBranch": "Nenhuma alteração neste branch."
+      "emptyOnBranch": "Nenhuma alteração neste branch.",
+      "loadingGit": "Lendo arquivos alterados…",
+      "updatingGit": "Atualizando arquivos alterados…"
     },
     "setupRetry": {
       "button": "Refazer setup",

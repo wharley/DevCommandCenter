@@ -1855,6 +1855,7 @@ export function WorkspaceInspectorSidebar({
 		(codeRabbitStatusQuery.isPending ? t("inspector.codeRabbit.checking") : null);
 	const [isContinuingWorkspace, setIsContinuingWorkspace] = useState(false);
 	const [isSyncingBase, setIsSyncingBase] = useState(false);
+	const [isGitActionInProgress, setIsGitActionInProgress] = useState(false);
 	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
 	const [isCompilingSpecContext, setIsCompilingSpecContext] = useState(false);
 	const [pendingGitConfirmation, setPendingGitConfirmation] =
@@ -1967,6 +1968,7 @@ export function WorkspaceInspectorSidebar({
 			return;
 		}
 
+		setIsGitActionInProgress(true);
 		try {
 			switch (commitMode) {
 				case "merged":
@@ -2082,6 +2084,8 @@ export function WorkspaceInspectorSidebar({
 				},
 			);
 			throw error;
+		} finally {
+			setIsGitActionInProgress(false);
 		}
 	}, [
 		commitMode,
@@ -2112,6 +2116,7 @@ export function WorkspaceInspectorSidebar({
 				requestLabel: forgeContext.requestLabel,
 			}),
 		);
+		setIsGitActionInProgress(true);
 		try {
 			await workspaceChangeRequestMerge({
 				workspaceRoot: root,
@@ -2144,6 +2149,8 @@ export function WorkspaceInspectorSidebar({
 				}),
 				{ id: loadingToast },
 			);
+		} finally {
+			setIsGitActionInProgress(false);
 		}
 	}, [forgeContext.requestLabel, queryClient, selectedForgeLogin, t, workspacePath]);
 
@@ -2811,7 +2818,10 @@ export function WorkspaceInspectorSidebar({
 					<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border/60">
 						<GitSectionHeader
 							commitMode={commitMode}
-							isRefreshing={gitStatusQuery.isFetching && !gitStatusQuery.isPending}
+							isRefreshing={
+								isGitActionInProgress ||
+								(gitStatusQuery.isFetching && !gitStatusQuery.isPending)
+							}
 							onCommit={handleInspectorCommit}
 							onContinueWorkspace={handleContinueWorkspace}
 							isContinuingWorkspace={isContinuingWorkspace}
@@ -2961,6 +2971,7 @@ export function WorkspaceInspectorSidebar({
 									onSelectPreview={onSelectPreview}
 									onPrefillComposer={onPrefillComposer}
 									reviewCommentsByPath={reviewCommentsByPath}
+									isGitActionInProgress={isGitActionInProgress || isSyncingBase}
 									targetSessionId={
 										activeDelegationReview?.delegation.childSessionId ??
 										(isSessionWorktreeView ? sessionId : null)

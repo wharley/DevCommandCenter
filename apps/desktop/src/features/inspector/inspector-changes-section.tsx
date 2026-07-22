@@ -759,6 +759,8 @@ type InspectorChangesSectionProps = {
 	onPrefillComposer?: (text: string) => void;
 	reviewCommentsByPath?: Map<string, WorkspacePrReviewComment[]>;
 	targetSessionId?: string | null;
+	/** A commit/push/PR action is reconciling the Git state shown below. */
+	isGitActionInProgress?: boolean;
 };
 
 export function InspectorChangesSection({
@@ -768,6 +770,7 @@ export function InspectorChangesSection({
 	onPrefillComposer,
 	reviewCommentsByPath = EMPTY_REVIEW_COMMENTS_BY_PATH,
 	targetSessionId = null,
+	isGitActionInProgress = false,
 }: InspectorChangesSectionProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -861,7 +864,14 @@ export function InspectorChangesSection({
 
 	if (query.isPending) {
 		return (
-			<p className="px-2 py-2 text-[11px] text-muted-foreground">Loading git status…</p>
+			<div
+				className="flex min-h-0 flex-1 items-center justify-center gap-2 px-3 py-6 text-[11px] text-muted-foreground"
+				role="status"
+				aria-live="polite"
+			>
+				<LoaderCircleIcon className="size-3.5 animate-spin" aria-hidden />
+				{t("inspector.changes.loadingGit")}
+			</div>
 		);
 	}
 
@@ -877,10 +887,11 @@ export function InspectorChangesSection({
 	const hasAny = data.staged.length > 0 || data.unstaged.length > 0;
 
 	return (
-		<ScrollArea
-			className="min-h-0 flex-1 bg-muted/15 font-mono text-[11.5px]"
-			aria-label="Git changes"
-		>
+		<div className="relative flex min-h-0 flex-1 flex-col">
+			<ScrollArea
+				className="min-h-0 flex-1 bg-muted/15 font-mono text-[11.5px]"
+				aria-label="Git changes"
+			>
 			<div className="min-w-0 max-w-full overflow-x-hidden pr-2">
 				{data.staged.length > 0 ? (
 					<ChangesGroup
@@ -953,6 +964,17 @@ export function InspectorChangesSection({
 					/>
 				) : null}
 			</div>
-		</ScrollArea>
+			</ScrollArea>
+			{isGitActionInProgress ? (
+				<div
+					className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-md border border-border/60 bg-background/95 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-sm backdrop-blur-[1px]"
+					role="status"
+					aria-live="polite"
+				>
+					<LoaderCircleIcon className="size-3.5 animate-spin text-primary" aria-hidden />
+					{t("inspector.changes.updatingGit")}
+				</div>
+			) : null}
+		</div>
 	);
 }
