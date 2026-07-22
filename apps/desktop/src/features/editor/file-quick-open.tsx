@@ -57,6 +57,40 @@ function fuzzyScore(haystack: string, needle: string, basenameStart: number): nu
 	return score;
 }
 
+export function rankQuickOpenFiles(
+	paths: readonly string[],
+	query: string,
+): string[] {
+	if (query.length === 0) {
+		return paths.slice(0, MAX_RESULTS);
+	}
+
+	const normalizedQuery = query.toLowerCase();
+	const scored: { path: string; score: number }[] = [];
+	for (const path of paths) {
+		const normalizedPath = path.toLowerCase();
+		const name = basename(path).toLowerCase();
+		let score: number;
+
+		// A literal filename/path match must always be visible first. This keeps
+		// an exact result from landing below fuzzy matches and requiring a scroll.
+		if (normalizedPath === normalizedQuery) {
+			score = 10_000;
+		} else if (name === normalizedQuery) {
+			score = 9_000;
+		} else if (normalizedPath.includes(normalizedQuery)) {
+			score = 8_000;
+		} else {
+			score = fuzzyScore(path, query, dirname(path).length + 1);
+		}
+
+		if (score >= 0) scored.push({ path, score });
+	}
+
+	scored.sort((a, b) => b.score - a.score || a.path.length - b.path.length);
+	return scored.slice(0, MAX_RESULTS).map((item) => item.path);
+}
+
 export function FileQuickOpen({
 	open,
 	onOpenChange,
@@ -87,16 +121,7 @@ export function FileQuickOpen({
 
 	const results = useMemo(() => {
 		const paths = filesQuery.data ?? [];
-		if (deferredQuery.length === 0) {
-			return paths.slice(0, MAX_RESULTS);
-		}
-		const scored: { path: string; score: number }[] = [];
-		for (const path of paths) {
-			const score = fuzzyScore(path, deferredQuery, dirname(path).length + 1);
-			if (score >= 0) scored.push({ path, score });
-		}
-		scored.sort((a, b) => b.score - a.score || a.path.length - b.path.length);
-		return scored.slice(0, MAX_RESULTS).map((item) => item.path);
+		return rankQuickOpenFiles(paths, deferredQuery);
 	}, [filesQuery.data, deferredQuery]);
 
 	return (

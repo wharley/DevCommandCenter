@@ -2,7 +2,6 @@ import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext
 import {
 	LexicalTypeaheadMenuPlugin,
 	MenuOption,
-	useBasicTypeaheadTriggerMatch,
 } from "@lexical/react/LexicalTypeaheadMenuPlugin";
 import { useQuery } from "@tanstack/react-query";
 import { $createTextNode, type TextNode } from "lexical";
@@ -22,6 +21,7 @@ import { workspaceTrackedFilesQueryOptions } from "../../workspace-tracked-files
 import { $createFileBadgeNode } from "../file-badge-node";
 
 export const MAX_VISIBLE_OPTIONS = 50;
+const MAX_FILE_MENTION_LENGTH = 200;
 
 class FileMentionOption extends MenuOption {
 	readonly file: TrackedComposerFile;
@@ -38,6 +38,12 @@ export function rankFile(file: TrackedComposerFile, query: string): number {
 	const q = query.toLowerCase();
 	const name = file.name.toLowerCase();
 	const path = file.path.toLowerCase();
+	if (name === q || path === q) {
+		return 5;
+	}
+	if (path.endsWith(`/${q}`)) {
+		return 4;
+	}
 	if (name.startsWith(q)) {
 		return 3;
 	}
@@ -57,11 +63,42 @@ export function filterFiles(
 	if (!query) {
 		return files.slice(0, MAX_VISIBLE_OPTIONS);
 	}
+	const q = query.toLowerCase();
+	// Once a complete filename (or path) is typed, do not dilute the result
+	// list with similarly named files such as paymentPix.ts or redis.tsx.
+	const exactMatches = files.filter((file) => {
+		const name = file.name.toLowerCase();
+		const path = file.path.toLowerCase();
+		return name === q || path === q;
+	});
+	if (exactMatches.length > 0) {
+		return exactMatches.slice(0, MAX_VISIBLE_OPTIONS);
+	}
 	const ranked = files
 		.map((file) => ({ file, score: rankFile(file, query) }))
 		.filter((entry) => entry.score > 0);
 	ranked.sort((a, b) => b.score - a.score);
 	return ranked.slice(0, MAX_VISIBLE_OPTIONS).map((entry) => entry.file);
+}
+
+/**
+ * File paths commonly contain punctuation (for example payment.ts and
+ * app/[token]/route.ts). Lexical's generic trigger matcher treats that
+ * punctuation as a mention terminator, so use a path-aware matcher instead.
+ */
+export function matchFileMentionTrigger(text: string) {
+	const match = new RegExp(
+		`(^|\\s|\\()(@([^\\s@]{0,${MAX_FILE_MENTION_LENGTH}}))$`,
+	).exec(text);
+	if (!match) {
+		return null;
+	}
+	const leadingCharacter = match[1];
+	return {
+		leadOffset: match.index + leadingCharacter.length,
+		matchingString: match[3],
+		replaceableString: match[2],
+	};
 }
 
 export function FileMentionPlugin({
@@ -82,9 +119,7 @@ export function FileMentionPlugin({
 		return filtered.map((file) => new FileMentionOption(file));
 	}, [files, query]);
 
-	const triggerFn = useBasicTypeaheadTriggerMatch("@", {
-		minLength: 0,
-	});
+	const triggerFn = useCallback(matchFileMentionTrigger, []);
 
 	const onSelectOption = useCallback(
 		(
