@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio, sync::Arc};
+use std::{collections::HashMap, fs, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -71,19 +71,22 @@ fn parse_claude_rate_limit_window(value: &Value) -> Option<ProviderUsageWindow> 
         .or_else(|| info.get("rate_limit_type"))
         .and_then(Value::as_str)
         .unwrap_or("subscription");
-    let raw_utilization = info.get("utilization").and_then(Value::as_f64);
-    let used_percent = raw_utilization
-        .map(|value| if value <= 1.0 { value * 100.0 } else { value })
-        .unwrap_or_else(|| {
-            if info.get("status").and_then(Value::as_str) == Some("rejected") {
-                100.0
+    let status = info.get("status").and_then(Value::as_str);
+    let used_percent = match info.get("utilization").and_then(Value::as_f64) {
+        Some(value) => {
+            if value <= 1.0 {
+                value * 100.0
             } else {
-                0.0
+                value
             }
-        })
-        .clamp(0.0, 100.0);
-    let is_exhausted =
-        info.get("status").and_then(Value::as_str) == Some("rejected") || used_percent >= 100.0;
+        }
+        None if status == Some("rejected") => 100.0,
+        // An allowed event may omit utilization. Treating that as 0% used made
+        // DCC display a convincing but incorrect "100% remaining" value.
+        None => return None,
+    }
+    .clamp(0.0, 100.0);
+    let is_exhausted = status == Some("rejected") || used_percent >= 100.0;
 
     Some(ProviderUsageWindow {
         id: id.to_string(),
@@ -100,6 +103,159 @@ fn parse_claude_rate_limit_window(value: &Value) -> Option<ProviderUsageWindow> 
         },
         is_exhausted,
     })
+}
+
+fn parse_claude_oauth_usage_window(id: &str, value: &Value) -> Option<ProviderUsageWindow> {
+    let used_percent = value.get("utilization")?.as_f64()?.clamp(0.0, 100.0);
+    Some(ProviderUsageWindow {
+        id: id.to_string(),
+        used_percent,
+        remaining_percent: (100.0 - used_percent).clamp(0.0, 100.0),
+        resets_at: value
+            .get("resets_at")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        window_duration_minutes: match id {
+            "five_hour" => Some(300),
+            "seven_day" | "seven_day_opus" | "seven_day_sonnet" => Some(10_080),
+            _ => None,
+        },
+        is_exhausted: used_percent >= 100.0,
+    })
+}
+
+fn parse_claude_oauth_account_usage(value: &Value) -> Result<ProviderAccountUsage> {
+    let mut windows = Vec::new();
+    for id in [
+        "five_hour",
+        "seven_day",
+        "seven_day_opus",
+        "seven_day_sonnet",
+    ] {
+        if let Some(window) = value
+            .get(id)
+            .and_then(|value| parse_claude_oauth_usage_window(id, value))
+        {
+            windows.push(window);
+        }
+    }
+
+    if windows.is_empty() {
+        return Err(CoreError::Provider(
+            "Claude usage API returned no usage windows".to_string(),
+        ));
+    }
+
+    Ok(ProviderAccountUsage {
+        provider_id: ProviderId("claude_code".to_string()),
+        state: ProviderAccountUsageState::Available,
+        windows,
+        plan_type: None,
+        updated_at: Utc::now().to_rfc3339(),
+        is_cached: false,
+    })
+}
+
+fn claude_credentials_path(runtime: Option<&ProviderRuntimeConfig>) -> Option<PathBuf> {
+    if let Some(config_dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
+        let path = PathBuf::from(config_dir);
+        if !path.as_os_str().is_empty() {
+            return Some(path.join(".credentials.json"));
+        }
+    }
+
+    let home = runtime
+        .and_then(|config| config.home_path.as_deref())
+        .and_then(|path| crate::common::resolve_runtime_home_path(Some(path)))
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))?;
+    Some(home.join(".claude").join(".credentials.json"))
+}
+
+fn oauth_token_from_credentials(raw: &str) -> Option<String> {
+    serde_json::from_str::<Value>(raw)
+        .ok()?
+        .pointer("/claudeAiOauth/accessToken")?
+        .as_str()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+}
+
+#[cfg(target_os = "macos")]
+async fn claude_oauth_token_from_keychain() -> Option<String> {
+    let mut command = Command::new("security");
+    command.args([
+        "find-generic-password",
+        "-w",
+        "-s",
+        "Claude Code-credentials",
+    ]);
+    command.kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_secs(5), command.output())
+        .await
+        .ok()?
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    oauth_token_from_credentials(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn claude_oauth_token_from_keychain() -> Option<String> {
+    None
+}
+
+async fn claude_oauth_access_token(runtime: Option<&ProviderRuntimeConfig>) -> Option<String> {
+    if let Some(token) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN")
+        .ok()
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+    {
+        return Some(token);
+    }
+
+    if let Some(token) = claude_credentials_path(runtime)
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|raw| oauth_token_from_credentials(&raw))
+    {
+        return Some(token);
+    }
+
+    claude_oauth_token_from_keychain().await
+}
+
+async fn fetch_claude_account_usage(
+    runtime: Option<&ProviderRuntimeConfig>,
+) -> Result<Option<ProviderAccountUsage>> {
+    let Some(token) = claude_oauth_access_token(runtime).await else {
+        return Ok(None);
+    };
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| {
+            CoreError::Provider(format!("failed to build Claude usage client: {error}"))
+        })?;
+    let response = client
+        .get("https://api.anthropic.com/api/oauth/usage")
+        .bearer_auth(token)
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .map_err(|error| CoreError::Provider(format!("Claude usage request failed: {error}")))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(CoreError::Provider(format!(
+            "Claude usage request returned HTTP {status}"
+        )));
+    }
+    let value = response
+        .json::<Value>()
+        .await
+        .map_err(|error| CoreError::Provider(format!("invalid Claude usage response: {error}")))?;
+    parse_claude_oauth_account_usage(&value).map(Some)
 }
 
 fn provider_runtime_cache_key(runtime: Option<&ProviderRuntimeConfig>) -> String {
@@ -733,22 +889,40 @@ impl Provider for ClaudeSdkSidecarAdapter {
         runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<Option<ProviderAccountUsage>> {
         let cache_key = provider_runtime_cache_key(runtime);
-        let usage = self
+        let cached_usage = self
             .runtime
             .account_usage
             .lock()
             .await
             .get(&cache_key)
-            .cloned()
-            .unwrap_or_else(|| ProviderAccountUsage {
+            .cloned();
+
+        match fetch_claude_account_usage(runtime).await {
+            Ok(Some(usage)) => {
+                self.runtime
+                    .account_usage
+                    .lock()
+                    .await
+                    .insert(cache_key, usage.clone());
+                Ok(Some(usage))
+            }
+            Ok(None) => Ok(Some(cached_usage.unwrap_or_else(|| ProviderAccountUsage {
                 provider_id: self.id.clone(),
                 state: ProviderAccountUsageState::AwaitingActivity,
                 windows: Vec::new(),
                 plan_type: None,
                 updated_at: Utc::now().to_rfc3339(),
                 is_cached: true,
-            });
-        Ok(Some(usage))
+            }))),
+            Err(error) => {
+                if let Some(mut usage) = cached_usage {
+                    usage.is_cached = true;
+                    Ok(Some(usage))
+                } else {
+                    Err(error)
+                }
+            }
+        }
     }
 }
 
@@ -772,5 +946,57 @@ mod account_usage_tests {
         assert_eq!(window.used_percent, 83.0);
         assert_eq!(window.remaining_percent, 17.0);
         assert_eq!(window.window_duration_minutes, Some(300));
+    }
+
+    #[test]
+    fn ignores_allowed_rate_limit_event_without_utilization() {
+        let window = parse_claude_rate_limit_window(&json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "allowed",
+                "rateLimitType": "five_hour",
+                "resetsAt": 1_800_000_000
+            }
+        }));
+
+        assert!(window.is_none());
+    }
+
+    #[test]
+    fn parses_live_claude_oauth_usage_windows() {
+        let usage = parse_claude_oauth_account_usage(&json!({
+            "five_hour": {
+                "utilization": 37.0,
+                "resets_at": "2026-07-22T18:00:00+00:00"
+            },
+            "seven_day": {
+                "utilization": 26.5,
+                "resets_at": "2026-07-27T18:00:00+00:00"
+            },
+            "seven_day_opus": null,
+            "seven_day_sonnet": {
+                "utilization": 1.0,
+                "resets_at": null
+            }
+        }))
+        .expect("OAuth usage response should parse");
+
+        assert_eq!(usage.windows.len(), 3);
+        assert_eq!(usage.windows[0].id, "five_hour");
+        assert_eq!(usage.windows[0].used_percent, 37.0);
+        assert_eq!(usage.windows[0].remaining_percent, 63.0);
+        assert_eq!(usage.windows[0].window_duration_minutes, Some(300));
+        assert_eq!(usage.windows[1].remaining_percent, 73.5);
+        assert_eq!(usage.windows[2].remaining_percent, 99.0);
+        assert!(!usage.is_cached);
+    }
+
+    #[test]
+    fn reads_oauth_access_token_from_claude_credentials() {
+        let token = oauth_token_from_credentials(
+            r#"{"claudeAiOauth":{"accessToken":" oauth-token ","refreshToken":"secret"}}"#,
+        );
+
+        assert_eq!(token.as_deref(), Some("oauth-token"));
     }
 }
