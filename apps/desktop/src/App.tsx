@@ -3679,6 +3679,9 @@ export default function App() {
 									workspaceName={selectedWorkspace.name}
 									workspaceBranch={selectedWorkspace.branch}
 									workspacePath={selectedSessionWorkspacePath}
+									terminalWorkspaceId={activeWorkspace?.id ?? selectedWorkspace.id}
+									terminalWorkspaceName={activeWorkspace?.name ?? selectedWorkspace.name}
+									terminalWorkspaceBranch={activeWorkspace?.branch ?? selectedWorkspace.branch}
 									projectId={activeWorkspace?.projectId ?? selectedWorkspace.projectId ?? selectedWorkspace.id}
 									terminalRootPath={activeWorkspace?.rootPath ?? selectedWorkspace.rootPath ?? null}
 									terminalWorktreePath={
