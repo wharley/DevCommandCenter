@@ -113,17 +113,13 @@ type WorkspaceComposerProps = {
 	workspaceBranch: string | null;
 	showPlanFollowUpPrompt: boolean;
 	planTitle: string | null;
-	planMarkdown: string | null;
+	planNeedsInput: boolean;
+	planApproved: boolean;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onAbortSession: () => void;
-	onOpenPlanSidebar: () => void;
-	onDelegatePlan: () => void;
-	onImplementPlanInNewThread: (input: {
-		planMarkdown: string;
-		planTitle: string | null;
-	}) => void;
+	onReviewPlan: () => void;
 };
 
 export function WorkspaceComposer({
@@ -140,14 +136,13 @@ export function WorkspaceComposer({
 	workspaceBranch,
 	showPlanFollowUpPrompt,
 	planTitle,
-	planMarkdown,
+	planNeedsInput,
+	planApproved,
 	onSelectProvider,
 	onSelectModel,
 	onSubmitPrompt,
 	onAbortSession,
-	onOpenPlanSidebar,
-	onDelegatePlan,
-	onImplementPlanInNewThread,
+	onReviewPlan,
 }: WorkspaceComposerProps) {
 	const { t } = useTranslation("common");
 	const [hasContent, setHasContent] = useState(false);
@@ -477,17 +472,9 @@ export function WorkspaceComposer({
 			{showPlanFollowUpPrompt ? (
 				<ComposerPlanFollowUpBanner
 					planTitle={planTitle}
-					onDelegatePlan={onDelegatePlan}
-					onImplementInNewThread={() => {
-						if (!planMarkdown) {
-							return;
-						}
-						onImplementPlanInNewThread({
-							planMarkdown,
-							planTitle,
-						});
-					}}
-					onOpenPlanSidebar={onOpenPlanSidebar}
+					needsInput={planNeedsInput}
+					approved={planApproved}
+					onReviewPlan={onReviewPlan}
 				/>
 			) : null}
 			{extraContextDirectories.length > 0 ? (
