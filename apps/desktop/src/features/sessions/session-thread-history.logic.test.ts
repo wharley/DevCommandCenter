@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { CoreEvent, SessionEventRecord } from "@dcc/contracts";
-import { projectWorkspaceMessages } from "./session-thread-history.logic";
+import {
+	mergeSessionThreadEvents,
+	projectWorkspaceMessages,
+} from "./session-thread-history.logic";
 
 function sessionTurnStarted(
 	sessionId: string,
@@ -276,6 +279,36 @@ function sessionTurnPermissionResolved(
 }
 
 describe("projectWorkspaceMessages", () => {
+	it("does not project another workspace's events when no session is selected", () => {
+		expect(
+			projectWorkspaceMessages(
+				[
+					sessionTurnStarted(
+						"session-old",
+						"turn-plan",
+						"Create a plan",
+						"2026-05-01T12:00:00Z",
+						true,
+					),
+					sessionTurnDeltaRecord(
+						"session-old",
+						"turn-plan",
+						"# Old workspace plan\n\n## Steps\n- [ ] Keep this isolated",
+					),
+					sessionTurnCompleted("session-old", "turn-plan"),
+				],
+				[
+					sessionTurnDelta(
+						"session-old",
+						"turn-plan",
+						"# Live plan from the old workspace",
+					),
+				],
+				null,
+			),
+		).toEqual([]);
+	});
+
 	it("filters history records to the current session and preserves timestamps", () => {
 		expect(
 			projectWorkspaceMessages(
@@ -608,6 +641,35 @@ describe("projectWorkspaceMessages", () => {
 				createdAt: "2026-05-01T12:00:00Z",
 				planMode: false,
 			},
+		]);
+	});
+
+	it("reconstructs a persisted plan approval as a session event", () => {
+		const approval: SessionEventRecord = {
+			eventId: "event-plan-approved",
+			sessionId: "session-a",
+			sequence: 3,
+			occurredAt: "2026-05-01T12:00:06Z",
+			kind: {
+				type: "plan_approved",
+				planMessageId: "assistant-session-a-turn-1",
+				planVersion: 1,
+				planHash: "fnv1a32:12345678",
+			},
+		};
+
+		expect(mergeSessionThreadEvents([approval], [], "session-a")).toEqual([
+			expect.objectContaining({
+				event: {
+					sessionPlanApproved: {
+						session_id: "session-a",
+						plan_message_id: "assistant-session-a-turn-1",
+						plan_version: 1,
+						plan_hash: "fnv1a32:12345678",
+					},
+				},
+				occurredAt: "2026-05-01T12:00:06Z",
+			}),
 		]);
 	});
 });
