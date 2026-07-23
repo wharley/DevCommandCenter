@@ -1128,7 +1128,9 @@
       "close": "Hide Git panel"
     },
     "terminal": {
-      "open": "Open terminal"
+      "open": "Open terminal",
+      "openWithActive_one": "Open terminal · {{count}} active",
+      "openWithActive_other": "Open terminal · {{count}} active"
     },
     "sessionState": {
       "idle": "idle",
