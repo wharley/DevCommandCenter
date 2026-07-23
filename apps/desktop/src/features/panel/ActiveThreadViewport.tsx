@@ -31,6 +31,8 @@ type ActiveThreadViewportProps = {
 	workspaceId?: string | null;
 	providers?: ProviderCatalog["providers"];
 	planMessageId: string | null;
+	planApproved: boolean;
+	planReadOnly: boolean;
 	sessionId: string | null;
 	activeMissionSpecRelativePath: string | null;
 	activeMissionSpecHash: string | null;
@@ -45,6 +47,7 @@ type ActiveThreadViewportProps = {
 	onReviewChanges?: () => void;
 	onReviewDelegation?: (delegationId: string) => void;
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
+	onOpenPlan: () => void;
 };
 
 export function ActiveThreadViewport({
@@ -61,6 +64,8 @@ export function ActiveThreadViewport({
 	workspaceId,
 	providers,
 	planMessageId,
+	planApproved,
+	planReadOnly,
 	sessionId,
 	activeMissionSpecRelativePath,
 	activeMissionSpecHash,
@@ -71,6 +76,7 @@ export function ActiveThreadViewport({
 	onReviewChanges,
 	onReviewDelegation,
 	onDelegateTaskApprove,
+	onOpenPlan,
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
 	const { contentRef, scrollRef, scrollToBottom, isAtBottom } = useStickToBottom({
@@ -171,11 +177,18 @@ export function ActiveThreadViewport({
 												plan={message.plan ?? null}
 												workspacePath={workspacePath}
 												isPlanContext={message.id === planMessageId}
+												isPlanApproved={
+													message.id === planMessageId && planApproved
+												}
+												isPlanReadOnly={
+													message.id === planMessageId && planReadOnly
+												}
 												sessionId={sessionId}
 												activeMissionSpecRelativePath={activeMissionSpecRelativePath}
 												activeMissionSpecHash={activeMissionSpecHash}
 												autoSaveMissionValidation={autoSaveMissionValidation}
 												onDelegateTaskApprove={onDelegateTaskApprove}
+												onOpenPlan={onOpenPlan}
 											/>
 										</div>
 									);
