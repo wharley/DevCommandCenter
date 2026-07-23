@@ -657,12 +657,52 @@
       "ultrathink": "Ultrathink"
     },
     "planFollowUp": {
-      "kicker": "Plano pronto",
+      "kicker": "Rascunho do plano",
+      "needsInput": "Plano precisa de resposta",
+      "approved": "Plano aprovado",
       "fallbackTitle": "Plano ativo da missão",
-      "openPlan": "Abrir plano",
+      "openPlan": "Revisar plano",
       "delegatePlan": "Delegar plano",
       "implementInNewThread": "Implementar em nova thread"
     }
+  },
+  "planSurface": {
+    "ariaLabel": "Revisão do plano",
+    "close": "Fechar revisão do plano",
+    "backToThread": "Voltar à conversa",
+    "draft": "Rascunho",
+    "needsInput": "Precisa de resposta",
+    "approved": "Aprovado",
+    "version": "Versão {{version}}",
+    "stepCount_one": "{{count}} etapa",
+    "stepCount_other": "{{count}} etapas",
+    "reviewBeforeExecution": "Revise e aprove este rascunho antes da execução.",
+    "needsInputSummary": "O planejador ainda precisa de informações antes da aprovação.",
+    "reviewPlan": "Revisar plano",
+    "viewPlan": "Ver plano",
+    "readOnly": "Somente leitura",
+    "readOnlyHint": "Esta versão já saiu do fluxo ativo de planejamento e permanece disponível para consulta.",
+    "readOnlySummary": "Esta versão já foi encaminhada e permanece disponível para consulta.",
+    "reviewHint": "Leia o plano, selecione qualquer trecho para comentar e depois aprove.",
+    "needsInputHint": "Volte à conversa e responda ao planejador antes de aprovar este plano.",
+    "answerInThread": "Responder na conversa",
+    "approvedHint": "Esta versão está aprovada e pronta para ser delegada.",
+    "commentSelection": "Comentar",
+    "commentTitle": "Comentar este trecho",
+    "commentDescription": "O planejador receberá este trecho, seu comentário e o plano atual completo.",
+    "selectedText": "Trecho selecionado",
+    "yourComment": "Seu comentário",
+    "commentPlaceholder": "Descreva o que deve mudar nesta parte do plano.",
+    "cancel": "Cancelar",
+    "requestRevision": "Solicitar revisão",
+    "revisionRequested": "Revisão do plano solicitada",
+    "approve": "Aprovar plano",
+    "approving": "Aprovando...",
+    "approvalSaved": "Plano aprovado",
+    "approvalFailed": "Não foi possível aprovar o plano",
+    "handoffRecordFailed": "A execução começou, mas não foi possível salvar o estado do plano",
+    "delegate": "Delegar implementação",
+    "implementInNewThread": "Implementar em nova thread"
   },
   "terminalDock": {
     "ariaLabel": "Dock do terminal",
@@ -1065,6 +1105,8 @@
       "turnCompleted": "Resposta pronta",
       "turnAborted": "Tarefa interrompida",
       "checkpointCreated": "Checkpoint criado",
+      "planApproved": "Plano aprovado",
+      "planHandedOff": "Plano encaminhado",
       "sessionCompleted": "Sessão concluída",
       "sessionAborted": "Sessão interrompida",
       "event": "Workspace atualizado"
@@ -1075,6 +1117,8 @@
       "sessionStarted": "Conectado ao {{provider}} e pronto para receber instruções.",
       "sessionResumed": "O contexto da sessão anterior foi restaurado.",
       "turnCompleted": "O assistente concluiu a resposta atual.",
+      "planApproved": "A versão {{version}} foi aprovada para implementação.",
+      "planHandedOff": "A versão {{version}} foi encaminhada para implementação.",
       "sessionCompleted": "A sessão foi concluída com sucesso.",
       "noFailureReason": "O runtime não informou o motivo da falha.",
       "noAbortReason": "O runtime não informou o motivo da interrupção.",
@@ -1128,7 +1172,9 @@
       "close": "Ocultar painel Git"
     },
     "terminal": {
-      "open": "Abrir terminal"
+      "open": "Abrir terminal",
+      "openWithActive_one": "Abrir terminal · {{count}} ativo",
+      "openWithActive_other": "Abrir terminal · {{count}} ativos"
     },
     "sessionState": {
       "idle": "ocioso",
