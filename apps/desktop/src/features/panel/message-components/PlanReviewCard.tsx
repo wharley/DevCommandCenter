@@ -1,4 +1,4 @@
-import { Suspense, useId, useState } from "react";
+import { Suspense, useId, useRef, useState } from "react";
 import {
 	Check,
 	Circle,
@@ -6,8 +6,10 @@ import {
 	Download,
 	Ellipsis,
 	Loader2,
+	MessageSquarePlus,
 	Save,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { LazyStreamdown } from "@/components/streamdown-loader";
 import { Button } from "@/components/ui/button";
@@ -20,6 +22,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -31,6 +34,7 @@ import { cn } from "@/lib/utils";
 import {
 	buildCollapsedPlanPreviewMarkdown,
 	buildPlanMarkdownFilename,
+	buildPlanRevisionPrompt,
 	downloadPlanAsTextFile,
 	normalizePlanContentForExport,
 	stripDisplayedPlanMarkdown,
@@ -43,6 +47,8 @@ type PlanReviewCardProps = {
 	acceptanceCriteriaCoverage?: MissionAcceptanceCriterionCoverage[];
 	workspacePath?: string | null;
 	className?: string;
+	onRequestRevision?: (prompt: string) => void;
+	documentMode?: boolean;
 };
 
 function stepIcon(status: ParsedPlanContent["steps"][number]["status"]) {
@@ -95,11 +101,21 @@ export function PlanReviewCard({
 	acceptanceCriteriaCoverage = [],
 	workspacePath,
 	className,
+	onRequestRevision,
+	documentMode = false,
 }: PlanReviewCardProps) {
 	const [expanded, setExpanded] = useState(false);
 	const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
+	const [isRevisionDialogOpen, setIsRevisionDialogOpen] = useState(false);
 	const [savePath, setSavePath] = useState("");
+	const [selectedText, setSelectedText] = useState("");
+	const [selectionActionPosition, setSelectionActionPosition] = useState<{
+		top: number;
+		left: number;
+	} | null>(null);
+	const [revisionComment, setRevisionComment] = useState("");
 	const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
+	const cardRef = useRef<HTMLDivElement>(null);
 	const hasSteps = plan.steps.length > 0;
 	const completedSteps = plan.steps.filter((step) => step.status === "completed").length;
 	const coveredCriteria = acceptanceCriteriaCoverage.filter(
@@ -114,6 +130,32 @@ export function PlanReviewCard({
 		: null;
 	const workspaceFilePath = exportFilename;
 	const savePathInputId = useId();
+	const revisionCommentInputId = useId();
+	const { t } = useTranslation("common");
+
+	const captureSelection = () => {
+		if (!onRequestRevision) return;
+		const selection = window.getSelection();
+		const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+		const excerpt = selection?.toString().trim() ?? "";
+		if (!range || !excerpt || !cardRef.current?.contains(range.commonAncestorContainer)) {
+			return;
+		}
+		const selectionRect = range.getBoundingClientRect();
+		const cardRect = cardRef.current.getBoundingClientRect();
+		const actionWidth = 148;
+		setSelectedText(excerpt);
+		setSelectionActionPosition({
+			top: selectionRect.bottom - cardRect.top + 8,
+			left: Math.max(
+				12,
+				Math.min(
+					selectionRect.left - cardRect.left,
+					cardRect.width - actionWidth - 12,
+				),
+			),
+		});
+	};
 
 	const handleCopy = async () => {
 		try {
@@ -168,13 +210,47 @@ export function PlanReviewCard({
 			});
 	};
 
+	const handleSubmitRevision = () => {
+		const comment = revisionComment.trim();
+		if (!selectedText || !comment || !onRequestRevision) {
+			return;
+		}
+		onRequestRevision(
+			buildPlanRevisionPrompt({
+				planMarkdown: plan.markdown,
+				selectedText,
+				comment,
+			}),
+		);
+		setRevisionComment("");
+		setSelectedText("");
+		setSelectionActionPosition(null);
+		setIsRevisionDialogOpen(false);
+		toast.success(t("planSurface.revisionRequested"));
+	};
+
 	return (
 		<div
+			ref={cardRef}
+			onMouseUp={captureSelection}
 			className={cn(
-				"rounded-[22px] border border-border/70 bg-card/75 p-4 shadow-[0_12px_40px_rgba(0,0,0,0.06)] backdrop-blur-sm",
+				"relative rounded-[22px] border border-border/70 bg-card/75 p-4 shadow-[0_12px_40px_rgba(0,0,0,0.06)] backdrop-blur-sm",
 				className,
 			)}
 		>
+			{selectedText && selectionActionPosition ? (
+				<Button
+					type="button"
+					size="sm"
+					className="absolute z-20 h-8 gap-1.5 rounded-full px-3 shadow-lg"
+					style={selectionActionPosition}
+					onMouseDown={(event) => event.preventDefault()}
+					onClick={() => setIsRevisionDialogOpen(true)}
+				>
+					<MessageSquarePlus className="size-3.5" aria-hidden />
+					{t("planSurface.commentSelection")}
+				</Button>
+			) : null}
 			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div className="min-w-0">
 					<div className="flex items-center gap-2">
@@ -228,7 +304,7 @@ export function PlanReviewCard({
 				</DropdownMenu>
 			</div>
 
-			{plan.summary ? (
+			{plan.summary && !documentMode ? (
 				<div className="mt-4">
 					<p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
 						Summary
@@ -283,7 +359,7 @@ export function PlanReviewCard({
 				</div>
 			) : null}
 
-			{hasSteps ? (
+			{hasSteps && !documentMode ? (
 				<div className="mt-4">
 					<p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
 						Steps
@@ -328,7 +404,7 @@ export function PlanReviewCard({
 				</div>
 			) : null}
 
-			{plan.approvedPrompts.length > 0 ? (
+			{plan.approvedPrompts.length > 0 && !documentMode ? (
 				<div className="mt-4">
 					<p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
 						Approved prompts
@@ -356,7 +432,23 @@ export function PlanReviewCard({
 				</div>
 			) : null}
 
-			{canCollapse ? (
+			{documentMode ? (
+				<div className="mt-5 border-t border-border/50 pt-5">
+					<div className="conversation-markdown mx-auto max-w-[78ch] break-words text-[14px] leading-7 text-foreground">
+						<Suspense
+							fallback={
+								<pre className="whitespace-pre-wrap break-words font-sans text-[14px] leading-7">
+									{displayedPlanMarkdown}
+								</pre>
+							}
+						>
+							<LazyStreamdown className="conversation-streamdown" mode="static">
+								{displayedPlanMarkdown}
+							</LazyStreamdown>
+						</Suspense>
+					</div>
+				</div>
+			) : canCollapse ? (
 				<div className="mt-4">
 					<div className={cn("relative", !expanded && "max-h-104 overflow-hidden")}>
 						<div className="conversation-markdown max-w-none break-words text-[13px] leading-6 text-foreground">
@@ -399,6 +491,54 @@ export function PlanReviewCard({
 					</p>
 				</div>
 			)}
+
+			<Dialog
+				open={isRevisionDialogOpen}
+				onOpenChange={setIsRevisionDialogOpen}
+			>
+				<DialogContent className="max-w-xl">
+					<DialogHeader>
+						<DialogTitle>{t("planSurface.commentTitle")}</DialogTitle>
+						<DialogDescription>
+							{t("planSurface.commentDescription")}
+						</DialogDescription>
+					</DialogHeader>
+					<div className="grid gap-3">
+						<div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+							<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+								{t("planSurface.selectedText")}
+							</p>
+							<p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-foreground">
+								{selectedText}
+							</p>
+						</div>
+						<label htmlFor={revisionCommentInputId} className="grid gap-1.5">
+							<span className="text-sm font-medium text-foreground">
+								{t("planSurface.yourComment")}
+							</span>
+							<Textarea
+								id={revisionCommentInputId}
+								value={revisionComment}
+								onChange={(event) => setRevisionComment(event.target.value)}
+								placeholder={t("planSurface.commentPlaceholder")}
+								autoFocus
+							/>
+						</label>
+					</div>
+					<DialogFooter>
+						<Button type="button" variant="outline" onClick={() => setIsRevisionDialogOpen(false)}>
+							{t("planSurface.cancel")}
+						</Button>
+						<Button
+							type="button"
+							disabled={revisionComment.trim().length === 0}
+							onClick={handleSubmitRevision}
+						>
+							{t("planSurface.requestRevision")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
 			<Dialog
 				open={isSaveDialogOpen}
