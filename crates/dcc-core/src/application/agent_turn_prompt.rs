@@ -77,7 +77,7 @@ fn wire_claude_code_partial(
     maybe_push_plan_line(
         &mut lines,
         plan,
-        "PLAN / permission-style ON: respond with a structured plan first (sections, ordered steps, risks). Do NOT write files, run shell, or apply patches until the user clearly asks to execute or exit planning.",
+        "PLAN / permission-style ON: inspect the repository with read-only tools first (list, search, and read files), then return a complete structured plan grounded in real paths. Do NOT write files, apply patches, or run mutating commands. If essential information is missing, ask a specific blocking question and say the plan is not ready for approval.",
         "EXECUTION ON: you may invoke tools, edit files, and run commands as appropriate for the repo.",
     );
     maybe_push_effort_line(&mut lines, effort);
@@ -102,7 +102,7 @@ fn wire_codex_partial(
     maybe_push_plan_line(
         &mut lines,
         plan,
-        "PLAN ON: outline steps and affected paths before changing anything; defer applying code edits or running terminal actions until the user confirms.",
+        "PLAN ON: inspect the repository with read-only tools first (list, search, and read files), then return a complete structured plan grounded in real paths. Do not edit files or run mutating commands. If essential information is missing, ask a specific blocking question and say the plan is not ready for approval.",
         "EXECUTION ON: implement using Codex tools following repository conventions.",
     );
     maybe_push_effort_line(&mut lines, effort);
@@ -126,7 +126,7 @@ fn wire_gemini_partial(
     maybe_push_plan_line(
         &mut lines,
         plan,
-        "PLAN ON: produce a clear plan with milestones before modifying artifacts.",
+        "PLAN ON: inspect the repository with read-only tools first, then return a complete plan with milestones and real affected paths. Do not modify artifacts or run mutating commands. If blocked, ask a specific question and say the plan is not ready for approval.",
         "EXECUTION ON: proceed with file and tool actions suitable for the workspace.",
     );
     maybe_push_effort_line(&mut lines, effort);
@@ -150,7 +150,7 @@ fn wire_cursor_partial(
     maybe_push_plan_line(
         &mut lines,
         plan,
-        "PLAN ON: describe intent and steps before automated edits or commands.",
+        "PLAN ON: inspect the repository with read-only tools first, then return a complete plan grounded in real affected paths. Do not edit files or run mutating commands. If blocked, ask a specific question and say the plan is not ready for approval.",
         "EXECUTION ON: act within Cursor agent capabilities.",
     );
     maybe_push_effort_line(&mut lines, effort);
@@ -175,7 +175,7 @@ fn wire_grok_partial(
     maybe_push_plan_line(
         &mut lines,
         plan,
-        "PLAN ON: present a concrete plan before editing files or running commands.",
+        "PLAN ON: inspect the repository with read-only tools first, then return a complete concrete plan grounded in real affected paths. Do not edit files or run mutating commands. If blocked, ask a specific question and say the plan is not ready for approval.",
         "EXECUTION ON: use Grok Build tools to implement and verify the requested work.",
     );
     maybe_push_effort_line(&mut lines, effort);
@@ -196,7 +196,7 @@ fn wire_generic_partial(
     maybe_push_plan_line(
         &mut lines,
         plan,
-        "Plan mode ON: plan first; avoid destructive actions until the user confirms execution.",
+        "Plan mode ON: inspect the repository with read-only tools first, then return a complete structured plan grounded in real affected paths. Do not edit files or run mutating commands. If blocked, ask a specific question and say the plan is not ready for approval.",
         "Plan mode OFF: use tools and edits as appropriate.",
     );
     maybe_push_effort_line(&mut lines, effort);
@@ -307,6 +307,7 @@ mod tests {
         );
         assert!(out.contains("Claude Code"));
         assert!(out.contains("PLAN / permission-style ON"));
+        assert!(out.contains("read-only tools first"));
         assert!(out.ends_with("Hi"));
     }
 
