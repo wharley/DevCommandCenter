@@ -29,6 +29,8 @@ function eventSessionId(event: CoreEvent): string | null {
 		("sessionTurnCompleted" in event && event.sessionTurnCompleted) ||
 		("sessionTurnAborted" in event && event.sessionTurnAborted) ||
 		("sessionCheckpointCreated" in event && event.sessionCheckpointCreated) ||
+		("sessionPlanApproved" in event && event.sessionPlanApproved) ||
+		("sessionPlanHandedOff" in event && event.sessionPlanHandedOff) ||
 		null;
 	return payload ? payload.session_id : null;
 }
@@ -50,13 +52,20 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionTurnCompleted" in event) return "session.turn.completed";
 	if ("sessionTurnAborted" in event) return "session.turn.aborted";
 	if ("sessionCheckpointCreated" in event) return "session.checkpoint.created";
+	if ("sessionPlanApproved" in event) return "session.plan.approved";
+	if ("sessionPlanHandedOff" in event) return "session.plan.handed-off";
 	if ("workspacePrepared" in event) return "workspace.prepared";
 	if ("workspaceReady" in event) return "workspace.ready";
 	return "event";
 }
 
 function eventTone(event: CoreEvent): "outline" | "secondary" | "success" | "warn" {
-	if ("sessionCompleted" in event || "workspaceReady" in event) {
+	if (
+		"sessionCompleted" in event ||
+		"workspaceReady" in event ||
+		"sessionPlanApproved" in event ||
+		"sessionPlanHandedOff" in event
+	) {
 		return "success";
 	}
 	if ("sessionAborted" in event || "sessionTurnAborted" in event) {
@@ -137,6 +146,22 @@ function semanticEventPresentation(
 		return {
 			title: t("sessionEventFeed.milestones.checkpointCreated"),
 			description: event.sessionCheckpointCreated.label,
+		};
+	}
+	if ("sessionPlanApproved" in event && event.sessionPlanApproved) {
+		return {
+			title: t("sessionEventFeed.milestones.planApproved"),
+			description: t("sessionEventFeed.details.planApproved", {
+				version: event.sessionPlanApproved.plan_version,
+			}),
+		};
+	}
+	if ("sessionPlanHandedOff" in event && event.sessionPlanHandedOff) {
+		return {
+			title: t("sessionEventFeed.milestones.planHandedOff"),
+			description: t("sessionEventFeed.details.planHandedOff", {
+				version: event.sessionPlanHandedOff.plan_version,
+			}),
 		};
 	}
 	if ("sessionCompleted" in event && event.sessionCompleted) {
@@ -224,6 +249,16 @@ function eventPayloadSummary(event: CoreEvent, t: TFunction<"common">): string {
 		"sessionCheckpointCreated" in event ? event.sessionCheckpointCreated : null;
 	if (sessionCheckpointCreated) {
 		return `${sessionCheckpointCreated.session_id} · ${sessionCheckpointCreated.label}`;
+	}
+	const sessionPlanApproved =
+		"sessionPlanApproved" in event ? event.sessionPlanApproved : null;
+	if (sessionPlanApproved) {
+		return `${sessionPlanApproved.session_id} · v${sessionPlanApproved.plan_version} · ${sessionPlanApproved.plan_hash}`;
+	}
+	const sessionPlanHandedOff =
+		"sessionPlanHandedOff" in event ? event.sessionPlanHandedOff : null;
+	if (sessionPlanHandedOff) {
+		return `${sessionPlanHandedOff.session_id} · v${sessionPlanHandedOff.plan_version} · ${sessionPlanHandedOff.action}`;
 	}
 	if ("workspacePrepared" in event || "workspaceReady" in event) {
 		const payload = "workspacePrepared" in event ? event.workspacePrepared : event.workspaceReady;
