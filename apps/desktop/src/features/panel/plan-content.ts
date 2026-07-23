@@ -80,6 +80,15 @@ export function normalizePlanContentForExport(content: string) {
 	return normalized.length > 0 ? `${normalized}\n` : normalized;
 }
 
+export function computePlanHash(planMarkdown: string) {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < planMarkdown.length; index += 1) {
+		hash ^= planMarkdown.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
 export function buildPlanMarkdownFilename(content: string, fallback = "mission-plan.md") {
 	const parsed = parsePlanContent(content);
 	const slug = slugify(parsed.title);
@@ -103,6 +112,40 @@ export function buildPlanDelegationPrompt(planMarkdown: string) {
 		"- Run focused validation where practical and report the exact commands/results.",
 		"- End with a concise summary of changed files, decisions, and validation.",
 	].join("\n");
+}
+
+export function buildPlanRevisionPrompt(input: {
+	planMarkdown: string;
+	selectedText: string;
+	comment: string;
+}) {
+	return [
+		"REVISE THE ACTIVE IMPLEMENTATION PLAN BASED ON THIS REVIEW COMMENT.",
+		"",
+		"Do not implement anything. Return the complete revised plan, not only a diff or an explanation.",
+		"Keep the plan concise, structured, and grounded in the repository. Preserve unaffected decisions unless the comment requires a change.",
+		"",
+		"SELECTED PLAN EXCERPT:",
+		"> " + input.selectedText.trim().replace(/\n/g, "\n> "),
+		"",
+		"REVIEW COMMENT:",
+		input.comment.trim(),
+		"",
+		"CURRENT PLAN:",
+		normalizePlanText(input.planMarkdown),
+	].join("\n");
+}
+
+export function planNeedsInput(content: string) {
+	const normalized = normalizePlanText(content);
+	return [
+		/\bplan (?:is )?not ready for approval\b/i,
+		/\bplano (?:ainda )?não est[aá] pronto para aprova[cç][aã]o\b/i,
+		/\b(?:if|once) you confirm\b[\s\S]{0,220}\b(?:inspect|read|review)\b[\s\S]{0,100}\b(?:repo|repository|codebase)\b/i,
+		/\bse voc[eê] confirmar\b[\s\S]{0,220}\b(?:inspecionar|ler|revisar)\b[\s\S]{0,100}\b(?:reposit[oó]rio|estrutura|c[oó]digo)\b/i,
+		/\bnext step\b[\s\S]{0,160}\b(?:inspect|read|review)\b[\s\S]{0,100}\b(?:repo|repository|codebase)\b/i,
+		/\bpr[oó]ximo passo\b[\s\S]{0,160}\b(?:inspecionar|ler|revisar)\b[\s\S]{0,100}\b(?:reposit[oó]rio|estrutura|c[oó]digo)\b/i,
+	].some((pattern) => pattern.test(normalized));
 }
 
 export function buildPlanFromSpecPrompt(specMarkdown: string) {
