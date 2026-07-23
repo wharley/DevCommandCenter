@@ -10,8 +10,12 @@ import type {
 import type {
 	AbortRunInput,
 	AbortRunOutput,
+	ApprovePlanInput,
+	ApprovePlanOutput,
 	CloseSessionInput,
 	CloseSessionOutput,
+	RecordPlanHandoffInput,
+	RecordPlanHandoffOutput,
 	RespondToUserInputInput,
 	RespondToUserInputOutput,
 	RespondToPermissionRequestInput,
@@ -40,6 +44,16 @@ export function sendTurn(input: SendTurnInput) {
 
 export function abortRun(input: AbortRunInput) {
 	return invoke<AbortRunOutput>(SESSION_METHODS.abortRun, { input });
+}
+
+export function approvePlan(input: ApprovePlanInput) {
+	return invoke<ApprovePlanOutput>(SESSION_METHODS.approvePlan, { input });
+}
+
+export function recordPlanHandoff(input: RecordPlanHandoffInput) {
+	return invoke<RecordPlanHandoffOutput>(SESSION_METHODS.recordPlanHandoff, {
+		input,
+	});
 }
 
 export function resumeSession(input: ResumeSessionInput) {
@@ -107,6 +121,8 @@ const SESSION_EVENT_NAMES = [
 	"dcc/session/turn/completed",
 	"dcc/session/turn/aborted",
 	"dcc/session/checkpoint/created",
+	"dcc/session/plan/approved",
+	"dcc/session/plan/handed-off",
 	"dcc/session/delegation/requested",
 	"dcc/session/delegation/started",
 	"dcc/session/delegation/delta",
