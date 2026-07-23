@@ -537,6 +537,7 @@ export function WorkspacePanel({
 					isInstallingUpdate={isInstallingUpdate}
 					onInstallUpdate={onInstallUpdate}
 					onOpenTerminal={onOpenTerminal ? openPreferredTerminal : undefined}
+					terminalScopes={terminalScopes}
 					workspacePath={workspacePath}
 					gitChangeSummary={gitChangeSummary}
 					inspectorCollapsed={inspectorCollapsed}
