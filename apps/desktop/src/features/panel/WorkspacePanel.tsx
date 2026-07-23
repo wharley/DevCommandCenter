@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import {
 	WorkspaceEditorSurface,
@@ -8,6 +10,7 @@ import {
 } from "@/features/editor/WorkspaceEditorSurface";
 import { FileTabsSurface } from "@/features/editor/file-tabs-surface";
 import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
+import { WorkspacePlanSurface } from "@/features/editor/WorkspacePlanSurface";
 import { WorkspaceMergeConflictResolver } from "@/features/merge/WorkspaceMergeConflictResolver";
 import type {
 	AgentResolutionRunRequest,
@@ -48,7 +51,17 @@ import {
 	buildMissionSpecFilename,
 	getComposerEffortKey,
 } from "@/features/composer/WorkspaceComposer.logic";
-import { buildPlanDelegationPrompt } from "./plan-content";
+import {
+	buildPlanDelegationPrompt,
+	computePlanHash,
+	parsePlanContent,
+	planNeedsInput,
+} from "./plan-content";
+import {
+	isPlanVersionApproved,
+	isPlanVersionHandedOff,
+} from "./plan-approval";
+import { approvePlan, recordPlanHandoff } from "@/lib/session-api";
 import { loadEffortSelection } from "@/features/composer/draftStorage";
 import {
 	DEFAULT_EFFORT_LEVELS,
@@ -150,11 +163,11 @@ type WorkspacePanelProps = {
 	onInstallUpdate: () => void;
 	surfaceSelection: WorkspaceSurfaceSelection | null;
 	onCloseSurface: () => void;
-	onOpenPlanSidebar: () => void;
+	onOpenPlanSurface: () => void;
 	onImplementPlanInNewThread: (input: {
 		planMarkdown: string;
 		planTitle: string | null;
-	}) => void;
+	}) => Promise<boolean>;
 	terminalScopes?: TerminalScopeTarget[];
 	onOpenTerminal?: (request: OpenTerminalRequest) => void;
 	externalComposerPrefill?: ComposerPrefill | null;
@@ -211,7 +224,7 @@ export function WorkspacePanel({
 	onInstallUpdate,
 	surfaceSelection,
 	onCloseSurface,
-	onOpenPlanSidebar,
+	onOpenPlanSurface,
 	onImplementPlanInNewThread,
 	terminalScopes,
 	onOpenTerminal,
@@ -225,6 +238,7 @@ export function WorkspacePanel({
 	onMergeConflictStateChanged,
 	delegateSignal,
 }: WorkspacePanelProps) {
+	const { t } = useTranslation("common");
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
 	);
@@ -235,6 +249,7 @@ export function WorkspacePanel({
 	const [delegatePrefill, setDelegatePrefill] =
 		useState<DelegationDialogPrefill | null>(null);
 	const [delegateSubmitting, setDelegateSubmitting] = useState(false);
+	const [isApprovingPlan, setIsApprovingPlan] = useState(false);
 	const openPreferredTerminal = useCallback(() => {
 		if (!onOpenTerminal) return;
 		const preferredScope =
@@ -246,6 +261,7 @@ export function WorkspacePanel({
 	}, [onOpenTerminal, terminalScopes]);
 	const reviewIdRef = useRef(0);
 	const delegatePrefillNonceRef = useRef(0);
+	const planHandoffInFlightRef = useRef(false);
 	const lastDelegateSignalRef = useRef(delegateSignal ?? 0);
 
 	// WorkspacePanel stays mounted while the active workspace changes. Clear its
@@ -257,6 +273,8 @@ export function WorkspacePanel({
 		setDelegateOpen(false);
 		setDelegatePrefill(null);
 		setDelegateSubmitting(false);
+		setIsApprovingPlan(false);
+		planHandoffInFlightRef.current = false;
 	}, [workspaceId]);
 
 	useEffect(() => {
@@ -351,25 +369,23 @@ export function WorkspacePanel({
 		},
 		[buildAnnotationTurn, onCloseSurface, onSubmitPrompt, reviewAnnotations],
 	);
-	const handleDelegateSubmit = useCallback(
-		async (request: ManualDelegationRequest) => {
-			setDelegateSubmitting(true);
-			try {
-				await onDelegate(request);
-				setDelegatePrefill(null);
-				setDelegateOpen(false);
-			} finally {
-				setDelegateSubmitting(false);
-			}
-		},
-		[onDelegate],
-	);
 	const handleOpenManualDelegation = useCallback(() => {
 		setDelegatePrefill(null);
 		setDelegateOpen(true);
 	}, []);
 
-	const effectiveSessionId = selectedSessionId ?? sessions[0]?.session.id ?? null;
+	const selectedSessionBelongsToWorkspace = Boolean(
+		selectedSessionId &&
+			sessions.some(
+				(summary) =>
+					summary.session.id === selectedSessionId &&
+					summary.session.workspaceId === workspaceId,
+			),
+	);
+	const effectiveSessionId = selectedSessionBelongsToWorkspace
+		? selectedSessionId
+		: (sessions.find((summary) => summary.session.workspaceId === workspaceId)
+				?.session.id ?? null);
 	const threadHistoryQuery = useQuery(
 		sessionThreadHistoryQueryOptions(effectiveSessionId, {
 			scope: sessionQueryScope,
@@ -431,24 +447,260 @@ export function WorkspacePanel({
 	const latestPlanMessage = planFollowUpState.latestPlanMessage;
 	const activePlanTitle =
 		activePlanMessage?.plan?.title ?? (activePlanMessage ? "Plan" : null);
-	const activePlanMarkdown =
-		activePlanMessage?.plan?.markdown ?? activePlanMessage?.content ?? null;
+	const activePlanNeedsInput = activePlanMessage
+		? planNeedsInput(activePlanMessage.plan?.rawMarkdown ?? activePlanMessage.content)
+		: false;
+	const latestPlanMarkdown =
+		latestPlanMessage?.plan?.markdown ?? latestPlanMessage?.content ?? null;
+	const latestPlanTitle =
+		latestPlanMessage?.plan?.title ?? (latestPlanMessage ? "Plan" : null);
+	const latestPlan =
+		latestPlanMessage?.plan ??
+		(latestPlanMessage ? parsePlanContent(latestPlanMessage.content) : null);
+	const latestPlanVersion = messages.filter(
+		(message) => message.role === "assistant" && message.plan?.isPlanLike,
+	).length;
+	const latestPlanHash = latestPlanMarkdown
+		? computePlanHash(latestPlanMarkdown)
+		: null;
+	const isLatestPlanApproved = isPlanVersionApproved(
+		{
+			sessionId: effectiveSessionId,
+			planMessageId: latestPlanMessage?.id ?? null,
+			planVersion: latestPlanVersion,
+			planHash: latestPlanHash,
+		},
+		historyEvents,
+		sessionEvents,
+	);
+	const isLatestPlanHandedOff = isPlanVersionHandedOff(
+		{
+			sessionId: effectiveSessionId,
+			planMessageId: latestPlanMessage?.id ?? null,
+			planVersion: latestPlanVersion,
+			planHash: latestPlanHash,
+		},
+		historyEvents,
+		sessionEvents,
+	);
+	const latestPlanNeedsInput = latestPlanMessage
+		? planNeedsInput(latestPlanMessage.plan?.rawMarkdown ?? latestPlanMessage.content)
+		: false;
 	const showPlanFollowUpPrompt = planFollowUpState.showPlanFollowUpPrompt;
+	const isLatestPlanCurrent =
+		latestPlanMessage !== null &&
+		activePlanMessage?.id === latestPlanMessage.id;
+	const isLatestPlanReadOnly =
+		Boolean(latestPlanMessage) &&
+		(!isLatestPlanCurrent || isLatestPlanHandedOff);
+	const canExecuteLatestPlan =
+		isLatestPlanApproved &&
+		!latestPlanNeedsInput &&
+		!isLatestPlanReadOnly;
 	const handleDelegatePlan = useCallback(() => {
-		if (!activePlanMarkdown) {
+		if (!latestPlanMarkdown || !canExecuteLatestPlan) {
 			return;
 		}
 		delegatePrefillNonceRef.current += 1;
 		setDelegatePrefill({
 			nonce: delegatePrefillNonceRef.current,
-			instruction: buildPlanDelegationPrompt(activePlanMarkdown),
+			instruction: buildPlanDelegationPrompt(latestPlanMarkdown),
 			mode: "implement",
 			contextPolicy: "full_reanchor",
 			targetProviderId: "codex",
 			targetModelId: "gpt-5.5",
 		});
 		setDelegateOpen(true);
-	}, [activePlanMarkdown]);
+	}, [canExecuteLatestPlan, latestPlanMarkdown]);
+	const handleApprovePlan = useCallback(async () => {
+		if (
+			!effectiveSessionId ||
+			!latestPlanMessage ||
+			!latestPlanHash ||
+			latestPlanVersion <= 0 ||
+			isApprovingPlan
+		) {
+			return;
+		}
+		setIsApprovingPlan(true);
+		try {
+			await approvePlan({
+				sessionId: effectiveSessionId,
+				planMessageId: latestPlanMessage.id,
+				planVersion: latestPlanVersion,
+				planHash: latestPlanHash,
+			});
+			await threadHistoryQuery.refetch();
+			toast.success(t("planSurface.approvalSaved"));
+		} catch (error) {
+			const refreshed = await threadHistoryQuery.refetch();
+			const approvalWasPersisted = isPlanVersionApproved(
+				{
+					sessionId: effectiveSessionId,
+					planMessageId: latestPlanMessage.id,
+					planVersion: latestPlanVersion,
+					planHash: latestPlanHash,
+				},
+				refreshed.data ?? [],
+				sessionEvents,
+			);
+			if (approvalWasPersisted) {
+				toast.success(t("planSurface.approvalSaved"));
+			} else {
+				toast.error(t("planSurface.approvalFailed"), {
+					description: error instanceof Error ? error.message : String(error),
+				});
+			}
+		} finally {
+			setIsApprovingPlan(false);
+		}
+	}, [
+		effectiveSessionId,
+		isApprovingPlan,
+		latestPlanHash,
+		latestPlanMessage,
+		latestPlanVersion,
+		sessionEvents,
+		t,
+		threadHistoryQuery,
+	]);
+	const handleRequestPlanRevision = useCallback(
+		(prompt: string) => {
+			const turn = buildAnnotationTurn(prompt);
+			void onSubmitPrompt({
+				...turn,
+				envelope: {
+					...turn.envelope,
+					planMode: true,
+					fastMode: false,
+				},
+			});
+		},
+		[buildAnnotationTurn, onSubmitPrompt],
+	);
+	const recordCurrentPlanHandoff = useCallback(
+		async (action: "delegation" | "new_thread") => {
+			if (
+				!effectiveSessionId ||
+				!latestPlanMessage ||
+				!latestPlanHash ||
+				latestPlanVersion <= 0
+			) {
+				return false;
+			}
+			try {
+				await recordPlanHandoff({
+					sessionId: effectiveSessionId,
+					planMessageId: latestPlanMessage.id,
+					planVersion: latestPlanVersion,
+					planHash: latestPlanHash,
+					action,
+					targetSessionId: null,
+				});
+				await threadHistoryQuery.refetch();
+				return true;
+			} catch (error) {
+				const refreshed = await threadHistoryQuery.refetch();
+				const wasPersisted = isPlanVersionHandedOff(
+					{
+						sessionId: effectiveSessionId,
+						planMessageId: latestPlanMessage.id,
+						planVersion: latestPlanVersion,
+						planHash: latestPlanHash,
+					},
+					refreshed.data ?? [],
+					sessionEvents,
+				);
+				if (!wasPersisted) {
+					toast.error(t("planSurface.handoffRecordFailed"), {
+						description:
+							error instanceof Error ? error.message : String(error),
+					});
+				}
+				return wasPersisted;
+			}
+		},
+		[
+			effectiveSessionId,
+			latestPlanHash,
+			latestPlanMessage,
+			latestPlanVersion,
+			sessionEvents,
+			t,
+			threadHistoryQuery,
+		],
+	);
+	const handleDelegateSubmit = useCallback(
+		async (request: ManualDelegationRequest) => {
+			const isPlanHandoff =
+				surfaceSelection?.kind === "plan" && delegatePrefill !== null;
+			if (
+				isPlanHandoff &&
+				(!canExecuteLatestPlan || planHandoffInFlightRef.current)
+			) {
+				setDelegateOpen(false);
+				return;
+			}
+			if (isPlanHandoff) {
+				planHandoffInFlightRef.current = true;
+			}
+			setDelegateSubmitting(true);
+			try {
+				await onDelegate(request);
+				if (isPlanHandoff) {
+					onCloseSurface();
+				}
+				setDelegatePrefill(null);
+				setDelegateOpen(false);
+				if (isPlanHandoff) {
+					await recordCurrentPlanHandoff("delegation");
+				}
+			} finally {
+				if (isPlanHandoff) {
+					planHandoffInFlightRef.current = false;
+				}
+				setDelegateSubmitting(false);
+			}
+		},
+		[
+			canExecuteLatestPlan,
+			delegatePrefill,
+			onCloseSurface,
+			onDelegate,
+			recordCurrentPlanHandoff,
+			surfaceSelection,
+		],
+	);
+	const handleImplementPlanInNewThread = useCallback(async () => {
+		if (
+			!canExecuteLatestPlan ||
+			!latestPlanMarkdown ||
+			planHandoffInFlightRef.current
+		) {
+			return;
+		}
+		planHandoffInFlightRef.current = true;
+		try {
+			const started = await onImplementPlanInNewThread({
+				planMarkdown: latestPlanMarkdown,
+				planTitle: latestPlanTitle,
+			});
+			if (!started) {
+				return;
+			}
+			onCloseSurface();
+			await recordCurrentPlanHandoff("new_thread");
+		} finally {
+			planHandoffInFlightRef.current = false;
+		}
+	}, [
+		canExecuteLatestPlan,
+		latestPlanMarkdown,
+		latestPlanTitle,
+		onCloseSurface,
+		onImplementPlanInNewThread,
+		recordCurrentPlanHandoff,
+	]);
 	const missionSpecsQuery = useWorkspaceMissionSpecs(workspacePath);
 	const missionSpecs = missionSpecsQuery.data?.specs ?? [];
 	const preferredSpecName = buildMissionSpecFilename(workspaceBranch);
@@ -502,6 +754,27 @@ export function WorkspacePanel({
 				onEditInComposer={handleEditAnnotationInComposer}
 				onAddToReview={handleAddToReview}
 			/>
+		) : surfaceSelection.kind === "plan" ? (
+			latestPlan && latestPlanMarkdown ? (
+				<WorkspacePlanSurface
+					plan={latestPlan}
+					version={latestPlanVersion}
+					workspacePath={workspacePath}
+					approved={isLatestPlanApproved}
+					approving={isApprovingPlan}
+					readOnly={isLatestPlanReadOnly}
+					needsInput={latestPlanNeedsInput}
+					onApprove={handleApprovePlan}
+					onClose={onCloseSurface}
+					onRequestRevision={handleRequestPlanRevision}
+					onDelegate={handleDelegatePlan}
+					onImplementInNewThread={handleImplementPlanInNewThread}
+				/>
+			) : (
+				<div className="flex h-full items-center justify-center bg-background p-8 text-sm text-muted-foreground">
+					The plan is no longer available in this session.
+				</div>
+			)
 		) : (
 			<WorkspaceMissionSpecSurface
 				spec={surfaceSelection.spec}
@@ -560,6 +833,8 @@ export function WorkspacePanel({
 					workspaceId={workspaceId}
 					providers={providerChoices}
 					planMessageId={latestPlanMessage?.id ?? null}
+					planApproved={isLatestPlanApproved}
+					planReadOnly={isLatestPlanReadOnly}
 					sessionId={effectiveSessionId}
 					activeMissionSpecRelativePath={activeMissionSpecRelativePath}
 					activeMissionSpecHash={activeMissionSpecHash}
@@ -570,6 +845,7 @@ export function WorkspacePanel({
 					onReviewChanges={onReviewChanges}
 					onReviewDelegation={onReviewDelegation}
 					onDelegateTaskApprove={onAgentDelegate}
+					onOpenPlan={onOpenPlanSurface}
 				/>
 
 				<div className="border-t border-border/60 px-3 pb-3 pt-3 sm:px-4">
@@ -587,14 +863,13 @@ export function WorkspacePanel({
 					workspaceBranch={workspaceBranch}
 					showPlanFollowUpPrompt={showPlanFollowUpPrompt}
 					planTitle={activePlanTitle}
-					planMarkdown={activePlanMarkdown}
+					planNeedsInput={activePlanNeedsInput}
+					planApproved={isLatestPlanApproved}
 					onSelectProvider={onSelectProvider}
 					onSelectModel={onSelectModel}
 					onSubmitPrompt={onSubmitPrompt}
 					onAbortSession={onAbortSession}
-					onOpenPlanSidebar={onOpenPlanSidebar}
-					onDelegatePlan={handleDelegatePlan}
-					onImplementPlanInNewThread={onImplementPlanInNewThread}
+					onReviewPlan={onOpenPlanSurface}
 				/>
 				</div>
 			</div>
