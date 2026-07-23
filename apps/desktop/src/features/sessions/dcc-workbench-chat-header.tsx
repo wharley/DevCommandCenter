@@ -39,6 +39,8 @@ import { canResumeSession } from "./session-chrome-state";
 import { isSessionArchived, visibleSessions } from "./session-close";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import { cn } from "@/lib/utils";
+import type { TerminalScopeTarget } from "@/features/terminal/terminal-scope";
+import { useActiveTerminalCount } from "@/features/terminal/use-active-terminal-count";
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
@@ -62,6 +64,7 @@ export type DccWorkbenchChatHeaderProps = {
 	isInstallingUpdate: boolean;
 	onInstallUpdate: () => void;
 	onOpenTerminal?: () => void;
+	terminalScopes?: TerminalScopeTarget[];
 	/** Uncommitted git changes summary; drives the calm-mode changes pill. */
 	gitChangeSummary?: {
 		files: number;
@@ -98,6 +101,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	isInstallingUpdate,
 	onInstallUpdate,
 	onOpenTerminal,
+	terminalScopes,
 	gitChangeSummary,
 	inspectorCollapsed,
 	onToggleInspector,
@@ -112,6 +116,13 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	const visibleSessionList = visibleSessions(sessions);
 	const archivedSessionList = sessions.filter(isSessionArchived);
 	const activeSessionId = selectedSessionId ?? visibleSessionList[0]?.session.id ?? "";
+	const activeTerminalCount = useActiveTerminalCount(terminalScopes);
+	const terminalLabel =
+		activeTerminalCount > 0
+			? t("workbench.terminal.openWithActive", {
+					count: activeTerminalCount,
+				})
+			: t("workbench.terminal.open");
 
 	return (
 		<div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-2">
@@ -211,15 +222,20 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 									type="button"
 									variant="ghost"
 									size="icon-sm"
-									className="shrink-0 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+									className="relative shrink-0 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
 									onClick={onOpenTerminal}
-									aria-label={t("workbench.terminal.open")}
+									aria-label={terminalLabel}
 								>
 									<SquareTerminal className="size-3.5" strokeWidth={1.8} />
+									{activeTerminalCount > 0 ? (
+										<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">
+											{activeTerminalCount}
+										</span>
+									) : null}
 								</Button>
 							</TooltipTrigger>
 							<TooltipContent side="bottom">
-								{t("workbench.terminal.open")}
+								{terminalLabel}
 							</TooltipContent>
 						</Tooltip>
 					) : null}
