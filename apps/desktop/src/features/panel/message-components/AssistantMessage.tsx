@@ -8,12 +8,15 @@ import { cn } from "@/lib/utils";
 import { Reasoning } from "@/components/ai/reasoning";
 import { ToolCall } from "@/components/ai/tool-call";
 import { MessageTimestamp } from "./message-metadata";
-import { PlanReviewCard } from "./PlanReviewCard";
+import { PlanSummaryCard } from "./PlanSummaryCard";
 import { MissionValidationCard } from "./MissionValidationCard";
 import { ApprovalCard } from "./ApprovalCard";
 import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import { UserInputCard } from "./UserInputCard";
-import type { ParsedPlanContent } from "@/features/panel/plan-content";
+import {
+	planNeedsInput,
+	type ParsedPlanContent,
+} from "@/features/panel/plan-content";
 import { parseMissionValidationReport } from "@/features/spec/mission-spec-content";
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
 
@@ -118,11 +121,14 @@ export function AssistantMessage({
 	plan,
 	workspacePath,
 	isPlanContext,
+	isPlanApproved,
+	isPlanReadOnly,
 	sessionId,
 	activeMissionSpecRelativePath,
 	activeMissionSpecHash,
 	autoSaveMissionValidation,
 	onDelegateTaskApprove,
+	onOpenPlan,
 }: {
 	content: string;
 	streaming?: boolean;
@@ -132,14 +138,28 @@ export function AssistantMessage({
 	plan?: ParsedPlanContent | null;
 	workspacePath?: string | null;
 	isPlanContext?: boolean;
+	isPlanApproved?: boolean;
+	isPlanReadOnly?: boolean;
 	sessionId?: string | null;
 	activeMissionSpecRelativePath?: string | null;
 	activeMissionSpecHash?: string | null;
 	autoSaveMissionValidation?: boolean;
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
+	onOpenPlan?: () => void;
 }) {
 	const { t } = useTranslation("common");
 	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
+	const displayedPlan = plan ?? {
+		title: "Plan",
+		summary: content,
+		steps: [],
+		approvedPrompts: [],
+		rawMarkdown: content,
+		markdown: content,
+		isPlanLike: false,
+		canCollapse: content.length > 900,
+		source: "plain" as const,
+	};
 	const activityAnnotations = useMemo(
 		() => (annotations ?? []).filter(isActivityAnnotation),
 		[annotations],
@@ -159,7 +179,12 @@ export function AssistantMessage({
 			data-message-role="assistant"
 			className="conversation-thread-enter conversation-fade-in group/assistant flex min-w-0 justify-start"
 		>
-			<div className="relative flex min-w-0 max-w-[75%] flex-col pb-5">
+			<div
+				className={cn(
+					"relative flex min-w-0 flex-col pb-5",
+					showPlanCard ? "w-full max-w-3xl" : "max-w-[75%]",
+				)}
+			>
 				{activityAnnotations.length ? (
 					<AssistantActivityGroup annotations={activityAnnotations}>
 						{activityAnnotations.map((annotation) => {
@@ -259,7 +284,13 @@ export function AssistantMessage({
 					</div>
 				) : null}
 				{showPlanCard ? (
-					<PlanReviewCard plan={plan ?? { title: "Plan", summary: content, steps: [], approvedPrompts: [], rawMarkdown: content, markdown: content, isPlanLike: false, canCollapse: content.length > 900, source: "plain" }} workspacePath={workspacePath} />
+					<PlanSummaryCard
+						plan={displayedPlan}
+						needsInput={planNeedsInput(displayedPlan.rawMarkdown)}
+						approved={isPlanApproved}
+						readOnly={isPlanReadOnly}
+						onOpen={onOpenPlan ?? (() => undefined)}
+					/>
 				) : validationReport ? (
 					<MissionValidationCard
 						report={validationReport}
