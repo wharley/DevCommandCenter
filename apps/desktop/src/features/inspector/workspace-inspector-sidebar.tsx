@@ -55,7 +55,6 @@ import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workben
 import { InspectorChangesSection } from "./inspector-changes-section";
 import { GitSectionHeader } from "./git-section-header";
 import { projectWorkspaceMessages } from "@/features/panel/thread-projection";
-import { PlanReviewCard } from "@/features/panel/message-components";
 import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
 import {
 	buildMissionAcceptanceCriteriaCoverage,
@@ -224,10 +223,10 @@ const MIN_SECTION_HEIGHT = 128;
 const MAX_SECTION_HEIGHT = 640;
 const DEFAULT_DOCK_HEIGHT = 320;
 
-type InspectorTab = "activity" | "context" | "spec" | "plan";
+type InspectorTab = "activity" | "context" | "spec";
 export type WorkspaceInspectorMode = "git" | "code";
 
-const SESSION_DOCK_TABS: InspectorTab[] = ["activity", "context", "spec", "plan"];
+const SESSION_DOCK_TABS: InspectorTab[] = ["activity", "context", "spec"];
 const INSPECTOR_MODES: WorkspaceInspectorMode[] = ["git", "code"];
 const EMPTY_CODE_FILE_PATHS: string[] = [];
 type PendingGitConfirmation = "merge" | "sync-base" | null;
@@ -902,7 +901,7 @@ function ResizeHandle({
 
 /**
  * Collapsed resting state for the session panel: a slim footer dock that keeps
- * Activity/Context/Spec/Plan one click away while handing the full rail height
+ * Activity/Context/Spec one click away while handing the full rail height
  * to the Git + review surface above it. Clicking any chip (or the bar) lifts the
  * dock back open at the chosen tab.
  */
@@ -2416,10 +2415,8 @@ export function WorkspaceInspectorSidebar({
 
 	const [dockHeight, setDockHeight] = useState(DEFAULT_DOCK_HEIGHT);
 	const [sessionDockOpen, setSessionDockOpen] = useState(false);
-	// Whether the user deliberately collapsed the dock this session. Kept so a
-	// fresh plan can still override it when it surfaces for review.
+	// Whether the user deliberately collapsed the dock in this session.
 	const dockUserClosedRef = useRef(false);
-	const autoOpenedPlanMessageIdRef = useRef<string | null>(null);
 	const selectInspectorMode = useCallback(
 		(mode: WorkspaceInspectorMode) => {
 			if (mode === "git") {
@@ -2453,7 +2450,6 @@ export function WorkspaceInspectorSidebar({
 		() => derivePlanFollowUpState(planMessages),
 		[planMessages],
 	);
-	const activePlanMessage = planFollowUpState.activePlanMessage;
 	const latestPlanMessage = planFollowUpState.latestPlanMessage;
 	const missionSpecsQuery = useWorkspaceMissionSpecs(workspacePath);
 	const missionSpecs = missionSpecsQuery.data?.specs ?? [];
@@ -2779,7 +2775,6 @@ export function WorkspaceInspectorSidebar({
 	]);
 
 	useEffect(() => {
-		autoOpenedPlanMessageIdRef.current = null;
 		onTabChange("activity");
 		// New session: rest collapsed. Calm mode keeps the dock closed until the
 		// user opens it (or a fresh plan surfaces) — streaming chat activity no
@@ -2789,31 +2784,10 @@ export function WorkspaceInspectorSidebar({
 	}, [sessionId]);
 
 	useEffect(() => {
-		const planMessageId = activePlanMessage?.id ?? null;
-		if (!planMessageId) {
-			return;
-		}
-		if (autoOpenedPlanMessageIdRef.current === planMessageId) {
-			return;
-		}
-		autoOpenedPlanMessageIdRef.current = planMessageId;
-		// A fresh plan is worth surfacing: open the dock and focus the Plan tab,
-		// overriding a manual collapse so the review isn't missed.
-		dockUserClosedRef.current = false;
-		setSessionDockOpen(true);
-		if (activeTab !== "plan") {
-			onTabChange("plan");
-		}
-	}, [activePlanMessage?.id, activeTab, onTabChange]);
-
-	useEffect(() => {
-		const activeSurfaceDisappeared =
-			(activeTab === "spec" && missionSpecs.length === 0) ||
-			(activeTab === "plan" && !latestPlanMessage);
-		if (activeSurfaceDisappeared) {
+		if (activeTab === "spec" && missionSpecs.length === 0) {
 			onTabChange("activity");
 		}
-	}, [activeTab, latestPlanMessage, missionSpecs.length, onTabChange]);
+	}, [activeTab, missionSpecs.length, onTabChange]);
 
 	function handleResizeDockStart(event: ReactMouseEvent<HTMLButtonElement>) {
 		event.preventDefault();
@@ -2851,7 +2825,6 @@ export function WorkspaceInspectorSidebar({
 	const catalogCount = providerCatalog?.providers.length ?? 0;
 	const visibleSessionDockTabs = SESSION_DOCK_TABS.filter((tab) => {
 		if (tab === "spec") return missionSpecs.length > 0;
-		if (tab === "plan") return Boolean(latestPlanMessage);
 		return true;
 	});
 
@@ -3082,8 +3055,7 @@ export function WorkspaceInspectorSidebar({
 						if (
 							value === "activity" ||
 							value === "context" ||
-							value === "spec" ||
-							value === "plan"
+							value === "spec"
 						) {
 							onTabChange(value);
 						}
@@ -3119,8 +3091,7 @@ export function WorkspaceInspectorSidebar({
 					<div className="shrink-0 border-b border-border/40 bg-muted/15 px-2">
 						<TabsList variant="line" className="no-scrollbar h-9 w-full justify-start gap-0 overflow-x-auto border-0 bg-transparent p-0">
 							{visibleSessionDockTabs.map((tab) => {
-								const count =
-									tab === "spec" ? missionSpecs.length : tab === "plan" ? 1 : null;
+								const count = tab === "spec" ? missionSpecs.length : null;
 								return (
 									<TabsTrigger
 										key={tab}
@@ -3894,43 +3865,6 @@ export function WorkspaceInspectorSidebar({
 							)}
 						</TabsContent>
 
-						<TabsContent
-							value="plan"
-							className="mt-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
-						>
-							{latestPlanMessage ? (
-								<PlanReviewCard
-									plan={
-										latestPlanMessage.plan ?? {
-											title: "Plan",
-											summary: latestPlanMessage.content,
-											steps: [],
-											approvedPrompts: [],
-											rawMarkdown: latestPlanMessage.content,
-											markdown: latestPlanMessage.content,
-											isPlanLike: false,
-											canCollapse: latestPlanMessage.content.length > 900,
-											source: "plain",
-										}
-									}
-									workspacePath={workspacePath}
-									acceptanceCriteriaCoverage={
-										activePlanAcceptanceCriteriaCoverage
-									}
-								/>
-							) : (
-								<div className="flex min-h-full items-center justify-center px-4 py-8 text-center">
-									<div className="max-w-sm">
-										<p className="text-[13px] font-medium text-foreground">
-											{t("inspector.plan.emptyTitle")}
-										</p>
-										<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-											{t("inspector.plan.emptyDescription")}
-										</p>
-									</div>
-								</div>
-							)}
-						</TabsContent>
 					</Tabs>
 				</section>
 			</>
@@ -3942,7 +3876,6 @@ export function WorkspaceInspectorSidebar({
 							activity: activityCount,
 							context: null,
 							spec: missionSpecs.length,
-							plan: latestPlanMessage ? 1 : 0,
 						}}
 						live={sessionState === "active"}
 						onExpand={openSessionDock}
