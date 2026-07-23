@@ -707,6 +707,12 @@ function getCoreEventSessionId(event: CoreEvent): string | null {
 	if ("sessionCheckpointCreated" in event && event.sessionCheckpointCreated) {
 		return event.sessionCheckpointCreated.session_id;
 	}
+	if ("sessionPlanApproved" in event && event.sessionPlanApproved) {
+		return event.sessionPlanApproved.session_id;
+	}
+	if ("sessionPlanHandedOff" in event && event.sessionPlanHandedOff) {
+		return event.sessionPlanHandedOff.session_id;
+	}
 	return null;
 }
 
@@ -968,7 +974,7 @@ export default function App() {
 		useState<PendingSessionNavigation | null>(null);
 	const [sessionActionSessionId, setSessionActionSessionId] = useState<string | null>(null);
 	const [inspectorTab, setInspectorTab] = useState<
-		"activity" | "context" | "spec" | "plan"
+		"activity" | "context" | "spec"
 	>("activity");
 	const [inspectorMode, setInspectorMode] =
 		useState<WorkspaceInspectorMode>("git");
@@ -1413,7 +1419,12 @@ export default function App() {
 		[workspaceSessions],
 	);
 	const effectiveSelectedSessionId =
-		selectedSessionId ?? visibleWorkspaceSessions[0]?.session.id ?? null;
+		selectedSessionId &&
+		visibleWorkspaceSessions.some(
+			(summary) => summary.session.id === selectedSessionId,
+		)
+			? selectedSessionId
+			: (visibleWorkspaceSessions[0]?.session.id ?? null);
 	const selectedSessionSummary = useMemo(
 		() =>
 			workspaceSessions.find(
@@ -1478,10 +1489,9 @@ export default function App() {
 		}
 		setInspectorCollapsed(true);
 	}, [inspectorCollapsed, setInspectorCollapsed]);
-	const openPlanSidebar = useCallback(() => {
-		setInspectorMode("git");
-		setInspectorCollapsed(false);
-		setInspectorTab("plan");
+	const openPlanSurface = useCallback(() => {
+		setSurfaceSelection({ kind: "plan" });
+		setInspectorCollapsed(true);
 	}, [setInspectorCollapsed]);
 	const runWorkbenchCommand = useCallback(
 		(command: WorkbenchCommand) => {
@@ -1692,7 +1702,7 @@ export default function App() {
 		setIsSessionSearchOpen(false);
 		setIsQuickOpenOpen(false);
 		setIsWorkspaceSearchOpen(false);
-	}, [backendCacheKey]);
+	}, [backendCacheKey, selectedWorkspace?.id]);
 
 	useEffect(() => {
 		if (!pendingSessionNavigation) {
@@ -2320,14 +2330,14 @@ export default function App() {
 		async (input: { planMarkdown: string; planTitle: string | null }) => {
 			const planMarkdown = input.planMarkdown.trim();
 			if (!planMarkdown) {
-				return;
+				return false;
 			}
 			if (!selectedProvider || !selectedWorkspace) {
-				return;
+				return false;
 			}
 			if (selectedProviderBlockReason) {
 				toast.error(selectedProviderBlockReason);
-				return;
+				return false;
 			}
 
 			const prompt = buildPlanImplementationPrompt(planMarkdown);
@@ -2349,8 +2359,6 @@ export default function App() {
 				});
 				const sessionId = started.session.id;
 				startedSessionId = sessionId;
-				openPlanSidebar();
-
 				const startedSnapshot: RuntimeSessionSnapshot = {
 					sessionId: started.session.id,
 					projectId: started.session.projectId,
@@ -2434,6 +2442,7 @@ export default function App() {
 								: summary,
 						),
 				);
+				return true;
 			} catch (error) {
 				const message =
 					error instanceof Error
@@ -2443,6 +2452,7 @@ export default function App() {
 							: "Failed to create implementation thread";
 				console.error("[dcc] implement plan thread failed:", error);
 				toast.error(message);
+				return false;
 			} finally {
 				setPendingPrompt((current) => (current === prompt ? null : current));
 				setPendingPromptSessionId((current) =>
@@ -2452,7 +2462,6 @@ export default function App() {
 		},
 		[
 			backendCacheKey,
-			openPlanSidebar,
 			queryClient,
 			selectedModel,
 			selectedProvider,
@@ -2772,7 +2781,6 @@ export default function App() {
 	const handleGeneratePlanFromSpec = useCallback(
 		(specMarkdown: string) => {
 			const prompt = buildPlanFromSpecPrompt(specMarkdown);
-			openPlanSidebar();
 			void handleSubmitPrompt({
 				rawPrompt: prompt,
 				envelope: {
@@ -2782,7 +2790,7 @@ export default function App() {
 				},
 			});
 		},
-		[handleSubmitPrompt, openPlanSidebar],
+		[handleSubmitPrompt],
 	);
 
 	const handleValidateMissionSpec = useCallback(
@@ -3709,7 +3717,7 @@ export default function App() {
 									selectedProviderRuntime={selectedProviderRuntime}
 									providerChoices={providerChoices}
 									sessions={workspaceSessions}
-									selectedSessionId={selectedSessionId}
+									selectedSessionId={effectiveSelectedSessionId}
 									isLoadingSessions={workspaceSessionsQuery.isPending}
 									sessionSnapshot={selectedSessionSnapshot}
 									sessionEvents={sessionEvents}
@@ -3732,7 +3740,7 @@ export default function App() {
 									onInstallUpdate={installUpdate}
 									surfaceSelection={surfaceSelection}
 									onCloseSurface={handleCloseSurface}
-									onOpenPlanSidebar={openPlanSidebar}
+									onOpenPlanSurface={openPlanSurface}
 									onImplementPlanInNewThread={handleImplementPlanInNewThread}
 									inspectorCollapsed={inspectorCollapsed}
 									onToggleInspector={toggleGitInspector}
