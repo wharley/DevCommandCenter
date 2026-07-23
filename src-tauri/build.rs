@@ -2,10 +2,11 @@ use std::{env, fs, path::PathBuf};
 
 use dcc_core::{
     application::{
-        AbortRunInput, AbortRunOutput, CloseSessionInput, CloseSessionOutput,
-        CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput, RestoreSessionInput,
-        RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput,
-        SendTurnOutput, StartThreadInput, StartThreadOutput,
+        AbortRunInput, AbortRunOutput, ApprovePlanInput, ApprovePlanOutput, CloseSessionInput,
+        CloseSessionOutput, CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput,
+        RecordPlanHandoffInput, RecordPlanHandoffOutput, RestoreSessionInput, RestoreSessionOutput,
+        ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput,
+        StartThreadOutput,
     },
     domain::{
         delegation::{
@@ -189,6 +190,8 @@ struct WorkspaceMethods {
 struct SessionMethods {
     start_thread: String,
     send_turn: String,
+    approve_plan: String,
+    record_plan_handoff: String,
     abort_run: String,
     resume_session: String,
     close_session: String,
@@ -404,6 +407,10 @@ fn main() {
         .typ::<StartThreadOutput>()
         .typ::<SendTurnInput>()
         .typ::<SendTurnOutput>()
+        .typ::<ApprovePlanInput>()
+        .typ::<ApprovePlanOutput>()
+        .typ::<RecordPlanHandoffInput>()
+        .typ::<RecordPlanHandoffOutput>()
         .typ::<AbortRunInput>()
         .typ::<AbortRunOutput>()
         .typ::<ResumeSessionInput>()
@@ -532,6 +539,8 @@ fn main() {
         SessionMethods {
             start_thread: "start_thread".to_string(),
             send_turn: "send_turn".to_string(),
+            approve_plan: "approve_plan".to_string(),
+            record_plan_handoff: "record_plan_handoff".to_string(),
             abort_run: "abort_run".to_string(),
             resume_session: "resume_session".to_string(),
             close_session: "close_session".to_string(),
