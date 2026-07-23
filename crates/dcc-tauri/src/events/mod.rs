@@ -57,6 +57,12 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
         CoreEvent::SessionCheckpointCreated { .. } => {
             format!("{SESSION_EVENT_PREFIX}/checkpoint/created")
         }
+        CoreEvent::SessionPlanApproved { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/plan/approved")
+        }
+        CoreEvent::SessionPlanHandedOff { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/plan/handed-off")
+        }
         CoreEvent::SessionDelegationRequested { .. } => {
             format!("{SESSION_EVENT_PREFIX}/delegation/requested")
         }
