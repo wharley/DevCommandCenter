@@ -33,9 +33,14 @@ import type { AgentInitiatedDelegationRequest } from "./agent-delegation-request
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import type {
 	OpenTerminalRequest,
-	TerminalScopeKind,
 	TerminalScopeTarget,
 } from "@/features/terminal/terminal-scope";
+import {
+	getWorkspaceTerminalUiState,
+	updateWorkspaceTerminalUiState,
+	type WorkspaceTerminalUiStateUpdate,
+	type WorkspaceTerminalUiStates,
+} from "@/features/terminal/terminal-workspace-ui-state";
 import {
 	dispatchWorkbenchCommand,
 	subscribeWorkbenchCommand,
@@ -61,6 +66,11 @@ type SessionWorkbenchProps = {
 	workspaceName: string;
 	workspaceBranch: string;
 	workspacePath: string | null;
+	/** Active worktree/member id used to isolate terminal state and runtime ownership. */
+	terminalWorkspaceId?: string | null;
+	/** Active worktree/member labels used by the terminal runtime context. */
+	terminalWorkspaceName?: string | null;
+	terminalWorkspaceBranch?: string | null;
 	/** Project id — terminals are scoped per project. */
 	projectId?: string | null;
 	/** Project root (`rootPath`) — terminals open here, outside the worktree. */
@@ -111,11 +121,11 @@ type SessionWorkbenchProps = {
 	onInstallUpdate: () => void;
 	surfaceSelection: WorkspaceSurfaceSelection | null;
 	onCloseSurface: () => void;
-	onOpenPlanSidebar: () => void;
+	onOpenPlanSurface: () => void;
 	onImplementPlanInNewThread: (input: {
 		planMarkdown: string;
 		planTitle: string | null;
-	}) => void;
+	}) => Promise<boolean>;
 	composerPrefill?: { text: string; nonce: number } | null;
 	/** Current inspector visibility — picks the open vs. close affordance. */
 	inspectorCollapsed?: boolean;
@@ -139,6 +149,9 @@ export function SessionWorkbench({
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
+	terminalWorkspaceId,
+	terminalWorkspaceName,
+	terminalWorkspaceBranch,
 	projectId,
 	terminalRootPath,
 	terminalWorktreePath,
@@ -177,7 +190,7 @@ export function SessionWorkbench({
 	onInstallUpdate,
 	surfaceSelection,
 	onCloseSurface,
-	onOpenPlanSidebar,
+	onOpenPlanSurface,
 	onImplementPlanInNewThread,
 	composerPrefill,
 	inspectorCollapsed,
@@ -190,25 +203,43 @@ export function SessionWorkbench({
 	delegateSignal,
 }: SessionWorkbenchProps) {
 	const { t } = useTranslation("common");
-	const [terminalOpen, setTerminalOpen] = useState(false);
-	const [terminalExpanded, setTerminalExpanded] = useState(false);
+	const [terminalUiStates, setTerminalUiStates] =
+		useState<WorkspaceTerminalUiStates>({});
 	const [deliveryOpen, setDeliveryOpen] = useState(false);
 	const [deliveryRunning, setDeliveryRunning] = useState(false);
 	const [deliveryResults, setDeliveryResults] = useState<
 		MultiWorkspaceDeliveryResult[] | null
 	>(null);
 	const [deliveryError, setDeliveryError] = useState<string | null>(null);
-	const [terminalScopeKind, setTerminalScopeKind] =
-		useState<TerminalScopeKind>("worktree");
 	const sessionState = sessionSnapshot?.state ?? "idle";
 	const sessionId = sessionSnapshot?.sessionId ?? null;
-	const terminalProjectKey = projectId ?? workspaceId;
+	const terminalWorkspaceKey = terminalWorkspaceId ?? workspaceId;
+	const terminalUiState = getWorkspaceTerminalUiState(
+		terminalUiStates,
+		terminalWorkspaceKey,
+	);
+	const terminalOpen = terminalUiState.open;
+	const terminalExpanded = terminalUiState.expanded;
+	const terminalScopeKind = terminalUiState.scopeKind;
+	const updateTerminalUiState = useCallback(
+		(update: WorkspaceTerminalUiStateUpdate) => {
+			setTerminalUiStates((current) =>
+				updateWorkspaceTerminalUiState(
+					current,
+					terminalWorkspaceKey,
+					update,
+				),
+			);
+		},
+		[terminalWorkspaceKey],
+	);
+	const terminalProjectKey = projectId ?? terminalWorkspaceKey;
 	const terminalScopes: TerminalScopeTarget[] = useMemo(
 		() => [
 			{
 				kind: "worktree",
 				label: t("terminalDock.scopes.worktree"),
-				scopeKey: `worktree:${workspaceId}`,
+				scopeKey: `worktree:${terminalWorkspaceKey}`,
 				cwd: terminalWorktreePath ?? null,
 				disabledReason: terminalWorktreePath
 					? null
@@ -230,7 +261,7 @@ export function SessionWorkbench({
 			terminalProjectKey,
 			terminalRootPath,
 			terminalWorktreePath,
-			workspaceId,
+			terminalWorkspaceKey,
 			workspacePath,
 		],
 	);
@@ -249,7 +280,6 @@ export function SessionWorkbench({
 			}
 			recordUxMetric("terminal_discovered");
 
-			setTerminalScopeKind(scope.kind);
 			if (request.terminalId) {
 				setActiveTerminalTab(scope.scopeKey, request.terminalId);
 			} else if (request.createNew) {
@@ -257,17 +287,30 @@ export function SessionWorkbench({
 			} else {
 				ensureTerminalTab(scope.scopeKey);
 			}
-			setTerminalOpen(true);
+			updateTerminalUiState((current) => ({
+				...current,
+				open: true,
+				scopeKind: scope.kind,
+			}));
 		},
-		[terminalScopes],
+		[terminalScopes, updateTerminalUiState],
 	);
 	const handleTerminalOpenChange = useCallback((next: boolean) => {
-		setTerminalOpen(next);
+		updateTerminalUiState((current) => ({
+			...current,
+			open: next,
+			expanded: next ? current.expanded : false,
+		}));
 		if (!next) {
-			setTerminalExpanded(false);
 			requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
 		}
-	}, []);
+	}, [updateTerminalUiState]);
+	const handleTerminalExpandedChange = useCallback(
+		(expanded: boolean) => {
+			updateTerminalUiState((current) => ({ ...current, expanded }));
+		},
+		[updateTerminalUiState],
+	);
 
 	useEffect(
 		() =>
@@ -426,7 +469,7 @@ export function SessionWorkbench({
 						onInstallUpdate={onInstallUpdate}
 						surfaceSelection={surfaceSelection}
 						onCloseSurface={onCloseSurface}
-						onOpenPlanSidebar={onOpenPlanSidebar}
+						onOpenPlanSurface={onOpenPlanSurface}
 						onImplementPlanInNewThread={onImplementPlanInNewThread}
 						terminalScopes={terminalScopes}
 						onOpenTerminal={handleOpenTerminal}
@@ -448,7 +491,7 @@ export function SessionWorkbench({
 					open={terminalOpen}
 					onOpenChange={handleTerminalOpenChange}
 					expanded={terminalExpanded}
-					onExpandedChange={setTerminalExpanded}
+					onExpandedChange={handleTerminalExpandedChange}
 					scopeKey={activeTerminalScope.scopeKey}
 					scopeLabel={activeTerminalScope.label}
 					cwd={activeTerminalScope.cwd}
@@ -458,10 +501,13 @@ export function SessionWorkbench({
 						if (kind !== terminalScopeKind) {
 							recordUxMetric("terminal_scope_switched");
 						}
-						setTerminalScopeKind(kind);
+						updateTerminalUiState((current) => ({
+							...current,
+							scopeKind: kind,
+						}));
 					}}
-					workspaceName={workspaceName}
-					workspaceBranch={workspaceBranch}
+					workspaceName={terminalWorkspaceName ?? workspaceName}
+					workspaceBranch={terminalWorkspaceBranch ?? workspaceBranch}
 					providerLabel={selectedProviderLabel}
 					sessionState={sessionState}
 					sessionId={sessionId}
