@@ -1,7 +1,8 @@
 use tauri::{AppHandle, State};
 
 use dcc_core::application::{
-    AbortRunInput, AbortRunOutput, CloseSessionInput, CloseSessionOutput, RestoreSessionInput,
+    AbortRunInput, AbortRunOutput, ApprovePlanInput, ApprovePlanOutput, CloseSessionInput,
+    CloseSessionOutput, RecordPlanHandoffInput, RecordPlanHandoffOutput, RestoreSessionInput,
     RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput,
     StartThreadInput, StartThreadOutput,
 };
@@ -76,6 +77,24 @@ pub async fn list_thread_events(
     session_id: String,
 ) -> Result<Vec<SessionEventRecord>, String> {
     session_command_impl::list_thread_events(state, app, session_id).await
+}
+
+#[tauri::command]
+pub async fn approve_plan(
+    state: State<'_, SessionCommandState>,
+    app: AppHandle,
+    input: ApprovePlanInput,
+) -> Result<ApprovePlanOutput, String> {
+    session_command_impl::approve_plan(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn record_plan_handoff(
+    state: State<'_, SessionCommandState>,
+    app: AppHandle,
+    input: RecordPlanHandoffInput,
+) -> Result<RecordPlanHandoffOutput, String> {
+    session_command_impl::record_plan_handoff(state, app, input).await
 }
 
 #[tauri::command]
