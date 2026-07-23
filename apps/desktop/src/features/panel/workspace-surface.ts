@@ -17,6 +17,9 @@ export type WorkspaceSurfaceSelection =
 			spec: MissionSpecEntry;
 	  }
 	| {
+			kind: "plan";
+	  }
+	| {
 			kind: "file-edit";
 			path: string;
 			name: string;
