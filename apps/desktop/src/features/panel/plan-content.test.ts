@@ -5,8 +5,11 @@ import {
 	buildPlanFromSpecPrompt,
 	buildPlanImplementationPrompt,
 	buildPlanImplementationThreadTitle,
+	buildPlanRevisionPrompt,
+	computePlanHash,
 	normalizePlanContentForExport,
 	parsePlanContent,
+	planNeedsInput,
 	stripDisplayedPlanMarkdown,
 } from "./plan-content";
 
@@ -54,6 +57,15 @@ describe("plan-content", () => {
 		expect(normalizePlanContentForExport("Plan text")).toBe("Plan text\n");
 	});
 
+	it("computes a stable content hash for an exact plan version", () => {
+		expect(computePlanHash("# Plan\n\n- [ ] Ship it")).toBe(
+			computePlanHash("# Plan\n\n- [ ] Ship it"),
+		);
+		expect(computePlanHash("# Plan\n\n- [ ] Ship it")).not.toBe(
+			computePlanHash("# Plan\n\n- [ ] Ship it safely"),
+		);
+	});
+
 	it("builds the implementation prompt and thread title", () => {
 		const markdown = "# Mission Plan\n\nShip the dashboard.";
 		expect(buildPlanImplementationPrompt(markdown)).toBe(
@@ -70,6 +82,32 @@ describe("plan-content", () => {
 		expect(prompt).toContain("# Mission Plan\n\nShip the dashboard.");
 		expect(prompt).toContain("Execution criteria:");
 		expect(prompt).toContain("changed files");
+	});
+
+	it("builds a revision prompt with the selected excerpt and full plan", () => {
+		const prompt = buildPlanRevisionPrompt({
+			planMarkdown: "# Mission Plan\n\n- [ ] Add the plan card.",
+			selectedText: "Add the plan card.",
+			comment: "Split this into the inspector and composer work.",
+		});
+
+		expect(prompt).toContain("Do not implement anything.");
+		expect(prompt).toContain("> Add the plan card.");
+		expect(prompt).toContain("Split this into the inspector and composer work.");
+		expect(prompt).toContain("# Mission Plan\n\n- [ ] Add the plan card.");
+	});
+
+	it("recognizes a preliminary plan that still needs repository inspection", () => {
+		expect(
+			planNeedsInput(
+				"Se você confirmar, o próximo passo é inspecionar a estrutura do repositório e devolver o plano final.",
+			),
+		).toBe(true);
+		expect(
+			planNeedsInput(
+				"# Plan\n\n## Steps\n- [ ] Inspect src/auth.ts\n- [ ] Implement the validated flow",
+			),
+		).toBe(false);
 	});
 
 	it("builds a planning prompt from a mission spec without requesting implementation", () => {
