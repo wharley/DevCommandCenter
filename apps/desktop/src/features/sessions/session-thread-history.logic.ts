@@ -245,6 +245,26 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					label: record.kind.label,
 				},
 			};
+		case "plan_approved":
+			return {
+				sessionPlanApproved: {
+					session_id: record.sessionId,
+					plan_message_id: record.kind.planMessageId,
+					plan_version: record.kind.planVersion,
+					plan_hash: record.kind.planHash,
+				},
+			};
+		case "plan_handed_off":
+			return {
+				sessionPlanHandedOff: {
+					session_id: record.sessionId,
+					plan_message_id: record.kind.planMessageId,
+					plan_version: record.kind.planVersion,
+					plan_hash: record.kind.planHash,
+					action: record.kind.action,
+					target_session_id: record.kind.targetSessionId,
+				},
+			};
 		case "delegation_requested":
 			return {
 				sessionDelegationRequested: {
@@ -377,6 +397,12 @@ function getEventSessionId(event: CoreEvent): string | null {
 	if ("sessionCheckpointCreated" in event && event.sessionCheckpointCreated) {
 		return event.sessionCheckpointCreated.session_id;
 	}
+	if ("sessionPlanApproved" in event && event.sessionPlanApproved) {
+		return event.sessionPlanApproved.session_id;
+	}
+	if ("sessionPlanHandedOff" in event && event.sessionPlanHandedOff) {
+		return event.sessionPlanHandedOff.session_id;
+	}
 	if ("sessionDelegationRequested" in event && event.sessionDelegationRequested) {
 		return event.sessionDelegationRequested.session_id;
 	}
@@ -419,6 +445,8 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionTurnCompleted" in event) return "session.turn.completed";
 	if ("sessionTurnAborted" in event) return "session.turn.aborted";
 	if ("sessionCheckpointCreated" in event) return "session.checkpoint.created";
+	if ("sessionPlanApproved" in event) return "session.plan.approved";
+	if ("sessionPlanHandedOff" in event) return "session.plan.handed-off";
 	if ("sessionDelegationRequested" in event) return "delegation.requested";
 	if ("sessionDelegationStarted" in event) return "delegation.running";
 	if ("sessionDelegationDelta" in event) return "delegation.update";
@@ -487,6 +515,12 @@ function eventSummary(event: CoreEvent): string {
 	}
 	if ("sessionCheckpointCreated" in event && event.sessionCheckpointCreated) {
 		return event.sessionCheckpointCreated.label;
+	}
+	if ("sessionPlanApproved" in event && event.sessionPlanApproved) {
+		return `Plan version ${event.sessionPlanApproved.plan_version} approved`;
+	}
+	if ("sessionPlanHandedOff" in event && event.sessionPlanHandedOff) {
+		return `Plan version ${event.sessionPlanHandedOff.plan_version} handed off via ${event.sessionPlanHandedOff.action}`;
 	}
 	if ("sessionDelegationRequested" in event && event.sessionDelegationRequested) {
 		return `Delegation requested · ${event.sessionDelegationRequested.delegation_id}`;
@@ -587,20 +621,27 @@ export function mergeSessionThreadEvents(
 	liveEvents: CoreEvent[],
 	sessionId: string | null,
 ) {
+	// A missing session means there is no thread to project. Treating null as
+	// "all sessions" leaks messages and active plans while switching workspaces
+	// or opening a brand-new workspace.
+	if (sessionId === null) {
+		return [];
+	}
+
 	const merged: TimelineEvent[] = [];
 	const seen = new Set<string>();
 	const historyCounts = new Map<string, number>();
 	const liveCounts = new Map<string, number>();
 
 	for (const record of historyEvents) {
-		if (sessionId !== null && record.sessionId !== sessionId) {
+		if (record.sessionId !== sessionId) {
 			continue;
 		}
 		pushHistoryEvent(merged, seen, historyCounts, record);
 	}
 
 	for (const event of liveEvents) {
-		if (sessionId !== null && getEventSessionId(event) !== sessionId) {
+		if (getEventSessionId(event) !== sessionId) {
 			continue;
 		}
 		pushLiveEvent(merged, seen, liveCounts, event);
