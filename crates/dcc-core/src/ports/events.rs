@@ -130,6 +130,20 @@ pub enum CoreEvent {
         checkpoint_id: String,
         label: String,
     },
+    SessionPlanApproved {
+        session_id: String,
+        plan_message_id: String,
+        plan_version: u32,
+        plan_hash: String,
+    },
+    SessionPlanHandedOff {
+        session_id: String,
+        plan_message_id: String,
+        plan_version: u32,
+        plan_hash: String,
+        action: String,
+        target_session_id: Option<String>,
+    },
     SessionDelegationRequested {
         session_id: String,
         delegation_id: String,
