@@ -195,6 +195,25 @@ pub enum SessionEventKind {
         checkpoint_id: CheckpointId,
         label: String,
     },
+    PlanApproved {
+        #[serde(rename = "planMessageId")]
+        plan_message_id: String,
+        #[serde(rename = "planVersion")]
+        plan_version: u32,
+        #[serde(rename = "planHash")]
+        plan_hash: String,
+    },
+    PlanHandedOff {
+        #[serde(rename = "planMessageId")]
+        plan_message_id: String,
+        #[serde(rename = "planVersion")]
+        plan_version: u32,
+        #[serde(rename = "planHash")]
+        plan_hash: String,
+        action: String,
+        #[serde(rename = "targetSessionId")]
+        target_session_id: Option<SessionId>,
+    },
     DelegationRequested {
         #[serde(rename = "delegationId")]
         delegation_id: DelegationId,
@@ -314,6 +333,8 @@ impl SessionProjection {
             | SessionEventKind::TurnUserInputResolved { .. }
             | SessionEventKind::TurnPermissionRequested { .. }
             | SessionEventKind::TurnPermissionResolved { .. }
+            | SessionEventKind::PlanApproved { .. }
+            | SessionEventKind::PlanHandedOff { .. }
             | SessionEventKind::DelegationRequested { .. }
             | SessionEventKind::DelegationStarted { .. }
             | SessionEventKind::DelegationDelta { .. }
