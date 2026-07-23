@@ -288,6 +288,8 @@ pub fn validate_workspace_automation_config(config: &RepoAutomationConfig) -> Re
                 task.id
             ));
         }
+        validate_workspace_task_command(&task.command)
+            .map_err(|error| format!("`.dcc.toml` task `{}` {error}", task.id))?;
         if !(1..=3600).contains(&task.timeout_seconds) {
             return Err(format!(
                 "`.dcc.toml` task `{}` timeout_seconds must be between 1 and 3600",
@@ -370,6 +372,48 @@ fn validate_task_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_workspace_task_command(command: &str) -> Result<(), String> {
+    let Some(flag) = command
+        .split_whitespace()
+        .find(|part| part.starts_with(is_typographic_dash))
+    else {
+        return Ok(());
+    };
+    Err(format!(
+        "contains a typographic dash in flag `{flag}`. Use ASCII hyphens for command flags (for example `--fix`)"
+    ))
+}
+
+fn is_typographic_dash(value: char) -> bool {
+    matches!(
+        value,
+        '\u{058A}'
+            | '\u{05BE}'
+            | '\u{1400}'
+            | '\u{1806}'
+            | '\u{2010}'
+            | '\u{2011}'
+            | '\u{2012}'
+            | '\u{2013}'
+            | '\u{2014}'
+            | '\u{2015}'
+            | '\u{2212}'
+            | '\u{2E17}'
+            | '\u{2E1A}'
+            | '\u{2E3A}'
+            | '\u{2E3B}'
+            | '\u{2E40}'
+            | '\u{301C}'
+            | '\u{3030}'
+            | '\u{30A0}'
+            | '\u{FE31}'
+            | '\u{FE32}'
+            | '\u{FE58}'
+            | '\u{FE63}'
+            | '\u{FF0D}'
+    )
+}
+
 fn validate_task_cwd(id: &str, cwd: &str) -> Result<(), String> {
     let path = Path::new(cwd);
     if path.is_absolute()
@@ -401,7 +445,8 @@ mod tests {
 
     use super::{
         read_workspace_automation_config, read_workspace_setup_command,
-        read_workspace_validation_config, RepoTaskKind,
+        read_workspace_validation_config, validate_workspace_automation_config,
+        RepoAutomationConfig, RepoAutomationTask, RepoTaskKind,
     };
 
     #[test]
@@ -570,6 +615,28 @@ before_push = ["lint"]
         assert!(error.contains("cannot run fix task"));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_typographic_dashes_in_task_flags() {
+        let config = RepoAutomationConfig {
+            setup_command: None,
+            tasks: vec![RepoAutomationTask {
+                id: "lint_fix".to_string(),
+                label: None,
+                command: "yarn lint —fix".to_string(),
+                kind: RepoTaskKind::Fix,
+                cwd: None,
+                timeout_seconds: 60,
+            }],
+            before_merge: Vec::new(),
+            before_push: Vec::new(),
+            source_path: ".dcc.toml".to_string(),
+        };
+
+        let error = validate_workspace_automation_config(&config).expect_err("invalid command");
+        assert!(error.contains("typographic dash"));
+        assert!(error.contains("--fix"));
     }
 
     #[test]

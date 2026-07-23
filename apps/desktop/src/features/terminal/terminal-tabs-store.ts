@@ -176,6 +176,28 @@ export function setActiveTerminal(scopeKey: string, terminalId: string) {
 	write(scopeKey, { ...current, activeId: terminalId });
 }
 
+/** Renaming is UI metadata only; it never recreates or interrupts the PTY. */
+export function renameTerminal(scopeKey: string, terminalId: string, title: string) {
+	const nextTitle = title.trim();
+	if (!nextTitle) {
+		return false;
+	}
+
+	const current = read(scopeKey);
+	const index = current.tabs.findIndex((tab) => tab.id === terminalId);
+	if (index === -1) {
+		return false;
+	}
+	if (current.tabs[index].title === nextTitle) {
+		return true;
+	}
+
+	const tabs = [...current.tabs];
+	tabs[index] = { ...tabs[index], title: nextTitle };
+	write(scopeKey, { ...current, tabs });
+	return true;
+}
+
 function subscribe(listener: () => void): () => void {
 	listeners.add(listener);
 	return () => {

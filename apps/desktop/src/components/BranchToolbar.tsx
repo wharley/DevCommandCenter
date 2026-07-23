@@ -59,7 +59,10 @@ export function BranchToolbar({
 						{t("branchToolbar.activeBadge")}
 					</Badge>
 				</div>
-				<p className="truncate text-[11px] text-muted-foreground">
+				<p
+					className="truncate text-[11px] text-muted-foreground"
+					title={workspacePath ?? undefined}
+				>
 					{workspacePath ?? t("branchToolbar.workspacePathUnavailable")}
 				</p>
 			</div>

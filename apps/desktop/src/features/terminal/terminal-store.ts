@@ -100,6 +100,23 @@ function snapshot(entry: TerminalEntry): TerminalSnapshot {
 	};
 }
 
+/**
+ * The xterm view can finish its first layout before the asynchronous PTY spawn
+ * completes. Keep that layout and apply it as soon as a PTY is available so
+ * full-screen terminal apps (for example nano) receive the visible dimensions.
+ */
+function applyPendingResize(entry: TerminalEntry) {
+	if (
+		!entry.ptyId ||
+		entry.lastResizeCols === null ||
+		entry.lastResizeRows === null
+	) {
+		return;
+	}
+
+	void resizeTerminalApi(entry.ptyId, entry.lastResizeCols, entry.lastResizeRows);
+}
+
 function appendChunk(entry: TerminalEntry, data: string) {
 	entry.chunks.push(data);
 	entry.bufferedBytes += data.length;
@@ -249,6 +266,7 @@ export async function ensureTerminal(
 			entry.status = result.session.status === "exited" ? "exited" : "running";
 			entry.exitCode = result.session.lastExitCode ?? null;
 			ptyToTerminal.set(result.ptyId, terminalEntryKey(terminalId));
+			applyPendingResize(entry);
 
 			if (result.chunks.length > 0) {
 				entry.chunks = [...result.chunks];
@@ -329,17 +347,14 @@ export function resizeTerminalView(
 	cols: number,
 	rows: number,
 ) {
-	const entry = entries.get(terminalEntryKey(terminalId));
-	if (!entry?.ptyId) {
-		return;
-	}
+	const entry = getOrCreateEntry(terminalId);
 	if (entry.lastResizeCols === cols && entry.lastResizeRows === rows) {
 		return;
 	}
 
 	entry.lastResizeCols = cols;
 	entry.lastResizeRows = rows;
-	void resizeTerminalApi(entry.ptyId, cols, rows);
+	applyPendingResize(entry);
 }
 
 export function killTerminal(terminalId: string) {

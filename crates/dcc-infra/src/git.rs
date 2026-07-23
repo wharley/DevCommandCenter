@@ -26,8 +26,8 @@ pub use crate::git_parsing::{
 };
 pub use crate::repo_config::{
     read_workspace_automation_config, read_workspace_validation_config,
-    validate_workspace_automation_config, RepoAutomationConfig, RepoAutomationTask, RepoTaskKind,
-    RepoValidationConfig,
+    validate_workspace_automation_config, validate_workspace_task_command, RepoAutomationConfig,
+    RepoAutomationTask, RepoTaskKind, RepoValidationConfig,
 };
 pub use crate::workspace_setup_plan::{
     detect_workspace_setup_suggestions, WorkspaceSetupSuggestion,

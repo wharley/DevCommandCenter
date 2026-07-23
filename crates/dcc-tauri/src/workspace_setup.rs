@@ -11,7 +11,7 @@ use std::os::windows::process::CommandExt;
 use dcc_core::domain::workspace::{
     WorkspaceSetupReport, WorkspaceSetupStatus, WorkspaceSetupStepReport,
 };
-use dcc_infra::git::WorkspaceSetupSuggestion;
+use dcc_infra::git::{validate_workspace_task_command, WorkspaceSetupSuggestion};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorkspaceSetupFailurePolicy {
@@ -207,6 +207,7 @@ pub fn run_workspace_task_command(
     script: &str,
     timeout_seconds: u64,
 ) -> Result<WorkspaceCommandExecution, String> {
+    validate_workspace_task_command(script)?;
     run_workspace_command_with_timeout(
         workspace_root,
         script,

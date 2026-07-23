@@ -14,6 +14,7 @@ import {
 	Rabbit,
 	Search,
 	TerminalSquare,
+	Wrench,
 } from "lucide-react";
 import {
 	useCallback,
@@ -1487,12 +1488,6 @@ export function WorkspaceInspectorSidebar({
 		delegationReviewRoot?.workspaceRoot ??
 		normalizedSessionWorkspacePath ??
 		workspacePath;
-	const changesPathLine =
-		changesWorkspaceRoot && changesWorkspaceRoot.length > 0
-			? changesWorkspaceRoot.length > 56
-				? `…${changesWorkspaceRoot.slice(-55)}`
-				: changesWorkspaceRoot
-			: null;
 	const queryClient = useQueryClient();
 	const delegationsQuery = useQuery({
 		queryKey: ["delegations", workspaceId],
@@ -1760,6 +1755,13 @@ export function WorkspaceInspectorSidebar({
 	);
 
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
+	const automationConfigQuery = useQuery({
+		queryKey: [WORKSPACE_AUTOMATION_QUERY_KEY, workspacePath?.trim() ?? ""],
+		queryFn: () => workspaceProjectAutomationConfig({ workspaceRoot: workspacePath?.trim() ?? "" }),
+		enabled: Boolean(workspacePath?.trim()),
+		refetchOnWindowFocus: false,
+		staleTime: 30_000,
+	});
 	const gitBranch =
 		gitStatusQuery.data?.currentBranch &&
 		gitStatusQuery.data.currentBranch !== "HEAD"
@@ -1840,6 +1842,7 @@ export function WorkspaceInspectorSidebar({
 	const [automationOpen, setAutomationOpen] = useState(false);
 	const [automationReport, setAutomationReport] =
 		useState<WorkspaceRunProjectTasksOutput | null>(null);
+	const [isRunningFixes, setIsRunningFixes] = useState(false);
 	const codeRabbitStatusQuery = useCodeRabbitCliStatus(workspacePath, {
 		enabled: Boolean(workspacePath?.trim()),
 		includeAuthStatus: true,
@@ -1899,6 +1902,61 @@ export function WorkspaceInspectorSidebar({
 	const committedVsBaseCount = reviewBranchDiffQuery.data?.changes.length ?? 0;
 	const suppressEmptyCreatePr =
 		commitMode === "create-pr" && committedVsBaseCount === 0;
+	const configuredFixTaskIds = useMemo(
+		() =>
+			automationConfigQuery.data?.tasks
+				.filter((task) => task.kind === "fix")
+				.map((task) => task.id) ?? [],
+		[automationConfigQuery.data?.tasks],
+	);
+
+	const runConfiguredFixes = useCallback(async () => {
+		const root = workspacePath?.trim();
+		if (!root) return;
+		const config = await queryClient.fetchQuery({
+			queryKey: [WORKSPACE_AUTOMATION_QUERY_KEY, root],
+			queryFn: () => workspaceProjectAutomationConfig({ workspaceRoot: root }),
+			staleTime: 0,
+		});
+		const taskIds = config.tasks
+			.filter((task) => task.kind === "fix")
+			.map((task) => task.id);
+		if (taskIds.length === 0 || !window.confirm(t("automation.confirmFix"))) return;
+
+		setIsRunningFixes(true);
+		setAutomationReport(null);
+		try {
+			const output = await workspaceRunProjectTasks({
+				workspaceRoot: root,
+				taskIds,
+				expectedConfigHash: config.configHash,
+			});
+			setAutomationReport(output);
+			setAutomationOpen(true);
+			if (output.changedFiles) {
+				await Promise.all([
+					queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+					}),
+					queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+					}),
+					queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_AUTOMATION_QUERY_KEY, root],
+					}),
+				]);
+			}
+			if (output.report.status === "passed") {
+				toast.success(t("automation.runPassed"));
+			} else {
+				toast.error(t("automation.runFailed"));
+			}
+		} catch (error) {
+			toast.error(t("automation.runFailed"), { description: String(error) });
+		} finally {
+			setIsRunningFixes(false);
+		}
+	}, [queryClient, t, workspacePath]);
 
 	const runBeforePushChecks = useCallback(
 		async (root: string) => {
@@ -2858,6 +2916,31 @@ export function WorkspaceInspectorSidebar({
 									onSyncBase={handleSyncBase}
 								/>
 							</div>
+							{configuredFixTaskIds.length > 0 ? (
+								<div className="flex shrink-0 items-center gap-2 rounded-md border border-primary/20 bg-primary/5 px-2.5 py-2">
+									<Wrench className="size-3.5 shrink-0 text-primary" />
+									<p className="min-w-0 flex-1 text-[11px] text-muted-foreground">
+										{t("automation.fixesAvailable", {
+											count: configuredFixTaskIds.length,
+										})}
+									</p>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										className="h-7 shrink-0 gap-1.5 px-2 text-[11px]"
+										disabled={isRunningFixes}
+										onClick={() => void runConfiguredFixes()}
+									>
+										{isRunningFixes ? (
+											<Loader2 className="size-3 animate-spin" />
+										) : (
+											<Wrench className="size-3" />
+										)}
+										{t("automation.runFixes")}
+									</Button>
+								</div>
+							) : null}
 							{activeDelegationReview ? (
 								<div className="flex shrink-0 items-center gap-1.5 overflow-hidden rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5">
 									<GitFork
@@ -2948,14 +3031,6 @@ export function WorkspaceInspectorSidebar({
 										</Button>
 									</div>
 								</div>
-							) : null}
-							{changesPathLine ? (
-								<p
-									className="shrink-0 truncate text-[11px] text-muted-foreground"
-									title={changesWorkspaceRoot ?? undefined}
-								>
-									{changesPathLine}
-								</p>
 							) : null}
 							{isSetupPending && setupReportSummary ? (
 								<SetupPendingBanner

@@ -4,6 +4,7 @@ import {
 	Maximize2,
 	Minimize2,
 	PanelRightClose,
+	Pencil,
 	Plus,
 	X,
 } from "lucide-react";
@@ -14,16 +15,26 @@ import {
 	useMemo,
 	useRef,
 	useState,
+	type FormEvent,
 	type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
 	Tooltip,
 	TooltipContent,
@@ -37,6 +48,7 @@ import {
 	getTerminalRuntimeId,
 	MAX_TERMINAL_TABS,
 	removeTerminal,
+	renameTerminal,
 	setActiveTerminal,
 	useProjectTerminals,
 } from "./terminal-tabs-store";
@@ -132,6 +144,8 @@ export function WorkspaceTerminalDrawer({
 	const heightRef = useRef(DEFAULT_HEIGHT_PX);
 	const [heightPx, setHeightPx] = useState(DEFAULT_HEIGHT_PX);
 	const [terminalStatusVersion, setTerminalStatusVersion] = useState(0);
+	const [renamingTab, setRenamingTab] = useState<{ id: string; title: string } | null>(null);
+	const [tabTitleDraft, setTabTitleDraft] = useState("");
 
 	const { tabs, activeId } = useProjectTerminals(scopeKey);
 	const activeTab = tabs.find((tab) => tab.id === activeId) ?? tabs[0] ?? null;
@@ -243,6 +257,22 @@ export function WorkspaceTerminalDrawer({
 			requestAnimationFrame(() => terminalTabRefs.current.get(targetId)?.focus());
 		},
 		[scopeKey, tabs],
+	);
+
+	const openRenameTab = useCallback((tab: { id: string; title: string }) => {
+		setRenamingTab(tab);
+		setTabTitleDraft(tab.title);
+	}, []);
+
+	const submitRenameTab = useCallback(
+		(event: FormEvent<HTMLFormElement>) => {
+			event.preventDefault();
+			if (!renamingTab) return;
+			if (renameTerminal(scopeKey, renamingTab.id, tabTitleDraft)) {
+				setRenamingTab(null);
+			}
+		},
+		[renamingTab, scopeKey, tabTitleDraft],
 	);
 
 	useEffect(() => {
@@ -383,6 +413,14 @@ export function WorkspaceTerminalDrawer({
 									</button>
 									<button
 										type="button"
+										aria-label={t("terminalDock.renameTab", { title: tab.title })}
+										className="rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/tab:opacity-100"
+										onClick={() => openRenameTab(tab)}
+									>
+										<Pencil className="size-3" />
+									</button>
+									<button
+										type="button"
 										aria-label={t("terminalDock.closeTab", { title: tab.title })}
 										className="rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/tab:opacity-100"
 										onClick={(event) => {
@@ -486,6 +524,37 @@ export function WorkspaceTerminalDrawer({
 					)}
 				</div>
 			</div>
+
+			<Dialog
+				open={renamingTab !== null}
+				onOpenChange={(nextOpen) => {
+					if (!nextOpen) setRenamingTab(null);
+				}}
+			>
+				<DialogContent className="sm:max-w-sm">
+					<DialogHeader>
+						<DialogTitle>{t("terminalDock.renameTitle")}</DialogTitle>
+						<DialogDescription>{t("terminalDock.renameDescription")}</DialogDescription>
+					</DialogHeader>
+					<form className="grid gap-4" onSubmit={submitRenameTab}>
+						<Input
+							autoFocus
+							value={tabTitleDraft}
+							onChange={(event) => setTabTitleDraft(event.target.value)}
+							maxLength={80}
+							aria-label={t("terminalDock.renameInput")}
+						/>
+						<DialogFooter>
+							<Button type="button" variant="outline" onClick={() => setRenamingTab(null)}>
+								{t("terminalDock.cancelRename")}
+							</Button>
+							<Button type="submit" disabled={!tabTitleDraft.trim()}>
+								{t("terminalDock.saveRename")}
+							</Button>
+						</DialogFooter>
+					</form>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

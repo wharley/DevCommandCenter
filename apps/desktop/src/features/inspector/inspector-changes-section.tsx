@@ -885,6 +885,8 @@ export function InspectorChangesSection({
 
 	const data = query.data!;
 	const hasAny = data.staged.length > 0 || data.unstaged.length > 0;
+	const hasReviewableChanges =
+		hasAny || (branchDiffQuery.data?.changes.length ?? 0) > 0;
 
 	return (
 		<div className="relative flex min-h-0 flex-1 flex-col">
@@ -953,7 +955,7 @@ export function InspectorChangesSection({
 						onSelect={handleSelectPreview}
 					/>
 				)}
-				{Boolean(root) ? (
+				{hasReviewableChanges ? (
 					<CodeRabbitReviewSection
 						workspaceRoot={root}
 						staged={data.staged}
