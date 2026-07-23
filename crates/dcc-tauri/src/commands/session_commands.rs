@@ -4,11 +4,13 @@ use tauri::{AppHandle, State};
 
 use dcc_core::{
     application::{
-        abort_run as run_abort_run, close_session as run_close_session,
+        abort_run as run_abort_run, approve_plan as run_approve_plan,
+        close_session as run_close_session, record_plan_handoff as run_record_plan_handoff,
         restore_session as run_restore_session, resume_session as run_resume_session,
         send_turn as run_send_turn, send_turn_selection_differs_from_session,
-        start_thread as run_start_thread, AbortRunInput, AbortRunOutput, CloseSessionInput,
-        CloseSessionOutput, RestoreSessionInput, RestoreSessionOutput, ResumeSessionInput,
+        start_thread as run_start_thread, AbortRunInput, AbortRunOutput, ApprovePlanInput,
+        ApprovePlanOutput, CloseSessionInput, CloseSessionOutput, RecordPlanHandoffInput,
+        RecordPlanHandoffOutput, RestoreSessionInput, RestoreSessionOutput, ResumeSessionInput,
         ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
     },
     domain::session::{SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary},
@@ -206,6 +208,28 @@ pub async fn list_thread_events(
 ) -> Result<Vec<SessionEventRecord>, String> {
     let session_id = dcc_core::domain::session::SessionId(session_id);
     SessionEventRepo::list_events_by_session(&*state, &session_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn approve_plan(
+    state: State<'_, SessionCommandState>,
+    _app: AppHandle,
+    input: ApprovePlanInput,
+) -> Result<ApprovePlanOutput, String> {
+    run_approve_plan(&*state, &*state, input)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn record_plan_handoff(
+    state: State<'_, SessionCommandState>,
+    _app: AppHandle,
+    input: RecordPlanHandoffInput,
+) -> Result<RecordPlanHandoffOutput, String> {
+    run_record_plan_handoff(&*state, &*state, input)
         .await
         .map_err(|error| error.to_string())
 }
