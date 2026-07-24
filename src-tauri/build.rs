@@ -87,9 +87,9 @@ use dcc_tauri::commands::{
         SearchWorkspaceInput, SearchWorkspaceMatch, SearchWorkspaceOutput,
         WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
         WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
-        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitAcceptConflictInput,
-        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
-        WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
+        WorkspaceContinueFromBaseBranchOutput, WorkspaceDeliveryPolicy,
+        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
+        WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
         WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictContent, WorkspaceGitConflictEntry,
         WorkspaceGitConflictKind, WorkspaceGitConflictOperation, WorkspaceGitConflictSide,
         WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
@@ -406,6 +406,7 @@ fn main() {
         .typ::<WorkspaceGitValidationConfigOutput>()
         .typ::<WorkspaceProjectTaskKind>()
         .typ::<WorkspaceProjectTask>()
+        .typ::<WorkspaceDeliveryPolicy>()
         .typ::<WorkspaceProjectAutomationConfigOutput>()
         .typ::<WorkspaceSaveProjectAutomationInput>()
         .typ::<WorkspaceRunProjectTasksInput>()

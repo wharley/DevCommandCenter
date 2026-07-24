@@ -41,12 +41,12 @@ use dcc_infra::{
         broken_worktree_reason, create_worktree_branch_from_ref,
         detect_workspace_setup_suggestions, is_git_repo, list_local_branch_names,
         read_workspace_automation_config, remove_worktree, validate_workspace_automation_config,
-        CommandGitOps, RepoAutomationConfig, RepoAutomationTask, RepoTaskKind,
+        CommandGitOps, RepoAutomationConfig, RepoAutomationTask, RepoDeliveryPolicy, RepoTaskKind,
     },
 };
 use toml_edit::{
     value as toml_value, Array as TomlArray, Document as TomlDocument, Item as TomlItem,
-    Table as TomlTable,
+    Table as TomlTable, Value as TomlValue,
 };
 use url::Url;
 
@@ -590,6 +590,16 @@ pub struct WorkspaceProjectTask {
     pub timeout_seconds: u64,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDeliveryPolicy {
+    pub minimum_approvals: u32,
+    pub require_pipeline: bool,
+    pub require_resolved_discussions: bool,
+    pub require_current_base: bool,
+    pub require_before_merge_checks: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceProjectAutomationConfigOutput {
@@ -597,6 +607,7 @@ pub struct WorkspaceProjectAutomationConfigOutput {
     pub tasks: Vec<WorkspaceProjectTask>,
     pub before_merge: Vec<String>,
     pub before_push: Vec<String>,
+    pub delivery_policy: WorkspaceDeliveryPolicy,
     pub source_path: String,
     pub config_hash: Option<String>,
     pub tracked_in_git: bool,
@@ -610,6 +621,7 @@ pub struct WorkspaceSaveProjectAutomationInput {
     pub tasks: Vec<WorkspaceProjectTask>,
     pub before_merge: Vec<String>,
     pub before_push: Vec<String>,
+    pub delivery_policy: WorkspaceDeliveryPolicy,
     pub expected_config_hash: Option<String>,
 }
 
@@ -1493,6 +1505,87 @@ fn repo_task_from_project(task: &WorkspaceProjectTask) -> RepoAutomationTask {
     }
 }
 
+fn delivery_policy_from_repo(policy: RepoDeliveryPolicy) -> WorkspaceDeliveryPolicy {
+    WorkspaceDeliveryPolicy {
+        minimum_approvals: policy.minimum_approvals,
+        require_pipeline: policy.require_pipeline,
+        require_resolved_discussions: policy.require_resolved_discussions,
+        require_current_base: policy.require_current_base,
+        require_before_merge_checks: policy.require_before_merge_checks,
+    }
+}
+
+fn delivery_policy_from_project(policy: &WorkspaceDeliveryPolicy) -> RepoDeliveryPolicy {
+    RepoDeliveryPolicy {
+        minimum_approvals: policy.minimum_approvals,
+        require_pipeline: policy.require_pipeline,
+        require_resolved_discussions: policy.require_resolved_discussions,
+        require_current_base: policy.require_current_base,
+        require_before_merge_checks: policy.require_before_merge_checks,
+    }
+}
+
+fn write_delivery_policy(document: &mut TomlDocument, policy: &RepoDeliveryPolicy) {
+    let default_policy = RepoDeliveryPolicy::default();
+    let inline_delivery = document
+        .get("delivery")
+        .and_then(TomlItem::as_value)
+        .and_then(TomlValue::as_inline_table)
+        .map(|inline| {
+            inline
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.clone()))
+                .collect::<Vec<_>>()
+        });
+    if let Some(values) = inline_delivery {
+        let mut table = TomlTable::new();
+        for (key, value) in values {
+            table.insert(&key, TomlItem::Value(value));
+        }
+        document["delivery"] = TomlItem::Table(table);
+    }
+    if !document.contains_key("delivery") && policy != &default_policy {
+        document["delivery"] = TomlItem::Table(TomlTable::new());
+    }
+    let Some(delivery) = document
+        .get_mut("delivery")
+        .and_then(TomlItem::as_table_mut)
+    else {
+        return;
+    };
+    for key in [
+        "minimum_approvals",
+        "require_pipeline",
+        "require_resolved_discussions",
+        "require_current_base",
+        "require_before_merge_checks",
+    ] {
+        delivery.remove(key);
+    }
+    if policy.minimum_approvals > 0 {
+        delivery["minimum_approvals"] = toml_value(i64::from(policy.minimum_approvals));
+    }
+    for (key, enabled) in [
+        ("require_pipeline", policy.require_pipeline),
+        (
+            "require_resolved_discussions",
+            policy.require_resolved_discussions,
+        ),
+        ("require_current_base", policy.require_current_base),
+        (
+            "require_before_merge_checks",
+            policy.require_before_merge_checks,
+        ),
+    ] {
+        if enabled {
+            delivery[key] = toml_value(true);
+        }
+    }
+    if delivery.is_empty() {
+        document.remove("delivery");
+    }
+}
+
 #[tauri::command]
 pub async fn workspace_project_automation_config(
     state: State<'_, WorkspaceCommandState>,
@@ -1519,6 +1612,7 @@ pub async fn workspace_project_automation_config(
                 .collect(),
             before_merge: config.before_merge,
             before_push: config.before_push,
+            delivery_policy: delivery_policy_from_repo(config.delivery_policy),
             source_path: config.source_path,
             config_hash: workspace_validation_config_hash(root)?,
             tracked_in_git,
@@ -1528,6 +1622,7 @@ pub async fn workspace_project_automation_config(
             tasks: Vec::new(),
             before_merge: Vec::new(),
             before_push: Vec::new(),
+            delivery_policy: WorkspaceDeliveryPolicy::default(),
             source_path,
             config_hash: None,
             tracked_in_git,
@@ -1570,6 +1665,7 @@ pub async fn workspace_save_project_automation(
         tasks,
         before_merge: input.before_merge.clone(),
         before_push: input.before_push.clone(),
+        delivery_policy: delivery_policy_from_project(&input.delivery_policy),
         source_path: source_path.to_string_lossy().to_string(),
     };
     validate_workspace_automation_config(&normalized)?;
@@ -1641,6 +1737,8 @@ pub async fn workspace_save_project_automation(
         }
         document["hooks"] = TomlItem::Table(hooks);
     }
+
+    write_delivery_policy(&mut document, &normalized.delivery_policy);
 
     fs::write(&source_path, document.to_string())
         .map_err(|error| format!("failed to write .dcc.toml: {error}"))?;
@@ -5009,6 +5107,102 @@ mod editor_workspace_file_tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
+    }
+
+    #[test]
+    fn delivery_policy_writer_preserves_unknown_keys_and_omits_neutral_values() {
+        let mut document = "[delivery]\ncustom_signal = \"kept\"\nrequire_pipeline = false\n"
+            .parse::<TomlDocument>()
+            .expect("parse delivery config");
+        write_delivery_policy(
+            &mut document,
+            &RepoDeliveryPolicy {
+                minimum_approvals: 2,
+                require_pipeline: true,
+                require_resolved_discussions: false,
+                require_current_base: true,
+                require_before_merge_checks: false,
+            },
+        );
+        let delivery = document["delivery"].as_table().expect("delivery table");
+        assert_eq!(
+            delivery
+                .get("custom_signal")
+                .and_then(TomlItem::as_value)
+                .and_then(TomlValue::as_str),
+            Some("kept")
+        );
+        assert_eq!(
+            delivery
+                .get("minimum_approvals")
+                .and_then(TomlItem::as_value)
+                .and_then(TomlValue::as_integer),
+            Some(2)
+        );
+        assert_eq!(
+            delivery
+                .get("require_pipeline")
+                .and_then(TomlItem::as_value)
+                .and_then(TomlValue::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            delivery
+                .get("require_current_base")
+                .and_then(TomlItem::as_value)
+                .and_then(TomlValue::as_bool),
+            Some(true)
+        );
+        assert!(!delivery.contains_key("require_resolved_discussions"));
+        assert!(!delivery.contains_key("require_before_merge_checks"));
+
+        write_delivery_policy(&mut document, &RepoDeliveryPolicy::default());
+        let delivery = document["delivery"]
+            .as_table()
+            .expect("preserved delivery table");
+        assert_eq!(delivery.len(), 1);
+        assert_eq!(
+            delivery
+                .get("custom_signal")
+                .and_then(TomlItem::as_value)
+                .and_then(TomlValue::as_str),
+            Some("kept")
+        );
+
+        let mut policy_only = "[delivery]\nrequire_pipeline = true\n"
+            .parse::<TomlDocument>()
+            .expect("parse policy-only config");
+        write_delivery_policy(&mut policy_only, &RepoDeliveryPolicy::default());
+        assert!(!policy_only.contains_key("delivery"));
+
+        let mut inline = "delivery = { custom_signal = \"kept\", minimum_approvals = 1 }\n"
+            .parse::<TomlDocument>()
+            .expect("parse inline delivery config");
+        write_delivery_policy(
+            &mut inline,
+            &RepoDeliveryPolicy {
+                require_pipeline: true,
+                ..RepoDeliveryPolicy::default()
+            },
+        );
+        let delivery = inline["delivery"]
+            .as_table()
+            .expect("normalized inline delivery table");
+        assert_eq!(
+            delivery
+                .get("custom_signal")
+                .and_then(TomlItem::as_value)
+                .and_then(TomlValue::as_str),
+            Some("kept")
+        );
+        assert_eq!(
+            delivery
+                .get("require_pipeline")
+                .and_then(TomlItem::as_value)
+                .and_then(TomlValue::as_bool),
+            Some(true)
+        );
+        assert!(!delivery.contains_key("minimum_approvals"));
     }
 
     fn bundle_project(project_id: &str, root: &str) -> CreateWorkspaceForRepoInput {

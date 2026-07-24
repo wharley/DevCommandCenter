@@ -232,6 +232,7 @@ describe("buildWorkspaceRecap", () => {
 				reviewState: {
 					reviewState: "pending",
 					approvalsAvailable: true,
+					approvalsReceived: 0,
 					approvalsLeft: 1,
 					hasConflicts: true,
 					behindBy: 0,
@@ -264,6 +265,7 @@ describe("buildWorkspaceRecap", () => {
 				reviewState: {
 					reviewState: "unknown",
 					approvalsAvailable: false,
+					approvalsReceived: 0,
 					approvalsLeft: null,
 					hasConflicts: false,
 					behindBy: 0,
@@ -295,6 +297,7 @@ describe("buildWorkspaceRecap", () => {
 				reviewState: {
 					reviewState: "approved",
 					approvalsAvailable: true,
+					approvalsReceived: 1,
 					approvalsLeft: 0,
 					hasConflicts: false,
 					behindBy: 0,
@@ -308,6 +311,109 @@ describe("buildWorkspaceRecap", () => {
 
 		expect(recap.state).toBe("ready_to_deliver");
 		expect(recap.messageKey).toBe("mergeReady");
+	});
+
+	it("applies optional project approval and pipeline rules after a change request exists", () => {
+		const policy = {
+			minimumApprovals: 2,
+			requirePipeline: true,
+			requireResolvedDiscussions: false,
+			requireCurrentBase: false,
+			requireBeforeMergeChecks: false,
+		};
+		const cleanDevelopment = buildWorkspaceRecap(
+			input({ commitMode: "create-pr", deliveryPolicy: policy }),
+		);
+		const readyForRequest = buildWorkspaceRecap(
+			input({
+				commitMode: "create-pr",
+				committedVsBaseCount: 3,
+				deliveryPolicy: policy,
+			}),
+		);
+		const approvalsPending = buildWorkspaceRecap(
+			input({
+				commitMode: "merge",
+				prNumber: 41,
+				deliveryPolicy: policy,
+				reviewState: {
+					reviewState: "approved",
+					approvalsAvailable: true,
+					approvalsReceived: 1,
+					approvalsLeft: 0,
+					hasConflicts: false,
+					behindBy: 0,
+					discussionsResolved: true,
+					draft: false,
+				},
+				pipelineStatus: "available",
+				pipeline: { status: "success", failedJobs: 0 },
+			}),
+		);
+		const pipelineMissing = buildWorkspaceRecap(
+			input({
+				commitMode: "merge",
+				prNumber: 41,
+				deliveryPolicy: { ...policy, minimumApprovals: 0 },
+				pipelineStatus: "available",
+			}),
+		);
+
+		expect(cleanDevelopment.messageKey).toBe("clean");
+		expect(readyForRequest.messageKey).toBe("readyForPr");
+		expect(approvalsPending.messageKey).toBe("policy.approvalsPending");
+		expect(approvalsPending.params.count).toBe(1);
+		expect(pipelineMissing.messageKey).toBe("policy.pipelineMissing");
+		expect(approvalsPending.signals).toHaveLength(6);
+		expect(
+			approvalsPending.signals.find((signal) => signal.id === "review")?.required,
+		).toBe(true);
+		expect(
+			approvalsPending.signals.find((signal) => signal.id === "pipeline")
+				?.required,
+		).toBe(true);
+		expect(
+			approvalsPending.signals.find((signal) => signal.id === "checks")?.required,
+		).toBe(false);
+	});
+
+	it("keeps missing external signals unavailable instead of passing them", () => {
+		const recap = buildWorkspaceRecap(
+			input({
+				commitMode: "open-pr",
+				prNumber: 61,
+				reviewStatus: "error",
+				pipelineStatus: "idle",
+			}),
+		);
+
+		expect(
+			recap.signals.find((signal) => signal.id === "review")?.state,
+		).toBe("unavailable");
+		expect(
+			recap.signals.find((signal) => signal.id === "pipeline")?.state,
+		).toBe("unavailable");
+	});
+
+	it("routes missing required checks to the existing project automation action", () => {
+		const recap = buildWorkspaceRecap(
+			input({
+				commitMode: "merge",
+				prNumber: 52,
+				deliveryPolicy: {
+					minimumApprovals: 0,
+					requirePipeline: false,
+					requireResolvedDiscussions: false,
+					requireCurrentBase: false,
+					requireBeforeMergeChecks: true,
+				},
+				beforeMergeChecksCount: 0,
+			}),
+		);
+
+		expect(recap.state).toBe("needs_attention");
+		expect(recap.messageKey).toBe("policy.checksMissing");
+		expect(recap.action?.kind).toBe("automation");
 	});
 
 	it("falls back to the request label when the PR number is unknown", () => {

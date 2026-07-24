@@ -8,6 +8,7 @@ const REPO_CONFIG_FILENAME: &str = ".dcc.toml";
 pub const DEFAULT_TASK_TIMEOUT_SECONDS: u64 = 600;
 const MAX_TASKS: usize = 50;
 const MAX_HOOK_TASKS: usize = 20;
+const MAX_MINIMUM_APPROVALS: u32 = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RepoSetupCommand {
@@ -37,12 +38,22 @@ pub struct RepoAutomationTask {
     pub timeout_seconds: u64,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RepoDeliveryPolicy {
+    pub minimum_approvals: u32,
+    pub require_pipeline: bool,
+    pub require_resolved_discussions: bool,
+    pub require_current_base: bool,
+    pub require_before_merge_checks: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RepoAutomationConfig {
     pub setup_command: Option<String>,
     pub tasks: Vec<RepoAutomationTask>,
     pub before_merge: Vec<String>,
     pub before_push: Vec<String>,
+    pub delivery_policy: RepoDeliveryPolicy,
     pub source_path: String,
 }
 
@@ -245,12 +256,15 @@ pub fn read_workspace_automation_config(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let delivery_policy =
+        parse_delivery_policy(parsed.get("delivery").and_then(toml::Value::as_table))?;
 
     Ok(Some(RepoAutomationConfig {
         setup_command,
         tasks: tasks.into_values().collect(),
         before_merge,
         before_push,
+        delivery_policy,
         source_path: normalize_source_path(config_path),
     }))
 }
@@ -310,7 +324,49 @@ pub fn validate_workspace_automation_config(config: &RepoAutomationConfig) -> Re
     }
     validate_hook(&tasks, "before_merge", &config.before_merge)?;
     validate_hook(&tasks, "before_push", &config.before_push)?;
+    if config.delivery_policy.minimum_approvals > MAX_MINIMUM_APPROVALS {
+        return Err(format!(
+            "`.dcc.toml` delivery.minimum_approvals must be between 0 and {MAX_MINIMUM_APPROVALS}"
+        ));
+    }
     Ok(())
+}
+
+fn parse_delivery_policy(
+    delivery: Option<&toml::value::Table>,
+) -> Result<RepoDeliveryPolicy, String> {
+    let Some(delivery) = delivery else {
+        return Ok(RepoDeliveryPolicy::default());
+    };
+    let minimum_approvals = match delivery.get("minimum_approvals") {
+        Some(value) => {
+            let value = value.as_integer().ok_or_else(|| {
+                "`.dcc.toml` delivery.minimum_approvals must be an integer".to_string()
+            })?;
+            if !(0..=i64::from(MAX_MINIMUM_APPROVALS)).contains(&value) {
+                return Err(format!(
+                    "`.dcc.toml` delivery.minimum_approvals must be between 0 and {MAX_MINIMUM_APPROVALS}"
+                ));
+            }
+            value as u32
+        }
+        None => 0,
+    };
+    let bool_value = |name: &str| -> Result<bool, String> {
+        match delivery.get(name) {
+            Some(value) => value
+                .as_bool()
+                .ok_or_else(|| format!("`.dcc.toml` delivery.{name} must be true or false")),
+            None => Ok(false),
+        }
+    };
+    Ok(RepoDeliveryPolicy {
+        minimum_approvals,
+        require_pipeline: bool_value("require_pipeline")?,
+        require_resolved_discussions: bool_value("require_resolved_discussions")?,
+        require_current_base: bool_value("require_current_base")?,
+        require_before_merge_checks: bool_value("require_before_merge_checks")?,
+    })
 }
 
 fn parse_hook_ids(hooks: Option<&toml::value::Table>, name: &str) -> Result<Vec<String>, String> {
@@ -446,7 +502,7 @@ mod tests {
     use super::{
         read_workspace_automation_config, read_workspace_setup_command,
         read_workspace_validation_config, validate_workspace_automation_config,
-        RepoAutomationConfig, RepoAutomationTask, RepoTaskKind,
+        RepoAutomationConfig, RepoAutomationTask, RepoDeliveryPolicy, RepoTaskKind,
     };
 
     #[test]
@@ -631,12 +687,77 @@ before_push = ["lint"]
             }],
             before_merge: Vec::new(),
             before_push: Vec::new(),
+            delivery_policy: RepoDeliveryPolicy::default(),
             source_path: ".dcc.toml".to_string(),
         };
 
         let error = validate_workspace_automation_config(&config).expect_err("invalid command");
         assert!(error.contains("typographic dash"));
         assert!(error.contains("--fix"));
+    }
+
+    #[test]
+    fn reads_optional_delivery_policy_with_neutral_defaults() {
+        let root = temp_test_dir("repo-config-delivery-policy");
+        fs::create_dir_all(&root).expect("create temp dir");
+        fs::write(
+            root.join(".dcc.toml"),
+            r#"
+[delivery]
+minimum_approvals = 2
+require_pipeline = true
+require_resolved_discussions = true
+require_current_base = true
+require_before_merge_checks = true
+"#,
+        )
+        .expect("write config");
+
+        let config = read_workspace_automation_config(&root)
+            .expect("valid config")
+            .expect("automation config");
+        assert_eq!(
+            config.delivery_policy,
+            RepoDeliveryPolicy {
+                minimum_approvals: 2,
+                require_pipeline: true,
+                require_resolved_discussions: true,
+                require_current_base: true,
+                require_before_merge_checks: true,
+            }
+        );
+
+        fs::write(root.join(".dcc.toml"), "[delivery]\n").expect("write defaults");
+        let defaults = read_workspace_automation_config(&root)
+            .expect("valid defaults")
+            .expect("automation config");
+        assert_eq!(defaults.delivery_policy, RepoDeliveryPolicy::default());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_invalid_delivery_policy_values() {
+        let root = temp_test_dir("repo-config-invalid-delivery-policy");
+        fs::create_dir_all(&root).expect("create temp dir");
+        fs::write(
+            root.join(".dcc.toml"),
+            "[delivery]\nminimum_approvals = 21\n",
+        )
+        .expect("write invalid approvals");
+        let approvals_error =
+            read_workspace_automation_config(&root).expect_err("invalid approvals");
+        assert!(approvals_error.contains("between 0 and 20"));
+
+        fs::write(
+            root.join(".dcc.toml"),
+            "[delivery]\nrequire_pipeline = \"yes\"\n",
+        )
+        .expect("write invalid bool");
+        let bool_error = read_workspace_automation_config(&root).expect_err("invalid bool");
+        assert!(bool_error.contains("must be true or false"));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

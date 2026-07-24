@@ -2724,6 +2724,9 @@ export function WorkspaceInspectorSidebar({
 		storedCodeRabbitReview && !codeRabbitReviewIsStale
 			? storedCodeRabbitReview.findings.length
 			: 0;
+	const codeRabbitReviewAvailable = Boolean(
+		storedCodeRabbitReview && !codeRabbitReviewIsStale,
+	);
 	const deliveryFailureQuery = useWorkspaceDeliveryFailure(
 		workspacePath,
 		gitBranch,
@@ -2784,6 +2787,7 @@ export function WorkspaceInspectorSidebar({
 				prState: prStatus?.state ?? null,
 				requestLabel: forgeContext.requestLabel,
 				pendingReviewFindingsCount,
+				codeRabbitReviewAvailable,
 				pendingDelegationResultsCount,
 				deliveryFailure: deliveryFailureQuery.data?.snapshot
 					? {
@@ -2798,6 +2802,8 @@ export function WorkspaceInspectorSidebar({
 								deliveryReviewStateQuery.data.reviewState,
 							approvalsAvailable:
 								deliveryReviewStateQuery.data.approvalsAvailable,
+							approvalsReceived:
+								deliveryReviewStateQuery.data.approvalsReceived,
 							approvalsLeft:
 								deliveryReviewStateQuery.data.approvalsLeft,
 							hasConflicts:
@@ -2837,9 +2843,16 @@ export function WorkspaceInspectorSidebar({
 							: deliveryPipelineQuery.isError
 								? "error"
 								: "available",
+				deliveryPolicy:
+					automationConfigQuery.data?.deliveryPolicy ?? null,
+				beforeMergeChecksCount:
+					automationConfigQuery.data?.beforeMerge.length ?? 0,
 			}),
 		[
+			automationConfigQuery.data?.beforeMerge.length,
+			automationConfigQuery.data?.deliveryPolicy,
 			commitMode,
+			codeRabbitReviewAvailable,
 			deliveryFailureQuery.data?.snapshot,
 			deliveryPipelineQuery.data?.pipeline,
 			deliveryPipelineQuery.isError,
@@ -2909,6 +2922,10 @@ export function WorkspaceInspectorSidebar({
 			case "sync": {
 				selectInspectorMode("git");
 				handleSyncBase();
+				return;
+			}
+			case "automation": {
+				setAutomationOpen(true);
 				return;
 			}
 		}

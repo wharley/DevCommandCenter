@@ -13,6 +13,21 @@ export type WorkspaceDeliveryState =
 	| "ready_to_deliver"
 	| "delivered";
 
+export type WorkspaceDeliverySignalState =
+	| "passed"
+	| "pending"
+	| "attention"
+	| "blocked"
+	| "unavailable";
+
+export type WorkspaceDeliverySignal = {
+	id: "workspace" | "recovery" | "agent_review" | "review" | "pipeline" | "checks";
+	state: WorkspaceDeliverySignalState;
+	messageKey: string;
+	params: Record<string, string | number>;
+	required: boolean;
+};
+
 export type WorkspaceRecapActionKind =
 	| "git"
 	| "review"
@@ -20,6 +35,7 @@ export type WorkspaceRecapActionKind =
 	| "pipeline"
 	| "delivery"
 	| "sync"
+	| "automation"
 	| "activity"
 	| "continue";
 
@@ -39,6 +55,7 @@ export type WorkspaceRecap = {
 	params: Record<string, string | number>;
 	tone: WorkspaceRecapTone;
 	action: WorkspaceRecapAction | null;
+	signals: WorkspaceDeliverySignal[];
 };
 
 export type WorkspaceRecapInput = {
@@ -57,6 +74,7 @@ export type WorkspaceRecapInput = {
 	requestLabel: "PR" | "MR";
 	/** CodeRabbit findings whose review still matches the current diff. */
 	pendingReviewFindingsCount: number;
+	codeRabbitReviewAvailable?: boolean;
 	/** Completed delegation results that still deserve human review. */
 	pendingDelegationResultsCount: number;
 	deliveryFailure?: {
@@ -66,6 +84,7 @@ export type WorkspaceRecapInput = {
 	reviewState?: {
 		reviewState: string | null;
 		approvalsAvailable: boolean;
+		approvalsReceived: number;
 		approvalsLeft: number | null;
 		hasConflicts: boolean | null;
 		behindBy: number | null;
@@ -78,6 +97,14 @@ export type WorkspaceRecapInput = {
 		failedJobs: number;
 	} | null;
 	pipelineStatus?: "idle" | "loading" | "error" | "available";
+	deliveryPolicy?: {
+		minimumApprovals: number;
+		requirePipeline: boolean;
+		requireResolvedDiscussions: boolean;
+		requireCurrentBase: boolean;
+		requireBeforeMergeChecks: boolean;
+	} | null;
+	beforeMergeChecksCount?: number;
 };
 
 function gitAction(mode: CommitMode): WorkspaceRecapAction {
@@ -126,7 +153,9 @@ function sectionAction(
  * turn, captured failures, review, approvals, and pipeline) on top; it never
  * persists or invents a second Git state machine.
  */
-export function buildWorkspaceRecap(input: WorkspaceRecapInput): WorkspaceRecap {
+function buildWorkspaceRecapPrimary(
+	input: WorkspaceRecapInput,
+): Omit<WorkspaceRecap, "signals"> {
 	if (input.commitMode === "resolve-conflicts" || input.conflictCount > 0) {
 		return {
 			state: "blocked",
@@ -374,6 +403,40 @@ export function buildWorkspaceRecap(input: WorkspaceRecapInput): WorkspaceRecap 
 		};
 	}
 
+	if (
+		input.deliveryPolicy?.requireResolvedDiscussions &&
+		input.prNumber &&
+		input.reviewState?.discussionsResolved == null
+	) {
+		return {
+			state: "needs_attention",
+			messageKey: "policy.discussionsUnavailable",
+			params: { pr: prRef(input) },
+			tone: "attention",
+			action: sectionAction(
+				"review-state",
+				"inspector.recap.actions.reviewState",
+			),
+		};
+	}
+
+	if (
+		input.deliveryPolicy?.requireCurrentBase &&
+		input.prNumber &&
+		input.reviewState?.behindBy == null
+	) {
+		return {
+			state: "needs_attention",
+			messageKey: "policy.baseUnavailable",
+			params: { pr: prRef(input) },
+			tone: "attention",
+			action: sectionAction(
+				"review-state",
+				"inspector.recap.actions.reviewState",
+			),
+		};
+	}
+
 	if (input.reviewState?.draft === true) {
 		return {
 			state: "awaiting_review",
@@ -418,6 +481,28 @@ export function buildWorkspaceRecap(input: WorkspaceRecapInput): WorkspaceRecap 
 	}
 
 	if (
+		input.prNumber &&
+		(input.deliveryPolicy?.minimumApprovals ?? 0) >
+		(input.reviewState?.approvalsReceived ?? 0)
+	) {
+		return {
+			state: "awaiting_review",
+			messageKey: "policy.approvalsPending",
+			params: {
+				count:
+					(input.deliveryPolicy?.minimumApprovals ?? 0) -
+					(input.reviewState?.approvalsReceived ?? 0),
+				required: input.deliveryPolicy?.minimumApprovals ?? 0,
+			},
+			tone: "neutral",
+			action: sectionAction(
+				"review-state",
+				"inspector.recap.actions.reviewState",
+			),
+		};
+	}
+
+	if (
 		input.reviewState?.reviewState === "pending" ||
 		input.reviewState?.reviewState === "unknown"
 	) {
@@ -453,6 +538,56 @@ export function buildWorkspaceRecap(input: WorkspaceRecapInput): WorkspaceRecap 
 				"pipeline",
 				"inspector.recap.actions.pipeline",
 			),
+		};
+	}
+
+	if (input.prNumber && input.deliveryPolicy?.requirePipeline) {
+		if (!input.pipeline) {
+			return {
+				state: "needs_attention",
+				messageKey: "policy.pipelineMissing",
+				params: {},
+				tone: "attention",
+				action:
+					input.pipelineStatus === "available"
+						? sectionAction(
+								"pipeline",
+								"inspector.recap.actions.pipeline",
+							)
+						: {
+								kind: "automation",
+								labelKey: "inspector.recap.actions.policy",
+							},
+			};
+		}
+		if (input.pipeline.status !== "success") {
+			return {
+				state: "needs_attention",
+				messageKey: "policy.pipelineNotSuccessful",
+				params: {},
+				tone: "attention",
+				action: sectionAction(
+					"pipeline",
+					"inspector.recap.actions.pipeline",
+				),
+			};
+		}
+	}
+
+	if (
+		input.prNumber &&
+		input.deliveryPolicy?.requireBeforeMergeChecks &&
+		(input.beforeMergeChecksCount ?? 0) === 0
+	) {
+		return {
+			state: "needs_attention",
+			messageKey: "policy.checksMissing",
+			params: {},
+			tone: "attention",
+			action: {
+				kind: "automation",
+				labelKey: "inspector.recap.actions.policy",
+			},
 		};
 	}
 
@@ -510,4 +645,257 @@ export function buildWorkspaceRecap(input: WorkspaceRecapInput): WorkspaceRecap 
 				action: null,
 			};
 	}
+}
+
+function buildWorkspaceDeliverySignals(
+	input: WorkspaceRecapInput,
+): WorkspaceDeliverySignal[] {
+	const policy = input.deliveryPolicy;
+	const reviewRequired =
+		(policy?.minimumApprovals ?? 0) > 0 ||
+		Boolean(policy?.requireResolvedDiscussions) ||
+		Boolean(policy?.requireCurrentBase);
+	const pipelineRequired = Boolean(policy?.requirePipeline);
+	const checksRequired = Boolean(policy?.requireBeforeMergeChecks);
+	const signals: WorkspaceDeliverySignal[] = [];
+
+	if (input.conflictCount > 0 || input.commitMode === "resolve-conflicts") {
+		signals.push({
+			id: "workspace",
+			state: "blocked",
+			messageKey: "workspaceConflicts",
+			params: { count: Math.max(input.conflictCount, 1) },
+			required: false,
+		});
+	} else if (input.changedFilesCount > 0) {
+		signals.push({
+			id: "workspace",
+			state: "pending",
+			messageKey: "workspaceChanges",
+			params: { count: input.changedFilesCount },
+			required: false,
+		});
+	} else if (input.aheadOfRemoteCount > 0) {
+		signals.push({
+			id: "workspace",
+			state: "pending",
+			messageKey: "workspaceAhead",
+			params: { count: input.aheadOfRemoteCount },
+			required: false,
+		});
+	} else {
+		signals.push({
+			id: "workspace",
+			state: "passed",
+			messageKey: "workspaceClean",
+			params: {},
+			required: false,
+		});
+	}
+
+	signals.push(
+		input.deliveryFailure
+			? {
+					id: "recovery",
+					state:
+						input.deliveryFailure.classification === "authentication" ||
+						input.deliveryFailure.classification === "transport" ||
+						input.deliveryFailure.classification === "unknown"
+							? "attention"
+							: "blocked",
+					messageKey: "recoveryCaptured",
+					params: {},
+					required: false,
+				}
+			: {
+					id: "recovery",
+					state: "passed",
+					messageKey: "recoveryClear",
+					params: {},
+					required: false,
+				},
+	);
+
+	if (input.pendingReviewFindingsCount > 0) {
+		signals.push({
+			id: "agent_review",
+			state: "attention",
+			messageKey: "agentFindings",
+			params: { count: input.pendingReviewFindingsCount },
+			required: false,
+		});
+	} else if (input.codeRabbitReviewAvailable) {
+		signals.push({
+			id: "agent_review",
+			state: "passed",
+			messageKey: "agentReviewClear",
+			params: {},
+			required: false,
+		});
+	} else {
+		signals.push({
+			id: "agent_review",
+			state: "unavailable",
+			messageKey: "agentReviewUnavailable",
+			params: {},
+			required: false,
+		});
+	}
+
+	if (!input.prNumber) {
+		signals.push({
+			id: "review",
+			state: "unavailable",
+			messageKey: "reviewNotStarted",
+			params: {},
+			required: reviewRequired,
+		});
+	} else if (input.reviewStatus === "loading") {
+		signals.push({
+			id: "review",
+			state: "pending",
+			messageKey: "reviewLoading",
+			params: {},
+			required: reviewRequired,
+		});
+	} else if (input.reviewStatus === "error" || !input.reviewState) {
+		signals.push({
+			id: "review",
+			state: "unavailable",
+			messageKey: "reviewUnavailable",
+			params: {},
+			required: reviewRequired,
+		});
+	} else {
+		const review = input.reviewState;
+		const approvalDeficit = Math.max(
+			0,
+			(policy?.minimumApprovals ?? 0) - review.approvalsReceived,
+		);
+		let state: WorkspaceDeliverySignalState = "passed";
+		let messageKey = "reviewPassed";
+		let params: Record<string, string | number> = {
+			count: review.approvalsReceived,
+		};
+		if (review.hasConflicts || review.reviewState === "changes_requested") {
+			state = "blocked";
+			messageKey = "reviewBlocked";
+			params = {};
+		} else if (
+			review.discussionsResolved === false ||
+			(review.behindBy ?? 0) > 0
+		) {
+			state = "attention";
+			messageKey = "reviewAttention";
+			params = {};
+		} else if (!review.approvalsAvailable && reviewRequired) {
+			state = "unavailable";
+			messageKey = "reviewUnavailable";
+			params = {};
+		} else if (
+			approvalDeficit > 0 ||
+			review.draft ||
+			review.reviewState === "pending"
+		) {
+			state = "pending";
+			messageKey = "reviewPending";
+			params = { count: approvalDeficit };
+		}
+		signals.push({
+			id: "review",
+			state,
+			messageKey,
+			params,
+			required: reviewRequired,
+		});
+	}
+
+	if (input.pipelineStatus === "loading") {
+		signals.push({
+			id: "pipeline",
+			state: "pending",
+			messageKey: "pipelineLoading",
+			params: {},
+			required: pipelineRequired,
+		});
+	} else if (input.pipelineStatus === "error") {
+		signals.push({
+			id: "pipeline",
+			state: "unavailable",
+			messageKey: "pipelineUnavailable",
+			params: {},
+			required: pipelineRequired,
+		});
+	} else if (!input.pipeline) {
+		signals.push({
+			id: "pipeline",
+			state: "unavailable",
+			messageKey:
+				input.pipelineStatus === "idle"
+					? "pipelineNotIntegrated"
+					: "pipelineMissing",
+			params: {},
+			required: pipelineRequired,
+		});
+	} else {
+		const status = input.pipeline.status;
+		const active = [
+			"created",
+			"waiting_for_resource",
+			"preparing",
+			"pending",
+			"running",
+			"scheduled",
+		].includes(status);
+		const state: WorkspaceDeliverySignalState =
+			status === "success"
+				? "passed"
+				: status === "failed"
+					? "blocked"
+					: active
+						? "pending"
+						: "attention";
+		signals.push({
+			id: "pipeline",
+			state,
+			messageKey:
+				status === "success"
+					? "pipelinePassed"
+					: status === "failed"
+						? "pipelineFailed"
+						: active
+							? "pipelineRunning"
+							: "pipelineAttention",
+			params: {},
+			required: pipelineRequired,
+		});
+	}
+
+	const beforeMergeChecksCount = input.beforeMergeChecksCount ?? 0;
+	signals.push({
+		id: "checks",
+		state:
+			beforeMergeChecksCount > 0
+				? "passed"
+				: checksRequired
+					? "blocked"
+					: "unavailable",
+		messageKey:
+			beforeMergeChecksCount > 0
+				? "checksConfigured"
+				: checksRequired
+					? "checksMissing"
+					: "checksOptional",
+		params: { count: beforeMergeChecksCount },
+		required: checksRequired,
+	});
+
+	return signals;
+}
+
+export function buildWorkspaceRecap(input: WorkspaceRecapInput): WorkspaceRecap {
+	return {
+		...buildWorkspaceRecapPrimary(input),
+		signals: buildWorkspaceDeliverySignals(input),
+	};
 }

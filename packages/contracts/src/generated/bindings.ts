@@ -1181,6 +1181,14 @@ export type WorkspaceDeliveryFailureSnapshot = {
 	createdAt: string,
 };
 
+export type WorkspaceDeliveryPolicy = {
+	minimumApprovals: number,
+	requirePipeline: boolean,
+	requireResolvedDiscussions: boolean,
+	requireCurrentBase: boolean,
+	requireBeforeMergeChecks: boolean,
+};
+
 export type WorkspaceDeliveryPushTarget = {
 	remote: string,
 	branch: string,
@@ -1524,6 +1532,7 @@ export type WorkspaceProjectAutomationConfigOutput = {
 	tasks: WorkspaceProjectTask[],
 	beforeMerge: string[],
 	beforePush: string[],
+	deliveryPolicy: WorkspaceDeliveryPolicy,
 	sourcePath: string,
 	configHash: string | null,
 	trackedInGit: boolean,
@@ -1615,6 +1624,7 @@ export type WorkspaceSaveProjectAutomationInput = {
 	tasks: WorkspaceProjectTask[],
 	beforeMerge: string[],
 	beforePush: string[],
+	deliveryPolicy: WorkspaceDeliveryPolicy,
 	expectedConfigHash: string | null,
 };
 

@@ -212,11 +212,27 @@ successful gate.
 
 ### Deliverable 4.2 — Project policy and secondary details
 
-- Define optional project rules for which validations, approvals, and pipeline
-  signals are required.
-- Expose the evaluated signals behind a compact expansion without duplicating
-  the existing detailed Inspector sections.
-- Keep the default policy conservative and provider-neutral.
+Projects can now opt into delivery rules through the existing `.dcc.toml`
+configuration:
+
+```toml
+[delivery]
+minimum_approvals = 2
+require_pipeline = true
+require_resolved_discussions = true
+require_current_base = true
+require_before_merge_checks = true
+```
+
+Every field is optional and defaults to a neutral value. The policy is only
+evaluated as a delivery gate after a PR/MR exists, so it never prevents the
+workflow from reaching review. DCC preserves provider-reported blockers even
+when no project policy is configured.
+
+The compact Delivery Status expansion exposes local Git, captured recovery,
+agent review, provider review, pipeline, and before-merge check signals. It
+marks project-configured rules without duplicating the detailed Inspector
+sections or issuing additional provider requests.
 
 ### Acceptance criteria
 
@@ -246,6 +262,7 @@ successful gate.
 9. Conservative failure classification.
 10. Recovery actions.
 11. Derived state and Delivery Status UX.
+12. Project policy and secondary Delivery Status signals.
 
 ## Progress
 
@@ -288,9 +305,12 @@ Updated July 24, 2026:
 - [x] Core six-state Delivery Status derivation and compact Inspector summary.
 - [x] Failure, review, approval, divergence, and pipeline precedence with
   existing-action routing.
-- [ ] Project-specific delivery policy and secondary signal details.
-- [ ] Delivery Status.
+- [x] Optional project delivery policy persisted in `.dcc.toml` with neutral,
+  provider-independent defaults.
+- [x] Secondary Delivery Status signals available through compact expansion.
+- [x] Project-specific delivery policy and secondary signal details.
+- [x] Delivery Status.
 
-Next slice: **Phase 4.2 — Project policy and secondary details**. The fork,
-job, and review-state smoke tests remain pending until real cases are available,
-without creating or changing external state solely for testing.
+Next slice: authenticated fork, job-log/retry, and review-rule smoke tests when
+real cases are available, without creating or changing external state solely
+for testing.

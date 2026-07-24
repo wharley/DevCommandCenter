@@ -1,3 +1,12 @@
+import {
+	CheckCircle2,
+	ChevronRight,
+	CircleAlert,
+	CircleHelp,
+	Clock3,
+	XCircle,
+} from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,6 +15,7 @@ import type {
 	WorkspaceRecap,
 	WorkspaceRecapAction,
 	WorkspaceRecapTone,
+	WorkspaceDeliverySignalState,
 	WorkspaceDeliveryState,
 } from "./workspace-recap";
 
@@ -31,6 +41,30 @@ const STATE_CLASS: Record<WorkspaceDeliveryState, string> = {
 		"border-violet-500/25 bg-violet-500/10 text-violet-700 dark:text-violet-300",
 };
 
+const SIGNAL_CLASS: Record<WorkspaceDeliverySignalState, string> = {
+	passed: "text-emerald-600 dark:text-emerald-400",
+	pending: "text-sky-600 dark:text-sky-400",
+	attention: "text-amber-600 dark:text-amber-400",
+	blocked: "text-destructive",
+	unavailable: "text-muted-foreground",
+};
+
+function SignalIcon({ state }: { state: WorkspaceDeliverySignalState }) {
+	const className = cn("size-3.5 shrink-0", SIGNAL_CLASS[state]);
+	switch (state) {
+		case "passed":
+			return <CheckCircle2 className={className} />;
+		case "pending":
+			return <Clock3 className={className} />;
+		case "attention":
+			return <CircleAlert className={className} />;
+		case "blocked":
+			return <XCircle className={className} />;
+		default:
+			return <CircleHelp className={className} />;
+	}
+}
+
 /**
  * One-line "where is this workspace and what now?" strip pinned below the
  * Inspector mode switch. The presentation layer owns whether the suggested
@@ -50,6 +84,7 @@ export function WorkspaceRecapStrip({
 	onAction: () => void;
 }) {
 	const { t } = useTranslation("common");
+	const [detailsOpen, setDetailsOpen] = useState(false);
 	const message = t(`inspector.recap.messages.${recap.messageKey}`, recap.params);
 
 	return (
@@ -82,6 +117,22 @@ export function WorkspaceRecapStrip({
 				>
 					{message}
 				</p>
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-xs"
+					className="size-6 shrink-0 text-muted-foreground"
+					onClick={() => setDetailsOpen((value) => !value)}
+					aria-expanded={detailsOpen}
+					aria-label={t("inspector.recap.signalDetails")}
+				>
+					<ChevronRight
+						className={cn(
+							"size-3.5 transition-transform",
+							detailsOpen && "rotate-90",
+						)}
+					/>
+				</Button>
 				{action ? (
 					<Button
 						type="button"
@@ -95,6 +146,29 @@ export function WorkspaceRecapStrip({
 					</Button>
 				) : null}
 			</div>
+			{detailsOpen ? (
+				<div className="mt-2 grid gap-1.5 border-t border-border/40 pt-2 sm:grid-cols-2">
+					{recap.signals.map((signal) => (
+						<div
+							key={signal.id}
+							className="flex min-w-0 items-start gap-1.5 rounded-md bg-background/45 px-2 py-1.5"
+						>
+							<SignalIcon state={signal.state} />
+							<p className="min-w-0 flex-1 text-[9.5px] leading-4 text-muted-foreground">
+								{t(
+									`inspector.recap.signals.${signal.messageKey}`,
+									signal.params,
+								)}
+							</p>
+							{signal.required ? (
+								<span className="shrink-0 text-[8px] font-medium uppercase tracking-[0.06em] text-foreground/55">
+									{t("inspector.recap.required")}
+								</span>
+							) : null}
+						</div>
+					))}
+				</div>
+			) : null}
 		</div>
 	);
 }

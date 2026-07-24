@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+	WorkspaceDeliveryPolicy,
 	WorkspaceProjectTask,
 	WorkspaceRunProjectTasksOutput,
 } from "@dcc/contracts";
@@ -10,6 +11,7 @@ import {
 	Play,
 	Plus,
 	Settings2,
+	ShieldCheck,
 	Trash2,
 	Wrench,
 } from "lucide-react";
@@ -51,6 +53,7 @@ type Draft = {
 	tasks: WorkspaceProjectTask[];
 	beforeMerge: string[];
 	beforePush: string[];
+	deliveryPolicy: WorkspaceDeliveryPolicy;
 };
 
 const EMPTY_DRAFT: Draft = {
@@ -58,6 +61,13 @@ const EMPTY_DRAFT: Draft = {
 	tasks: [],
 	beforeMerge: [],
 	beforePush: [],
+	deliveryPolicy: {
+		minimumApprovals: 0,
+		requirePipeline: false,
+		requireResolvedDiscussions: false,
+		requireCurrentBase: false,
+		requireBeforeMergeChecks: false,
+	},
 };
 
 function taskLabel(task: WorkspaceProjectTask) {
@@ -95,6 +105,7 @@ export function WorkspaceProjectAutomationDialog({
 			tasks: configQuery.data.tasks,
 			beforeMerge: configQuery.data.beforeMerge,
 			beforePush: configQuery.data.beforePush,
+			deliveryPolicy: configQuery.data.deliveryPolicy,
 		});
 	}, [configQuery.data, open]);
 
@@ -115,6 +126,7 @@ export function WorkspaceProjectAutomationDialog({
 				tasks: configQuery.data.tasks,
 				beforeMerge: configQuery.data.beforeMerge,
 				beforePush: configQuery.data.beforePush,
+				deliveryPolicy: configQuery.data.deliveryPolicy,
 			})
 		);
 	}, [configQuery.data, draft]);
@@ -206,6 +218,7 @@ export function WorkspaceProjectAutomationDialog({
 				})),
 				beforeMerge: [...new Set(draft.beforeMerge.map((id) => id.trim()))],
 				beforePush: [...new Set(draft.beforePush.map((id) => id.trim()))],
+				deliveryPolicy: draft.deliveryPolicy,
 				expectedConfigHash: configQuery.data.configHash,
 			});
 			queryClient.setQueryData([WORKSPACE_AUTOMATION_QUERY_KEY, root], saved);
@@ -300,6 +313,90 @@ export function WorkspaceProjectAutomationDialog({
 									}
 									placeholder={t("automation.setupPlaceholder")}
 								/>
+							</section>
+
+							<section className="rounded-xl border border-border/60 bg-muted/15 p-4">
+								<div className="mb-3 flex items-start gap-2">
+									<ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
+									<div>
+										<h3 className="text-sm font-semibold">
+											{t("automation.deliveryTitle")}
+										</h3>
+										<p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+											{t("automation.deliveryDescription")}
+										</p>
+									</div>
+								</div>
+								<div className="grid gap-3 md:grid-cols-2">
+									<div className="rounded-lg border border-border/50 bg-background/70 p-3">
+										<Label htmlFor="delivery-minimum-approvals">
+											{t("automation.minimumApprovals")}
+										</Label>
+										<Input
+											id="delivery-minimum-approvals"
+											className="mt-1.5"
+											type="number"
+											min={0}
+											max={20}
+											value={draft.deliveryPolicy.minimumApprovals}
+											onChange={(event) =>
+												setDraft((current) => ({
+													...current,
+													deliveryPolicy: {
+														...current.deliveryPolicy,
+														minimumApprovals: Math.min(
+															20,
+															Math.max(0, Number(event.target.value) || 0),
+														),
+													},
+												}))
+											}
+										/>
+										<p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+											{t("automation.minimumApprovalsHint")}
+										</p>
+									</div>
+									<div className="space-y-2 rounded-lg border border-border/50 bg-background/70 p-3 text-xs">
+										{(
+											[
+												["requirePipeline", "automation.requirePipeline"],
+												[
+													"requireResolvedDiscussions",
+													"automation.requireResolvedDiscussions",
+												],
+												[
+													"requireCurrentBase",
+													"automation.requireCurrentBase",
+												],
+												[
+													"requireBeforeMergeChecks",
+													"automation.requireBeforeMergeChecks",
+												],
+											] as const
+										).map(([key, label]) => (
+											<label key={key} className="flex items-start gap-2">
+												<input
+													type="checkbox"
+													className="mt-0.5"
+													checked={draft.deliveryPolicy[key]}
+													onChange={(event) =>
+														setDraft((current) => ({
+															...current,
+															deliveryPolicy: {
+																...current.deliveryPolicy,
+																[key]: event.target.checked,
+															},
+														}))
+													}
+												/>
+												<span>{t(label)}</span>
+											</label>
+										))}
+									</div>
+								</div>
+								<p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+									{t("automation.deliveryPolicyHint")}
+								</p>
 							</section>
 
 							<section>
