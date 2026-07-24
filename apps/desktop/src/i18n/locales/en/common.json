@@ -398,6 +398,26 @@
         "dismissed": "Dismissed"
       }
     },
+    "deliveryFailure": {
+      "title": "Delivery issue captured",
+      "operation": {
+        "fetch": "Fetch",
+        "pull": "Update",
+        "push": "Push",
+        "pipeline": "Pipeline"
+      },
+      "branchUnavailable": "Branch unavailable",
+      "commitUnavailable": "Commit unavailable",
+      "remoteUnavailable": "Remote unavailable",
+      "pushTargetUnavailable": "Push target unavailable",
+      "capturedAt": "Captured at {{time}}",
+      "output": "Captured output",
+      "outputTruncated": "Output was limited to the safe DCC snapshot size.",
+      "changedFiles_one": "{{count}} changed file",
+      "changedFiles_other": "{{count}} changed files",
+      "noChangedFiles": "No local changed files were present at capture time.",
+      "filesTruncated": "Only the first 100 changed paths were captured."
+    },
     "tabs": {
       "activity": "Activity",
       "context": "Details",

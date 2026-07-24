@@ -35,17 +35,134 @@ use dcc_core::{
 };
 use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 
+use crate::delivery_failure::{
+    WorkspaceDeliveryFailureOperation, WorkspaceDeliveryFailureSnapshot,
+};
 use crate::events::TauriEventBus;
 use dcc_providers::provider_runtime;
+
+const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
+
+type DeliveryFailureStore =
+    HashMap<String, HashMap<WorkspaceDeliveryFailureOperation, WorkspaceDeliveryFailureSnapshot>>;
 
 #[derive(Clone, Debug)]
 pub struct WorkspaceCommandState {
     pub db_path: PathBuf,
+    delivery_failures: Arc<Mutex<DeliveryFailureStore>>,
 }
 
 impl WorkspaceCommandState {
     pub fn new(db_path: PathBuf) -> Self {
-        Self { db_path }
+        Self {
+            db_path,
+            delivery_failures: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub(crate) fn record_delivery_failure(
+        &self,
+        snapshot: WorkspaceDeliveryFailureSnapshot,
+    ) -> WorkspaceDeliveryFailureSnapshot {
+        let Ok(mut store) = self.delivery_failures.lock() else {
+            return snapshot;
+        };
+        let root = snapshot.workspace_root.clone();
+        if let Some(existing) = store
+            .get(&root)
+            .and_then(|operations| operations.get(&snapshot.operation))
+        {
+            let same_failure = existing.branch == snapshot.branch
+                && existing.head_sha == snapshot.head_sha
+                && existing.remote == snapshot.remote
+                && existing.push_target == snapshot.push_target
+                && existing.output == snapshot.output
+                && existing.changed_files == snapshot.changed_files
+                && existing.external_url == snapshot.external_url;
+            if same_failure {
+                return existing.clone();
+            }
+        }
+
+        if !store.contains_key(&root) && store.len() >= DELIVERY_FAILURE_WORKSPACE_LIMIT {
+            let oldest_root = store
+                .iter()
+                .filter_map(|(candidate_root, operations)| {
+                    operations
+                        .values()
+                        .map(|failure| failure.created_at.as_str())
+                        .max()
+                        .map(|latest| (candidate_root.clone(), latest.to_string()))
+                })
+                .min_by(|left, right| left.1.cmp(&right.1))
+                .map(|(candidate_root, _)| candidate_root);
+            if let Some(oldest_root) = oldest_root {
+                store.remove(&oldest_root);
+            }
+        }
+
+        store
+            .entry(root)
+            .or_default()
+            .insert(snapshot.operation, snapshot.clone());
+        snapshot
+    }
+
+    pub(crate) fn clear_delivery_failure(
+        &self,
+        workspace_root: &str,
+        operation: WorkspaceDeliveryFailureOperation,
+    ) {
+        let Ok(mut store) = self.delivery_failures.lock() else {
+            return;
+        };
+        let root = workspace_root.trim();
+        let remove_root = store
+            .get_mut(root)
+            .map(|operations| {
+                operations.remove(&operation);
+                operations.is_empty()
+            })
+            .unwrap_or(false);
+        if remove_root {
+            store.remove(root);
+        }
+    }
+
+    pub(crate) fn clear_delivery_failures(&self, workspace_root: &str) {
+        let Ok(mut store) = self.delivery_failures.lock() else {
+            return;
+        };
+        store.remove(workspace_root.trim());
+    }
+
+    pub(crate) fn has_delivery_failure(&self, workspace_root: &str) -> bool {
+        self.delivery_failures
+            .lock()
+            .ok()
+            .and_then(|store| {
+                store
+                    .get(workspace_root.trim())
+                    .map(|operations| !operations.is_empty())
+            })
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn latest_delivery_failure(
+        &self,
+        workspace_root: &str,
+        branch: Option<&str>,
+        head_sha: Option<&str>,
+    ) -> Option<WorkspaceDeliveryFailureSnapshot> {
+        let store = self.delivery_failures.lock().ok()?;
+        store
+            .get(workspace_root.trim())?
+            .values()
+            .filter(|failure| {
+                failure.branch.as_deref() == branch && failure.head_sha.as_deref() == head_sha
+            })
+            .max_by(|left, right| left.created_at.cmp(&right.created_at))
+            .cloned()
     }
 }
 

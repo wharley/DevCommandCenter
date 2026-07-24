@@ -90,6 +90,8 @@ import type {
 	WorkspaceForgeContextOutput,
 	WorkspaceContinueFromBaseBranchInput,
 	WorkspaceContinueFromBaseBranchOutput,
+	WorkspaceDeliveryFailureInput,
+	WorkspaceDeliveryFailureOutput,
 	WorkspacePrReviewCommentsInput,
 	WorkspacePrReviewCommentsOutput,
 	WorkspacePrStatusInput,
@@ -576,6 +578,15 @@ export function workspacePipelineJobRetry(input: WorkspacePipelineJobInput) {
 export function workspaceReviewState(input: WorkspaceReviewStateInput) {
 	return invoke<WorkspaceReviewStateOutput>(
 		WORKSPACE_METHODS.workspaceReviewState,
+		{ input },
+	);
+}
+
+export function workspaceDeliveryFailureSnapshot(
+	input: WorkspaceDeliveryFailureInput,
+) {
+	return invoke<WorkspaceDeliveryFailureOutput>(
+		WORKSPACE_METHODS.workspaceDeliveryFailureSnapshot,
 		{ input },
 	);
 }

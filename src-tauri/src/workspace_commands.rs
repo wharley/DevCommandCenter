@@ -30,6 +30,7 @@ use dcc_tauri::{
         WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution, WriteWorkspaceFileInput,
         WriteWorkspaceFileOutput,
     },
+    delivery_failure::{WorkspaceDeliveryFailureInput, WorkspaceDeliveryFailureOutput},
     state::WorkspaceCommandState,
 };
 
@@ -364,6 +365,14 @@ pub async fn workspace_git_push(
     input: WorkspaceGitPushInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::workspace_commands::workspace_git_push(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_delivery_failure_snapshot(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceDeliveryFailureInput,
+) -> Result<WorkspaceDeliveryFailureOutput, String> {
+    dcc_tauri::delivery_failure::workspace_delivery_failure_snapshot(state, input).await
 }
 
 #[tauri::command]

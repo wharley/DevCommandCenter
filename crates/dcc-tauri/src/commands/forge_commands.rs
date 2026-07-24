@@ -14,6 +14,10 @@ use crate::{
         resolve_branch_diff_base, resolve_current_branch_name, resolve_current_commit_sha,
         resolve_workspace_target_branch, workspace_branch_hints,
     },
+    delivery_failure::{
+        capture_workspace_delivery_failure, clear_workspace_delivery_failure,
+        CaptureDeliveryFailureOptions, WorkspaceDeliveryFailureOperation,
+    },
     state::WorkspaceCommandState,
 };
 
@@ -696,14 +700,9 @@ pub async fn workspace_change_request_create(
     )?
     .and_then(|context| context.effective_login);
 
-    push_current_branch(
-        &state.db_path,
-        root,
-        protected_branch.as_deref(),
-        login.as_deref(),
-    )
-    .await
-    .map_err(|error| format!("git push failed: {error}"))?;
+    push_current_branch(&state, root, protected_branch.as_deref(), login.as_deref())
+        .await
+        .map_err(|error| format!("git push failed: {error}"))?;
 
     forge_provider::create_workspace_change_request(
         root,
@@ -1521,7 +1520,7 @@ pub async fn workspace_pipeline_status(
         None
     };
 
-    let pipeline = crate::commands::forge::gitlab::find_pipeline_for_sha(
+    let pipeline = match crate::commands::forge::gitlab::find_pipeline_for_sha(
         root,
         &forge_context.host,
         &forge_context.namespace,
@@ -1529,20 +1528,94 @@ pub async fn workspace_pipeline_status(
         change_request_number,
         &head_sha,
         forge_context.effective_login.as_deref(),
-    )?;
+    ) {
+        Ok(pipeline) => pipeline,
+        Err(error) => {
+            capture_workspace_delivery_failure(
+                &state,
+                root,
+                WorkspaceDeliveryFailureOperation::Pipeline,
+                &error,
+                CaptureDeliveryFailureOptions {
+                    remote: Some(forge_context.remote_name.clone()),
+                    external_url: None,
+                },
+            )
+            .await;
+            return Err(error);
+        }
+    };
     let pipeline = match pipeline {
         Some(pipeline) => {
-            let jobs = crate::commands::forge::gitlab::list_pipeline_jobs(
+            let jobs = match crate::commands::forge::gitlab::list_pipeline_jobs(
                 root,
                 &forge_context.host,
                 &forge_context.namespace,
                 &forge_context.repo,
                 pipeline.id,
                 forge_context.effective_login.as_deref(),
-            )?;
-            Some(map_gitlab_pipeline(pipeline, jobs))
+            ) {
+                Ok(jobs) => jobs,
+                Err(error) => {
+                    capture_workspace_delivery_failure(
+                        &state,
+                        root,
+                        WorkspaceDeliveryFailureOperation::Pipeline,
+                        &error,
+                        CaptureDeliveryFailureOptions {
+                            remote: Some(forge_context.remote_name.clone()),
+                            external_url: pipeline.web_url.clone(),
+                        },
+                    )
+                    .await;
+                    return Err(error);
+                }
+            };
+            let pipeline = map_gitlab_pipeline(pipeline, jobs);
+            if pipeline.status == "failed" {
+                let failed_jobs = pipeline
+                    .jobs
+                    .iter()
+                    .filter(|job| job.status == "failed")
+                    .take(20)
+                    .map(|job| format!("- {} / {}", job.stage, job.name))
+                    .collect::<Vec<_>>();
+                let mut detail = format!(
+                    "GitLab pipeline #{} failed for commit {}.",
+                    pipeline.id, pipeline.sha
+                );
+                if !failed_jobs.is_empty() {
+                    detail.push_str("\nFailed jobs:\n");
+                    detail.push_str(&failed_jobs.join("\n"));
+                }
+                capture_workspace_delivery_failure(
+                    &state,
+                    root,
+                    WorkspaceDeliveryFailureOperation::Pipeline,
+                    &detail,
+                    CaptureDeliveryFailureOptions {
+                        remote: Some(forge_context.remote_name.clone()),
+                        external_url: pipeline.web_url.clone(),
+                    },
+                )
+                .await;
+            } else {
+                clear_workspace_delivery_failure(
+                    &state,
+                    root,
+                    WorkspaceDeliveryFailureOperation::Pipeline,
+                );
+            }
+            Some(pipeline)
         }
-        None => None,
+        None => {
+            clear_workspace_delivery_failure(
+                &state,
+                root,
+                WorkspaceDeliveryFailureOperation::Pipeline,
+            );
+            None
+        }
     };
 
     Ok(WorkspacePipelineStatusOutput {

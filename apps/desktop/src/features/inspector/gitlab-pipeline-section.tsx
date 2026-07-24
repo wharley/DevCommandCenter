@@ -13,7 +13,7 @@ import {
 	RotateCcw,
 	XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,7 @@ import {
 	useWorkspacePipeline,
 	WORKSPACE_PIPELINE_QUERY_KEY,
 } from "./use-workspace-pipeline";
+import { WORKSPACE_DELIVERY_FAILURE_QUERY_KEY } from "./use-workspace-delivery-failure";
 
 type PipelineTone = "success" | "danger" | "progress" | "waiting" | "muted";
 
@@ -245,6 +246,22 @@ export function GitlabPipelineSection({
 		retry: false,
 	});
 
+	useEffect(() => {
+		if (
+			!root ||
+			(pipelineQuery.dataUpdatedAt === 0 && pipelineQuery.errorUpdatedAt === 0)
+		)
+			return;
+		void queryClient.invalidateQueries({
+			queryKey: [WORKSPACE_DELIVERY_FAILURE_QUERY_KEY, root],
+		});
+	}, [
+		pipelineQuery.dataUpdatedAt,
+		pipelineQuery.errorUpdatedAt,
+		queryClient,
+		root,
+	]);
+
 	if (!enabled) return null;
 
 	if (pipelineQuery.isPending) {
@@ -309,6 +326,9 @@ export function GitlabPipelineSection({
 			setActiveJobId(null);
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_PIPELINE_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_DELIVERY_FAILURE_QUERY_KEY, root],
 			});
 			toast.success(t("inspector.pipeline.retryStarted", { job: job.name }));
 		} catch (error) {

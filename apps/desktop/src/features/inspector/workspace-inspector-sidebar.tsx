@@ -55,6 +55,7 @@ import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workben
 import { InspectorChangesSection } from "./inspector-changes-section";
 import { GitSectionHeader } from "./git-section-header";
 import { GitlabPipelineSection } from "./gitlab-pipeline-section";
+import { WorkspaceDeliveryFailureSection } from "./workspace-delivery-failure-section";
 import { WorkspaceReviewStateSection } from "./workspace-review-state-section";
 import { projectWorkspaceMessages } from "@/features/panel/thread-projection";
 import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
@@ -104,6 +105,7 @@ import { WorkspaceRecapStrip } from "./workspace-recap-strip";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
 import { useWorkspacePrReviewComments } from "./use-workspace-pr-review-comments";
 import { WORKSPACE_PIPELINE_QUERY_KEY } from "./use-workspace-pipeline";
+import { WORKSPACE_DELIVERY_FAILURE_QUERY_KEY } from "./use-workspace-delivery-failure";
 import { WORKSPACE_REVIEW_STATE_QUERY_KEY } from "./use-workspace-review-state";
 import {
 	useWorkspaceForgeContext,
@@ -2132,6 +2134,9 @@ export function WorkspaceInspectorSidebar({
 				queryKey: [WORKSPACE_PIPELINE_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_DELIVERY_FAILURE_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_REVIEW_STATE_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
@@ -2141,6 +2146,9 @@ export function WorkspaceInspectorSidebar({
 				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
 			});
 		} catch (error) {
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_DELIVERY_FAILURE_QUERY_KEY, root],
+			});
 			const message = getInspectorActionErrorMessage(error, t);
 			console.error("[inspector] git action failed", { commitMode, root, error });
 			toast.error(
@@ -2207,6 +2215,9 @@ export function WorkspaceInspectorSidebar({
 				queryKey: [WORKSPACE_PIPELINE_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_DELIVERY_FAILURE_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_REVIEW_STATE_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
@@ -2216,6 +2227,9 @@ export function WorkspaceInspectorSidebar({
 				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
 			});
 		} catch (error) {
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_DELIVERY_FAILURE_QUERY_KEY, root],
+			});
 			const message = getInspectorActionErrorMessage(error);
 			toast.error(
 				t("inspector.gitConfirmation.mergeFailed", {
@@ -2269,6 +2283,9 @@ export function WorkspaceInspectorSidebar({
 			});
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_PIPELINE_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_DELIVERY_FAILURE_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_REVIEW_STATE_QUERY_KEY, root],
@@ -2913,6 +2930,11 @@ export function WorkspaceInspectorSidebar({
 									onSyncBase={handleSyncBase}
 								/>
 							</div>
+							<WorkspaceDeliveryFailureSection
+								workspaceRoot={workspacePath}
+								branch={gitBranch}
+								enabled={Boolean(workspacePath)}
+							/>
 							<WorkspaceReviewStateSection
 								workspaceRoot={workspacePath}
 								branch={gitBranch}

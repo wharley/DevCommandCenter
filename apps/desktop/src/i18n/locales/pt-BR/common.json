@@ -398,6 +398,26 @@
         "dismissed": "Descartada"
       }
     },
+    "deliveryFailure": {
+      "title": "Problema de entrega capturado",
+      "operation": {
+        "fetch": "Busca",
+        "pull": "Atualização",
+        "push": "Envio",
+        "pipeline": "Pipeline"
+      },
+      "branchUnavailable": "Branch indisponível",
+      "commitUnavailable": "Commit indisponível",
+      "remoteUnavailable": "Remoto indisponível",
+      "pushTargetUnavailable": "Destino de envio indisponível",
+      "capturedAt": "Capturado em {{time}}",
+      "output": "Saída capturada",
+      "outputTruncated": "A saída foi limitada ao tamanho seguro do snapshot do DCC.",
+      "changedFiles_one": "{{count}} arquivo alterado",
+      "changedFiles_other": "{{count}} arquivos alterados",
+      "noChangedFiles": "Não havia arquivos locais alterados no momento da captura.",
+      "filesTruncated": "Somente os primeiros 100 caminhos alterados foram capturados."
+    },
     "tabs": {
       "activity": "Atividade",
       "context": "Detalhes",

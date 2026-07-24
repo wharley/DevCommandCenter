@@ -68,6 +68,10 @@ use crate::{
         resolve_workspace_broken_reason, resolve_workspace_setup_root,
         resolve_workspace_target_branch, run_git_network_output_with_workspace_auth,
     },
+    delivery_failure::{
+        capture_workspace_delivery_failure, clear_workspace_delivery_failure,
+        CaptureDeliveryFailureOptions, WorkspaceDeliveryFailureOperation,
+    },
     events::TauriEventBus,
     git::{
         configure_git_command, git_command_succeeds, git_output_err, parse_name_status_z,
@@ -1872,7 +1876,7 @@ pub async fn workspace_git_complete_merge(
 
     let protected_branch = resolve_workspace_target_branch(&state, root).await;
     push_current_branch(
-        &state.db_path,
+        &state,
         root,
         protected_branch.as_deref(),
         input.forge_login.as_deref(),
@@ -2133,7 +2137,7 @@ async fn refresh_repository_forge_metadata(
     Ok(())
 }
 
-pub(crate) async fn push_current_branch(
+async fn push_current_branch_inner(
     db_path: &Path,
     root: &str,
     protected_branch: Option<&str>,
@@ -2186,6 +2190,33 @@ pub(crate) async fn push_current_branch(
 
     let branch = ensure_pushable_branch(root, protected_branch)?;
     push_branch_refspec(db_path, root, &branch, forge_login)
+}
+
+pub(crate) async fn push_current_branch(
+    state: &WorkspaceCommandState,
+    root: &str,
+    protected_branch: Option<&str>,
+    forge_login: Option<&str>,
+) -> Result<(), String> {
+    let result =
+        push_current_branch_inner(&state.db_path, root, protected_branch, forge_login).await;
+    match result {
+        Ok(()) => {
+            clear_workspace_delivery_failure(state, root, WorkspaceDeliveryFailureOperation::Push);
+            Ok(())
+        }
+        Err(error) => {
+            capture_workspace_delivery_failure(
+                state,
+                root,
+                WorkspaceDeliveryFailureOperation::Push,
+                &error,
+                CaptureDeliveryFailureOptions::default(),
+            )
+            .await;
+            Err(error)
+        }
+    }
 }
 
 fn path_is_tracked(root: &str, rel: &str) -> bool {
@@ -2445,12 +2476,21 @@ pub async fn workspace_git_commit_push(
 
     let commit = run_git_output(root, &["commit", "-m", message])?;
     if !commit.status.success() {
-        return Err(git_output_err("git commit", &commit.stderr));
+        let error = git_output_err("git commit", &commit.stderr);
+        capture_workspace_delivery_failure(
+            &state,
+            root,
+            WorkspaceDeliveryFailureOperation::Push,
+            &error,
+            CaptureDeliveryFailureOptions::default(),
+        )
+        .await;
+        return Err(error);
     }
 
     let protected_branch = resolve_workspace_target_branch(&state, root).await;
     push_current_branch(
-        &state.db_path,
+        &state,
         root,
         protected_branch.as_deref(),
         input.forge_login.as_deref(),
@@ -2471,7 +2511,7 @@ pub async fn workspace_git_push(
 
     let protected_branch = resolve_workspace_target_branch(&state, root).await;
     push_current_branch(
-        &state.db_path,
+        &state,
         root,
         protected_branch.as_deref(),
         input.forge_login.as_deref(),
@@ -2584,27 +2624,84 @@ pub async fn workspace_git_sync_base(
     let fetch_refspec = remote_branch_fetch_refspec(&remote, &base_branch);
     let branch = resolve_current_branch_name(root)?;
     let before = resolve_current_commit_sha(root)?.unwrap_or_default();
-    let fetch = run_git_network_output_with_workspace_auth(
+    let fetch = match run_git_network_output_with_workspace_auth(
         &state.db_path,
         root,
         &["fetch", &remote, &fetch_refspec],
         input.forge_login.as_deref(),
-    )?;
+    ) {
+        Ok(fetch) => fetch,
+        Err(error) => {
+            capture_workspace_delivery_failure(
+                &state,
+                root,
+                WorkspaceDeliveryFailureOperation::Fetch,
+                &error,
+                CaptureDeliveryFailureOptions {
+                    remote: Some(remote.clone()),
+                    external_url: None,
+                },
+            )
+            .await;
+            return Err(error);
+        }
+    };
     if !fetch.status.success() {
-        return Err(git_output_err("git fetch", &fetch.stderr));
+        let error = git_output_err("git fetch", &fetch.stderr);
+        capture_workspace_delivery_failure(
+            &state,
+            root,
+            WorkspaceDeliveryFailureOperation::Fetch,
+            &error,
+            CaptureDeliveryFailureOptions {
+                remote: Some(remote.clone()),
+                external_url: None,
+            },
+        )
+        .await;
+        return Err(error);
     }
+    clear_workspace_delivery_failure(&state, root, WorkspaceDeliveryFailureOperation::Fetch);
 
-    let merge = run_git_output(root, &["merge", "--no-edit", &base_ref])?;
+    let merge = match run_git_output(root, &["merge", "--no-edit", &base_ref]) {
+        Ok(merge) => merge,
+        Err(error) => {
+            capture_workspace_delivery_failure(
+                &state,
+                root,
+                WorkspaceDeliveryFailureOperation::Pull,
+                &error,
+                CaptureDeliveryFailureOptions {
+                    remote: Some(remote.clone()),
+                    external_url: None,
+                },
+            )
+            .await;
+            return Err(error);
+        }
+    };
     let conflict_count = resolve_conflict_count(root).unwrap_or(0);
     if !merge.status.success() {
-        let detail = git_output_err("git merge", &merge.stderr);
+        let mut detail = git_output_err("git merge", &merge.stderr);
         if conflict_count > 0 {
-            return Err(format!(
+            detail = format!(
                 "{detail}\nMerge left {conflict_count} conflicting file(s) in the worktree."
-            ));
+            );
         }
+        capture_workspace_delivery_failure(
+            &state,
+            root,
+            WorkspaceDeliveryFailureOperation::Pull,
+            &detail,
+            CaptureDeliveryFailureOptions {
+                remote: Some(remote.clone()),
+                external_url: None,
+            },
+        )
+        .await;
         return Err(detail);
     }
+    clear_workspace_delivery_failure(&state, root, WorkspaceDeliveryFailureOperation::Pull);
 
     let after = resolve_current_commit_sha(root)?.unwrap_or_default();
     persist_workspace_base_branch(&state, root, &base_branch).await?;
@@ -6430,7 +6527,14 @@ pub async fn delete_workspace(
     cleanup_delegation_worktrees(&session_repo, &workspace).await?;
     cleanup_workspace_files(&workspace)?;
     cleanup_unused_workspace_push_target(&repo, &workspace).await?;
-    repo.delete_workspace(&id).await.map_err(|e| e.to_string())
+    repo.delete_workspace(&id)
+        .await
+        .map_err(|e| e.to_string())?;
+    state.clear_delivery_failures(&workspace.root_path);
+    if let Some(worktree_path) = workspace.worktree_path.as_deref() {
+        state.clear_delivery_failures(worktree_path);
+    }
+    Ok(())
 }
 
 async fn cleanup_delegation_worktrees(
