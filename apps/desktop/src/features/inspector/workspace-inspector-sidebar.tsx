@@ -2933,7 +2933,9 @@ export function WorkspaceInspectorSidebar({
 							<WorkspaceDeliveryFailureSection
 								workspaceRoot={workspacePath}
 								branch={gitBranch}
+								forgeLogin={selectedForgeLogin}
 								enabled={Boolean(workspacePath)}
+								onPrefillComposer={onPrefillComposer}
 							/>
 							<WorkspaceReviewStateSection
 								workspaceRoot={workspacePath}

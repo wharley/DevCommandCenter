@@ -70,7 +70,10 @@ use crate::{
     },
     delivery_failure::{
         capture_workspace_delivery_failure, clear_workspace_delivery_failure,
+        resolve_delivery_push_target, validate_delivery_recovery_snapshot,
         CaptureDeliveryFailureOptions, WorkspaceDeliveryFailureOperation,
+        WorkspaceDeliveryRecoveryAction, WorkspaceDeliveryRecoveryInput,
+        WorkspaceDeliveryRecoveryOutput,
     },
     events::TauriEventBus,
     git::{
@@ -2564,7 +2567,7 @@ fn remote_branch_fetch_refspec(remote: &str, branch: &str) -> String {
 }
 
 async fn persist_workspace_base_branch(
-    state: &State<'_, WorkspaceCommandState>,
+    state: &WorkspaceCommandState,
     workspace_root: &str,
     base_branch: &str,
 ) -> Result<(), String> {
@@ -2589,7 +2592,26 @@ pub async fn workspace_git_sync_base(
     input: WorkspaceGitSyncBaseInput,
 ) -> Result<WorkspaceGitSyncBaseOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
-    let root = input.workspace_root.trim();
+    sync_workspace_branch(
+        &state,
+        &input.workspace_root,
+        input.base_branch.as_deref(),
+        None,
+        true,
+        input.forge_login.as_deref(),
+    )
+    .await
+}
+
+async fn sync_workspace_branch(
+    state: &WorkspaceCommandState,
+    workspace_root: &str,
+    target_branch: Option<&str>,
+    target_remote: Option<&str>,
+    persist_target_as_base: bool,
+    forge_login: Option<&str>,
+) -> Result<WorkspaceGitSyncBaseOutput, String> {
+    let root = workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
@@ -2600,12 +2622,15 @@ pub async fn workspace_git_sync_base(
         );
     }
 
-    let remote = resolve_default_remote_name(root)?;
-    let workspace_target_branch = resolve_workspace_target_branch(&state, root).await;
+    let remote = target_remote
+        .map(str::trim)
+        .filter(|remote| !remote.is_empty())
+        .map(str::to_string)
+        .map(Ok)
+        .unwrap_or_else(|| resolve_default_remote_name(root))?;
+    let workspace_target_branch = resolve_workspace_target_branch(state, root).await;
     let default_branch = resolve_default_branch_name(root).ok();
-    let base_branch = input
-        .base_branch
-        .as_deref()
+    let base_branch = target_branch
         .and_then(|branch| normalize_base_branch_for_sync(branch, &remote))
         .or_else(|| {
             workspace_target_branch
@@ -2628,17 +2653,18 @@ pub async fn workspace_git_sync_base(
         &state.db_path,
         root,
         &["fetch", &remote, &fetch_refspec],
-        input.forge_login.as_deref(),
+        forge_login,
     ) {
         Ok(fetch) => fetch,
         Err(error) => {
             capture_workspace_delivery_failure(
-                &state,
+                state,
                 root,
                 WorkspaceDeliveryFailureOperation::Fetch,
                 &error,
                 CaptureDeliveryFailureOptions {
                     remote: Some(remote.clone()),
+                    operation_target: Some(base_branch.clone()),
                     external_url: None,
                 },
             )
@@ -2649,30 +2675,32 @@ pub async fn workspace_git_sync_base(
     if !fetch.status.success() {
         let error = git_output_err("git fetch", &fetch.stderr);
         capture_workspace_delivery_failure(
-            &state,
+            state,
             root,
             WorkspaceDeliveryFailureOperation::Fetch,
             &error,
             CaptureDeliveryFailureOptions {
                 remote: Some(remote.clone()),
+                operation_target: Some(base_branch.clone()),
                 external_url: None,
             },
         )
         .await;
         return Err(error);
     }
-    clear_workspace_delivery_failure(&state, root, WorkspaceDeliveryFailureOperation::Fetch);
+    clear_workspace_delivery_failure(state, root, WorkspaceDeliveryFailureOperation::Fetch);
 
     let merge = match run_git_output(root, &["merge", "--no-edit", &base_ref]) {
         Ok(merge) => merge,
         Err(error) => {
             capture_workspace_delivery_failure(
-                &state,
+                state,
                 root,
                 WorkspaceDeliveryFailureOperation::Pull,
                 &error,
                 CaptureDeliveryFailureOptions {
                     remote: Some(remote.clone()),
+                    operation_target: Some(base_branch.clone()),
                     external_url: None,
                 },
             )
@@ -2689,28 +2717,126 @@ pub async fn workspace_git_sync_base(
             );
         }
         capture_workspace_delivery_failure(
-            &state,
+            state,
             root,
             WorkspaceDeliveryFailureOperation::Pull,
             &detail,
             CaptureDeliveryFailureOptions {
                 remote: Some(remote.clone()),
+                operation_target: Some(base_branch.clone()),
                 external_url: None,
             },
         )
         .await;
         return Err(detail);
     }
-    clear_workspace_delivery_failure(&state, root, WorkspaceDeliveryFailureOperation::Pull);
+    clear_workspace_delivery_failure(state, root, WorkspaceDeliveryFailureOperation::Pull);
 
     let after = resolve_current_commit_sha(root)?.unwrap_or_default();
-    persist_workspace_base_branch(&state, root, &base_branch).await?;
+    if persist_target_as_base {
+        persist_workspace_base_branch(state, root, &base_branch).await?;
+    }
     Ok(WorkspaceGitSyncBaseOutput {
         branch,
         base_branch,
         remote,
         updated: before != after,
         conflict_count,
+    })
+}
+
+#[tauri::command]
+pub async fn workspace_delivery_recovery_execute(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceDeliveryRecoveryInput,
+) -> Result<WorkspaceDeliveryRecoveryOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let snapshot = validate_delivery_recovery_snapshot(
+        &state,
+        &input.workspace_root,
+        &input.attempt_token,
+        input.action,
+    )?;
+    let root = snapshot.workspace_root.as_str();
+    let mut refresh_pipeline = false;
+
+    match input.action {
+        WorkspaceDeliveryRecoveryAction::Retry => match snapshot.operation {
+            WorkspaceDeliveryFailureOperation::Push => {
+                let current_target =
+                    resolve_delivery_push_target(&state, root, snapshot.branch.as_deref()).await;
+                if current_target.as_ref() != snapshot.push_target.as_ref() {
+                    return Err(
+                        "the workspace push target changed after this failure was captured; review the current target before retrying"
+                            .to_string(),
+                    );
+                }
+                let protected_branch = resolve_workspace_target_branch(&state, root).await;
+                push_current_branch(
+                    &state,
+                    root,
+                    protected_branch.as_deref(),
+                    input.forge_login.as_deref(),
+                )
+                .await?;
+            }
+            WorkspaceDeliveryFailureOperation::Fetch | WorkspaceDeliveryFailureOperation::Pull => {
+                let target = snapshot.operation_target.as_deref().ok_or_else(|| {
+                    "the captured update target is unavailable; retry from the branch toolbar"
+                        .to_string()
+                })?;
+                sync_workspace_branch(
+                    &state,
+                    root,
+                    Some(target),
+                    snapshot.remote.as_deref(),
+                    true,
+                    input.forge_login.as_deref(),
+                )
+                .await?;
+            }
+            WorkspaceDeliveryFailureOperation::Pipeline => {
+                refresh_pipeline = true;
+            }
+        },
+        WorkspaceDeliveryRecoveryAction::Synchronize => {
+            let current_target =
+                resolve_delivery_push_target(&state, root, snapshot.branch.as_deref()).await;
+            if current_target.as_ref() != snapshot.push_target.as_ref() {
+                return Err(
+                    "the workspace push target changed after this failure was captured; review the current target before synchronizing"
+                        .to_string(),
+                );
+            }
+            let target = snapshot
+                .push_target
+                .as_ref()
+                .map(|target| target.branch.as_str())
+                .ok_or_else(|| {
+                    "the captured push target is unavailable; synchronize from the branch toolbar"
+                        .to_string()
+                })?;
+            let remote = snapshot
+                .push_target
+                .as_ref()
+                .map(|target| target.remote.as_str());
+            sync_workspace_branch(
+                &state,
+                root,
+                Some(target),
+                remote,
+                false,
+                input.forge_login.as_deref(),
+            )
+            .await?;
+        }
+        WorkspaceDeliveryRecoveryAction::SendToAgent
+        | WorkspaceDeliveryRecoveryAction::OpenExternal => {}
+    }
+
+    Ok(WorkspaceDeliveryRecoveryOutput {
+        snapshot,
+        refresh_pipeline,
     })
 }
 

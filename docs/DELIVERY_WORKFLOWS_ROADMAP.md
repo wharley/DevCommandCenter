@@ -149,6 +149,12 @@ action.
 - Send bounded context to the agent.
 - Open the external provider.
 
+Actions are derived by the backend from the captured operation and
+classification. Before execution, DCC revalidates the workspace, branch, commit,
+attempt token, remote, and push target. Mutating actions require explicit user
+confirmation; synchronization uses the captured remote branch, stops for manual
+conflict resolution, and does not change a fork workspace's review base.
+
 ### Acceptance criteria
 
 - Recovery uses the state captured at failure time rather than accidentally
@@ -257,9 +263,9 @@ Updated July 24, 2026:
 - [ ] Authenticated smoke test with a real open PR/MR that has review rules.
 - [x] Failure snapshots.
 - [x] Conservative failure classification.
-- [ ] Recovery actions.
+- [x] Recovery actions.
 - [ ] Delivery Status.
 
-Next slice: **Phase 3.3 — Recovery actions**. The fork, job, and review-state
+Next slice: **Phase 4 — Delivery Status**. The fork, job, and review-state
 smoke tests remain pending until real cases are available, without creating or
 changing external state solely for testing.

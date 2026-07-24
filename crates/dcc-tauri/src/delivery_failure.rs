@@ -43,6 +43,15 @@ pub enum WorkspaceDeliveryFailureClassification {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceDeliveryRecoveryAction {
+    Retry,
+    Synchronize,
+    SendToAgent,
+    OpenExternal,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDeliveryPushTarget {
@@ -61,12 +70,14 @@ pub struct WorkspaceDeliveryFailureSnapshot {
     pub operation: WorkspaceDeliveryFailureOperation,
     pub classification: WorkspaceDeliveryFailureClassification,
     pub remote: Option<String>,
+    pub operation_target: Option<String>,
     pub push_target: Option<WorkspaceDeliveryPushTarget>,
     pub output: String,
     pub output_truncated: bool,
     pub changed_files: Vec<String>,
     pub changed_files_truncated: bool,
     pub external_url: Option<String>,
+    pub available_actions: Vec<WorkspaceDeliveryRecoveryAction>,
     pub created_at: String,
 }
 
@@ -82,10 +93,64 @@ pub struct WorkspaceDeliveryFailureOutput {
     pub snapshot: Option<WorkspaceDeliveryFailureSnapshot>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDeliveryRecoveryInput {
+    pub workspace_root: String,
+    pub attempt_token: String,
+    pub action: WorkspaceDeliveryRecoveryAction,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDeliveryRecoveryOutput {
+    pub snapshot: WorkspaceDeliveryFailureSnapshot,
+    pub refresh_pipeline: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CaptureDeliveryFailureOptions {
     pub(crate) remote: Option<String>,
+    pub(crate) operation_target: Option<String>,
     pub(crate) external_url: Option<String>,
+}
+
+fn delivery_recovery_actions(
+    operation: WorkspaceDeliveryFailureOperation,
+    classification: WorkspaceDeliveryFailureClassification,
+    has_operation_target: bool,
+    has_push_target: bool,
+    has_external_url: bool,
+) -> Vec<WorkspaceDeliveryRecoveryAction> {
+    let mut actions = Vec::new();
+    let retryable = match classification {
+        WorkspaceDeliveryFailureClassification::Authentication
+        | WorkspaceDeliveryFailureClassification::Transport => match operation {
+            WorkspaceDeliveryFailureOperation::Push => has_push_target,
+            WorkspaceDeliveryFailureOperation::Fetch | WorkspaceDeliveryFailureOperation::Pull => {
+                has_operation_target
+            }
+            WorkspaceDeliveryFailureOperation::Pipeline => true,
+        },
+        _ => false,
+    };
+    if retryable {
+        actions.push(WorkspaceDeliveryRecoveryAction::Retry);
+    }
+    if classification == WorkspaceDeliveryFailureClassification::NonFastForward
+        && operation == WorkspaceDeliveryFailureOperation::Push
+        && has_push_target
+    {
+        actions.push(WorkspaceDeliveryRecoveryAction::Synchronize);
+    }
+    if classification != WorkspaceDeliveryFailureClassification::Unknown {
+        actions.push(WorkspaceDeliveryRecoveryAction::SendToAgent);
+    }
+    if has_external_url {
+        actions.push(WorkspaceDeliveryRecoveryAction::OpenExternal);
+    }
+    actions
 }
 
 fn strip_terminal_controls(raw: &str) -> String {
@@ -390,7 +455,7 @@ fn normalize_push_target(root: &str, target: WorkspacePushTarget) -> WorkspaceDe
     }
 }
 
-async fn resolve_push_target(
+pub(crate) async fn resolve_delivery_push_target(
     state: &WorkspaceCommandState,
     root: &str,
     branch: Option<&str>,
@@ -430,7 +495,7 @@ pub(crate) async fn capture_workspace_delivery_failure(
     let root = root.trim();
     let branch = resolve_current_branch_name(root).ok();
     let head_sha = resolve_current_commit_sha(root).ok().flatten();
-    let push_target = resolve_push_target(state, root, branch.as_deref()).await;
+    let push_target = resolve_delivery_push_target(state, root, branch.as_deref()).await;
     let remote = options
         .remote
         .map(|value| value.trim().to_string())
@@ -439,6 +504,21 @@ pub(crate) async fn capture_workspace_delivery_failure(
     let (output, output_truncated) = sanitize_delivery_failure_output(output);
     let classification = classify_delivery_failure(operation, &output);
     let (changed_files, changed_files_truncated) = collect_changed_files(root);
+    let operation_target = options
+        .operation_target
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let external_url = options
+        .external_url
+        .map(|value| redact_url_credentials(value.trim()))
+        .filter(|value| !value.is_empty());
+    let available_actions = delivery_recovery_actions(
+        operation,
+        classification,
+        operation_target.is_some(),
+        push_target.is_some(),
+        external_url.is_some(),
+    );
     let snapshot = WorkspaceDeliveryFailureSnapshot {
         attempt_token: Uuid::new_v4().to_string(),
         workspace_root: root.to_string(),
@@ -447,15 +527,14 @@ pub(crate) async fn capture_workspace_delivery_failure(
         operation,
         classification,
         remote,
+        operation_target,
         push_target,
         output,
         output_truncated,
         changed_files,
         changed_files_truncated,
-        external_url: options
-            .external_url
-            .map(|value| redact_url_credentials(value.trim()))
-            .filter(|value| !value.is_empty()),
+        external_url,
+        available_actions,
         created_at: Utc::now().to_rfc3339(),
     };
     state.record_delivery_failure(snapshot)
@@ -485,14 +564,45 @@ pub async fn workspace_delivery_failure_snapshot(
     })
 }
 
+pub(crate) fn validate_delivery_recovery_snapshot(
+    state: &WorkspaceCommandState,
+    workspace_root: &str,
+    attempt_token: &str,
+    action: WorkspaceDeliveryRecoveryAction,
+) -> Result<WorkspaceDeliveryFailureSnapshot, String> {
+    let root = workspace_root.trim();
+    if root.is_empty() || !Path::new(root).is_dir() {
+        return Err("the delivery recovery workspace is no longer available".to_string());
+    }
+    let branch = resolve_current_branch_name(root).ok();
+    let head_sha = resolve_current_commit_sha(root).ok().flatten();
+    let snapshot = state
+        .latest_delivery_failure(root, branch.as_deref(), head_sha.as_deref())
+        .ok_or_else(|| {
+            "the captured delivery context is stale; inspect the current workspace state"
+                .to_string()
+        })?;
+    if snapshot.attempt_token != attempt_token.trim() {
+        return Err(
+            "a newer delivery attempt replaced this recovery context; review it before continuing"
+                .to_string(),
+        );
+    }
+    if !snapshot.available_actions.contains(&action) {
+        return Err("this recovery action is not safe for the captured failure".to_string());
+    }
+    Ok(snapshot)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
     use super::{
-        classify_delivery_failure, sanitize_delivery_failure_output,
+        classify_delivery_failure, delivery_recovery_actions, sanitize_delivery_failure_output,
         WorkspaceDeliveryFailureClassification, WorkspaceDeliveryFailureOperation,
-        WorkspaceDeliveryFailureSnapshot, FAILURE_OUTPUT_MAX_BYTES, TRUNCATION_MARKER,
+        WorkspaceDeliveryFailureSnapshot, WorkspaceDeliveryRecoveryAction,
+        FAILURE_OUTPUT_MAX_BYTES, TRUNCATION_MARKER,
     };
     use crate::state::WorkspaceCommandState;
 
@@ -529,12 +639,14 @@ mod tests {
             operation: WorkspaceDeliveryFailureOperation::Push,
             classification: WorkspaceDeliveryFailureClassification::Unknown,
             remote: Some("origin".to_string()),
+            operation_target: None,
             push_target: None,
             output: "push failed".to_string(),
             output_truncated: false,
             changed_files: vec!["src/main.rs".to_string()],
             changed_files_truncated: false,
             external_url: None,
+            available_actions: vec![],
             created_at: format!("2026-07-24T12:00:0{token}Z"),
         }
     }
@@ -643,6 +755,56 @@ mod tests {
                 "GitLab pipeline lookup failed: 403 Forbidden"
             ),
             WorkspaceDeliveryFailureClassification::Unknown
+        );
+    }
+
+    #[test]
+    fn derives_only_safe_recovery_actions() {
+        assert_eq!(
+            delivery_recovery_actions(
+                WorkspaceDeliveryFailureOperation::Push,
+                WorkspaceDeliveryFailureClassification::Authentication,
+                false,
+                true,
+                false,
+            ),
+            vec![
+                WorkspaceDeliveryRecoveryAction::Retry,
+                WorkspaceDeliveryRecoveryAction::SendToAgent,
+            ]
+        );
+        assert_eq!(
+            delivery_recovery_actions(
+                WorkspaceDeliveryFailureOperation::Push,
+                WorkspaceDeliveryFailureClassification::NonFastForward,
+                false,
+                true,
+                false,
+            ),
+            vec![
+                WorkspaceDeliveryRecoveryAction::Synchronize,
+                WorkspaceDeliveryRecoveryAction::SendToAgent,
+            ]
+        );
+        assert_eq!(
+            delivery_recovery_actions(
+                WorkspaceDeliveryFailureOperation::Pull,
+                WorkspaceDeliveryFailureClassification::Transport,
+                false,
+                true,
+                false,
+            ),
+            vec![WorkspaceDeliveryRecoveryAction::SendToAgent]
+        );
+        assert_eq!(
+            delivery_recovery_actions(
+                WorkspaceDeliveryFailureOperation::Pipeline,
+                WorkspaceDeliveryFailureClassification::Unknown,
+                false,
+                true,
+                true,
+            ),
+            vec![WorkspaceDeliveryRecoveryAction::OpenExternal]
         );
     }
 }

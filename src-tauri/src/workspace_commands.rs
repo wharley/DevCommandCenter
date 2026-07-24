@@ -30,7 +30,10 @@ use dcc_tauri::{
         WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution, WriteWorkspaceFileInput,
         WriteWorkspaceFileOutput,
     },
-    delivery_failure::{WorkspaceDeliveryFailureInput, WorkspaceDeliveryFailureOutput},
+    delivery_failure::{
+        WorkspaceDeliveryFailureInput, WorkspaceDeliveryFailureOutput,
+        WorkspaceDeliveryRecoveryInput, WorkspaceDeliveryRecoveryOutput,
+    },
     state::WorkspaceCommandState,
 };
 
@@ -373,6 +376,14 @@ pub async fn workspace_delivery_failure_snapshot(
     input: WorkspaceDeliveryFailureInput,
 ) -> Result<WorkspaceDeliveryFailureOutput, String> {
     dcc_tauri::delivery_failure::workspace_delivery_failure_snapshot(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_delivery_recovery_execute(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceDeliveryRecoveryInput,
+) -> Result<WorkspaceDeliveryRecoveryOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_delivery_recovery_execute(state, input).await
 }
 
 #[tauri::command]

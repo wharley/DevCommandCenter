@@ -436,7 +436,18 @@
       "changedFiles_one": "{{count}} changed file",
       "changedFiles_other": "{{count}} changed files",
       "noChangedFiles": "No local changed files were present at capture time.",
-      "filesTruncated": "Only the first 100 changed paths were captured."
+      "filesTruncated": "Only the first 100 changed paths were captured.",
+      "retry": "Try again",
+      "synchronize": "Synchronize",
+      "sendToAgent": "Send to agent",
+      "openExternal": "Open provider",
+      "confirmRetry": "Retry the captured delivery operation using the same branch and commit context?",
+      "confirmSynchronize": "Fetch and merge the captured remote branch into this workspace? DCC will stop if conflicts require attention.",
+      "retrySuccess": "The delivery operation completed.",
+      "synchronizeSuccess": "The captured remote branch was synchronized.",
+      "sentToAgent": "Bounded failure context was added to the Composer.",
+      "externalUnavailable": "The captured provider URL is no longer available.",
+      "actionFailed": "Recovery action could not be completed."
     },
     "tabs": {
       "activity": "Activity",

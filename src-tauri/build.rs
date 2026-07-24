@@ -108,7 +108,8 @@ use dcc_tauri::commands::{
 use dcc_tauri::delivery_failure::{
     WorkspaceDeliveryFailureClassification, WorkspaceDeliveryFailureInput,
     WorkspaceDeliveryFailureOperation, WorkspaceDeliveryFailureOutput,
-    WorkspaceDeliveryFailureSnapshot, WorkspaceDeliveryPushTarget,
+    WorkspaceDeliveryFailureSnapshot, WorkspaceDeliveryPushTarget, WorkspaceDeliveryRecoveryAction,
+    WorkspaceDeliveryRecoveryInput, WorkspaceDeliveryRecoveryOutput,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -165,6 +166,7 @@ struct WorkspaceMethods {
     workspace_pipeline_job_retry: String,
     workspace_review_state: String,
     workspace_delivery_failure_snapshot: String,
+    workspace_delivery_recovery_execute: String,
     workspace_git_branch_diff: String,
     workspace_apply_delegation_worktree: String,
     workspace_git_commit_push: String,
@@ -369,6 +371,9 @@ fn main() {
         .typ::<WorkspaceDeliveryPushTarget>()
         .typ::<WorkspaceDeliveryFailureSnapshot>()
         .typ::<WorkspaceDeliveryFailureOutput>()
+        .typ::<WorkspaceDeliveryRecoveryAction>()
+        .typ::<WorkspaceDeliveryRecoveryInput>()
+        .typ::<WorkspaceDeliveryRecoveryOutput>()
         .typ::<WorkspaceGitStatusInput>()
         .typ::<WorkspaceGitStatusOutput>()
         .typ::<WorkspaceGitChangeEntry>()
@@ -532,6 +537,8 @@ fn main() {
                 workspace_pipeline_job_retry: "workspace_pipeline_job_retry".to_string(),
                 workspace_review_state: "workspace_review_state".to_string(),
                 workspace_delivery_failure_snapshot: "workspace_delivery_failure_snapshot"
+                    .to_string(),
+                workspace_delivery_recovery_execute: "workspace_delivery_recovery_execute"
                     .to_string(),
                 workspace_git_branch_diff: "workspace_git_branch_diff".to_string(),
                 workspace_apply_delegation_worktree: "workspace_apply_delegation_worktree"

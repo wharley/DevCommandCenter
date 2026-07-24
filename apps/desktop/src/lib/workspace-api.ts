@@ -92,6 +92,8 @@ import type {
 	WorkspaceContinueFromBaseBranchOutput,
 	WorkspaceDeliveryFailureInput,
 	WorkspaceDeliveryFailureOutput,
+	WorkspaceDeliveryRecoveryInput,
+	WorkspaceDeliveryRecoveryOutput,
 	WorkspacePrReviewCommentsInput,
 	WorkspacePrReviewCommentsOutput,
 	WorkspacePrStatusInput,
@@ -587,6 +589,15 @@ export function workspaceDeliveryFailureSnapshot(
 ) {
 	return invoke<WorkspaceDeliveryFailureOutput>(
 		WORKSPACE_METHODS.workspaceDeliveryFailureSnapshot,
+		{ input },
+	);
+}
+
+export function workspaceDeliveryRecoveryExecute(
+	input: WorkspaceDeliveryRecoveryInput,
+) {
+	return invoke<WorkspaceDeliveryRecoveryOutput>(
+		WORKSPACE_METHODS.workspaceDeliveryRecoveryExecute,
 		{ input },
 	);
 }

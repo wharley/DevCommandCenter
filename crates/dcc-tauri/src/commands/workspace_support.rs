@@ -234,7 +234,7 @@ pub(crate) fn resolve_current_branch_name(root: &str) -> Result<String, String> 
 /// overwritten by the most recently created workspace, so it must NOT be used
 /// here — doing so makes the diff/PR base of one workspace leak into another.
 pub(crate) async fn resolve_workspace_target_branch(
-    state: &State<'_, WorkspaceCommandState>,
+    state: &WorkspaceCommandState,
     workspace_root: &str,
 ) -> Option<String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).ok()?;

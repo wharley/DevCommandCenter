@@ -436,7 +436,18 @@
       "changedFiles_one": "{{count}} arquivo alterado",
       "changedFiles_other": "{{count}} arquivos alterados",
       "noChangedFiles": "Não havia arquivos locais alterados no momento da captura.",
-      "filesTruncated": "Somente os primeiros 100 caminhos alterados foram capturados."
+      "filesTruncated": "Somente os primeiros 100 caminhos alterados foram capturados.",
+      "retry": "Tentar novamente",
+      "synchronize": "Sincronizar",
+      "sendToAgent": "Enviar ao agente",
+      "openExternal": "Abrir provedor",
+      "confirmRetry": "Repetir a operação de entrega capturada usando o mesmo contexto de branch e commit?",
+      "confirmSynchronize": "Buscar e mesclar a branch remota capturada neste workspace? O DCC interromperá se houver conflitos que precisem de atenção.",
+      "retrySuccess": "A operação de entrega foi concluída.",
+      "synchronizeSuccess": "A branch remota capturada foi sincronizada.",
+      "sentToAgent": "O contexto limitado da falha foi adicionado ao Composer.",
+      "externalUnavailable": "A URL capturada do provedor não está mais disponível.",
+      "actionFailed": "Não foi possível concluir a ação de recuperação."
     },
     "tabs": {
       "activity": "Atividade",

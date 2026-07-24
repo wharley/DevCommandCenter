@@ -1539,6 +1539,7 @@ pub async fn workspace_pipeline_status(
                 CaptureDeliveryFailureOptions {
                     remote: Some(forge_context.remote_name.clone()),
                     external_url: None,
+                    ..CaptureDeliveryFailureOptions::default()
                 },
             )
             .await;
@@ -1565,6 +1566,7 @@ pub async fn workspace_pipeline_status(
                         CaptureDeliveryFailureOptions {
                             remote: Some(forge_context.remote_name.clone()),
                             external_url: pipeline.web_url.clone(),
+                            ..CaptureDeliveryFailureOptions::default()
                         },
                     )
                     .await;
@@ -1596,6 +1598,7 @@ pub async fn workspace_pipeline_status(
                     CaptureDeliveryFailureOptions {
                         remote: Some(forge_context.remote_name.clone()),
                         external_url: pipeline.web_url.clone(),
+                        ..CaptureDeliveryFailureOptions::default()
                     },
                 )
                 .await;

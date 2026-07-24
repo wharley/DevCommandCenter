@@ -76,10 +76,12 @@ impl WorkspaceCommandState {
                 && existing.head_sha == snapshot.head_sha
                 && existing.classification == snapshot.classification
                 && existing.remote == snapshot.remote
+                && existing.operation_target == snapshot.operation_target
                 && existing.push_target == snapshot.push_target
                 && existing.output == snapshot.output
                 && existing.changed_files == snapshot.changed_files
-                && existing.external_url == snapshot.external_url;
+                && existing.external_url == snapshot.external_url
+                && existing.available_actions == snapshot.available_actions;
             if same_failure {
                 return existing.clone();
             }
