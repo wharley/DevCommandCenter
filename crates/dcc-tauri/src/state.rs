@@ -74,6 +74,7 @@ impl WorkspaceCommandState {
         {
             let same_failure = existing.branch == snapshot.branch
                 && existing.head_sha == snapshot.head_sha
+                && existing.classification == snapshot.classification
                 && existing.remote == snapshot.remote
                 && existing.push_target == snapshot.push_target
                 && existing.output == snapshot.output

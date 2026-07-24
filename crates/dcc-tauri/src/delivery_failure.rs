@@ -30,6 +30,19 @@ pub enum WorkspaceDeliveryFailureOperation {
     Pipeline,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceDeliveryFailureClassification {
+    Authentication,
+    NonFastForward,
+    ProtectedBranch,
+    LocalHookOrLint,
+    ConflictOrDivergence,
+    Transport,
+    PipelineOrJob,
+    Unknown,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDeliveryPushTarget {
@@ -46,6 +59,7 @@ pub struct WorkspaceDeliveryFailureSnapshot {
     pub branch: Option<String>,
     pub head_sha: Option<String>,
     pub operation: WorkspaceDeliveryFailureOperation,
+    pub classification: WorkspaceDeliveryFailureClassification,
     pub remote: Option<String>,
     pub push_target: Option<WorkspaceDeliveryPushTarget>,
     pub output: String,
@@ -197,6 +211,142 @@ pub(crate) fn sanitize_delivery_failure_output(raw: &str) -> (String, bool) {
     (bounded, true)
 }
 
+fn contains_any(text: &str, markers: &[&str]) -> bool {
+    markers.iter().any(|marker| text.contains(marker))
+}
+
+pub(crate) fn classify_delivery_failure(
+    operation: WorkspaceDeliveryFailureOperation,
+    output: &str,
+) -> WorkspaceDeliveryFailureClassification {
+    let text = output.to_ascii_lowercase();
+
+    if contains_any(
+        &text,
+        &[
+            "protected branch",
+            "protected ref",
+            "gh006",
+            "branch policy",
+            "not allowed to push code to protected",
+            "cannot push to this protected",
+        ],
+    ) {
+        return WorkspaceDeliveryFailureClassification::ProtectedBranch;
+    }
+
+    if contains_any(
+        &text,
+        &[
+            "non-fast-forward",
+            "fetch first",
+            "tip of your current branch is behind",
+            "updates were rejected because the remote contains work",
+            "remote contains work that you do not have locally",
+        ],
+    ) {
+        return WorkspaceDeliveryFailureClassification::NonFastForward;
+    }
+
+    if contains_any(
+        &text,
+        &[
+            "authentication failed",
+            "not authenticated",
+            "unauthorized",
+            "invalid credentials",
+            "bad credentials",
+            "invalid username or password",
+            "could not read username",
+            "http basic: access denied",
+            "permission denied (publickey)",
+            "token expired",
+            "invalid token",
+            "401 unauthorized",
+            "http 401",
+            "status code: 401",
+        ],
+    ) {
+        return WorkspaceDeliveryFailureClassification::Authentication;
+    }
+
+    if contains_any(
+        &text,
+        &[
+            "merge conflict",
+            "automatic merge failed",
+            "conflicting file",
+            "unmerged files",
+            "needs merge",
+            "have diverged",
+            "branches have diverged",
+            "not possible to fast-forward",
+            "changed after this workspace was opened",
+        ],
+    ) {
+        return WorkspaceDeliveryFailureClassification::ConflictOrDivergence;
+    }
+
+    if operation == WorkspaceDeliveryFailureOperation::Push
+        && contains_any(
+            &text,
+            &[
+                "pre-commit hook",
+                "pre-push hook",
+                "commit-msg hook",
+                "lint-staged",
+                "lint failed",
+                "eslint",
+                "husky",
+            ],
+        )
+    {
+        return WorkspaceDeliveryFailureClassification::LocalHookOrLint;
+    }
+
+    if contains_any(
+        &text,
+        &[
+            "could not resolve host",
+            "couldn't resolve host",
+            "failed to connect",
+            "connection timed out",
+            "operation timed out",
+            "connection refused",
+            "connection reset",
+            "network is unreachable",
+            "ssl certificate problem",
+            "tls handshake",
+            "rpc failed",
+            "remote end hung up unexpectedly",
+            "early eof",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+        ],
+    ) {
+        return WorkspaceDeliveryFailureClassification::Transport;
+    }
+
+    if operation == WorkspaceDeliveryFailureOperation::Pipeline
+        && contains_any(
+            &text,
+            &[
+                "pipeline #",
+                "pipeline failed",
+                "failed pipeline",
+                "failed jobs:",
+                "job failed",
+            ],
+        )
+    {
+        return WorkspaceDeliveryFailureClassification::PipelineOrJob;
+    }
+
+    WorkspaceDeliveryFailureClassification::Unknown
+}
+
 fn collect_changed_files(root: &str) -> (Vec<String>, bool) {
     let Ok(output) = run_git_output(root, &["status", "--porcelain=v1", "-z"]) else {
         return (Vec::new(), false);
@@ -287,6 +437,7 @@ pub(crate) async fn capture_workspace_delivery_failure(
         .filter(|value| !value.is_empty())
         .or_else(|| push_target.as_ref().map(|target| target.remote.clone()));
     let (output, output_truncated) = sanitize_delivery_failure_output(output);
+    let classification = classify_delivery_failure(operation, &output);
     let (changed_files, changed_files_truncated) = collect_changed_files(root);
     let snapshot = WorkspaceDeliveryFailureSnapshot {
         attempt_token: Uuid::new_v4().to_string(),
@@ -294,6 +445,7 @@ pub(crate) async fn capture_workspace_delivery_failure(
         branch,
         head_sha,
         operation,
+        classification,
         remote,
         push_target,
         output,
@@ -338,7 +490,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        sanitize_delivery_failure_output, WorkspaceDeliveryFailureOperation,
+        classify_delivery_failure, sanitize_delivery_failure_output,
+        WorkspaceDeliveryFailureClassification, WorkspaceDeliveryFailureOperation,
         WorkspaceDeliveryFailureSnapshot, FAILURE_OUTPUT_MAX_BYTES, TRUNCATION_MARKER,
     };
     use crate::state::WorkspaceCommandState;
@@ -374,6 +527,7 @@ mod tests {
             branch: Some(branch.to_string()),
             head_sha: Some(sha.to_string()),
             operation: WorkspaceDeliveryFailureOperation::Push,
+            classification: WorkspaceDeliveryFailureClassification::Unknown,
             remote: Some("origin".to_string()),
             push_target: None,
             output: "push failed".to_string(),
@@ -409,5 +563,86 @@ mod tests {
         assert!(state
             .latest_delivery_failure("/tmp/dcc-delivery-test", Some("feature/a"), Some("abc"))
             .is_none());
+    }
+
+    #[test]
+    fn classifies_only_strong_delivery_failure_signals() {
+        let cases = [
+            (
+                WorkspaceDeliveryFailureOperation::Push,
+                "remote: You are not allowed to push code to protected branches",
+                WorkspaceDeliveryFailureClassification::ProtectedBranch,
+            ),
+            (
+                WorkspaceDeliveryFailureOperation::Push,
+                "! [rejected] feature -> feature (non-fast-forward)",
+                WorkspaceDeliveryFailureClassification::NonFastForward,
+            ),
+            (
+                WorkspaceDeliveryFailureOperation::Fetch,
+                "fatal: Authentication failed for repository",
+                WorkspaceDeliveryFailureClassification::Authentication,
+            ),
+            (
+                WorkspaceDeliveryFailureOperation::Pull,
+                "Automatic merge failed; fix conflicts and then commit the result",
+                WorkspaceDeliveryFailureClassification::ConflictOrDivergence,
+            ),
+            (
+                WorkspaceDeliveryFailureOperation::Push,
+                "husky - pre-push hook exited with code 1: ESLint found problems",
+                WorkspaceDeliveryFailureClassification::LocalHookOrLint,
+            ),
+            (
+                WorkspaceDeliveryFailureOperation::Fetch,
+                "fatal: unable to access repository: Could not resolve host",
+                WorkspaceDeliveryFailureClassification::Transport,
+            ),
+            (
+                WorkspaceDeliveryFailureOperation::Pipeline,
+                "GitLab pipeline #42 failed for commit abc",
+                WorkspaceDeliveryFailureClassification::PipelineOrJob,
+            ),
+        ];
+
+        for (operation, output, expected) in cases {
+            assert_eq!(
+                classify_delivery_failure(operation, output),
+                expected,
+                "{output}"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_ambiguous_failures_unknown_and_preserves_specific_precedence() {
+        assert_eq!(
+            classify_delivery_failure(
+                WorkspaceDeliveryFailureOperation::Push,
+                "remote rejected: pre-receive hook declined"
+            ),
+            WorkspaceDeliveryFailureClassification::Unknown
+        );
+        assert_eq!(
+            classify_delivery_failure(
+                WorkspaceDeliveryFailureOperation::Pipeline,
+                "HTTP 401 Unauthorized while loading pipeline"
+            ),
+            WorkspaceDeliveryFailureClassification::Authentication
+        );
+        assert_eq!(
+            classify_delivery_failure(
+                WorkspaceDeliveryFailureOperation::Push,
+                "unexpected failure"
+            ),
+            WorkspaceDeliveryFailureClassification::Unknown
+        );
+        assert_eq!(
+            classify_delivery_failure(
+                WorkspaceDeliveryFailureOperation::Pipeline,
+                "GitLab pipeline lookup failed: 403 Forbidden"
+            ),
+            WorkspaceDeliveryFailureClassification::Unknown
+        );
     }
 }

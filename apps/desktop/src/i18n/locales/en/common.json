@@ -406,11 +406,31 @@
         "push": "Push",
         "pipeline": "Pipeline"
       },
+      "classification": {
+        "authentication": "Authentication",
+        "non-fast-forward": "Branch behind remote",
+        "protected-branch": "Protected branch",
+        "local-hook-or-lint": "Local check failed",
+        "conflict-or-divergence": "Conflict or divergence",
+        "transport": "Network or transport",
+        "pipeline-or-job": "Pipeline or job",
+        "unknown": "Needs inspection"
+      },
+      "classificationHint": {
+        "authentication": "The captured output contains an explicit authentication or credential failure.",
+        "non-fast-forward": "The remote branch contains commits that are not present in the current branch.",
+        "protected-branch": "The provider explicitly rejected the update because of branch protection or policy.",
+        "local-hook-or-lint": "A local Git hook or lint check stopped the delivery flow.",
+        "conflict-or-divergence": "The branches cannot be combined cleanly without resolving their divergence.",
+        "transport": "The operation failed while connecting to or communicating with the remote service.",
+        "pipeline-or-job": "The current pipeline or one of its jobs failed.",
+        "unknown": "DCC did not find a strong enough signal to classify this issue safely."
+      },
       "branchUnavailable": "Branch unavailable",
       "commitUnavailable": "Commit unavailable",
       "remoteUnavailable": "Remote unavailable",
       "pushTargetUnavailable": "Push target unavailable",
-      "capturedAt": "Captured at {{time}}",
+      "capturedContext": "{{operation}} failure captured at {{time}}",
       "output": "Captured output",
       "outputTruncated": "Output was limited to the safe DCC snapshot size.",
       "changedFiles_one": "{{count}} changed file",

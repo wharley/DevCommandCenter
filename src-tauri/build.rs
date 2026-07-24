@@ -106,8 +106,9 @@ use dcc_tauri::commands::{
     },
 };
 use dcc_tauri::delivery_failure::{
-    WorkspaceDeliveryFailureInput, WorkspaceDeliveryFailureOperation,
-    WorkspaceDeliveryFailureOutput, WorkspaceDeliveryFailureSnapshot, WorkspaceDeliveryPushTarget,
+    WorkspaceDeliveryFailureClassification, WorkspaceDeliveryFailureInput,
+    WorkspaceDeliveryFailureOperation, WorkspaceDeliveryFailureOutput,
+    WorkspaceDeliveryFailureSnapshot, WorkspaceDeliveryPushTarget,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -364,6 +365,7 @@ fn main() {
         .typ::<WorkspaceReviewStateOutput>()
         .typ::<WorkspaceDeliveryFailureInput>()
         .typ::<WorkspaceDeliveryFailureOperation>()
+        .typ::<WorkspaceDeliveryFailureClassification>()
         .typ::<WorkspaceDeliveryPushTarget>()
         .typ::<WorkspaceDeliveryFailureSnapshot>()
         .typ::<WorkspaceDeliveryFailureOutput>()

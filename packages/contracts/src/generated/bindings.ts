@@ -1150,6 +1150,8 @@ export type WorkspaceContinueFromBaseBranchOutput = {
 	workspace: Workspace,
 };
 
+export type WorkspaceDeliveryFailureClassification = "authentication" | "non-fast-forward" | "protected-branch" | "local-hook-or-lint" | "conflict-or-divergence" | "transport" | "pipeline-or-job" | "unknown";
+
 export type WorkspaceDeliveryFailureInput = {
 	workspaceRoot: string,
 };
@@ -1166,6 +1168,7 @@ export type WorkspaceDeliveryFailureSnapshot = {
 	branch: string | null,
 	headSha: string | null,
 	operation: WorkspaceDeliveryFailureOperation,
+	classification: WorkspaceDeliveryFailureClassification,
 	remote: string | null,
 	pushTarget: WorkspaceDeliveryPushTarget | null,
 	output: string,

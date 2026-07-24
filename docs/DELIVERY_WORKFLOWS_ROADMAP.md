@@ -246,15 +246,20 @@ Updated July 24, 2026:
   changed paths, timestamp, and attempt token.
 - [x] Credential redaction, terminal sanitization, and conservative size
   limits before failure output reaches the Inspector.
+- [x] Provider-neutral failure classification with explicit precedence for
+  authentication, non-fast-forward, protected branches, local checks,
+  conflicts, transport, and pipelines.
+- [x] Ambiguous failures remain `unknown` and are presented without a
+  misleading recovery claim.
 - [ ] Authenticated smoke test with a real fork on GitHub and GitLab.
 - [x] Authenticated, read-only smoke test with a real GitLab pipeline.
 - [ ] Log and retry smoke test with a real pipeline that contains jobs.
 - [ ] Authenticated smoke test with a real open PR/MR that has review rules.
 - [x] Failure snapshots.
-- [ ] Conservative failure classification.
+- [x] Conservative failure classification.
 - [ ] Recovery actions.
 - [ ] Delivery Status.
 
-Next slice: **Phase 3.2 — Conservative classification**. The fork, job, and
-review-state smoke tests remain pending until real cases are available, without
-creating or changing external state solely for testing.
+Next slice: **Phase 3.3 — Recovery actions**. The fork, job, and review-state
+smoke tests remain pending until real cases are available, without creating or
+changing external state solely for testing.

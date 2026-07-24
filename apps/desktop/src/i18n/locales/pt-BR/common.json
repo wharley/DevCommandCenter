@@ -406,11 +406,31 @@
         "push": "Envio",
         "pipeline": "Pipeline"
       },
+      "classification": {
+        "authentication": "Autenticação",
+        "non-fast-forward": "Branch atrás do remoto",
+        "protected-branch": "Branch protegida",
+        "local-hook-or-lint": "Verificação local falhou",
+        "conflict-or-divergence": "Conflito ou divergência",
+        "transport": "Rede ou transporte",
+        "pipeline-or-job": "Pipeline ou job",
+        "unknown": "Precisa de análise"
+      },
+      "classificationHint": {
+        "authentication": "A saída capturada contém uma falha explícita de autenticação ou credencial.",
+        "non-fast-forward": "A branch remota possui commits que não estão presentes na branch atual.",
+        "protected-branch": "O provedor rejeitou explicitamente a atualização por proteção ou política da branch.",
+        "local-hook-or-lint": "Um hook local do Git ou uma verificação de lint interrompeu o fluxo de entrega.",
+        "conflict-or-divergence": "As branches não podem ser combinadas diretamente sem resolver a divergência.",
+        "transport": "A operação falhou durante a conexão ou comunicação com o serviço remoto.",
+        "pipeline-or-job": "A pipeline atual ou um de seus jobs falhou.",
+        "unknown": "O DCC não encontrou um sinal forte o suficiente para classificar esse problema com segurança."
+      },
       "branchUnavailable": "Branch indisponível",
       "commitUnavailable": "Commit indisponível",
       "remoteUnavailable": "Remoto indisponível",
       "pushTargetUnavailable": "Destino de envio indisponível",
-      "capturedAt": "Capturado em {{time}}",
+      "capturedContext": "Falha de {{operation}} capturada em {{time}}",
       "output": "Saída capturada",
       "outputTruncated": "A saída foi limitada ao tamanho seguro do snapshot do DCC.",
       "changedFiles_one": "{{count}} arquivo alterado",

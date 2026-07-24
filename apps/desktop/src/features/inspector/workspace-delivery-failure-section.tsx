@@ -63,14 +63,26 @@ export function WorkspaceDeliveryFailureSection({
 				</Button>
 				<Badge
 					variant="outline"
-					className="h-5 rounded-full border-amber-500/25 bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
+					className={cn(
+						"h-5 rounded-full px-1.5 text-[9px] font-medium",
+						failure.classification === "unknown"
+							? "border-border/70 bg-muted/60 text-muted-foreground"
+							: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+					)}
 				>
-					{t(`inspector.deliveryFailure.operation.${failure.operation}`)}
+					{t(
+						`inspector.deliveryFailure.classification.${failure.classification}`,
+					)}
 				</Badge>
 			</div>
 
 			{open ? (
 				<div className="space-y-2 border-t border-amber-500/15 px-2.5 py-2">
+					<p className="text-[9.5px] leading-relaxed text-muted-foreground">
+						{t(
+							`inspector.deliveryFailure.classificationHint.${failure.classification}`,
+						)}
+					</p>
 					<div className="grid grid-cols-2 gap-1.5">
 						<div className="flex items-center gap-1.5 rounded-md bg-background/60 px-2 py-1.5 text-[9.5px] text-muted-foreground">
 							<GitBranch className="size-3.5 shrink-0" />
@@ -101,7 +113,12 @@ export function WorkspaceDeliveryFailureSection({
 						</div>
 					</div>
 					<p className="text-[9px] text-muted-foreground">
-						{t("inspector.deliveryFailure.capturedAt", { time: capturedAt })}
+						{t("inspector.deliveryFailure.capturedContext", {
+							operation: t(
+								`inspector.deliveryFailure.operation.${failure.operation}`,
+							),
+							time: capturedAt,
+						})}
 					</p>
 
 					<div>
