@@ -55,6 +55,7 @@ import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workben
 import { InspectorChangesSection } from "./inspector-changes-section";
 import { GitSectionHeader } from "./git-section-header";
 import { GitlabPipelineSection } from "./gitlab-pipeline-section";
+import { WorkspaceReviewStateSection } from "./workspace-review-state-section";
 import { projectWorkspaceMessages } from "@/features/panel/thread-projection";
 import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
 import {
@@ -103,6 +104,7 @@ import { WorkspaceRecapStrip } from "./workspace-recap-strip";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
 import { useWorkspacePrReviewComments } from "./use-workspace-pr-review-comments";
 import { WORKSPACE_PIPELINE_QUERY_KEY } from "./use-workspace-pipeline";
+import { WORKSPACE_REVIEW_STATE_QUERY_KEY } from "./use-workspace-review-state";
 import {
 	useWorkspaceForgeContext,
 	WORKSPACE_FORGE_CONTEXT_QUERY_KEY,
@@ -2130,6 +2132,9 @@ export function WorkspaceInspectorSidebar({
 				queryKey: [WORKSPACE_PIPELINE_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_REVIEW_STATE_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
@@ -2202,6 +2207,9 @@ export function WorkspaceInspectorSidebar({
 				queryKey: [WORKSPACE_PIPELINE_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_REVIEW_STATE_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
@@ -2261,6 +2269,9 @@ export function WorkspaceInspectorSidebar({
 			});
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_PIPELINE_QUERY_KEY, root],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_REVIEW_STATE_QUERY_KEY, root],
 			});
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
@@ -2902,6 +2913,12 @@ export function WorkspaceInspectorSidebar({
 									onSyncBase={handleSyncBase}
 								/>
 							</div>
+							<WorkspaceReviewStateSection
+								workspaceRoot={workspacePath}
+								branch={gitBranch}
+								forgeLogin={selectedForgeLogin}
+								enabled={forgeConnected && Boolean(prStatus?.number)}
+							/>
 							<GitlabPipelineSection
 								workspaceRoot={workspacePath}
 								forgeLogin={selectedForgeLogin}

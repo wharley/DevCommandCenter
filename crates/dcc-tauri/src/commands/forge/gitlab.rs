@@ -147,6 +147,41 @@ pub(crate) struct GitlabJobTrace {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabReviewUser {
+    pub(crate) username: Option<String>,
+    pub(crate) name: Option<String>,
+    pub(crate) avatar_url: Option<String>,
+    pub(crate) web_url: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabReviewer {
+    pub(crate) user: GitlabReviewUser,
+    pub(crate) state: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabApproval {
+    pub(crate) user: GitlabReviewUser,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabApprovals {
+    pub(crate) approvals_required: Option<u32>,
+    pub(crate) approvals_left: Option<u32>,
+    pub(crate) approved: Option<bool>,
+    #[serde(default)]
+    pub(crate) approved_by: Vec<GitlabApproval>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GitlabMergeRequestReview {
+    pub(crate) detail: Value,
+    pub(crate) reviewers: Option<Vec<GitlabReviewer>>,
+    pub(crate) approvals: Option<GitlabApprovals>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 struct GitlabUserProfile {
     username: Option<String>,
     name: Option<String>,
@@ -827,6 +862,59 @@ fn run_api_json<T: serde::de::DeserializeOwned>(
     }
     serde_json::from_slice::<T>(&output.stdout)
         .map_err(|error| format!("Failed to decode {label}: {error}"))
+}
+
+pub(crate) fn load_merge_request_review(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    merge_request_iid: u32,
+    login: Option<&str>,
+) -> Result<GitlabMergeRequestReview, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let encoded_project = encode_percent(&format!("{namespace}/{repo}"));
+    let detail_endpoint = format!(
+        "projects/{encoded_project}/merge_requests/{merge_request_iid}?include_diverged_commits_count=true",
+    );
+    let detail = run_api_json(
+        root,
+        host,
+        auth.as_ref(),
+        &detail_endpoint,
+        false,
+        "GitLab merge request review state",
+    )?;
+
+    let reviewers_endpoint =
+        format!("projects/{encoded_project}/merge_requests/{merge_request_iid}/reviewers");
+    let reviewers = run_api_json(
+        root,
+        host,
+        auth.as_ref(),
+        &reviewers_endpoint,
+        false,
+        "GitLab merge request reviewers",
+    )
+    .ok();
+
+    let approvals_endpoint =
+        format!("projects/{encoded_project}/merge_requests/{merge_request_iid}/approvals");
+    let approvals = run_api_json(
+        root,
+        host,
+        auth.as_ref(),
+        &approvals_endpoint,
+        false,
+        "GitLab merge request approvals",
+    )
+    .ok();
+
+    Ok(GitlabMergeRequestReview {
+        detail,
+        reviewers,
+        approvals,
+    })
 }
 
 pub(crate) fn find_pipeline_for_sha(

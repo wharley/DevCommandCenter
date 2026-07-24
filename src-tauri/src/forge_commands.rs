@@ -8,6 +8,7 @@ use dcc_tauri::{
         WorkspacePipelineJobInput, WorkspacePipelineJobLogOutput, WorkspacePipelineStatusInput,
         WorkspacePipelineStatusOutput, WorkspacePrReviewCommentsInput,
         WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
+        WorkspaceReviewStateInput, WorkspaceReviewStateOutput,
     },
     commands::workspace_commands::{RepositoryIdInput, WorkspaceGitPushInput},
     state::WorkspaceCommandState,
@@ -163,4 +164,12 @@ pub async fn workspace_pipeline_job_retry(
     input: WorkspacePipelineJobInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::forge_commands::workspace_pipeline_job_retry(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_review_state(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceReviewStateInput,
+) -> Result<WorkspaceReviewStateOutput, String> {
+    dcc_tauri::commands::forge_commands::workspace_review_state(state, input).await
 }

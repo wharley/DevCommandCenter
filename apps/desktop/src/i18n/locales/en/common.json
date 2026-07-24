@@ -356,6 +356,48 @@
         "waiting_for_resource": "Waiting"
       }
     },
+    "reviewState": {
+      "title": "Review status",
+      "loading": "Loading review status…",
+      "loadFailed": "The review status could not be loaded.",
+      "tryAgain": "Try again",
+      "openReview": "Open review in the forge",
+      "pendingReviewers_one": "{{count}} reviewer pending",
+      "pendingReviewers_other": "{{count}} reviewers pending",
+      "approvals": "{{received}} of {{required}} approvals",
+      "approvalsRecorded_one": "{{count}} approval recorded",
+      "approvalsRecorded_other": "{{count}} approvals recorded",
+      "noApprovalRequired": "No approval required",
+      "approvalRequirementUnknown": "Approval requirement unavailable",
+      "approvalsUnavailable": "Approval rules unavailable",
+      "conflicts": "Merge conflicts",
+      "mergeable": "Mergeable",
+      "mergeabilityUnknown": "Mergeability pending",
+      "baseUnknown": "Base status unavailable",
+      "behindBase_one": "{{count}} commit behind base",
+      "behindBase_other": "{{count}} commits behind base",
+      "baseCurrent": "Current with base",
+      "discussionsUnknown": "Discussion state unavailable",
+      "discussionsResolved": "Discussions resolved",
+      "discussionsOpen": "Open discussions",
+      "reviewers": "Reviewers",
+      "unknownReviewer": "Reviewer",
+      "noReviewers": "No reviewers assigned.",
+      "state": {
+        "approved": "Approved",
+        "changes_requested": "Changes requested",
+        "pending": "Waiting for review",
+        "not_required": "No approval required",
+        "unknown": "Status unavailable"
+      },
+      "reviewerState": {
+        "approved": "Approved",
+        "changes_requested": "Changes requested",
+        "pending": "Pending",
+        "reviewed": "Reviewed",
+        "dismissed": "Dismissed"
+      }
+    },
     "tabs": {
       "activity": "Activity",
       "context": "Details",

@@ -182,6 +182,47 @@ pub struct WorkspacePrStatusOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceReviewStateInput {
+    pub workspace_root: String,
+    pub branch: Option<String>,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceReviewer {
+    pub login: Option<String>,
+    pub name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub html_url: Option<String>,
+    pub state: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceReviewStateOutput {
+    pub provider: Option<String>,
+    pub host: Option<String>,
+    pub number: Option<u32>,
+    pub url: Option<String>,
+    pub review_state: Option<String>,
+    pub reviewers: Vec<WorkspaceReviewer>,
+    pub reviewers_available: bool,
+    pub approvals_available: bool,
+    pub approvals_required: Option<u32>,
+    pub approvals_received: u32,
+    pub approvals_left: Option<u32>,
+    pub approved: Option<bool>,
+    pub mergeable: Option<String>,
+    pub merge_state_status: Option<String>,
+    pub has_conflicts: Option<bool>,
+    pub behind_by: Option<u32>,
+    pub discussions_resolved: Option<bool>,
+    pub draft: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspacePrReviewCommentAuthor {
     pub login: Option<String>,
     pub avatar_url: Option<String>,
@@ -800,6 +841,446 @@ pub async fn workspace_pr_status(
     })
 }
 
+pub async fn workspace_review_state(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceReviewStateInput,
+) -> Result<WorkspaceReviewStateOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Ok(empty_workspace_review_state(None, None));
+    }
+    let forge_context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?;
+    let Some(forge_context) = forge_context else {
+        return Ok(empty_workspace_review_state(None, None));
+    };
+    let provider_key = forge_context::forge_provider_key(forge_context.provider).to_string();
+    let source = imported_workspace_source(&state, root).await?;
+    let branch = input
+        .branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| source.as_ref().map(|source| source.head_branch.clone()))
+        .or_else(|| resolve_current_branch_name(root).ok());
+    let head_sha = resolve_current_commit_sha(root).ok().flatten();
+    let imported_request = source.as_ref().filter(|source| {
+        source.kind == WorkspaceSourceKind::PullRequest
+            && source.provider.eq_ignore_ascii_case(&provider_key)
+            && source.change_request_number.is_some()
+    });
+    let (number, fallback_url) = if let Some(source) = imported_request {
+        (
+            source.change_request_number,
+            Some(source.url.clone()).filter(|url| !url.trim().is_empty()),
+        )
+    } else if let Some(branch) = branch.as_deref() {
+        let branch_hints = workspace_branch_hints(root, Some(branch));
+        let resolved = forge_provider::resolve_workspace_change_request_status(
+            root,
+            branch,
+            &branch_hints,
+            head_sha.as_deref(),
+            forge_context.effective_login.as_deref(),
+        )?;
+        (
+            resolved.as_ref().and_then(|status| status.number),
+            resolved.and_then(|status| status.url),
+        )
+    } else {
+        (None, None)
+    };
+    let Some(number) = number else {
+        return Ok(empty_workspace_review_state(
+            Some(provider_key),
+            Some(forge_context.host),
+        ));
+    };
+
+    match forge_context.provider {
+        ForgeCliProvider::Github => {
+            let raw = crate::commands::forge::github::resolve_pull_review_state_json(
+                root,
+                &forge_context.host,
+                &forge_context.namespace,
+                &forge_context.repo,
+                number,
+                forge_context.effective_login.as_deref(),
+            )?;
+            let behind_by = raw
+                .get("baseRefOid")
+                .and_then(|value| value.as_str())
+                .zip(raw.get("headRefOid").and_then(|value| value.as_str()))
+                .and_then(|(base_sha, head_sha)| {
+                    crate::commands::forge::github::compare_commits_json(
+                        &forge_context.host,
+                        &forge_context.namespace,
+                        &forge_context.repo,
+                        base_sha,
+                        head_sha,
+                        forge_context.effective_login.as_deref(),
+                    )
+                    .ok()
+                })
+                .and_then(|comparison| {
+                    comparison
+                        .get("behind_by")
+                        .and_then(|value| value.as_u64())
+                        .map(|value| value as u32)
+                });
+            Ok(map_github_review_state(
+                raw,
+                Some(forge_context.host),
+                number,
+                fallback_url,
+                behind_by,
+            ))
+        }
+        ForgeCliProvider::Gitlab => {
+            let raw = crate::commands::forge::gitlab::load_merge_request_review(
+                root,
+                &forge_context.host,
+                &forge_context.namespace,
+                &forge_context.repo,
+                number,
+                forge_context.effective_login.as_deref(),
+            )?;
+            Ok(map_gitlab_review_state(
+                raw,
+                Some(forge_context.host),
+                number,
+                fallback_url,
+            ))
+        }
+    }
+}
+
+fn empty_workspace_review_state(
+    provider: Option<String>,
+    host: Option<String>,
+) -> WorkspaceReviewStateOutput {
+    WorkspaceReviewStateOutput {
+        provider,
+        host,
+        number: None,
+        url: None,
+        review_state: None,
+        reviewers: Vec::new(),
+        reviewers_available: false,
+        approvals_available: false,
+        approvals_required: None,
+        approvals_received: 0,
+        approvals_left: None,
+        approved: None,
+        mergeable: None,
+        merge_state_status: None,
+        has_conflicts: None,
+        behind_by: None,
+        discussions_resolved: None,
+        draft: None,
+    }
+}
+
+fn reviewer_from_json(value: &serde_json::Value, state: &str) -> WorkspaceReviewer {
+    let author = value.get("author").unwrap_or(value);
+    WorkspaceReviewer {
+        login: author
+            .get("login")
+            .or_else(|| author.get("username"))
+            .or_else(|| author.get("slug"))
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string),
+        name: author
+            .get("name")
+            .or_else(|| author.get("slug"))
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string),
+        avatar_url: author
+            .get("avatarUrl")
+            .or_else(|| author.get("avatar_url"))
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string),
+        html_url: author
+            .get("url")
+            .or_else(|| author.get("web_url"))
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string),
+        state: state.to_string(),
+    }
+}
+
+fn reviewer_key(reviewer: &WorkspaceReviewer, fallback: usize) -> String {
+    reviewer
+        .login
+        .as_ref()
+        .or(reviewer.name.as_ref())
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_else(|| format!("reviewer-{fallback}"))
+}
+
+fn map_github_review_state(
+    raw: serde_json::Value,
+    host: Option<String>,
+    number: u32,
+    fallback_url: Option<String>,
+    behind_by: Option<u32>,
+) -> WorkspaceReviewStateOutput {
+    let mut reviewers = std::collections::BTreeMap::new();
+    let latest_reviews = raw
+        .get("latestReviews")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for (index, review) in latest_reviews.iter().enumerate() {
+        let state = match review
+            .get("state")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+        {
+            "APPROVED" => "approved",
+            "CHANGES_REQUESTED" => "changes_requested",
+            "DISMISSED" => "dismissed",
+            _ => "reviewed",
+        };
+        let reviewer = reviewer_from_json(review, state);
+        reviewers.insert(reviewer_key(&reviewer, index), reviewer);
+    }
+    let review_requests = raw
+        .get("reviewRequests")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for (index, request) in review_requests.iter().enumerate() {
+        let reviewer = reviewer_from_json(request, "pending");
+        reviewers.insert(
+            reviewer_key(&reviewer, latest_reviews.len() + index),
+            reviewer,
+        );
+    }
+    let reviewers = reviewers.into_values().collect::<Vec<_>>();
+    let approvals_received = reviewers
+        .iter()
+        .filter(|reviewer| reviewer.state == "approved")
+        .count() as u32;
+    let decision = raw.get("reviewDecision").and_then(|value| value.as_str());
+    let review_state = match decision {
+        Some("APPROVED") => "approved",
+        Some("CHANGES_REQUESTED") => "changes_requested",
+        Some("REVIEW_REQUIRED") => "pending",
+        _ if reviewers
+            .iter()
+            .any(|reviewer| reviewer.state == "changes_requested") =>
+        {
+            "changes_requested"
+        }
+        _ if reviewers.iter().any(|reviewer| reviewer.state == "pending") => "pending",
+        _ if approvals_received > 0 => "approved",
+        _ => "not_required",
+    };
+    let mergeable =
+        raw.get("mergeable")
+            .and_then(|value| value.as_str())
+            .map(|value| match value {
+                "MERGEABLE" => "mergeable".to_string(),
+                "CONFLICTING" => "conflicting".to_string(),
+                _ => "unknown".to_string(),
+            });
+    let has_conflicts = mergeable
+        .as_deref()
+        .map(|value| value == "conflicting")
+        .filter(|_| mergeable.as_deref() != Some("unknown"));
+    let approved = decision.map(|value| value == "APPROVED");
+
+    WorkspaceReviewStateOutput {
+        provider: Some("github".to_string()),
+        host,
+        number: Some(number),
+        url: raw
+            .get("url")
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string)
+            .or(fallback_url),
+        review_state: Some(review_state.to_string()),
+        reviewers,
+        reviewers_available: true,
+        approvals_available: true,
+        approvals_required: None,
+        approvals_received,
+        approvals_left: (decision == Some("APPROVED")).then_some(0),
+        approved,
+        mergeable,
+        merge_state_status: raw
+            .get("mergeStateStatus")
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string),
+        has_conflicts,
+        behind_by,
+        discussions_resolved: None,
+        draft: raw.get("isDraft").and_then(|value| value.as_bool()),
+    }
+}
+
+fn map_gitlab_review_state(
+    raw: crate::commands::forge::gitlab::GitlabMergeRequestReview,
+    host: Option<String>,
+    number: u32,
+    fallback_url: Option<String>,
+) -> WorkspaceReviewStateOutput {
+    let approvals_available = raw.approvals.is_some();
+    let reviewers_available = raw.reviewers.is_some();
+    let approved_logins = raw
+        .approvals
+        .as_ref()
+        .map(|approvals| {
+            approvals
+                .approved_by
+                .iter()
+                .filter_map(|approval| approval.user.username.as_deref())
+                .map(|login| login.to_ascii_lowercase())
+                .collect::<std::collections::HashSet<_>>()
+        })
+        .unwrap_or_default();
+    let mut reviewers = std::collections::BTreeMap::new();
+    for (index, reviewer) in raw.reviewers.as_ref().into_iter().flatten().enumerate() {
+        let approved = reviewer
+            .user
+            .username
+            .as_ref()
+            .map(|login| approved_logins.contains(&login.to_ascii_lowercase()))
+            .unwrap_or(false);
+        let state = if approved {
+            "approved"
+        } else {
+            match reviewer.state.as_deref() {
+                Some("reviewed") => "reviewed",
+                _ => "pending",
+            }
+        };
+        let normalized = WorkspaceReviewer {
+            login: reviewer.user.username.clone(),
+            name: reviewer.user.name.clone(),
+            avatar_url: reviewer.user.avatar_url.clone(),
+            html_url: reviewer.user.web_url.clone(),
+            state: state.to_string(),
+        };
+        reviewers.insert(reviewer_key(&normalized, index), normalized);
+    }
+    if let Some(approvals) = raw.approvals.as_ref() {
+        for (index, approval) in approvals.approved_by.iter().enumerate() {
+            let normalized = WorkspaceReviewer {
+                login: approval.user.username.clone(),
+                name: approval.user.name.clone(),
+                avatar_url: approval.user.avatar_url.clone(),
+                html_url: approval.user.web_url.clone(),
+                state: "approved".to_string(),
+            };
+            reviewers.insert(
+                reviewer_key(&normalized, reviewers.len() + index),
+                normalized,
+            );
+        }
+    }
+    let reviewers = reviewers.into_values().collect::<Vec<_>>();
+    let approvals_received = raw
+        .approvals
+        .as_ref()
+        .map(|approvals| approvals.approved_by.len() as u32)
+        .unwrap_or(0);
+    let detailed_status = raw
+        .detail
+        .get("detailed_merge_status")
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            raw.detail
+                .get("merge_status")
+                .and_then(|value| value.as_str())
+        });
+    let approvals_required = raw
+        .approvals
+        .as_ref()
+        .and_then(|approvals| approvals.approvals_required);
+    let approvals_left = raw
+        .approvals
+        .as_ref()
+        .and_then(|approvals| approvals.approvals_left);
+    let approved = raw
+        .approvals
+        .as_ref()
+        .and_then(|approvals| approvals.approved);
+    let review_state = if detailed_status == Some("requested_changes") {
+        "changes_requested"
+    } else if approved == Some(true) {
+        "approved"
+    } else if approvals_left.unwrap_or(0) > 0
+        || detailed_status == Some("not_approved")
+        || reviewers.iter().any(|reviewer| reviewer.state == "pending")
+    {
+        "pending"
+    } else if approvals_required == Some(0) {
+        "not_required"
+    } else {
+        "unknown"
+    };
+    let mergeable = crate::commands::forge::gitlab::map_mergeable(&raw.detail)
+        .map(|value| value.to_ascii_lowercase());
+    let has_conflicts = raw
+        .detail
+        .get("has_conflicts")
+        .and_then(|value| value.as_bool())
+        .or_else(|| {
+            mergeable
+                .as_deref()
+                .filter(|value| *value != "unknown")
+                .map(|value| value == "conflicting")
+        });
+
+    WorkspaceReviewStateOutput {
+        provider: Some("gitlab".to_string()),
+        host,
+        number: Some(number),
+        url: raw
+            .detail
+            .get("web_url")
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string)
+            .or(fallback_url),
+        review_state: Some(review_state.to_string()),
+        reviewers,
+        reviewers_available,
+        approvals_available,
+        approvals_required,
+        approvals_received,
+        approvals_left,
+        approved,
+        mergeable,
+        merge_state_status: detailed_status.map(ToString::to_string),
+        has_conflicts,
+        behind_by: raw
+            .detail
+            .get("diverged_commits_count")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as u32),
+        discussions_resolved: raw
+            .detail
+            .get("blocking_discussions_resolved")
+            .and_then(|value| value.as_bool()),
+        draft: raw
+            .detail
+            .get("draft")
+            .and_then(|value| value.as_bool())
+            .or_else(|| {
+                raw.detail
+                    .get("work_in_progress")
+                    .and_then(|value| value.as_bool())
+            }),
+    }
+}
+
 pub async fn workspace_pr_review_comments(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspacePrReviewCommentsInput,
@@ -1347,12 +1828,17 @@ fn map_gitlab_review_comments(
 
 #[cfg(test)]
 mod tests {
-    use super::{gitlab_job_is_retryable, map_gitlab_review_comments};
-    use crate::commands::forge::gitlab::{
-        GitlabDiscussion, GitlabDiscussionAuthor, GitlabDiscussionLinePosition,
-        GitlabDiscussionLineRange, GitlabDiscussionNote, GitlabDiscussionPosition,
-        GitlabPipelineJob,
+    use super::{
+        gitlab_job_is_retryable, map_github_review_state, map_gitlab_review_comments,
+        map_gitlab_review_state,
     };
+    use crate::commands::forge::gitlab::{
+        GitlabApproval, GitlabApprovals, GitlabDiscussion, GitlabDiscussionAuthor,
+        GitlabDiscussionLinePosition, GitlabDiscussionLineRange, GitlabDiscussionNote,
+        GitlabDiscussionPosition, GitlabMergeRequestReview, GitlabPipelineJob, GitlabReviewUser,
+        GitlabReviewer,
+    };
+    use serde_json::json;
 
     fn note(id: i64, position: Option<GitlabDiscussionPosition>) -> GitlabDiscussionNote {
         GitlabDiscussionNote {
@@ -1450,5 +1936,115 @@ mod tests {
         assert!(gitlab_job_is_retryable(&pipeline_job("success", false)));
         assert!(!gitlab_job_is_retryable(&pipeline_job("running", false)));
         assert!(!gitlab_job_is_retryable(&pipeline_job("failed", true)));
+    }
+
+    #[test]
+    fn normalizes_github_reviewers_decision_and_merge_state() {
+        let output = map_github_review_state(
+            json!({
+                "url": "https://github.com/dcc/app/pull/12",
+                "reviewDecision": "CHANGES_REQUESTED",
+                "latestReviews": [
+                    {
+                        "state": "APPROVED",
+                        "author": {
+                            "login": "alice",
+                            "name": "Alice",
+                            "avatarUrl": "https://example.test/alice.png",
+                            "url": "https://github.com/alice"
+                        }
+                    },
+                    {
+                        "state": "CHANGES_REQUESTED",
+                        "author": { "login": "bob" }
+                    }
+                ],
+                "reviewRequests": [
+                    { "login": "carol" },
+                    { "slug": "platform-team" }
+                ],
+                "mergeable": "CONFLICTING",
+                "mergeStateStatus": "DIRTY",
+                "isDraft": false
+            }),
+            Some("github.com".to_string()),
+            12,
+            None,
+            Some(3),
+        );
+
+        assert_eq!(output.review_state.as_deref(), Some("changes_requested"));
+        assert_eq!(output.approvals_received, 1);
+        assert!(output.approvals_available);
+        assert_eq!(output.reviewers.len(), 4);
+        assert!(output
+            .reviewers
+            .iter()
+            .any(|reviewer| reviewer.login.as_deref() == Some("platform-team")));
+        assert_eq!(output.has_conflicts, Some(true));
+        assert_eq!(output.behind_by, Some(3));
+    }
+
+    fn review_user(login: &str, name: &str) -> GitlabReviewUser {
+        GitlabReviewUser {
+            username: Some(login.to_string()),
+            name: Some(name.to_string()),
+            avatar_url: None,
+            web_url: Some(format!("https://gitlab.example/{login}")),
+        }
+    }
+
+    #[test]
+    fn normalizes_gitlab_pending_approvals_and_reviewers() {
+        let output = map_gitlab_review_state(
+            GitlabMergeRequestReview {
+                detail: json!({
+                    "web_url": "https://gitlab.example/dcc/app/-/merge_requests/7",
+                    "detailed_merge_status": "not_approved",
+                    "merge_status": "can_be_merged",
+                    "has_conflicts": false,
+                    "diverged_commits_count": 2,
+                    "blocking_discussions_resolved": false,
+                    "draft": false
+                }),
+                reviewers: Some(vec![
+                    GitlabReviewer {
+                        user: review_user("alice", "Alice"),
+                        state: Some("unreviewed".to_string()),
+                    },
+                    GitlabReviewer {
+                        user: review_user("bob", "Bob"),
+                        state: Some("reviewed".to_string()),
+                    },
+                ]),
+                approvals: Some(GitlabApprovals {
+                    approvals_required: Some(2),
+                    approvals_left: Some(1),
+                    approved: Some(false),
+                    approved_by: vec![GitlabApproval {
+                        user: review_user("bob", "Bob"),
+                    }],
+                }),
+            },
+            Some("gitlab.example".to_string()),
+            7,
+            None,
+        );
+
+        assert_eq!(output.review_state.as_deref(), Some("pending"));
+        assert_eq!(output.approvals_required, Some(2));
+        assert_eq!(output.approvals_received, 1);
+        assert_eq!(output.approvals_left, Some(1));
+        assert_eq!(output.behind_by, Some(2));
+        assert_eq!(output.discussions_resolved, Some(false));
+        assert_eq!(output.has_conflicts, Some(false));
+        assert!(output
+            .reviewers
+            .iter()
+            .any(|reviewer| reviewer.login.as_deref() == Some("alice")
+                && reviewer.state == "pending"));
+        assert!(output.reviewers.iter().any(
+            |reviewer| reviewer.login.as_deref() == Some("bob") && reviewer.state == "approved"
+        ));
     }
 }

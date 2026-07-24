@@ -356,6 +356,48 @@
         "waiting_for_resource": "Aguardando"
       }
     },
+    "reviewState": {
+      "title": "Status da revisão",
+      "loading": "Carregando status da revisão…",
+      "loadFailed": "Não foi possível carregar o status da revisão.",
+      "tryAgain": "Tentar novamente",
+      "openReview": "Abrir revisão na forge",
+      "pendingReviewers_one": "{{count}} revisor pendente",
+      "pendingReviewers_other": "{{count}} revisores pendentes",
+      "approvals": "{{received}} de {{required}} aprovações",
+      "approvalsRecorded_one": "{{count}} aprovação registrada",
+      "approvalsRecorded_other": "{{count}} aprovações registradas",
+      "noApprovalRequired": "Nenhuma aprovação obrigatória",
+      "approvalRequirementUnknown": "Regra de aprovação indisponível",
+      "approvalsUnavailable": "Regras de aprovação indisponíveis",
+      "conflicts": "Conflitos de merge",
+      "mergeable": "Pode receber merge",
+      "mergeabilityUnknown": "Mergeability em análise",
+      "baseUnknown": "Estado da base indisponível",
+      "behindBase_one": "{{count}} commit atrás da base",
+      "behindBase_other": "{{count}} commits atrás da base",
+      "baseCurrent": "Atualizada com a base",
+      "discussionsUnknown": "Estado das discussões indisponível",
+      "discussionsResolved": "Discussões resolvidas",
+      "discussionsOpen": "Discussões abertas",
+      "reviewers": "Revisores",
+      "unknownReviewer": "Revisor",
+      "noReviewers": "Nenhum revisor atribuído.",
+      "state": {
+        "approved": "Aprovada",
+        "changes_requested": "Alterações solicitadas",
+        "pending": "Aguardando revisão",
+        "not_required": "Aprovação não exigida",
+        "unknown": "Status indisponível"
+      },
+      "reviewerState": {
+        "approved": "Aprovou",
+        "changes_requested": "Solicitou alterações",
+        "pending": "Pendente",
+        "reviewed": "Revisou",
+        "dismissed": "Descartada"
+      }
+    },
     "tabs": {
       "activity": "Atividade",
       "context": "Detalhes",

@@ -27,6 +27,7 @@ pub use forge_commands::{
     workspace_gh_pr_merge, workspace_gh_pr_view_web, workspace_github_cli_status,
     workspace_pipeline_job_log, workspace_pipeline_job_retry, workspace_pipeline_status,
     workspace_pr_review_comments, workspace_pr_status, workspace_retry_repository_forge_binding,
+    workspace_review_state,
 };
 pub use provider_commands::{list_providers, provider_account_usage};
 pub use session_commands::{

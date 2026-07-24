@@ -214,9 +214,10 @@ Possible signals:
 4. Safe remote cleanup.
 5. GitLab reviews.
 6. GitLab pipelines and jobs.
-7. Failure snapshots and classification.
-8. Recovery actions.
-9. Derived state and Delivery Status UX.
+7. Normalized review state.
+8. Failure snapshots and classification.
+9. Recovery actions.
+10. Derived state and Delivery Status UX.
 
 ## Progress
 
@@ -235,13 +236,17 @@ Updated July 24, 2026:
 - [x] Jobs with status, duration, stage, and external links.
 - [x] Job logs loaded on demand, sanitized, and limited to 256 KiB.
 - [x] Conservative retry for completed, non-archived jobs.
+- [x] Provider-neutral review state shared by GitHub and GitLab.
+- [x] Reviewers, pending approvals, mergeability, conflicts, and base divergence
+  summarized in the Inspector.
 - [ ] Authenticated smoke test with a real fork on GitHub and GitLab.
 - [x] Authenticated, read-only smoke test with a real GitLab pipeline.
 - [ ] Log and retry smoke test with a real pipeline that contains jobs.
+- [ ] Authenticated smoke test with a real open PR/MR that has review rules.
 - [ ] Failure snapshots and classification.
 - [ ] Recovery actions.
 - [ ] Delivery Status.
 
-Next slice: **Phase 2.3 — Review state**. The Phase 1 fork smoke test and the
-job smoke test remain pending until real cases are available, without creating
-or changing external state solely for testing.
+Next slice: **Phase 3.1 — Failure model**. The fork, job, and review-state smoke
+tests remain pending until real cases are available, without creating or
+changing external state solely for testing.

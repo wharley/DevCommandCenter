@@ -67,6 +67,7 @@ use forge_commands::{
     workspace_gh_pr_merge, workspace_gh_pr_view_web, workspace_github_cli_status,
     workspace_pipeline_job_log, workspace_pipeline_job_retry, workspace_pipeline_status,
     workspace_pr_review_comments, workspace_pr_status, workspace_retry_repository_forge_binding,
+    workspace_review_state,
 };
 use tauri_plugin_dialog::{
     DialogExt, FilePath, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
@@ -6921,6 +6922,7 @@ pub fn run() {
             workspace_pipeline_status,
             workspace_pr_review_comments,
             workspace_pr_status,
+            workspace_review_state,
             workspace_run_setup,
             workspace_continue_from_base_branch,
             create_delegation,

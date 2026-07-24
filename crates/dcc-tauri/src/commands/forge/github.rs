@@ -482,6 +482,82 @@ pub(crate) fn list_pull_review_comments(
     Ok(pages.into_iter().flatten().collect())
 }
 
+pub(crate) fn resolve_pull_review_state_json(
+    root: &str,
+    host: &str,
+    owner: &str,
+    repo: &str,
+    pull_number: u32,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let Some(auth) = resolve_auth_context(host, login)? else {
+        return Err("GitHub CLI is not authenticated for this repository host.".to_string());
+    };
+    let fields = "number,url,state,isDraft,mergeable,mergeStateStatus,baseRefName,baseRefOid,headRefName,headRefOid,reviewDecision,reviewRequests,latestReviews";
+    let repository = format!("{owner}/{repo}");
+    let gh = resolve_cli_binary("gh")?;
+    let mut command = Command::new(gh);
+    command
+        .current_dir(root)
+        .args([
+            "pr",
+            "view",
+            &pull_number.to_string(),
+            "--repo",
+            &repository,
+            "--json",
+            fields,
+        ])
+        .envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let detail = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Err(if detail.trim().is_empty() {
+            "Failed to load GitHub pull request review state.".to_string()
+        } else {
+            detail.trim().to_string()
+        });
+    }
+    serde_json::from_slice::<Value>(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitHub pull request review state: {error}"))
+}
+
+pub(crate) fn compare_commits_json(
+    host: &str,
+    owner: &str,
+    repo: &str,
+    base_sha: &str,
+    head_sha: &str,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let Some(auth) = resolve_auth_context(host, login)? else {
+        return Err("GitHub CLI is not authenticated for this repository host.".to_string());
+    };
+    let endpoint = format!("/repos/{owner}/{repo}/compare/{base_sha}...{head_sha}");
+    let gh = resolve_cli_binary("gh")?;
+    let mut command = Command::new(gh);
+    command
+        .args([
+            "api",
+            "--hostname",
+            host,
+            "-H",
+            "Accept: application/vnd.github+json",
+            &endpoint,
+        ])
+        .envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(git_output_err("GitHub compare commits", &output.stderr));
+    }
+    serde_json::from_slice::<Value>(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitHub commit comparison: {error}"))
+}
+
 fn fetch_github_profile(host: &str, login: &str) -> Result<GithubUserProfile, String> {
     if let Some(cached) = profile_cache::get(host, login) {
         return Ok(cached);

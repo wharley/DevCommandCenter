@@ -98,6 +98,8 @@ import type {
 	WorkspacePipelineJobLogOutput,
 	WorkspacePipelineStatusInput,
 	WorkspacePipelineStatusOutput,
+	WorkspaceReviewStateInput,
+	WorkspaceReviewStateOutput,
 	WorkspaceRunSetupInput,
 	WorkspaceRunSetupOutput,
 	WorkspaceBundleStateOutput,
@@ -569,6 +571,13 @@ export function workspacePipelineJobLog(input: WorkspacePipelineJobInput) {
 
 export function workspacePipelineJobRetry(input: WorkspacePipelineJobInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspacePipelineJobRetry, { input });
+}
+
+export function workspaceReviewState(input: WorkspaceReviewStateInput) {
+	return invoke<WorkspaceReviewStateOutput>(
+		WORKSPACE_METHODS.workspaceReviewState,
+		{ input },
+	);
 }
 
 export function workspaceGitBranchDiff(input: WorkspaceGitBranchDiffInput) {
