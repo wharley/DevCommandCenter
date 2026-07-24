@@ -346,6 +346,7 @@ mod tests {
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
             worktree_path: Some("/tmp/repo/.dcc-worktrees/main-123".to_string()),
+            source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),

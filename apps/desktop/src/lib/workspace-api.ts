@@ -7,6 +7,7 @@ import type {
 	CreateWorkspaceForRepoOutput,
 	CreateWorkspaceBundleForReposInput,
 	CreateWorkspaceBundleForReposOutput,
+	CreateWorkspaceFromSourceUrlInput,
 	CreateWorkspaceFromUrlInput,
 	CreateWorkspaceFromUrlOutput,
 	CompileMissionSpecContextInput,
@@ -42,6 +43,7 @@ import type {
 	ListGitTrackedFilesOutput,
 	ReadWorkspaceFileInput,
 	ReadWorkspaceFileOutput,
+	ResolveWorkspaceSourceUrlInput,
 	WriteWorkspaceFileInput,
 	WriteWorkspaceFileOutput,
 	SearchWorkspaceInput,
@@ -95,6 +97,7 @@ import type {
 	WorkspaceRunSetupInput,
 	WorkspaceRunSetupOutput,
 	WorkspaceBundleStateOutput,
+	WorkspaceSourceUrlResolution,
 } from "@dcc/contracts";
 
 export const CODERABBIT_REVIEW_EVENT_NAME = "dcc/coderabbit/review/event";
@@ -103,6 +106,20 @@ export function createWorkspaceForRepo(input: CreateWorkspaceForRepoInput) {
 	return invoke<CreateWorkspaceForRepoOutput>(WORKSPACE_METHODS.createWorkspaceForRepo, {
 		input,
 	});
+}
+
+export function resolveWorkspaceSourceUrl(input: ResolveWorkspaceSourceUrlInput) {
+	return invoke<WorkspaceSourceUrlResolution>(
+		WORKSPACE_METHODS.resolveWorkspaceSourceUrl,
+		{ input },
+	);
+}
+
+export function createWorkspaceFromSourceUrl(input: CreateWorkspaceFromSourceUrlInput) {
+	return invoke<CreateWorkspaceForRepoOutput>(
+		WORKSPACE_METHODS.createWorkspaceFromSourceUrl,
+		{ input },
+	);
 }
 
 export function createWorkspaceBundleForRepos(

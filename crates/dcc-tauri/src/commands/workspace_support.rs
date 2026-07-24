@@ -174,6 +174,7 @@ mod tests {
             root_path: root_path.to_string_lossy().to_string(),
             base_branch: "main".to_string(),
             worktree_path: worktree_path.map(|path| path.to_string_lossy().to_string()),
+            source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
@@ -343,6 +344,17 @@ pub(crate) fn push_branch_refspec(
     branch: &str,
     forge_login: Option<&str>,
 ) -> Result<(), String> {
+    let remote = resolve_default_remote_name(root)?;
+    push_branch_refspec_to_remote(db_path, root, &remote, branch, forge_login)
+}
+
+pub(crate) fn push_branch_refspec_to_remote(
+    db_path: &Path,
+    root: &str,
+    remote: &str,
+    branch: &str,
+    forge_login: Option<&str>,
+) -> Result<(), String> {
     let branch = branch.trim();
     if branch.is_empty() || branch == "HEAD" {
         return Err(
@@ -350,12 +362,15 @@ pub(crate) fn push_branch_refspec(
         );
     }
 
-    let remote = resolve_default_remote_name(root)?;
+    let remote = remote.trim();
+    if remote.is_empty() {
+        return Err("cannot push because the source remote is empty".to_string());
+    }
     let remote_ref = format!("HEAD:refs/heads/{branch}");
     let output = run_git_network_output_with_workspace_auth(
         db_path,
         root,
-        &["push", "-u", &remote, &remote_ref],
+        &["push", "-u", remote, &remote_ref],
         forge_login,
     )?;
     if output.status.success() {

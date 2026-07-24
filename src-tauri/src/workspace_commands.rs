@@ -5,12 +5,13 @@ use dcc_tauri::{
     commands::workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
         CreateWorkspaceBundleForReposInput, CreateWorkspaceBundleForReposOutput,
-        CreateWorkspaceForRepoOutput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
-        ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
-        ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
-        ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspaceBundlesOutput,
-        ListWorkspacesOutput, MissionSpecContextStatusInput, MissionSpecContextStatusOutput,
-        ReadWorkspaceFileInput, ReadWorkspaceFileOutput, RepositoryIdInput,
+        CreateWorkspaceForRepoOutput, CreateWorkspaceFromSourceUrlInput,
+        CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
+        ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
+        ListLocalBranchesOutput, ListMissionSpecsInput, ListMissionSpecsOutput,
+        ListRepositoriesOutput, ListWorkspaceBundlesOutput, ListWorkspacesOutput,
+        MissionSpecContextStatusInput, MissionSpecContextStatusOutput, ReadWorkspaceFileInput,
+        ReadWorkspaceFileOutput, RepositoryIdInput, ResolveWorkspaceSourceUrlInput,
         SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
         SearchWorkspaceOutput, WorkspaceApplyDelegationWorktreeInput,
         WorkspaceApplyDelegationWorktreeOutput, WorkspaceBundleIdInput, WorkspaceBundleStateOutput,
@@ -26,7 +27,8 @@ use dcc_tauri::{
         WorkspacePrepareDelegationWorktreeOutput, WorkspaceProjectAutomationConfigOutput,
         WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunProjectTasksInput,
         WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
-        WorkspaceSaveProjectAutomationInput, WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
+        WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution, WriteWorkspaceFileInput,
+        WriteWorkspaceFileOutput,
     },
     state::WorkspaceCommandState,
 };
@@ -38,6 +40,24 @@ pub async fn create_workspace_for_repo(
     input: CreateWorkspaceForRepoInput,
 ) -> Result<CreateWorkspaceForRepoOutput, String> {
     dcc_tauri::commands::workspace_commands::create_workspace_for_repo(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn resolve_workspace_source_url(
+    state: State<'_, WorkspaceCommandState>,
+    input: ResolveWorkspaceSourceUrlInput,
+) -> Result<WorkspaceSourceUrlResolution, String> {
+    dcc_tauri::commands::workspace_commands::resolve_workspace_source_url(state, input).await
+}
+
+#[tauri::command]
+pub async fn create_workspace_from_source_url(
+    state: State<'_, WorkspaceCommandState>,
+    app: AppHandle,
+    input: CreateWorkspaceFromSourceUrlInput,
+) -> Result<CreateWorkspaceForRepoOutput, String> {
+    dcc_tauri::commands::workspace_commands::create_workspace_from_source_url(state, app, input)
+        .await
 }
 
 #[tauri::command]

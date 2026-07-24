@@ -614,6 +614,34 @@ pub(crate) fn resolve_change_request_json(
     Ok(Some(detail))
 }
 
+pub(crate) fn resolve_change_request_url_json(
+    root: &str,
+    target: &WorkspaceForgeTarget,
+    iid: u32,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let auth = resolve_auth_context(&target.remote.host, login)?;
+    let project_path = format!("{}/{}", target.remote.namespace, target.remote.repo);
+    let endpoint = format!(
+        "projects/{}/merge_requests/{iid}",
+        encode_percent(&project_path),
+    );
+    let glab = resolve_cli_binary("glab")?;
+    let mut command = Command::new(glab);
+    command
+        .current_dir(root)
+        .args(["api", "--hostname", &target.remote.host, endpoint.as_str()]);
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(git_output_err("glab api merge request", &output.stderr));
+    }
+    serde_json::from_slice::<Value>(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitLab merge request: {error}"))
+}
+
 pub(crate) fn map_state(state: Option<&str>) -> Option<String> {
     match state {
         Some("opened") | Some("open") => Some("open".to_string()),
@@ -667,6 +695,30 @@ pub(crate) fn view_change_request_web(
         "glab mr view failed: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     ))
+}
+
+pub(crate) fn view_change_request_number_web(
+    root: &str,
+    host: &str,
+    number: u32,
+    login: Option<&str>,
+) -> Result<(), String> {
+    let glab = resolve_cli_binary("glab")?;
+    let auth = resolve_auth_context(host, login)?;
+    let mut command = Command::new(glab);
+    command.current_dir(root);
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let number = number.to_string();
+    let output = command
+        .args(["mr", "view", &number, "--web"])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(git_output_err("glab mr view --web", &output.stderr))
 }
 
 pub(crate) fn merge_change_request(

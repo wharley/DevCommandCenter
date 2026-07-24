@@ -849,6 +849,7 @@ export default function App() {
 		archiveWorkspace,
 		cloneWorkspaceFromUrl,
 		createWorkspace,
+		createWorkspaceFromSourceUrl,
 		createWorkspaceBundle,
 		deleteWorkspace,
 		deleteWorkspaces,
@@ -3671,6 +3672,7 @@ export default function App() {
 								repositoryContext={workspaceRepositoryContext}
 								onOpenChange={handleWorkspaceDialogOpenChange}
 								onCreateWorkspace={createWorkspace}
+								onCreateWorkspaceFromSourceUrl={createWorkspaceFromSourceUrl}
 								onCreateWorkspaceBundle={async (input) => {
 									const result = await createWorkspaceBundle(input);
 									void queryClient.invalidateQueries({ queryKey: ["workspaceBundles"] });

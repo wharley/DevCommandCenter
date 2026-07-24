@@ -23,7 +23,7 @@ use dcc_core::{
         },
         workspace::{
             Workspace, WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus,
-            WorkspaceSetupStepReport, WorkspaceState,
+            WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind, WorkspaceState,
         },
         workspace_bundle::{
             WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
@@ -72,19 +72,20 @@ use dcc_tauri::commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
         CompiledMissionSpecContextFile, CreateWorkspaceBundleForReposInput,
         CreateWorkspaceBundleForReposOutput, CreateWorkspaceForRepoOutput,
-        CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
-        ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
-        ListLocalBranchesOutput, ListMissionSpecsInput, ListMissionSpecsOutput,
-        ListRepositoriesOutput, ListWorkspaceBundlesOutput, ListWorkspacesOutput,
-        MissionSpecContextFileState, MissionSpecContextFileStatus, MissionSpecContextStatusInput,
-        MissionSpecContextStatusOutput, MissionSpecEntry, MissionValidationEntry,
-        ReadWorkspaceFileInput, ReadWorkspaceFileOutput, RepositoryIdInput,
-        SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
-        SearchWorkspaceMatch, SearchWorkspaceOutput, WorkspaceApplyDelegationWorktreeInput,
-        WorkspaceApplyDelegationWorktreeOutput, WorkspaceBundleIdInput, WorkspaceBundleStateOutput,
-        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
-        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
-        WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
+        CreateWorkspaceFromSourceUrlInput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
+        ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
+        ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
+        ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspaceBundlesOutput,
+        ListWorkspacesOutput, MissionSpecContextFileState, MissionSpecContextFileStatus,
+        MissionSpecContextStatusInput, MissionSpecContextStatusOutput, MissionSpecEntry,
+        MissionValidationEntry, ReadWorkspaceFileInput, ReadWorkspaceFileOutput, RepositoryIdInput,
+        ResolveWorkspaceSourceUrlInput, SaveMissionValidationInput, SaveMissionValidationOutput,
+        SearchWorkspaceInput, SearchWorkspaceMatch, SearchWorkspaceOutput,
+        WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
+        WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
+        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitAcceptConflictInput,
+        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
+        WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
         WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictContent, WorkspaceGitConflictEntry,
         WorkspaceGitConflictKind, WorkspaceGitConflictOperation, WorkspaceGitConflictSide,
         WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
@@ -96,8 +97,8 @@ use dcc_tauri::commands::{
         WorkspaceProjectAutomationConfigOutput, WorkspaceProjectTask, WorkspaceProjectTaskKind,
         WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunProjectTasksInput,
         WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
-        WorkspaceSaveProjectAutomationInput, WorkspaceSetupHint, WriteWorkspaceFileInput,
-        WriteWorkspaceFileOutput,
+        WorkspaceSaveProjectAutomationInput, WorkspaceSetupHint, WorkspaceSourceUrlResolution,
+        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -111,7 +112,9 @@ struct WorkspaceMethods {
     archive_workspace_bundle: String,
     create_workspace_bundle_for_repos: String,
     create_workspace_for_repo: String,
+    create_workspace_from_source_url: String,
     create_workspace_from_url: String,
+    resolve_workspace_source_url: String,
     archive_workspace: String,
     restore_workspace: String,
     restore_workspace_bundle: String,
@@ -237,6 +240,8 @@ fn main() {
         .typ::<ProjectId>()
         .typ::<RepositoryId>()
         .typ::<WorkspaceState>()
+        .typ::<WorkspaceSourceKind>()
+        .typ::<WorkspaceSource>()
         .typ::<Workspace>()
         .typ::<WorkspaceBundleId>()
         .typ::<WorkspaceBundleState>()
@@ -272,6 +277,9 @@ fn main() {
         .typ::<WorkspaceSessionSummary>()
         .typ::<CreateWorkspaceForRepoInput>()
         .typ::<CreateWorkspaceForRepoOutput>()
+        .typ::<ResolveWorkspaceSourceUrlInput>()
+        .typ::<WorkspaceSourceUrlResolution>()
+        .typ::<CreateWorkspaceFromSourceUrlInput>()
         .typ::<CreateWorkspaceBundleForReposInput>()
         .typ::<CreateWorkspaceBundleForReposOutput>()
         .typ::<WorkspaceBundleIdInput>()
@@ -447,7 +455,9 @@ fn main() {
                 archive_workspace_bundle: "archive_workspace_bundle".to_string(),
                 create_workspace_bundle_for_repos: "create_workspace_bundle_for_repos".to_string(),
                 create_workspace_for_repo: "create_workspace_for_repo".to_string(),
+                create_workspace_from_source_url: "create_workspace_from_source_url".to_string(),
                 create_workspace_from_url: "create_workspace_from_url".to_string(),
+                resolve_workspace_source_url: "resolve_workspace_source_url".to_string(),
                 archive_workspace: "archive_workspace".to_string(),
                 restore_workspace: "restore_workspace".to_string(),
                 restore_workspace_bundle: "restore_workspace_bundle".to_string(),

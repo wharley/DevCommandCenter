@@ -19,7 +19,7 @@ use dcc_core::{
             SessionSearchResult, SessionState, TurnId, WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
-        workspace::{Workspace, WorkspaceId, WorkspaceState},
+        workspace::{Workspace, WorkspaceId, WorkspaceSource, WorkspaceState},
         workspace_bundle::{
             WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
             WorkspaceBundleSummary,
@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS dcc_workspaces (
 	root_path TEXT NOT NULL,
 	base_branch TEXT NOT NULL,
 	worktree_path TEXT NULL,
+	source_json TEXT NULL,
 	state TEXT NOT NULL,
 	setup_report_json TEXT NULL,
 	created_at TEXT NOT NULL,
@@ -250,6 +251,7 @@ impl SqliteWorkspaceRepo {
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
+        Self::ensure_column(&conn, "dcc_workspaces", "source_json", "TEXT NULL")?;
         Self::ensure_column(
             &conn,
             "dcc_workspace_bundle_members",
@@ -499,7 +501,20 @@ impl SqliteWorkspaceRepo {
     }
 
     fn workspace_from_row(row: &Row<'_>) -> rusqlite::Result<Workspace> {
-        let state = row.get::<_, String>(6)?;
+        let source_json = row.get::<_, Option<String>>(6)?;
+        let source = source_json
+            .as_deref()
+            .map(|json| {
+                from_str::<WorkspaceSource>(json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        6,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })
+            })
+            .transpose()?;
+        let state = row.get::<_, String>(7)?;
         let state = match state.as_str() {
             "initializing" => WorkspaceState::Initializing,
             "setup_pending" => WorkspaceState::SetupPending,
@@ -507,7 +522,7 @@ impl SqliteWorkspaceRepo {
             "archived" => WorkspaceState::Archived,
             other => {
                 return Err(rusqlite::Error::FromSqlConversionFailure(
-                    6,
+                    7,
                     rusqlite::types::Type::Text,
                     Box::new(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -517,13 +532,13 @@ impl SqliteWorkspaceRepo {
             }
         };
 
-        let setup_report_json = row.get::<_, Option<String>>(7)?;
+        let setup_report_json = row.get::<_, Option<String>>(8)?;
         let setup_report = setup_report_json
             .as_deref()
             .map(|json| {
                 from_str(json).map_err(|error| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        7,
+                        8,
                         rusqlite::types::Type::Text,
                         Box::new(error),
                     )
@@ -538,10 +553,11 @@ impl SqliteWorkspaceRepo {
             root_path: row.get::<_, String>(3)?,
             base_branch: row.get::<_, String>(4)?,
             worktree_path: row.get::<_, Option<String>>(5)?,
+            source,
             state,
             setup_report,
-            created_at: row.get::<_, String>(8)?,
-            updated_at: row.get::<_, String>(9)?,
+            created_at: row.get::<_, String>(9)?,
+            updated_at: row.get::<_, String>(10)?,
         })
     }
 
@@ -1496,14 +1512,15 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             r#"
 			INSERT INTO dcc_workspaces (
 				id, project_id, name, root_path, base_branch, worktree_path,
-				state, setup_report_json, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+				source_json, state, setup_report_json, created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
 			ON CONFLICT(id) DO UPDATE SET
 				project_id = excluded.project_id,
 				name = excluded.name,
 				root_path = excluded.root_path,
 				base_branch = excluded.base_branch,
 				worktree_path = excluded.worktree_path,
+				source_json = excluded.source_json,
 				state = excluded.state,
 				setup_report_json = excluded.setup_report_json,
 				created_at = excluded.created_at,
@@ -1516,6 +1533,12 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
                 workspace.root_path.clone(),
                 workspace.base_branch.clone(),
                 workspace.worktree_path.clone(),
+                workspace
+                    .source
+                    .as_ref()
+                    .map(to_string)
+                    .transpose()
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
                 Self::workspace_state_as_str(&workspace.state),
                 workspace
                     .setup_report
@@ -1541,7 +1564,7 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             .query_row(
                 r#"
 				SELECT id, project_id, name, root_path, base_branch, worktree_path,
-				       state, setup_report_json, created_at, updated_at
+				       source_json, state, setup_report_json, created_at, updated_at
 				  FROM dcc_workspaces
 				 WHERE id = ?1
 				"#,
@@ -1563,7 +1586,7 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             .prepare(
                 r#"
 				SELECT id, project_id, name, root_path, base_branch, worktree_path,
-				       state, setup_report_json, created_at, updated_at
+				       source_json, state, setup_report_json, created_at, updated_at
 				  FROM dcc_workspaces
 				 ORDER BY updated_at DESC, created_at DESC
 				"#,
@@ -2435,7 +2458,7 @@ mod tests {
             session::{SessionEventKind, SessionState, TurnId},
             workspace::{
                 WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus, WorkspaceSetupStepReport,
-                WorkspaceState,
+                WorkspaceSource, WorkspaceSourceKind, WorkspaceState,
             },
             workspace_bundle::{
                 WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
@@ -2520,6 +2543,7 @@ mod tests {
             root_path: "/tmp/removed-workspace".to_string(),
             base_branch: "main".to_string(),
             worktree_path: Some("/tmp/removed-workspace".to_string()),
+            source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
@@ -2579,6 +2603,7 @@ mod tests {
             root_path: "/tmp/searchable".to_string(),
             base_branch: "main".to_string(),
             worktree_path: Some("/tmp/searchable".to_string()),
+            source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
@@ -2691,6 +2716,7 @@ mod tests {
             root_path: "/tmp/delegation".to_string(),
             base_branch: "main".to_string(),
             worktree_path: Some("/tmp/delegation".to_string()),
+            source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
@@ -2818,6 +2844,7 @@ mod tests {
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
             worktree_path: Some("/tmp/repo/.dcc-worktrees/main".to_string()),
+            source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
@@ -2843,6 +2870,55 @@ mod tests {
         let workspaces =
             futures::executor::block_on(repo.list_workspaces()).expect("list workspaces");
         assert!(workspaces.is_empty());
+    }
+
+    #[test]
+    fn sqlite_workspace_repo_round_trips_imported_source_context() {
+        let repo = SqliteWorkspaceRepo::from_connection(in_memory_conn()).expect("create repo");
+        let workspace = Workspace {
+            id: WorkspaceId("workspace-source".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            name: Some("Review #42".to_string()),
+            root_path: "/tmp/repo".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: Some("/tmp/repo/.dcc-worktrees/review-42".to_string()),
+            source: Some(WorkspaceSource {
+                kind: WorkspaceSourceKind::PullRequest,
+                url: "https://github.com/acme/widgets/pull/42".to_string(),
+                provider: "github".to_string(),
+                remote_name: "origin".to_string(),
+                head_branch: "feature/review".to_string(),
+                head_sha: "abc123".to_string(),
+                base_branch: "main".to_string(),
+                change_request_number: Some(42),
+                title: Some("Improve review flow".to_string()),
+                author: Some("octocat".to_string()),
+            }),
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        futures::executor::block_on(repo.save_workspace(&workspace)).expect("save workspace");
+        let restored = futures::executor::block_on(repo.get_workspace(&workspace.id))
+            .expect("read workspace")
+            .expect("workspace exists");
+
+        assert_eq!(
+            restored
+                .source
+                .as_ref()
+                .map(|source| source.head_branch.as_str()),
+            Some("feature/review")
+        );
+        assert_eq!(
+            restored
+                .source
+                .as_ref()
+                .and_then(|source| source.change_request_number),
+            Some(42)
+        );
     }
 
     #[test]
@@ -2889,6 +2965,7 @@ mod tests {
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
             worktree_path: Some("/tmp/repo/.dcc-worktrees/main".to_string()),
+            source: None,
             state: WorkspaceState::SetupPending,
             setup_report: Some(WorkspaceSetupReport {
                 status: WorkspaceSetupStatus::Warning,
@@ -2936,6 +3013,7 @@ mod tests {
                 root_path: "/tmp/backend".to_string(),
                 base_branch: "main".to_string(),
                 worktree_path: Some("/tmp/backend/.dcc-worktrees/main-a".to_string()),
+                source: None,
                 state: WorkspaceState::SetupPending,
                 setup_report: None,
                 created_at: "2026-01-01T00:00:00Z".to_string(),
@@ -2948,6 +3026,7 @@ mod tests {
                 root_path: "/tmp/frontend".to_string(),
                 base_branch: "main".to_string(),
                 worktree_path: Some("/tmp/frontend/.dcc-worktrees/main-b".to_string()),
+                source: None,
                 state: WorkspaceState::Ready,
                 setup_report: None,
                 created_at: "2026-01-01T00:00:00Z".to_string(),

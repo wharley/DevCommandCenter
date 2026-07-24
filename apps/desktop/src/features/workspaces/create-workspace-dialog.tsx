@@ -1,4 +1,4 @@
-import { LoaderCircle, FolderOpen } from "lucide-react";
+import { CheckCircle2, FolderOpen, Link2, LoaderCircle } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -16,15 +16,17 @@ import { Label } from "../../components/ui/label";
 import type {
 	CreateWorkspaceBundleForReposInput,
 	CreateWorkspaceForRepoInput,
+	CreateWorkspaceFromSourceUrlInput,
 	CreateWorkspaceFromUrlInput,
 	Repository,
+	WorkspaceSourceUrlResolution,
 } from "@dcc/contracts";
 import type {
 	WorkspaceBundleCreationResult,
 	WorkspaceCreationResult,
 } from "./use-workspaces";
 import { inferProjectIdFromWorkspaceRoot } from "./create-workspace-dialog.logic";
-import { listLocalBranches } from "../../lib/workspace-api";
+import { listLocalBranches, resolveWorkspaceSourceUrl } from "../../lib/workspace-api";
 import {
 	setupHintsDescription,
 	setupReportDescription,
@@ -44,6 +46,9 @@ type CreateWorkspaceDialogProps = {
 	repositoryContext?: ExistingRepositoryContext | null;
 	onOpenChange: (open: boolean) => void;
 	onCreateWorkspace: (input: CreateWorkspaceForRepoInput) => Promise<WorkspaceCreationResult>;
+	onCreateWorkspaceFromSourceUrl: (
+		input: CreateWorkspaceFromSourceUrlInput,
+	) => Promise<WorkspaceCreationResult>;
 	onCreateWorkspaceBundle: (
 		input: CreateWorkspaceBundleForReposInput,
 	) => Promise<WorkspaceBundleCreationResult>;
@@ -125,6 +130,7 @@ export function CreateWorkspaceDialog({
 	repositoryContext = null,
 	onOpenChange,
 	onCreateWorkspace,
+	onCreateWorkspaceFromSourceUrl,
 	onCreateWorkspaceBundle,
 	onCloneWorkspace,
 	repositories,
@@ -135,6 +141,12 @@ export function CreateWorkspaceDialog({
 	const [availableBranches, setAvailableBranches] = useState<string[]>([]);
 	const [isLoadingBranches, setIsLoadingBranches] = useState(false);
 	const [creationScope, setCreationScope] = useState<"single" | "multi">("single");
+	const [workspaceStart, setWorkspaceStart] = useState<"new" | "source">("new");
+	const [sourceUrl, setSourceUrl] = useState("");
+	const [validatedSourceUrl, setValidatedSourceUrl] = useState("");
+	const [sourceResolution, setSourceResolution] =
+		useState<WorkspaceSourceUrlResolution | null>(null);
+	const [isResolvingSource, setIsResolvingSource] = useState(false);
 	const [selectedRepositoryIds, setSelectedRepositoryIds] = useState<string[]>([]);
 
 	useEffect(() => {
@@ -144,6 +156,11 @@ export function CreateWorkspaceDialog({
 			setAvailableBranches([]);
 			setIsLoadingBranches(false);
 			setCreationScope("single");
+			setWorkspaceStart("new");
+			setSourceUrl("");
+			setValidatedSourceUrl("");
+			setSourceResolution(null);
+			setIsResolvingSource(false);
 			setSelectedRepositoryIds([]);
 			if (mode === "open" && initialForm.workspaceRoot.trim().length > 0) {
 				void loadBranchesForWorkspaceRoot(initialForm.workspaceRoot);
@@ -226,6 +243,37 @@ export function CreateWorkspaceDialog({
 		}
 	}
 
+	async function handleResolveSourceUrl() {
+		if (!repositoryContext || sourceUrl.trim().length === 0) {
+			return;
+		}
+		setIsResolvingSource(true);
+		setSourceResolution(null);
+		setValidatedSourceUrl("");
+		try {
+			const resolution = await resolveWorkspaceSourceUrl({
+				workspaceRoot: repositoryContext.workspaceRoot,
+				url: sourceUrl.trim(),
+				forgeLogin: null,
+			});
+			setSourceResolution(resolution);
+			setValidatedSourceUrl(sourceUrl.trim());
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			toast.error(t("workspaceDialog.sourceValidationError"), {
+				description: message,
+			});
+		} finally {
+			setIsResolvingSource(false);
+		}
+	}
+
+	const isSourceWorkspace =
+		mode === "open" &&
+		creationScope === "single" &&
+		repositoryContext !== null &&
+		workspaceStart === "source";
+
 	const canSubmit = useMemo(() => {
 		if (mode === "open" && creationScope === "multi") {
 			return (
@@ -243,6 +291,14 @@ export function CreateWorkspaceDialog({
 			return hasCommonFields && form.repositoryUrl.trim().length > 0;
 		}
 
+		if (isSourceWorkspace) {
+			return (
+				sourceResolution !== null &&
+				validatedSourceUrl === sourceUrl.trim() &&
+				!isResolvingSource
+			);
+		}
+
 		return hasCommonFields && form.baseBranch.trim().length > 0;
 	}, [
 		creationScope,
@@ -252,8 +308,13 @@ export function CreateWorkspaceDialog({
 		form.repositoryUrl,
 		form.workspaceRoot,
 		isSubmitting,
+		isResolvingSource,
+		isSourceWorkspace,
 		mode,
 		selectedRepositoryIds.length,
+		sourceResolution,
+		sourceUrl,
+		validatedSourceUrl,
 	]);
 
 	async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -288,6 +349,15 @@ export function CreateWorkspaceDialog({
 					workspaceRoot: form.workspaceRoot.trim(),
 					baseBranch: form.baseBranch.trim(),
 					name: form.name.trim() || null,
+				});
+				notifyWorkspaceCreationResult(t, mode, result);
+			} else if (isSourceWorkspace && repositoryContext) {
+				const result = await onCreateWorkspaceFromSourceUrl({
+					projectId: repositoryContext.projectId,
+					workspaceRoot: repositoryContext.workspaceRoot,
+					url: sourceUrl.trim(),
+					name: form.name.trim() || null,
+					forgeLogin: null,
 				});
 				notifyWorkspaceCreationResult(t, mode, result);
 			} else {
@@ -367,6 +437,7 @@ export function CreateWorkspaceDialog({
 								disabled={isSubmitting || repositories.length < 2}
 								onClick={() => {
 									setCreationScope("multi");
+									setWorkspaceStart("new");
 									const contextRepository = repositoryContext
 										? repositories.find(
 											(repository) =>
@@ -383,6 +454,34 @@ export function CreateWorkspaceDialog({
 								}}
 							>
 								{t("workspaceDialog.multiWorkspace")}
+							</Button>
+						</div>
+					) : null}
+
+					{mode === "open" &&
+					creationScope === "single" &&
+					repositoryContext ? (
+						<div className="grid grid-cols-2 gap-1 rounded-md border border-border/60 p-1">
+							<Button
+								type="button"
+								variant={workspaceStart === "new" ? "secondary" : "ghost"}
+								size="sm"
+								className="h-7 text-[12px]"
+								disabled={isSubmitting || isResolvingSource}
+								onClick={() => setWorkspaceStart("new")}
+							>
+								{t("workspaceDialog.newWorkspaceStart")}
+							</Button>
+							<Button
+								type="button"
+								variant={workspaceStart === "source" ? "secondary" : "ghost"}
+								size="sm"
+								className="h-7 gap-1.5 text-[12px]"
+								disabled={isSubmitting || isResolvingSource}
+								onClick={() => setWorkspaceStart("source")}
+							>
+								<Link2 className="size-3.5" aria-hidden />
+								{t("workspaceDialog.existingBranchOrPr")}
 							</Button>
 						</div>
 					) : null}
@@ -438,6 +537,80 @@ export function CreateWorkspaceDialog({
 						</div>
 					) : null}
 
+					{isSourceWorkspace ? (
+						<div className="flex min-w-0 flex-col gap-2">
+							<div className="flex min-w-0 flex-col gap-1">
+								<Label
+									htmlFor="workspace-source-url"
+									className="text-[12px] font-medium tracking-[-0.01em]"
+								>
+									{t("workspaceDialog.sourceUrl")}
+								</Label>
+								<p className="text-[11px] leading-snug text-muted-foreground">
+									{t("workspaceDialog.sourceUrlDescription")}
+								</p>
+								<div className="flex min-w-0 gap-2">
+									<Input
+										id="workspace-source-url"
+										value={sourceUrl}
+										onChange={(event) => {
+											setSourceUrl(event.target.value);
+											setSourceResolution(null);
+											setValidatedSourceUrl("");
+										}}
+										placeholder={t("workspaceDialog.sourceUrlPlaceholder")}
+										autoComplete="off"
+										spellCheck={false}
+										disabled={isSubmitting || isResolvingSource}
+										className="h-7 min-w-0 flex-1 font-mono text-[12px] md:text-[12px]"
+									/>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										className="h-7 shrink-0 gap-1.5"
+										disabled={
+											isSubmitting ||
+											isResolvingSource ||
+											sourceUrl.trim().length === 0
+										}
+										onClick={() => void handleResolveSourceUrl()}
+									>
+										{isResolvingSource ? (
+											<LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+										) : (
+											<Link2 className="size-3.5" aria-hidden />
+										)}
+										{t("workspaceDialog.validateSource")}
+									</Button>
+								</div>
+							</div>
+							{sourceResolution ? (
+								<div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-2 text-[11px]">
+									<div className="flex items-center gap-1.5 font-medium text-foreground">
+										<CheckCircle2
+											className="size-3.5 text-emerald-600 dark:text-emerald-400"
+											aria-hidden
+										/>
+										{sourceResolution.kind === "pull_request"
+											? t("workspaceDialog.pullRequestResolved", {
+													number: String(sourceResolution.changeRequestNumber ?? ""),
+												})
+											: t("workspaceDialog.branchResolved")}
+									</div>
+									{sourceResolution.title ? (
+										<p className="mt-1 truncate text-foreground">
+											{sourceResolution.title}
+										</p>
+									) : null}
+									<p className="mt-1 break-all font-mono text-muted-foreground">
+										{sourceResolution.headBranch} → {sourceResolution.baseBranch}
+									</p>
+								</div>
+							) : null}
+						</div>
+					) : null}
+
 					{mode === "clone" ? (
 						<div className="flex min-w-0 flex-col gap-1">
 							<Label
@@ -465,7 +638,11 @@ export function CreateWorkspaceDialog({
 					) : null}
 
 					<div
-						className={creationScope === "multi" ? "hidden" : "flex min-w-0 flex-col gap-1"}
+						className={
+							creationScope === "multi" || isSourceWorkspace
+								? "hidden"
+								: "flex min-w-0 flex-col gap-1"
+						}
 					>
 						<div className="flex min-w-0 flex-wrap items-start justify-between gap-1.5 sm:flex-nowrap sm:items-center sm:gap-2">
 							<Label
@@ -493,7 +670,11 @@ export function CreateWorkspaceDialog({
 					</div>
 
 					<div
-						className={creationScope === "multi" ? "hidden" : "flex min-w-0 flex-col gap-1"}
+						className={
+							creationScope === "multi" || isSourceWorkspace
+								? "hidden"
+								: "flex min-w-0 flex-col gap-1"
+						}
 					>
 						<div className="flex min-w-0 flex-wrap items-start justify-between gap-1.5 sm:flex-nowrap sm:items-center sm:gap-2">
 							<Label
@@ -541,7 +722,11 @@ export function CreateWorkspaceDialog({
 					</div>
 
 					<div
-						className={creationScope === "multi" ? "hidden" : "flex min-w-0 flex-col gap-1"}
+						className={
+							creationScope === "multi" || isSourceWorkspace
+								? "hidden"
+								: "flex min-w-0 flex-col gap-1"
+						}
 					>
 						<Label
 							htmlFor="workspace-branch"
@@ -649,6 +834,8 @@ export function CreateWorkspaceDialog({
 								t("workspaceDialog.cloneSubmit")
 							) : creationScope === "multi" ? (
 								t("workspaceDialog.multiSubmit")
+							) : isSourceWorkspace ? (
+								t("workspaceDialog.sourceSubmit")
 							) : (
 								t("workspaceDialog.createSubmit")
 							)}

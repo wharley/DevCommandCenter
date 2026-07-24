@@ -1,5 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { removeWorkspacesFromList, workspaceMutationIds } from "./use-workspaces";
+import {
+	removeWorkspacesFromList,
+	workspaceMutationIds,
+	workspaceToSummary,
+} from "./use-workspaces";
+
+describe("workspaceToSummary", () => {
+	it("uses the imported branch as the active workspace branch", () => {
+		const summary = workspaceToSummary({
+			id: "review-42",
+			projectId: "widgets",
+			name: null,
+			rootPath: "/repo/widgets",
+			baseBranch: "main",
+			worktreePath: "/repo/.dcc-worktrees/review-42",
+			source: {
+				kind: "pull_request",
+				url: "https://github.com/acme/widgets/pull/42",
+				provider: "github",
+				remoteName: "origin",
+				headBranch: "feature/review",
+				headSha: "abc123",
+				baseBranch: "main",
+				changeRequestNumber: 42,
+				title: "Improve review flow",
+				author: "octocat",
+			},
+			state: "ready",
+			setupReport: null,
+			createdAt: "2026-01-01T00:00:00Z",
+			updatedAt: "2026-01-01T00:00:00Z",
+		});
+
+		expect(summary.name).toBe("Improve review flow");
+		expect(summary.branch).toBe("feature/review");
+	});
+});
 
 describe("removeWorkspacesFromList", () => {
 	it("keeps the current selection when it is not removed", () => {

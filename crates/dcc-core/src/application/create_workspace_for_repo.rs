@@ -106,6 +106,7 @@ where
         root_path: input.workspace_root,
         base_branch: branch,
         worktree_path: Some(worktree_path.clone()),
+        source: None,
         state: WorkspaceState::SetupPending,
         setup_report: None,
         created_at: created_at,

@@ -2,19 +2,30 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::State;
 
+use dcc_core::domain::workspace::{WorkspaceSource, WorkspaceSourceKind};
 use dcc_infra::db::SqliteWorkspaceRepo;
 
 use crate::{
     commands::forge::context as forge_context,
     commands::forge::provider as forge_provider,
-    commands::workspace_commands::{RepositoryIdInput, WorkspaceGitPushInput},
+    commands::workspace_commands::{push_current_branch, RepositoryIdInput, WorkspaceGitPushInput},
     commands::workspace_support::{
-        ensure_pushable_branch, preflight_workspace_root, push_branch_refspec,
+        ensure_pushable_branch, find_workspace_by_root, preflight_workspace_root,
         resolve_branch_diff_base, resolve_current_branch_name, resolve_current_commit_sha,
         resolve_workspace_target_branch, workspace_branch_hints,
     },
     state::WorkspaceCommandState,
 };
+
+async fn imported_workspace_source(
+    state: &WorkspaceCommandState,
+    root: &str,
+) -> Result<Option<WorkspaceSource>, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    Ok(find_workspace_by_root(&repo, root)
+        .await?
+        .and_then(|workspace| workspace.source))
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -486,6 +497,16 @@ pub async fn workspace_change_request_view_web(
         input.forge_login.as_deref(),
     )?
     .and_then(|context| context.effective_login);
+    if let Some(source) = imported_workspace_source(&state, root).await? {
+        if source.kind == WorkspaceSourceKind::PullRequest {
+            return forge_provider::view_workspace_change_request_source(
+                root,
+                &source.url,
+                source.change_request_number,
+                login.as_deref(),
+            );
+        }
+    }
     forge_provider::view_workspace_change_request(root, login.as_deref())
 }
 
@@ -499,13 +520,27 @@ pub async fn workspace_change_request_merge(
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    let branch = resolve_current_branch_name(root)?;
+    let source = imported_workspace_source(&state, root).await?;
+    let branch = match source.as_ref() {
+        Some(source) => source.head_branch.clone(),
+        None => resolve_current_branch_name(root)?,
+    };
     let login = forge_context::resolve_workspace_forge_context(
         &state.db_path,
         root,
         input.forge_login.as_deref(),
     )?
     .and_then(|context| context.effective_login);
+    if let Some(source) = source {
+        if source.kind == WorkspaceSourceKind::PullRequest {
+            return forge_provider::merge_workspace_change_request_source(
+                root,
+                &source.url,
+                &branch,
+                login.as_deref(),
+            );
+        }
+    }
     forge_provider::merge_workspace_change_request(root, &branch, login.as_deref())
 }
 
@@ -520,18 +555,27 @@ pub async fn workspace_change_request_create(
         return Err("workspace_root is empty".to_string());
     }
 
+    let source = imported_workspace_source(&state, root).await?;
     let protected_branch = resolve_workspace_target_branch(&state, root).await;
-    let head_branch = ensure_pushable_branch(root, protected_branch.as_deref())?;
-    let base_ref = resolve_branch_diff_base(root, protected_branch.as_deref())
-        .unwrap_or_else(|| "main".to_string());
-    let base_stripped = base_ref
-        .split_once('/')
-        .map(|(_, branch)| branch)
-        .unwrap_or(&base_ref);
-    let base_branch = if base_stripped == "HEAD" {
-        "main"
+    let head_branch = if let Some(source) = source.as_ref() {
+        source.head_branch.clone()
     } else {
-        base_stripped
+        ensure_pushable_branch(root, protected_branch.as_deref())?
+    };
+    let base_branch = if let Some(source) = source.as_ref() {
+        source.base_branch.clone()
+    } else {
+        let base_ref = resolve_branch_diff_base(root, protected_branch.as_deref())
+            .unwrap_or_else(|| "main".to_string());
+        let base_stripped = base_ref
+            .split_once('/')
+            .map(|(_, branch)| branch)
+            .unwrap_or(&base_ref);
+        if base_stripped == "HEAD" {
+            "main".to_string()
+        } else {
+            base_stripped.to_string()
+        }
     };
     let login = forge_context::resolve_workspace_forge_context(
         &state.db_path,
@@ -540,12 +584,18 @@ pub async fn workspace_change_request_create(
     )?
     .and_then(|context| context.effective_login);
 
-    push_branch_refspec(&state.db_path, root, &head_branch, login.as_deref())
-        .map_err(|error| format!("git push failed: {error}"))?;
+    push_current_branch(
+        &state.db_path,
+        root,
+        protected_branch.as_deref(),
+        login.as_deref(),
+    )
+    .await
+    .map_err(|error| format!("git push failed: {error}"))?;
 
     forge_provider::create_workspace_change_request(
         root,
-        base_branch,
+        &base_branch,
         &head_branch,
         login.as_deref(),
     )
@@ -607,12 +657,17 @@ pub async fn workspace_pr_status(
         .as_ref()
         .and_then(|context| context.effective_login.as_deref());
     let head_sha = resolve_current_commit_sha(root).ok().flatten();
+    let source = imported_workspace_source(&state, root).await?;
     let branch = match input
         .branch
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
     {
         Some(branch) => branch,
+        None if source.is_some() => source
+            .as_ref()
+            .map(|source| source.head_branch.clone())
+            .unwrap_or_default(),
         None => match resolve_current_branch_name(root) {
             Ok(branch) => branch,
             Err(_) => {
@@ -722,17 +777,20 @@ pub async fn workspace_pr_review_comments(
         .filter(|value| !value.is_empty())
     {
         Some(branch) => branch.to_string(),
-        None => match resolve_current_branch_name(root) {
-            Ok(branch) => branch,
-            Err(_) => {
-                return Ok(WorkspacePrReviewCommentsOutput {
-                    provider: Some("github".to_string()),
-                    host: Some(forge_context.host),
-                    number: None,
-                    url: None,
-                    comments: Vec::new(),
-                });
-            }
+        None => match imported_workspace_source(&state, root).await? {
+            Some(source) => source.head_branch,
+            None => match resolve_current_branch_name(root) {
+                Ok(branch) => branch,
+                Err(_) => {
+                    return Ok(WorkspacePrReviewCommentsOutput {
+                        provider: Some("github".to_string()),
+                        host: Some(forge_context.host),
+                        number: None,
+                        url: None,
+                        comments: Vec::new(),
+                    });
+                }
+            },
         },
     };
     let branch_hints = workspace_branch_hints(root, Some(&branch));

@@ -241,6 +241,23 @@ pub(crate) fn view_workspace_change_request(root: &str, login: Option<&str>) -> 
     }
 }
 
+pub(crate) fn view_workspace_change_request_source(
+    root: &str,
+    url: &str,
+    number: Option<u32>,
+    login: Option<&str>,
+) -> Result<(), String> {
+    match resolve_workspace_forge_target(root)? {
+        Some(target) if target.provider == ForgeCliProvider::Gitlab => {
+            let number = number
+                .ok_or_else(|| "The imported merge request number is unavailable.".to_string())?;
+            gitlab::view_change_request_number_web(root, &target.remote.host, number, login)
+        }
+        Some(target) => github::view_change_request_url_web(root, &target.remote.host, url, login),
+        None => github::view_change_request_url_web(root, "github.com", url, login),
+    }
+}
+
 pub(crate) fn merge_workspace_change_request(
     root: &str,
     branch: &str,
@@ -252,6 +269,21 @@ pub(crate) fn merge_workspace_change_request(
         }
         Some(target) => github::merge_change_request(root, &target.remote.host, login),
         None => github::merge_change_request(root, "github.com", login),
+    }
+}
+
+pub(crate) fn merge_workspace_change_request_source(
+    root: &str,
+    url: &str,
+    branch: &str,
+    login: Option<&str>,
+) -> Result<(), String> {
+    match resolve_workspace_forge_target(root)? {
+        Some(target) if target.provider == ForgeCliProvider::Gitlab => {
+            gitlab::merge_change_request(root, branch, &target, login)
+        }
+        Some(target) => github::merge_change_request_url(root, &target.remote.host, url, login),
+        None => github::merge_change_request_url(root, "github.com", url, login),
     }
 }
 

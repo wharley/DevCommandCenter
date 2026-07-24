@@ -150,6 +150,7 @@ mod tests {
             root_path: root.to_string(),
             base_branch: "main".to_string(),
             worktree_path: Some(format!("{root}/.dcc-worktrees/main-{id}")),
+            source: None,
             state: crate::domain::workspace::WorkspaceState::Ready,
             setup_report: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),

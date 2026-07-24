@@ -17,14 +17,16 @@ use dcc_core::{
     application::{
         create_workspace_bundle as run_create_workspace_bundle,
         create_workspace_for_repo as run_create_workspace_for_repo,
-        create_workspace_from_url as run_create_workspace_from_url, CreateWorkspaceForRepoInput,
+        create_workspace_from_url as run_create_workspace_from_url,
+        finalize_workspace_for_repo as run_finalize_workspace_for_repo,
+        prepare_workspace_for_repo as run_prepare_workspace_for_repo, CreateWorkspaceForRepoInput,
         CreateWorkspaceFromUrlInput,
     },
     domain::{
         repository::{Repository, RepositoryId},
         workspace::{
             Workspace, WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus,
-            WorkspaceSetupStepReport, WorkspaceState,
+            WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind, WorkspaceState,
         },
         workspace_bundle::{WorkspaceBundleId, WorkspaceBundleState, WorkspaceBundleSummary},
     },
@@ -45,19 +47,25 @@ use toml_edit::{
     value as toml_value, Array as TomlArray, Document as TomlDocument, Item as TomlItem,
     Table as TomlTable,
 };
+use url::Url;
 
 #[cfg(test)]
 use crate::workspace_setup::run_workspace_validation_command;
 use crate::{
-    commands::forge::remote::resolve_workspace_remote_info,
+    commands::forge::{
+        github, gitlab,
+        remote::{
+            resolve_workspace_forge_target, resolve_workspace_remote_info, WorkspaceForgeTarget,
+        },
+    },
     commands::workspace_support::{
         broken_workspace_message, cleanup_workspace_files, ensure_pushable_branch,
         find_workspace_by_root, next_available_branch_name, preflight_workspace_root,
-        purge_broken_workspace_by_root, push_branch_refspec, resolve_branch_diff_base,
-        resolve_current_branch_name, resolve_current_commit_sha, resolve_default_remote_name,
-        resolve_workspace_active_root, resolve_workspace_broken_reason,
-        resolve_workspace_setup_root, resolve_workspace_target_branch,
-        run_git_network_output_with_workspace_auth,
+        purge_broken_workspace_by_root, push_branch_refspec, push_branch_refspec_to_remote,
+        resolve_branch_diff_base, resolve_current_branch_name, resolve_current_commit_sha,
+        resolve_default_remote_name, resolve_workspace_active_root,
+        resolve_workspace_broken_reason, resolve_workspace_setup_root,
+        resolve_workspace_target_branch, run_git_network_output_with_workspace_auth,
     },
     events::TauriEventBus,
     git::{
@@ -120,6 +128,41 @@ pub struct CreateWorkspaceFromUrlOutput {
     pub workspace: Workspace,
     pub setup_hints: Vec<WorkspaceSetupHint>,
     pub setup_report: WorkspaceSetupReport,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveWorkspaceSourceUrlInput {
+    pub workspace_root: String,
+    pub url: String,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWorkspaceFromSourceUrlInput {
+    pub project_id: dcc_core::domain::project::ProjectId,
+    pub workspace_root: String,
+    pub url: String,
+    pub name: Option<String>,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSourceUrlResolution {
+    pub kind: WorkspaceSourceKind,
+    pub url: String,
+    pub provider: String,
+    pub host: String,
+    pub repository: String,
+    pub head_branch: String,
+    pub head_sha: String,
+    pub base_branch: String,
+    pub change_request_number: Option<u32>,
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub state: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1830,7 +1873,8 @@ pub async fn workspace_git_complete_merge(
         root,
         protected_branch.as_deref(),
         input.forge_login.as_deref(),
-    )?;
+    )
+    .await?;
     Ok(WorkspaceGitCompleteMergeOutput {
         completed: true,
         validation,
@@ -2086,12 +2130,49 @@ async fn refresh_repository_forge_metadata(
     Ok(())
 }
 
-fn push_current_branch(
+pub(crate) async fn push_current_branch(
     db_path: &Path,
     root: &str,
     protected_branch: Option<&str>,
     forge_login: Option<&str>,
 ) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(db_path).map_err(|error| error.to_string())?;
+    if let Some(source) = find_workspace_by_root(&repo, root)
+        .await?
+        .and_then(|workspace| workspace.source)
+    {
+        let remote_tracking_ref =
+            format!("refs/remotes/{}/{}", source.remote_name, source.head_branch);
+        let source_ref = format!("refs/heads/{}", source.head_branch);
+        let refspec = format!("+{source_ref}:{remote_tracking_ref}");
+        let fetch = run_git_network_output_with_workspace_auth(
+            db_path,
+            root,
+            &["fetch", &source.remote_name, &refspec],
+            forge_login,
+        )?;
+        if !fetch.status.success() {
+            return Err(git_output_err("git fetch source branch", &fetch.stderr));
+        }
+        let ancestry = run_git_output(
+            root,
+            &["merge-base", "--is-ancestor", &remote_tracking_ref, "HEAD"],
+        )?;
+        if !ancestry.status.success() {
+            return Err(format!(
+                "The remote branch `{}` changed after this workspace was opened. Sync or merge its latest commits before pushing.",
+                source.head_branch
+            ));
+        }
+        return push_branch_refspec_to_remote(
+            db_path,
+            root,
+            &source.remote_name,
+            &source.head_branch,
+            forge_login,
+        );
+    }
+
     let branch = ensure_pushable_branch(root, protected_branch)?;
     push_branch_refspec(db_path, root, &branch, forge_login)
 }
@@ -2363,6 +2444,7 @@ pub async fn workspace_git_commit_push(
         protected_branch.as_deref(),
         input.forge_login.as_deref(),
     )
+    .await
 }
 
 #[tauri::command]
@@ -2383,6 +2465,7 @@ pub async fn workspace_git_push(
         protected_branch.as_deref(),
         input.forge_login.as_deref(),
     )
+    .await
 }
 
 fn normalize_base_branch_for_sync(value: &str, remote: &str) -> Option<String> {
@@ -3252,6 +3335,528 @@ pub async fn create_workspace_for_repo(
     create_workspace_for_repo_with_repo(&repo, &app, input).await
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ParsedWorkspaceSourceKind {
+    Branch(String),
+    PullRequest(u32),
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedWorkspaceSource {
+    public: WorkspaceSourceUrlResolution,
+    remote_name: String,
+    effective_login: Option<String>,
+}
+
+fn percent_decode_url_path(value: &str) -> Result<String, String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+        if index + 2 >= bytes.len() {
+            return Err("URL contains an invalid percent-encoded path.".to_string());
+        }
+        let hex = std::str::from_utf8(&bytes[index + 1..index + 3])
+            .map_err(|_| "URL contains an invalid percent-encoded path.".to_string())?;
+        let byte = u8::from_str_radix(hex, 16)
+            .map_err(|_| "URL contains an invalid percent-encoded path.".to_string())?;
+        decoded.push(byte);
+        index += 3;
+    }
+    String::from_utf8(decoded).map_err(|_| "URL path is not valid UTF-8.".to_string())
+}
+
+fn parse_workspace_source_url(
+    raw_url: &str,
+    target: &WorkspaceForgeTarget,
+) -> Result<ParsedWorkspaceSourceKind, String> {
+    let url = Url::parse(raw_url.trim())
+        .map_err(|_| "Enter a valid HTTP or HTTPS URL for a branch or pull request.".to_string())?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("Only HTTP or HTTPS branch and pull request URLs are supported.".to_string());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("URLs containing credentials are not supported.".to_string());
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "The URL does not contain a repository host.".to_string())?;
+    if !host.eq_ignore_ascii_case(&target.remote.host) {
+        return Err(format!(
+            "This URL belongs to `{host}`, but the current project uses `{}`.",
+            target.remote.host
+        ));
+    }
+
+    let decoded_path = percent_decode_url_path(url.path())?;
+    let path = decoded_path.trim_matches('/');
+    let repository_path = format!("{}/{}", target.remote.namespace, target.remote.repo);
+    let prefix = format!("{repository_path}/");
+    let suffix = path
+        .strip_prefix(&prefix)
+        .or_else(|| {
+            path.get(..prefix.len())
+                .filter(|candidate| candidate.eq_ignore_ascii_case(&prefix))
+                .and_then(|_| path.get(prefix.len()..))
+        })
+        .ok_or_else(|| {
+            format!("This URL belongs to a different repository. Expected `{repository_path}`.")
+        })?;
+
+    match target.provider {
+        crate::commands::forge_commands::ForgeCliProvider::Github => {
+            if let Some(rest) = suffix.strip_prefix("pull/") {
+                let number = rest
+                    .split('/')
+                    .next()
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .filter(|number| *number > 0)
+                    .ok_or_else(|| "The GitHub pull request number is invalid.".to_string())?;
+                return Ok(ParsedWorkspaceSourceKind::PullRequest(number));
+            }
+            let branch = suffix
+                .strip_prefix("tree/")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    "Use a GitHub branch URL (`/tree/...`) or pull request URL (`/pull/...`)."
+                        .to_string()
+                })?;
+            Ok(ParsedWorkspaceSourceKind::Branch(branch.to_string()))
+        }
+        crate::commands::forge_commands::ForgeCliProvider::Gitlab => {
+            if let Some(rest) = suffix.strip_prefix("-/merge_requests/") {
+                let number = rest
+                    .split('/')
+                    .next()
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .filter(|number| *number > 0)
+                    .ok_or_else(|| "The GitLab merge request number is invalid.".to_string())?;
+                return Ok(ParsedWorkspaceSourceKind::PullRequest(number));
+            }
+            let branch = suffix
+                .strip_prefix("-/tree/")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    "Use a GitLab branch URL (`/-/tree/...`) or merge request URL (`/-/merge_requests/...`)."
+                        .to_string()
+                })?;
+            Ok(ParsedWorkspaceSourceKind::Branch(branch.to_string()))
+        }
+    }
+}
+
+fn parse_remote_heads(output: &[u8]) -> Vec<(String, String)> {
+    let mut heads = String::from_utf8_lossy(output)
+        .lines()
+        .filter_map(|line| {
+            let (sha, reference) = line.split_once('\t')?;
+            let branch = reference.strip_prefix("refs/heads/")?;
+            Some((branch.to_string(), sha.to_string()))
+        })
+        .collect::<Vec<_>>();
+    heads.sort_by(|left, right| left.0.cmp(&right.0));
+    heads.dedup_by(|left, right| left.0 == right.0);
+    heads
+}
+
+fn resolve_branch_from_url_path(
+    url_branch_path: &str,
+    heads: &[(String, String)],
+) -> Result<(String, String), String> {
+    let exact = heads
+        .iter()
+        .find(|(branch, _)| branch == url_branch_path)
+        .cloned()
+        .ok_or_else(|| {
+            "The URL does not resolve to an existing remote branch. File and folder URLs are not accepted."
+                .to_string()
+        })?;
+    let ambiguous = heads.iter().any(|(branch, _)| {
+        branch != &exact.0
+            && exact
+                .0
+                .strip_prefix(branch)
+                .is_some_and(|suffix| suffix.starts_with('/'))
+    });
+    if ambiguous {
+        return Err(
+            "The URL is ambiguous between a branch and a path inside another branch. Copy the branch URL from the forge branch list."
+                .to_string(),
+        );
+    }
+    Ok(exact)
+}
+
+fn json_string(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn resolve_current_commit_sha_for_ref(root: &str, reference: &str) -> Result<String, String> {
+    let output = run_git_output(root, &["rev-parse", "--verify", reference])?;
+    if !output.status.success() {
+        return Err(git_output_err("git rev-parse --verify", &output.stderr));
+    }
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() {
+        return Err(format!("Git did not resolve `{reference}` to a commit."));
+    }
+    Ok(sha)
+}
+
+async fn resolve_workspace_source_url_inner(
+    db_path: &Path,
+    repo: &SqliteWorkspaceRepo,
+    input: &ResolveWorkspaceSourceUrlInput,
+) -> Result<ResolvedWorkspaceSource, String> {
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    let target = resolve_workspace_forge_target(root)?.ok_or_else(|| {
+        "The current project does not have a supported GitHub or GitLab remote.".to_string()
+    })?;
+    let parsed = parse_workspace_source_url(&input.url, &target)?;
+    let forge_context = crate::commands::forge::context::resolve_workspace_forge_context(
+        db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?;
+    let effective_login = forge_context
+        .as_ref()
+        .and_then(|context| context.effective_login.clone());
+    let repository = repo
+        .get_repository(&RepositoryId(root.to_string()))
+        .await
+        .map_err(|error| error.to_string())?;
+    let default_base = repository
+        .as_ref()
+        .map(|repository| repository.base_branch.trim())
+        .filter(|branch| !branch.is_empty())
+        .unwrap_or("main")
+        .to_string();
+    let repository_name = format!("{}/{}", target.remote.namespace, target.remote.repo);
+    let provider = match target.provider {
+        crate::commands::forge_commands::ForgeCliProvider::Github => "github",
+        crate::commands::forge_commands::ForgeCliProvider::Gitlab => "gitlab",
+    }
+    .to_string();
+
+    let public = match parsed {
+        ParsedWorkspaceSourceKind::Branch(url_branch_path) => {
+            let output = run_git_network_output_with_workspace_auth(
+                db_path,
+                root,
+                &["ls-remote", "--heads", &target.remote_name],
+                effective_login.as_deref(),
+            )?;
+            if !output.status.success() {
+                return Err(git_output_err("git ls-remote --heads", &output.stderr));
+            }
+            let heads = parse_remote_heads(&output.stdout);
+            let (head_branch, head_sha) = resolve_branch_from_url_path(&url_branch_path, &heads)?;
+            if head_branch == default_base {
+                return Err(format!(
+                    "`{head_branch}` is the project base branch. Choose a feature branch URL instead."
+                ));
+            }
+            WorkspaceSourceUrlResolution {
+                kind: WorkspaceSourceKind::Branch,
+                url: input.url.trim().to_string(),
+                provider,
+                host: target.remote.host.clone(),
+                repository: repository_name,
+                head_branch,
+                head_sha,
+                base_branch: default_base,
+                change_request_number: None,
+                title: None,
+                author: None,
+                state: None,
+            }
+        }
+        ParsedWorkspaceSourceKind::PullRequest(number) => match target.provider {
+            crate::commands::forge_commands::ForgeCliProvider::Github => {
+                let raw = github::resolve_change_request_url_json(
+                    root,
+                    &target.remote.host,
+                    input.url.trim(),
+                    effective_login.as_deref(),
+                )?;
+                let resolved_number = raw
+                    .get("number")
+                    .and_then(Value::as_u64)
+                    .map(|value| value as u32)
+                    .ok_or_else(|| "GitHub did not return a pull request number.".to_string())?;
+                if resolved_number != number {
+                    return Err("The resolved pull request does not match the URL.".to_string());
+                }
+                let state = json_string(&raw, "state")
+                    .map(|value| value.to_ascii_lowercase())
+                    .unwrap_or_default();
+                if state != "open" {
+                    return Err(
+                        "Only open pull requests can be opened as editable workspaces.".to_string(),
+                    );
+                }
+                let head_repository = raw
+                    .get("headRepository")
+                    .and_then(|value| value.get("nameWithOwner"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+                    .or_else(|| {
+                        let owner = raw
+                            .get("headRepositoryOwner")
+                            .and_then(|value| value.get("login"))
+                            .and_then(Value::as_str)?;
+                        let name = raw
+                            .get("headRepository")
+                            .and_then(|value| value.get("name"))
+                            .and_then(Value::as_str)?;
+                        Some(format!("{owner}/{name}"))
+                    })
+                    .ok_or_else(|| {
+                        "GitHub did not provide enough repository identity to verify the pull request source."
+                            .to_string()
+                    })?;
+                if !head_repository.eq_ignore_ascii_case(&repository_name) {
+                    return Err(
+                        "Pull requests from forks are not supported in editable workspaces yet."
+                            .to_string(),
+                    );
+                }
+                WorkspaceSourceUrlResolution {
+                    kind: WorkspaceSourceKind::PullRequest,
+                    url: json_string(&raw, "url").unwrap_or_else(|| input.url.trim().to_string()),
+                    provider,
+                    host: target.remote.host.clone(),
+                    repository: repository_name,
+                    head_branch: json_string(&raw, "headRefName").ok_or_else(|| {
+                        "GitHub did not return the pull request branch.".to_string()
+                    })?,
+                    head_sha: json_string(&raw, "headRefOid").ok_or_else(|| {
+                        "GitHub did not return the pull request head commit.".to_string()
+                    })?,
+                    base_branch: json_string(&raw, "baseRefName").unwrap_or(default_base),
+                    change_request_number: Some(number),
+                    title: json_string(&raw, "title"),
+                    author: raw
+                        .get("author")
+                        .and_then(|value| value.get("login"))
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string),
+                    state: Some(state),
+                }
+            }
+            crate::commands::forge_commands::ForgeCliProvider::Gitlab => {
+                let raw = gitlab::resolve_change_request_url_json(
+                    root,
+                    &target,
+                    number,
+                    effective_login.as_deref(),
+                )?;
+                let source_project = raw.get("source_project_id").and_then(Value::as_u64);
+                let target_project = raw.get("target_project_id").and_then(Value::as_u64);
+                let (source_project, target_project) =
+                    source_project.zip(target_project).ok_or_else(|| {
+                        "GitLab did not provide enough project identity to verify the merge request source."
+                            .to_string()
+                    })?;
+                if source_project != target_project {
+                    return Err(
+                        "Merge requests from forks are not supported in editable workspaces yet."
+                            .to_string(),
+                    );
+                }
+                let state = json_string(&raw, "state")
+                    .map(|value| value.to_ascii_lowercase())
+                    .unwrap_or_default();
+                if state != "opened" && state != "open" {
+                    return Err(
+                        "Only open merge requests can be opened as editable workspaces."
+                            .to_string(),
+                    );
+                }
+                let head_sha = json_string(&raw, "sha")
+                    .or_else(|| {
+                        raw.get("diff_refs")
+                            .and_then(|value| value.get("head_sha"))
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string)
+                    })
+                    .ok_or_else(|| {
+                        "GitLab did not return the merge request head commit.".to_string()
+                    })?;
+                WorkspaceSourceUrlResolution {
+                    kind: WorkspaceSourceKind::PullRequest,
+                    url: json_string(&raw, "web_url")
+                        .unwrap_or_else(|| input.url.trim().to_string()),
+                    provider,
+                    host: target.remote.host.clone(),
+                    repository: repository_name,
+                    head_branch: json_string(&raw, "source_branch").ok_or_else(|| {
+                        "GitLab did not return the merge request branch.".to_string()
+                    })?,
+                    head_sha,
+                    base_branch: json_string(&raw, "target_branch").unwrap_or(default_base),
+                    change_request_number: Some(number),
+                    title: json_string(&raw, "title"),
+                    author: raw
+                        .get("author")
+                        .and_then(|value| value.get("username"))
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string),
+                    state: Some("open".to_string()),
+                }
+            }
+        },
+    };
+
+    Ok(ResolvedWorkspaceSource {
+        public,
+        remote_name: target.remote_name,
+        effective_login,
+    })
+}
+
+#[tauri::command]
+pub async fn resolve_workspace_source_url(
+    state: State<'_, WorkspaceCommandState>,
+    input: ResolveWorkspaceSourceUrlInput,
+) -> Result<WorkspaceSourceUrlResolution, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    Ok(
+        resolve_workspace_source_url_inner(&state.db_path, &repo, &input)
+            .await?
+            .public,
+    )
+}
+
+#[tauri::command]
+pub async fn create_workspace_from_source_url(
+    state: State<'_, WorkspaceCommandState>,
+    app: AppHandle,
+    input: CreateWorkspaceFromSourceUrlInput,
+) -> Result<CreateWorkspaceForRepoOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim().to_string();
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let repository_id = RepositoryId(root.clone());
+    let existing_repository = repo
+        .get_repository(&repository_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            "The project must already be open in DCC before importing a branch or pull request."
+                .to_string()
+        })?;
+    if existing_repository.project_id != input.project_id {
+        return Err("The URL must be opened from the matching DCC project.".to_string());
+    }
+
+    let resolved = resolve_workspace_source_url_inner(
+        &state.db_path,
+        &repo,
+        &ResolveWorkspaceSourceUrlInput {
+            workspace_root: root.clone(),
+            url: input.url.clone(),
+            forge_login: input.forge_login.clone(),
+        },
+    )
+    .await?;
+
+    let source_ref = format!("refs/heads/{}", resolved.public.head_branch);
+    let tracking_ref = format!(
+        "refs/remotes/{}/{}",
+        resolved.remote_name, resolved.public.head_branch
+    );
+    let refspec = format!("+{source_ref}:{tracking_ref}");
+    let fetch = run_git_network_output_with_workspace_auth(
+        &state.db_path,
+        &root,
+        &["fetch", &resolved.remote_name, &refspec],
+        resolved.effective_login.as_deref(),
+    )?;
+    if !fetch.status.success() {
+        return Err(git_output_err("git fetch branch", &fetch.stderr));
+    }
+    let fetched_sha = resolve_current_commit_sha_for_ref(&root, &tracking_ref)?;
+
+    let workspace_name = input
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| resolved.public.title.clone())
+        .or_else(|| Some(resolved.public.head_branch.clone()));
+    let git = CommandGitOps::new();
+    let events = TauriEventBus::new(app.clone());
+    let mut prepared = run_prepare_workspace_for_repo(
+        &git,
+        &events,
+        CreateWorkspaceForRepoInput {
+            project_id: input.project_id,
+            workspace_root: root,
+            base_branch: tracking_ref,
+            name: workspace_name,
+        },
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    prepared.workspace.base_branch = resolved.public.base_branch.clone();
+    prepared.workspace.source = Some(WorkspaceSource {
+        kind: resolved.public.kind,
+        url: resolved.public.url,
+        provider: resolved.public.provider,
+        remote_name: resolved.remote_name,
+        head_branch: resolved.public.head_branch,
+        head_sha: fetched_sha,
+        base_branch: resolved.public.base_branch,
+        change_request_number: resolved.public.change_request_number,
+        title: resolved.public.title,
+        author: resolved.public.author,
+    });
+    let finalized = run_finalize_workspace_for_repo(&repo, &events, prepared)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut workspace = finalized.workspace;
+
+    let mut repository = existing_repository;
+    repository.base_branch = workspace.base_branch.clone();
+    repository.updated_at = Utc::now().to_rfc3339();
+    repo.save_repository(&repository)
+        .await
+        .map_err(|error| error.to_string())?;
+    refresh_repository_forge_metadata(&repo, &workspace).await?;
+
+    let setup_hints = collect_workspace_setup_hints(&workspace);
+    let setup_report = execute_workspace_setup_report(&workspace).await;
+    let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
+    let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
+    persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
+
+    Ok(CreateWorkspaceForRepoOutput {
+        workspace,
+        setup_hints,
+        setup_report,
+    })
+}
+
 async fn create_workspace_for_repo_with_repo(
     repo: &SqliteWorkspaceRepo,
     app: &AppHandle,
@@ -3832,6 +4437,57 @@ mod editor_workspace_file_tests {
             base_branch: "main".to_string(),
             name: None,
         }
+    }
+
+    fn forge_target(
+        provider: crate::commands::forge_commands::ForgeCliProvider,
+    ) -> WorkspaceForgeTarget {
+        WorkspaceForgeTarget {
+            provider,
+            remote_name: "origin".to_string(),
+            remote: crate::commands::forge::remote::parse_remote(
+                "https://github.com/acme/widgets.git",
+            )
+            .expect("parsed remote"),
+        }
+    }
+
+    #[test]
+    fn source_url_parser_accepts_only_the_current_github_repository() {
+        let target = forge_target(crate::commands::forge_commands::ForgeCliProvider::Github);
+        assert_eq!(
+            parse_workspace_source_url("https://github.com/acme/widgets/pull/42", &target)
+                .expect("pull request URL"),
+            ParsedWorkspaceSourceKind::PullRequest(42)
+        );
+        assert_eq!(
+            parse_workspace_source_url(
+                "https://github.com/acme/widgets/tree/feature/review",
+                &target,
+            )
+            .expect("branch URL"),
+            ParsedWorkspaceSourceKind::Branch("feature/review".to_string())
+        );
+        assert!(
+            parse_workspace_source_url("https://github.com/acme/other/pull/42", &target).is_err()
+        );
+    }
+
+    #[test]
+    fn source_branch_resolution_rejects_path_ambiguity() {
+        let heads = vec![
+            ("feature".to_string(), "111".to_string()),
+            ("feature/docs".to_string(), "222".to_string()),
+        ];
+        assert!(resolve_branch_from_url_path("feature/docs", &heads).is_err());
+        assert_eq!(
+            resolve_branch_from_url_path(
+                "feature/docs",
+                &[("feature/docs".to_string(), "222".to_string())],
+            )
+            .expect("unambiguous branch"),
+            ("feature/docs".to_string(), "222".to_string())
+        );
     }
 
     #[test]

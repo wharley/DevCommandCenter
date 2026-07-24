@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::commands::forge::accounts::{AuthCheck, ForgeCliAccountProfile, RepoAccess};
 use crate::commands::forge::resolve_cli_binary;
+use dcc_infra::git::git_output_err;
 
 #[derive(Debug, Clone)]
 pub(crate) struct GithubCliAuthStatus {
@@ -702,6 +703,31 @@ pub(crate) fn resolve_change_request_json(
     Ok(pr.cloned())
 }
 
+pub(crate) fn resolve_change_request_url_json(
+    root: &str,
+    host: &str,
+    url: &str,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let gh = resolve_cli_binary("gh")?;
+    let auth = resolve_auth_context(host, login)?;
+    let json_fields = "number,title,url,state,isDraft,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,author";
+    let mut command = Command::new(gh);
+    command.current_dir(root);
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let output = command
+        .args(["pr", "view", url, "--json", json_fields])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(git_output_err("gh pr view", &output.stderr));
+    }
+    serde_json::from_slice::<Value>(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitHub pull request: {error}"))
+}
+
 pub(crate) fn view_change_request_web(
     root: &str,
     host: &str,
@@ -727,6 +753,29 @@ pub(crate) fn view_change_request_web(
     ))
 }
 
+pub(crate) fn view_change_request_url_web(
+    root: &str,
+    host: &str,
+    url: &str,
+    login: Option<&str>,
+) -> Result<(), String> {
+    let gh = resolve_cli_binary("gh")?;
+    let auth = resolve_auth_context(host, login)?;
+    let mut command = Command::new(gh);
+    command.current_dir(root);
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let output = command
+        .args(["pr", "view", url, "--web"])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(git_output_err("gh pr view --web", &output.stderr))
+}
+
 pub(crate) fn merge_change_request(
     root: &str,
     host: &str,
@@ -750,6 +799,29 @@ pub(crate) fn merge_change_request(
         "gh pr merge failed: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     ))
+}
+
+pub(crate) fn merge_change_request_url(
+    root: &str,
+    host: &str,
+    url: &str,
+    login: Option<&str>,
+) -> Result<(), String> {
+    let gh = resolve_cli_binary("gh")?;
+    let auth = resolve_auth_context(host, login)?;
+    let mut command = Command::new(gh);
+    command.current_dir(root);
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let output = command
+        .args(["pr", "merge", url, "--merge"])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(git_output_err("gh pr merge", &output.stderr))
 }
 
 pub(crate) fn create_change_request(

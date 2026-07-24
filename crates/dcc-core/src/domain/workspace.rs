@@ -24,6 +24,28 @@ pub enum WorkspaceSetupStatus {
     Failed,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceSourceKind {
+    Branch,
+    PullRequest,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSource {
+    pub kind: WorkspaceSourceKind,
+    pub url: String,
+    pub provider: String,
+    pub remote_name: String,
+    pub head_branch: String,
+    pub head_sha: String,
+    pub base_branch: String,
+    pub change_request_number: Option<u32>,
+    pub title: Option<String>,
+    pub author: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSetupStepReport {
@@ -51,6 +73,7 @@ pub struct Workspace {
     pub root_path: String,
     pub base_branch: String,
     pub worktree_path: Option<String>,
+    pub source: Option<WorkspaceSource>,
     pub state: WorkspaceState,
     pub setup_report: Option<WorkspaceSetupReport>,
     pub created_at: String,

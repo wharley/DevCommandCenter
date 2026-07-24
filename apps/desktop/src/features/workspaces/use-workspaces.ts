@@ -6,6 +6,7 @@ import {
 	archiveWorkspaceBundle as apiArchiveWorkspaceBundle,
 	createWorkspaceBundleForRepos,
 	createWorkspaceForRepo,
+	createWorkspaceFromSourceUrl as apiCreateWorkspaceFromSourceUrl,
 	createWorkspaceFromUrl,
 	deleteWorkspace as apiDeleteWorkspace,
 	deleteWorkspaceBundle as apiDeleteWorkspaceBundle,
@@ -15,6 +16,7 @@ import {
 import type {
 	CreateWorkspaceForRepoInput,
 	CreateWorkspaceBundleForReposInput,
+	CreateWorkspaceFromSourceUrlInput,
 	CreateWorkspaceFromUrlInput,
 	Workspace,
 	WorkspaceBundleSummary,
@@ -129,8 +131,12 @@ export function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
 
 	return {
 		id: workspace.id,
-		name: workspace.name ?? workspace.baseBranch,
-		branch: workspace.baseBranch,
+		name:
+			workspace.name ??
+			workspace.source?.title ??
+			workspace.source?.headBranch ??
+			workspace.baseBranch,
+		branch: workspace.source?.headBranch ?? workspace.baseBranch,
 		status,
 		projectId: workspace.projectId,
 		rootPath: workspace.rootPath,
@@ -245,6 +251,35 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 			setIsCreatingWorkspace(false);
 		}
 	}, []);
+
+	const createWorkspaceFromSourceUrl = useCallback(
+		async (input: CreateWorkspaceFromSourceUrlInput) => {
+			setIsCreatingWorkspace(true);
+			try {
+				const result = await apiCreateWorkspaceFromSourceUrl(input);
+				const summary = workspaceToSummary(result.workspace);
+				setOptimisticCreated((current) => [
+					summary,
+					...current.filter((workspace) => workspace.id !== summary.id),
+				]);
+				setHiddenWorkspaceIds((current) =>
+					current.includes(summary.id)
+						? current.filter((workspaceId) => workspaceId !== summary.id)
+						: current,
+				);
+				setStatusOverrides((current) => removeStatusOverrides(current, [summary.id]));
+				setSelectedWorkspaceId(summary.id);
+				return {
+					workspace: summary,
+					setupHints: result.setupHints,
+					setupReport: result.setupReport,
+				} satisfies WorkspaceCreationResult;
+			} finally {
+				setIsCreatingWorkspace(false);
+			}
+		},
+		[],
+	);
 
 	const createWorkspaceBundle = useCallback(
 		async (input: CreateWorkspaceBundleForReposInput) => {
@@ -419,6 +454,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 		archiveWorkspace,
 		cloneWorkspaceFromUrl,
 		createWorkspace,
+		createWorkspaceFromSourceUrl,
 		createWorkspaceBundle,
 		deleteWorkspace,
 		deleteWorkspaces,
