@@ -263,6 +263,7 @@ sections or issuing additional provider requests.
 10. Recovery actions.
 11. Derived state and Delivery Status UX.
 12. Project policy and secondary Delivery Status signals.
+13. Opt-in authenticated delivery smoke harness.
 
 ## Progress
 
@@ -310,7 +311,11 @@ Updated July 24, 2026:
 - [x] Secondary Delivery Status signals available through compact expansion.
 - [x] Project-specific delivery policy and secondary signal details.
 - [x] Delivery Status.
+- [x] Opt-in authenticated smoke harness for GitHub forks and GitLab forks,
+  review rules, pipeline jobs, bounded logs, and explicitly confirmed retry.
+- [x] Authenticated, read-only GitLab MR adapter smoke test.
 
 Next slice: authenticated fork, job-log/retry, and review-rule smoke tests when
-real cases are available, without creating or changing external state solely
-for testing.
+real cases are available. The commands and safety requirements are documented
+in [Authenticated Delivery Smoke Tests](AUTHENTICATED_DELIVERY_SMOKE_TESTS.md);
+no external state should be created solely for testing.

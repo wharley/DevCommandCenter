@@ -1683,7 +1683,7 @@ pub async fn workspace_pipeline_job_retry(
         .iter()
         .find(|job| job.id == input.job_id)
         .ok_or_else(|| "The selected job does not belong to the current pipeline.".to_string())?;
-    if !gitlab_job_is_retryable(job) {
+    if !job.is_retryable() {
         return Err("GitLab does not expose retry for this job state.".to_string());
     }
 
@@ -1746,11 +1746,6 @@ fn resolve_pipeline_action_context(
     Ok((forge_context, pipeline, jobs))
 }
 
-fn gitlab_job_is_retryable(job: &crate::commands::forge::gitlab::GitlabPipelineJob) -> bool {
-    !job.archived.unwrap_or(false)
-        && matches!(job.status.as_str(), "failed" | "canceled" | "success")
-}
-
 fn map_gitlab_pipeline(
     pipeline: crate::commands::forge::gitlab::GitlabPipeline,
     jobs: Vec<crate::commands::forge::gitlab::GitlabPipelineJob>,
@@ -1771,7 +1766,7 @@ fn map_gitlab_pipeline(
         jobs: jobs
             .into_iter()
             .map(|job| {
-                let retryable = gitlab_job_is_retryable(&job);
+                let retryable = job.is_retryable();
                 WorkspacePipelineJob {
                     id: job.id,
                     name: job.name,
@@ -1904,10 +1899,7 @@ fn map_gitlab_review_comments(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        gitlab_job_is_retryable, map_github_review_state, map_gitlab_review_comments,
-        map_gitlab_review_state,
-    };
+    use super::{map_github_review_state, map_gitlab_review_comments, map_gitlab_review_state};
     use crate::commands::forge::gitlab::{
         GitlabApproval, GitlabApprovals, GitlabDiscussion, GitlabDiscussionAuthor,
         GitlabDiscussionLinePosition, GitlabDiscussionLineRange, GitlabDiscussionNote,
@@ -2008,10 +2000,10 @@ mod tests {
 
     #[test]
     fn only_completed_non_archived_jobs_are_retryable() {
-        assert!(gitlab_job_is_retryable(&pipeline_job("failed", false)));
-        assert!(gitlab_job_is_retryable(&pipeline_job("success", false)));
-        assert!(!gitlab_job_is_retryable(&pipeline_job("running", false)));
-        assert!(!gitlab_job_is_retryable(&pipeline_job("failed", true)));
+        assert!(pipeline_job("failed", false).is_retryable());
+        assert!(pipeline_job("success", false).is_retryable());
+        assert!(!pipeline_job("running", false).is_retryable());
+        assert!(!pipeline_job("failed", true).is_retryable());
     }
 
     #[test]

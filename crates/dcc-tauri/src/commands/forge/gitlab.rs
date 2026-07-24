@@ -137,6 +137,11 @@ impl GitlabPipelineJob {
             .find(|artifact| artifact.file_type.as_deref() == Some("trace"))
             .and_then(|artifact| artifact.size)
     }
+
+    pub(crate) fn is_retryable(&self) -> bool {
+        !self.archived.unwrap_or(false)
+            && matches!(self.status.as_str(), "failed" | "canceled" | "success")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1342,11 +1347,88 @@ pub(crate) fn create_change_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_glab_token, parse_glab_authenticated_hosts, parse_glab_logged_in_pairs,
-        parse_project_push_permission, sanitize_job_trace, GitlabJobArtifact, GitlabPipelineJob,
+        extract_glab_token, list_pipeline_jobs, load_merge_request_review,
+        parse_glab_authenticated_hosts, parse_glab_logged_in_pairs, parse_project_push_permission,
+        pipeline_by_id, read_job_trace, resolve_project_json, retry_job, sanitize_job_trace,
+        GitlabJobArtifact, GitlabPipelineJob, JOB_TRACE_LIMIT_BYTES,
     };
 
     use crate::commands::forge::accounts::RepoAccess;
+    use std::env;
+
+    struct GitlabSmokeFixture {
+        root: String,
+        host: String,
+        namespace: String,
+        repo: String,
+        login: Option<String>,
+    }
+
+    impl GitlabSmokeFixture {
+        fn from_env() -> Self {
+            let repository = required_smoke_env("DCC_SMOKE_GITLAB_REPOSITORY");
+            let (namespace, repo) = repository.rsplit_once('/').unwrap_or_else(|| {
+                panic!("DCC_SMOKE_GITLAB_REPOSITORY must use namespace/repository")
+            });
+            Self {
+                root: env::current_dir()
+                    .expect("resolve current directory")
+                    .to_string_lossy()
+                    .to_string(),
+                host: optional_smoke_env("DCC_SMOKE_GITLAB_HOST")
+                    .unwrap_or_else(|| "gitlab.com".to_string()),
+                namespace: namespace.to_string(),
+                repo: repo.to_string(),
+                login: optional_smoke_env("DCC_SMOKE_GITLAB_LOGIN"),
+            }
+        }
+
+        fn merge_request_iid(&self) -> u32 {
+            required_smoke_env("DCC_SMOKE_GITLAB_MR_IID")
+                .parse()
+                .expect("DCC_SMOKE_GITLAB_MR_IID must be a positive integer")
+        }
+
+        fn pipeline_id(&self) -> u64 {
+            required_smoke_env("DCC_SMOKE_GITLAB_PIPELINE_ID")
+                .parse()
+                .expect("DCC_SMOKE_GITLAB_PIPELINE_ID must be a positive integer")
+        }
+    }
+
+    fn required_smoke_env(name: &str) -> String {
+        optional_smoke_env(name).unwrap_or_else(|| panic!("{name} is required for this smoke test"))
+    }
+
+    fn optional_smoke_env(name: &str) -> Option<String> {
+        env::var(name)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    }
+
+    fn load_smoke_review(fixture: &GitlabSmokeFixture) -> super::GitlabMergeRequestReview {
+        load_merge_request_review(
+            &fixture.root,
+            &fixture.host,
+            &fixture.namespace,
+            &fixture.repo,
+            fixture.merge_request_iid(),
+            fixture.login.as_deref(),
+        )
+        .expect("load GitLab merge request through the DCC adapter")
+    }
+
+    fn assert_open_smoke_review(review: &super::GitlabMergeRequestReview) {
+        assert_eq!(
+            review
+                .detail
+                .get("state")
+                .and_then(serde_json::Value::as_str),
+            Some("opened"),
+            "the configured merge request is not open"
+        );
+    }
 
     #[test]
     fn parses_gitlab_logged_in_pairs() {
@@ -1438,5 +1520,179 @@ self.gitlab.example.com\n  ✓ Logged in to self.gitlab.example.com as team-user
             }],
         };
         assert_eq!(job.trace_size(), Some(42));
+    }
+
+    #[test]
+    #[ignore = "requires an authenticated glab CLI and an open GitLab MR fixture"]
+    fn authenticated_smoke_gitlab_open_merge_request() {
+        let fixture = GitlabSmokeFixture::from_env();
+        let review = load_smoke_review(&fixture);
+        assert_open_smoke_review(&review);
+        assert!(review
+            .detail
+            .get("sha")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|sha| !sha.is_empty()));
+        assert!(review.approvals.is_some());
+    }
+
+    #[test]
+    #[ignore = "requires an authenticated glab CLI and an open cross-project MR fixture"]
+    fn authenticated_smoke_gitlab_fork_merge_request() {
+        let fixture = GitlabSmokeFixture::from_env();
+        let review = load_smoke_review(&fixture);
+        assert_open_smoke_review(&review);
+        let source_project = review
+            .detail
+            .get("source_project_id")
+            .and_then(serde_json::Value::as_u64)
+            .expect("source_project_id");
+        let target_project = review
+            .detail
+            .get("target_project_id")
+            .and_then(serde_json::Value::as_u64)
+            .expect("target_project_id");
+        assert_ne!(
+            source_project, target_project,
+            "the configured MR is not a fork"
+        );
+        let source = resolve_project_json(
+            &fixture.root,
+            &fixture.host,
+            source_project,
+            fixture.login.as_deref(),
+        )
+        .expect("resolve fork project through the DCC adapter");
+        assert!(source
+            .get("path_with_namespace")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|path| !path.is_empty()));
+        assert!(source
+            .get("http_url_to_repo")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| {
+                source
+                    .get("ssh_url_to_repo")
+                    .and_then(serde_json::Value::as_str)
+            })
+            .is_some_and(|url| !url.is_empty()));
+    }
+
+    #[test]
+    #[ignore = "requires an authenticated glab CLI and an open MR with approval rules"]
+    fn authenticated_smoke_gitlab_review_rules() {
+        let fixture = GitlabSmokeFixture::from_env();
+        let review = load_smoke_review(&fixture);
+        assert_open_smoke_review(&review);
+        let approvals = review.approvals.expect("GitLab approvals response");
+        assert!(
+            approvals.approvals_required.unwrap_or(0) > 0,
+            "the configured MR has no approval requirement"
+        );
+        assert!(approvals.approvals_left.is_some());
+    }
+
+    #[test]
+    #[ignore = "requires an authenticated glab CLI and a pipeline with retained jobs"]
+    fn authenticated_smoke_gitlab_pipeline_job_log() {
+        let fixture = GitlabSmokeFixture::from_env();
+        let pipeline_id = fixture.pipeline_id();
+        let pipeline = pipeline_by_id(
+            &fixture.root,
+            &fixture.host,
+            &fixture.namespace,
+            &fixture.repo,
+            pipeline_id,
+            fixture.login.as_deref(),
+        )
+        .expect("load GitLab pipeline through the DCC adapter");
+        assert_eq!(pipeline.id, pipeline_id);
+        assert!(!pipeline.sha.is_empty());
+
+        let jobs = list_pipeline_jobs(
+            &fixture.root,
+            &fixture.host,
+            &fixture.namespace,
+            &fixture.repo,
+            pipeline_id,
+            fixture.login.as_deref(),
+        )
+        .expect("load GitLab pipeline jobs through the DCC adapter");
+        assert!(
+            !jobs.is_empty(),
+            "the configured pipeline has no retained jobs"
+        );
+        let requested_job_id = optional_smoke_env("DCC_SMOKE_GITLAB_JOB_ID").map(|value| {
+            value
+                .parse::<u64>()
+                .expect("DCC_SMOKE_GITLAB_JOB_ID must be a positive integer")
+        });
+        let job = match requested_job_id {
+            Some(job_id) => jobs
+                .iter()
+                .find(|job| job.id == job_id)
+                .expect("the exact configured job does not belong to the pipeline"),
+            None => jobs
+                .iter()
+                .find(|job| job.is_retryable())
+                .expect("no completed, non-archived job is available"),
+        };
+        assert!(job.is_retryable(), "the configured job is not retryable");
+        let trace = read_job_trace(
+            &fixture.root,
+            &fixture.host,
+            &fixture.namespace,
+            &fixture.repo,
+            job.id,
+            job.trace_size(),
+            fixture.login.as_deref(),
+        )
+        .expect("load GitLab job log through the DCC adapter");
+        assert!(trace.loaded_bytes > 0, "the configured job log is empty");
+        assert!(trace.loaded_bytes <= JOB_TRACE_LIMIT_BYTES as u64);
+        assert!(!trace.content.contains('\u{1b}'));
+        assert!(!trace.content.contains("section_start:"));
+        assert!(!trace.content.contains("section_end:"));
+    }
+
+    #[test]
+    #[ignore = "mutates GitLab by retrying the exact configured job"]
+    fn authenticated_smoke_gitlab_job_retry() {
+        assert_eq!(
+            optional_smoke_env("DCC_SMOKE_GITLAB_ALLOW_RETRY").as_deref(),
+            Some("retry-this-exact-job"),
+            "set DCC_SMOKE_GITLAB_ALLOW_RETRY=retry-this-exact-job to confirm the mutation"
+        );
+        let fixture = GitlabSmokeFixture::from_env();
+        let pipeline_id = fixture.pipeline_id();
+        let job_id = required_smoke_env("DCC_SMOKE_GITLAB_JOB_ID")
+            .parse::<u64>()
+            .expect("DCC_SMOKE_GITLAB_JOB_ID must be a positive integer");
+        let jobs = list_pipeline_jobs(
+            &fixture.root,
+            &fixture.host,
+            &fixture.namespace,
+            &fixture.repo,
+            pipeline_id,
+            fixture.login.as_deref(),
+        )
+        .expect("load GitLab pipeline jobs before retry");
+        let job = jobs
+            .iter()
+            .find(|job| job.id == job_id)
+            .expect("the exact configured job does not belong to the pipeline");
+        assert!(job.is_retryable(), "the configured job is not retryable");
+
+        let retried = retry_job(
+            &fixture.root,
+            &fixture.host,
+            &fixture.namespace,
+            &fixture.repo,
+            job_id,
+            fixture.login.as_deref(),
+        )
+        .expect("retry GitLab job through the DCC adapter");
+        assert!(retried.id > 0);
+        assert_ne!(retried.id, job_id);
     }
 }

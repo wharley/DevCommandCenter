@@ -941,10 +941,19 @@ pub(crate) fn create_change_request(
 mod tests {
     use super::{
         parse_github_active_login_for_host, parse_github_authenticated_hosts,
-        parse_github_logins_for_host, parse_repo_push_permission,
+        parse_github_logins_for_host, parse_repo_push_permission, resolve_change_request_url_json,
     };
 
     use crate::commands::forge::accounts::RepoAccess;
+    use std::env;
+
+    fn required_smoke_env(name: &str) -> String {
+        env::var(name)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| panic!("{name} is required for this smoke test"))
+    }
 
     #[test]
     fn parses_active_github_login_from_json() {
@@ -1018,5 +1027,62 @@ mod tests {
             parse_repo_push_permission(payload).unwrap(),
             RepoAccess::Probable
         );
+    }
+
+    #[test]
+    #[ignore = "requires an authenticated gh CLI and an open cross-repository PR fixture"]
+    fn authenticated_smoke_github_fork_pull_request() {
+        let url = required_smoke_env("DCC_SMOKE_GITHUB_PR_URL");
+        let target_repository =
+            required_smoke_env("DCC_SMOKE_GITHUB_TARGET_REPOSITORY").to_ascii_lowercase();
+        let host = env::var("DCC_SMOKE_GITHUB_HOST")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "github.com".to_string());
+        let login = env::var("DCC_SMOKE_GITHUB_LOGIN")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let root = env::current_dir().expect("resolve current directory");
+        let pull_request = resolve_change_request_url_json(
+            root.to_string_lossy().as_ref(),
+            &host,
+            &url,
+            login.as_deref(),
+        )
+        .expect("load GitHub pull request through the DCC adapter");
+        assert_eq!(
+            pull_request
+                .get("state")
+                .and_then(serde_json::Value::as_str),
+            Some("OPEN")
+        );
+        let head_repository = pull_request
+            .get("headRepository")
+            .and_then(|value| value.get("nameWithOwner"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string)
+            .or_else(|| {
+                let owner = pull_request
+                    .get("headRepositoryOwner")
+                    .and_then(|value| value.get("login"))
+                    .and_then(serde_json::Value::as_str)?;
+                let name = pull_request
+                    .get("headRepository")
+                    .and_then(|value| value.get("name"))
+                    .and_then(serde_json::Value::as_str)?;
+                Some(format!("{owner}/{name}"))
+            })
+            .expect("GitHub head repository identity");
+        assert_ne!(
+            head_repository.to_ascii_lowercase(),
+            target_repository,
+            "the configured PR is not a fork"
+        );
+        assert!(pull_request
+            .get("headRefOid")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|sha| !sha.is_empty()));
     }
 }
