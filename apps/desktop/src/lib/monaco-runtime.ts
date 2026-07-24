@@ -67,7 +67,7 @@ export type DiffAnnotationPayload = {
 };
 
 export type DiffMachineAnnotation = {
-	source: "coderabbit" | "github-review";
+	source: "coderabbit" | "forge-review";
 	id?: string;
 	severity: "critical" | "major" | "minor" | "trivial" | "info" | "unknown";
 	side: "original" | "modified";
@@ -439,8 +439,8 @@ function createDiffMachineAnnotationController(
 	): Monaco.editor.IModelDeltaDecoration => {
 		const startLine = Math.max(1, Math.floor(annotation.startLine));
 		const endLine = Math.max(startLine, Math.floor(annotation.endLine));
-		const isReviewComment = annotation.source === "github-review";
-		const label = isReviewComment ? "GitHub review" : "CodeRabbit";
+		const isReviewComment = annotation.source === "forge-review";
+		const label = isReviewComment ? "Code review" : "CodeRabbit";
 		return {
 			range: new monaco.Range(startLine, 1, endLine, 1),
 			options: {
@@ -461,7 +461,7 @@ function createDiffMachineAnnotationController(
 	) =>
 		activeAnnotations.find(
 			(annotation) =>
-				annotation.source === "github-review" &&
+				annotation.source === "forge-review" &&
 				annotation.side === side &&
 				lineNumber >= Math.max(1, Math.floor(annotation.startLine)) &&
 				lineNumber <= Math.max(1, Math.floor(annotation.endLine)),
@@ -494,7 +494,7 @@ function createDiffMachineAnnotationController(
 		});
 
 	const addReviewCommentWidget = (annotation: DiffMachineAnnotation) => {
-		if (!onClick || annotation.source !== "github-review") {
+		if (!onClick || annotation.source !== "forge-review") {
 			return;
 		}
 		const editor =

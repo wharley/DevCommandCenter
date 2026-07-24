@@ -606,6 +606,15 @@ export function CreateWorkspaceDialog({
 									<p className="mt-1 break-all font-mono text-muted-foreground">
 										{sourceResolution.headBranch} → {sourceResolution.baseBranch}
 									</p>
+									{sourceResolution.isCrossRepository ? (
+										<p className="mt-1 text-muted-foreground">
+											{t("workspaceDialog.forkSource", {
+												repository:
+													sourceResolution.sourceRepository ??
+													sourceResolution.repository,
+											})}
+										</p>
+									) : null}
 								</div>
 							) : null}
 						</div>

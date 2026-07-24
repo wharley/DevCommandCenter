@@ -94,6 +94,10 @@ import type {
 	WorkspacePrReviewCommentsOutput,
 	WorkspacePrStatusInput,
 	WorkspacePrStatusOutput,
+	WorkspacePipelineJobInput,
+	WorkspacePipelineJobLogOutput,
+	WorkspacePipelineStatusInput,
+	WorkspacePipelineStatusOutput,
 	WorkspaceRunSetupInput,
 	WorkspaceRunSetupOutput,
 	WorkspaceBundleStateOutput,
@@ -547,6 +551,24 @@ export function workspacePrReviewComments(input: WorkspacePrReviewCommentsInput)
 		WORKSPACE_METHODS.workspacePrReviewComments,
 		{ input },
 	);
+}
+
+export function workspacePipelineStatus(input: WorkspacePipelineStatusInput) {
+	return invoke<WorkspacePipelineStatusOutput>(
+		WORKSPACE_METHODS.workspacePipelineStatus,
+		{ input },
+	);
+}
+
+export function workspacePipelineJobLog(input: WorkspacePipelineJobInput) {
+	return invoke<WorkspacePipelineJobLogOutput>(
+		WORKSPACE_METHODS.workspacePipelineJobLog,
+		{ input },
+	);
+}
+
+export function workspacePipelineJobRetry(input: WorkspacePipelineJobInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspacePipelineJobRetry, { input });
 }
 
 export function workspaceGitBranchDiff(input: WorkspaceGitBranchDiffInput) {

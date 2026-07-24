@@ -191,9 +191,9 @@ pub struct WorkspacePrReviewCommentAuthor {
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePrReviewComment {
-    pub id: i64,
-    pub parent_id: Option<i64>,
-    pub thread_id: i64,
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub thread_id: String,
     pub path: String,
     pub body: String,
     pub diff_hunk: Option<String>,
@@ -206,6 +206,9 @@ pub struct WorkspacePrReviewComment {
     pub author: Option<WorkspacePrReviewCommentAuthor>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
+    pub resolvable: Option<bool>,
+    pub resolved: Option<bool>,
+    pub outdated: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -216,6 +219,74 @@ pub struct WorkspacePrReviewCommentsOutput {
     pub number: Option<u32>,
     pub url: Option<String>,
     pub comments: Vec<WorkspacePrReviewComment>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePipelineStatusInput {
+    pub workspace_root: String,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePipelineJobInput {
+    pub workspace_root: String,
+    pub pipeline_id: u64,
+    pub job_id: u64,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePipelineJob {
+    pub id: u64,
+    pub name: String,
+    pub stage: String,
+    pub status: String,
+    pub duration: Option<f64>,
+    pub queued_duration: Option<f64>,
+    pub web_url: Option<String>,
+    pub allow_failure: bool,
+    pub archived: bool,
+    pub retryable: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePipeline {
+    pub id: u64,
+    pub sha: String,
+    pub ref_name: Option<String>,
+    pub status: String,
+    pub source: Option<String>,
+    pub web_url: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub duration: Option<f64>,
+    pub queued_duration: Option<f64>,
+    pub jobs: Vec<WorkspacePipelineJob>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePipelineStatusOutput {
+    pub provider: Option<String>,
+    pub host: Option<String>,
+    pub change_request_number: Option<u32>,
+    pub head_sha: Option<String>,
+    pub pipeline: Option<WorkspacePipeline>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePipelineJobLogOutput {
+    pub job_id: u64,
+    pub content: String,
+    pub truncated: bool,
+    pub loaded_bytes: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -760,15 +831,8 @@ pub async fn workspace_pr_review_comments(
             comments: Vec::new(),
         });
     };
-    if forge_context.provider != ForgeCliProvider::Github {
-        return Ok(WorkspacePrReviewCommentsOutput {
-            provider: Some(forge_context::forge_provider_key(forge_context.provider).to_string()),
-            host: Some(forge_context.host),
-            number: None,
-            url: None,
-            comments: Vec::new(),
-        });
-    }
+    let provider_key = forge_context::forge_provider_key(forge_context.provider).to_string();
+    let imported_source = imported_workspace_source(&state, root).await?;
 
     let branch = match input
         .branch
@@ -777,13 +841,13 @@ pub async fn workspace_pr_review_comments(
         .filter(|value| !value.is_empty())
     {
         Some(branch) => branch.to_string(),
-        None => match imported_workspace_source(&state, root).await? {
-            Some(source) => source.head_branch,
+        None => match imported_source.as_ref() {
+            Some(source) => source.head_branch.clone(),
             None => match resolve_current_branch_name(root) {
                 Ok(branch) => branch,
                 Err(_) => {
                     return Ok(WorkspacePrReviewCommentsOutput {
-                        provider: Some("github".to_string()),
+                        provider: Some(provider_key),
                         host: Some(forge_context.host),
                         number: None,
                         url: None,
@@ -793,73 +857,598 @@ pub async fn workspace_pr_review_comments(
             },
         },
     };
-    let branch_hints = workspace_branch_hints(root, Some(&branch));
-    let head_sha = resolve_current_commit_sha(root).ok().flatten();
-    let resolved = forge_provider::resolve_workspace_change_request_status(
-        root,
-        &branch,
-        &branch_hints,
-        head_sha.as_deref(),
-        forge_context.effective_login.as_deref(),
-    )?;
-    let Some(resolved) = resolved else {
-        return Ok(WorkspacePrReviewCommentsOutput {
-            provider: Some("github".to_string()),
-            host: Some(forge_context.host),
-            number: None,
-            url: None,
-            comments: Vec::new(),
-        });
+    let current_head_sha = resolve_current_commit_sha(root).ok().flatten();
+    let imported_request = imported_source.as_ref().filter(|source| {
+        source.kind == WorkspaceSourceKind::PullRequest
+            && source.provider.eq_ignore_ascii_case(&provider_key)
+            && source.change_request_number.is_some()
+    });
+    let (number, request_url) = if let Some(source) = imported_request {
+        (
+            source.change_request_number,
+            Some(source.url.trim().to_string()).filter(|url| !url.is_empty()),
+        )
+    } else {
+        let branch_hints = workspace_branch_hints(root, Some(&branch));
+        let resolved = forge_provider::resolve_workspace_change_request_status(
+            root,
+            &branch,
+            &branch_hints,
+            current_head_sha.as_deref(),
+            forge_context.effective_login.as_deref(),
+        )?;
+        let Some(resolved) = resolved else {
+            return Ok(WorkspacePrReviewCommentsOutput {
+                provider: Some(provider_key),
+                host: Some(forge_context.host),
+                number: None,
+                url: None,
+                comments: Vec::new(),
+            });
+        };
+        (resolved.number, resolved.url)
     };
-    let Some(number) = resolved.number else {
+    let Some(number) = number else {
         return Ok(WorkspacePrReviewCommentsOutput {
-            provider: Some("github".to_string()),
+            provider: Some(provider_key),
             host: Some(forge_context.host),
             number: None,
-            url: resolved.url,
+            url: request_url,
             comments: Vec::new(),
         });
     };
 
-    let comments = crate::commands::forge::github::list_pull_review_comments(
+    let comments = match forge_context.provider {
+        ForgeCliProvider::Github => crate::commands::forge::github::list_pull_review_comments(
+            &forge_context.host,
+            &forge_context.namespace,
+            &forge_context.repo,
+            number,
+            forge_context.effective_login.as_deref(),
+        )?
+        .into_iter()
+        .map(|comment| {
+            let thread_id = comment.in_reply_to_id.unwrap_or(comment.id);
+            WorkspacePrReviewComment {
+                id: comment.id.to_string(),
+                parent_id: comment.in_reply_to_id.map(|id| id.to_string()),
+                thread_id: thread_id.to_string(),
+                path: comment.path,
+                body: comment.body.unwrap_or_default(),
+                diff_hunk: comment.diff_hunk,
+                html_url: comment.html_url,
+                side: comment.side,
+                line: comment.line,
+                start_line: comment.start_line,
+                original_line: comment.original_line,
+                original_start_line: comment.original_start_line,
+                author: comment.user.map(|user| WorkspacePrReviewCommentAuthor {
+                    login: user.login,
+                    avatar_url: user.avatar_url,
+                    html_url: user.html_url,
+                }),
+                created_at: comment.created_at,
+                updated_at: comment.updated_at,
+                resolvable: None,
+                resolved: None,
+                outdated: None,
+            }
+        })
+        .collect(),
+        ForgeCliProvider::Gitlab => {
+            let discussions = crate::commands::forge::gitlab::list_merge_request_discussions(
+                root,
+                &forge_context.host,
+                &forge_context.namespace,
+                &forge_context.repo,
+                number,
+                forge_context.effective_login.as_deref(),
+            )?;
+            map_gitlab_review_comments(
+                discussions,
+                request_url.as_deref(),
+                current_head_sha.as_deref(),
+            )
+        }
+    };
+
+    Ok(WorkspacePrReviewCommentsOutput {
+        provider: Some(provider_key),
+        host: Some(forge_context.host),
+        number: Some(number),
+        url: request_url,
+        comments,
+    })
+}
+
+#[tauri::command]
+pub async fn workspace_pipeline_status(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePipelineStatusInput,
+) -> Result<WorkspacePipelineStatusOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Ok(WorkspacePipelineStatusOutput {
+            provider: None,
+            host: None,
+            change_request_number: None,
+            head_sha: None,
+            pipeline: None,
+        });
+    }
+
+    let forge_context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?;
+    let Some(forge_context) = forge_context else {
+        return Ok(WorkspacePipelineStatusOutput {
+            provider: None,
+            host: None,
+            change_request_number: None,
+            head_sha: None,
+            pipeline: None,
+        });
+    };
+    let provider_key = forge_context::forge_provider_key(forge_context.provider).to_string();
+    if forge_context.provider != ForgeCliProvider::Gitlab {
+        return Ok(WorkspacePipelineStatusOutput {
+            provider: Some(provider_key),
+            host: Some(forge_context.host),
+            change_request_number: None,
+            head_sha: resolve_current_commit_sha(root).ok().flatten(),
+            pipeline: None,
+        });
+    }
+
+    let head_sha = resolve_current_commit_sha(root).ok().flatten();
+    let Some(head_sha) = head_sha else {
+        return Ok(WorkspacePipelineStatusOutput {
+            provider: Some(provider_key),
+            host: Some(forge_context.host),
+            change_request_number: None,
+            head_sha: None,
+            pipeline: None,
+        });
+    };
+    let imported_source = imported_workspace_source(&state, root).await?;
+    let branch = imported_source
+        .as_ref()
+        .map(|source| source.head_branch.clone())
+        .or_else(|| resolve_current_branch_name(root).ok());
+    let imported_number = imported_source.as_ref().and_then(|source| {
+        (source.kind == WorkspaceSourceKind::PullRequest
+            && source.provider.eq_ignore_ascii_case("gitlab"))
+        .then_some(source.change_request_number)
+        .flatten()
+    });
+    let change_request_number = if imported_number.is_some() {
+        imported_number
+    } else if let Some(branch) = branch.as_deref() {
+        let branch_hints = workspace_branch_hints(root, Some(branch));
+        forge_provider::resolve_workspace_change_request_status(
+            root,
+            branch,
+            &branch_hints,
+            Some(&head_sha),
+            forge_context.effective_login.as_deref(),
+        )?
+        .and_then(|status| status.number)
+    } else {
+        None
+    };
+
+    let pipeline = crate::commands::forge::gitlab::find_pipeline_for_sha(
+        root,
         &forge_context.host,
         &forge_context.namespace,
         &forge_context.repo,
-        number,
+        change_request_number,
+        &head_sha,
         forge_context.effective_login.as_deref(),
-    )?
-    .into_iter()
-    .map(|comment| {
-        let thread_id = comment.in_reply_to_id.unwrap_or(comment.id);
-        WorkspacePrReviewComment {
-            id: comment.id,
-            parent_id: comment.in_reply_to_id,
-            thread_id,
-            path: comment.path,
-            body: comment.body.unwrap_or_default(),
-            diff_hunk: comment.diff_hunk,
-            html_url: comment.html_url,
-            side: comment.side,
-            line: comment.line,
-            start_line: comment.start_line,
-            original_line: comment.original_line,
-            original_start_line: comment.original_start_line,
-            author: comment.user.map(|user| WorkspacePrReviewCommentAuthor {
-                login: user.login,
-                avatar_url: user.avatar_url,
-                html_url: user.html_url,
-            }),
-            created_at: comment.created_at,
-            updated_at: comment.updated_at,
+    )?;
+    let pipeline = match pipeline {
+        Some(pipeline) => {
+            let jobs = crate::commands::forge::gitlab::list_pipeline_jobs(
+                root,
+                &forge_context.host,
+                &forge_context.namespace,
+                &forge_context.repo,
+                pipeline.id,
+                forge_context.effective_login.as_deref(),
+            )?;
+            Some(map_gitlab_pipeline(pipeline, jobs))
         }
-    })
-    .collect();
+        None => None,
+    };
 
-    Ok(WorkspacePrReviewCommentsOutput {
-        provider: Some("github".to_string()),
+    Ok(WorkspacePipelineStatusOutput {
+        provider: Some(provider_key),
         host: Some(forge_context.host),
-        number: Some(number),
-        url: resolved.url,
-        comments,
+        change_request_number,
+        head_sha: Some(head_sha),
+        pipeline,
     })
+}
+
+#[tauri::command]
+pub async fn workspace_pipeline_job_log(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePipelineJobInput,
+) -> Result<WorkspacePipelineJobLogOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    let (forge_context, pipeline, jobs) = resolve_pipeline_action_context(
+        &state,
+        root,
+        input.pipeline_id,
+        input.forge_login.as_deref(),
+    )?;
+    let job = jobs
+        .iter()
+        .find(|job| job.id == input.job_id)
+        .ok_or_else(|| "The selected job does not belong to the current pipeline.".to_string())?;
+    let trace = crate::commands::forge::gitlab::read_job_trace(
+        root,
+        &forge_context.host,
+        &forge_context.namespace,
+        &forge_context.repo,
+        job.id,
+        job.trace_size(),
+        forge_context.effective_login.as_deref(),
+    )?;
+
+    debug_assert_eq!(pipeline.id, input.pipeline_id);
+    Ok(WorkspacePipelineJobLogOutput {
+        job_id: job.id,
+        content: trace.content,
+        truncated: trace.truncated,
+        loaded_bytes: trace.loaded_bytes,
+    })
+}
+
+#[tauri::command]
+pub async fn workspace_pipeline_job_retry(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePipelineJobInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    let (forge_context, _, jobs) = resolve_pipeline_action_context(
+        &state,
+        root,
+        input.pipeline_id,
+        input.forge_login.as_deref(),
+    )?;
+    let job = jobs
+        .iter()
+        .find(|job| job.id == input.job_id)
+        .ok_or_else(|| "The selected job does not belong to the current pipeline.".to_string())?;
+    if !gitlab_job_is_retryable(job) {
+        return Err("GitLab does not expose retry for this job state.".to_string());
+    }
+
+    crate::commands::forge::gitlab::retry_job(
+        root,
+        &forge_context.host,
+        &forge_context.namespace,
+        &forge_context.repo,
+        job.id,
+        forge_context.effective_login.as_deref(),
+    )?;
+    Ok(())
+}
+
+fn resolve_pipeline_action_context(
+    state: &WorkspaceCommandState,
+    root: &str,
+    pipeline_id: u64,
+    forge_login: Option<&str>,
+) -> Result<
+    (
+        crate::commands::forge::context::ResolvedWorkspaceForgeContext,
+        crate::commands::forge::gitlab::GitlabPipeline,
+        Vec<crate::commands::forge::gitlab::GitlabPipelineJob>,
+    ),
+    String,
+> {
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    let forge_context =
+        forge_context::resolve_workspace_forge_context(&state.db_path, root, forge_login)?
+            .ok_or_else(|| "No forge context is available for this workspace.".to_string())?;
+    if forge_context.provider != ForgeCliProvider::Gitlab {
+        return Err("Pipeline jobs are currently available for GitLab workspaces.".to_string());
+    }
+    let head_sha = resolve_current_commit_sha(root)?
+        .ok_or_else(|| "The current workspace commit could not be resolved.".to_string())?;
+    let pipeline = crate::commands::forge::gitlab::pipeline_by_id(
+        root,
+        &forge_context.host,
+        &forge_context.namespace,
+        &forge_context.repo,
+        pipeline_id,
+        forge_context.effective_login.as_deref(),
+    )?;
+    if pipeline.sha != head_sha {
+        return Err(
+            "The selected pipeline no longer matches the current workspace commit.".to_string(),
+        );
+    }
+    let jobs = crate::commands::forge::gitlab::list_pipeline_jobs(
+        root,
+        &forge_context.host,
+        &forge_context.namespace,
+        &forge_context.repo,
+        pipeline_id,
+        forge_context.effective_login.as_deref(),
+    )?;
+    Ok((forge_context, pipeline, jobs))
+}
+
+fn gitlab_job_is_retryable(job: &crate::commands::forge::gitlab::GitlabPipelineJob) -> bool {
+    !job.archived.unwrap_or(false)
+        && matches!(job.status.as_str(), "failed" | "canceled" | "success")
+}
+
+fn map_gitlab_pipeline(
+    pipeline: crate::commands::forge::gitlab::GitlabPipeline,
+    jobs: Vec<crate::commands::forge::gitlab::GitlabPipelineJob>,
+) -> WorkspacePipeline {
+    WorkspacePipeline {
+        id: pipeline.id,
+        sha: pipeline.sha,
+        ref_name: pipeline.ref_name,
+        status: pipeline.status,
+        source: pipeline.source,
+        web_url: pipeline.web_url,
+        created_at: pipeline.created_at,
+        updated_at: pipeline.updated_at,
+        started_at: pipeline.started_at,
+        finished_at: pipeline.finished_at,
+        duration: pipeline.duration,
+        queued_duration: pipeline.queued_duration,
+        jobs: jobs
+            .into_iter()
+            .map(|job| {
+                let retryable = gitlab_job_is_retryable(&job);
+                WorkspacePipelineJob {
+                    id: job.id,
+                    name: job.name,
+                    stage: job.stage,
+                    status: job.status,
+                    duration: job.duration,
+                    queued_duration: job.queued_duration,
+                    web_url: job.web_url,
+                    allow_failure: job.allow_failure.unwrap_or(false),
+                    archived: job.archived.unwrap_or(false),
+                    retryable,
+                }
+            })
+            .collect(),
+    }
+}
+
+fn map_gitlab_review_comments(
+    discussions: Vec<crate::commands::forge::gitlab::GitlabDiscussion>,
+    request_url: Option<&str>,
+    current_head_sha: Option<&str>,
+) -> Vec<WorkspacePrReviewComment> {
+    let mut comments = Vec::new();
+
+    for discussion in discussions {
+        let Some(anchor_position) = discussion
+            .notes
+            .iter()
+            .find_map(|note| note.position.clone())
+        else {
+            continue;
+        };
+        let parent_id = discussion
+            .notes
+            .iter()
+            .find(|note| !note.system.unwrap_or(false))
+            .map(|note| note.id.to_string());
+
+        for note in discussion.notes {
+            if note.system.unwrap_or(false) {
+                continue;
+            }
+            let position = note.position.unwrap_or_else(|| anchor_position.clone());
+            let Some(path) = position
+                .new_path
+                .clone()
+                .or_else(|| position.old_path.clone())
+            else {
+                continue;
+            };
+            let uses_new_side = position.new_line.is_some()
+                || position
+                    .line_range
+                    .as_ref()
+                    .and_then(|range| range.end.new_line)
+                    .is_some();
+            let (line, start_line, original_line, original_start_line, side) = if uses_new_side {
+                (
+                    position
+                        .line_range
+                        .as_ref()
+                        .and_then(|range| range.end.new_line)
+                        .or(position.new_line),
+                    position
+                        .line_range
+                        .as_ref()
+                        .and_then(|range| range.start.new_line)
+                        .or(position.new_line),
+                    position.old_line,
+                    position
+                        .line_range
+                        .as_ref()
+                        .and_then(|range| range.start.old_line),
+                    Some("RIGHT".to_string()),
+                )
+            } else {
+                (
+                    None,
+                    None,
+                    position
+                        .line_range
+                        .as_ref()
+                        .and_then(|range| range.end.old_line)
+                        .or(position.old_line),
+                    position
+                        .line_range
+                        .as_ref()
+                        .and_then(|range| range.start.old_line)
+                        .or(position.old_line),
+                    Some("LEFT".to_string()),
+                )
+            };
+            let note_id = note.id.to_string();
+            let outdated = position.head_sha.as_deref().and_then(|position_sha| {
+                current_head_sha.map(|current_sha| position_sha != current_sha)
+            });
+            comments.push(WorkspacePrReviewComment {
+                id: note_id.clone(),
+                parent_id: parent_id
+                    .as_ref()
+                    .filter(|parent| parent.as_str() != note_id)
+                    .cloned(),
+                thread_id: discussion.id.clone(),
+                path,
+                body: note.body.unwrap_or_default(),
+                diff_hunk: None,
+                html_url: request_url
+                    .map(|url| format!("{}#note_{}", url.trim_end_matches('/'), note.id)),
+                side,
+                line,
+                start_line,
+                original_line,
+                original_start_line,
+                author: note.author.map(|author| WorkspacePrReviewCommentAuthor {
+                    login: author.username,
+                    avatar_url: author.avatar_url,
+                    html_url: author.web_url,
+                }),
+                created_at: note.created_at,
+                updated_at: note.updated_at,
+                resolvable: note.resolvable,
+                resolved: note.resolved,
+                outdated,
+            });
+        }
+    }
+
+    comments
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{gitlab_job_is_retryable, map_gitlab_review_comments};
+    use crate::commands::forge::gitlab::{
+        GitlabDiscussion, GitlabDiscussionAuthor, GitlabDiscussionLinePosition,
+        GitlabDiscussionLineRange, GitlabDiscussionNote, GitlabDiscussionPosition,
+        GitlabPipelineJob,
+    };
+
+    fn note(id: i64, position: Option<GitlabDiscussionPosition>) -> GitlabDiscussionNote {
+        GitlabDiscussionNote {
+            id,
+            body: Some(format!("note {id}")),
+            author: Some(GitlabDiscussionAuthor {
+                username: Some("reviewer".to_string()),
+                avatar_url: None,
+                web_url: Some("https://gitlab.example/reviewer".to_string()),
+            }),
+            created_at: None,
+            updated_at: None,
+            system: Some(false),
+            resolvable: Some(true),
+            resolved: Some(false),
+            position,
+        }
+    }
+
+    #[test]
+    fn maps_gitlab_diff_thread_and_inherits_position_for_replies() {
+        let position = GitlabDiscussionPosition {
+            old_path: Some("src/lib.rs".to_string()),
+            new_path: Some("src/lib.rs".to_string()),
+            old_line: Some(8),
+            new_line: Some(10),
+            head_sha: Some("old-head".to_string()),
+            line_range: Some(GitlabDiscussionLineRange {
+                start: GitlabDiscussionLinePosition {
+                    old_line: Some(8),
+                    new_line: Some(10),
+                },
+                end: GitlabDiscussionLinePosition {
+                    old_line: Some(9),
+                    new_line: Some(11),
+                },
+            }),
+        };
+        let comments = map_gitlab_review_comments(
+            vec![GitlabDiscussion {
+                id: "discussion-abc".to_string(),
+                notes: vec![note(101, Some(position)), note(102, None)],
+            }],
+            Some("https://gitlab.example/group/repo/-/merge_requests/7"),
+            Some("current-head"),
+        );
+
+        assert_eq!(comments.len(), 2);
+        assert_eq!(comments[0].thread_id, "discussion-abc");
+        assert_eq!(comments[0].parent_id, None);
+        assert_eq!(comments[1].parent_id.as_deref(), Some("101"));
+        assert_eq!(comments[1].path, "src/lib.rs");
+        assert_eq!(comments[1].side.as_deref(), Some("RIGHT"));
+        assert_eq!(comments[1].start_line, Some(10));
+        assert_eq!(comments[1].line, Some(11));
+        assert_eq!(comments[1].outdated, Some(true));
+        assert_eq!(
+            comments[1].html_url.as_deref(),
+            Some("https://gitlab.example/group/repo/-/merge_requests/7#note_102")
+        );
+    }
+
+    #[test]
+    fn ignores_general_gitlab_discussions_without_a_diff_position() {
+        let comments = map_gitlab_review_comments(
+            vec![GitlabDiscussion {
+                id: "general-discussion".to_string(),
+                notes: vec![note(201, None)],
+            }],
+            None,
+            None,
+        );
+
+        assert!(comments.is_empty());
+    }
+
+    fn pipeline_job(status: &str, archived: bool) -> GitlabPipelineJob {
+        GitlabPipelineJob {
+            id: 1,
+            name: "verify".to_string(),
+            stage: "test".to_string(),
+            status: status.to_string(),
+            duration: None,
+            queued_duration: None,
+            web_url: None,
+            allow_failure: Some(false),
+            archived: Some(archived),
+            artifacts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn only_completed_non_archived_jobs_are_retryable() {
+        assert!(gitlab_job_is_retryable(&pipeline_job("failed", false)));
+        assert!(gitlab_job_is_retryable(&pipeline_job("success", false)));
+        assert!(!gitlab_job_is_retryable(&pipeline_job("running", false)));
+        assert!(!gitlab_job_is_retryable(&pipeline_job("failed", true)));
+    }
 }

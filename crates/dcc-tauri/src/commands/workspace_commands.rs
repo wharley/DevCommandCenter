@@ -25,8 +25,9 @@ use dcc_core::{
     domain::{
         repository::{Repository, RepositoryId},
         workspace::{
-            Workspace, WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus,
-            WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind, WorkspaceState,
+            Workspace, WorkspaceId, WorkspacePushTarget, WorkspaceSetupReport,
+            WorkspaceSetupStatus, WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind,
+            WorkspaceState,
         },
         workspace_bundle::{WorkspaceBundleId, WorkspaceBundleState, WorkspaceBundleSummary},
     },
@@ -163,6 +164,8 @@ pub struct WorkspaceSourceUrlResolution {
     pub title: Option<String>,
     pub author: Option<String>,
     pub state: Option<String>,
+    pub source_repository: Option<String>,
+    pub is_cross_repository: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -2141,14 +2144,22 @@ pub(crate) async fn push_current_branch(
         .await?
         .and_then(|workspace| workspace.source)
     {
-        let remote_tracking_ref =
-            format!("refs/remotes/{}/{}", source.remote_name, source.head_branch);
-        let source_ref = format!("refs/heads/{}", source.head_branch);
+        let push_target = source.push_target.unwrap_or(WorkspacePushTarget {
+            remote_name: source.remote_name,
+            branch_name: source.head_branch,
+            remote_url: None,
+            remote_created: false,
+        });
+        let remote_tracking_ref = format!(
+            "refs/remotes/{}/{}",
+            push_target.remote_name, push_target.branch_name
+        );
+        let source_ref = format!("refs/heads/{}", push_target.branch_name);
         let refspec = format!("+{source_ref}:{remote_tracking_ref}");
         let fetch = run_git_network_output_with_workspace_auth(
             db_path,
             root,
-            &["fetch", &source.remote_name, &refspec],
+            &["fetch", &push_target.remote_name, &refspec],
             forge_login,
         )?;
         if !fetch.status.success() {
@@ -2161,14 +2172,14 @@ pub(crate) async fn push_current_branch(
         if !ancestry.status.success() {
             return Err(format!(
                 "The remote branch `{}` changed after this workspace was opened. Sync or merge its latest commits before pushing.",
-                source.head_branch
+                push_target.branch_name
             ));
         }
         return push_branch_refspec_to_remote(
             db_path,
             root,
-            &source.remote_name,
-            &source.head_branch,
+            &push_target.remote_name,
+            &push_target.branch_name,
             forge_login,
         );
     }
@@ -3346,6 +3357,49 @@ struct ResolvedWorkspaceSource {
     public: WorkspaceSourceUrlResolution,
     remote_name: String,
     effective_login: Option<String>,
+    requested_push_target: RequestedWorkspacePushTarget,
+}
+
+#[derive(Clone, Debug)]
+struct RequestedWorkspacePushTarget {
+    preferred_remote_name: String,
+    branch_name: String,
+    remote_url: Option<String>,
+}
+
+fn sanitize_fork_remote_segment(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let sanitized = sanitized.trim_matches(['-', '.']).to_ascii_lowercase();
+    if sanitized.is_empty() {
+        "contributor".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn preferred_fork_remote_name(source_repository: &str) -> String {
+    let namespace = source_repository
+        .rsplit_once('/')
+        .map(|(namespace, _)| namespace)
+        .unwrap_or(source_repository);
+    format!("dcc-{}", sanitize_fork_remote_segment(namespace))
+}
+
+fn https_repository_url(host: &str, repository: &str) -> String {
+    format!(
+        "https://{}/{}.git",
+        host.trim().trim_end_matches('/'),
+        repository.trim().trim_matches('/'),
+    )
 }
 
 fn percent_decode_url_path(value: &str) -> Result<String, String> {
@@ -3515,6 +3569,225 @@ fn resolve_current_commit_sha_for_ref(root: &str, reference: &str) -> Result<Str
     Ok(sha)
 }
 
+fn list_workspace_remote_names(root: &str) -> Result<Vec<String>, String> {
+    let output = run_git_output(root, &["remote"])?;
+    if !output.status.success() {
+        return Err(git_output_err("git remote", &output.stderr));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|remote| !remote.is_empty())
+        .map(ToString::to_string)
+        .collect())
+}
+
+fn find_workspace_remote_for_url(root: &str, remote_url: &str) -> Result<Option<String>, String> {
+    let expected = crate::commands::forge::remote::parse_remote(remote_url);
+    for remote_name in list_workspace_remote_names(root)? {
+        let output = run_git_output(root, &["remote", "get-url", &remote_name])?;
+        if !output.status.success() {
+            continue;
+        }
+        let candidate_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let same_repository = expected
+            .as_ref()
+            .zip(crate::commands::forge::remote::parse_remote(&candidate_url).as_ref())
+            .is_some_and(|(expected, candidate)| {
+                expected.host.eq_ignore_ascii_case(&candidate.host)
+                    && expected
+                        .namespace
+                        .eq_ignore_ascii_case(&candidate.namespace)
+                    && expected.repo.eq_ignore_ascii_case(&candidate.repo)
+            });
+        if same_repository || candidate_url == remote_url {
+            return Ok(Some(remote_name));
+        }
+    }
+    Ok(None)
+}
+
+fn next_available_workspace_remote_name(root: &str, preferred: &str) -> Result<String, String> {
+    let existing = list_workspace_remote_names(root)?
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if !existing.contains(preferred) {
+        return Ok(preferred.to_string());
+    }
+    for suffix in 2..100 {
+        let candidate = format!("{preferred}-{suffix}");
+        if !existing.contains(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err(format!(
+        "Could not find an available Git remote name for `{preferred}`."
+    ))
+}
+
+fn prepare_workspace_push_target(
+    root: &str,
+    requested: &RequestedWorkspacePushTarget,
+) -> Result<WorkspacePushTarget, String> {
+    let Some(remote_url) = requested.remote_url.as_deref() else {
+        let output = run_git_output(
+            root,
+            &["remote", "get-url", &requested.preferred_remote_name],
+        )?;
+        if !output.status.success() {
+            return Err(format!(
+                "The source remote `{}` is no longer available.",
+                requested.preferred_remote_name
+            ));
+        }
+        return Ok(WorkspacePushTarget {
+            remote_name: requested.preferred_remote_name.clone(),
+            branch_name: requested.branch_name.clone(),
+            remote_url: None,
+            remote_created: false,
+        });
+    };
+
+    if let Some(remote_name) = find_workspace_remote_for_url(root, remote_url)? {
+        return Ok(WorkspacePushTarget {
+            remote_name,
+            branch_name: requested.branch_name.clone(),
+            remote_url: Some(remote_url.to_string()),
+            remote_created: false,
+        });
+    }
+
+    let remote_name = next_available_workspace_remote_name(root, &requested.preferred_remote_name)?;
+    let output = run_git_output(root, &["remote", "add", &remote_name, remote_url])?;
+    if !output.status.success() {
+        return Err(git_output_err("git remote add", &output.stderr));
+    }
+    Ok(WorkspacePushTarget {
+        remote_name,
+        branch_name: requested.branch_name.clone(),
+        remote_url: Some(remote_url.to_string()),
+        remote_created: true,
+    })
+}
+
+fn cleanup_prepared_workspace_push_target(root: &str, target: &WorkspacePushTarget) {
+    if !target.remote_created {
+        return;
+    }
+    let Some(expected_url) = target.remote_url.as_deref() else {
+        return;
+    };
+    let output = match run_git_output(root, &["remote", "get-url", &target.remote_name]) {
+        Ok(output) if output.status.success() => output,
+        _ => return,
+    };
+    let configured_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if configured_url != expected_url {
+        return;
+    }
+    let _ = run_git_output(root, &["remote", "remove", &target.remote_name]);
+}
+
+async fn inherit_workspace_push_target_ownership(
+    repo: &SqliteWorkspaceRepo,
+    root: &str,
+    target: &mut WorkspacePushTarget,
+) -> Result<(), String> {
+    if target.remote_created || target.remote_url.is_none() {
+        return Ok(());
+    }
+    let is_owned = repo
+        .list_workspaces()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|workspace| workspace.root_path == root)
+        .filter_map(|workspace| workspace.source?.push_target)
+        .any(|known| {
+            known.remote_created
+                && (known.remote_name == target.remote_name
+                    || known.remote_url.as_deref() == target.remote_url.as_deref())
+        });
+    target.remote_created = is_owned;
+    Ok(())
+}
+
+fn git_branch_config_uses_remote(root: &str, remote_name: &str) -> bool {
+    let Ok(output) = run_git_output(
+        root,
+        &[
+            "config",
+            "--get-regexp",
+            r"^branch\..*\.(remote|pushRemote)$",
+        ],
+    ) else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.split_whitespace().nth(1))
+        .any(|value| value == remote_name)
+}
+
+async fn cleanup_unused_workspace_push_target(
+    repo: &SqliteWorkspaceRepo,
+    removed: &Workspace,
+) -> Result<(), String> {
+    let Some(target) = removed
+        .source
+        .as_ref()
+        .and_then(|source| source.push_target.as_ref())
+    else {
+        return Ok(());
+    };
+    if !target.remote_created
+        || target.remote_url.is_none()
+        || matches!(target.remote_name.as_str(), "origin" | "upstream")
+    {
+        return Ok(());
+    }
+    let used_by_another_workspace = repo
+        .list_workspaces()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|workspace| workspace.id != removed.id && workspace.root_path == removed.root_path)
+        .filter_map(|workspace| workspace.source?.push_target)
+        .any(|known| {
+            known.remote_name == target.remote_name
+                || known.remote_url.as_deref() == target.remote_url.as_deref()
+        });
+    if used_by_another_workspace
+        || git_branch_config_uses_remote(&removed.root_path, &target.remote_name)
+    {
+        return Ok(());
+    }
+
+    let output = run_git_output(
+        &removed.root_path,
+        &["remote", "get-url", &target.remote_name],
+    )?;
+    if !output.status.success() {
+        return Ok(());
+    }
+    let configured_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if target.remote_url.as_deref() != Some(configured_url.as_str()) {
+        return Ok(());
+    }
+    let output = run_git_output(
+        &removed.root_path,
+        &["remote", "remove", &target.remote_name],
+    )?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(git_output_err("git remote remove", &output.stderr))
+    }
+}
+
 async fn resolve_workspace_source_url_inner(
     db_path: &Path,
     repo: &SqliteWorkspaceRepo,
@@ -3552,6 +3825,7 @@ async fn resolve_workspace_source_url_inner(
         crate::commands::forge_commands::ForgeCliProvider::Gitlab => "gitlab",
     }
     .to_string();
+    let mut source_remote_url = None;
 
     let public = match parsed {
         ParsedWorkspaceSourceKind::Branch(url_branch_path) => {
@@ -3576,7 +3850,7 @@ async fn resolve_workspace_source_url_inner(
                 url: input.url.trim().to_string(),
                 provider,
                 host: target.remote.host.clone(),
-                repository: repository_name,
+                repository: repository_name.clone(),
                 head_branch,
                 head_sha,
                 base_branch: default_base,
@@ -3584,6 +3858,8 @@ async fn resolve_workspace_source_url_inner(
                 title: None,
                 author: None,
                 state: None,
+                source_repository: Some(repository_name.clone()),
+                is_cross_repository: false,
             }
         }
         ParsedWorkspaceSourceKind::PullRequest(number) => match target.provider {
@@ -3632,18 +3908,13 @@ async fn resolve_workspace_source_url_inner(
                         "GitHub did not provide enough repository identity to verify the pull request source."
                             .to_string()
                     })?;
-                if !head_repository.eq_ignore_ascii_case(&repository_name) {
-                    return Err(
-                        "Pull requests from forks are not supported in editable workspaces yet."
-                            .to_string(),
-                    );
-                }
+                let is_cross_repository = !head_repository.eq_ignore_ascii_case(&repository_name);
                 WorkspaceSourceUrlResolution {
                     kind: WorkspaceSourceKind::PullRequest,
                     url: json_string(&raw, "url").unwrap_or_else(|| input.url.trim().to_string()),
                     provider,
                     host: target.remote.host.clone(),
-                    repository: repository_name,
+                    repository: repository_name.clone(),
                     head_branch: json_string(&raw, "headRefName").ok_or_else(|| {
                         "GitHub did not return the pull request branch.".to_string()
                     })?,
@@ -3659,6 +3930,8 @@ async fn resolve_workspace_source_url_inner(
                         .and_then(Value::as_str)
                         .map(ToString::to_string),
                     state: Some(state),
+                    source_repository: Some(head_repository),
+                    is_cross_repository,
                 }
             }
             crate::commands::forge_commands::ForgeCliProvider::Gitlab => {
@@ -3675,12 +3948,25 @@ async fn resolve_workspace_source_url_inner(
                         "GitLab did not provide enough project identity to verify the merge request source."
                             .to_string()
                     })?;
-                if source_project != target_project {
-                    return Err(
-                        "Merge requests from forks are not supported in editable workspaces yet."
-                            .to_string(),
-                    );
-                }
+                let is_cross_repository = source_project != target_project;
+                let source_project_metadata = if is_cross_repository {
+                    Some(gitlab::resolve_project_json(
+                        root,
+                        &target.remote.host,
+                        source_project,
+                        effective_login.as_deref(),
+                    )?)
+                } else {
+                    None
+                };
+                let source_repository = source_project_metadata
+                    .as_ref()
+                    .and_then(|project| json_string(project, "path_with_namespace"))
+                    .unwrap_or_else(|| repository_name.clone());
+                source_remote_url = source_project_metadata.as_ref().and_then(|project| {
+                    json_string(project, "http_url_to_repo")
+                        .or_else(|| json_string(project, "ssh_url_to_repo"))
+                });
                 let state = json_string(&raw, "state")
                     .map(|value| value.to_ascii_lowercase())
                     .unwrap_or_default();
@@ -3706,7 +3992,7 @@ async fn resolve_workspace_source_url_inner(
                         .unwrap_or_else(|| input.url.trim().to_string()),
                     provider,
                     host: target.remote.host.clone(),
-                    repository: repository_name,
+                    repository: repository_name.clone(),
                     head_branch: json_string(&raw, "source_branch").ok_or_else(|| {
                         "GitLab did not return the merge request branch.".to_string()
                     })?,
@@ -3720,15 +4006,39 @@ async fn resolve_workspace_source_url_inner(
                         .and_then(Value::as_str)
                         .map(ToString::to_string),
                     state: Some("open".to_string()),
+                    source_repository: Some(source_repository),
+                    is_cross_repository,
                 }
             }
         },
+    };
+
+    let source_repository = public
+        .source_repository
+        .clone()
+        .unwrap_or_else(|| repository_name.clone());
+    let requested_push_target = if public.is_cross_repository {
+        RequestedWorkspacePushTarget {
+            preferred_remote_name: preferred_fork_remote_name(&source_repository),
+            branch_name: public.head_branch.clone(),
+            remote_url: Some(
+                source_remote_url
+                    .unwrap_or_else(|| https_repository_url(&public.host, &source_repository)),
+            ),
+        }
+    } else {
+        RequestedWorkspacePushTarget {
+            preferred_remote_name: target.remote_name.clone(),
+            branch_name: public.head_branch.clone(),
+            remote_url: None,
+        }
     };
 
     Ok(ResolvedWorkspaceSource {
         public,
         remote_name: target.remote_name,
         effective_login,
+        requested_push_target,
     })
 }
 
@@ -3779,22 +4089,50 @@ pub async fn create_workspace_from_source_url(
     )
     .await?;
 
-    let source_ref = format!("refs/heads/{}", resolved.public.head_branch);
+    let mut push_target = prepare_workspace_push_target(&root, &resolved.requested_push_target)?;
+    let prepared_push_target = push_target.clone();
+    if let Err(error) =
+        inherit_workspace_push_target_ownership(&repo, &root, &mut push_target).await
+    {
+        cleanup_prepared_workspace_push_target(&root, &prepared_push_target);
+        return Err(error);
+    }
+    let source_ref = format!("refs/heads/{}", push_target.branch_name);
     let tracking_ref = format!(
         "refs/remotes/{}/{}",
-        resolved.remote_name, resolved.public.head_branch
+        push_target.remote_name, push_target.branch_name
     );
     let refspec = format!("+{source_ref}:{tracking_ref}");
-    let fetch = run_git_network_output_with_workspace_auth(
+    let fetch = match run_git_network_output_with_workspace_auth(
         &state.db_path,
         &root,
-        &["fetch", &resolved.remote_name, &refspec],
+        &["fetch", &push_target.remote_name, &refspec],
         resolved.effective_login.as_deref(),
-    )?;
+    ) {
+        Ok(fetch) => fetch,
+        Err(error) => {
+            cleanup_prepared_workspace_push_target(&root, &prepared_push_target);
+            return Err(error);
+        }
+    };
     if !fetch.status.success() {
+        cleanup_prepared_workspace_push_target(&root, &prepared_push_target);
         return Err(git_output_err("git fetch branch", &fetch.stderr));
     }
-    let fetched_sha = resolve_current_commit_sha_for_ref(&root, &tracking_ref)?;
+    let fetched_sha = match resolve_current_commit_sha_for_ref(&root, &tracking_ref) {
+        Ok(sha) => sha,
+        Err(error) => {
+            cleanup_prepared_workspace_push_target(&root, &prepared_push_target);
+            return Err(error);
+        }
+    };
+    if !fetched_sha.eq_ignore_ascii_case(&resolved.public.head_sha) {
+        cleanup_prepared_workspace_push_target(&root, &prepared_push_target);
+        return Err(format!(
+            "The source branch changed while DCC was opening this workspace. Expected `{}`, but fetched `{fetched_sha}`. Validate the PR or MR again.",
+            resolved.public.head_sha
+        ));
+    }
 
     let workspace_name = input
         .name
@@ -3806,18 +4144,24 @@ pub async fn create_workspace_from_source_url(
         .or_else(|| Some(resolved.public.head_branch.clone()));
     let git = CommandGitOps::new();
     let events = TauriEventBus::new(app.clone());
-    let mut prepared = run_prepare_workspace_for_repo(
+    let mut prepared = match run_prepare_workspace_for_repo(
         &git,
         &events,
         CreateWorkspaceForRepoInput {
             project_id: input.project_id,
-            workspace_root: root,
+            workspace_root: root.clone(),
             base_branch: tracking_ref,
             name: workspace_name,
         },
     )
     .await
-    .map_err(|error| error.to_string())?;
+    {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            cleanup_prepared_workspace_push_target(&root, &prepared_push_target);
+            return Err(error.to_string());
+        }
+    };
     prepared.workspace.base_branch = resolved.public.base_branch.clone();
     prepared.workspace.source = Some(WorkspaceSource {
         kind: resolved.public.kind,
@@ -3830,10 +4174,16 @@ pub async fn create_workspace_from_source_url(
         change_request_number: resolved.public.change_request_number,
         title: resolved.public.title,
         author: resolved.public.author,
+        source_repository: resolved.public.source_repository,
+        push_target: Some(push_target.clone()),
     });
-    let finalized = run_finalize_workspace_for_repo(&repo, &events, prepared)
-        .await
-        .map_err(|error| error.to_string())?;
+    let finalized = match run_finalize_workspace_for_repo(&repo, &events, prepared).await {
+        Ok(finalized) => finalized,
+        Err(error) => {
+            cleanup_prepared_workspace_push_target(&root, &prepared_push_target);
+            return Err(error.to_string());
+        }
+    };
     let mut workspace = finalized.workspace;
 
     let mut repository = existing_repository;
@@ -3927,6 +4277,13 @@ async fn rollback_bundle_workspaces(
         if let Err(error) = cleanup_workspace_files(workspace) {
             errors.push(format!(
                 "failed to clean workspace {}: {error}",
+                workspace.id.0
+            ));
+            continue;
+        }
+        if let Err(error) = cleanup_unused_workspace_push_target(repo, workspace).await {
+            errors.push(format!(
+                "failed to clean workspace remote {}: {error}",
                 workspace.id.0
             ));
             continue;
@@ -4233,6 +4590,7 @@ pub async fn delete_workspace_bundle(
         .await
         .map_err(|error| error.to_string())?;
     for workspace in created_workspaces {
+        cleanup_unused_workspace_push_target(&repo, &workspace).await?;
         repo.delete_workspace(&workspace.id)
             .await
             .map_err(|error| error.to_string())?;
@@ -4487,6 +4845,170 @@ mod editor_workspace_file_tests {
             )
             .expect("unambiguous branch"),
             ("feature/docs".to_string(), "222".to_string())
+        );
+    }
+
+    fn initialize_remote_test_repository(root: &str) {
+        let output = run_git_output(root, &["init"]).expect("git init");
+        assert!(output.status.success());
+    }
+
+    fn imported_fork_workspace(id: &str, root: &str, remote_name: &str) -> Workspace {
+        Workspace {
+            id: WorkspaceId(id.to_string()),
+            project_id: dcc_core::domain::project::ProjectId("project-1".to_string()),
+            name: Some(id.to_string()),
+            root_path: root.to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: None,
+            source: Some(WorkspaceSource {
+                kind: WorkspaceSourceKind::PullRequest,
+                url: "https://github.com/acme/widgets/pull/42".to_string(),
+                provider: "github".to_string(),
+                remote_name: "origin".to_string(),
+                head_branch: "feature/review".to_string(),
+                head_sha: "abc123".to_string(),
+                base_branch: "main".to_string(),
+                change_request_number: Some(42),
+                title: Some("Review".to_string()),
+                author: Some("wharley".to_string()),
+                source_repository: Some("wharley/widgets".to_string()),
+                push_target: Some(WorkspacePushTarget {
+                    remote_name: remote_name.to_string(),
+                    branch_name: "feature/review".to_string(),
+                    remote_url: Some("https://github.com/wharley/widgets.git".to_string()),
+                    remote_created: true,
+                }),
+            }),
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn fork_remote_names_are_deterministic_and_sanitized() {
+        assert_eq!(
+            preferred_fork_remote_name("Wharley.Ornelas/widgets"),
+            "dcc-wharley.ornelas"
+        );
+        assert_eq!(
+            preferred_fork_remote_name("company/platform team/widgets"),
+            "dcc-company-platform-team"
+        );
+    }
+
+    #[test]
+    fn push_target_reuses_an_existing_remote_for_the_same_repository() {
+        let dir = TestDir::new("reuse-fork-remote");
+        initialize_remote_test_repository(dir.as_str());
+        let output = run_git_output(
+            dir.as_str(),
+            &[
+                "remote",
+                "add",
+                "contributor",
+                "git@github.com:wharley/widgets.git",
+            ],
+        )
+        .expect("add existing remote");
+        assert!(output.status.success());
+
+        let target = prepare_workspace_push_target(
+            dir.as_str(),
+            &RequestedWorkspacePushTarget {
+                preferred_remote_name: "dcc-wharley".to_string(),
+                branch_name: "feature/review".to_string(),
+                remote_url: Some("https://github.com/wharley/widgets.git".to_string()),
+            },
+        )
+        .expect("reuse matching remote");
+
+        assert_eq!(target.remote_name, "contributor");
+        assert!(!target.remote_created);
+        assert_eq!(list_workspace_remote_names(dir.as_str()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn push_target_uses_a_unique_name_and_cleans_up_only_its_remote() {
+        let dir = TestDir::new("create-fork-remote");
+        initialize_remote_test_repository(dir.as_str());
+        let output = run_git_output(
+            dir.as_str(),
+            &[
+                "remote",
+                "add",
+                "dcc-wharley",
+                "https://github.com/other/widgets.git",
+            ],
+        )
+        .expect("add colliding remote");
+        assert!(output.status.success());
+
+        let target = prepare_workspace_push_target(
+            dir.as_str(),
+            &RequestedWorkspacePushTarget {
+                preferred_remote_name: "dcc-wharley".to_string(),
+                branch_name: "feature/review".to_string(),
+                remote_url: Some("https://github.com/wharley/widgets.git".to_string()),
+            },
+        )
+        .expect("create unique remote");
+
+        assert_eq!(target.remote_name, "dcc-wharley-2");
+        assert!(target.remote_created);
+        cleanup_prepared_workspace_push_target(dir.as_str(), &target);
+        assert_eq!(
+            list_workspace_remote_names(dir.as_str()).unwrap(),
+            vec!["dcc-wharley".to_string()]
+        );
+    }
+
+    #[test]
+    fn fork_remote_cleanup_waits_for_the_last_workspace() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = TestDir::new("cleanup-fork-remote");
+        initialize_remote_test_repository(dir.as_str());
+        let output = run_git_output(
+            dir.as_str(),
+            &[
+                "remote",
+                "add",
+                "dcc-wharley",
+                "https://github.com/wharley/widgets.git",
+            ],
+        )
+        .expect("add DCC remote");
+        assert!(output.status.success());
+
+        let connection = rusqlite::Connection::open_in_memory().expect("in-memory database");
+        let repo = SqliteWorkspaceRepo::from_connection(Arc::new(Mutex::new(connection)))
+            .expect("workspace repository");
+        let first = imported_fork_workspace("fork-1", dir.as_str(), "dcc-wharley");
+        let second = imported_fork_workspace("fork-2", dir.as_str(), "dcc-wharley");
+        futures::executor::block_on(repo.save_workspace(&first)).expect("save first workspace");
+        futures::executor::block_on(repo.save_workspace(&second)).expect("save second workspace");
+
+        futures::executor::block_on(cleanup_unused_workspace_push_target(&repo, &first))
+            .expect("keep shared remote");
+        assert!(
+            run_git_output(dir.as_str(), &["remote", "get-url", "dcc-wharley"])
+                .unwrap()
+                .status
+                .success()
+        );
+
+        futures::executor::block_on(repo.delete_workspace(&first.id))
+            .expect("delete first workspace");
+        futures::executor::block_on(cleanup_unused_workspace_push_target(&repo, &second))
+            .expect("remove last remote");
+        assert!(
+            !run_git_output(dir.as_str(), &["remote", "get-url", "dcc-wharley"])
+                .unwrap()
+                .status
+                .success()
         );
     }
 
@@ -5907,6 +6429,7 @@ pub async fn delete_workspace(
         .ok_or_else(|| format!("workspace not found: {}", id.0))?;
     cleanup_delegation_worktrees(&session_repo, &workspace).await?;
     cleanup_workspace_files(&workspace)?;
+    cleanup_unused_workspace_push_target(&repo, &workspace).await?;
     repo.delete_workspace(&id).await.map_err(|e| e.to_string())
 }
 

@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -41,6 +42,108 @@ static GITLAB_PROFILE_CACHE: LazyLock<
 pub(crate) struct GitlabAuthContext {
     pub(crate) envs: Vec<(String, String)>,
     pub(crate) git_http_authorization: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabDiscussionAuthor {
+    pub(crate) username: Option<String>,
+    pub(crate) avatar_url: Option<String>,
+    pub(crate) web_url: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabDiscussionLinePosition {
+    pub(crate) old_line: Option<i64>,
+    pub(crate) new_line: Option<i64>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabDiscussionLineRange {
+    pub(crate) start: GitlabDiscussionLinePosition,
+    pub(crate) end: GitlabDiscussionLinePosition,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabDiscussionPosition {
+    pub(crate) old_path: Option<String>,
+    pub(crate) new_path: Option<String>,
+    pub(crate) old_line: Option<i64>,
+    pub(crate) new_line: Option<i64>,
+    pub(crate) head_sha: Option<String>,
+    pub(crate) line_range: Option<GitlabDiscussionLineRange>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabDiscussionNote {
+    pub(crate) id: i64,
+    pub(crate) body: Option<String>,
+    pub(crate) author: Option<GitlabDiscussionAuthor>,
+    pub(crate) created_at: Option<String>,
+    pub(crate) updated_at: Option<String>,
+    pub(crate) system: Option<bool>,
+    pub(crate) resolvable: Option<bool>,
+    pub(crate) resolved: Option<bool>,
+    pub(crate) position: Option<GitlabDiscussionPosition>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabDiscussion {
+    pub(crate) id: String,
+    pub(crate) notes: Vec<GitlabDiscussionNote>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabPipeline {
+    pub(crate) id: u64,
+    pub(crate) sha: String,
+    #[serde(rename = "ref")]
+    pub(crate) ref_name: Option<String>,
+    pub(crate) status: String,
+    pub(crate) source: Option<String>,
+    pub(crate) web_url: Option<String>,
+    pub(crate) created_at: Option<String>,
+    pub(crate) updated_at: Option<String>,
+    pub(crate) started_at: Option<String>,
+    pub(crate) finished_at: Option<String>,
+    pub(crate) duration: Option<f64>,
+    pub(crate) queued_duration: Option<f64>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabJobArtifact {
+    pub(crate) file_type: Option<String>,
+    pub(crate) size: Option<u64>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct GitlabPipelineJob {
+    pub(crate) id: u64,
+    pub(crate) name: String,
+    pub(crate) stage: String,
+    pub(crate) status: String,
+    pub(crate) duration: Option<f64>,
+    pub(crate) queued_duration: Option<f64>,
+    pub(crate) web_url: Option<String>,
+    pub(crate) allow_failure: Option<bool>,
+    pub(crate) archived: Option<bool>,
+    #[serde(default)]
+    pub(crate) artifacts: Vec<GitlabJobArtifact>,
+}
+
+impl GitlabPipelineJob {
+    pub(crate) fn trace_size(&self) -> Option<u64> {
+        self.artifacts
+            .iter()
+            .find(|artifact| artifact.file_type.as_deref() == Some("trace"))
+            .and_then(|artifact| artifact.size)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GitlabJobTrace {
+    pub(crate) content: String,
+    pub(crate) truncated: bool,
+    pub(crate) loaded_bytes: u64,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -642,6 +745,349 @@ pub(crate) fn resolve_change_request_url_json(
         .map_err(|error| format!("Failed to decode GitLab merge request: {error}"))
 }
 
+pub(crate) fn resolve_project_json(
+    root: &str,
+    host: &str,
+    project_id: u64,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let endpoint = format!("projects/{project_id}");
+    let glab = resolve_cli_binary("glab")?;
+    let mut command = Command::new(glab);
+    command
+        .current_dir(root)
+        .args(["api", "--hostname", host, endpoint.as_str()]);
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(git_output_err("glab api project", &output.stderr));
+    }
+    serde_json::from_slice::<Value>(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitLab project: {error}"))
+}
+
+pub(crate) fn list_merge_request_discussions(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    merge_request_iid: u32,
+    login: Option<&str>,
+) -> Result<Vec<GitlabDiscussion>, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let project_path = format!("{namespace}/{repo}");
+    let endpoint = format!(
+        "projects/{}/merge_requests/{merge_request_iid}/discussions?per_page=100",
+        encode_percent(&project_path),
+    );
+    let glab = resolve_cli_binary("glab")?;
+    let mut command = Command::new(glab);
+    command
+        .current_dir(root)
+        .args(["api", "--hostname", host, "--paginate", endpoint.as_str()]);
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(git_output_err(
+            "glab api merge request discussions",
+            &output.stderr,
+        ));
+    }
+
+    serde_json::from_slice::<Vec<GitlabDiscussion>>(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitLab merge request discussions: {error}"))
+}
+
+fn run_api_json<T: serde::de::DeserializeOwned>(
+    root: &str,
+    host: &str,
+    auth: Option<&GitlabAuthContext>,
+    endpoint: &str,
+    paginate: bool,
+    label: &str,
+) -> Result<T, String> {
+    let glab = resolve_cli_binary("glab")?;
+    let mut command = Command::new(glab);
+    command.current_dir(root).args(["api", "--hostname", host]);
+    if paginate {
+        command.arg("--paginate");
+    }
+    command.arg(endpoint);
+    if let Some(auth) = auth {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(git_output_err(label, &output.stderr));
+    }
+    serde_json::from_slice::<T>(&output.stdout)
+        .map_err(|error| format!("Failed to decode {label}: {error}"))
+}
+
+pub(crate) fn find_pipeline_for_sha(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    merge_request_iid: Option<u32>,
+    head_sha: &str,
+    login: Option<&str>,
+) -> Result<Option<GitlabPipeline>, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let project_path = format!("{namespace}/{repo}");
+    let encoded_project = encode_percent(&project_path);
+
+    let mut pipeline_id = None;
+    if let Some(iid) = merge_request_iid {
+        let endpoint =
+            format!("projects/{encoded_project}/merge_requests/{iid}/pipelines?per_page=50",);
+        let pipelines: Vec<GitlabPipeline> = run_api_json(
+            root,
+            host,
+            auth.as_ref(),
+            &endpoint,
+            true,
+            "GitLab merge request pipelines",
+        )?;
+        pipeline_id = pipelines
+            .into_iter()
+            .filter(|pipeline| pipeline.sha == head_sha)
+            .max_by_key(|pipeline| pipeline.id)
+            .map(|pipeline| pipeline.id);
+    }
+
+    if pipeline_id.is_none() {
+        let endpoint = format!(
+            "projects/{encoded_project}/pipelines?sha={}&order_by=id&sort=desc&per_page=20",
+            encode_percent(head_sha),
+        );
+        let pipelines: Vec<GitlabPipeline> = run_api_json(
+            root,
+            host,
+            auth.as_ref(),
+            &endpoint,
+            false,
+            "GitLab pipelines",
+        )?;
+        pipeline_id = pipelines
+            .into_iter()
+            .find(|pipeline| pipeline.sha == head_sha)
+            .map(|pipeline| pipeline.id);
+    }
+
+    let Some(pipeline_id) = pipeline_id else {
+        return Ok(None);
+    };
+    pipeline_by_id_with_auth(root, host, &encoded_project, pipeline_id, auth.as_ref()).map(Some)
+}
+
+fn pipeline_by_id_with_auth(
+    root: &str,
+    host: &str,
+    encoded_project: &str,
+    pipeline_id: u64,
+    auth: Option<&GitlabAuthContext>,
+) -> Result<GitlabPipeline, String> {
+    let endpoint = format!("projects/{encoded_project}/pipelines/{pipeline_id}");
+    run_api_json(root, host, auth, &endpoint, false, "GitLab pipeline")
+}
+
+pub(crate) fn pipeline_by_id(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    pipeline_id: u64,
+    login: Option<&str>,
+) -> Result<GitlabPipeline, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let encoded_project = encode_percent(&format!("{namespace}/{repo}"));
+    pipeline_by_id_with_auth(root, host, &encoded_project, pipeline_id, auth.as_ref())
+}
+
+pub(crate) fn list_pipeline_jobs(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    pipeline_id: u64,
+    login: Option<&str>,
+) -> Result<Vec<GitlabPipelineJob>, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let encoded_project = encode_percent(&format!("{namespace}/{repo}"));
+    let endpoint = format!(
+        "projects/{encoded_project}/pipelines/{pipeline_id}/jobs?include_retried=false&per_page=100",
+    );
+    run_api_json(
+        root,
+        host,
+        auth.as_ref(),
+        &endpoint,
+        true,
+        "GitLab pipeline jobs",
+    )
+}
+
+const JOB_TRACE_LIMIT_BYTES: usize = 256 * 1024;
+
+pub(crate) fn read_job_trace(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    job_id: u64,
+    trace_size: Option<u64>,
+    login: Option<&str>,
+) -> Result<GitlabJobTrace, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let encoded_project = encode_percent(&format!("{namespace}/{repo}"));
+    let endpoint = format!("projects/{encoded_project}/jobs/{job_id}/trace");
+    let glab = resolve_cli_binary("glab")?;
+    let mut command = Command::new(glab);
+    command.current_dir(root).args(["api", "--hostname", host]);
+    let range_truncated = trace_size
+        .map(|size| size > JOB_TRACE_LIMIT_BYTES as u64)
+        .unwrap_or(false);
+    if range_truncated {
+        let start = trace_size
+            .unwrap_or_default()
+            .saturating_sub(JOB_TRACE_LIMIT_BYTES as u64);
+        command.args(["-H", &format!("Range: bytes={start}-")]);
+    }
+    command
+        .arg(endpoint)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        return Err("GitLab job log did not expose an output stream.".to_string());
+    };
+    let mut bytes = Vec::with_capacity(JOB_TRACE_LIMIT_BYTES + 1);
+    stdout
+        .take((JOB_TRACE_LIMIT_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    let stream_truncated = bytes.len() > JOB_TRACE_LIMIT_BYTES;
+    if stream_truncated {
+        bytes.truncate(JOB_TRACE_LIMIT_BYTES);
+        let _ = child.kill();
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() && !stream_truncated {
+        return Err(git_output_err("GitLab job log", &output.stderr));
+    }
+    let loaded_bytes = bytes.len() as u64;
+    let content = sanitize_job_trace(&String::from_utf8_lossy(&bytes));
+    Ok(GitlabJobTrace {
+        content,
+        truncated: range_truncated || stream_truncated,
+        loaded_bytes,
+    })
+}
+
+pub(crate) fn retry_job(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    job_id: u64,
+    login: Option<&str>,
+) -> Result<GitlabPipelineJob, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let encoded_project = encode_percent(&format!("{namespace}/{repo}"));
+    let endpoint = format!("projects/{encoded_project}/jobs/{job_id}/retry");
+    let glab = resolve_cli_binary("glab")?;
+    let mut command = Command::new(glab);
+    command
+        .current_dir(root)
+        .args(["api", "--hostname", host, "--method", "POST", &endpoint]);
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(git_output_err("GitLab job retry", &output.stderr));
+    }
+    serde_json::from_slice::<GitlabPipelineJob>(&output.stdout)
+        .map_err(|error| format!("Failed to decode retried GitLab job: {error}"))
+}
+
+fn sanitize_job_trace(raw: &str) -> String {
+    #[derive(Clone, Copy)]
+    enum EscapeState {
+        Normal,
+        Escape,
+        Csi,
+        Osc,
+        OscEscape,
+    }
+
+    let mut state = EscapeState::Normal;
+    let mut cleaned = String::with_capacity(raw.len());
+    for character in raw.chars() {
+        state = match state {
+            EscapeState::Normal => match character {
+                '\u{1b}' => EscapeState::Escape,
+                '\r' => EscapeState::Normal,
+                '\n' | '\t' => {
+                    cleaned.push(character);
+                    EscapeState::Normal
+                }
+                value if !value.is_control() => {
+                    cleaned.push(value);
+                    EscapeState::Normal
+                }
+                _ => EscapeState::Normal,
+            },
+            EscapeState::Escape => match character {
+                '[' => EscapeState::Csi,
+                ']' => EscapeState::Osc,
+                _ => EscapeState::Normal,
+            },
+            EscapeState::Csi => {
+                if ('@'..='~').contains(&character) {
+                    EscapeState::Normal
+                } else {
+                    EscapeState::Csi
+                }
+            }
+            EscapeState::Osc => match character {
+                '\u{7}' => EscapeState::Normal,
+                '\u{1b}' => EscapeState::OscEscape,
+                _ => EscapeState::Osc,
+            },
+            EscapeState::OscEscape => {
+                if character == '\\' {
+                    EscapeState::Normal
+                } else {
+                    EscapeState::Osc
+                }
+            }
+        };
+    }
+
+    cleaned
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim_start();
+            !trimmed.starts_with("section_start:") && !trimmed.starts_with("section_end:")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub(crate) fn map_state(state: Option<&str>) -> Option<String> {
     match state {
         Some("opened") | Some("open") => Some("open".to_string()),
@@ -809,7 +1255,7 @@ pub(crate) fn create_change_request(
 mod tests {
     use super::{
         extract_glab_token, parse_glab_authenticated_hosts, parse_glab_logged_in_pairs,
-        parse_project_push_permission,
+        parse_project_push_permission, sanitize_job_trace, GitlabJobArtifact, GitlabPipelineJob,
     };
 
     use crate::commands::forge::accounts::RepoAccess;
@@ -878,5 +1324,31 @@ self.gitlab.example.com\n  ✓ Logged in to self.gitlab.example.com as team-user
             parse_project_push_permission(payload).unwrap(),
             RepoAccess::Probable
         );
+    }
+
+    #[test]
+    fn sanitizes_terminal_sequences_and_gitlab_section_markers() {
+        let raw = "\u{1b}[31mfailed\u{1b}[0m\r\nsection_start:123:test\r\nrun tests\nsection_end:124:test\r\n";
+        assert_eq!(sanitize_job_trace(raw), "failed\nrun tests");
+    }
+
+    #[test]
+    fn resolves_trace_size_from_job_artifacts() {
+        let job = GitlabPipelineJob {
+            id: 1,
+            name: "test".to_string(),
+            stage: "verify".to_string(),
+            status: "failed".to_string(),
+            duration: None,
+            queued_duration: None,
+            web_url: None,
+            allow_failure: Some(false),
+            archived: Some(false),
+            artifacts: vec![GitlabJobArtifact {
+                file_type: Some("trace".to_string()),
+                size: Some(42),
+            }],
+        };
+        assert_eq!(job.trace_size(), Some(42));
     }
 }

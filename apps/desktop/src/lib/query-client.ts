@@ -243,6 +243,7 @@ export function createDccQueryClient() {
 					return (
 						queryKey === "workspaceGitStatus" ||
 						queryKey === "workspacePrStatus" ||
+						queryKey === "workspacePipeline" ||
 						queryKey === "workspaceGitBranchDiff"
 					);
 				},

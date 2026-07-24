@@ -190,7 +190,7 @@ function WorkspaceEditorDiff({
 }
 
 type ReviewThread = {
-	id: number;
+	id: string;
 	comments: WorkspacePrReviewComment[];
 };
 
@@ -215,7 +215,7 @@ function reviewCommentSide(comment: WorkspacePrReviewComment): "original" | "mod
 }
 
 function buildReviewThreads(comments: WorkspacePrReviewComment[]): ReviewThread[] {
-	const grouped = new Map<number, WorkspacePrReviewComment[]>();
+	const grouped = new Map<string, WorkspacePrReviewComment[]>();
 	for (const comment of comments) {
 		const thread = grouped.get(comment.threadId);
 		if (thread) {
@@ -252,8 +252,8 @@ function buildReviewCommentAnnotations(
 			first.body.split("\n").map((line) => line.trim()).find(Boolean) ??
 			"Review comment";
 		return {
-			source: "github-review",
-			id: String(thread.id),
+			source: "forge-review",
+			id: thread.id,
 			severity: "info",
 			side: reviewCommentSide(first),
 			startLine,
@@ -289,13 +289,13 @@ function buildReviewThreadPrompt({
 		})
 		.join("\n\n");
 	return [
-		`Analyze this GitHub PR review thread and implement the appropriate fix.`,
+		`Analyze this code review thread and implement the appropriate fix.`,
 		"",
 		`File: ${selection.path}`,
 		line ? `Line: ${line}` : null,
 		`Side: ${side}`,
 		selection.baseBranch ? `Base branch: ${selection.baseBranch}` : null,
-		first.htmlUrl ? `GitHub: ${first.htmlUrl}` : null,
+		first.htmlUrl ? `Review: ${first.htmlUrl}` : null,
 		"",
 		"Review thread:",
 		comments,
@@ -364,10 +364,14 @@ function ReviewThreadDrawer({
 	const { t, i18n } = useTranslation("common");
 	const first = thread.comments[0]!;
 	const line = reviewCommentLine(first);
-	const githubUrl =
+	const reviewUrl =
 		first.htmlUrl ?? thread.comments.find((comment) => comment.htmlUrl)?.htmlUrl ?? null;
 	const reviewerLabel = t("reviewThread.reviewer");
 	const multiple = thread.comments.length > 1;
+	const resolutionState = thread.comments.find(
+		(comment) => comment.resolvable === true,
+	)?.resolved;
+	const isOutdated = thread.comments.some((comment) => comment.outdated === true);
 
 	return (
 		<aside
@@ -387,6 +391,25 @@ function ReviewThreadDrawer({
 						{multiple ? (
 							<span className="shrink-0 rounded-full bg-muted px-1.5 text-[9.5px] font-semibold leading-[15px] text-muted-foreground tabular-nums">
 								{thread.comments.length}
+							</span>
+						) : null}
+						{isOutdated || resolutionState != null ? (
+							<span
+								className={
+									isOutdated
+										? "shrink-0 rounded-full bg-muted px-1.5 text-[9.5px] font-medium leading-[15px] text-muted-foreground"
+										: resolutionState
+										? "shrink-0 rounded-full bg-emerald-500/10 px-1.5 text-[9.5px] font-medium leading-[15px] text-emerald-600 dark:text-emerald-400"
+										: "shrink-0 rounded-full bg-amber-500/10 px-1.5 text-[9.5px] font-medium leading-[15px] text-amber-700 dark:text-amber-400"
+								}
+							>
+								{t(
+									isOutdated
+										? "reviewThread.outdated"
+										: resolutionState
+										? "reviewThread.resolved"
+										: "reviewThread.unresolved",
+								)}
 							</span>
 						) : null}
 					</div>
@@ -479,16 +502,16 @@ function ReviewThreadDrawer({
 			</div>
 
 			<footer className="flex flex-wrap items-center gap-1.5 border-t border-border/60 bg-muted/20 px-3 py-2.5">
-				{githubUrl ? (
+				{reviewUrl ? (
 					<Button
 						type="button"
 						variant="ghost"
 						size="xs"
 						className="mr-auto h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-						onClick={() => void openExternal(githubUrl)}
+						onClick={() => void openExternal(reviewUrl)}
 					>
 						<ExternalLink className="size-3.5" strokeWidth={2} />
-						{t("reviewThread.openOnGithub")}
+						{t("reviewThread.openOnForge")}
 					</Button>
 				) : (
 					<span className="mr-auto" />
@@ -529,7 +552,7 @@ export function WorkspaceEditorSurface({
 }: WorkspaceEditorSurfaceProps) {
 	const { t } = useTranslation("common");
 	const [pending, setPending] = useState<PendingAnnotation | null>(null);
-	const [activeReviewThreadId, setActiveReviewThreadId] = useState<number | null>(
+	const [activeReviewThreadId, setActiveReviewThreadId] = useState<string | null>(
 		null,
 	);
 	const annotationsEnabled = Boolean(
@@ -777,8 +800,8 @@ export function WorkspaceEditorSurface({
 						onAnnotate={annotationsEnabled ? handleAnnotate : undefined}
 						annotateLabel={t("diffAnnotate.sendToAgent")}
 						onMachineAnnotationClick={({ annotation }) => {
-							if (annotation.source === "github-review" && annotation.id) {
-								setActiveReviewThreadId(Number(annotation.id));
+							if (annotation.source === "forge-review" && annotation.id) {
+								setActiveReviewThreadId(annotation.id);
 							}
 						}}
 						reviewCommentLabel={t("diffAnnotate.reviewComment")}

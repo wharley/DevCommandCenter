@@ -120,4 +120,5 @@ DCC was shaped by the broader ecosystem of AI coding tools, terminal-native deve
 - [Mobile web companion](docs/MOBILE_WEB.md)
 - [Mobile pairing security model](docs/SECURITY_MOBILE_PAIRING.md)
 - [CodeRabbit integration](docs/CODERABBIT.md)
+- [Delivery workflows roadmap](docs/DELIVERY_WORKFLOWS_ROADMAP.md)
 - [Monaco Editor in Tauri](docs/MONACO_TAURI.md)

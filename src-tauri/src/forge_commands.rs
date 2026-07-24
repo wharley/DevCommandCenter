@@ -5,8 +5,9 @@ use dcc_tauri::{
         ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliHostsInput, ForgeCliHostsOutput,
         ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput,
         GithubCliStatusOutput, WorkspaceForgeContextInput, WorkspaceForgeContextOutput,
-        WorkspacePrReviewCommentsInput, WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput,
-        WorkspacePrStatusOutput,
+        WorkspacePipelineJobInput, WorkspacePipelineJobLogOutput, WorkspacePipelineStatusInput,
+        WorkspacePipelineStatusOutput, WorkspacePrReviewCommentsInput,
+        WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
     },
     commands::workspace_commands::{RepositoryIdInput, WorkspaceGitPushInput},
     state::WorkspaceCommandState,
@@ -138,4 +139,28 @@ pub async fn workspace_pr_review_comments(
     input: WorkspacePrReviewCommentsInput,
 ) -> Result<WorkspacePrReviewCommentsOutput, String> {
     dcc_tauri::commands::forge_commands::workspace_pr_review_comments(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_pipeline_status(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePipelineStatusInput,
+) -> Result<WorkspacePipelineStatusOutput, String> {
+    dcc_tauri::commands::forge_commands::workspace_pipeline_status(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_pipeline_job_log(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePipelineJobInput,
+) -> Result<WorkspacePipelineJobLogOutput, String> {
+    dcc_tauri::commands::forge_commands::workspace_pipeline_job_log(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_pipeline_job_retry(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePipelineJobInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::forge_commands::workspace_pipeline_job_retry(state, input).await
 }

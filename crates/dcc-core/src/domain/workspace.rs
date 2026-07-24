@@ -33,6 +33,17 @@ pub enum WorkspaceSourceKind {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspacePushTarget {
+    pub remote_name: String,
+    pub branch_name: String,
+    #[serde(default)]
+    pub remote_url: Option<String>,
+    #[serde(default)]
+    pub remote_created: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceSource {
     pub kind: WorkspaceSourceKind,
     pub url: String,
@@ -44,6 +55,10 @@ pub struct WorkspaceSource {
     pub change_request_number: Option<u32>,
     pub title: Option<String>,
     pub author: Option<String>,
+    #[serde(default)]
+    pub source_repository: Option<String>,
+    #[serde(default)]
+    pub push_target: Option<WorkspacePushTarget>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

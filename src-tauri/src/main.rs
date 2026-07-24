@@ -65,6 +65,7 @@ use forge_commands::{
     workspace_forge_cli_accounts, workspace_forge_cli_hosts, workspace_forge_cli_select_login,
     workspace_forge_cli_status, workspace_forge_context, workspace_gh_pr_create_fill,
     workspace_gh_pr_merge, workspace_gh_pr_view_web, workspace_github_cli_status,
+    workspace_pipeline_job_log, workspace_pipeline_job_retry, workspace_pipeline_status,
     workspace_pr_review_comments, workspace_pr_status, workspace_retry_repository_forge_binding,
 };
 use tauri_plugin_dialog::{
@@ -6915,6 +6916,9 @@ pub fn run() {
             workspace_git_unstage_file,
             workspace_prepare_delegation_worktree,
             workspace_remove_delegation_worktree,
+            workspace_pipeline_job_log,
+            workspace_pipeline_job_retry,
+            workspace_pipeline_status,
             workspace_pr_review_comments,
             workspace_pr_status,
             workspace_run_setup,

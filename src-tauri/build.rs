@@ -22,8 +22,9 @@ use dcc_core::{
             WorkspaceSessionSummary,
         },
         workspace::{
-            Workspace, WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus,
-            WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind, WorkspaceState,
+            Workspace, WorkspaceId, WorkspacePushTarget, WorkspaceSetupReport,
+            WorkspaceSetupStatus, WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind,
+            WorkspaceState,
         },
         workspace_bundle::{
             WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
@@ -58,6 +59,8 @@ use dcc_tauri::commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
         ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput,
         GithubCliStatusOutput, WorkspaceForgeContextInput, WorkspaceForgeContextOutput,
+        WorkspacePipeline, WorkspacePipelineJob, WorkspacePipelineJobInput,
+        WorkspacePipelineJobLogOutput, WorkspacePipelineStatusInput, WorkspacePipelineStatusOutput,
         WorkspacePrReviewComment, WorkspacePrReviewCommentAuthor, WorkspacePrReviewCommentsInput,
         WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
     },
@@ -151,6 +154,9 @@ struct WorkspaceMethods {
     workspace_gh_pr_view_web: String,
     workspace_pr_review_comments: String,
     workspace_pr_status: String,
+    workspace_pipeline_status: String,
+    workspace_pipeline_job_log: String,
+    workspace_pipeline_job_retry: String,
     workspace_git_branch_diff: String,
     workspace_apply_delegation_worktree: String,
     workspace_git_commit_push: String,
@@ -241,6 +247,7 @@ fn main() {
         .typ::<RepositoryId>()
         .typ::<WorkspaceState>()
         .typ::<WorkspaceSourceKind>()
+        .typ::<WorkspacePushTarget>()
         .typ::<WorkspaceSource>()
         .typ::<Workspace>()
         .typ::<WorkspaceBundleId>()
@@ -339,6 +346,12 @@ fn main() {
         .typ::<WorkspacePrReviewComment>()
         .typ::<WorkspacePrReviewCommentsInput>()
         .typ::<WorkspacePrReviewCommentsOutput>()
+        .typ::<WorkspacePipelineStatusInput>()
+        .typ::<WorkspacePipelineJobInput>()
+        .typ::<WorkspacePipelineJob>()
+        .typ::<WorkspacePipeline>()
+        .typ::<WorkspacePipelineStatusOutput>()
+        .typ::<WorkspacePipelineJobLogOutput>()
         .typ::<WorkspaceGitStatusInput>()
         .typ::<WorkspaceGitStatusOutput>()
         .typ::<WorkspaceGitChangeEntry>()
@@ -497,6 +510,9 @@ fn main() {
                 workspace_gh_pr_view_web: "workspace_gh_pr_view_web".to_string(),
                 workspace_pr_review_comments: "workspace_pr_review_comments".to_string(),
                 workspace_pr_status: "workspace_pr_status".to_string(),
+                workspace_pipeline_status: "workspace_pipeline_status".to_string(),
+                workspace_pipeline_job_log: "workspace_pipeline_job_log".to_string(),
+                workspace_pipeline_job_retry: "workspace_pipeline_job_retry".to_string(),
                 workspace_git_branch_diff: "workspace_git_branch_diff".to_string(),
                 workspace_apply_delegation_worktree: "workspace_apply_delegation_worktree"
                     .to_string(),

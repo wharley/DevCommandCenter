@@ -2457,8 +2457,8 @@ mod tests {
             repository::{Repository, RepositoryId},
             session::{SessionEventKind, SessionState, TurnId},
             workspace::{
-                WorkspaceId, WorkspaceSetupReport, WorkspaceSetupStatus, WorkspaceSetupStepReport,
-                WorkspaceSource, WorkspaceSourceKind, WorkspaceState,
+                WorkspaceId, WorkspacePushTarget, WorkspaceSetupReport, WorkspaceSetupStatus,
+                WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind, WorkspaceState,
             },
             workspace_bundle::{
                 WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
@@ -2893,6 +2893,13 @@ mod tests {
                 change_request_number: Some(42),
                 title: Some("Improve review flow".to_string()),
                 author: Some("octocat".to_string()),
+                source_repository: Some("acme/widgets".to_string()),
+                push_target: Some(WorkspacePushTarget {
+                    remote_name: "origin".to_string(),
+                    branch_name: "feature/review".to_string(),
+                    remote_url: None,
+                    remote_created: false,
+                }),
             }),
             state: WorkspaceState::Ready,
             setup_report: None,
@@ -2919,6 +2926,43 @@ mod tests {
                 .and_then(|source| source.change_request_number),
             Some(42)
         );
+        assert_eq!(
+            restored
+                .source
+                .as_ref()
+                .and_then(|source| source.push_target.as_ref())
+                .map(|target| target.remote_name.as_str()),
+            Some("origin")
+        );
+
+        let legacy_source = serde_json::json!({
+            "kind": "pull_request",
+            "url": "https://github.com/acme/widgets/pull/42",
+            "provider": "github",
+            "remoteName": "origin",
+            "headBranch": "feature/review",
+            "headSha": "abc123",
+            "baseBranch": "main",
+            "changeRequestNumber": 42,
+            "title": "Improve review flow",
+            "author": "octocat"
+        });
+        repo.conn
+            .lock()
+            .expect("workspace database lock")
+            .execute(
+                "UPDATE dcc_workspaces SET source_json = ?2 WHERE id = ?1",
+                params![&workspace.id.0, legacy_source.to_string()],
+            )
+            .expect("write legacy source");
+        let restored_legacy = futures::executor::block_on(repo.get_workspace(&workspace.id))
+            .expect("read legacy workspace")
+            .expect("legacy workspace exists");
+        assert!(restored_legacy
+            .source
+            .as_ref()
+            .and_then(|source| source.push_target.as_ref())
+            .is_none());
     }
 
     #[test]
