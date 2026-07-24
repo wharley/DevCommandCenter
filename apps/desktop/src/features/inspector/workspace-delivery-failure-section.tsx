@@ -155,7 +155,10 @@ export function WorkspaceDeliveryFailureSection({
 	};
 
 	return (
-		<div className="shrink-0 overflow-hidden rounded-md border border-amber-500/30 bg-amber-500/[0.045]">
+		<div
+			data-delivery-failure-section
+			className="shrink-0 overflow-hidden rounded-md border border-amber-500/30 bg-amber-500/[0.045]"
+		>
 			<div className="flex min-w-0 items-center gap-2 px-2.5 py-2">
 				<Button
 					type="button"

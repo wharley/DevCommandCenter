@@ -461,11 +461,23 @@
       "resize": "Redimensionar painel de sessão"
     },
     "recap": {
-      "ariaLabel": "Resumo do workspace",
+      "ariaLabel": "Status de entrega do workspace",
+      "state": {
+        "in_development": "Em desenvolvimento",
+        "needs_attention": "Precisa de atenção",
+        "blocked": "Bloqueado",
+        "awaiting_review": "Aguardando review",
+        "ready_to_deliver": "Pronto",
+        "delivered": "Entregue"
+      },
       "actions": {
         "changes": "Ver mudanças",
         "continue": "Continuar",
         "review": "Ver review",
+        "reviewState": "Ver status do review",
+        "pipeline": "Ver pipeline",
+        "delivery": "Ver problema",
+        "synchronize": "Sincronizar",
         "activity": "Ver atividade"
       },
       "messages": {
@@ -480,6 +492,31 @@
         "delegationResults_other": "{{count}} resultados de delegação prontos para revisão.",
         "findings_one": "O review apontou {{count}} item no diff atual — trate antes de commitar.",
         "findings_other": "O review apontou {{count}} itens no diff atual — trate antes de commitar.",
+        "deliveryFailure": {
+          "fetch": "A última busca remota falhou — analise o contexto capturado antes de continuar.",
+          "pull": "A última atualização da branch falhou — analise o contexto capturado antes de continuar.",
+          "push": "O último envio falhou — analise o contexto capturado antes de continuar.",
+          "pipeline": "Um problema de pipeline foi capturado para o commit atual."
+        },
+        "reviewConflicts": "{{pr}} possui conflitos que precisam ser resolvidos localmente.",
+        "changesRequested": "{{pr}} possui alterações solicitadas que ainda precisam de atenção.",
+        "pipelineFailed_one": "A pipeline atual possui {{count}} job bloqueante com falha.",
+        "pipelineFailed_other": "A pipeline atual possui {{count}} jobs bloqueantes com falha.",
+        "discussionsOpen": "{{pr}} ainda possui discussões de review não resolvidas.",
+        "behindBase_one": "Esta branch está {{count}} commit atrás da base do review.",
+        "behindBase_other": "Esta branch está {{count}} commits atrás da base do review.",
+        "pipelineCanceled": "A pipeline atual foi cancelada antes de concluir a entrega.",
+        "pipelineManual": "A pipeline atual está aguardando uma ação manual.",
+        "reviewLoading": "Verificando o status de review e aprovação de {{pr}}.",
+        "pipelineLoading": "Verificando a pipeline do commit atual.",
+        "reviewUnavailable": "O status de review de {{pr}} está indisponível no momento.",
+        "pipelineUnavailable": "O status da pipeline está indisponível; o DCC não considera isso uma aprovação.",
+        "draft": "{{pr}} ainda está marcado como rascunho.",
+        "approvalsPending_one": "Ainda é necessária {{count}} aprovação antes da entrega.",
+        "approvalsPending_other": "Ainda são necessárias {{count}} aprovações antes da entrega.",
+        "reviewPending": "{{pr}} está aguardando o retorno dos reviewers.",
+        "approvalsUnavailable": "Os requisitos de aprovação de {{pr}} estão indisponíveis; o DCC não os considera atendidos.",
+        "pipelineRunning": "A pipeline atual ainda está em execução.",
         "changes_one": "{{count}} arquivo alterado (+{{additions}} −{{deletions}}) aguardando commit.",
         "changes_other": "{{count}} arquivos alterados (+{{additions}} −{{deletions}}) aguardando commit.",
         "ahead_one": "{{count}} commit local aguardando push.",

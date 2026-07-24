@@ -461,11 +461,23 @@
       "resize": "Resize session panel"
     },
     "recap": {
-      "ariaLabel": "Workspace recap",
+      "ariaLabel": "Workspace delivery status",
+      "state": {
+        "in_development": "In development",
+        "needs_attention": "Needs attention",
+        "blocked": "Blocked",
+        "awaiting_review": "Awaiting review",
+        "ready_to_deliver": "Ready",
+        "delivered": "Delivered"
+      },
       "actions": {
         "changes": "View changes",
         "continue": "Continue",
         "review": "View review",
+        "reviewState": "View review status",
+        "pipeline": "View pipeline",
+        "delivery": "View issue",
+        "synchronize": "Synchronize",
         "activity": "View activity"
       },
       "messages": {
@@ -480,6 +492,31 @@
         "delegationResults_other": "{{count}} delegation results are ready to review.",
         "findings_one": "Review flagged {{count}} finding on the current diff — handle it before committing.",
         "findings_other": "Review flagged {{count}} findings on the current diff — handle them before committing.",
+        "deliveryFailure": {
+          "fetch": "The last remote fetch failed — inspect the captured context before continuing.",
+          "pull": "The last branch update failed — inspect the captured context before continuing.",
+          "push": "The last push failed — inspect the captured context before continuing.",
+          "pipeline": "A pipeline issue was captured for the current commit."
+        },
+        "reviewConflicts": "{{pr}} has conflicts that must be resolved locally.",
+        "changesRequested": "{{pr}} has requested changes that still need attention.",
+        "pipelineFailed_one": "The current pipeline has {{count}} blocking failed job.",
+        "pipelineFailed_other": "The current pipeline has {{count}} blocking failed jobs.",
+        "discussionsOpen": "{{pr}} still has unresolved review discussions.",
+        "behindBase_one": "This branch is {{count}} commit behind its review base.",
+        "behindBase_other": "This branch is {{count}} commits behind its review base.",
+        "pipelineCanceled": "The current pipeline was canceled before delivery completed.",
+        "pipelineManual": "The current pipeline is waiting for a manual action.",
+        "reviewLoading": "Checking review and approval status for {{pr}}.",
+        "pipelineLoading": "Checking pipeline status for the current commit.",
+        "reviewUnavailable": "Review status for {{pr}} is currently unavailable.",
+        "pipelineUnavailable": "Pipeline status is currently unavailable; DCC is not treating it as approved.",
+        "draft": "{{pr}} is still marked as a draft.",
+        "approvalsPending_one": "{{count}} approval is still required before delivery.",
+        "approvalsPending_other": "{{count}} approvals are still required before delivery.",
+        "reviewPending": "{{pr}} is waiting for reviewer feedback.",
+        "approvalsUnavailable": "Approval requirements for {{pr}} are unavailable; DCC is not treating them as satisfied.",
+        "pipelineRunning": "The current pipeline is still running.",
         "changes_one": "{{count}} file changed (+{{additions}} −{{deletions}}), waiting for a commit.",
         "changes_other": "{{count}} files changed (+{{additions}} −{{deletions}}), waiting for a commit.",
         "ahead_one": "{{count}} local commit waiting for a push.",

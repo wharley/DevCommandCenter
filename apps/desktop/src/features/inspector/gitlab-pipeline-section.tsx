@@ -266,7 +266,10 @@ export function GitlabPipelineSection({
 
 	if (pipelineQuery.isPending) {
 		return (
-			<div className="flex shrink-0 items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-2.5 py-2 text-[11px] text-muted-foreground">
+			<div
+				data-workspace-pipeline
+				className="flex shrink-0 items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-2.5 py-2 text-[11px] text-muted-foreground"
+			>
 				<Loader2 className="size-3.5 animate-spin" />
 				{t("inspector.pipeline.loading")}
 			</div>
@@ -275,7 +278,10 @@ export function GitlabPipelineSection({
 
 	if (pipelineQuery.isError) {
 		return (
-			<div className="flex shrink-0 items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+			<div
+				data-workspace-pipeline
+				className="flex shrink-0 items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-[11px] text-amber-700 dark:text-amber-300"
+			>
 				<CircleAlert className="size-3.5 shrink-0" />
 				<span className="min-w-0 flex-1 truncate">
 					{t("inspector.pipeline.loadFailed")}
@@ -295,7 +301,10 @@ export function GitlabPipelineSection({
 
 	if (!pipeline) {
 		return (
-			<div className="flex shrink-0 items-center gap-2 rounded-md border border-border/50 bg-muted/15 px-2.5 py-2 text-[11px] text-muted-foreground">
+			<div
+				data-workspace-pipeline
+				className="flex shrink-0 items-center gap-2 rounded-md border border-border/50 bg-muted/15 px-2.5 py-2 text-[11px] text-muted-foreground"
+			>
 				<CircleDot className="size-3.5 shrink-0" />
 				<span className="truncate">{t("inspector.pipeline.notFound")}</span>
 			</div>
@@ -341,7 +350,10 @@ export function GitlabPipelineSection({
 	};
 
 	return (
-		<div className="shrink-0 overflow-hidden rounded-md border border-border/60 bg-muted/15">
+		<div
+			data-workspace-pipeline
+			className="shrink-0 overflow-hidden rounded-md border border-border/60 bg-muted/15"
+		>
 			<div className="flex min-w-0 items-center gap-2 px-2.5 py-2">
 				<Button
 					type="button"

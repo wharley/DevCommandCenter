@@ -197,6 +197,27 @@ Possible signals:
 - Details and secondary signals remain behind expansion.
 - Rules are adjustable per project; DCC does not invent mandatory policies.
 
+### Deliverable 4.1 — Core derived status
+
+The existing workspace recap is now the Delivery Status projection. It derives
+the six states from local Git, active agent work, captured delivery failures,
+CodeRabbit findings, normalized reviews and approvals, base divergence, and
+pipeline state. It reuses the existing query cache and does not persist or
+re-fetch an independent aggregate.
+
+The summary exposes one reason and links its recommendation to an existing Git,
+review, pipeline, synchronization, or recovery action. Loading and failed
+external queries are represented as unavailable information rather than a
+successful gate.
+
+### Deliverable 4.2 — Project policy and secondary details
+
+- Define optional project rules for which validations, approvals, and pipeline
+  signals are required.
+- Expose the evaluated signals behind a compact expansion without duplicating
+  the existing detailed Inspector sections.
+- Keep the default policy conservative and provider-neutral.
+
 ### Acceptance criteria
 
 - The summary explains why a workspace is or is not ready.
@@ -264,8 +285,12 @@ Updated July 24, 2026:
 - [x] Failure snapshots.
 - [x] Conservative failure classification.
 - [x] Recovery actions.
+- [x] Core six-state Delivery Status derivation and compact Inspector summary.
+- [x] Failure, review, approval, divergence, and pipeline precedence with
+  existing-action routing.
+- [ ] Project-specific delivery policy and secondary signal details.
 - [ ] Delivery Status.
 
-Next slice: **Phase 4 — Delivery Status**. The fork, job, and review-state
-smoke tests remain pending until real cases are available, without creating or
-changing external state solely for testing.
+Next slice: **Phase 4.2 — Project policy and secondary details**. The fork,
+job, and review-state smoke tests remain pending until real cases are available,
+without creating or changing external state solely for testing.

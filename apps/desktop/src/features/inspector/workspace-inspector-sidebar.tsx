@@ -104,9 +104,18 @@ import { buildWorkspaceRecap, workspaceRecapActionForMode } from "./workspace-re
 import { WorkspaceRecapStrip } from "./workspace-recap-strip";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
 import { useWorkspacePrReviewComments } from "./use-workspace-pr-review-comments";
-import { WORKSPACE_PIPELINE_QUERY_KEY } from "./use-workspace-pipeline";
-import { WORKSPACE_DELIVERY_FAILURE_QUERY_KEY } from "./use-workspace-delivery-failure";
-import { WORKSPACE_REVIEW_STATE_QUERY_KEY } from "./use-workspace-review-state";
+import {
+	useWorkspacePipeline,
+	WORKSPACE_PIPELINE_QUERY_KEY,
+} from "./use-workspace-pipeline";
+import {
+	useWorkspaceDeliveryFailure,
+	WORKSPACE_DELIVERY_FAILURE_QUERY_KEY,
+} from "./use-workspace-delivery-failure";
+import {
+	useWorkspaceReviewState,
+	WORKSPACE_REVIEW_STATE_QUERY_KEY,
+} from "./use-workspace-review-state";
 import {
 	useWorkspaceForgeContext,
 	WORKSPACE_FORGE_CONTEXT_QUERY_KEY,
@@ -2715,6 +2724,22 @@ export function WorkspaceInspectorSidebar({
 		storedCodeRabbitReview && !codeRabbitReviewIsStale
 			? storedCodeRabbitReview.findings.length
 			: 0;
+	const deliveryFailureQuery = useWorkspaceDeliveryFailure(
+		workspacePath,
+		gitBranch,
+		Boolean(workspacePath),
+	);
+	const deliveryReviewStateQuery = useWorkspaceReviewState(
+		workspacePath,
+		gitBranch,
+		selectedForgeLogin,
+		forgeConnected && Boolean(prStatus?.number),
+	);
+	const deliveryPipelineQuery = useWorkspacePipeline(
+		workspacePath,
+		selectedForgeLogin,
+		workspaceForgeContext?.provider === "gitlab" && forgeConnected,
+	);
 	const workingTreeSummary = useMemo(() => {
 		const entries = [
 			...(gitStatusQuery.data?.staged ?? []),
@@ -2760,14 +2785,75 @@ export function WorkspaceInspectorSidebar({
 				requestLabel: forgeContext.requestLabel,
 				pendingReviewFindingsCount,
 				pendingDelegationResultsCount,
+				deliveryFailure: deliveryFailureQuery.data?.snapshot
+					? {
+							operation: deliveryFailureQuery.data.snapshot.operation,
+							classification:
+								deliveryFailureQuery.data.snapshot.classification,
+						}
+					: null,
+				reviewState: deliveryReviewStateQuery.data
+					? {
+							reviewState:
+								deliveryReviewStateQuery.data.reviewState,
+							approvalsAvailable:
+								deliveryReviewStateQuery.data.approvalsAvailable,
+							approvalsLeft:
+								deliveryReviewStateQuery.data.approvalsLeft,
+							hasConflicts:
+								deliveryReviewStateQuery.data.hasConflicts,
+							behindBy: deliveryReviewStateQuery.data.behindBy,
+							discussionsResolved:
+								deliveryReviewStateQuery.data.discussionsResolved,
+							draft: deliveryReviewStateQuery.data.draft,
+						}
+					: null,
+				reviewStatus: !prStatus?.number
+					? "idle"
+					: !forgeConnected
+						? "error"
+						: deliveryReviewStateQuery.isPending
+							? "loading"
+							: deliveryReviewStateQuery.isError
+								? "error"
+								: "available",
+				pipeline: deliveryPipelineQuery.data?.pipeline
+					? {
+							status: deliveryPipelineQuery.data.pipeline.status,
+							failedJobs:
+								deliveryPipelineQuery.data.pipeline.jobs.filter(
+									(job) =>
+										job.status === "failed" &&
+										!job.allowFailure,
+								).length,
+						}
+					: null,
+				pipelineStatus:
+					workspaceForgeContext?.provider !== "gitlab" ||
+					!forgeConnected
+						? "idle"
+						: deliveryPipelineQuery.isPending
+							? "loading"
+							: deliveryPipelineQuery.isError
+								? "error"
+								: "available",
 			}),
 		[
 			commitMode,
+			deliveryFailureQuery.data?.snapshot,
+			deliveryPipelineQuery.data?.pipeline,
+			deliveryPipelineQuery.isError,
+			deliveryPipelineQuery.isPending,
+			deliveryReviewStateQuery.data,
+			deliveryReviewStateQuery.isError,
+			deliveryReviewStateQuery.isPending,
+			forgeConnected,
 			forgeContext.requestLabel,
 			gitStatusQuery.data,
 			pendingReviewFindingsCount,
 			prStatus?.number,
 			prStatus?.state,
+			workspaceForgeContext?.provider,
 			pendingDelegationResultsCount,
 			committedVsBaseCount,
 			sessionSnapshot?.activeTurnId,
@@ -2783,6 +2869,14 @@ export function WorkspaceInspectorSidebar({
 		if (!action) {
 			return;
 		}
+		const revealGitSection = (selector: string) => {
+			selectInspectorMode("git");
+			window.setTimeout(() => {
+				rootRef.current
+					?.querySelector(selector)
+					?.scrollIntoView({ block: "start", behavior: "smooth" });
+			}, 120);
+		};
 		switch (action.kind) {
 			case "git": {
 				selectInspectorMode("git");
@@ -2797,19 +2891,30 @@ export function WorkspaceInspectorSidebar({
 				return;
 			}
 			case "review": {
+				revealGitSection("[data-coderabbit-review-section]");
+				return;
+			}
+			case "review-state": {
+				revealGitSection("[data-workspace-review-state]");
+				return;
+			}
+			case "pipeline": {
+				revealGitSection("[data-workspace-pipeline]");
+				return;
+			}
+			case "delivery": {
+				revealGitSection("[data-delivery-failure-section]");
+				return;
+			}
+			case "sync": {
 				selectInspectorMode("git");
-				// Wait a frame for the git mode (and the review section) to mount
-				// before scrolling to it.
-				window.setTimeout(() => {
-					rootRef.current
-						?.querySelector("[data-coderabbit-review-section]")
-						?.scrollIntoView({ block: "start", behavior: "smooth" });
-				}, 120);
+				handleSyncBase();
 				return;
 			}
 		}
 	}, [
 		handleContinueWorkspace,
+		handleSyncBase,
 		openSessionDock,
 		selectInspectorMode,
 		visibleWorkspaceRecapAction,

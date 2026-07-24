@@ -76,7 +76,10 @@ export function WorkspaceReviewStateSection({
 
 	if (query.isPending) {
 		return (
-			<div className="flex shrink-0 items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-2.5 py-2 text-[11px] text-muted-foreground">
+			<div
+				data-workspace-review-state
+				className="flex shrink-0 items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-2.5 py-2 text-[11px] text-muted-foreground"
+			>
 				<Loader2 className="size-3.5 animate-spin" />
 				{t("inspector.reviewState.loading")}
 			</div>
@@ -85,7 +88,10 @@ export function WorkspaceReviewStateSection({
 
 	if (query.isError) {
 		return (
-			<div className="flex shrink-0 items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+			<div
+				data-workspace-review-state
+				className="flex shrink-0 items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-[11px] text-amber-700 dark:text-amber-300"
+			>
 				<CircleAlert className="size-3.5 shrink-0" />
 				<span className="min-w-0 flex-1 truncate">
 					{t("inspector.reviewState.loadFailed")}
@@ -132,6 +138,7 @@ export function WorkspaceReviewStateSection({
 
 	return (
 		<div
+			data-workspace-review-state
 			className={cn(
 				"shrink-0 overflow-hidden rounded-md border bg-muted/15",
 				hasBlockingSignal ? "border-amber-500/25" : "border-border/60",
