@@ -105,6 +105,9 @@
       "active": "Running",
       "completed": "Completed",
       "aborted": "Aborted"
+    },
+    "activityTime": {
+      "ago": "{{time}} ago"
     }
   },
   "commandPalette": {

@@ -45,6 +45,8 @@ function makeSession(
 		},
 		lastTurnPrompt: null,
 		lastTurnState: null,
+		lastTurnStartedAt: null,
+		lastTurnCompletedAt: null,
 	};
 }
 

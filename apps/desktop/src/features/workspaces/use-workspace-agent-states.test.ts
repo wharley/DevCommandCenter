@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
-import { deriveAgentStateFromSessions } from "./use-workspace-agent-states";
+import {
+	deriveAgentActivityFromSessions,
+	deriveAgentStateFromSessions,
+} from "./use-workspace-agent-states";
 
 type SummaryOverrides = {
 	session?: Partial<WorkspaceSessionSummary["session"]>;
@@ -8,6 +11,8 @@ type SummaryOverrides = {
 	projection?: Partial<WorkspaceSessionSummary["projection"]>;
 	lastTurnPrompt?: WorkspaceSessionSummary["lastTurnPrompt"];
 	lastTurnState?: WorkspaceSessionSummary["lastTurnState"];
+	lastTurnStartedAt?: WorkspaceSessionSummary["lastTurnStartedAt"];
+	lastTurnCompletedAt?: WorkspaceSessionSummary["lastTurnCompletedAt"];
 };
 
 function makeSummary(
@@ -49,6 +54,8 @@ function makeSummary(
 		},
 		lastTurnPrompt: overrides.lastTurnPrompt ?? null,
 		lastTurnState: overrides.lastTurnState ?? null,
+		lastTurnStartedAt: overrides.lastTurnStartedAt ?? null,
+		lastTurnCompletedAt: overrides.lastTurnCompletedAt ?? null,
 	};
 }
 
@@ -78,9 +85,16 @@ describe("deriveAgentStateFromSessions", () => {
 				turnCount: 1,
 			},
 			lastTurnState: "completed",
+			lastTurnStartedAt: "2026-05-06T12:00:01.000Z",
+			lastTurnCompletedAt: "2026-05-06T12:00:09.000Z",
 		});
 
 		expect(deriveAgentStateFromSessions([summary])).toBe("completed");
+		expect(deriveAgentActivityFromSessions([summary])).toEqual({
+			state: "completed",
+			startedAt: "2026-05-06T12:00:01.000Z",
+			completedAt: "2026-05-06T12:00:09.000Z",
+		});
 	});
 
 	it("returns aborted for the latest aborted turn", () => {

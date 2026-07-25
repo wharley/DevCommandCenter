@@ -4,10 +4,16 @@ import { workspacePrStatus } from "@/lib/workspace-api";
 export const WORKSPACE_PR_STATUS_QUERY_KEY = "workspacePrStatus";
 const WORKSPACE_PR_REFETCH_INTERVAL_MS = 10_000;
 
+type WorkspacePrStatusQueryOptions = {
+	staleTime?: number;
+	refetchInterval?: number | false;
+};
+
 export function useWorkspacePrStatus(
 	workspaceRoot: string | null,
 	branch: string | null,
 	forgeLogin: string | null = null,
+	options?: WorkspacePrStatusQueryOptions,
 ) {
 	const root = workspaceRoot?.trim() ?? "";
 	const currentBranch = branch?.trim() ?? "";
@@ -38,8 +44,9 @@ export function useWorkspacePrStatus(
 			});
 		},
 		enabled: Boolean(root),
-		staleTime: 8_000,
+		staleTime: options?.staleTime ?? 8_000,
 		refetchOnWindowFocus: true,
-		refetchInterval: WORKSPACE_PR_REFETCH_INTERVAL_MS,
+		refetchInterval:
+			options?.refetchInterval ?? WORKSPACE_PR_REFETCH_INTERVAL_MS,
 	});
 }

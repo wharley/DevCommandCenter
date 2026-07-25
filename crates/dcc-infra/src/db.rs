@@ -1282,17 +1282,31 @@ impl SqliteSessionRepo {
         let events = self.list_events_by_session_sync(&session.id)?;
         let mut last_turn_prompt = None;
         let mut last_turn_state = None;
+        let mut last_turn_id = None;
+        let mut last_turn_started_at = None;
+        let mut last_turn_completed_at = None;
         for event in &events {
             match &event.kind {
-                SessionEventKind::TurnStarted { prompt, .. } => {
+                SessionEventKind::TurnStarted {
+                    turn_id, prompt, ..
+                } => {
+                    last_turn_id = Some(turn_id.clone());
                     last_turn_prompt = Some(prompt.clone());
                     last_turn_state = Some("running".to_string());
+                    last_turn_started_at = Some(event.occurred_at.clone());
+                    last_turn_completed_at = None;
                 }
-                SessionEventKind::TurnCompleted { .. } => {
+                SessionEventKind::TurnCompleted { turn_id }
+                    if last_turn_id.as_ref() == Some(turn_id) =>
+                {
                     last_turn_state = Some("completed".to_string());
+                    last_turn_completed_at = Some(event.occurred_at.clone());
                 }
-                SessionEventKind::TurnAborted { .. } => {
+                SessionEventKind::TurnAborted { turn_id, .. }
+                    if last_turn_id.as_ref() == Some(turn_id) =>
+                {
                     last_turn_state = Some("aborted".to_string());
+                    last_turn_completed_at = Some(event.occurred_at.clone());
                 }
                 SessionEventKind::SessionCompleted => {
                     if last_turn_state.is_none() {
@@ -1325,6 +1339,8 @@ impl SqliteSessionRepo {
             projection,
             last_turn_prompt,
             last_turn_state,
+            last_turn_started_at,
+            last_turn_completed_at,
         })
     }
 
@@ -2499,22 +2515,46 @@ mod tests {
             title: "Thread".to_string(),
             archived_at: None,
         };
-        let event = SessionEventRecord {
-            event_id: "event-1".to_string(),
-            session_id: SessionId("session-1".to_string()),
-            sequence: 1,
-            occurred_at: "2026-01-01T00:00:00Z".to_string(),
-            kind: SessionEventKind::SessionStarted {
-                workspace_id: WorkspaceId("workspace-1".to_string()),
-                project_id: ProjectId("project-1".to_string()),
-                provider_id: "codex".to_string(),
-                model: Some("gpt-5".to_string()),
+        let events = [
+            SessionEventRecord {
+                event_id: "event-1".to_string(),
+                session_id: SessionId("session-1".to_string()),
+                sequence: 1,
+                occurred_at: "2026-01-01T00:00:00Z".to_string(),
+                kind: SessionEventKind::SessionStarted {
+                    workspace_id: WorkspaceId("workspace-1".to_string()),
+                    project_id: ProjectId("project-1".to_string()),
+                    provider_id: "codex".to_string(),
+                    model: Some("gpt-5".to_string()),
+                },
             },
-        };
+            SessionEventRecord {
+                event_id: "event-2".to_string(),
+                session_id: SessionId("session-1".to_string()),
+                sequence: 2,
+                occurred_at: "2026-01-01T00:00:02Z".to_string(),
+                kind: SessionEventKind::TurnStarted {
+                    turn_id: TurnId("turn-1".to_string()),
+                    prompt: "Implement the workspace recap".to_string(),
+                    plan_mode: Some(false),
+                },
+            },
+            SessionEventRecord {
+                event_id: "event-3".to_string(),
+                session_id: SessionId("session-1".to_string()),
+                sequence: 3,
+                occurred_at: "2026-01-01T00:00:09Z".to_string(),
+                kind: SessionEventKind::TurnCompleted {
+                    turn_id: TurnId("turn-1".to_string()),
+                },
+            },
+        ];
 
         futures::executor::block_on(repo.save_session(&session)).expect("save session");
         futures::executor::block_on(repo.save_thread(&thread)).expect("save thread");
-        futures::executor::block_on(repo.append_event(&event)).expect("append event");
+        for event in &events {
+            futures::executor::block_on(repo.append_event(event)).expect("append event");
+        }
 
         let summary = repo
             .list_workspace_sessions(&WorkspaceId("workspace-1".to_string()))
@@ -2527,6 +2567,14 @@ mod tests {
         );
         assert_eq!(summary[0].thread.id.0, "thread-1");
         assert_eq!(summary[0].projection.state, SessionState::Active);
+        assert_eq!(
+            summary[0].last_turn_started_at.as_deref(),
+            Some("2026-01-01T00:00:02Z")
+        );
+        assert_eq!(
+            summary[0].last_turn_completed_at.as_deref(),
+            Some("2026-01-01T00:00:09Z")
+        );
     }
 
     #[test]

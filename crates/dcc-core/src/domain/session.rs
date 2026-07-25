@@ -411,6 +411,8 @@ pub struct WorkspaceSessionSummary {
     pub projection: SessionProjection,
     pub last_turn_prompt: Option<String>,
     pub last_turn_state: Option<String>,
+    pub last_turn_started_at: Option<String>,
+    pub last_turn_completed_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

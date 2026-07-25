@@ -6,6 +6,12 @@ import type { WorkspaceSummary } from "./types";
 
 export type AgentState = "active" | "completed" | "aborted";
 
+export type WorkspaceAgentActivity = {
+	state: AgentState;
+	startedAt: string | null;
+	completedAt: string | null;
+};
+
 function isRunningSession(summary: WorkspaceSessionSummary): boolean {
 	return (
 		summary.lastTurnState === "running" ||
@@ -15,11 +21,19 @@ function isRunningSession(summary: WorkspaceSessionSummary): boolean {
 	);
 }
 
-export function deriveAgentStateFromSessions(
+export function deriveAgentActivityFromSessions(
 	summaries: WorkspaceSessionSummary[],
-): AgentState | null {
-	if (summaries.some(isRunningSession)) {
-		return "active";
+): WorkspaceAgentActivity | null {
+	const running = summaries.find(isRunningSession);
+	if (running) {
+		return {
+			state: "active",
+			startedAt:
+				running.lastTurnStartedAt ??
+				running.projection.updatedAt ??
+				running.session.updatedAt,
+			completedAt: null,
+		};
 	}
 
 	const latest = summaries[0];
@@ -28,7 +42,14 @@ export function deriveAgentStateFromSessions(
 	}
 
 	if (latest.lastTurnState === "aborted" || latest.projection.state === "aborted") {
-		return "aborted";
+		return {
+			state: "aborted",
+			startedAt: latest.lastTurnStartedAt,
+			completedAt:
+				latest.lastTurnCompletedAt ??
+				latest.projection.updatedAt ??
+				latest.session.updatedAt,
+		};
 	}
 
 	if (
@@ -36,16 +57,29 @@ export function deriveAgentStateFromSessions(
 		latest.projection.state === "completed" ||
 		latest.projection.turnCount > 0
 	) {
-		return "completed";
+		return {
+			state: "completed",
+			startedAt: latest.lastTurnStartedAt,
+			completedAt:
+				latest.lastTurnCompletedAt ??
+				latest.projection.updatedAt ??
+				latest.session.updatedAt,
+		};
 	}
 
 	return null;
 }
 
-export function useWorkspaceAgentStates(
+export function deriveAgentStateFromSessions(
+	summaries: WorkspaceSessionSummary[],
+): AgentState | null {
+	return deriveAgentActivityFromSessions(summaries)?.state ?? null;
+}
+
+export function useWorkspaceAgentActivities(
 	workspaces: Pick<WorkspaceSummary, "id" | "status">[],
 	input?: { enabled?: boolean; scope?: string },
-): Record<string, AgentState> {
+): Record<string, WorkspaceAgentActivity> {
 	const isEnabled = input?.enabled ?? true;
 	const scope = input?.scope ?? "local";
 	const trackedWorkspaces = useMemo(
@@ -61,12 +95,15 @@ export function useWorkspaceAgentStates(
 		),
 	});
 
-	return trackedWorkspaces.reduce<Record<string, AgentState>>((states, workspace, index) => {
-		const query = sessionQueries[index];
-		const nextState = deriveAgentStateFromSessions(query?.data ?? []);
-		if (nextState) {
-			states[workspace.id] = nextState;
-		}
-		return states;
-	}, {});
+	return trackedWorkspaces.reduce<Record<string, WorkspaceAgentActivity>>(
+		(activities, workspace, index) => {
+			const query = sessionQueries[index];
+			const activity = deriveAgentActivityFromSessions(query?.data ?? []);
+			if (activity) {
+				activities[workspace.id] = activity;
+			}
+			return activities;
+		},
+		{},
+	);
 }

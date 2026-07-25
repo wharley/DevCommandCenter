@@ -1801,6 +1801,8 @@ export default function App() {
 						projection: result.projection,
 						lastTurnPrompt: null,
 						lastTurnState: result.projection.activeTurnId ? "running" : null,
+						lastTurnStartedAt: null,
+						lastTurnCompletedAt: null,
 					};
 					return [
 						nextSummary,
@@ -1879,6 +1881,8 @@ export default function App() {
 						projection: started.projection,
 						lastTurnPrompt: null,
 						lastTurnState: null,
+						lastTurnStartedAt: null,
+						lastTurnCompletedAt: null,
 					},
 					...current.filter(
 						(summary) => summary.session.id !== started.session.id,
@@ -1931,6 +1935,11 @@ export default function App() {
 										projection: result.projection,
 										lastTurnPrompt: result.turn.content,
 										lastTurnState: result.turn.state,
+										lastTurnStartedAt: result.turn.createdAt,
+										lastTurnCompletedAt:
+											result.turn.state === "running"
+												? null
+												: result.turn.updatedAt,
 									}
 								: summary,
 						),
@@ -2151,6 +2160,8 @@ export default function App() {
 								projection: started.projection,
 								lastTurnPrompt: null,
 								lastTurnState: started.projection.activeTurnId ? "running" : null,
+								lastTurnStartedAt: null,
+								lastTurnCompletedAt: null,
 							};
 							return [
 								nextSummary,
@@ -2387,6 +2398,8 @@ export default function App() {
 							projection: started.projection,
 							lastTurnPrompt: null,
 							lastTurnState: started.projection.activeTurnId ? "running" : null,
+							lastTurnStartedAt: null,
+							lastTurnCompletedAt: null,
 						};
 						return [
 							nextSummary,
@@ -2439,6 +2452,11 @@ export default function App() {
 										projection: result.projection,
 										lastTurnPrompt: result.turn.content,
 										lastTurnState: result.turn.state,
+										lastTurnStartedAt: result.turn.createdAt,
+										lastTurnCompletedAt:
+											result.turn.state === "running"
+												? null
+												: result.turn.updatedAt,
 									}
 								: summary,
 						),
@@ -2563,6 +2581,8 @@ export default function App() {
 							projection: started.projection,
 							lastTurnPrompt: null,
 							lastTurnState: started.projection.activeTurnId ? "running" : null,
+							lastTurnStartedAt: null,
+							lastTurnCompletedAt: null,
 						};
 						return [
 							nextSummary,
@@ -2637,6 +2657,11 @@ export default function App() {
 									projection: result.projection,
 									lastTurnPrompt: result.turn.content,
 									lastTurnState: result.turn.state,
+									lastTurnStartedAt: result.turn.createdAt,
+									lastTurnCompletedAt:
+										result.turn.state === "running"
+											? null
+											: result.turn.updatedAt,
 								}
 							: summary,
 					),
@@ -2729,6 +2754,11 @@ export default function App() {
 												projection: reanchorResult.projection,
 												lastTurnPrompt: reanchorResult.turn.content,
 												lastTurnState: reanchorResult.turn.state,
+												lastTurnStartedAt: reanchorResult.turn.createdAt,
+												lastTurnCompletedAt:
+													reanchorResult.turn.state === "running"
+														? null
+														: reanchorResult.turn.updatedAt,
 											}
 										: summary,
 								),

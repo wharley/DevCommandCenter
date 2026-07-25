@@ -4,7 +4,15 @@ import { workspaceGitStatus } from "@/lib/workspace-api";
 export const WORKSPACE_GIT_STATUS_QUERY_KEY = "workspaceGitStatus";
 const GIT_INSPECTOR_REFETCH_INTERVAL_MS = 10_000;
 
-export function useWorkspaceGitStatus(workspaceRoot: string | null) {
+type WorkspaceGitStatusQueryOptions = {
+	staleTime?: number;
+	refetchInterval?: number | false;
+};
+
+export function useWorkspaceGitStatus(
+	workspaceRoot: string | null,
+	options?: WorkspaceGitStatusQueryOptions,
+) {
 	const root = workspaceRoot?.trim() ?? "";
 
 	return useQuery({
@@ -24,8 +32,9 @@ export function useWorkspaceGitStatus(workspaceRoot: string | null) {
 			return workspaceGitStatus({ workspaceRoot: root });
 		},
 		enabled: Boolean(root),
-		staleTime: 8_000,
+		staleTime: options?.staleTime ?? 8_000,
 		refetchOnWindowFocus: true,
-		refetchInterval: GIT_INSPECTOR_REFETCH_INTERVAL_MS,
+		refetchInterval:
+			options?.refetchInterval ?? GIT_INSPECTOR_REFETCH_INTERVAL_MS,
 	});
 }

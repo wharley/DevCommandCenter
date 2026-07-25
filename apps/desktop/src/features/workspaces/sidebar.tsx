@@ -70,7 +70,7 @@ import {
 	workspaceRailDisplayTitle,
 } from "./workspace-rail-shared";
 import { WorkspaceRailRowItem } from "./workspace-rail-row";
-import { useWorkspaceAgentStates } from "./use-workspace-agent-states";
+import { useWorkspaceAgentActivities } from "./use-workspace-agent-states";
 
 type VirtualItem =
 	| {
@@ -87,7 +87,7 @@ type VirtualItem =
 	| { kind: "bottom-padding" };
 
 const HEADER_HEIGHT = 34;
-const ROW_HEIGHT = 32;
+const ROW_HEIGHT = 56;
 const GROUP_GAP = 8;
 const EMPTY_GROUP_GAP = 8;
 const BOTTOM_PADDING = 8;
@@ -245,7 +245,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	workspaces,
 }: WorkspacesSidebarProps) {
 	const { t } = useTranslation("common");
-	const workspaceAgentStates = useWorkspaceAgentStates(workspaces, {
+	const workspaceAgentActivities = useWorkspaceAgentActivities(workspaces, {
 		enabled: showAgentStates,
 		scope: sessionQueryScope,
 	});
@@ -649,7 +649,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				<WorkspaceRailRowItem
 					workspace={item.workspace}
 					selected={selectedWorkspaceId === item.workspace.id}
-					agentState={workspaceAgentStates[item.workspace.id] ?? null}
+					activity={workspaceAgentActivities[item.workspace.id] ?? null}
+					metadataEnabled={showAgentStates}
 					onSelect={onSelectWorkspace}
 					onArchiveWorkspace={onArchiveWorkspace}
 					onRestoreWorkspace={onRestoreWorkspace}
@@ -672,7 +673,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			selectedWorkspaceId,
 			t,
 			toggleSection,
-			workspaceAgentStates,
+			workspaceAgentActivities,
+			showAgentStates,
 		],
 	);
 

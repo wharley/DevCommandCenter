@@ -4,7 +4,15 @@ import { workspaceGitBranchDiff } from "@/lib/workspace-api";
 export const WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY = "workspaceGitBranchDiff";
 const WORKSPACE_BRANCH_DIFF_REFETCH_INTERVAL_MS = 10_000;
 
-export function useWorkspaceGitBranchDiff(workspaceRoot: string | null) {
+type WorkspaceGitBranchDiffQueryOptions = {
+	staleTime?: number;
+	refetchInterval?: number | false;
+};
+
+export function useWorkspaceGitBranchDiff(
+	workspaceRoot: string | null,
+	options?: WorkspaceGitBranchDiffQueryOptions,
+) {
 	const root = workspaceRoot?.trim() ?? "";
 
 	return useQuery({
@@ -16,8 +24,9 @@ export function useWorkspaceGitBranchDiff(workspaceRoot: string | null) {
 			return workspaceGitBranchDiff({ workspaceRoot: root });
 		},
 		enabled: Boolean(root),
-		staleTime: 15_000,
+		staleTime: options?.staleTime ?? 15_000,
 		refetchOnWindowFocus: true,
-		refetchInterval: WORKSPACE_BRANCH_DIFF_REFETCH_INTERVAL_MS,
+		refetchInterval:
+			options?.refetchInterval ?? WORKSPACE_BRANCH_DIFF_REFETCH_INTERVAL_MS,
 	});
 }

@@ -1634,6 +1634,8 @@ export type WorkspaceSessionSummary = {
 	projection: SessionProjection,
 	lastTurnPrompt: string | null,
 	lastTurnState: string | null,
+	lastTurnStartedAt: string | null,
+	lastTurnCompletedAt: string | null,
 };
 
 export type WorkspaceSetupHint = {

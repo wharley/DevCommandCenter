@@ -105,6 +105,9 @@
       "active": "Executando",
       "completed": "Concluído",
       "aborted": "Interrompido"
+    },
+    "activityTime": {
+      "ago": "há {{time}}"
     }
   },
   "commandPalette": {
