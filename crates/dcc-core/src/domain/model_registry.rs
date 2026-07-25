@@ -27,12 +27,15 @@ impl ModelEntry {
 pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
     ("fable", "claude-fable-5"),
     ("fable-5", "claude-fable-5"),
-    ("opus", "claude-opus-4-8"),
-    ("opus-4.8", "claude-opus-4-8"),
-    ("opus-4.7", "claude-opus-4-8"),
-    ("claude-opus-4-7", "claude-opus-4-8"),
-    ("opus-4.6", "claude-opus-4-6"),
-    ("claude-opus-4-6-20251117", "claude-opus-4-6"),
+    ("opus", "claude-opus-5"),
+    ("opus-5", "claude-opus-5"),
+    ("opus-4.8", "claude-opus-5"),
+    ("claude-opus-4-8", "claude-opus-5"),
+    ("opus-4.7", "claude-opus-5"),
+    ("claude-opus-4-7", "claude-opus-5"),
+    ("opus-4.6", "claude-opus-5"),
+    ("claude-opus-4-6", "claude-opus-5"),
+    ("claude-opus-4-6-20251117", "claude-opus-5"),
     ("sonnet", "claude-sonnet-5"),
     ("sonnet-5", "claude-sonnet-5"),
     ("sonnet-4.6", "claude-sonnet-5"),
@@ -119,9 +122,9 @@ pub const CLAUDE_CODE: &[ModelEntry] = &[
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
-        id: "claude-opus-4-8",
-        label: "Claude Opus 4.8",
-        description: "Highest capability, best for deep reasoning and large refactors.",
+        id: "claude-opus-5",
+        label: "Claude Opus 5",
+        description: "Complex agentic coding and enterprise work with a 1M-token context window.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
@@ -265,7 +268,7 @@ pub const GROK: &[ModelEntry] = &[ModelEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_alias, CODEX, GROK};
+    use super::{resolve_alias, CLAUDE_CODE, CODEX, GROK};
 
     #[test]
     fn codex_registers_gpt_56_preview_models() {
@@ -291,14 +294,18 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_aliases_upgrade_opus_47_to_opus_48() {
-        assert_eq!(resolve_alias("claude_code", "opus"), "claude-opus-4-8");
-        assert_eq!(resolve_alias("claude_code", "opus-4.8"), "claude-opus-4-8");
-        assert_eq!(resolve_alias("claude_code", "opus-4.7"), "claude-opus-4-8");
+    fn claude_code_aliases_upgrade_opus_versions_to_opus_5() {
+        assert_eq!(resolve_alias("claude_code", "opus"), "claude-opus-5");
+        assert_eq!(resolve_alias("claude_code", "opus-5"), "claude-opus-5");
+        assert_eq!(resolve_alias("claude_code", "opus-4.8"), "claude-opus-5");
         assert_eq!(
             resolve_alias("claude_code", "claude-opus-4-7"),
-            "claude-opus-4-8"
+            "claude-opus-5"
         );
+        assert!(CLAUDE_CODE.iter().any(|model| model.id == "claude-opus-5"));
+        assert!(!CLAUDE_CODE
+            .iter()
+            .any(|model| model.id == "claude-opus-4-8"));
     }
 
     #[test]

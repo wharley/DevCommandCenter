@@ -75,8 +75,8 @@ describe("resolveSelectedModelId", () => {
 				effortLevels: ["low", "medium", "high", "xhigh", "max"],
 			},
 			{
-				id: "claude-opus-4-8",
-				label: "Claude Opus 4.8",
+				id: "claude-opus-5",
+				label: "Claude Opus 5",
 				description: "",
 				recommended: false,
 				effortLevels: ["low", "medium", "high", "xhigh", "max"],
@@ -109,12 +109,12 @@ describe("resolveSelectedModelId", () => {
 		expect(resolveSelectedModelId(provider, "alpha-default")).toBe("alpha-default");
 	});
 
-	it("upgrades legacy Claude Opus 4.7 selections to Claude Opus 4.8", () => {
+	it("upgrades legacy Claude Opus selections to Claude Opus 5", () => {
 		expect(resolveSelectedModelId(claudeProvider, "opus-4.7")).toBe(
-			"claude-opus-4-8",
+			"claude-opus-5",
 		);
 		expect(resolveSelectedModelId(claudeProvider, "claude-opus-4-7")).toBe(
-			"claude-opus-4-8",
+			"claude-opus-5",
 		);
 	});
 

@@ -14,11 +14,21 @@ describe("provider-model-registry", () => {
 		expect(resolveModelAlias("claude_code", "fable-5")).toBe("claude-fable-5");
 	});
 
-	it("upgrades Claude Opus 4.7 aliases to Claude Opus 4.8", () => {
-		expect(resolveModelAlias("claude_code", "opus")).toBe("claude-opus-4-8");
-		expect(resolveModelAlias("claude_code", "opus-4.8")).toBe("claude-opus-4-8");
-		expect(resolveModelAlias("claude_code", "opus-4.7")).toBe("claude-opus-4-8");
+	it("upgrades Claude Opus aliases to Claude Opus 5", () => {
+		expect(resolveModelAlias("claude_code", "opus")).toBe("claude-opus-5");
+		expect(resolveModelAlias("claude_code", "opus-5")).toBe("claude-opus-5");
+		expect(resolveModelAlias("claude_code", "opus-4.8")).toBe("claude-opus-5");
 		expect(resolveModelAlias("claude_code", "claude-opus-4-7")).toBe(
+			"claude-opus-5",
+		);
+	});
+
+	it("registers Claude Opus 5 with its full effort ladder", () => {
+		const opus = PROVIDER_MODEL_REGISTRY.claude_code.find(
+			(model) => model.id === "claude-opus-5",
+		);
+		expect(opus?.effortLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
+		expect(PROVIDER_MODEL_REGISTRY.claude_code.map((model) => model.id)).not.toContain(
 			"claude-opus-4-8",
 		);
 	});
