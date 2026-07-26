@@ -46,6 +46,10 @@ type ActiveThreadViewportProps = {
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
 	onReviewDelegation?: (delegationId: string) => void;
+	onRerunDelegation?: (input: {
+		delegationId: string;
+		targetProviderId: string;
+	}) => Promise<void>;
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	onOpenPlan: () => void;
 };
@@ -75,6 +79,7 @@ export function ActiveThreadViewport({
 	onSubmitPrompt,
 	onReviewChanges,
 	onReviewDelegation,
+	onRerunDelegation,
 	onDelegateTaskApprove,
 	onOpenPlan,
 }: ActiveThreadViewportProps) {
@@ -205,6 +210,7 @@ export function ActiveThreadViewport({
 												onSelectSession={onSelectSession}
 												onReviewChanges={onReviewChanges}
 												onReviewDelegation={onReviewDelegation}
+												onRerunDelegation={onRerunDelegation}
 											/>
 										</div>
 									);

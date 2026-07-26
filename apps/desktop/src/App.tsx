@@ -111,6 +111,7 @@ import {
 	completeDelegation,
 	createDelegation,
 	failDelegation,
+	getDelegation,
 	listDelegations,
 	startDelegation,
 } from "./lib/delegation-api";
@@ -129,8 +130,16 @@ import {
 	resolveSelectedModelId,
 	setSessionComposerSelection,
 } from "./features/providers/provider-selection.logic";
-import type { ComposerSubmittedTurn } from "./features/composer/composer-turn";
-import type { ManualDelegationRequest } from "./features/sessions/delegation-dialog";
+import type {
+	ComposerDelegationRequest,
+	ComposerSubmittedTurn,
+} from "./features/composer/composer-turn";
+import { resolveDelegationDefaults } from "./features/sessions/delegation-defaults";
+import {
+	canRerunDelegation,
+	rerunMode,
+} from "./features/sessions/delegation-decisions";
+import type { ManualDelegationRequest } from "./features/sessions/delegation-request";
 import type { AgentInitiatedDelegationRequest } from "./features/sessions/agent-delegation-request";
 import { buildMissionSpecFilename } from "./features/composer/WorkspaceComposer.logic";
 import {
@@ -2115,15 +2124,17 @@ export default function App() {
 					}
 					const delegationWorkspacePath =
 						implementationWorktreePath ?? selectedLocalWorkspacePath;
-					const prompt = await buildManualDelegationPrompt({
-						request,
-						workspaceName: selectedWorkspace.name,
-						workspaceBranch: selectedWorkspace.branch,
-						workspacePath: delegationWorkspacePath,
-						parentSessionId,
-						parentSessionTitle: parentTitle,
-						liveSessionEvents: sessionEvents,
-					});
+					const prompt =
+						request.prebuiltPrompt ??
+						(await buildManualDelegationPrompt({
+							request,
+							workspaceName: selectedWorkspace.name,
+							workspaceBranch: selectedWorkspace.branch,
+							workspacePath: delegationWorkspacePath,
+							parentSessionId,
+							parentSessionTitle: parentTitle,
+							liveSessionEvents: sessionEvents,
+						}));
 					const started = await startThread({
 						workspaceId: selectedWorkspace.id,
 						projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
@@ -2207,8 +2218,8 @@ export default function App() {
 						model: targetModelId,
 						providerRuntime: targetRuntime,
 						planMode: false,
-						effort: "medium",
-						fastMode: true,
+						effort: request.effort ?? "medium",
+						fastMode: request.fastMode ?? true,
 					});
 					startedCount += 1;
 				} catch (error) {
@@ -2284,6 +2295,83 @@ export default function App() {
 			selectedWorkspace,
 			sessionEvents,
 		],
+	);
+
+	/**
+	 * Composer-initiated delegation. The user only picked target(s) and whether the
+	 * run may write files; mode and context policy are derived here so neither term
+	 * has to appear in the UI.
+	 */
+	const handleComposerDelegate = useCallback(
+		async (request: ComposerDelegationRequest) => {
+			if (request.targetProviderIds.length === 0) {
+				return;
+			}
+			let hasWorkingTreeChanges = false;
+			if (!request.allowFileEdits && selectedLocalWorkspacePath) {
+				try {
+					const status = await workspaceGitStatus({
+						workspaceRoot: selectedLocalWorkspacePath,
+					});
+					hasWorkingTreeChanges =
+						status.staged.length > 0 || status.unstaged.length > 0;
+				} catch (error) {
+					// Status is only used to pick review-vs-explain; a failure here should
+					// not block the delegation.
+					console.error("[dcc] delegation git status probe failed:", error);
+				}
+			}
+			const defaults = resolveDelegationDefaults({
+				allowFileEdits: request.allowFileEdits,
+				hasWorkingTreeChanges,
+			});
+			await handleDelegate({
+				targetProviderId: request.targetProviderIds[0],
+				targetProviderIds: request.targetProviderIds,
+				// Null lets handleDelegate resolve each target's recommended model.
+				targetModelId: null,
+				mode: defaults.mode,
+				contextPolicy: defaults.contextPolicy,
+				instruction: request.rawPrompt,
+				effort: request.effort,
+				fastMode: request.fastMode,
+			});
+		},
+		[handleDelegate, selectedLocalWorkspacePath],
+	);
+
+	/**
+	 * Replays a finished delegation on a different agent. The stored prompt already
+	 * carries the context that was assembled the first time, so re-sending it
+	 * verbatim keeps the two runs comparable instead of quietly changing the input.
+	 */
+	const handleRerunDelegation = useCallback(
+		async (input: { delegationId: string; targetProviderId: string }) => {
+			let record: Delegation | null;
+			try {
+				record = (await getDelegation({ delegationId: input.delegationId }))
+					.delegation;
+			} catch (error) {
+				toast.error(
+					error instanceof Error ? error.message : "Could not load the delegation.",
+				);
+				return;
+			}
+			if (!canRerunDelegation(record)) {
+				toast.error(t("delegation.card.rerunUnavailable"));
+				return;
+			}
+			await handleDelegate({
+				targetProviderId: input.targetProviderId,
+				targetProviderIds: [input.targetProviderId],
+				targetModelId: null,
+				mode: rerunMode(record),
+				contextPolicy: record.contextPolicy,
+				instruction: record.prompt,
+				prebuiltPrompt: record.prompt,
+			});
+		},
+		[handleDelegate, t],
 	);
 
 	const handleAgentDelegate = useCallback(
@@ -3765,6 +3853,7 @@ export default function App() {
 									onResumeSession={handleResumeSession}
 									onAbortSession={handleAbortSession}
 									onDelegate={handleDelegate}
+									onDelegatePrompt={handleComposerDelegate}
 									onAgentDelegate={handleAgentDelegate}
 									sessionActionSessionId={sessionActionSessionId}
 									updateInfo={appUpdateInfo}
@@ -3778,6 +3867,7 @@ export default function App() {
 									onToggleInspector={toggleGitInspector}
 									onReviewChanges={openGitInspector}
 									onReviewDelegation={handleReviewDelegation}
+									onRerunDelegation={handleRerunDelegation}
 									onResolveConflictWithAgent={handleResolveConflictWithAgent}
 									onOpenAgentSession={handleOpenAgentSession}
 									onMergeConflictStateChanged={handleMergeConflictStateChanged}

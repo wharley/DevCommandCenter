@@ -155,7 +155,7 @@ export function ApprovalCard({
 							</p>
 							<p className="mt-1 text-sm text-foreground">
 								{t(
-									`delegation.dialog.contextOptions.${delegationRequest.contextPolicy.type}`,
+									`delegation.contextOptions.${delegationRequest.contextPolicy.type}`,
 									{ defaultValue: delegationRequest.contextPolicy.type },
 								)}
 							</p>

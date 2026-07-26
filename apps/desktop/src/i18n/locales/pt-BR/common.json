@@ -15,45 +15,18 @@
       "tooltip": "Envie uma tarefa delimitada desta sessão para outro agente",
       "tooltipNoSession": "Inicie uma sessão primeiro — a delegação envia trabalho da sessão ativa para outro agente"
     },
-    "dialog": {
-      "title": "Delegar",
-      "description": "Envie uma tarefa delimitada para outro agente. O DCC monta o contexto, acompanha a sessão filha e traz o resultado de volta para revisão.",
-      "mode": "Modo",
-      "modeReview": "Review",
-      "modeExplain": "Explicar",
-      "modeImplement": "Implementar",
-      "modeHint": {
-        "review": "Somente leitura. O alvo revisa o trabalho e reporta findings.",
-        "explain": "Somente leitura. O alvo explica o código ou contexto para reancorar a sessão.",
-        "implement": "Edita arquivos em um worktree isolado. Nada é aplicado até você revisar e aplicar no Inspector."
-      },
-      "provider": "Provider",
-      "primaryProvider": "Provider primário",
-      "targets": "Alvos do fan-out",
-      "targetsHint": "O modelo selecionado vale para o provider primário. Os demais alvos usam o modelo recomendado.",
-      "primaryBadge": "Primário",
-      "model": "Modelo",
-      "context": "Contexto",
-      "contextOptions": {
-        "review_current_diff": "Diff atual",
-        "full_reanchor": "Reancoragem completa",
-        "minimal": "Mínimo"
-      },
-      "contextHint": {
-        "review_current_diff": "Envia a instrução com o diff atual e os arquivos alterados.",
-        "full_reanchor": "Envia um resumo desta sessão com spec, plano e diff.",
-        "minimal": "Envia apenas a instrução e os metadados do workspace."
-      },
-      "instruction": "Instrução",
-      "instructionPlaceholder": "Revise o diff atual buscando regressões e testes faltando.",
-      "cancel": "Cancelar",
-      "submit": "Delegar",
-      "submitFanOut": "Delegar para {{count}} alvos",
-      "submitting": "Delegando..."
+    "contextOptions": {
+      "review_current_diff": "Diff atual",
+      "full_reanchor": "Reancoragem completa",
+      "minimal": "Mínimo"
     },
     "card": {
       "title": "Delegação",
       "openChild": "Abrir sessão filha",
+      "canEditFiles": "pode editar",
+      "rerun": "Re-rodar em outro agente",
+      "rerunHint": "Mesma tarefa, mesmo contexto",
+      "rerunUnavailable": "Esta delegação não pode ser re-rodada.",
       "reviewInInspector": "Revisar no Inspector"
     },
     "approval": {
@@ -872,6 +845,15 @@
       "fastModeHint": "Prefere respostas mais curtas e diretas.",
       "effort": "Esforço de raciocínio"
     },
+    "delegate": {
+      "open": "Delegar para outro agente",
+      "title": "Delegar para",
+      "fanOut": "Delegar para vários…",
+      "submitFanOut": "Delegar para {{count}} agentes",
+      "allowEdits": "Pode editar arquivos",
+      "allowEditsHint": "Roda em worktree isolado; nada é aplicado sem sua revisão.",
+      "noEditTargets": "Nenhum agente disponível edita arquivos."
+    },
     "accountUsage": {
       "title": "Uso da conta",
       "refresh": "Atualizar uso da conta",
@@ -941,6 +923,7 @@
     "approvalFailed": "Não foi possível aprovar o plano",
     "handoffRecordFailed": "A execução começou, mas não foi possível salvar o estado do plano",
     "delegate": "Delegar implementação",
+    "delegateNoTarget": "Nenhum agente disponível edita arquivos.",
     "implementInNewThread": "Implementar em nova thread"
   },
   "terminalDock": {
@@ -949,12 +932,12 @@
     "resizeHint": "Arraste para redimensionar",
     "newTab": "Nova aba de terminal",
     "closeTab": "Fechar {{title}}",
-	"renameTab": "Renomear {{title}}",
-	"renameTitle": "Renomear terminal",
-	"renameDescription": "Este nome identifica a aba e não interrompe o terminal em execução.",
-	"renameInput": "Nome do terminal",
-	"cancelRename": "Cancelar",
-	"saveRename": "Salvar",
+    "renameTab": "Renomear {{title}}",
+    "renameTitle": "Renomear terminal",
+    "renameDescription": "Este nome identifica a aba e não interrompe o terminal em execução.",
+    "renameInput": "Nome do terminal",
+    "cancelRename": "Cancelar",
+    "saveRename": "Salvar",
     "tabsAriaLabel": "Abas do terminal",
     "scopeSelector": "Escopo do terminal: {{scope}}",
     "newScopedTab": "Novo terminal em {{scope}}",
@@ -983,14 +966,38 @@
     "localePtBr": "Português (Brasil)",
     "localeEn": "English",
     "sections": {
-      "general": { "label": "Geral", "description": "Padrões do app e comportamento do shell." },
-      "appearance": { "label": "Aparência", "description": "Tema, idioma e contraste da interface." },
-      "model": { "label": "Provedores", "description": "Modelos, uso da conta e runtimes." },
-      "connections": { "label": "Conexões", "description": "Celulares e tablets pareados com este desktop." },
-      "shortcuts": { "label": "Atalhos", "description": "Atalhos ativos e cheatsheet disponível." },
-      "git": { "label": "Git", "description": "Automação e comportamento Git do workspace atual." },
-      "experimental": { "label": "Experimental", "description": "Sinais locais de UX e opções de preview." },
-      "account": { "label": "Conta", "description": "GitHub, GitLab e autenticação local no app." }
+      "general": {
+        "label": "Geral",
+        "description": "Padrões do app e comportamento do shell."
+      },
+      "appearance": {
+        "label": "Aparência",
+        "description": "Tema, idioma e contraste da interface."
+      },
+      "model": {
+        "label": "Provedores",
+        "description": "Modelos, uso da conta e runtimes."
+      },
+      "connections": {
+        "label": "Conexões",
+        "description": "Celulares e tablets pareados com este desktop."
+      },
+      "shortcuts": {
+        "label": "Atalhos",
+        "description": "Atalhos ativos e cheatsheet disponível."
+      },
+      "git": {
+        "label": "Git",
+        "description": "Automação e comportamento Git do workspace atual."
+      },
+      "experimental": {
+        "label": "Experimental",
+        "description": "Sinais locais de UX e opções de preview."
+      },
+      "account": {
+        "label": "Conta",
+        "description": "GitHub, GitLab e autenticação local no app."
+      }
     },
     "statusComingSoon": "Em breve",
     "general": {

@@ -17,18 +17,16 @@ import type {
 	AgentResolutionRunResult,
 } from "@/features/merge/agent-conflict-resolution";
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
-import {
-	DelegationDialog,
-	type DelegationDialogPrefill,
-	type ManualDelegationRequest,
-} from "@/features/sessions/delegation-dialog";
+import type { ManualDelegationRequest } from "@/features/sessions/delegation-request";
 import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
 import { DiffReviewTray, type ReviewAnnotation } from "./diff-review-tray";
 import { WorkspaceComposer } from "@/features/composer";
 import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
+import { delegationTargetsFor } from "@/features/sessions/delegation-targets";
 import {
 	composerTurnFromRaw,
+	type ComposerDelegationRequest,
 	type ComposerSubmittedTurn,
 } from "@/features/composer/composer-turn";
 import type { AppUpdateInfo } from "@/features/updater";
@@ -156,6 +154,8 @@ type WorkspacePanelProps = {
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
+	/** Composer-initiated delegation; mode and context policy are derived upstream. */
+	onDelegatePrompt: (request: ComposerDelegationRequest) => Promise<void>;
 	onAgentDelegate: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
 	updateInfo: AppUpdateInfo;
@@ -179,6 +179,10 @@ type WorkspacePanelProps = {
 	onReviewChanges?: () => void;
 	/** Opens the inspector and previews an implementation delegation diff. */
 	onReviewDelegation?: (delegationId: string) => void;
+	onRerunDelegation?: (input: {
+		delegationId: string;
+		targetProviderId: string;
+	}) => Promise<void>;
 	onResolveConflictWithAgent: (
 		request: AgentResolutionRunRequest,
 	) => Promise<AgentResolutionRunResult>;
@@ -217,6 +221,7 @@ export function WorkspacePanel({
 	onResumeSession,
 	onAbortSession,
 	onDelegate,
+	onDelegatePrompt,
 	onAgentDelegate,
 	sessionActionSessionId,
 	updateInfo,
@@ -233,6 +238,7 @@ export function WorkspacePanel({
 	onToggleInspector,
 	onReviewChanges,
 	onReviewDelegation,
+	onRerunDelegation,
 	onResolveConflictWithAgent,
 	onOpenAgentSession,
 	onMergeConflictStateChanged,
@@ -245,10 +251,6 @@ export function WorkspacePanel({
 	const [reviewAnnotations, setReviewAnnotations] = useState<ReviewAnnotation[]>(
 		[],
 	);
-	const [delegateOpen, setDelegateOpen] = useState(false);
-	const [delegatePrefill, setDelegatePrefill] =
-		useState<DelegationDialogPrefill | null>(null);
-	const [delegateSubmitting, setDelegateSubmitting] = useState(false);
 	const [isApprovingPlan, setIsApprovingPlan] = useState(false);
 	const openPreferredTerminal = useCallback(() => {
 		if (!onOpenTerminal) return;
@@ -260,9 +262,7 @@ export function WorkspacePanel({
 		}
 	}, [onOpenTerminal, terminalScopes]);
 	const reviewIdRef = useRef(0);
-	const delegatePrefillNonceRef = useRef(0);
 	const planHandoffInFlightRef = useRef(false);
-	const lastDelegateSignalRef = useRef(delegateSignal ?? 0);
 
 	// WorkspacePanel stays mounted while the active workspace changes. Clear its
 	// transient UI state so a plan delegation from the previous workspace cannot
@@ -270,21 +270,9 @@ export function WorkspacePanel({
 	useEffect(() => {
 		setComposerPrefill(null);
 		setReviewAnnotations([]);
-		setDelegateOpen(false);
-		setDelegatePrefill(null);
-		setDelegateSubmitting(false);
 		setIsApprovingPlan(false);
 		planHandoffInFlightRef.current = false;
 	}, [workspaceId]);
-
-	useEffect(() => {
-		const signal = delegateSignal ?? 0;
-		if (signal > lastDelegateSignalRef.current) {
-			lastDelegateSignalRef.current = signal;
-			setDelegatePrefill(null);
-			setDelegateOpen(true);
-		}
-	}, [delegateSignal]);
 
 	useEffect(() => {
 		if (externalComposerPrefill) {
@@ -369,9 +357,12 @@ export function WorkspacePanel({
 		},
 		[buildAnnotationTurn, onCloseSurface, onSubmitPrompt, reviewAnnotations],
 	);
+	// Both the header button and the command palette now point at the composer's
+	// delegate menu. Summing the external signal with local presses keeps the value
+	// monotonic, so the composer can treat any increase as "open me".
+	const [localDelegateMenuBumps, setLocalDelegateMenuBumps] = useState(0);
 	const handleOpenManualDelegation = useCallback(() => {
-		setDelegatePrefill(null);
-		setDelegateOpen(true);
+		setLocalDelegateMenuBumps((current) => current + 1);
 	}, []);
 
 	const selectedSessionBelongsToWorkspace = Boolean(
@@ -497,21 +488,6 @@ export function WorkspacePanel({
 		isLatestPlanApproved &&
 		!latestPlanNeedsInput &&
 		!isLatestPlanReadOnly;
-	const handleDelegatePlan = useCallback(() => {
-		if (!latestPlanMarkdown || !canExecuteLatestPlan) {
-			return;
-		}
-		delegatePrefillNonceRef.current += 1;
-		setDelegatePrefill({
-			nonce: delegatePrefillNonceRef.current,
-			instruction: buildPlanDelegationPrompt(latestPlanMarkdown),
-			mode: "implement",
-			contextPolicy: "full_reanchor",
-			targetProviderId: "codex",
-			targetModelId: "gpt-5.5",
-		});
-		setDelegateOpen(true);
-	}, [canExecuteLatestPlan, latestPlanMarkdown]);
 	const handleApprovePlan = useCallback(async () => {
 		if (
 			!effectiveSessionId ||
@@ -630,47 +606,55 @@ export function WorkspacePanel({
 			threadHistoryQuery,
 		],
 	);
-	const handleDelegateSubmit = useCallback(
-		async (request: ManualDelegationRequest) => {
-			const isPlanHandoff =
-				surfaceSelection?.kind === "plan" && delegatePrefill !== null;
-			if (
-				isPlanHandoff &&
-				(!canExecuteLatestPlan || planHandoffInFlightRef.current)
-			) {
-				setDelegateOpen(false);
-				return;
-			}
-			if (isPlanHandoff) {
-				planHandoffInFlightRef.current = true;
-			}
-			setDelegateSubmitting(true);
-			try {
-				await onDelegate(request);
-				if (isPlanHandoff) {
-					onCloseSurface();
-				}
-				setDelegatePrefill(null);
-				setDelegateOpen(false);
-				if (isPlanHandoff) {
-					await recordCurrentPlanHandoff("delegation");
-				}
-			} finally {
-				if (isPlanHandoff) {
-					planHandoffInFlightRef.current = false;
-				}
-				setDelegateSubmitting(false);
-			}
-		},
-		[
-			canExecuteLatestPlan,
-			delegatePrefill,
-			onCloseSurface,
-			onDelegate,
-			recordCurrentPlanHandoff,
-			surfaceSelection,
-		],
-	);
+	// An approved plan already carries every answer a delegation needs, and plan
+	// approval is itself the human checkpoint — so the handoff runs directly.
+	const planImplementationTarget = useMemo(() => {
+		const targets = delegationTargetsFor(providerChoices, {
+			allowFileEdits: true,
+		});
+		return targets.find((target) => target.id === "codex") ?? targets[0] ?? null;
+	}, [providerChoices]);
+	const handleDelegatePlan = useCallback(async () => {
+		if (!latestPlanMarkdown || !canExecuteLatestPlan) {
+			return;
+		}
+		if (!planImplementationTarget) {
+			toast.error(t("planSurface.delegateNoTarget"));
+			return;
+		}
+		if (planHandoffInFlightRef.current) {
+			return;
+		}
+		const models = planImplementationTarget.models;
+		const targetModelId =
+			models.find((model) => model.id === "gpt-5.5")?.id ??
+			models.find((model) => model.recommended)?.id ??
+			models[0]?.id ??
+			null;
+		planHandoffInFlightRef.current = true;
+		try {
+			await onDelegate({
+				targetProviderId: planImplementationTarget.id,
+				targetProviderIds: [planImplementationTarget.id],
+				targetModelId,
+				mode: "implement",
+				contextPolicy: { type: "full_reanchor" },
+				instruction: buildPlanDelegationPrompt(latestPlanMarkdown),
+			});
+			onCloseSurface();
+			await recordCurrentPlanHandoff("delegation");
+		} finally {
+			planHandoffInFlightRef.current = false;
+		}
+	}, [
+		canExecuteLatestPlan,
+		latestPlanMarkdown,
+		onCloseSurface,
+		onDelegate,
+		planImplementationTarget,
+		recordCurrentPlanHandoff,
+		t,
+	]);
 	const handleImplementPlanInNewThread = useCallback(async () => {
 		if (
 			!canExecuteLatestPlan ||
@@ -844,6 +828,7 @@ export function WorkspacePanel({
 					onSubmitPrompt={onSubmitPrompt}
 					onReviewChanges={onReviewChanges}
 					onReviewDelegation={onReviewDelegation}
+					onRerunDelegation={onRerunDelegation}
 					onDelegateTaskApprove={onAgentDelegate}
 					onOpenPlan={onOpenPlanSurface}
 				/>
@@ -868,6 +853,8 @@ export function WorkspacePanel({
 					onSelectProvider={onSelectProvider}
 					onSelectModel={onSelectModel}
 					onSubmitPrompt={onSubmitPrompt}
+					onDelegatePrompt={sessionSnapshot ? onDelegatePrompt : undefined}
+					openDelegateMenuSignal={(delegateSignal ?? 0) + localDelegateMenuBumps}
 					onAbortSession={onAbortSession}
 					onReviewPlan={onOpenPlanSurface}
 				/>
@@ -884,15 +871,6 @@ export function WorkspacePanel({
 				onRemove={handleRemoveReviewAnnotation}
 				onClear={handleClearReview}
 				onSubmit={handleSubmitReview}
-			/>
-			<DelegationDialog
-				key={workspaceId}
-				open={delegateOpen}
-				providers={providerChoices}
-				isSubmitting={delegateSubmitting}
-				prefill={delegatePrefill}
-				onOpenChange={setDelegateOpen}
-				onSubmit={handleDelegateSubmit}
 			/>
 		</>
 	);

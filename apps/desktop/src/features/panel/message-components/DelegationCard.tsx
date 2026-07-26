@@ -1,11 +1,26 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { LoaderCircle } from "lucide-react";
 import type { Delegation, ProviderCatalog } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { listDelegations } from "@/lib/delegation-api";
 import { delegationStatusClass } from "@/features/sessions/delegation-status";
+import {
+	canRerunDelegation,
+	describeDelegation,
+	rerunTargets,
+} from "@/features/sessions/delegation-decisions";
+import { eligibleDelegationTargets } from "@/features/sessions/delegation-targets";
 import type { WorkspaceMessageDelegation } from "@/features/sessions/session-thread-history.logic";
 import { MessageTimestamp } from "./message-metadata";
 
@@ -26,6 +41,7 @@ export function DelegationCard({
 	onSelectSession,
 	onReviewChanges,
 	onReviewDelegation,
+	onRerunDelegation,
 }: {
 	delegation: WorkspaceMessageDelegation;
 	fallbackContent: string;
@@ -35,8 +51,14 @@ export function DelegationCard({
 	onSelectSession: (sessionId: string) => void;
 	onReviewChanges?: () => void;
 	onReviewDelegation?: (delegationId: string) => void;
+	/** Replays this delegation's prompt on another agent. */
+	onRerunDelegation?: (input: {
+		delegationId: string;
+		targetProviderId: string;
+	}) => Promise<void>;
 }) {
 	const { t } = useTranslation("common");
+	const [isRerunning, setIsRerunning] = useState(false);
 	// Shares queryKey and options with the Inspector's Delegations section so
 	// both surfaces read the same cache entry and poll only once.
 	const delegationsQuery = useQuery({
@@ -62,13 +84,36 @@ export function DelegationCard({
 	const statusLabel = t(`inspector.delegations.status.${status}`, {
 		defaultValue: status,
 	});
-	const modeLabel = record
-		? t(`inspector.delegations.mode.${record.mode}`, { defaultValue: record.mode })
-		: null;
-	const providerLabel = record
-		? (providers.find((provider) => provider.id === record.targetProviderId)?.label ??
-			record.targetProviderId)
-		: null;
+	const decisions = record ? describeDelegation(record, providers) : null;
+	// The decisions the DCC took for this run, shown as the outcome of a
+	// delegation instead of a form the user had to fill in beforehand.
+	const decisionChips = decisions
+		? [
+				t(`inspector.delegations.mode.${decisions.mode}`, {
+					defaultValue: decisions.mode,
+				}),
+				decisions.providerLabel,
+				t(`delegation.contextOptions.${decisions.contextPolicy}`, {
+					defaultValue: decisions.contextPolicy,
+				}),
+				...(decisions.allowFileEdits ? [t("delegation.card.canEditFiles")] : []),
+			]
+		: [];
+	const availableRerunTargets =
+		record && onRerunDelegation && canRerunDelegation(record)
+			? rerunTargets(record, eligibleDelegationTargets(providers))
+			: [];
+	const handleRerun = async (targetProviderId: string) => {
+		if (!record || !onRerunDelegation || isRerunning) {
+			return;
+		}
+		setIsRerunning(true);
+		try {
+			await onRerunDelegation({ delegationId: record.id, targetProviderId });
+		} finally {
+			setIsRerunning(false);
+		}
+	};
 	const summary =
 		record?.resultSummary ??
 		delegation.summary ??
@@ -95,15 +140,23 @@ export function DelegationCard({
 		>
 			<div className="w-full max-w-[42rem] rounded-xl border border-border/70 bg-card/70 px-4 py-3">
 				<div className="flex items-center justify-between gap-3">
-					<div className="flex min-w-0 items-center gap-2">
+					<div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
 						<p className="shrink-0 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80">
 							{t("delegation.card.title")}
 						</p>
-						{modeLabel || providerLabel ? (
-							<p className="min-w-0 truncate text-[12px] font-medium text-foreground">
-								{[modeLabel, providerLabel].filter(Boolean).join(" · ")}
-							</p>
-						) : null}
+						{decisionChips.map((chip, index) => (
+							<span
+								key={chip}
+								className={cn(
+									"max-w-[12rem] truncate rounded-md px-1.5 py-0.5 text-[11px] leading-4",
+									index === 0
+										? "bg-muted/70 font-medium text-foreground"
+										: "bg-muted/40 text-muted-foreground",
+								)}
+							>
+								{chip}
+							</span>
+						))}
 					</div>
 					<Badge
 						variant="outline"
@@ -157,6 +210,37 @@ export function DelegationCard({
 						>
 							{t("delegation.card.reviewInInspector")}
 						</Button>
+					) : null}
+					{availableRerunTargets.length > 0 ? (
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="h-6 gap-1 px-2 text-[11px]"
+									disabled={isRerunning}
+								>
+									{isRerunning ? (
+										<LoaderCircle className="size-3 animate-spin" aria-hidden />
+									) : null}
+									{t("delegation.card.rerun")}
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="start" className="w-60">
+								<DropdownMenuLabel>
+									{t("delegation.card.rerunHint")}
+								</DropdownMenuLabel>
+								{availableRerunTargets.map((target) => (
+									<DropdownMenuItem
+										key={target.id}
+										onSelect={() => void handleRerun(target.id)}
+									>
+										{target.label}
+									</DropdownMenuItem>
+								))}
+							</DropdownMenuContent>
+						</DropdownMenu>
 					) : null}
 					<span className="ml-auto inline-flex items-center text-[11px] leading-none text-muted-foreground/60">
 						<MessageTimestamp createdAt={createdAt} />

@@ -15,45 +15,18 @@
       "tooltip": "Send a scoped task from this session to another agent",
       "tooltipNoSession": "Start a session first — delegation hands work from the active session to another agent"
     },
-    "dialog": {
-      "title": "Delegate",
-      "description": "Hand a scoped task to another agent. DCC assembles the context, tracks the child session, and brings the result back here for review.",
-      "mode": "Mode",
-      "modeReview": "Review",
-      "modeExplain": "Explain",
-      "modeImplement": "Implement",
-      "modeHint": {
-        "review": "Read-only. The target reviews the work and reports findings.",
-        "explain": "Read-only. The target explains the code or context to re-anchor the session.",
-        "implement": "Edits files in an isolated worktree. Nothing lands until you review and apply it in the Inspector."
-      },
-      "provider": "Provider",
-      "primaryProvider": "Primary provider",
-      "targets": "Fan-out targets",
-      "targetsHint": "The selected model applies to the primary provider. Other targets use their recommended model.",
-      "primaryBadge": "Primary",
-      "model": "Model",
-      "context": "Context",
-      "contextOptions": {
-        "review_current_diff": "Current diff",
-        "full_reanchor": "Full reanchor",
-        "minimal": "Minimal"
-      },
-      "contextHint": {
-        "review_current_diff": "Sends the instruction plus the current diff and changed files.",
-        "full_reanchor": "Sends a summary of this session plus spec, plan, and diff.",
-        "minimal": "Sends only the instruction and workspace metadata."
-      },
-      "instruction": "Instruction",
-      "instructionPlaceholder": "Review the current diff for regressions and missing tests.",
-      "cancel": "Cancel",
-      "submit": "Delegate",
-      "submitFanOut": "Delegate to {{count}} targets",
-      "submitting": "Delegating..."
+    "contextOptions": {
+      "review_current_diff": "Current diff",
+      "full_reanchor": "Full reanchor",
+      "minimal": "Minimal"
     },
     "card": {
       "title": "Delegation",
       "openChild": "Open child session",
+      "canEditFiles": "can edit",
+      "rerun": "Rerun on another agent",
+      "rerunHint": "Same task, same context",
+      "rerunUnavailable": "This delegation cannot be rerun.",
       "reviewInInspector": "Review in Inspector"
     },
     "approval": {
@@ -872,6 +845,15 @@
       "fastModeHint": "Prefer shorter, more direct replies.",
       "effort": "Reasoning effort"
     },
+    "delegate": {
+      "open": "Delegate to another agent",
+      "title": "Delegate to",
+      "fanOut": "Delegate to several…",
+      "submitFanOut": "Delegate to {{count}} agents",
+      "allowEdits": "Can edit files",
+      "allowEditsHint": "Runs in an isolated worktree; nothing lands without your review.",
+      "noEditTargets": "No available agent can edit files."
+    },
     "accountUsage": {
       "title": "Account usage",
       "refresh": "Refresh account usage",
@@ -941,6 +923,7 @@
     "approvalFailed": "Could not approve the plan",
     "handoffRecordFailed": "The handoff started, but its plan status could not be saved",
     "delegate": "Delegate implementation",
+    "delegateNoTarget": "No available agent can edit files.",
     "implementInNewThread": "Implement in new thread"
   },
   "terminalDock": {
@@ -949,12 +932,12 @@
     "resizeHint": "Drag to resize",
     "newTab": "New terminal tab",
     "closeTab": "Close {{title}}",
-	"renameTab": "Rename {{title}}",
-	"renameTitle": "Rename terminal",
-	"renameDescription": "This name identifies the tab and does not interrupt the running terminal.",
-	"renameInput": "Terminal name",
-	"cancelRename": "Cancel",
-	"saveRename": "Save",
+    "renameTab": "Rename {{title}}",
+    "renameTitle": "Rename terminal",
+    "renameDescription": "This name identifies the tab and does not interrupt the running terminal.",
+    "renameInput": "Terminal name",
+    "cancelRename": "Cancel",
+    "saveRename": "Save",
     "tabsAriaLabel": "Terminal tabs",
     "scopeSelector": "Terminal scope: {{scope}}",
     "newScopedTab": "New {{scope}} terminal",
@@ -983,14 +966,38 @@
     "localePtBr": "Portuguese (Brazil)",
     "localeEn": "English",
     "sections": {
-      "general": { "label": "General", "description": "App defaults and shell behavior." },
-      "appearance": { "label": "Appearance", "description": "Theme, language, and interface contrast." },
-      "model": { "label": "Providers", "description": "Models, account usage, and runtimes." },
-      "connections": { "label": "Connections", "description": "Phones and tablets paired with this desktop." },
-      "shortcuts": { "label": "Shortcuts", "description": "Active shortcuts and the cheatsheet are available." },
-      "git": { "label": "Git", "description": "Automation and Git behavior for the current workspace." },
-      "experimental": { "label": "Experimental", "description": "Local UX signals and preview options." },
-      "account": { "label": "Account", "description": "GitHub, GitLab, and local in-app authentication." }
+      "general": {
+        "label": "General",
+        "description": "App defaults and shell behavior."
+      },
+      "appearance": {
+        "label": "Appearance",
+        "description": "Theme, language, and interface contrast."
+      },
+      "model": {
+        "label": "Providers",
+        "description": "Models, account usage, and runtimes."
+      },
+      "connections": {
+        "label": "Connections",
+        "description": "Phones and tablets paired with this desktop."
+      },
+      "shortcuts": {
+        "label": "Shortcuts",
+        "description": "Active shortcuts and the cheatsheet are available."
+      },
+      "git": {
+        "label": "Git",
+        "description": "Automation and Git behavior for the current workspace."
+      },
+      "experimental": {
+        "label": "Experimental",
+        "description": "Local UX signals and preview options."
+      },
+      "account": {
+        "label": "Account",
+        "description": "GitHub, GitLab, and local in-app authentication."
+      }
     },
     "statusComingSoon": "Coming soon",
     "general": {

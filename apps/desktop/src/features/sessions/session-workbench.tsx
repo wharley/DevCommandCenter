@@ -22,13 +22,16 @@ import {
 import { WorkspacePanel } from "@/features/panel";
 import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surface";
 import type { AppUpdateInfo } from "@/features/updater";
-import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
+import type {
+	ComposerDelegationRequest,
+	ComposerSubmittedTurn,
+} from "@/features/composer/composer-turn";
 import type {
 	AgentResolutionRunRequest,
 	AgentResolutionRunResult,
 } from "@/features/merge/agent-conflict-resolution";
 import type { RuntimeSessionSnapshot } from "./workbench-types";
-import type { ManualDelegationRequest } from "./delegation-dialog";
+import type { ManualDelegationRequest } from "./delegation-request";
 import type { AgentInitiatedDelegationRequest } from "./agent-delegation-request";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import type {
@@ -114,6 +117,7 @@ type SessionWorkbenchProps = {
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
+	onDelegatePrompt: (request: ComposerDelegationRequest) => Promise<void>;
 	onAgentDelegate: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
 	updateInfo: AppUpdateInfo;
@@ -135,6 +139,10 @@ type SessionWorkbenchProps = {
 	onReviewChanges?: () => void;
 	/** Opens the inspector and previews an implementation delegation diff. */
 	onReviewDelegation?: (delegationId: string) => void;
+	onRerunDelegation?: (input: {
+		delegationId: string;
+		targetProviderId: string;
+	}) => Promise<void>;
 	onResolveConflictWithAgent: (
 		request: AgentResolutionRunRequest,
 	) => Promise<AgentResolutionRunResult>;
@@ -183,6 +191,7 @@ export function SessionWorkbench({
 	onResumeSession,
 	onAbortSession,
 	onDelegate,
+	onDelegatePrompt,
 	onAgentDelegate,
 	sessionActionSessionId,
 	updateInfo,
@@ -197,6 +206,7 @@ export function SessionWorkbench({
 	onToggleInspector,
 	onReviewChanges,
 	onReviewDelegation,
+	onRerunDelegation,
 	onResolveConflictWithAgent,
 	onOpenAgentSession,
 	onMergeConflictStateChanged,
@@ -462,6 +472,7 @@ export function SessionWorkbench({
 						onResumeSession={onResumeSession}
 						onAbortSession={onAbortSession}
 						onDelegate={onDelegate}
+						onDelegatePrompt={onDelegatePrompt}
 						onAgentDelegate={onAgentDelegate}
 						sessionActionSessionId={sessionActionSessionId}
 						updateInfo={updateInfo}
@@ -478,6 +489,7 @@ export function SessionWorkbench({
 						onToggleInspector={onToggleInspector}
 						onReviewChanges={onReviewChanges}
 						onReviewDelegation={onReviewDelegation}
+						onRerunDelegation={onRerunDelegation}
 						onResolveConflictWithAgent={onResolveConflictWithAgent}
 						onOpenAgentSession={onOpenAgentSession}
 						onMergeConflictStateChanged={onMergeConflictStateChanged}
