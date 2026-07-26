@@ -23,7 +23,6 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { CommandPopoverContent } from "../../components/ui/command-popover";
 import {
@@ -530,7 +529,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					>
 						<button
 							type="button"
-							className="flex min-w-0 flex-1 cursor-pointer select-none items-center justify-between rounded-lg px-2 py-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground"
+							className="flex min-w-0 flex-1 cursor-pointer select-none items-center justify-between rounded-lg px-2 py-1 text-[11.5px] font-semibold tracking-[0.01em] text-muted-foreground transition-colors hover:text-foreground group-hover/dccRailHeader:text-foreground"
 							disabled={!item.canCollapse}
 							onClick={() => toggleSection(item.groupId)}
 						>
@@ -546,23 +545,20 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								/>
 								{item.headerVariant === "archived" ? (
 									<Archive
-										className="size-[14px] shrink-0 text-[var(--workspace-sidebar-status-backlog)]"
+										className="size-[13px] shrink-0 text-muted-foreground/60"
 										strokeWidth={1.9}
 										aria-hidden
 									/>
 								) : (
-									<ProjectGroupGlyph />
+									<ProjectGroupGlyph className="size-[13px] text-muted-foreground/60" />
 								)}
 								<span className="truncate">{item.label}</span>
 							</span>
 
 							{item.rowCount > 0 ? (
-								<Badge
-									variant="secondary"
-									className="h-4 min-w-[16px] justify-center rounded-full px-1 text-[9.5px]"
-								>
+								<span className="shrink-0 pl-1.5 text-[10px] font-medium tabular-nums text-muted-foreground/70">
 									{item.rowCount}
-								</Badge>
+								</span>
 							) : null}
 						</button>
 

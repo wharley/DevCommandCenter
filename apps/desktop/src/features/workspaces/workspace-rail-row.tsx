@@ -45,12 +45,18 @@ export type WorkspaceRailRowProps = {
 	onDeleteWorkspace?: (workspaceId: string) => void;
 };
 
+/**
+ * The recap line sits under the workspace name, so it is graded by value, not by
+ * hue: only `attention` (something is blocking the branch) spends chroma, the
+ * rest step down in neutral weight. Five tinted lines in a list read as a
+ * rainbow and drown out the names above them.
+ */
 const recapToneClass: Record<WorkspaceRecapTone, string> = {
-	neutral: "text-muted-foreground/70",
-	working: "text-amber-600/85 dark:text-amber-300/80",
-	attention: "text-amber-700 dark:text-amber-300",
-	ready: "text-emerald-700 dark:text-emerald-300",
-	done: "text-violet-700 dark:text-violet-300",
+	neutral: "text-muted-foreground/80",
+	working: "text-muted-foreground",
+	attention: "text-amber-700 dark:text-amber-300/90",
+	ready: "text-foreground/70",
+	done: "text-muted-foreground/80",
 };
 
 function WorkspaceActivityTime({
@@ -130,6 +136,14 @@ export const WorkspaceRailRowItem = memo(
 	}: WorkspaceRailRowProps) {
 		const { t } = useTranslation("common");
 		const branchTone = branchToneFromWorkspace(workspace);
+		// Transitional states keep full chroma — there the glyph is reporting
+		// something in motion. `merged` is the resting tone of every ready
+		// workspace, so it is pulled back to a tint: still identity, no longer a
+		// signal competing with the name beside it.
+		const glyphToneClass = cn(
+			workspaceRailBranchToneClasses[branchTone],
+			branchTone === "merged" && "opacity-75",
+		);
 		const displayTitle = workspaceRailDisplayTitle(workspace);
 		const workspacePath = workspace.worktreePath ?? workspace.rootPath ?? null;
 		const railRecap = useWorkspaceRailRecap({
@@ -205,31 +219,23 @@ export const WorkspaceRailRowItem = memo(
 							<div className="row-content-fade flex min-w-0 flex-1 items-center gap-2">
 								{workspace.bundleId ? (
 									<Boxes
-										className="size-[13px] shrink-0 text-cyan-400"
+										className="size-[13px] shrink-0 text-cyan-400/70"
 										strokeWidth={1.9}
 										aria-hidden
 									/>
 								) : (
 									<GitBranch
-										className={cn(
-											"size-[13px] shrink-0",
-											workspaceRailBranchToneClasses[branchTone],
-										)}
+										className={cn("size-[13px] shrink-0", glyphToneClass)}
 										strokeWidth={1.9}
 										aria-hidden
 									/>
 								)}
-								<span
-									className={cn(
-										"min-w-0 truncate leading-tight",
-										selected ? "font-medium text-foreground" : "font-medium",
-									)}
-								>
+								<span className="min-w-0 truncate font-medium leading-tight text-foreground">
 									{displayTitle}
 								</span>
 								{workspace.memberWorkspaceIds &&
 								workspace.memberWorkspaceIds.length > 1 ? (
-									<span className="shrink-0 rounded-full bg-cyan-500/15 px-1.5 text-[9.5px] font-semibold text-cyan-300">
+									<span className="shrink-0 rounded-full bg-foreground/[0.08] px-1.5 text-[9.5px] font-semibold tabular-nums text-muted-foreground">
 										{workspace.memberWorkspaceIds.length}
 									</span>
 								) : null}
@@ -242,25 +248,28 @@ export const WorkspaceRailRowItem = memo(
 											"size-[6px] shrink-0 rounded-full",
 											activity.state === "active" &&
 												"bg-amber-400 animate-pulse",
-											activity.state === "completed" && "bg-emerald-500",
+											activity.state === "completed" && "bg-emerald-500/80",
 											activity.state === "aborted" && "bg-destructive",
 										)}
 									/>
-									<span
-										className={cn(
-											"flex items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-none",
-											activity.state === "active" && "text-amber-500",
-											activity.state === "completed" && "text-emerald-500",
-											activity.state === "aborted" && "text-destructive",
-										)}
-									>
-										{t(`sidebar.agentState.${activity.state}`)}
-										<span aria-hidden className="opacity-35">
+									{/* Chroma marks the states that want the user: a finished run
+									    to review, a failed one to fix. `active` stays neutral —
+									    the pulsing dot already carries "live", and the elapsed
+									    time reads as metadata in every state. */}
+									<span className="flex items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-none text-muted-foreground">
+										<span
+											className={cn(
+												activity.state === "completed" &&
+													"text-emerald-600 dark:text-emerald-400/90",
+												activity.state === "aborted" && "text-destructive/85",
+											)}
+										>
+											{t(`sidebar.agentState.${activity.state}`)}
+										</span>
+										<span aria-hidden className="opacity-40">
 											·
 										</span>
-										<span className="opacity-65">
-											<WorkspaceActivityTime activity={activity} />
-										</span>
+										<WorkspaceActivityTime activity={activity} />
 									</span>
 								</span>
 							)}
