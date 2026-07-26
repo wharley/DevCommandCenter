@@ -1,6 +1,6 @@
 import { cva } from "class-variance-authority";
 import { Archive, Boxes, GitBranch, Loader2, RotateCcw, Trash2 } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -62,6 +62,17 @@ function WorkspaceActivityTime({
 	const timestamp = workspaceActivityTimestamp(activity);
 	const timestampMs = timestamp ? Date.parse(timestamp) : Number.NaN;
 	const [now, setNow] = useState(() => Date.now());
+	const unitLabels = useMemo(
+		() => ({
+			second: t("sidebar.activityTime.units.second"),
+			minute: t("sidebar.activityTime.units.minute"),
+			hour: t("sidebar.activityTime.units.hour"),
+			day: t("sidebar.activityTime.units.day"),
+			month: t("sidebar.activityTime.units.month"),
+			months: t("sidebar.activityTime.units.months"),
+		}),
+		[t],
+	);
 
 	useEffect(() => {
 		if (Number.isNaN(timestampMs)) {
@@ -77,7 +88,7 @@ function WorkspaceActivityTime({
 		return null;
 	}
 
-	const time = formatCompactElapsedTime(now - timestampMs);
+	const time = formatCompactElapsedTime(now - timestampMs, unitLabels);
 	return activity.state === "active" ? (
 		<span className="tabular-nums">{time}</span>
 	) : (

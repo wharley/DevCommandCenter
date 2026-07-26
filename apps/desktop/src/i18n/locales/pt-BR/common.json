@@ -107,7 +107,15 @@
       "aborted": "Interrompido"
     },
     "activityTime": {
-      "ago": "há {{time}}"
+      "ago": "há {{time}}",
+      "units": {
+        "second": "s",
+        "minute": "min",
+        "hour": "h",
+        "day": "d",
+        "month": "mês",
+        "months": "meses"
+      }
     }
   },
   "commandPalette": {
