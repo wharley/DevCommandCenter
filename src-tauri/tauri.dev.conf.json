@@ -1,5 +1,10 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Dev Command Center Dev",
-  "identifier": "com.devcommandcenter.app.dev"
+  "identifier": "com.devcommandcenter.app.dev",
+  "bundle": {
+    "resources": [
+      "../sidecar/dist/vendor/"
+    ]
+  }
 }

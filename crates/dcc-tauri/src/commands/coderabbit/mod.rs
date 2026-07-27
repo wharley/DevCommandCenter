@@ -133,6 +133,20 @@ pub struct WorkspaceCodeRabbitCliStatusOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceCodeRabbitLogoutInput {
+    pub cli_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCodeRabbitLogoutOutput {
+    pub success: bool,
+    pub exit_code: Option<i32>,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceCodeRabbitDoctorInput {
     pub workspace_root: String,
     pub cli_path: Option<String>,
@@ -433,6 +447,41 @@ pub async fn workspace_coderabbit_cli_status(
             message,
             login_command: "cr auth login".to_string(),
             auth,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn workspace_coderabbit_logout(
+    input: WorkspaceCodeRabbitLogoutInput,
+) -> Result<WorkspaceCodeRabbitLogoutOutput, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cli = detect_coderabbit_cli(input.cli_path.as_deref(), None)?;
+        let output = run_command_with_timeout(
+            &cli.path,
+            [OsString::from("auth"), OsString::from("logout")],
+            None,
+            CODERABBIT_STATUS_TIMEOUT,
+        )?;
+        let stdout = command_stdout(&output);
+        let stderr = command_stderr(&output);
+        let success = output.status.success();
+        let message = if !stdout.is_empty() {
+            stdout
+        } else if !stderr.is_empty() {
+            stderr
+        } else if success {
+            "CodeRabbit disconnected".to_string()
+        } else {
+            "CodeRabbit logout failed".to_string()
+        };
+
+        Ok(WorkspaceCodeRabbitLogoutOutput {
+            success,
+            exit_code: output.status.code(),
+            message,
         })
     })
     .await

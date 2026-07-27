@@ -50,10 +50,11 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::git_support::build_review_diffs_for_path;
 use coderabbit_commands::{
     workspace_coderabbit_cli_status, workspace_coderabbit_diff_fingerprint,
-    workspace_coderabbit_doctor, workspace_coderabbit_review, workspace_coderabbit_review_cancel,
-    workspace_coderabbit_review_clear, workspace_coderabbit_review_history,
-    workspace_coderabbit_review_job, workspace_coderabbit_review_load,
-    workspace_coderabbit_review_save, workspace_coderabbit_review_start,
+    workspace_coderabbit_doctor, workspace_coderabbit_logout, workspace_coderabbit_review,
+    workspace_coderabbit_review_cancel, workspace_coderabbit_review_clear,
+    workspace_coderabbit_review_history, workspace_coderabbit_review_job,
+    workspace_coderabbit_review_load, workspace_coderabbit_review_save,
+    workspace_coderabbit_review_start,
 };
 use delegation_commands::{
     approve_delegation, cancel_delegation, complete_delegation, create_delegation, fail_delegation,
@@ -6872,6 +6873,7 @@ pub fn run() {
             list_workspaces,
             workspace_forge_cli_status,
             workspace_coderabbit_cli_status,
+            workspace_coderabbit_logout,
             workspace_coderabbit_doctor,
             workspace_coderabbit_diff_fingerprint,
             workspace_coderabbit_review,

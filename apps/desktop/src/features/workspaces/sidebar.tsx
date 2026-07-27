@@ -85,9 +85,9 @@ type VirtualItem =
 	| { kind: "group-gap"; size: number }
 	| { kind: "bottom-padding" };
 
-const HEADER_HEIGHT = 34;
-const ROW_HEIGHT = 56;
-const GROUP_GAP = 8;
+const HEADER_HEIGHT = 36;
+const ROW_HEIGHT = 72;
+const GROUP_GAP = 10;
 const EMPTY_GROUP_GAP = 8;
 const BOTTOM_PADDING = 8;
 
@@ -523,13 +523,13 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				return (
 					<div
 						className={cn(
-							"group/dccRailHeader flex items-center gap-1 rounded-lg pr-1 hover:bg-accent/60",
+							"group/dccRailHeader flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent/50",
 						)}
 						data-empty-group={isEmptyGroup ? "true" : "false"}
 					>
 						<button
 							type="button"
-							className="flex min-w-0 flex-1 cursor-pointer select-none items-center justify-between rounded-lg px-2 py-1 text-[11.5px] font-semibold tracking-[0.01em] text-muted-foreground transition-colors hover:text-foreground group-hover/dccRailHeader:text-foreground"
+							className="flex min-w-0 flex-1 cursor-pointer select-none items-center justify-between rounded-md px-2 py-1.5 text-[12px] font-semibold tracking-[0.005em] text-foreground/75 transition-colors hover:text-foreground group-hover/dccRailHeader:text-foreground"
 							disabled={!item.canCollapse}
 							onClick={() => toggleSection(item.groupId)}
 						>
@@ -545,18 +545,23 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								/>
 								{item.headerVariant === "archived" ? (
 									<Archive
-										className="size-[13px] shrink-0 text-muted-foreground/60"
+										className="size-[13px] shrink-0 text-muted-foreground/75"
 										strokeWidth={1.9}
 										aria-hidden
 									/>
 								) : (
-									<ProjectGroupGlyph className="size-[13px] text-muted-foreground/60" />
+									<ProjectGroupGlyph className="size-[13px] text-muted-foreground/75" />
 								)}
 								<span className="truncate">{item.label}</span>
 							</span>
 
 							{item.rowCount > 0 ? (
-								<span className="shrink-0 pl-1.5 text-[10px] font-medium tabular-nums text-muted-foreground/70">
+								<span
+									className="ml-1.5 flex h-[17px] min-w-[17px] shrink-0 items-center justify-center rounded-full bg-foreground/[0.06] px-1 text-[9.5px] font-semibold tabular-nums text-muted-foreground"
+									title={t("sidebar.workspaceCount", {
+										count: item.rowCount,
+									})}
+								>
 									{item.rowCount}
 								</span>
 							) : null}

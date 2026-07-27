@@ -6,6 +6,7 @@ use dcc_tauri::{
         CodeRabbitDiffFingerprint, WorkspaceCodeRabbitCliStatusInput,
         WorkspaceCodeRabbitCliStatusOutput, WorkspaceCodeRabbitDoctorInput,
         WorkspaceCodeRabbitDoctorOutput, WorkspaceCodeRabbitFingerprintInput,
+        WorkspaceCodeRabbitLogoutInput, WorkspaceCodeRabbitLogoutOutput,
         WorkspaceCodeRabbitReviewHistoryInput, WorkspaceCodeRabbitReviewHistoryOutput,
         WorkspaceCodeRabbitReviewInput, WorkspaceCodeRabbitReviewJobInput,
         WorkspaceCodeRabbitReviewJobSnapshot, WorkspaceCodeRabbitReviewOutput,
@@ -21,6 +22,13 @@ pub async fn workspace_coderabbit_cli_status(
     input: WorkspaceCodeRabbitCliStatusInput,
 ) -> Result<WorkspaceCodeRabbitCliStatusOutput, String> {
     dcc_tauri::commands::coderabbit::workspace_coderabbit_cli_status(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_coderabbit_logout(
+    input: WorkspaceCodeRabbitLogoutInput,
+) -> Result<WorkspaceCodeRabbitLogoutOutput, String> {
+    dcc_tauri::commands::coderabbit::workspace_coderabbit_logout(input).await
 }
 
 #[tauri::command]

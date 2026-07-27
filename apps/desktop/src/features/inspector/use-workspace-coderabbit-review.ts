@@ -87,13 +87,17 @@ async function loadPersistedCodeRabbitReview(
 	}
 }
 
-export function useStoredCodeRabbitReview(workspaceRoot: string | null) {
+export function useStoredCodeRabbitReview(
+	workspaceRoot: string | null,
+	options?: { enabled?: boolean },
+) {
 	const root = workspaceRoot?.trim() ?? "";
+	const enabled = options?.enabled ?? true;
 	const queryClient = useQueryClient();
 	const query = useQuery({
 		queryKey: reviewQueryKey(root),
 		queryFn: () => loadPersistedCodeRabbitReview(root),
-		enabled: Boolean(root),
+		enabled: Boolean(root) && enabled,
 		staleTime: 30_000,
 		initialData: root
 			? {
@@ -106,7 +110,7 @@ export function useStoredCodeRabbitReview(workspaceRoot: string | null) {
 	const historyQuery = useQuery({
 		queryKey: historyQueryKey(root),
 		queryFn: () => workspaceCodeRabbitReviewHistory({ workspaceRoot: root, limit: 12 }),
-		enabled: Boolean(root),
+		enabled: Boolean(root) && enabled,
 		staleTime: 30_000,
 	});
 

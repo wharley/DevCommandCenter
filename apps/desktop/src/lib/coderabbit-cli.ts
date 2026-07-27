@@ -1,6 +1,9 @@
 import type { WorkspaceCodeRabbitCliStatusOutput } from "@dcc/contracts";
 import { openTerminalAtPath } from "./shell-api";
-import { workspaceCodeRabbitCliStatus } from "./workspace-api";
+import {
+	workspaceCodeRabbitCliStatus,
+	workspaceCodeRabbitLogout,
+} from "./workspace-api";
 
 function isTauriRuntime(): boolean {
 	return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -49,4 +52,14 @@ export function buildCodeRabbitLoginShellCommand(): string {
 
 export async function openCodeRabbitCliAuthTerminal() {
 	return openTerminalAtPath("~", { command: buildCodeRabbitLoginShellCommand() });
+}
+
+export async function disconnectCodeRabbitCli(cliPath?: string | null) {
+	if (!isTauriRuntime()) {
+		throw new Error("CodeRabbit CLI is only available in the desktop runtime.");
+	}
+
+	return workspaceCodeRabbitLogout({
+		cliPath: cliPath?.trim() || null,
+	});
 }

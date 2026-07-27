@@ -28,6 +28,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,10 @@ import { ProviderSelectionPanel } from "@/features/providers/provider-selection-
 import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
 import { ProviderAccountUsagePanel } from "@/features/providers/provider-account-usage-panel";
 import { CodeRabbitConnectDialog } from "@/features/settings/coderabbit-connect-dialog";
+import {
+	setCodeRabbitIntegrationEnabled,
+	useCodeRabbitIntegrationEnabled,
+} from "@/features/settings/coderabbit-preferences";
 import {
 	invalidateCodeRabbitCliQueries,
 	useCodeRabbitCliStatus,
@@ -76,6 +81,7 @@ import {
 import { WorkspaceProjectAutomationDialog } from "@/features/automation/workspace-project-automation-dialog";
 import { WORKSPACE_GIT_STATUS_QUERY_KEY } from "@/features/inspector/use-workspace-git-status";
 import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "@/features/inspector/use-workspace-git-branch-diff";
+import { disconnectCodeRabbitCli } from "@/lib/coderabbit-cli";
 
 type SettingsDialogProps = {
 	open: boolean;
@@ -487,6 +493,8 @@ function CodeRabbitCliIntegrationCard() {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
 	const [connectOpen, setConnectOpen] = useState(false);
+	const [isDisconnecting, setIsDisconnecting] = useState(false);
+	const integrationEnabled = useCodeRabbitIntegrationEnabled();
 	const statusQuery = useCodeRabbitCliStatus(null, { includeAuthStatus: true });
 	const status = statusQuery.data;
 	const authReady = Boolean(status?.auth?.success || status?.auth?.authenticated);
@@ -503,6 +511,30 @@ function CodeRabbitCliIntegrationCard() {
 		await invalidateCodeRabbitCliQueries(queryClient, null);
 	};
 
+	const handleDisconnect = async () => {
+		if (!window.confirm(t("settings.codeRabbit.disconnectConfirm"))) {
+			return;
+		}
+		setIsDisconnecting(true);
+		try {
+			const result = await disconnectCodeRabbitCli(status?.cliPath);
+			if (!result.success) {
+				throw new Error(result.message);
+			}
+			setCodeRabbitIntegrationEnabled(false);
+			await invalidateCodeRabbitCliQueries(queryClient, null);
+			toast.success(t("settings.codeRabbit.disconnectedToast"));
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: t("settings.codeRabbit.disconnectFailed"),
+			);
+		} finally {
+			setIsDisconnecting(false);
+		}
+	};
+
 	return (
 		<>
 			<div className="rounded-xl border border-border/60 p-4">
@@ -515,12 +547,14 @@ function CodeRabbitCliIntegrationCard() {
 									{t("settings.codeRabbit.title")}
 								</h3>
 								<Badge
-									variant={isReady ? "success" : "outline"}
+									variant={integrationEnabled && isReady ? "success" : "outline"}
 									className="h-5 text-[10px] font-normal"
 								>
-									{isReady
-										? t("settings.codeRabbit.readyBadge")
-										: t("settings.codeRabbit.notReadyBadge")}
+									{!integrationEnabled
+										? t("settings.codeRabbit.disabledBadge")
+										: isReady
+											? t("settings.codeRabbit.readyBadge")
+											: t("settings.codeRabbit.notReadyBadge")}
 								</Badge>
 							</div>
 							<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
@@ -549,6 +583,17 @@ function CodeRabbitCliIntegrationCard() {
 										<TerminalSquare className="size-3.5" />
 										{t("settings.codeRabbit.reconnect")}
 									</Button>
+									<Button
+										variant="ghost"
+										size="sm"
+										disabled={isDisconnecting}
+										onClick={() => void handleDisconnect()}
+										className="text-destructive hover:text-destructive"
+									>
+										{isDisconnecting
+											? t("settings.codeRabbit.disconnecting")
+											: t("settings.codeRabbit.disconnect")}
+									</Button>
 								</>
 							) : (
 								<>
@@ -562,6 +607,22 @@ function CodeRabbitCliIntegrationCard() {
 								</>
 							)}
 						</div>
+					</div>
+
+					<div className="flex items-center justify-between gap-4 rounded-lg border border-border/50 bg-background/50 px-3 py-2.5">
+						<div className="min-w-0">
+							<div className="text-[12px] font-medium text-foreground">
+								{t("settings.codeRabbit.inspectorToggle")}
+							</div>
+							<p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+								{t("settings.codeRabbit.inspectorToggleHint")}
+							</p>
+						</div>
+						<Switch
+							checked={integrationEnabled}
+							onCheckedChange={setCodeRabbitIntegrationEnabled}
+							aria-label={t("settings.codeRabbit.inspectorToggle")}
+						/>
 					</div>
 
 					<div className="min-w-0">

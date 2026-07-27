@@ -41,6 +41,7 @@ use dcc_tauri::commands::{
         CodeRabbitReviewType, WorkspaceCodeRabbitCliStatusInput,
         WorkspaceCodeRabbitCliStatusOutput, WorkspaceCodeRabbitDoctorInput,
         WorkspaceCodeRabbitDoctorOutput, WorkspaceCodeRabbitFingerprintInput,
+        WorkspaceCodeRabbitLogoutInput, WorkspaceCodeRabbitLogoutOutput,
         WorkspaceCodeRabbitReviewHistoryEntry, WorkspaceCodeRabbitReviewHistoryInput,
         WorkspaceCodeRabbitReviewHistoryOutput, WorkspaceCodeRabbitReviewInput,
         WorkspaceCodeRabbitReviewJobInput, WorkspaceCodeRabbitReviewJobSnapshot,
@@ -192,6 +193,7 @@ struct WorkspaceMethods {
     workspace_remove_delegation_worktree: String,
     workspace_run_setup: String,
     workspace_coderabbit_cli_status: String,
+    workspace_coderabbit_logout: String,
     workspace_coderabbit_doctor: String,
     workspace_coderabbit_diff_fingerprint: String,
     workspace_coderabbit_review: String,
@@ -424,6 +426,8 @@ fn main() {
         .typ::<WorkspaceCodeRabbitCliStatusInput>()
         .typ::<CodeRabbitAuthStatusOutput>()
         .typ::<WorkspaceCodeRabbitCliStatusOutput>()
+        .typ::<WorkspaceCodeRabbitLogoutInput>()
+        .typ::<WorkspaceCodeRabbitLogoutOutput>()
         .typ::<WorkspaceCodeRabbitDoctorInput>()
         .typ::<WorkspaceCodeRabbitDoctorOutput>()
         .typ::<WorkspaceCodeRabbitFingerprintInput>()
@@ -572,6 +576,7 @@ fn main() {
                     .to_string(),
                 workspace_run_setup: "workspace_run_setup".to_string(),
                 workspace_coderabbit_cli_status: "workspace_coderabbit_cli_status".to_string(),
+                workspace_coderabbit_logout: "workspace_coderabbit_logout".to_string(),
                 workspace_coderabbit_doctor: "workspace_coderabbit_doctor".to_string(),
                 workspace_coderabbit_diff_fingerprint: "workspace_coderabbit_diff_fingerprint"
                     .to_string(),

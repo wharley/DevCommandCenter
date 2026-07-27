@@ -27,6 +27,12 @@ the CLI, reads its version, and checks whether the CLI is authenticated.
 If authentication is required, use the connect action. DCC opens an embedded
 terminal session for the normal CodeRabbit CLI login flow.
 
+The same card has a **Show in Inspector** switch. Turning it off hides
+CodeRabbit review prompts, summaries, panels, and file annotations without
+changing the CLI login or deleting saved review history. Use **Disconnect**
+when you also want DCC to run `cr auth logout` and clear CodeRabbit's local
+authentication; disconnecting turns the Inspector integration off as well.
+
 ## Running a Review
 
 Open a workspace and go to `Inspector > Changes`. The CodeRabbit review panel

@@ -33,6 +33,7 @@ import {
 	workspaceGitUnstageFile,
 } from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
+import { useCodeRabbitIntegrationEnabled } from "@/features/settings/coderabbit-preferences";
 import { CodeRabbitReviewSection } from "./coderabbit-review-section";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { useWorkspaceGitBranchDiff, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./use-workspace-git-branch-diff";
@@ -778,8 +779,24 @@ export function InspectorChangesSection({
 	const [unstagedOpen, setUnstagedOpen] = useState(true);
 	const [changesTreeView, setChangesTreeView] = useState(true);
 	const [gitBusy, setGitBusy] = useState(false);
+	const codeRabbitEnabled = useCodeRabbitIntegrationEnabled();
 
 	const root = workspaceRoot?.trim() ?? "";
+
+	useEffect(() => {
+		if (
+			codeRabbitEnabled ||
+			!selectedPreview?.machineAnnotations?.some(
+				(annotation) => annotation.source === "coderabbit",
+			)
+		) {
+			return;
+		}
+		onSelectPreview({
+			...selectedPreview,
+			machineAnnotations: undefined,
+		});
+	}, [codeRabbitEnabled, onSelectPreview, selectedPreview]);
 
 	const invalidateStatus = useCallback(async () => {
 		await queryClient.invalidateQueries({
@@ -955,7 +972,7 @@ export function InspectorChangesSection({
 						onSelect={handleSelectPreview}
 					/>
 				)}
-				{hasReviewableChanges ? (
+				{codeRabbitEnabled && hasReviewableChanges ? (
 					<CodeRabbitReviewSection
 						workspaceRoot={root}
 						staged={data.staged}

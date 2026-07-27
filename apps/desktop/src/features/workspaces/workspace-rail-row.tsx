@@ -1,5 +1,5 @@
 import { cva } from "class-variance-authority";
-import { Archive, Boxes, GitBranch, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, Loader2, RotateCcw, Trash2 } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -13,14 +13,12 @@ import {
 } from "./workspace-rail-time";
 import type { WorkspaceSummary } from "./types";
 import {
-	branchToneFromWorkspace,
 	initialsFromWorkspaceLabel,
-	workspaceRailBranchToneClasses,
 	workspaceRailDisplayTitle,
 } from "./workspace-rail-shared";
 
 const rowVariants = cva(
-	"group/dccRailRow relative min-h-[54px] select-none cursor-pointer rounded-md px-2.5 text-[13px]",
+	"group/dccRailRow relative min-h-[70px] select-none cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
 	{
 		variants: {
 			active: {
@@ -116,7 +114,7 @@ function WorkspaceRailAvatar({
 	return (
 		<span
 			aria-hidden
-			className="flex size-[16px] shrink-0 items-center justify-center rounded-[5px] border border-transparent bg-accent/65 text-[8px] font-semibold uppercase text-foreground ring-1 ring-border/50"
+			className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border border-transparent bg-accent/70 text-[8.5px] font-semibold uppercase text-foreground ring-1 ring-border/60"
 		>
 			{initials}
 		</span>
@@ -135,15 +133,6 @@ export const WorkspaceRailRowItem = memo(
 		onDeleteWorkspace,
 	}: WorkspaceRailRowProps) {
 		const { t } = useTranslation("common");
-		const branchTone = branchToneFromWorkspace(workspace);
-		// Transitional states keep full chroma — there the glyph is reporting
-		// something in motion. `merged` is the resting tone of every ready
-		// workspace, so it is pulled back to a tint: still identity, no longer a
-		// signal competing with the name beside it.
-		const glyphToneClass = cn(
-			workspaceRailBranchToneClasses[branchTone],
-			branchTone === "merged" && "opacity-75",
-		);
 		const displayTitle = workspaceRailDisplayTitle(workspace);
 		const workspacePath = workspace.worktreePath ?? workspace.rootPath ?? null;
 		const railRecap = useWorkspaceRailRecap({
@@ -213,24 +202,20 @@ export const WorkspaceRailRowItem = memo(
 						isPending && "pointer-events-none opacity-60",
 					)}
 				>
-					<div className="flex h-[30px] min-w-0 items-center gap-2">
+					{selected ? (
+						<span
+							aria-hidden
+							className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-sidebar-primary"
+						/>
+					) : null}
+					<div className="flex min-w-0 items-start gap-2">
 						<WorkspaceRailAvatar title={displayTitle} subtitle={workspace.name} />
-						<div className="flex min-w-0 flex-1 items-center gap-2">
-							<div className="row-content-fade flex min-w-0 flex-1 items-center gap-2">
-								{workspace.bundleId ? (
-									<Boxes
-										className="size-[13px] shrink-0 text-cyan-400/70"
-										strokeWidth={1.9}
-										aria-hidden
-									/>
-								) : (
-									<GitBranch
-										className={cn("size-[13px] shrink-0", glyphToneClass)}
-										strokeWidth={1.9}
-										aria-hidden
-									/>
-								)}
-								<span className="min-w-0 truncate font-medium leading-tight text-foreground">
+						<div className="min-w-0 flex-1">
+							<div className="flex min-w-0 items-center gap-1.5 transition-[padding] group-hover/dccRailRow:pr-6 group-focus-within/dccRailRow:pr-6">
+								<span
+									className="min-w-0 truncate font-medium leading-5 text-foreground"
+									title={displayTitle}
+								>
 									{displayTitle}
 								</span>
 								{workspace.memberWorkspaceIds &&
@@ -241,7 +226,7 @@ export const WorkspaceRailRowItem = memo(
 								) : null}
 							</div>
 							{activity && (
-								<span className="ml-auto flex shrink-0 items-center gap-1 transition-opacity group-hover/dccRailRow:opacity-0 group-focus-within/dccRailRow:opacity-0">
+								<div className="mt-px flex min-w-0 items-center gap-1.5">
 									<span
 										aria-hidden
 										className={cn(
@@ -252,13 +237,11 @@ export const WorkspaceRailRowItem = memo(
 											activity.state === "aborted" && "bg-destructive",
 										)}
 									/>
-									{/* Chroma marks the states that want the user: a finished run
-									    to review, a failed one to fix. `active` stays neutral —
-									    the pulsing dot already carries "live", and the elapsed
-									    time reads as metadata in every state. */}
-									<span className="flex items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-none text-muted-foreground">
+									<span className="flex min-w-0 items-center gap-1 whitespace-nowrap text-[10.5px] font-medium leading-4 text-muted-foreground">
 										<span
 											className={cn(
+												activity.state === "active" &&
+													"text-amber-700 dark:text-amber-300/90",
 												activity.state === "completed" &&
 													"text-emerald-600 dark:text-emerald-400/90",
 												activity.state === "aborted" && "text-destructive/85",
@@ -271,12 +254,23 @@ export const WorkspaceRailRowItem = memo(
 										</span>
 										<WorkspaceActivityTime activity={activity} />
 									</span>
-								</span>
+								</div>
 							)}
+							{recapMessage && railRecap ? (
+								<p
+									className={cn(
+										"truncate text-[10.5px] leading-4",
+										recapToneClass[railRecap.recap.tone],
+									)}
+									title={recapTitle}
+								>
+									{recapMessage}
+								</p>
+							) : null}
 						</div>
 						<div
 							className={cn(
-								"group/actions absolute right-2.5 top-[3px] flex items-center gap-0.5 transition-opacity group-hover/dccRailRow:opacity-100 group-focus-within/dccRailRow:opacity-100",
+								"group/actions absolute right-2 top-1.5 flex items-center gap-0.5 rounded-md bg-sidebar/90 pl-1 transition-opacity group-hover/dccRailRow:opacity-100 group-focus-within/dccRailRow:opacity-100",
 								isPending ? "opacity-100" : "opacity-0",
 							)}
 						>
@@ -370,17 +364,6 @@ export const WorkspaceRailRowItem = memo(
 							)}
 						</div>
 					</div>
-					{recapMessage && railRecap ? (
-						<p
-							className={cn(
-								"truncate pb-1 pl-6 text-[10.5px] leading-4",
-								recapToneClass[railRecap.recap.tone],
-							)}
-							title={recapTitle}
-						>
-							{recapMessage}
-						</p>
-					) : null}
 				</div>
 			</div>
 		);

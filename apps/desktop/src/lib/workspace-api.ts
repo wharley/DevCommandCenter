@@ -17,6 +17,8 @@ import type {
 	WorkspaceCodeRabbitDoctorInput,
 	WorkspaceCodeRabbitDoctorOutput,
 	WorkspaceCodeRabbitFingerprintInput,
+	WorkspaceCodeRabbitLogoutInput,
+	WorkspaceCodeRabbitLogoutOutput,
 	CodeRabbitDiffFingerprint,
 	WorkspaceCodeRabbitReviewInput,
 	WorkspaceCodeRabbitReviewJobInput,
@@ -212,6 +214,13 @@ export function workspaceForgeContext(input: WorkspaceForgeContextInput) {
 export function workspaceCodeRabbitCliStatus(input: WorkspaceCodeRabbitCliStatusInput) {
 	return invoke<WorkspaceCodeRabbitCliStatusOutput>(
 		WORKSPACE_METHODS.workspaceCoderabbitCliStatus,
+		{ input },
+	);
+}
+
+export function workspaceCodeRabbitLogout(input: WorkspaceCodeRabbitLogoutInput) {
+	return invoke<WorkspaceCodeRabbitLogoutOutput>(
+		WORKSPACE_METHODS.workspaceCoderabbitLogout,
 		{ input },
 	);
 }
