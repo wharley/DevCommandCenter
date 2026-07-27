@@ -194,6 +194,7 @@ export function ActiveThreadViewport({
 												autoSaveMissionValidation={autoSaveMissionValidation}
 												onDelegateTaskApprove={onDelegateTaskApprove}
 												onOpenPlan={onOpenPlan}
+												hidePendingApprovals
 											/>
 										</div>
 									);

@@ -129,6 +129,7 @@ export function AssistantMessage({
 	autoSaveMissionValidation,
 	onDelegateTaskApprove,
 	onOpenPlan,
+	hidePendingApprovals = false,
 }: {
 	content: string;
 	streaming?: boolean;
@@ -146,6 +147,7 @@ export function AssistantMessage({
 	autoSaveMissionValidation?: boolean;
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	onOpenPlan?: () => void;
+	hidePendingApprovals?: boolean;
 }) {
 	const { t } = useTranslation("common");
 	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
@@ -165,8 +167,17 @@ export function AssistantMessage({
 		[annotations],
 	);
 	const requestAnnotations = useMemo(
-		() => (annotations ?? []).filter((annotation) => !isActivityAnnotation(annotation)),
-		[annotations],
+		() =>
+			(annotations ?? []).filter(
+				(annotation) =>
+					!isActivityAnnotation(annotation) &&
+					!(
+						hidePendingApprovals &&
+						annotation.type === "approval" &&
+						annotation.streaming
+					),
+			),
+		[annotations, hidePendingApprovals],
 	);
 	const validationReport = showPlanCard ? null : parseMissionValidationReport(content);
 	const isValidationStale = Boolean(

@@ -1415,6 +1415,24 @@
       "failed": "Falhou",
       "failedFallback": "A execução falhou",
       "noOutput": "Nenhuma saída capturada."
+    },
+    "permission": {
+      "label": "Autorização",
+      "required": "Aguardando sua autorização",
+      "waiting": "O agente está pausado até você permitir ou negar esta ação.",
+      "pendingCount_one": "{{count}} solicitação pendente",
+      "pendingCount_other": "{{count}} solicitações pendentes",
+      "tool": "Ferramenta",
+      "command": "Comando",
+      "file": "Arquivo",
+      "allow": "Permitir",
+      "deny": "Negar",
+      "allowed": "Permitido",
+      "denied": "Negado",
+      "pending": "Pendente",
+      "submitError": "Não foi possível enviar sua decisão ao agente.",
+      "delegateMissingInstruction": "A solicitação de delegação não contém uma instrução.",
+      "delegateUnavailable": "A delegação não está disponível neste contexto."
     }
   },
   "workbench": {

@@ -23,16 +23,6 @@ type ApprovalCardProps = {
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 };
 
-function behaviorLabel(behavior: string | undefined) {
-	if (behavior === "allow") {
-		return "Allowed";
-	}
-	if (behavior === "deny") {
-		return "Denied";
-	}
-	return "Pending";
-}
-
 export function ApprovalCard({
 	sessionId,
 	requestId,
@@ -55,6 +45,12 @@ export function ApprovalCard({
 				: null,
 		[command, description, toolName],
 	);
+	const behaviorLabel =
+		behavior === "allow"
+			? t("conversation.permission.allowed")
+			: behavior === "deny"
+				? t("conversation.permission.denied")
+				: t("conversation.permission.pending");
 
 	async function submit(nextBehavior: "allow" | "deny") {
 		if (!sessionId) {
@@ -68,10 +64,12 @@ export function ApprovalCard({
 					description,
 				});
 				if (!request) {
-					throw new Error("delegate_task request is missing an instruction.");
+					throw new Error(
+						t("conversation.permission.delegateMissingInstruction"),
+					);
 				}
 				if (!onDelegateTaskApprove) {
-					throw new Error("delegate_task is unavailable in this context.");
+					throw new Error(t("conversation.permission.delegateUnavailable"));
 				}
 				await onDelegateTaskApprove(request);
 			}
@@ -84,7 +82,7 @@ export function ApprovalCard({
 			toast.error(
 				error instanceof Error
 					? error.message
-					: "Unable to send the permission decision to the agent.",
+					: t("conversation.permission.submitError"),
 			);
 		} finally {
 			setSubmitting(null);
@@ -96,7 +94,7 @@ export function ApprovalCard({
 			<div className="mb-3 flex items-center justify-between gap-3">
 				<div>
 					<p className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground/80">
-						Approval
+						{t("conversation.permission.label")}
 					</p>
 					<p className="mt-1 text-sm text-foreground">
 						{title ??
@@ -110,7 +108,7 @@ export function ApprovalCard({
 						) : (
 							<Ban className="size-4 text-amber-600" aria-hidden />
 						)}
-						{behaviorLabel(behavior)}
+						{behaviorLabel}
 					</span>
 				) : null}
 			</div>
@@ -175,13 +173,13 @@ export function ApprovalCard({
 			) : (
 				<div className="space-y-2">
 					<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-						Tool
+						{t("conversation.permission.tool")}
 					</p>
 					<p className="text-sm text-foreground">{toolName}</p>
 					{command ? (
 						<div>
 							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-								Command
+								{t("conversation.permission.command")}
 							</p>
 							<pre className="mt-1 overflow-x-auto rounded-xl bg-background/70 px-3 py-2 text-xs text-foreground">
 								<code>{command}</code>
@@ -191,7 +189,7 @@ export function ApprovalCard({
 					{file ? (
 						<div>
 							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-								File
+								{t("conversation.permission.file")}
 							</p>
 							<p className="mt-1 break-all font-mono text-xs text-foreground">{file}</p>
 						</div>
@@ -211,7 +209,7 @@ export function ApprovalCard({
 						{submitting === "deny" ? (
 							<LoaderCircle className="size-4 animate-spin" aria-hidden />
 						) : null}
-						Deny
+						{t("conversation.permission.deny")}
 					</Button>
 					<Button
 						type="button"
@@ -222,7 +220,7 @@ export function ApprovalCard({
 						{submitting === "allow" ? (
 							<LoaderCircle className="size-4 animate-spin" aria-hidden />
 						) : null}
-						Allow
+						{t("conversation.permission.allow")}
 					</Button>
 				</div>
 			) : null}

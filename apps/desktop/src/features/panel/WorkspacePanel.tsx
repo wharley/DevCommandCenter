@@ -21,6 +21,8 @@ import type { ManualDelegationRequest } from "@/features/sessions/delegation-req
 import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
 import { DiffReviewTray, type ReviewAnnotation } from "./diff-review-tray";
+import { collectPendingPermissionRequests } from "./pending-permissions";
+import { PendingPermissionPanel } from "./message-components";
 import { WorkspaceComposer } from "@/features/composer";
 import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
 import { delegationTargetsFor } from "@/features/sessions/delegation-targets";
@@ -430,6 +432,10 @@ export function WorkspacePanel({
 			),
 		[effectiveSessionId, historyEvents, pendingPrompt, sessionEvents],
 	);
+	const pendingPermissionRequests = useMemo(
+		() => collectPendingPermissionRequests(messages),
+		[messages],
+	);
 	const planFollowUpState = useMemo(
 		() => derivePlanFollowUpState(messages),
 		[messages],
@@ -832,6 +838,14 @@ export function WorkspacePanel({
 					onDelegateTaskApprove={onAgentDelegate}
 					onOpenPlan={onOpenPlanSurface}
 				/>
+
+				{effectiveSessionId ? (
+					<PendingPermissionPanel
+						sessionId={effectiveSessionId}
+						requests={pendingPermissionRequests}
+						onDelegateTaskApprove={onAgentDelegate}
+					/>
+				) : null}
 
 				<div className="border-t border-border/60 px-3 pb-3 pt-3 sm:px-4">
 					<WorkspaceComposer

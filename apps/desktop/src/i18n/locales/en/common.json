@@ -1415,6 +1415,24 @@
       "failed": "Failed",
       "failedFallback": "Tool call failed",
       "noOutput": "No output captured."
+    },
+    "permission": {
+      "label": "Approval",
+      "required": "Permission required",
+      "waiting": "The agent is paused until you allow or deny this action.",
+      "pendingCount_one": "{{count}} request pending",
+      "pendingCount_other": "{{count}} requests pending",
+      "tool": "Tool",
+      "command": "Command",
+      "file": "File",
+      "allow": "Allow",
+      "deny": "Deny",
+      "allowed": "Allowed",
+      "denied": "Denied",
+      "pending": "Pending",
+      "submitError": "Unable to send the permission decision to the agent.",
+      "delegateMissingInstruction": "The delegation request is missing an instruction.",
+      "delegateUnavailable": "Delegation is unavailable in this context."
     }
   },
   "workbench": {
