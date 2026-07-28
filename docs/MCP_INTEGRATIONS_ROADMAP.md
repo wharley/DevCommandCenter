@@ -710,7 +710,9 @@ Updated July 28, 2026:
 - [ ] MVP integrations UI.
   - [x] Add renderer-safe list, create, activate, disable, and remove commands.
   - [x] Keep credential values write-only and make credential deletion explicit.
-  - [ ] Add the integrations surface and URL/command creation flow.
-  - [ ] Add lifecycle, compatibility, restart, and tool-policy views.
+  - [x] Add the integrations surface and URL/command creation flow.
+  - [x] Add trust review plus enable, disable, remove, and optional credential
+    deletion controls.
+  - [ ] Add live compatibility, restart, process, and tool-policy views.
 - [ ] Real-service smoke tests.
 - [ ] Additional provider bridges.

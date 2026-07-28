@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+	Cable,
 	CircleUserRound,
 	GitBranch,
 	Keyboard,
@@ -82,6 +83,7 @@ import { WorkspaceProjectAutomationDialog } from "@/features/automation/workspac
 import { WORKSPACE_GIT_STATUS_QUERY_KEY } from "@/features/inspector/use-workspace-git-status";
 import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "@/features/inspector/use-workspace-git-branch-diff";
 import { disconnectCodeRabbitCli } from "@/lib/coderabbit-cli";
+import { McpIntegrationsPanel } from "@/features/settings/mcp-integrations-panel";
 
 type SettingsDialogProps = {
 	open: boolean;
@@ -108,6 +110,8 @@ type SettingsDialogProps = {
 	onInstallUpdate?: () => void;
 	workspaceRoot: string | null;
 	workspaceName: string | null;
+	projectId: string | null;
+	sessionId: string | null;
 };
 
 function forgeAccountInitials(value: string): string {
@@ -157,6 +161,7 @@ export type SettingsSectionId =
 	| "general"
 	| "appearance"
 	| "model"
+	| "integrations"
 	| "connections"
 	| "shortcuts"
 	| "git"
@@ -678,6 +683,8 @@ export function SettingsDialog({
 	onInstallUpdate,
 	workspaceRoot,
 	workspaceName,
+	projectId,
+	sessionId,
 }: SettingsDialogProps) {
 	const { t, i18n } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -715,6 +722,12 @@ export function SettingsDialog({
 				label: t("settings.sections.model.label"),
 				description: t("settings.sections.model.description"),
 				icon: Sparkles,
+			},
+			{
+				id: "integrations",
+				label: t("settings.sections.integrations.label"),
+				description: t("settings.sections.integrations.description"),
+				icon: Cable,
 			},
 			{
 				id: "connections",
@@ -1062,6 +1075,14 @@ export function SettingsDialog({
 										onClearRuntime={onClearProviderRuntime}
 									/>
 								</section>
+							) : null}
+
+							{activeSection === "integrations" ? (
+								<McpIntegrationsPanel
+									projectId={projectId}
+									sessionId={sessionId}
+									workspaceName={workspaceName}
+								/>
 							) : null}
 
 							{activeSection === "connections" ? (

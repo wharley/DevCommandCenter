@@ -4053,6 +4053,10 @@ export default function App() {
 				}}
 				workspaceRoot={selectedLocalWorkspacePath}
 				workspaceName={selectedWorkspace?.name ?? null}
+				projectId={
+					selectedWorkspace?.projectId ?? selectedWorkspace?.id ?? null
+				}
+				sessionId={effectiveSelectedSessionId}
 			/>
 			<SkillsDialog
 				open={isSkillsOpen}
