@@ -78,6 +78,9 @@ arguments, working directory, environment key names, source identity, and a
 fingerprint of security-relevant fields. Changing that fingerprint invalidates
 trust.
 
+The canonical fingerprint and activation rules are documented in the
+[MCP definition trust model](./MCP_TRUST_MODEL.md).
+
 DCC modifies and removes only projections it created. Disabling a definition
 stops future DCC attachment while preserving it. Removing it cleans up
 DCC-owned processes and projections; deleting credentials remains a separate,

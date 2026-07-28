@@ -324,6 +324,9 @@ Implementation policy:
 
 ### Deliverable 1.4 — Trust
 
+Implementation policy:
+[MCP definition trust model](./MCP_TRUST_MODEL.md).
+
 - Compute a stable fingerprint over the executable or URL definition,
   arguments, cwd, environment key names, and source identity.
 - Require explicit activation for imported definitions.
@@ -662,11 +665,11 @@ Updated July 28, 2026:
   - [x] Replace the inherited MCP boolean with explicit support levels.
   - [x] Audit and downgrade current provider claims.
   - [ ] Add provider-version evidence to bridge compatibility results.
-- [ ] Domain and credential-store foundation.
+- [x] Domain and credential-store foundation.
   - [x] Provider-neutral definitions, transports, bindings, trust, and runtime contracts.
   - [x] SQLite repositories and idempotent startup migrations.
   - [x] OS credential-store port and platform adapters.
-  - [ ] Fingerprint computation and activation service.
+  - [x] Fingerprint computation and activation service.
 - [ ] Offline fixture and conformance harness.
 - [ ] Claude bridge.
 - [ ] Codex bridge.

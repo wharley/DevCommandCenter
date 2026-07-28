@@ -479,7 +479,7 @@ mod tests {
     }
 
     fn http_definition(id: &str) -> McpDefinition {
-        McpDefinition {
+        let mut definition = McpDefinition {
             id: McpDefinitionId(id.to_string()),
             display_name: "Figma".to_string(),
             transport: McpTransport::Http {
@@ -499,7 +499,9 @@ mod tests {
             },
             created_at: "2026-07-28T00:00:00Z".to_string(),
             updated_at: "2026-07-28T00:00:00Z".to_string(),
-        }
+        };
+        definition.synchronize_trust_fingerprint();
+        definition
     }
 
     fn binding(id: &str, definition_id: &str, scope: McpBindingScope) -> McpBinding {
@@ -664,6 +666,7 @@ mod tests {
                 definition_key: Some("payments".to_string()),
             },
         };
+        definition.synchronize_trust_fingerprint();
 
         block_on(repo.save_mcp_definition(&definition)).expect("save imported definition");
         block_on(repo.delete_mcp_definition(&definition.id)).expect("delete imported definition");

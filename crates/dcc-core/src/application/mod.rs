@@ -5,6 +5,7 @@ pub mod close_session;
 pub mod create_workspace_bundle;
 pub mod create_workspace_for_repo;
 pub mod create_workspace_from_url;
+pub mod mcp_trust;
 pub mod record_plan_handoff;
 pub mod restore_session;
 pub mod resume_session;
@@ -24,6 +25,10 @@ pub use create_workspace_for_repo::{
     CreateWorkspaceForRepoInput, FinalizedWorkspace, PreparedWorkspace,
 };
 pub use create_workspace_from_url::{create_workspace_from_url, CreateWorkspaceFromUrlInput};
+pub use mcp_trust::{
+    activate_mcp_definition, prepare_imported_mcp_definition, synchronize_mcp_definition_trust,
+    ActivateMcpDefinitionInput, ActivateMcpDefinitionOutput,
+};
 pub use record_plan_handoff::{
     record_plan_handoff, RecordPlanHandoffInput, RecordPlanHandoffOutput,
 };

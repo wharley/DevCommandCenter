@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use specta::Type;
 use thiserror::Error;
 use url::Url;
@@ -245,6 +246,84 @@ pub struct McpDefinition {
 }
 
 impl McpDefinition {
+    /// Computes the versioned SHA-256 digest of fields that can change what
+    /// the integration executes, contacts, or authenticates to.
+    ///
+    /// Secret values are deliberately excluded. Opaque credential references
+    /// are included so replacing the credential selected by a definition
+    /// requires confirmation without exposing the credential itself.
+    pub fn computed_trust_fingerprint(&self) -> McpTrustFingerprint {
+        let mut encoder = TrustFingerprintEncoder::new();
+        encoder.string("definition-id", &self.id.0);
+
+        match &self.transport {
+            McpTransport::Stdio {
+                executable,
+                args,
+                cwd,
+            } => {
+                encoder.tag("transport", "stdio");
+                encoder.string("executable", executable);
+                encoder.strings("args", args.iter().map(String::as_str));
+                encoder.optional_string("cwd", cwd.as_deref());
+            }
+            McpTransport::Http { url } => {
+                encoder.tag("transport", "http");
+                encoder.string("url", url);
+            }
+        }
+
+        match &self.ownership {
+            McpDefinitionOwnership::DccManaged => {
+                encoder.tag("ownership", "dcc-managed");
+            }
+            McpDefinitionOwnership::ImportedReadOnly { source } => {
+                encoder.tag("ownership", "imported-read-only");
+                encoder.tag(
+                    "source-kind",
+                    match source.kind {
+                        McpImportSourceKind::ProviderConfig => "provider-config",
+                        McpImportSourceKind::ProjectFile => "project-file",
+                        McpImportSourceKind::Other => "other",
+                    },
+                );
+                encoder.string("source-locator", &source.locator);
+                encoder.optional_string("source-definition-key", source.definition_key.as_deref());
+            }
+        }
+
+        let mut secret_bindings = self
+            .secret_refs
+            .iter()
+            .map(|binding| {
+                let (kind, name) = match &binding.target {
+                    McpSecretTarget::EnvironmentVariable { name } => ("env", name.clone()),
+                    McpSecretTarget::HttpHeader { name } => ("header", name.to_ascii_lowercase()),
+                };
+                (kind, name, binding.secret_ref.0.as_str())
+            })
+            .collect::<Vec<_>>();
+        secret_bindings.sort_unstable();
+
+        encoder.count("secret-bindings", secret_bindings.len());
+        for (kind, name, secret_ref) in secret_bindings {
+            encoder.tag("secret-target-kind", kind);
+            encoder.string("secret-target-name", &name);
+            encoder.string("secret-reference", secret_ref);
+        }
+
+        encoder.finish()
+    }
+
+    /// Refreshes the current fingerprint while deliberately retaining the
+    /// prior decision. A material change therefore becomes `NeedsTrust`.
+    pub fn synchronize_trust_fingerprint(&mut self) -> bool {
+        let fingerprint = self.computed_trust_fingerprint();
+        let changed = self.trust.current_fingerprint != fingerprint;
+        self.trust.current_fingerprint = fingerprint;
+        changed
+    }
+
     pub fn validate(&self) -> Result<(), McpValidationError> {
         validate_non_empty("id", &self.id.0)?;
         validate_non_empty("displayName", &self.display_name)?;
@@ -270,6 +349,10 @@ impl McpDefinition {
                 }
                 _ => {}
             }
+        }
+
+        if self.trust.current_fingerprint != self.computed_trust_fingerprint() {
+            return Err(McpValidationError::TrustFingerprintMismatch);
         }
 
         Ok(())
@@ -451,6 +534,8 @@ pub enum McpValidationError {
     InvalidUrl,
     #[error("trust fingerprint must be a 64-character hexadecimal SHA-256 digest")]
     InvalidTrustFingerprint,
+    #[error("current trust fingerprint does not match the MCP definition")]
+    TrustFingerprintMismatch,
     #[error("a secret target may only be bound once")]
     DuplicateSecretTarget,
     #[error("environment variable name is invalid")]
@@ -469,6 +554,58 @@ pub enum McpValidationError {
     UnexpectedRuntimeError,
     #[error("runtime error exceeds the domain size limit")]
     RuntimeErrorTooLong,
+}
+
+struct TrustFingerprintEncoder(Sha256);
+
+impl TrustFingerprintEncoder {
+    fn new() -> Self {
+        let mut encoder = Self(Sha256::new());
+        encoder.bytes(b"dcc-mcp-trust-fingerprint-v1");
+        encoder
+    }
+
+    fn tag(&mut self, label: &str, value: &str) {
+        self.string(label, value);
+    }
+
+    fn string(&mut self, label: &str, value: &str) {
+        self.bytes(label.as_bytes());
+        self.bytes(value.as_bytes());
+    }
+
+    fn optional_string(&mut self, label: &str, value: Option<&str>) {
+        self.bytes(label.as_bytes());
+        match value {
+            Some(value) => {
+                self.bytes(&[1]);
+                self.bytes(value.as_bytes());
+            }
+            None => self.bytes(&[0]),
+        }
+    }
+
+    fn strings<'a>(&mut self, label: &str, values: impl Iterator<Item = &'a str>) {
+        let values = values.collect::<Vec<_>>();
+        self.count(label, values.len());
+        for value in values {
+            self.bytes(value.as_bytes());
+        }
+    }
+
+    fn count(&mut self, label: &str, count: usize) {
+        self.bytes(label.as_bytes());
+        self.0.update((count as u64).to_be_bytes());
+    }
+
+    fn bytes(&mut self, value: &[u8]) {
+        self.0.update((value.len() as u64).to_be_bytes());
+        self.0.update(value);
+    }
+
+    fn finish(self) -> McpTrustFingerprint {
+        McpTrustFingerprint(format!("{:x}", self.0.finalize()))
+    }
 }
 
 fn validate_non_empty(field: &'static str, value: &str) -> Result<(), McpValidationError> {
@@ -545,7 +682,7 @@ mod tests {
     }
 
     fn definition(transport: McpTransport) -> McpDefinition {
-        McpDefinition {
+        let mut definition = McpDefinition {
             id: McpDefinitionId("figma".to_string()),
             display_name: "Figma".to_string(),
             transport,
@@ -555,7 +692,9 @@ mod tests {
             trust: trust(),
             created_at: "2026-07-28T00:00:00Z".to_string(),
             updated_at: "2026-07-28T00:00:00Z".to_string(),
-        }
+        };
+        definition.synchronize_trust_fingerprint();
+        definition
     }
 
     #[test]
@@ -610,6 +749,7 @@ mod tests {
             },
             secret_ref: McpSecretReferenceId("credential:figma".to_string()),
         });
+        definition.synchronize_trust_fingerprint();
 
         assert_eq!(definition.validate(), Ok(()));
         let json = serde_json::to_string(&definition).expect("serialize definition");
