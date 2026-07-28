@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
-    process::Stdio,
+    process::{Command as StdCommand, Stdio},
+    str,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -34,6 +35,9 @@ use dcc_core::{
     CoreError, Result,
 };
 
+use crate::codex_mcp::{
+    write_thread_start_request, CODEX_MCP_RUNTIME_VERSION, SUPPORTED_CODEX_CLI_VERSION,
+};
 use crate::common::{append_tool_instructions, augmented_path};
 
 // ── JSON-RPC helpers ────────────────────────────────────────────────────────
@@ -78,6 +82,47 @@ fn thread_start_params(cwd: &str, additional_working_directories: &[String]) -> 
         params["runtimeWorkspaceRoots"] = json!(runtime_workspace_roots);
     }
     params
+}
+
+fn parse_codex_cli_version_output(output: &str) -> Option<&str> {
+    let mut fields = output.split_whitespace();
+    match (fields.next(), fields.next(), fields.next()) {
+        (Some("codex-cli"), Some(version), None)
+            if !version.is_empty()
+                && version.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+')
+                }) =>
+        {
+            Some(version)
+        }
+        _ => None,
+    }
+}
+
+fn projection_version_for_cli_output(output: &str) -> Option<&'static str> {
+    (parse_codex_cli_version_output(output) == Some(SUPPORTED_CODEX_CLI_VERSION))
+        .then_some(CODEX_MCP_RUNTIME_VERSION)
+}
+
+fn detect_codex_mcp_projection_version() -> Option<&'static str> {
+    let output = StdCommand::new("codex")
+        .arg("--version")
+        .env("PATH", augmented_path())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    projection_version_for_cli_output(str::from_utf8(&output.stdout).ok()?)
+}
+
+fn initialize_result_codex_version(result: &Value) -> Option<&str> {
+    let user_agent = result.get("userAgent")?.as_str()?;
+    user_agent
+        .split_whitespace()
+        .next()?
+        .strip_prefix("dcc/")
+        .filter(|version| !version.is_empty())
 }
 
 fn codex_reasoning_effort(effort: Option<&str>) -> Option<&'static str> {
@@ -475,6 +520,38 @@ impl SessionRuntime {
             .map_err(|e| CoreError::Provider(format!("codex {method} error: {e}")))
     }
 
+    async fn send_mcp_thread_start_request(
+        &self,
+        cwd: &str,
+        additional_working_directories: &[String],
+        servers: &[dcc_core::ports::ProviderMcpServerConfig],
+    ) -> Result<Value> {
+        let method = "thread/start";
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().await.insert(id, tx);
+        let write_result = {
+            let mut stdin = self.stdin.lock().await;
+            write_thread_start_request(
+                &mut *stdin,
+                id,
+                cwd,
+                additional_working_directories,
+                servers,
+            )
+            .await
+        };
+        if let Err(error) = write_result {
+            self.pending.lock().await.remove(&id);
+            return Err(error);
+        }
+        timeout(Duration::from_secs(30), rx)
+            .await
+            .map_err(|_| CoreError::Provider(format!("codex {method} timed out")))?
+            .map_err(|_| CoreError::Provider(format!("codex {method} cancelled")))?
+            .map_err(|error| CoreError::Provider(format!("codex {method} error: {error}")))
+    }
+
     async fn send_notification(&self, method: &str) -> Result<()> {
         let mut stdin = self.stdin.lock().await;
         write_line(&mut stdin, &rpc_notification(method)).await
@@ -497,17 +574,26 @@ pub struct CodexAppServerAdapter {
     pub description: String,
     pub capabilities: Capabilities,
     pub stable: bool,
+    mcp_projection_version: Option<&'static str>,
     state: Arc<AdapterState>,
 }
 
 impl CodexAppServerAdapter {
     pub fn new(capabilities: Capabilities) -> Self {
+        Self::with_mcp_projection_version(capabilities, detect_codex_mcp_projection_version())
+    }
+
+    fn with_mcp_projection_version(
+        capabilities: Capabilities,
+        mcp_projection_version: Option<&'static str>,
+    ) -> Self {
         Self {
             id: ProviderId("codex".to_string()),
             label: "Codex".to_string(),
             description: "OpenAI Codex provider via app-server protocol.".to_string(),
             capabilities,
             stable: true,
+            mcp_projection_version,
             state: Arc::new(AdapterState::default()),
         }
     }
@@ -524,6 +610,7 @@ impl CodexAppServerAdapter {
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
 
         cmd.env("PATH", augmented_path());
         cmd.env("DCC_PROVIDER_ID", "codex");
@@ -595,23 +682,37 @@ impl CodexAppServerAdapter {
         );
 
         // Handshake + thread/start
-        if let Err(e) = Self::handshake(&runtime, &cfg).await {
+        if let Err(e) = Self::handshake(&runtime, &cfg, self.mcp_projection_version).await {
             self.state.sessions.lock().await.remove(&session_key);
+            let _ = runtime.child.lock().await.start_kill();
             return Err(e);
         }
 
         Ok(handle)
     }
 
-    async fn handshake(runtime: &Arc<SessionRuntime>, cfg: &SessionConfig) -> Result<()> {
+    async fn handshake(
+        runtime: &Arc<SessionRuntime>,
+        cfg: &SessionConfig,
+        mcp_projection_version: Option<&str>,
+    ) -> Result<()> {
         // initialize
         let uses_experimental_multi_root = !cfg.additional_working_directories.is_empty();
-        runtime
+        let initialize_result = runtime
             .send_request(
                 "initialize",
                 initialize_params(uses_experimental_multi_root),
             )
             .await?;
+        if !cfg.mcp_servers.is_empty()
+            && (mcp_projection_version != Some(CODEX_MCP_RUNTIME_VERSION)
+                || initialize_result_codex_version(&initialize_result)
+                    != Some(SUPPORTED_CODEX_CLI_VERSION))
+        {
+            return Err(CoreError::Provider(format!(
+                "Codex MCP projection requires audited codex-cli {SUPPORTED_CODEX_CLI_VERSION}"
+            )));
+        }
 
         // initialized notification (no response expected)
         runtime.send_notification("initialized").await?;
@@ -622,12 +723,22 @@ impl CodexAppServerAdapter {
             .as_deref()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or(".");
-        let result = runtime
-            .send_request(
-                "thread/start",
-                thread_start_params(cwd, &cfg.additional_working_directories),
-            )
-            .await?;
+        let result = if cfg.mcp_servers.is_empty() {
+            runtime
+                .send_request(
+                    "thread/start",
+                    thread_start_params(cwd, &cfg.additional_working_directories),
+                )
+                .await?
+        } else {
+            runtime
+                .send_mcp_thread_start_request(
+                    cwd,
+                    &cfg.additional_working_directories,
+                    &cfg.mcp_servers,
+                )
+                .await?
+        };
 
         let thread_id = result
             .get("thread")
@@ -817,6 +928,10 @@ impl Provider for CodexAppServerAdapter {
         self.capabilities.clone()
     }
 
+    fn dcc_mcp_projection_version(&self) -> Option<&str> {
+        self.mcp_projection_version
+    }
+
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {
         self.start_runtime(cfg).await
     }
@@ -975,6 +1090,48 @@ impl Provider for CodexAppServerAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gates_mcp_projection_on_the_exact_audited_codex_version() {
+        assert_eq!(
+            parse_codex_cli_version_output("codex-cli 0.145.0\n"),
+            Some("0.145.0")
+        );
+        assert_eq!(
+            projection_version_for_cli_output("codex-cli 0.145.0\n"),
+            Some(CODEX_MCP_RUNTIME_VERSION)
+        );
+        assert_eq!(
+            projection_version_for_cli_output("codex-cli 0.146.0\n"),
+            None
+        );
+        assert_eq!(projection_version_for_cli_output("codex 0.145.0\n"), None);
+
+        let adapter = CodexAppServerAdapter::with_mcp_projection_version(
+            crate::codex::stable_codex_capabilities(),
+            Some(CODEX_MCP_RUNTIME_VERSION),
+        );
+        assert_eq!(
+            adapter.dcc_mcp_projection_version(),
+            Some(CODEX_MCP_RUNTIME_VERSION)
+        );
+    }
+
+    #[test]
+    fn validates_the_initialized_app_server_version() {
+        assert_eq!(
+            initialize_result_codex_version(&json!({
+                "userAgent": "dcc/0.145.0 (macOS 15.5; arm64)"
+            })),
+            Some("0.145.0")
+        );
+        assert_eq!(
+            initialize_result_codex_version(&json!({
+                "userAgent": "other/0.145.0 (macOS 15.5; arm64)"
+            })),
+            None
+        );
+    }
 
     #[test]
     fn opts_into_experimental_api_only_for_runtime_workspace_roots() {

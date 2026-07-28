@@ -3,6 +3,7 @@ mod claude_mcp;
 pub mod claude_sdk_sidecar;
 pub mod codex;
 pub mod codex_app_server;
+mod codex_mcp;
 pub mod common;
 pub mod cursor;
 pub mod droid;
@@ -109,9 +110,15 @@ mod tests {
                 .dcc_mcp_projection_version(),
             Some("claude-agent-sdk@0.2.126+claude-code@2.1.126")
         );
+        assert!(matches!(
+            provider_runtime("codex")
+                .expect("Codex provider")
+                .dcc_mcp_projection_version(),
+            None | Some(crate::codex_mcp::CODEX_MCP_RUNTIME_VERSION)
+        ));
         for provider_id in PROVIDER_IDS
             .into_iter()
-            .filter(|provider_id| *provider_id != "claude_code")
+            .filter(|provider_id| !matches!(*provider_id, "claude_code" | "codex"))
         {
             assert_eq!(
                 provider_runtime(provider_id)

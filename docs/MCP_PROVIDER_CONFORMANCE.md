@@ -76,8 +76,9 @@ semantics that affect conformance creates a new fixture version. Evidence with
 unknown versions or incomplete transport/check coverage is rejected.
 
 Provider-version evidence is exact. A provider upgrade must run its bridge
-suite again before that version can be advertised as verified. Phase 3 and
-Phase 4 will add real Claude and Codex adapter implementations to this harness.
+suite again before that version can be advertised as verified. Claude now has a
+production-sidecar conformance adapter. The Codex bridge must add its real
+app-server adapter to this harness before it can claim full conformance.
 
 ## Claude opt-in gate
 

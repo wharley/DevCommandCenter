@@ -695,6 +695,13 @@ Updated July 28, 2026:
     - [x] Prove permission denial and missing-credential fail-closed behavior offline.
     - [ ] Run the authenticated opt-in gate during final end-to-end validation.
 - [ ] Codex bridge.
+  - [x] Add exact-version-gated, session-only projection through
+    `thread/start.params.config.mcp_servers`.
+  - [x] Preserve native `CODEX_HOME` and keep MCP credentials off argv,
+    persistence, diagnostics, and renderer contracts.
+  - [ ] Normalize app-server startup, inventory, and tool-call status.
+  - [ ] Route approvals through the DCC permission boundary.
+  - [ ] Verify lifecycle and both fixture transports through the harness.
 - [ ] MVP integrations UI.
 - [ ] Real-service smoke tests.
 - [ ] Additional provider bridges.
