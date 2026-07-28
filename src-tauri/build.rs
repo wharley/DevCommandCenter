@@ -2,11 +2,11 @@ use std::{env, fs, path::PathBuf};
 
 use dcc_core::{
     application::{
-        AbortRunInput, AbortRunOutput, ApprovePlanInput, ApprovePlanOutput, CloseSessionInput,
-        CloseSessionOutput, CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput,
-        RecordPlanHandoffInput, RecordPlanHandoffOutput, RestoreSessionInput, RestoreSessionOutput,
-        ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput,
-        StartThreadOutput,
+        AbortRunInput, AbortRunOutput, ActivateMcpDefinitionInput, ApprovePlanInput,
+        ApprovePlanOutput, CloseSessionInput, CloseSessionOutput, CreateWorkspaceForRepoInput,
+        CreateWorkspaceFromUrlInput, RecordPlanHandoffInput, RecordPlanHandoffOutput,
+        RestoreSessionInput, RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput,
+        SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
     },
     domain::{
         delegation::{
@@ -72,6 +72,12 @@ use dcc_tauri::commands::{
         WorkspacePrReviewComment, WorkspacePrReviewCommentAuthor, WorkspacePrReviewCommentsInput,
         WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
         WorkspaceReviewStateInput, WorkspaceReviewStateOutput, WorkspaceReviewer,
+    },
+    mcp_commands::{
+        ActivateMcpIntegrationOutput, CreateMcpIntegrationInput, CreateMcpIntegrationOutput,
+        DisableMcpIntegrationInput, DisableMcpIntegrationOutput, ListMcpIntegrationsOutput,
+        McpCredentialInput, McpIntegrationRecord, RemoveMcpIntegrationInput,
+        RemoveMcpIntegrationOutput,
     },
     provider_commands::{
         ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
@@ -236,6 +242,16 @@ struct SessionMethods {
 struct ProviderMethods {
     list_providers: String,
     provider_account_usage: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+struct McpMethods {
+    list_mcp_integrations: String,
+    create_mcp_integration: String,
+    activate_mcp_integration: String,
+    disable_mcp_integration: String,
+    remove_mcp_integration: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -481,6 +497,17 @@ fn main() {
         .typ::<ListProvidersOutput>()
         .typ::<ProviderAccountUsageInput>()
         .typ::<ProviderAccountUsageOutput>()
+        .typ::<McpIntegrationRecord>()
+        .typ::<ListMcpIntegrationsOutput>()
+        .typ::<McpCredentialInput>()
+        .typ::<CreateMcpIntegrationInput>()
+        .typ::<CreateMcpIntegrationOutput>()
+        .typ::<ActivateMcpDefinitionInput>()
+        .typ::<ActivateMcpIntegrationOutput>()
+        .typ::<DisableMcpIntegrationInput>()
+        .typ::<DisableMcpIntegrationOutput>()
+        .typ::<RemoveMcpIntegrationInput>()
+        .typ::<RemoveMcpIntegrationOutput>()
         .typ::<StartThreadInput>()
         .typ::<StartThreadOutput>()
         .typ::<SendTurnInput>()
@@ -647,6 +674,17 @@ fn main() {
         ProviderMethods {
             list_providers: "list_providers".to_string(),
             provider_account_usage: "provider_account_usage".to_string(),
+        },
+    );
+
+    let builder = builder.constant(
+        "MCP_METHODS",
+        McpMethods {
+            list_mcp_integrations: "list_mcp_integrations".to_string(),
+            create_mcp_integration: "create_mcp_integration".to_string(),
+            activate_mcp_integration: "activate_mcp_integration".to_string(),
+            disable_mcp_integration: "disable_mcp_integration".to_string(),
+            remove_mcp_integration: "remove_mcp_integration".to_string(),
         },
     );
 

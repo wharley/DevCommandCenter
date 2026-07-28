@@ -708,5 +708,9 @@ Updated July 28, 2026:
     - [x] Prove missing-credential fail-closed behavior for both transports.
     - [ ] Run the authenticated opt-in gate during final end-to-end validation.
 - [ ] MVP integrations UI.
+  - [x] Add renderer-safe list, create, activate, disable, and remove commands.
+  - [x] Keep credential values write-only and make credential deletion explicit.
+  - [ ] Add the integrations surface and URL/command creation flow.
+  - [ ] Add lifecycle, compatibility, restart, and tool-policy views.
 - [ ] Real-service smoke tests.
 - [ ] Additional provider bridges.

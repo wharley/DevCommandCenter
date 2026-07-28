@@ -4,6 +4,8 @@
 /* Constants */
 export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","startDelegation":"start_delegation"} as const;
 
+export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration"} as const;
+
 export const PROVIDER_METHODS = {"listProviders":"list_providers","providerAccountUsage":"provider_account_usage"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","approvePlan":"approve_plan","closeSession":"close_session","listThreadEvents":"list_thread_events","listWorkspaceSessions":"list_workspace_sessions","recordPlanHandoff":"record_plan_handoff","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","searchSessions":"search_sessions","sendTurn":"send_turn","startThread":"start_thread"} as const;
@@ -19,6 +21,20 @@ export type AbortRunInput = {
 export type AbortRunOutput = {
 	session: Session,
 	projection: SessionProjection,
+};
+
+export type ActivateMcpDefinitionInput = {
+	definitionId: McpDefinitionId,
+	/**
+	 *  The exact fingerprint displayed when the user confirmed activation.
+	 *  Requiring it prevents a stale UI from approving a changed definition.
+	 */
+	expectedFingerprint: McpTrustFingerprint,
+};
+
+export type ActivateMcpIntegrationOutput = {
+	integration: McpIntegrationRecord,
+	changed: boolean,
 };
 
 export type ApproveDelegationInput = {
@@ -349,6 +365,17 @@ export type CreateDelegationOutput = {
 	delegation: Delegation,
 };
 
+export type CreateMcpIntegrationInput = {
+	displayName: string,
+	transport: McpTransport,
+	scope: McpBindingScope,
+	credentials?: McpCredentialInput[],
+};
+
+export type CreateMcpIntegrationOutput = {
+	integration: McpIntegrationRecord,
+};
+
 export type CreateWorkspaceBundleForReposInput = {
 	name: string,
 	projects: CreateWorkspaceForRepoInput[],
@@ -427,6 +454,15 @@ export type DelegationId = string;
 export type DelegationMode = "review" | "implement" | "explain" | "test" | "research";
 
 export type DelegationStatus = "draft" | "queued" | "running" | "review_pending" | "completed" | "failed" | "cancelled";
+
+export type DisableMcpIntegrationInput = {
+	definitionId: McpDefinitionId,
+};
+
+export type DisableMcpIntegrationOutput = {
+	integration: McpIntegrationRecord,
+	changed: boolean,
+};
 
 export type FailDelegationInput = {
 	delegationId: DelegationId,
@@ -563,6 +599,10 @@ export type ListLocalBranchesOutput = {
 	branches: string[],
 };
 
+export type ListMcpIntegrationsOutput = {
+	integrations: McpIntegrationRecord[],
+};
+
 export type ListMissionSpecsInput = {
 	workspaceRoot: string,
 };
@@ -629,6 +669,15 @@ export type McpConformanceTransportEvidence = {
 	checks: McpConformanceCheck[],
 };
 
+export type McpCredentialInput = {
+	target: McpSecretTarget,
+	/**
+	 *  Write-only renderer input. It is moved into `SecretValue`, zeroized on
+	 *  drop, and never included in a command output.
+	 */
+	secret: string,
+};
+
 export type McpDefinition = {
 	id: McpDefinitionId,
 	displayName: string,
@@ -658,6 +707,12 @@ export type McpImportSource = {
 };
 
 export type McpImportSourceKind = "providerConfig" | "projectFile" | "other";
+
+export type McpIntegrationRecord = {
+	definition: McpDefinition,
+	bindings: McpBinding[],
+	credentialCount: number,
+};
 
 export type McpProbeReport = {
 	definitionId: McpDefinitionId,
@@ -878,6 +933,16 @@ export type RecordPlanHandoffInput = {
 export type RecordPlanHandoffOutput = {
 	event: SessionEventRecord,
 	created: boolean,
+};
+
+export type RemoveMcpIntegrationInput = {
+	definitionId: McpDefinitionId,
+	deleteCredentials?: boolean,
+};
+
+export type RemoveMcpIntegrationOutput = {
+	removed: boolean,
+	deletedCredentials: number,
 };
 
 export type Repository = {

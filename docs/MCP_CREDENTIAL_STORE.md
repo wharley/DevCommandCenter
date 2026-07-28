@@ -39,12 +39,14 @@ key source, explicit user consent, and its own ADR.
 - Store is create-or-replace.
 - Delete is explicit and independent from disabling or removing an MCP
   definition.
+- Renderer creation commands accept credential values as write-only input and
+  return only opaque references and counts. Removal deletes credentials only
+  when the user explicitly requests it.
 - Default tests use an in-memory fake and never touch a contributor's native
   credential store.
 
 ## Deliberately deferred
 
-- Renderer commands for storing credentials.
 - OAuth token acquisition and refresh.
 - Resolving references into MCP transports.
 - An opt-in native credential-store smoke test in release CI.

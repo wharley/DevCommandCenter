@@ -4,6 +4,7 @@ mod coderabbit_commands;
 mod delegation_commands;
 mod forge_commands;
 mod git_support;
+mod mcp_commands;
 mod provider_commands;
 mod session_commands;
 mod skills_commands;
@@ -6939,6 +6940,11 @@ pub fn run() {
             complete_delegation,
             approve_delegation,
             fail_delegation,
+            mcp_commands::list_mcp_integrations,
+            mcp_commands::create_mcp_integration,
+            mcp_commands::activate_mcp_integration,
+            mcp_commands::disable_mcp_integration,
+            mcp_commands::remove_mcp_integration,
             provider_commands::provider_account_usage,
             session_commands::start_thread,
             session_commands::send_turn,

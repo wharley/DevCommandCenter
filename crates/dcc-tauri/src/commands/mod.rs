@@ -3,6 +3,7 @@ pub mod common;
 pub mod delegation_commands;
 pub mod forge;
 pub mod forge_commands;
+pub mod mcp_commands;
 pub mod provider_commands;
 pub mod session_commands;
 pub mod workspace_commands;
@@ -29,6 +30,10 @@ pub use forge_commands::{
     workspace_pipeline_job_log, workspace_pipeline_job_retry, workspace_pipeline_status,
     workspace_pr_review_comments, workspace_pr_status, workspace_retry_repository_forge_binding,
     workspace_review_state,
+};
+pub use mcp_commands::{
+    activate_mcp_integration, create_mcp_integration, disable_mcp_integration,
+    list_mcp_integrations, remove_mcp_integration,
 };
 pub use provider_commands::{list_providers, provider_account_usage};
 pub use session_commands::{
