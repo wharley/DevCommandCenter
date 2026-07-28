@@ -699,7 +699,7 @@ Updated July 28, 2026:
     `thread/start.params.config.mcp_servers`.
   - [x] Preserve native `CODEX_HOME` and keep MCP credentials off argv,
     persistence, diagnostics, and renderer contracts.
-  - [ ] Normalize app-server startup, inventory, and tool-call status.
+  - [x] Normalize app-server startup, inventory, and tool-call status.
   - [ ] Route approvals through the DCC permission boundary.
   - [ ] Verify lifecycle and both fixture transports through the harness.
 - [ ] MVP integrations UI.

@@ -1,17 +1,20 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     process::{Command as StdCommand, Stdio},
     str,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, RwLock as StdRwLock,
     },
     time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use futures::stream::{self, BoxStream};
+use futures::{
+    stream::{self, BoxStream},
+    StreamExt,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::{
@@ -25,6 +28,7 @@ use uuid::Uuid;
 use dcc_core::{
     application::{compose_fallback_prompt_for_provider, PromptInjectionOptions},
     domain::{
+        mcp::{McpErrorCategory, McpRuntimeState, McpRuntimeStatus},
         provider::{
             Capabilities, HealthStatus, ProviderAccountUsage, ProviderAccountUsageState,
             ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
@@ -36,7 +40,9 @@ use dcc_core::{
 };
 
 use crate::codex_mcp::{
-    write_thread_start_request, CODEX_MCP_RUNTIME_VERSION, SUPPORTED_CODEX_CLI_VERSION,
+    failed_codex_mcp_status_snapshot, initial_codex_mcp_status_snapshot, merge_codex_mcp_status,
+    parse_codex_mcp_startup_status, parse_codex_mcp_status_snapshot, prepare_thread_start_request,
+    CodexMcpDefinitionMap, CODEX_MCP_RUNTIME_VERSION, SUPPORTED_CODEX_CLI_VERSION,
 };
 use crate::common::{append_tool_instructions, augmented_path};
 
@@ -434,6 +440,20 @@ fn notification_to_event(
                     label: Some("Thinking".to_string()),
                     at,
                 }),
+                "mcpToolCall" => Some(ProviderEvent::ToolCallStarted {
+                    id,
+                    action: item
+                        .get("tool")
+                        .and_then(Value::as_str)
+                        .filter(|tool| !tool.is_empty())
+                        .unwrap_or("MCP")
+                        .chars()
+                        .take(128)
+                        .collect(),
+                    command: None,
+                    file: None,
+                    at,
+                }),
                 _ => None,
             }
         }
@@ -446,8 +466,22 @@ fn notification_to_event(
                 .unwrap_or("item")
                 .to_string();
             match kind {
-                "commandExecution" | "file_change" | "fileChange" | "web_search"
-                | "mcp_tool_call" => {
+                "mcpToolCall" => {
+                    let failed = item
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .is_some_and(|status| status == "failed");
+                    if failed {
+                        Some(ProviderEvent::ToolCallFailed {
+                            id,
+                            reason: Some("MCP tool call failed".to_string()),
+                            at,
+                        })
+                    } else {
+                        Some(ProviderEvent::ToolCallCompleted { id, at })
+                    }
+                }
+                "commandExecution" | "file_change" | "fileChange" | "web_search" => {
                     let failed = item
                         .get("status")
                         .and_then(Value::as_str)
@@ -498,6 +532,8 @@ struct SessionRuntime {
     stdin: Mutex<ChildStdin>,
     child: Mutex<Child>,
     thread_id: Mutex<Option<String>>,
+    mcp_definitions_by_wire_name: Mutex<CodexMcpDefinitionMap>,
+    mcp_status_snapshot: StdRwLock<Option<Vec<McpRuntimeStatus>>>,
     pending: PendingMap,
     next_id: AtomicU64,
     events_tx: broadcast::Sender<ProviderEvent>,
@@ -528,34 +564,185 @@ impl SessionRuntime {
     ) -> Result<Value> {
         let method = "thread/start";
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let prepared =
+            prepare_thread_start_request(id, cwd, additional_working_directories, servers)?;
+        let definitions = prepared.definitions_by_wire_name().clone();
+        *self.mcp_definitions_by_wire_name.lock().await = definitions.clone();
+        self.publish_mcp_status_snapshot(initial_codex_mcp_status_snapshot(
+            &definitions,
+            &self.handle.provider_id,
+            &self.handle.session_id,
+        ));
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
         let write_result = {
             let mut stdin = self.stdin.lock().await;
-            write_thread_start_request(
-                &mut *stdin,
-                id,
-                cwd,
-                additional_working_directories,
-                servers,
-            )
-            .await
+            prepared.write_to(&mut *stdin).await
         };
         if let Err(error) = write_result {
             self.pending.lock().await.remove(&id);
             return Err(error);
         }
-        timeout(Duration::from_secs(30), rx)
+        let result = timeout(Duration::from_secs(30), rx)
             .await
             .map_err(|_| CoreError::Provider(format!("codex {method} timed out")))?
             .map_err(|_| CoreError::Provider(format!("codex {method} cancelled")))?
-            .map_err(|error| CoreError::Provider(format!("codex {method} error: {error}")))
+            .map_err(|_| {
+                CoreError::Provider("Codex MCP thread configuration failed".to_string())
+            })?;
+        Ok(result)
     }
 
     async fn send_notification(&self, method: &str) -> Result<()> {
         let mut stdin = self.stdin.lock().await;
         write_line(&mut stdin, &rpc_notification(method)).await
     }
+
+    fn publish_mcp_status_snapshot(&self, statuses: Vec<McpRuntimeStatus>) {
+        *self
+            .mcp_status_snapshot
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(statuses.clone());
+        let _ = self
+            .events_tx
+            .send(ProviderEvent::McpRuntimeStatusSnapshot { statuses });
+    }
+
+    fn merge_and_publish_mcp_status(&self, status: McpRuntimeStatus) {
+        let statuses = {
+            let mut snapshot = self
+                .mcp_status_snapshot
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let statuses = snapshot.get_or_insert_with(Vec::new);
+            merge_codex_mcp_status(statuses, status);
+            statuses.clone()
+        };
+        let _ = self
+            .events_tx
+            .send(ProviderEvent::McpRuntimeStatusSnapshot { statuses });
+    }
+
+    fn latest_mcp_status_snapshot(&self) -> Option<Vec<McpRuntimeStatus>> {
+        self.mcp_status_snapshot
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+}
+
+const MAX_CODEX_MCP_STATUS_PAGES: usize = 8;
+const MAX_CODEX_MCP_STATUS_ITEMS: usize = 512;
+const MAX_CODEX_MCP_CURSOR_CHARS: usize = 1_024;
+
+async fn refresh_codex_mcp_statuses(runtime: &Arc<SessionRuntime>) {
+    let definitions = runtime.mcp_definitions_by_wire_name.lock().await.clone();
+    if definitions.is_empty() {
+        return;
+    }
+    let thread_id = runtime.thread_id.lock().await.clone();
+    let result = match thread_id {
+        Some(thread_id) => fetch_codex_mcp_status_snapshot(runtime, &thread_id, &definitions).await,
+        None => Err(CoreError::Provider(
+            "Codex MCP status requested without a thread".to_string(),
+        )),
+    };
+    match result {
+        Ok(mut statuses) => {
+            if let Some(current) = runtime.latest_mcp_status_snapshot() {
+                for current_status in current {
+                    let fetched_is_still_attaching = statuses.iter().any(|status| {
+                        status.definition_id == current_status.definition_id
+                            && status.state == McpRuntimeState::AttachingProvider
+                    });
+                    if fetched_is_still_attaching
+                        && current_status.state != McpRuntimeState::AttachingProvider
+                    {
+                        merge_codex_mcp_status(&mut statuses, current_status);
+                    }
+                }
+            }
+            runtime.publish_mcp_status_snapshot(statuses);
+        }
+        Err(_) => runtime.publish_mcp_status_snapshot(failed_codex_mcp_status_snapshot(
+            &definitions,
+            &runtime.handle.provider_id,
+            &runtime.handle.session_id,
+            McpErrorCategory::Protocol,
+            "Unable to read Codex MCP status",
+        )),
+    }
+}
+
+async fn fetch_codex_mcp_status_snapshot(
+    runtime: &Arc<SessionRuntime>,
+    thread_id: &str,
+    definitions: &CodexMcpDefinitionMap,
+) -> Result<Vec<McpRuntimeStatus>> {
+    let mut data = Vec::new();
+    let mut cursor: Option<String> = None;
+    let mut seen_cursors = HashSet::new();
+    let mut completed = false;
+
+    for _ in 0..MAX_CODEX_MCP_STATUS_PAGES {
+        let response = runtime
+            .send_request(
+                "mcpServerStatus/list",
+                json!({
+                    "cursor": cursor,
+                    "detail": "toolsAndAuthOnly",
+                    "limit": 100,
+                    "threadId": thread_id,
+                }),
+            )
+            .await?;
+        let page = response
+            .get("data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| CoreError::Provider("invalid Codex MCP status payload".to_string()))?;
+        if data.len().saturating_add(page.len()) > MAX_CODEX_MCP_STATUS_ITEMS {
+            return Err(CoreError::Provider(
+                "invalid Codex MCP status payload".to_string(),
+            ));
+        }
+        data.extend(page.iter().cloned());
+
+        let next_cursor = match response.get("nextCursor") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(value))
+                if !value.is_empty() && value.chars().count() <= MAX_CODEX_MCP_CURSOR_CHARS =>
+            {
+                Some(value.clone())
+            }
+            _ => {
+                return Err(CoreError::Provider(
+                    "invalid Codex MCP status payload".to_string(),
+                ));
+            }
+        };
+        let Some(next_cursor) = next_cursor else {
+            completed = true;
+            break;
+        };
+        if !seen_cursors.insert(next_cursor.clone()) {
+            return Err(CoreError::Provider(
+                "invalid Codex MCP status payload".to_string(),
+            ));
+        }
+        cursor = Some(next_cursor);
+    }
+    if !completed {
+        return Err(CoreError::Provider(
+            "invalid Codex MCP status payload".to_string(),
+        ));
+    }
+
+    parse_codex_mcp_status_snapshot(
+        &json!({ "data": data }),
+        definitions,
+        &runtime.handle.provider_id,
+        &runtime.handle.session_id,
+    )
 }
 
 // ── Adapter runtime state ───────────────────────────────────────────────────
@@ -659,6 +846,8 @@ impl CodexAppServerAdapter {
             stdin: Mutex::new(stdin),
             child: Mutex::new(child),
             thread_id: Mutex::new(None),
+            mcp_definitions_by_wire_name: Mutex::new(HashMap::new()),
+            mcp_status_snapshot: StdRwLock::new(None),
             pending: Arc::new(Mutex::new(HashMap::new())),
             next_id: AtomicU64::new(1),
             events_tx: events_tx.clone(),
@@ -748,6 +937,9 @@ impl CodexAppServerAdapter {
             .to_string();
 
         *runtime.thread_id.lock().await = Some(thread_id);
+        if !cfg.mcp_servers.is_empty() {
+            refresh_codex_mcp_statuses(runtime).await;
+        }
         Ok(())
     }
 
@@ -810,6 +1002,42 @@ impl CodexAppServerAdapter {
 
                 // Notification: has method, no response id
                 if let (Some(method), Some(params)) = (&msg.method, &msg.params) {
+                    if method == "mcpServer/startupStatus/updated" {
+                        let definitions = runtime.mcp_definitions_by_wire_name.lock().await.clone();
+                        let thread_id = runtime.thread_id.lock().await.clone();
+                        match parse_codex_mcp_startup_status(
+                            params,
+                            &definitions,
+                            &runtime.handle.provider_id,
+                            &runtime.handle.session_id,
+                            thread_id.as_deref(),
+                        ) {
+                            Some(Ok(status)) => {
+                                let should_refresh = status.state == McpRuntimeState::Connected
+                                    && thread_id.is_some();
+                                runtime.merge_and_publish_mcp_status(status);
+                                if should_refresh {
+                                    let refresh_runtime = runtime.clone();
+                                    tokio::spawn(async move {
+                                        refresh_codex_mcp_statuses(&refresh_runtime).await;
+                                    });
+                                }
+                            }
+                            Some(Err(_)) => {
+                                runtime.publish_mcp_status_snapshot(
+                                    failed_codex_mcp_status_snapshot(
+                                        &definitions,
+                                        &runtime.handle.provider_id,
+                                        &runtime.handle.session_id,
+                                        McpErrorCategory::Protocol,
+                                        "Invalid Codex MCP startup status",
+                                    ),
+                                );
+                            }
+                            None => {}
+                        }
+                        continue;
+                    }
                     if method == "error" && should_suppress_codex_error(params, &runtime).await {
                         continue;
                     }
@@ -1021,7 +1249,10 @@ impl Provider for CodexAppServerAdapter {
         };
 
         let rx = runtime.events_tx.subscribe();
-        Box::pin(stream::unfold(rx, |mut rx| async move {
+        let initial = runtime
+            .latest_mcp_status_snapshot()
+            .map(|statuses| Ok(ProviderEvent::McpRuntimeStatusSnapshot { statuses }));
+        let live = stream::unfold(rx, |mut rx| async move {
             loop {
                 match rx.recv().await {
                     Ok(event) => return Some((Ok(event), rx)),
@@ -1029,7 +1260,8 @@ impl Provider for CodexAppServerAdapter {
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 }
             }
-        }))
+        });
+        Box::pin(stream::iter(initial).chain(live))
     }
 
     async fn cancel(&self, handle: &SessionHandle) -> Result<()> {
@@ -1195,6 +1427,63 @@ mod tests {
                 assert_eq!(content, "\n\nSegunda mensagem.");
             }
             other => panic!("expected separated text delta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn normalizes_schema_backed_mcp_tool_lifecycle_without_payloads() {
+        let mut last_agent_message_id = None;
+        let started = notification_to_event(
+            "item/started",
+            &json!({
+                "item": {
+                    "id": "mcp-call-1",
+                    "type": "mcpToolCall",
+                    "server": "dcc-session-0",
+                    "tool": "fixture.echo",
+                    "arguments": { "secret": "must-not-cross" },
+                    "status": "inProgress"
+                }
+            }),
+            &mut last_agent_message_id,
+        );
+        match started {
+            Some(ProviderEvent::ToolCallStarted {
+                id,
+                action,
+                command,
+                file,
+                ..
+            }) => {
+                assert_eq!(id, "mcp-call-1");
+                assert_eq!(action, "fixture.echo");
+                assert_eq!(command, None);
+                assert_eq!(file, None);
+            }
+            other => panic!("expected MCP tool start, got {other:?}"),
+        }
+
+        let failed = notification_to_event(
+            "item/completed",
+            &json!({
+                "item": {
+                    "id": "mcp-call-1",
+                    "type": "mcpToolCall",
+                    "server": "dcc-session-0",
+                    "tool": "fixture.echo",
+                    "arguments": { "secret": "must-not-cross" },
+                    "status": "failed",
+                    "error": { "message": "secret-bearing provider error" }
+                }
+            }),
+            &mut last_agent_message_id,
+        );
+        match failed {
+            Some(ProviderEvent::ToolCallFailed { id, reason, .. }) => {
+                assert_eq!(id, "mcp-call-1");
+                assert_eq!(reason.as_deref(), Some("MCP tool call failed"));
+            }
+            other => panic!("expected MCP tool failure, got {other:?}"),
         }
     }
 

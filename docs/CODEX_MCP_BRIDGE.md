@@ -54,16 +54,43 @@ handshake explicitly starts process termination. Since the projection exists
 only in the thread configuration, cleanup never deletes a user-created Codex
 entry.
 
+## Runtime status and tool lifecycle
+
+After `thread/start`, DCC reads the documented `mcpServerStatus/list` inventory
+with `toolsAndAuthOnly` detail. Pagination, cursor size, total entries, and tool
+count are bounded. The result is normalized into a complete DCC snapshot:
+
+- a listed DCC-owned server is `connected` with its sorted tool inventory;
+- `notLoggedIn` becomes a fixed, bounded authentication failure;
+- an attached server absent from the current inventory remains
+  `attachingProvider`;
+- malformed inventory becomes a fixed protocol failure without forwarding the
+  provider payload.
+
+DCC also consumes `mcpServer/startupStatus/updated`. `starting`, `ready`,
+`failed`, and `cancelled` are mapped explicitly, including the documented
+`reauthenticationRequired` reason. Startup events that arrive before the
+`thread/start` response are retained by registering the random wire-name map
+before the request is written. The latest complete snapshot is replayed when
+the DCC event subscriber attaches, avoiding a startup race.
+
+Only random names owned by the current DCC session are normalized. Native
+user-configured Codex entries remain visible to Codex but are ignored by the
+DCC runtime-status projection. Once a thread ID is known, notifications for
+other threads are ignored.
+
+The schema-backed `mcpToolCall` item lifecycle becomes the existing DCC
+tool-started, tool-completed, and tool-failed events. Arguments, results, raw
+provider errors, and random server names do not cross that event boundary.
+
 ## Remaining verification
 
-This slice establishes safe injection and explicit version gating. It does not
-yet claim full Codex conformance. The remaining bridge work is:
+Safe injection, explicit version gating, and runtime status normalization do
+not yet constitute full Codex conformance. The remaining bridge work is:
 
-1. map app-server MCP startup and inventory status to DCC runtime status;
-2. normalize MCP tool lifecycle events;
-3. route tool approvals through the DCC permission boundary;
-4. run both offline fixture transports through the shared conformance harness;
-5. verify direct and configured Codex homes during final end-to-end validation.
+1. route tool approvals through the DCC permission boundary;
+2. run both offline fixture transports through the shared conformance harness;
+3. verify direct and configured Codex homes during final end-to-end validation.
 
 Until those gates pass, the public capability remains `nativeConfig`; the
 backend-only projection version is internal wiring evidence, not a general
