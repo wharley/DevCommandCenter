@@ -188,13 +188,14 @@ pub enum Input {
 pub trait Provider: Send + Sync {
     fn id(&self) -> ProviderId;
     fn capabilities(&self) -> Capabilities;
-    /// Whether this exact adapter implementation accepts backend-only DCC MCP
-    /// projections through `SessionConfig`.
+    /// Exact runtime version for this adapter's backend-only DCC MCP
+    /// projection channel.
     ///
-    /// This is an internal wiring contract, not conformance evidence or a
+    /// `None` means this adapter must receive no DCC projection. A version is
+    /// an internal wiring contract, not conformance evidence or a
     /// renderer-facing compatibility claim.
-    fn accepts_dcc_mcp_projection(&self) -> bool {
-        false
+    fn dcc_mcp_projection_version(&self) -> Option<&str> {
+        None
     }
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle>;
     async fn send_input(&self, handle: &SessionHandle, input: Input) -> Result<()>;

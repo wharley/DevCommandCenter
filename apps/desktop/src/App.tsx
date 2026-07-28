@@ -680,6 +680,12 @@ function getCoreEventSessionId(event: CoreEvent): string | null {
 	if ("sessionResumed" in event && event.sessionResumed) {
 		return event.sessionResumed.session_id;
 	}
+	if (
+		"sessionMcpRuntimeStatusChanged" in event &&
+		event.sessionMcpRuntimeStatusChanged
+	) {
+		return event.sessionMcpRuntimeStatusChanged.session_id;
+	}
 	if ("sessionTurnStarted" in event && event.sessionTurnStarted) {
 		return event.sessionTurnStarted.session_id;
 	}

@@ -689,7 +689,7 @@ Updated July 28, 2026:
 - [ ] Claude bridge.
   - [x] Add the backend-only projection channel and documented Agent SDK injection.
   - [x] Resolve eligible session, project, and global bindings with OS credentials.
-  - [ ] Normalize SDK status into DCC runtime status.
+  - [x] Normalize SDK status into DCC runtime status.
   - [ ] Verify approval, lifecycle, and both fixture transports through the harness.
 - [ ] Codex bridge.
 - [ ] MVP integrations UI.

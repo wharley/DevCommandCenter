@@ -15,6 +15,8 @@ function eventSessionId(event: CoreEvent): string | null {
 		("sessionCompleted" in event && event.sessionCompleted) ||
 		("sessionAborted" in event && event.sessionAborted) ||
 		("sessionResumed" in event && event.sessionResumed) ||
+		("sessionMcpRuntimeStatusChanged" in event &&
+			event.sessionMcpRuntimeStatusChanged) ||
 		("sessionTurnStarted" in event && event.sessionTurnStarted) ||
 		("sessionTurnDelta" in event && event.sessionTurnDelta) ||
 		("sessionTurnReasoningStarted" in event && event.sessionTurnReasoningStarted) ||
@@ -40,6 +42,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionCompleted" in event) return "session.completed";
 	if ("sessionAborted" in event) return "session.aborted";
 	if ("sessionResumed" in event) return "session.resumed";
+	if ("sessionMcpRuntimeStatusChanged" in event) return "session.mcp.runtime-status";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
 	if ("sessionTurnDelta" in event) return "session.turn.delta";
 	if ("sessionTurnReasoningStarted" in event) return "session.turn.reasoning.started";
@@ -192,6 +195,16 @@ function eventPayloadSummary(event: CoreEvent, t: TFunction<"common">): string {
 		"sessionTurnStarted" in event ? event.sessionTurnStarted : null;
 	if (sessionTurnStarted) {
 		return `${sessionTurnStarted.session_id} · ${sessionTurnStarted.prompt}`;
+	}
+	const mcpRuntimeStatus =
+		"sessionMcpRuntimeStatusChanged" in event
+			? event.sessionMcpRuntimeStatusChanged
+			: null;
+	if (mcpRuntimeStatus) {
+		const states = mcpRuntimeStatus.statuses
+			.map((status) => `${status.definitionId}:${status.state}`)
+			.join(", ");
+		return `${mcpRuntimeStatus.session_id}${states ? ` · ${states}` : ""}`;
 	}
 	const sessionTurnDelta =
 		"sessionTurnDelta" in event ? event.sessionTurnDelta : null;

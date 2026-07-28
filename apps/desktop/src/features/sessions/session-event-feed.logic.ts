@@ -11,6 +11,7 @@ export function isSemanticSessionEvent(event: CoreEvent): boolean {
 		"sessionTurnReasoningStarted" in event ||
 		"sessionTurnReasoningDelta" in event ||
 		"sessionTurnReasoningCompleted" in event ||
+		"sessionMcpRuntimeStatusChanged" in event ||
 		"sessionTurnToolCallStarted" in event ||
 		"sessionTurnToolCallDelta" in event ||
 		"sessionTurnToolCallCompleted" in event

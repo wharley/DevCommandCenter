@@ -10,6 +10,9 @@ describe("isSemanticSessionEvent", () => {
 	it("hides streaming and successful tool internals from the summary", () => {
 		expect(isSemanticSessionEvent(event({ sessionTurnDelta: {} }))).toBe(false);
 		expect(isSemanticSessionEvent(event({ sessionTurnReasoningDelta: {} }))).toBe(false);
+		expect(isSemanticSessionEvent(event({ sessionMcpRuntimeStatusChanged: {} }))).toBe(
+			false,
+		);
 		expect(isSemanticSessionEvent(event({ sessionTurnToolCallStarted: {} }))).toBe(false);
 		expect(isSemanticSessionEvent(event({ sessionTurnToolCallCompleted: {} }))).toBe(false);
 	});

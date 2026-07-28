@@ -349,6 +349,12 @@ function getEventSessionId(event: CoreEvent): string | null {
 	if ("sessionResumed" in event && event.sessionResumed) {
 		return event.sessionResumed.session_id;
 	}
+	if (
+		"sessionMcpRuntimeStatusChanged" in event &&
+		event.sessionMcpRuntimeStatusChanged
+	) {
+		return event.sessionMcpRuntimeStatusChanged.session_id;
+	}
 	if ("sessionTurnStarted" in event && event.sessionTurnStarted) {
 		return event.sessionTurnStarted.session_id;
 	}
@@ -429,6 +435,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionCompleted" in event) return "session.completed";
 	if ("sessionAborted" in event) return "session.aborted";
 	if ("sessionResumed" in event) return "session.resumed";
+	if ("sessionMcpRuntimeStatusChanged" in event) return "session.mcp.runtime-status";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
 	if ("sessionTurnDelta" in event) return "session.turn.delta";
 	if ("sessionTurnReasoningStarted" in event) return "session.turn.reasoning.started";

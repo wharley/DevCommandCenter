@@ -86,17 +86,44 @@ empty projection and continue using only their native configuration.
 
 ## Status and failure boundary
 
-The sidecar reads `mcpServerStatus()` and emits only bounded metadata for names
-in the DCC projection:
+The sidecar reads `mcpServerStatus()` and emits a complete, deterministic
+snapshot for every name in the DCC projection. It includes only:
 
 - DCC definition ID and provider-local name;
 - normalized connection status;
 - bounded tool names.
 
+SDK states map into the provider-neutral runtime contract as follows:
+
+- `connected` becomes `Connected`, with the bounded tool names visible to the
+  provider session;
+- `pending` becomes `AttachingProvider`;
+- `disabled` becomes `Disabled`;
+- `needs-auth` becomes `Failed` with the `Authentication` category and a fixed
+  message;
+- `failed` becomes `Failed` with the `Provider` category and a fixed message.
+
+An expected server absent from the SDK response remains `AttachingProvider`;
+it is never inferred to be connected. Duplicate or unknown SDK status entries
+fail closed. If status inspection itself throws, the sidecar emits a failed
+entry for every projected server before aborting the turn.
+
 Provider configuration, URLs, headers, environment values, descriptions, and
 raw SDK errors are not forwarded. A thrown attach error becomes the fixed
 message `DCC MCP attachment failed`. `failed` and `needs-auth` statuses fail the
 turn closed; `pending` remains distinct because the SDK may still be connecting.
+
+The Claude adapter declares the exact runtime key
+`claude-agent-sdk@0.2.126+claude-code@2.1.126`. A test binds that key to the
+pinned package dependencies, so a dependency upgrade cannot silently retain
+old runtime identity.
+
+Rust validates the snapshot again and creates `McpRuntimeStatus` values bound
+to the definition, provider, exact runtime version, and session. The backend
+atomically replaces the in-memory snapshot and publishes
+`dcc/session/mcp/runtime-status`. These values are deliberately not appended
+to the durable session transcript. The snapshot is cleared when the provider
+runtime ends or is cancelled, preventing a stale `Connected` state.
 
 MCP tools are not added to `allowedTools`. Anthropic documents that MCP tools
 require explicit permission unless specifically allowed, and that
@@ -106,7 +133,6 @@ conformance suite before the bridge is promoted.
 
 ## Deliberate limitations of this slice
 
-- The sidecar status event is not yet normalized into DCC runtime status.
 - The installed SDK stdio configuration has no per-server `cwd` field. The
   Claude adapter rejects definitions that require one instead of silently
   dropping it.
@@ -115,7 +141,8 @@ conformance suite before the bridge is promoted.
 - No `verifiedBridge` evidence is emitted by this slice.
 
 These boundaries keep the bridge unadvertised as verified while the next cut
-connects normalized runtime status.
+drives approval, lifecycle, and both fixture transports through the shared
+provider conformance harness.
 
 ## Offline checks
 

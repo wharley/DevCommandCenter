@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
 	dccMcpQueryOptions,
+	failedDccMcpStatus,
 	normalizeDccMcpServers,
 	readDccMcpStatus,
 } from "./mcp-config.mjs";
@@ -134,4 +135,95 @@ test("an empty DCC projection leaves provider-configured servers untouched", asy
 		failed: [],
 		servers: [],
 	});
+});
+
+test("keeps every projected server in a deterministic fail-closed snapshot", async () => {
+	const projection = normalizeDccMcpServers([
+		{
+			definitionId: "connected",
+			name: "dcc-connected",
+			transport: {
+				type: "http",
+				url: "https://example.com/connected",
+				headers: {},
+			},
+		},
+		{
+			definitionId: "missing",
+			name: "dcc-missing",
+			transport: {
+				type: "http",
+				url: "https://example.com/missing",
+				headers: {},
+			},
+		},
+		{
+			definitionId: "duplicate",
+			name: "dcc-duplicate",
+			transport: {
+				type: "http",
+				url: "https://example.com/duplicate",
+				headers: {},
+			},
+		},
+	]);
+	const query = {
+		async mcpServerStatus() {
+			return [
+				{
+					name: "dcc-connected",
+					status: "connected",
+					tools: [
+						{ name: "fixture.echo" },
+						{ name: "fixture.echo" },
+						{ name: "invalid tool name" },
+					],
+				},
+				{ name: "dcc-duplicate", status: "connected", tools: [] },
+				{ name: "dcc-duplicate", status: "connected", tools: [] },
+			];
+		},
+	};
+
+	const status = await readDccMcpStatus(query, projection);
+
+	assert.deepEqual(status.servers, [
+		{
+			definitionId: "connected",
+			name: "dcc-connected",
+			status: "connected",
+			tools: ["fixture.echo"],
+		},
+		{
+			definitionId: "missing",
+			name: "dcc-missing",
+			status: "pending",
+			tools: [],
+		},
+		{
+			definitionId: "duplicate",
+			name: "dcc-duplicate",
+			status: "failed",
+			tools: [],
+		},
+	]);
+	assert.deepEqual(status.failed, ["dcc-duplicate"]);
+	assert.deepEqual(failedDccMcpStatus(projection).failed, [
+		"dcc-connected",
+		"dcc-missing",
+		"dcc-duplicate",
+	]);
+	assert.deepEqual(
+		(
+			await readDccMcpStatus(
+				{
+					async mcpServerStatus() {
+						return { invalid: true };
+					},
+				},
+				projection,
+			)
+		).failed,
+		["dcc-connected", "dcc-missing", "dcc-duplicate"],
+	);
 });

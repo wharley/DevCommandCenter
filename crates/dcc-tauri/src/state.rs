@@ -15,6 +15,7 @@ use dcc_core::{
     application::{resolve_session_mcp_servers, ResolveSessionMcpInput, StartThreadInput},
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
+        mcp::{McpRuntimeState, McpRuntimeStatus},
         project::{Project, ProjectId},
         provider::{ProviderEvent, ProviderId, SessionHandle},
         repository::{Repository, RepositoryId},
@@ -192,6 +193,7 @@ struct ProviderSessionBinding {
 #[derive(Default, Debug)]
 struct SessionStore {
     provider_sessions: HashMap<SessionId, ProviderSessionBinding>,
+    mcp_runtime_statuses: HashMap<SessionId, Vec<McpRuntimeStatus>>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -368,9 +370,14 @@ impl SessionCommandState {
             .await?;
         let provider_runtime =
             self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
+        let mcp_projection_version = provider.dcc_mcp_projection_version().map(str::to_string);
         let mcp_servers = self
             .resolve_provider_mcp_servers(session, provider.as_ref())
             .await?;
+        let projected_definition_ids = mcp_servers
+            .iter()
+            .map(|server| server.definition_id.clone())
+            .collect::<Vec<_>>();
 
         let handle = provider
             .prepare_session(SessionConfig {
@@ -397,6 +404,31 @@ impl SessionCommandState {
                 .insert(session.id.clone(), binding.clone());
         }
 
+        if let Some(provider_version) = mcp_projection_version {
+            let checked_at = Utc::now().to_rfc3339();
+            let statuses = projected_definition_ids
+                .into_iter()
+                .map(|definition_id| McpRuntimeStatus {
+                    definition_id,
+                    provider_id: ProviderId(session.provider_id.clone()),
+                    provider_version: provider_version.clone(),
+                    session_id: session.id.clone(),
+                    state: McpRuntimeState::AttachingProvider,
+                    tools: Vec::new(),
+                    checked_at: checked_at.clone(),
+                    bounded_error: None,
+                })
+                .collect();
+            let _ = self
+                .replace_mcp_runtime_statuses(
+                    &session.id,
+                    &session.provider_id,
+                    &provider_version,
+                    statuses,
+                )
+                .await;
+        }
+
         self.spawn_provider_bridge(session.id.clone(), binding, provider)
             .await;
         Ok(())
@@ -410,7 +442,7 @@ impl SessionCommandState {
         // Only adapters with an explicit DCC projection path may receive
         // registry definitions. Native provider configuration remains
         // independent for every other provider.
-        if !provider.accepts_dcc_mcp_projection() {
+        if provider.dcc_mcp_projection_version().is_none() {
             return Ok(Vec::new());
         }
 
@@ -422,6 +454,82 @@ impl SessionCommandState {
                 provider_id: ProviderId(session.provider_id.clone()),
                 project_id: session.project_id.clone(),
                 session_id: session.id.clone(),
+            },
+        )
+        .await
+    }
+
+    pub fn list_mcp_runtime_statuses(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<McpRuntimeStatus>> {
+        Ok(self
+            .lock_store()?
+            .mcp_runtime_statuses
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn replace_mcp_runtime_statuses(
+        &self,
+        session_id: &SessionId,
+        provider_id: &str,
+        provider_version: &str,
+        mut statuses: Vec<McpRuntimeStatus>,
+    ) -> Result<()> {
+        let mut definition_ids = HashSet::with_capacity(statuses.len());
+        for status in &statuses {
+            status.validate().map_err(|_| {
+                dcc_core::CoreError::Provider(
+                    "provider returned an invalid MCP runtime status".to_string(),
+                )
+            })?;
+            if &status.session_id != session_id
+                || status.provider_id.0 != provider_id
+                || status.provider_version != provider_version
+                || !definition_ids.insert(status.definition_id.clone())
+            {
+                return Err(dcc_core::CoreError::Provider(
+                    "provider returned an invalid MCP runtime status".to_string(),
+                ));
+            }
+        }
+        statuses.sort_unstable_by(|left, right| left.definition_id.0.cmp(&right.definition_id.0));
+
+        {
+            let mut store = self.lock_store()?;
+            if statuses.is_empty() {
+                store.mcp_runtime_statuses.remove(session_id);
+            } else {
+                store
+                    .mcp_runtime_statuses
+                    .insert(session_id.clone(), statuses.clone());
+            }
+        }
+
+        self.publish(
+            dcc_core::ports::events::CoreEvent::SessionMcpRuntimeStatusChanged {
+                session_id: session_id.0.clone(),
+                statuses,
+            },
+        )
+        .await
+    }
+
+    async fn clear_mcp_runtime_statuses(&self, session_id: &SessionId) -> Result<()> {
+        let removed = self
+            .lock_store()?
+            .mcp_runtime_statuses
+            .remove(session_id)
+            .is_some();
+        if !removed {
+            return Ok(());
+        }
+        self.publish(
+            dcc_core::ports::events::CoreEvent::SessionMcpRuntimeStatusChanged {
+                session_id: session_id.0.clone(),
+                statuses: Vec::new(),
             },
         )
         .await
@@ -606,6 +714,18 @@ impl SessionCommandState {
             while let Some(event) = events.next().await {
                 match event {
                     Ok(ProviderEvent::Started { .. }) => {}
+                    Ok(ProviderEvent::McpRuntimeStatusSnapshot { statuses }) => {
+                        if let Some(provider_version) = provider.dcc_mcp_projection_version() {
+                            let _ = state
+                                .replace_mcp_runtime_statuses(
+                                    &session_id,
+                                    &binding.provider_id,
+                                    provider_version,
+                                    statuses,
+                                )
+                                .await;
+                        }
+                    }
                     Ok(ProviderEvent::TextDelta { content }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
@@ -932,6 +1052,7 @@ impl SessionCommandState {
             if let Ok(mut store) = state.store.lock() {
                 store.provider_sessions.remove(&session_id);
             }
+            let _ = state.clear_mcp_runtime_statuses(&session_id).await;
         });
     }
 
@@ -1064,6 +1185,7 @@ impl SessionCommandState {
         if let Ok(mut store) = self.store.lock() {
             store.provider_sessions.remove(session_id);
         }
+        let _ = self.clear_mcp_runtime_statuses(session_id).await;
         result
     }
 }
@@ -1130,8 +1252,11 @@ impl SessionRepo for SessionCommandState {
     async fn delete_session(&self, id: &SessionId) -> Result<()> {
         let result = SessionRepo::delete_session(&self.session_repo, id).await;
         if result.is_ok() {
-            let mut store = self.lock_store()?;
-            store.provider_sessions.remove(id);
+            {
+                let mut store = self.lock_store()?;
+                store.provider_sessions.remove(id);
+            }
+            let _ = self.clear_mcp_runtime_statuses(id).await;
         }
         result
     }
@@ -1213,6 +1338,7 @@ impl EventBus for SessionCommandState {
 mod tests {
     use super::*;
     use dcc_core::domain::{
+        mcp::McpDefinitionId,
         session::SessionState,
         workspace::WorkspaceState,
         workspace_bundle::{
@@ -1234,6 +1360,81 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
+    }
+
+    fn mcp_status(
+        definition_id: &str,
+        session_id: &SessionId,
+        state: McpRuntimeState,
+    ) -> McpRuntimeStatus {
+        McpRuntimeStatus {
+            definition_id: McpDefinitionId(definition_id.to_string()),
+            provider_id: ProviderId("claude_code".to_string()),
+            provider_version: "claude-agent-sdk@test+claude-code@test".to_string(),
+            session_id: session_id.clone(),
+            state,
+            tools: Vec::new(),
+            checked_at: "2026-07-28T00:00:00Z".to_string(),
+            bounded_error: None,
+        }
+    }
+
+    #[test]
+    fn mcp_runtime_snapshots_are_ephemeral_sorted_and_identity_bound() {
+        let db_path = std::env::temp_dir().join(format!("dcc-mcp-{}.sqlite", Uuid::new_v4()));
+        let state = SessionCommandState::new_headless(db_path.clone(), std::env::temp_dir());
+        let session_id = SessionId("session-1".to_string());
+        let provider_version = "claude-agent-sdk@test+claude-code@test";
+
+        futures::executor::block_on(state.replace_mcp_runtime_statuses(
+            &session_id,
+            "claude_code",
+            provider_version,
+            vec![
+                mcp_status("zeta", &session_id, McpRuntimeState::Connected),
+                mcp_status("alpha", &session_id, McpRuntimeState::AttachingProvider),
+            ],
+        ))
+        .expect("replace MCP status snapshot");
+
+        assert_eq!(
+            state
+                .list_mcp_runtime_statuses(&session_id)
+                .expect("list statuses")
+                .iter()
+                .map(|status| status.definition_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "zeta"]
+        );
+
+        let mismatch = futures::executor::block_on(state.replace_mcp_runtime_statuses(
+            &session_id,
+            "claude_code",
+            "different-version",
+            vec![mcp_status(
+                "replacement",
+                &session_id,
+                McpRuntimeState::Connected,
+            )],
+        ));
+        assert!(matches!(mismatch, Err(dcc_core::CoreError::Provider(_))));
+        assert_eq!(
+            state
+                .list_mcp_runtime_statuses(&session_id)
+                .expect("snapshot remains")
+                .len(),
+            2
+        );
+
+        futures::executor::block_on(state.clear_mcp_runtime_statuses(&session_id))
+            .expect("clear snapshot");
+        assert!(state
+            .list_mcp_runtime_statuses(&session_id)
+            .expect("list cleared statuses")
+            .is_empty());
+
+        drop(state);
+        let _ = std::fs::remove_file(db_path);
     }
 
     #[test]

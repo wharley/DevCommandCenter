@@ -23,7 +23,9 @@ use dcc_core::{
     CoreError, Result,
 };
 
-use crate::claude_mcp::write_initial_mcp_configuration;
+use crate::claude_mcp::{
+    parse_claude_mcp_status_snapshot, write_initial_mcp_configuration, CLAUDE_MCP_RUNTIME_VERSION,
+};
 use crate::common::{
     apply_cli_spawn_environment, augmented_path, now_iso, parse_provider_stream_line,
     ParsedProviderLine, ProviderStreamState,
@@ -483,6 +485,8 @@ impl ClaudeSdkSidecarAdapter {
             session_id: cfg.session_id,
             handle_id: Uuid::new_v4().to_string(),
         };
+        let runtime_provider_id = handle.provider_id.clone();
+        let runtime_session_id = handle.session_id.clone();
         let session_key = handle.session_id.0.clone();
         let (events_tx, _) = broadcast::channel(64);
         let runtime = Arc::new(SessionRuntime {
@@ -526,6 +530,26 @@ impl ClaudeSdkSidecarAdapter {
                 }
                 if let Ok(value) = serde_json::from_str::<Value>(&content) {
                     cache_claude_account_usage(&runtime_state, &account_usage_key, &value).await;
+                    if let Some(snapshot) = parse_claude_mcp_status_snapshot(
+                        &value,
+                        &runtime_provider_id,
+                        &runtime_session_id,
+                    ) {
+                        match snapshot {
+                            Ok(statuses) => {
+                                let _ = runtime_for_task
+                                    .events_tx
+                                    .send(ProviderEvent::McpRuntimeStatusSnapshot { statuses });
+                            }
+                            Err(_) => {
+                                let _ = runtime_for_task.events_tx.send(ProviderEvent::Failed {
+                                    message: "invalid Claude MCP status payload".to_string(),
+                                    at: now_iso(),
+                                });
+                            }
+                        }
+                        continue;
+                    }
                 }
                 match parse_provider_stream_line(&content, &mut stream_state) {
                     ParsedProviderLine::Event(event) => {
@@ -605,8 +629,8 @@ impl Provider for ClaudeSdkSidecarAdapter {
         self.capabilities.clone()
     }
 
-    fn accepts_dcc_mcp_projection(&self) -> bool {
-        true
+    fn dcc_mcp_projection_version(&self) -> Option<&str> {
+        Some(CLAUDE_MCP_RUNTIME_VERSION)
     }
 
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {

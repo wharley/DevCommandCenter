@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
+use crate::domain::mcp::McpRuntimeStatus;
 use crate::Result;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -34,6 +35,12 @@ pub enum CoreEvent {
     },
     SessionResumed {
         session_id: String,
+    },
+    /// Ephemeral runtime truth. This event is not appended to the durable
+    /// session transcript.
+    SessionMcpRuntimeStatusChanged {
+        session_id: String,
+        statuses: Vec<McpRuntimeStatus>,
     },
     SessionTurnStarted {
         session_id: String,

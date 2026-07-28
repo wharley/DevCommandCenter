@@ -105,6 +105,7 @@ const SESSION_EVENT_NAMES = [
 	"dcc/session/completed",
 	"dcc/session/aborted",
 	"dcc/session/resumed",
+	"dcc/session/mcp/runtime-status",
 	"dcc/session/turn/started",
 	"dcc/session/turn/delta",
 	"dcc/session/turn/reasoning/started",

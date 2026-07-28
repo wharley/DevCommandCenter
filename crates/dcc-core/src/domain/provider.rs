@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::mcp_conformance::{McpConformanceEvidence, McpConformanceEvidenceError};
 use super::session::SessionId;
+use super::{
+    mcp::McpRuntimeStatus,
+    mcp_conformance::{McpConformanceEvidence, McpConformanceEvidenceError},
+};
 use crate::ports::provider::{
     ProviderPermissionRequest, ProviderUserInputAnswer, ProviderUserInputQuestion,
 };
@@ -146,6 +149,12 @@ pub struct ProviderAccountUsage {
 pub enum ProviderEvent {
     Started {
         at: String,
+    },
+    /// Complete ephemeral MCP status snapshot for the provider session.
+    ///
+    /// It is intentionally separate from the persisted session transcript.
+    McpRuntimeStatusSnapshot {
+        statuses: Vec<McpRuntimeStatus>,
     },
     TextDelta {
         content: String,

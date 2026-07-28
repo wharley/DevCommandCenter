@@ -9,6 +9,7 @@ import readline from "node:readline";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import {
 	dccMcpQueryOptions,
+	failedDccMcpStatus,
 	normalizeDccMcpServers,
 	readDccMcpStatus,
 } from "./mcp-config.mjs";
@@ -408,6 +409,12 @@ async function runTurn(payload, state) {
 		try {
 			mcpStatus = await readDccMcpStatus(q, state.mcpProjection);
 		} catch {
+			mcpStatus = failedDccMcpStatus(state.mcpProjection);
+			emit({
+				type: "dcc_mcp_status",
+				failed: mcpStatus.failed,
+				servers: mcpStatus.servers,
+			});
 			throw new Error("DCC MCP attachment failed");
 		}
 		emit({

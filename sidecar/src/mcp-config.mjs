@@ -131,15 +131,26 @@ function boundedToolNames(tools) {
 	if (!Array.isArray(tools)) {
 		return [];
 	}
-	return tools
-		.map((tool) => tool?.name)
-		.filter(
-			(name) =>
-				typeof name === "string" &&
-				name.trim().length > 0 &&
-				name.length <= TOOL_NAME_LIMIT,
-		)
-		.slice(0, 256);
+	const names = [];
+	const seen = new Set();
+	for (const tool of tools) {
+		const name = tool?.name;
+		if (
+			typeof name !== "string" ||
+			name.length === 0 ||
+			name.length > TOOL_NAME_LIMIT ||
+			!/^[A-Za-z0-9_.-]+$/.test(name) ||
+			seen.has(name)
+		) {
+			continue;
+		}
+		seen.add(name);
+		names.push(name);
+		if (names.length === 256) {
+			break;
+		}
+	}
+	return names;
 }
 
 export function dccMcpQueryOptions(projection) {
@@ -156,25 +167,61 @@ export async function readDccMcpStatus(query, projection) {
 		return { failed: [], servers: [] };
 	}
 	const statuses = await query.mcpServerStatus();
-	const servers = (Array.isArray(statuses) ? statuses : [])
-		.filter(
-			(status) =>
-				isRecord(status) &&
-				typeof status.name === "string" &&
-				Object.hasOwn(projection.servers, status.name),
-		)
-		.map((status) => ({
-			definitionId: projection.definitionIds[status.name],
-			name: status.name,
-			status: STATUS_VALUES.has(status.status) ? status.status : "failed",
-			tools: boundedToolNames(status.tools),
-		}));
+	if (!Array.isArray(statuses)) {
+		return failedDccMcpStatus(projection);
+	}
+	const byName = new Map();
+	for (const status of statuses) {
+		if (
+			!isRecord(status) ||
+			typeof status.name !== "string" ||
+			!Object.hasOwn(projection.servers, status.name)
+		) {
+			continue;
+		}
+		if (byName.has(status.name)) {
+			byName.set(status.name, { status: "failed", tools: [] });
+			continue;
+		}
+		const normalizedStatus = STATUS_VALUES.has(status.status)
+			? status.status
+			: "failed";
+		byName.set(status.name, {
+			status: normalizedStatus,
+			tools:
+				normalizedStatus === "connected"
+					? boundedToolNames(status.tools)
+					: [],
+		});
+	}
+	const servers = names.map((name) => {
+		const status = byName.get(name) ?? { status: "pending", tools: [] };
+		return {
+			definitionId: projection.definitionIds[name],
+			name,
+			status: status.status,
+			tools: status.tools,
+		};
+	});
 	const failed = servers
 		.filter((server) => ["failed", "needs-auth"].includes(server.status))
 		.map((server) => server.name);
 
 	return {
 		failed,
+		servers,
+	};
+}
+
+export function failedDccMcpStatus(projection) {
+	const servers = Object.keys(projection.servers).map((name) => ({
+		definitionId: projection.definitionIds[name],
+		name,
+		status: "failed",
+		tools: [],
+	}));
+	return {
+		failed: servers.map((server) => server.name),
 		servers,
 	};
 }

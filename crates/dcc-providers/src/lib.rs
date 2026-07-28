@@ -102,17 +102,23 @@ mod tests {
     }
 
     #[test]
-    fn only_adapters_with_an_explicit_projection_channel_accept_dcc_mcp() {
-        assert!(provider_runtime("claude_code")
-            .expect("Claude provider")
-            .accepts_dcc_mcp_projection());
+    fn only_adapters_with_an_explicit_versioned_projection_channel_accept_dcc_mcp() {
+        assert_eq!(
+            provider_runtime("claude_code")
+                .expect("Claude provider")
+                .dcc_mcp_projection_version(),
+            Some("claude-agent-sdk@0.2.126+claude-code@2.1.126")
+        );
         for provider_id in PROVIDER_IDS
             .into_iter()
             .filter(|provider_id| *provider_id != "claude_code")
         {
-            assert!(!provider_runtime(provider_id)
-                .expect("registered provider")
-                .accepts_dcc_mcp_projection());
+            assert_eq!(
+                provider_runtime(provider_id)
+                    .expect("registered provider")
+                    .dcc_mcp_projection_version(),
+                None
+            );
         }
     }
 

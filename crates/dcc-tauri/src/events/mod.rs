@@ -15,6 +15,9 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
         CoreEvent::SessionCompleted { .. } => format!("{SESSION_EVENT_PREFIX}/completed"),
         CoreEvent::SessionAborted { .. } => format!("{SESSION_EVENT_PREFIX}/aborted"),
         CoreEvent::SessionResumed { .. } => format!("{SESSION_EVENT_PREFIX}/resumed"),
+        CoreEvent::SessionMcpRuntimeStatusChanged { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/mcp/runtime-status")
+        }
         CoreEvent::SessionTurnStarted { .. } => format!("{SESSION_EVENT_PREFIX}/turn/started"),
         CoreEvent::SessionTurnDelta { .. } => format!("{SESSION_EVENT_PREFIX}/turn/delta"),
         CoreEvent::SessionTurnReasoningStarted { .. } => {
@@ -128,5 +131,15 @@ mod tests {
 
         assert_eq!(name, "dcc/workspace/prepared");
         assert!(!name.contains('.'));
+    }
+
+    #[test]
+    fn mcp_runtime_status_uses_a_session_scoped_event_name() {
+        let event = CoreEvent::SessionMcpRuntimeStatusChanged {
+            session_id: "session-1".to_string(),
+            statuses: Vec::new(),
+        };
+
+        assert_eq!(core_event_name(&event), "dcc/session/mcp/runtime-status");
     }
 }
