@@ -28,7 +28,7 @@ use uuid::Uuid;
 use dcc_core::{
     application::{compose_fallback_prompt_for_provider, PromptInjectionOptions},
     domain::{
-        mcp::{McpErrorCategory, McpRuntimeState, McpRuntimeStatus},
+        mcp::{McpErrorCategory, McpRuntimeState, McpRuntimeStatus, McpToolPolicyDecision},
         provider::{
             Capabilities, HealthStatus, ProviderAccountUsage, ProviderAccountUsageState,
             ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
@@ -45,8 +45,8 @@ use dcc_core::{
 use crate::codex_mcp::{
     codex_mcp_approval_policy, failed_codex_mcp_status_snapshot, initial_codex_mcp_status_snapshot,
     merge_codex_mcp_status, parse_codex_mcp_startup_status, parse_codex_mcp_status_snapshot,
-    prepare_thread_start_request, CodexMcpDefinitionMap, CODEX_MCP_RUNTIME_VERSION,
-    SUPPORTED_CODEX_CLI_VERSION,
+    prepare_thread_start_request, CodexMcpDefinitionMap, CodexMcpToolPolicyMap,
+    CODEX_MCP_RUNTIME_VERSION, SUPPORTED_CODEX_CLI_VERSION,
 };
 use crate::common::{append_tool_instructions, augmented_path};
 
@@ -628,7 +628,12 @@ fn claim_codex_mcp_tool_approval(
     current_thread_id: Option<&str>,
     definitions: &CodexMcpDefinitionMap,
     active_calls: &mut HashMap<String, ActiveCodexMcpToolCall>,
-) -> Option<(String, PendingCodexMcpApproval, ProviderPermissionRequest)> {
+) -> Option<(
+    String,
+    PendingCodexMcpApproval,
+    ProviderPermissionRequest,
+    dcc_core::domain::mcp::McpDefinitionId,
+)> {
     let rpc_id = validated_codex_server_request_id(rpc_id)?;
     if params.get("mode").and_then(Value::as_str) != Some("form")
         || params
@@ -652,9 +657,7 @@ fn claim_codex_mcp_tool_approval(
 
     let wire_server_name =
         bounded_nonempty_string(params.get("serverName")?, MAX_CODEX_RPC_STRING_ID_CHARS)?;
-    if !definitions.contains_key(&wire_server_name) {
-        return None;
-    }
+    let definition_id = definitions.get(&wire_server_name)?.clone();
     let requested_turn_id = match params.get("turnId") {
         None | Some(Value::Null) => None,
         Some(value) => Some(bounded_nonempty_string(
@@ -692,7 +695,7 @@ fn claim_codex_mcp_tool_approval(
         command: None,
         file: None,
     };
-    Some((request_id, pending, request))
+    Some((request_id, pending, request, definition_id))
 }
 
 fn codex_mcp_elicitation_result(behavior: &str) -> Option<Value> {
@@ -708,6 +711,18 @@ fn codex_mcp_elicitation_result(behavior: &str) -> Option<Value> {
     }))
 }
 
+fn codex_mcp_tool_policy(
+    policies: &CodexMcpToolPolicyMap,
+    definition_id: &dcc_core::domain::mcp::McpDefinitionId,
+    tool_name: &str,
+) -> McpToolPolicyDecision {
+    policies
+        .get(definition_id)
+        .and_then(|tools| tools.get(tool_name))
+        .cloned()
+        .unwrap_or(McpToolPolicyDecision::Ask)
+}
+
 type PendingResponse = oneshot::Sender<std::result::Result<Value, String>>;
 type PendingMap = Arc<Mutex<HashMap<u64, PendingResponse>>>;
 
@@ -717,6 +732,7 @@ struct SessionRuntime {
     child: Mutex<Child>,
     thread_id: Mutex<Option<String>>,
     mcp_definitions_by_wire_name: Mutex<CodexMcpDefinitionMap>,
+    mcp_tool_policies: Mutex<CodexMcpToolPolicyMap>,
     mcp_status_snapshot: StdRwLock<Option<Vec<McpRuntimeStatus>>>,
     pending: PendingMap,
     pending_mcp_approvals: Mutex<HashMap<String, PendingCodexMcpApproval>>,
@@ -752,7 +768,9 @@ impl SessionRuntime {
         let prepared =
             prepare_thread_start_request(id, cwd, additional_working_directories, servers)?;
         let definitions = prepared.definitions_by_wire_name().clone();
+        let tool_policies = prepared.tool_policies_by_definition().clone();
         *self.mcp_definitions_by_wire_name.lock().await = definitions.clone();
+        *self.mcp_tool_policies.lock().await = tool_policies;
         self.publish_mcp_status_snapshot(initial_codex_mcp_status_snapshot(
             &definitions,
             &self.handle.provider_id,
@@ -923,7 +941,42 @@ async fn handle_codex_mcp_elicitation_request(
         active_calls,
     );
 
-    if let Some((request_id, pending, request)) = claimed {
+    if let Some((request_id, pending, request, definition_id)) = claimed {
+        let decision = codex_mcp_tool_policy(
+            &*runtime.mcp_tool_policies.lock().await,
+            &definition_id,
+            &request.tool_name,
+        );
+        if matches!(
+            decision,
+            McpToolPolicyDecision::Allow | McpToolPolicyDecision::Deny
+        ) {
+            let behavior = match decision {
+                McpToolPolicyDecision::Allow => "allow",
+                McpToolPolicyDecision::Deny => "deny",
+                McpToolPolicyDecision::Ask => unreachable!(),
+            };
+            if runtime
+                .send_server_result(
+                    &pending.rpc_id,
+                    codex_mcp_elicitation_result(behavior)
+                        .expect("explicit tool policies map to provider results"),
+                )
+                .await
+                .is_ok()
+            {
+                let _ = runtime.events_tx.send(ProviderEvent::PermissionRequested {
+                    request,
+                    at: now_iso(),
+                });
+                let _ = runtime.events_tx.send(ProviderEvent::PermissionResolved {
+                    id: request_id,
+                    behavior: behavior.to_string(),
+                    at: now_iso(),
+                });
+            }
+            return;
+        }
         let inserted = {
             let mut pending_approvals = runtime.pending_mcp_approvals.lock().await;
             if pending_approvals.len() >= MAX_PENDING_CODEX_MCP_APPROVALS
@@ -1174,6 +1227,7 @@ impl CodexAppServerAdapter {
             child: Mutex::new(child),
             thread_id: Mutex::new(None),
             mcp_definitions_by_wire_name: Mutex::new(HashMap::new()),
+            mcp_tool_policies: Mutex::new(HashMap::new()),
             mcp_status_snapshot: StdRwLock::new(None),
             pending: Arc::new(Mutex::new(HashMap::new())),
             pending_mcp_approvals: Mutex::new(HashMap::new()),
@@ -1896,7 +1950,7 @@ mod tests {
             "dcc-session-0".to_string(),
             dcc_core::domain::mcp::McpDefinitionId("fixture".to_string()),
         )]);
-        let (request_id, pending, request) = claim_codex_mcp_tool_approval(
+        let (request_id, pending, request, definition_id) = claim_codex_mcp_tool_approval(
             &json!(41),
             &json!({
                 "threadId": "thread-1",
@@ -1920,6 +1974,7 @@ mod tests {
         assert_eq!(pending.rpc_id, json!(41));
         assert_eq!(pending.item_id, "mcp-call-1");
         assert_eq!(request.tool_name, "fixture.mutate");
+        assert_eq!(definition_id.0, "fixture");
         assert!(!request
             .description
             .as_deref()
@@ -2031,6 +2086,24 @@ mod tests {
             }))
         );
         assert_eq!(codex_mcp_elicitation_result("allow_session"), None);
+    }
+
+    #[test]
+    fn defaults_unknown_codex_mcp_tools_to_ask() {
+        let definition_id = dcc_core::domain::mcp::McpDefinitionId("fixture".to_string());
+        let policies = HashMap::from([(
+            definition_id.clone(),
+            HashMap::from([("fixture.mutate".to_string(), McpToolPolicyDecision::Deny)]),
+        )]);
+
+        assert_eq!(
+            codex_mcp_tool_policy(&policies, &definition_id, "fixture.mutate"),
+            McpToolPolicyDecision::Deny
+        );
+        assert_eq!(
+            codex_mcp_tool_policy(&policies, &definition_id, "fixture.read"),
+            McpToolPolicyDecision::Ask
+        );
     }
 
     #[test]

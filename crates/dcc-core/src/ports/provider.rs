@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::{
-    domain::mcp::McpDefinitionId,
+    domain::mcp::{McpDefinitionId, McpToolPolicyDecision},
     domain::provider::{
         Capabilities, HealthStatus, ProviderAccountUsage, ProviderEvent, ProviderId, SessionHandle,
     },
@@ -42,6 +42,15 @@ pub struct ProviderMcpServerConfig {
     /// user-configured provider entries.
     pub server_name: String,
     pub transport: ProviderMcpTransport,
+    /// Explicit overrides only. Missing tools always default to Ask.
+    pub tool_policies: Vec<ProviderMcpToolPolicy>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderMcpToolPolicy {
+    pub tool_name: String,
+    pub decision: McpToolPolicyDecision,
 }
 
 #[derive(Clone, Debug)]
@@ -235,6 +244,7 @@ mod tests {
                         SecretValue::new(b"secret-canary".to_vec()).expect("test secret"),
                     )],
                 },
+                tool_policies: Vec::new(),
             }],
         };
 

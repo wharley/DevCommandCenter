@@ -6,6 +6,8 @@ import type {
 import {
 	deriveMcpIntegrationRuntimeView,
 	findOrphanMcpRuntimeStatuses,
+	getMcpToolPolicyDecision,
+	listMcpIntegrationTools,
 	type McpRuntimeContext,
 } from "./mcp-integration-runtime";
 
@@ -41,6 +43,7 @@ function integration(
 				updatedAt: "2026-07-28T09:00:00Z",
 			},
 		],
+		toolPolicies: [],
 		credentialCount: 0,
 	};
 }
@@ -102,6 +105,21 @@ describe("MCP integration runtime view", () => {
 		expect(view.kind).toBe("restartRequired");
 	});
 
+	it("requires restart when a tool policy is newer than the runtime snapshot", () => {
+		const record = integration();
+		record.toolPolicies = [
+			{
+				definitionId: "figma",
+				toolName: "update_design",
+				decision: "deny",
+				updatedAt: "2026-07-28T10:02:00Z",
+			},
+		];
+		expect(
+			deriveMcpIntegrationRuntimeView(record, [status()], context).kind,
+		).toBe("restartRequired");
+	});
+
 	it("does not infer support when a native provider has not reported status", () => {
 		expect(
 			deriveMcpIntegrationRuntimeView(integration(), [], context).kind,
@@ -134,5 +152,25 @@ describe("MCP integration runtime view", () => {
 	it("keeps removed definitions visible as orphan runtime attachments", () => {
 		expect(findOrphanMcpRuntimeStatuses([], [status()])).toHaveLength(1);
 		expect(findOrphanMcpRuntimeStatuses([integration()], [status()])).toEqual([]);
+	});
+
+	it("defaults unknown tools to Ask and keeps stored policies visible", () => {
+		const record = integration();
+		record.toolPolicies = [
+			{
+				definitionId: "figma",
+				toolName: "legacy_mutation",
+				decision: "deny",
+				updatedAt: "2026-07-28T09:30:00Z",
+			},
+		];
+		expect(
+			listMcpIntegrationTools(record, [
+				{ name: "read_design" },
+				{ name: "legacy_mutation" },
+			]),
+		).toEqual(["legacy_mutation", "read_design"]);
+		expect(getMcpToolPolicyDecision(record, "read_design")).toBe("ask");
+		expect(getMcpToolPolicyDecision(record, "legacy_mutation")).toBe("deny");
 	});
 });

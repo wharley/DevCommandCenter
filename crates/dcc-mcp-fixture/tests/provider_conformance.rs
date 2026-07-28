@@ -236,6 +236,7 @@ where
             definition_id: self.definition_id.clone(),
             server_name: SERVER_NAME.to_string(),
             transport: projected_transport,
+            tool_policies: Vec::new(),
         })
     }
 

@@ -11,7 +11,7 @@ use dcc_core::{
         provider::ProviderId,
         session::SessionId,
     },
-    ports::{ProviderMcpServerConfig, ProviderMcpTransport},
+    ports::{ProviderMcpServerConfig, ProviderMcpToolPolicy, ProviderMcpTransport},
     CoreError, Result,
 };
 use reqwest::{
@@ -45,6 +45,7 @@ struct ClaudeMcpServer<'a> {
     definition_id: &'a str,
     name: String,
     transport: ClaudeMcpTransport<'a>,
+    tool_policies: &'a [ProviderMcpToolPolicy],
 }
 
 #[derive(Serialize)]
@@ -121,6 +122,7 @@ fn encode_mcp_configuration(servers: &[ProviderMcpServerConfig]) -> Result<Sensi
         if server.definition_id.0.trim().is_empty() {
             return Err(invalid_configuration());
         }
+        validate_tool_policies(&server.tool_policies)?;
 
         let transport = match &server.transport {
             ProviderMcpTransport::Stdio {
@@ -164,6 +166,7 @@ fn encode_mcp_configuration(servers: &[ProviderMcpServerConfig]) -> Result<Sensi
             definition_id: &server.definition_id.0,
             name: format!("dcc-{session_namespace}-{index}"),
             transport,
+            tool_policies: &server.tool_policies,
         });
     }
 
@@ -345,6 +348,30 @@ fn validate_http_url(value: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_tool_policies(policies: &[ProviderMcpToolPolicy]) -> Result<()> {
+    if policies.len() > MAX_TOOL_COUNT {
+        return Err(invalid_configuration());
+    }
+    let mut names = HashSet::with_capacity(policies.len());
+    for policy in policies {
+        if policy.tool_name.is_empty()
+            || policy.tool_name.len() > 128
+            || !policy
+                .tool_name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+            || !names.insert(policy.tool_name.as_str())
+            || matches!(
+                policy.decision,
+                dcc_core::domain::mcp::McpToolPolicyDecision::Ask
+            )
+        {
+            return Err(invalid_configuration());
+        }
+    }
+    Ok(())
+}
+
 fn invalid_configuration() -> CoreError {
     CoreError::InvalidInput("Claude MCP configuration is invalid".to_string())
 }
@@ -356,9 +383,12 @@ fn invalid_status_payload() -> CoreError {
 #[cfg(test)]
 mod tests {
     use dcc_core::{
-        domain::mcp::McpDefinitionId,
+        domain::mcp::{McpDefinitionId, McpToolPolicyDecision},
         domain::{provider::ProviderId, session::SessionId},
-        ports::{ProviderMcpSecret, ProviderMcpServerConfig, ProviderMcpTransport, SecretValue},
+        ports::{
+            ProviderMcpSecret, ProviderMcpServerConfig, ProviderMcpToolPolicy,
+            ProviderMcpTransport, SecretValue,
+        },
     };
 
     use super::*;
@@ -382,6 +412,10 @@ mod tests {
                     cwd: None,
                     environment: vec![secret("FIXTURE_TOKEN", "secret-canary")],
                 },
+                tool_policies: vec![ProviderMcpToolPolicy {
+                    tool_name: "fixture.mutate".to_string(),
+                    decision: McpToolPolicyDecision::Deny,
+                }],
             },
             ProviderMcpServerConfig {
                 definition_id: McpDefinitionId("http-fixture".to_string()),
@@ -390,6 +424,7 @@ mod tests {
                     url: "http://127.0.0.1:8765/mcp".to_string(),
                     headers: vec![secret("Authorization", "Bearer secret-canary")],
                 },
+                tool_policies: Vec::new(),
             },
         ];
 
@@ -399,6 +434,7 @@ mod tests {
 
         assert_eq!(value["type"], "configure_mcp");
         assert_eq!(value["servers"][0]["transport"]["type"], "stdio");
+        assert_eq!(value["servers"][0]["toolPolicies"][0]["decision"], "deny");
         assert_eq!(value["servers"][1]["transport"]["type"], "http");
         assert!(value["servers"][0]["name"]
             .as_str()
@@ -426,6 +462,7 @@ mod tests {
                     "-----BEGIN KEY-----\nabc\n-----END KEY-----",
                 )],
             },
+            tool_policies: Vec::new(),
         };
 
         assert!(encode_mcp_configuration(&[server]).is_ok());
@@ -440,6 +477,7 @@ mod tests {
                 url: "https://example.com/mcp".to_string(),
                 headers: Vec::new(),
             },
+            tool_policies: Vec::new(),
         };
         assert!(encode_mcp_configuration(&[user_owned_name]).is_err());
 
@@ -450,6 +488,7 @@ mod tests {
                 url: "https://example.com/mcp".to_string(),
                 headers: vec![secret("Authorization", "Bearer ok\r\nX-Evil: yes")],
             },
+            tool_policies: Vec::new(),
         };
         assert!(encode_mcp_configuration(&[injected_header]).is_err());
     }
@@ -465,6 +504,7 @@ mod tests {
                 cwd: Some("/workspace".to_string()),
                 environment: Vec::new(),
             },
+            tool_policies: Vec::new(),
         };
 
         assert!(encode_mcp_configuration(&[server]).is_err());

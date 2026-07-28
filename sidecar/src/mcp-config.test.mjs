@@ -6,6 +6,7 @@ import {
 	failedDccMcpStatus,
 	normalizeDccMcpServers,
 	readDccMcpStatus,
+	resolveDccMcpToolPolicy,
 } from "./mcp-config.mjs";
 
 test("normalizes DCC-owned stdio and HTTP servers for the Agent SDK", () => {
@@ -37,6 +38,40 @@ test("normalizes DCC-owned stdio and HTTP servers for the Agent SDK", () => {
 	]);
 	assert.equal(projection.servers["dcc-command-fixture"].alwaysLoad, true);
 	assert.equal(projection.servers["dcc-http-fixture"].type, "http");
+});
+
+test("resolves only explicit policies for DCC-owned MCP tools", () => {
+	const projection = normalizeDccMcpServers([
+		{
+			definitionId: "fixture",
+			name: "dcc-fixture",
+			transport: {
+				type: "http",
+				url: "https://example.com/mcp",
+				headers: {},
+			},
+			toolPolicies: [
+				{ toolName: "read", decision: "allow" },
+				{ toolName: "mutate", decision: "deny" },
+			],
+		},
+	]);
+
+	assert.deepEqual(
+		resolveDccMcpToolPolicy(projection, "mcp__dcc-fixture__read"),
+		{ decision: "allow", toolName: "read" },
+	);
+	assert.deepEqual(
+		resolveDccMcpToolPolicy(projection, "mcp__dcc-fixture__unknown"),
+		{ decision: "ask", toolName: "unknown" },
+	);
+	assert.equal(resolveDccMcpToolPolicy(projection, "Bash"), null);
+	assert.deepEqual(dccMcpQueryOptions(projection).allowedTools, [
+		"mcp__dcc-fixture__read",
+	]);
+	assert.deepEqual(dccMcpQueryOptions(projection).disallowedTools, [
+		"mcp__dcc-fixture__mutate",
+	]);
 });
 
 test("rejects names outside the DCC namespace and header injection", () => {

@@ -3,6 +3,7 @@ import type {
 	McpRuntimeState,
 	McpRuntimeStatus,
 	McpSupportLevel,
+	McpToolPolicyDecision,
 } from "@dcc/contracts";
 import { mcpIntegrationNeedsTrust } from "./mcp-integration-form";
 
@@ -77,6 +78,7 @@ export function deriveMcpIntegrationRuntimeView(
 	const latestConfigurationAt = Math.max(
 		timestamp(integration.definition.updatedAt),
 		...applicableBindings.map((binding) => timestamp(binding.updatedAt)),
+		...integration.toolPolicies.map((policy) => timestamp(policy.updatedAt)),
 	);
 
 	if (status) {
@@ -115,4 +117,26 @@ export function findOrphanMcpRuntimeStatuses(
 		integrations.map((integration) => integration.definition.id),
 	);
 	return statuses.filter((status) => !definitionIds.has(status.definitionId));
+}
+
+export function listMcpIntegrationTools(
+	integration: McpIntegrationRecord,
+	runtimeTools: Array<{ name: string }>,
+): string[] {
+	return [
+		...new Set([
+			...runtimeTools.map((tool) => tool.name),
+			...integration.toolPolicies.map((policy) => policy.toolName),
+		]),
+	].sort((left, right) => left.localeCompare(right));
+}
+
+export function getMcpToolPolicyDecision(
+	integration: McpIntegrationRecord,
+	toolName: string,
+): McpToolPolicyDecision {
+	return (
+		integration.toolPolicies.find((policy) => policy.toolName === toolName)
+			?.decision ?? "ask"
+	);
 }

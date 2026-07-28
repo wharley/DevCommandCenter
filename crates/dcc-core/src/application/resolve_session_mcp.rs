@@ -7,13 +7,17 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     domain::{
-        mcp::{McpBindingScope, McpDefinition, McpSecretTarget, McpTransport},
+        mcp::{
+            McpBindingScope, McpDefinition, McpDefinitionId, McpSecretTarget, McpToolPolicy,
+            McpTransport,
+        },
         project::ProjectId,
         provider::ProviderId,
         session::SessionId,
     },
     ports::{
-        CredentialStore, McpRepo, ProviderMcpSecret, ProviderMcpServerConfig, ProviderMcpTransport,
+        CredentialStore, McpRepo, ProviderMcpSecret, ProviderMcpServerConfig,
+        ProviderMcpToolPolicy, ProviderMcpTransport,
     },
     CoreError, Result,
 };
@@ -40,6 +44,7 @@ pub async fn resolve_session_mcp_servers(
 ) -> Result<Vec<ProviderMcpServerConfig>> {
     let definitions = repo.list_mcp_definitions().await?;
     let bindings = repo.list_mcp_bindings(None).await?;
+    let policies = repo.list_mcp_tool_policies(None).await?;
 
     for definition in &definitions {
         definition
@@ -50,6 +55,11 @@ pub async fn resolve_session_mcp_servers(
         binding
             .validate()
             .map_err(|_| invalid_registry("binding"))?;
+    }
+    for policy in &policies {
+        policy
+            .validate()
+            .map_err(|_| invalid_registry("tool policy"))?;
     }
 
     let selected_ids = bindings
@@ -87,6 +97,13 @@ pub async fn resolve_session_mcp_servers(
         .filter(|definition| definition.enabled && !definition.trust.requires_confirmation())
         .collect::<Vec<_>>();
     selected.sort_unstable_by(|left, right| left.id.0.cmp(&right.id.0));
+    let mut policies_by_definition = HashMap::<McpDefinitionId, Vec<McpToolPolicy>>::new();
+    for policy in policies {
+        policies_by_definition
+            .entry(policy.definition_id.clone())
+            .or_default()
+            .push(policy);
+    }
 
     let mut server_names = HashSet::with_capacity(selected.len());
     let mut servers = Vec::with_capacity(selected.len());
@@ -95,7 +112,11 @@ pub async fn resolve_session_mcp_servers(
         if !server_names.insert(server_name.clone()) {
             return Err(invalid_registry("definition"));
         }
-        servers.push(project_definition(definition, server_name, credential_store).await?);
+        let policies = policies_by_definition
+            .remove(&definition.id)
+            .unwrap_or_default();
+        servers
+            .push(project_definition(definition, server_name, policies, credential_store).await?);
     }
     Ok(servers)
 }
@@ -121,6 +142,7 @@ fn provider_server_name(definition: &McpDefinition) -> String {
 async fn project_definition(
     definition: McpDefinition,
     server_name: String,
+    mut policies: Vec<McpToolPolicy>,
     credential_store: &dyn CredentialStore,
 ) -> Result<ProviderMcpServerConfig> {
     let mut secrets = Vec::with_capacity(definition.secret_refs.len());
@@ -154,10 +176,20 @@ async fn project_definition(
         },
     };
 
+    policies.sort_unstable_by(|left, right| left.tool_name.cmp(&right.tool_name));
+    let tool_policies = policies
+        .into_iter()
+        .map(|policy| ProviderMcpToolPolicy {
+            tool_name: policy.tool_name,
+            decision: policy.decision,
+        })
+        .collect();
+
     Ok(ProviderMcpServerConfig {
         definition_id: definition.id,
         server_name,
         transport,
+        tool_policies,
     })
 }
 
@@ -189,6 +221,7 @@ mod tests {
     struct FakeMcpRepo {
         definitions: Arc<Mutex<Vec<McpDefinition>>>,
         bindings: Arc<Mutex<Vec<McpBinding>>>,
+        policies: Arc<Mutex<Vec<crate::domain::mcp::McpToolPolicy>>>,
     }
 
     #[async_trait]
@@ -258,6 +291,43 @@ mod tests {
                 .lock()
                 .unwrap()
                 .retain(|binding| &binding.id != id);
+            Ok(())
+        }
+
+        async fn save_mcp_tool_policy(
+            &self,
+            policy: &crate::domain::mcp::McpToolPolicy,
+        ) -> Result<()> {
+            self.policies.lock().unwrap().push(policy.clone());
+            Ok(())
+        }
+
+        async fn list_mcp_tool_policies(
+            &self,
+            definition_id: Option<&McpDefinitionId>,
+        ) -> Result<Vec<crate::domain::mcp::McpToolPolicy>> {
+            Ok(self
+                .policies
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|policy| {
+                    definition_id
+                        .map(|definition_id| &policy.definition_id == definition_id)
+                        .unwrap_or(true)
+                })
+                .cloned()
+                .collect())
+        }
+
+        async fn delete_mcp_tool_policy(
+            &self,
+            definition_id: &McpDefinitionId,
+            tool_name: &str,
+        ) -> Result<()> {
+            self.policies.lock().unwrap().retain(|policy| {
+                &policy.definition_id != definition_id || policy.tool_name != tool_name
+            });
             Ok(())
         }
     }
@@ -509,6 +579,12 @@ mod tests {
                 Vec::new(),
             ),
         ]);
+        repo.policies.lock().unwrap().push(McpToolPolicy {
+            definition_id: McpDefinitionId("http".to_string()),
+            tool_name: "mutate".to_string(),
+            decision: crate::domain::mcp::McpToolPolicyDecision::Deny,
+            updated_at: "2026-07-28T00:00:00Z".to_string(),
+        });
 
         let servers =
             futures::executor::block_on(resolve_session_mcp_servers(&repo, &credentials, &input()))
@@ -530,6 +606,8 @@ mod tests {
         };
         assert_eq!(headers[0].name, "Authorization");
         assert_eq!(headers[0].expose_secret(), b"Bearer secret-canary");
+        assert_eq!(http.tool_policies.len(), 1);
+        assert_eq!(http.tool_policies[0].tool_name, "mutate");
         let ProviderMcpTransport::Stdio { cwd, .. } = &servers[2].transport else {
             panic!("expected stdio transport");
         };

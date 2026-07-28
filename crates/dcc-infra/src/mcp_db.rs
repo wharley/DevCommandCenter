@@ -11,7 +11,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use dcc_core::{
     domain::mcp::{
         McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
-        McpDefinitionOwnership, McpTransport, McpTrust,
+        McpDefinitionOwnership, McpToolPolicy, McpToolPolicyDecision, McpTransport, McpTrust,
     },
     ports::McpRepo,
     CoreError, Result,
@@ -61,6 +61,18 @@ ON dcc_mcp_bindings(definition_id, updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_dcc_mcp_bindings_scope
 ON dcc_mcp_bindings(scope_kind, scope_target_id, enabled);
+
+CREATE TABLE IF NOT EXISTS dcc_mcp_tool_policies (
+    definition_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK (decision IN ('allow', 'deny')),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (definition_id, tool_name),
+    FOREIGN KEY (definition_id) REFERENCES dcc_mcp_definitions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_mcp_tool_policies_definition
+ON dcc_mcp_tool_policies(definition_id, tool_name);
 "#;
 
 #[derive(Clone)]
@@ -177,6 +189,33 @@ impl SqliteMcpRepo {
             )
         })?;
         Ok(binding)
+    }
+
+    fn tool_policy_from_row(row: &Row<'_>) -> rusqlite::Result<McpToolPolicy> {
+        let decision = match row.get::<_, String>(2)?.as_str() {
+            "allow" => McpToolPolicyDecision::Allow,
+            "deny" => McpToolPolicyDecision::Deny,
+            value => {
+                return Err(invalid_column(
+                    2,
+                    format!("invalid MCP tool policy decision: {value}"),
+                ));
+            }
+        };
+        let policy = McpToolPolicy {
+            definition_id: McpDefinitionId(row.get(0)?),
+            tool_name: row.get(1)?,
+            decision,
+            updated_at: row.get(3)?,
+        };
+        policy.validate().map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
+        Ok(policy)
     }
 }
 
@@ -377,6 +416,88 @@ impl McpRepo for SqliteMcpRepo {
         let conn = self.lock_connection()?;
         conn.execute("DELETE FROM dcc_mcp_bindings WHERE id = ?1", params![id.0])
             .map_err(repository_error)?;
+        Ok(())
+    }
+
+    async fn save_mcp_tool_policy(&self, policy: &McpToolPolicy) -> Result<()> {
+        policy
+            .validate()
+            .map_err(|error| CoreError::InvalidInput(error.to_string()))?;
+        let decision = match policy.decision {
+            McpToolPolicyDecision::Allow => "allow",
+            McpToolPolicyDecision::Deny => "deny",
+            McpToolPolicyDecision::Ask => {
+                return Err(CoreError::InvalidInput(
+                    "Ask is the implicit MCP tool policy and must not be persisted".to_string(),
+                ));
+            }
+        };
+        let conn = self.lock_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_mcp_tool_policies (
+                definition_id, tool_name, decision, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(definition_id, tool_name) DO UPDATE SET
+                decision = excluded.decision,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                policy.definition_id.0,
+                policy.tool_name,
+                decision,
+                policy.updated_at,
+            ],
+        )
+        .map_err(repository_error)?;
+        Ok(())
+    }
+
+    async fn list_mcp_tool_policies(
+        &self,
+        definition_id: Option<&McpDefinitionId>,
+    ) -> Result<Vec<McpToolPolicy>> {
+        let conn = self.lock_connection()?;
+        let sql = if definition_id.is_some() {
+            r#"
+            SELECT definition_id, tool_name, decision, updated_at
+              FROM dcc_mcp_tool_policies
+             WHERE definition_id = ?1
+             ORDER BY tool_name ASC
+            "#
+        } else {
+            r#"
+            SELECT definition_id, tool_name, decision, updated_at
+              FROM dcc_mcp_tool_policies
+             ORDER BY definition_id ASC, tool_name ASC
+            "#
+        };
+        let mut statement = conn.prepare(sql).map_err(repository_error)?;
+        let rows = if let Some(definition_id) = definition_id {
+            statement
+                .query_map(params![definition_id.0], Self::tool_policy_from_row)
+                .map_err(repository_error)?
+        } else {
+            statement
+                .query_map([], Self::tool_policy_from_row)
+                .map_err(repository_error)?
+        };
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(repository_error)
+    }
+
+    async fn delete_mcp_tool_policy(
+        &self,
+        definition_id: &McpDefinitionId,
+        tool_name: &str,
+    ) -> Result<()> {
+        let conn = self.lock_connection()?;
+        conn.execute(
+            "DELETE FROM dcc_mcp_tool_policies WHERE definition_id = ?1 AND tool_name = ?2",
+            params![definition_id.0, tool_name],
+        )
+        .map_err(repository_error)?;
         Ok(())
     }
 }
@@ -596,6 +717,31 @@ mod tests {
         assert!(bindings.contains(&session));
         assert!(bindings.contains(&project));
         assert!(bindings.contains(&global));
+    }
+
+    #[test]
+    fn persists_tool_policy_overrides_and_cascades_with_definition() {
+        let (repo, _) = in_memory_repo();
+        let definition = http_definition("figma");
+        block_on(repo.save_mcp_definition(&definition)).expect("save definition");
+        let policy = McpToolPolicy {
+            definition_id: definition.id.clone(),
+            tool_name: "update_design".to_string(),
+            decision: McpToolPolicyDecision::Deny,
+            updated_at: "2026-07-28T01:00:00Z".to_string(),
+        };
+
+        block_on(repo.save_mcp_tool_policy(&policy)).expect("save tool policy");
+        assert_eq!(
+            block_on(repo.list_mcp_tool_policies(Some(&definition.id)))
+                .expect("list tool policies"),
+            vec![policy.clone()]
+        );
+
+        block_on(repo.delete_mcp_definition(&definition.id)).expect("delete definition");
+        assert!(block_on(repo.list_mcp_tool_policies(Some(&definition.id)))
+            .expect("list cascaded policies")
+            .is_empty());
     }
 
     #[test]

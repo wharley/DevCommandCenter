@@ -6945,6 +6945,7 @@ pub fn run() {
             mcp_commands::activate_mcp_integration,
             mcp_commands::disable_mcp_integration,
             mcp_commands::remove_mcp_integration,
+            mcp_commands::set_mcp_tool_policy,
             provider_commands::provider_account_usage,
             session_commands::start_thread,
             session_commands::send_turn,

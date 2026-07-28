@@ -128,10 +128,14 @@ interactive sidecar process is also marked for termination on Rust-handle drop,
 covering interrupted tests and abnormal adapter teardown in addition to the
 normal explicit cancel path.
 
-MCP tools are not added to `allowedTools`. Anthropic documents that MCP tools
-require explicit permission unless specifically allowed, and that
-`acceptEdits` does not auto-approve them. The existing `canUseTool` callback
-therefore remains the DCC approval path.
+Unknown MCP tools are absent from both `allowedTools` and `disallowedTools` and
+therefore default to the existing DCC `canUseTool` approval path. Explicit
+per-definition `Allow` and `Deny` overrides are projected to the exact random
+session-qualified MCP tool name. The sidecar also validates the policy map and
+applies it in `canUseTool` when Claude requests a callback, so native tools and
+provider-owned MCP servers cannot inherit DCC policy by a display-name match.
+Policy records contain only bounded definition IDs, tool names, decisions, and
+timestamps; arguments and results never enter persistence or renderer state.
 
 The callback now lives in a separately tested sidecar module. Offline tests
 prove that MCP requests stay pending until DCC responds, that an explicit

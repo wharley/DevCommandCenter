@@ -105,12 +105,35 @@ function normalizeTransport(value) {
 	throw invalidConfiguration();
 }
 
+function normalizeToolPolicies(value) {
+	if (!Array.isArray(value) || value.length > 256) {
+		throw invalidConfiguration();
+	}
+	const policies = {};
+	for (const policy of value) {
+		if (
+			!isRecord(policy) ||
+			typeof policy.toolName !== "string" ||
+			policy.toolName.length === 0 ||
+			policy.toolName.length > TOOL_NAME_LIMIT ||
+			!/^[A-Za-z0-9_.-]+$/.test(policy.toolName) ||
+			!["allow", "deny"].includes(policy.decision) ||
+			Object.hasOwn(policies, policy.toolName)
+		) {
+			throw invalidConfiguration();
+		}
+		policies[policy.toolName] = policy.decision;
+	}
+	return policies;
+}
+
 export function normalizeDccMcpServers(value) {
 	if (!Array.isArray(value) || value.length > MAX_SERVER_COUNT) {
 		throw invalidConfiguration();
 	}
 	const servers = {};
 	const definitionIds = {};
+	const toolPolicies = {};
 	for (const entry of value) {
 		if (
 			!isRecord(entry) ||
@@ -123,8 +146,27 @@ export function normalizeDccMcpServers(value) {
 		}
 		servers[entry.name] = normalizeTransport(entry.transport);
 		definitionIds[entry.name] = entry.definitionId;
+		toolPolicies[entry.name] = normalizeToolPolicies(entry.toolPolicies ?? []);
 	}
-	return { servers, definitionIds };
+	return { servers, definitionIds, toolPolicies };
+}
+
+export function resolveDccMcpToolPolicy(projection, toolName) {
+	if (typeof toolName !== "string") {
+		return null;
+	}
+	for (const serverName of Object.keys(projection.servers)) {
+		const prefix = `mcp__${serverName}__`;
+		if (toolName.startsWith(prefix)) {
+			const serverToolName = toolName.slice(prefix.length);
+			return {
+				decision:
+					projection.toolPolicies[serverName]?.[serverToolName] ?? "ask",
+				toolName: serverToolName,
+			};
+		}
+	}
+	return null;
 }
 
 function boundedToolNames(tools) {
@@ -158,7 +200,25 @@ export function dccMcpQueryOptions(projection) {
 	if (names.length === 0) {
 		return {};
 	}
-	return { mcpServers: projection.servers };
+	const allowedTools = [];
+	const disallowedTools = [];
+	for (const serverName of names) {
+		for (const [toolName, decision] of Object.entries(
+			projection.toolPolicies[serverName] ?? {},
+		)) {
+			const qualifiedName = `mcp__${serverName}__${toolName}`;
+			if (decision === "allow") {
+				allowedTools.push(qualifiedName);
+			} else if (decision === "deny") {
+				disallowedTools.push(qualifiedName);
+			}
+		}
+	}
+	return {
+		mcpServers: projection.servers,
+		...(allowedTools.length > 0 ? { allowedTools } : {}),
+		...(disallowedTools.length > 0 ? { disallowedTools } : {}),
+	};
 }
 
 export async function readDccMcpStatus(query, projection) {

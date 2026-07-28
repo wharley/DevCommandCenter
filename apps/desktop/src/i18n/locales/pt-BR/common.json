@@ -1104,6 +1104,7 @@
       "runtimeLoading": "Lendo o snapshot efêmero do runtime desta sessão…",
       "runtimeLoadError": "Não foi possível ler o snapshot do runtime. As configurações persistidas continuam disponíveis abaixo.",
       "runtimeSnapshot": "{{count}} relato(s) de status do runtime para esta sessão exata.",
+      "processLifecycleHint": "Os servidores MCP atualmente compartilham o ciclo de vida da sessão do provedor. O DCC não mostrará um controle separado para parar até o runtime expor um processo independente sob sua responsabilidade.",
       "runtimeStatus": "Runtime da sessão",
       "runtime": {
         "disabled": "Desativada",
@@ -1123,6 +1124,14 @@
       "restartHint": "Esta configuração é mais nova que o último estado confirmado do runtime da sessão. Recrie ou reinicie a sessão do provedor para aplicá-la.",
       "notReportedHint": "O provedor não informou um estado para esta integração na sessão selecionada. O DCC não presume sucesso nem falha.",
       "checkedAt": "Última verificação em {{date}}",
+      "toolPoliciesTitle": "Políticas das ferramentas",
+      "toolPoliciesHint": "Ferramentas desconhecidas usam Perguntar. Permitir ignora a confirmação e Negar bloqueia a execução; alterações valem após recriar ou reiniciar a sessão do provedor.",
+      "toolPolicy": {
+        "ask": "Perguntar",
+        "allow": "Permitir",
+        "deny": "Negar"
+      },
+      "toolPolicyUpdated": "Política da ferramenta salva. A sessão selecionada pode precisar reiniciar.",
       "orphanRuntimeTitle": "{{count}} integração(ões) removida(s) ainda informada(s) por esta sessão",
       "orphanRuntimeHint": "A definição persistida já foi removida, mas a sessão do provedor ainda informa a conexão. Reinicie ou recrie essa sessão para desconectá-la.",
       "add": "Adicionar integração",
@@ -1205,6 +1214,7 @@
         "activate": "Não foi possível ativar a integração.",
         "disable": "Não foi possível desativar a integração.",
         "remove": "Não foi possível remover a integração.",
+        "toolPolicy": "Não foi possível salvar a política da ferramenta.",
         "loading": "Não foi possível carregar as integrações."
       }
     },

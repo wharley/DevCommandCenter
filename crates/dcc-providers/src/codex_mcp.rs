@@ -7,7 +7,7 @@ use dcc_core::{
     domain::{
         mcp::{
             McpDefinitionId, McpErrorCategory, McpRuntimeError, McpRuntimeState, McpRuntimeStatus,
-            McpToolSummary,
+            McpToolPolicyDecision, McpToolSummary,
         },
         provider::ProviderId,
         session::SessionId,
@@ -34,6 +34,8 @@ const MAX_TOOL_COUNT: usize = 256;
 pub(crate) const CODEX_MCP_RUNTIME_VERSION: &str = "codex-cli@0.145.0+app-server-protocol-v2";
 pub(crate) const SUPPORTED_CODEX_CLI_VERSION: &str = "0.145.0";
 pub(crate) type CodexMcpDefinitionMap = HashMap<String, McpDefinitionId>;
+pub(crate) type CodexMcpToolPolicyMap =
+    HashMap<McpDefinitionId, HashMap<String, McpToolPolicyDecision>>;
 
 #[derive(Serialize)]
 struct RpcRequest<'a> {
@@ -131,11 +133,16 @@ impl Drop for SensitiveRpcPayload {
 pub(crate) struct PreparedCodexMcpThreadStartRequest {
     payload: SensitiveRpcPayload,
     definitions_by_wire_name: CodexMcpDefinitionMap,
+    tool_policies_by_definition: CodexMcpToolPolicyMap,
 }
 
 impl PreparedCodexMcpThreadStartRequest {
     pub(crate) fn definitions_by_wire_name(&self) -> &CodexMcpDefinitionMap {
         &self.definitions_by_wire_name
+    }
+
+    pub(crate) fn tool_policies_by_definition(&self) -> &CodexMcpToolPolicyMap {
+        &self.tool_policies_by_definition
     }
 
     pub(crate) async fn write_to<W>(&self, writer: &mut W) -> Result<()>
@@ -185,6 +192,7 @@ pub(crate) fn prepare_thread_start_request(
     let mut definition_ids = HashSet::with_capacity(servers.len());
     let mut wire_servers = BTreeMap::new();
     let mut definitions_by_wire_name = HashMap::with_capacity(servers.len());
+    let mut tool_policies_by_definition = HashMap::with_capacity(servers.len());
     let session_namespace = Uuid::new_v4().simple().to_string();
     for (index, server) in servers.iter().enumerate() {
         validate_server_name(&server.server_name)?;
@@ -194,6 +202,26 @@ pub(crate) fn prepare_thread_start_request(
         {
             return Err(invalid_configuration());
         }
+        let mut tool_policies = HashMap::with_capacity(server.tool_policies.len());
+        if server.tool_policies.len() > MAX_TOOL_COUNT {
+            return Err(invalid_configuration());
+        }
+        for policy in &server.tool_policies {
+            if policy.tool_name.is_empty()
+                || policy.tool_name.len() > 128
+                || !policy
+                    .tool_name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+                || matches!(policy.decision, McpToolPolicyDecision::Ask)
+                || tool_policies
+                    .insert(policy.tool_name.clone(), policy.decision.clone())
+                    .is_some()
+            {
+                return Err(invalid_configuration());
+            }
+        }
+        tool_policies_by_definition.insert(server.definition_id.clone(), tool_policies);
 
         let transport = match &server.transport {
             ProviderMcpTransport::Stdio {
@@ -266,6 +294,7 @@ pub(crate) fn prepare_thread_start_request(
     Ok(PreparedCodexMcpThreadStartRequest {
         payload,
         definitions_by_wire_name,
+        tool_policies_by_definition,
     })
 }
 
@@ -654,8 +683,8 @@ fn invalid_status_payload() -> CoreError {
 #[cfg(test)]
 mod tests {
     use dcc_core::{
-        domain::mcp::McpDefinitionId,
-        ports::{ProviderMcpSecret, SecretValue},
+        domain::mcp::{McpDefinitionId, McpToolPolicyDecision},
+        ports::{ProviderMcpSecret, ProviderMcpToolPolicy, SecretValue},
     };
 
     use super::*;
@@ -678,6 +707,10 @@ mod tests {
                     cwd: Some("/workspace/tools".to_string()),
                     environment: vec![secret("FIXTURE_TOKEN", "stdio-secret-canary")],
                 },
+                tool_policies: vec![ProviderMcpToolPolicy {
+                    tool_name: "fixture.mutate".to_string(),
+                    decision: McpToolPolicyDecision::Deny,
+                }],
             },
             ProviderMcpServerConfig {
                 definition_id: McpDefinitionId("http-fixture".to_string()),
@@ -686,6 +719,7 @@ mod tests {
                     url: "https://mcp.example.test/rpc".to_string(),
                     headers: vec![secret("Authorization", "Bearer http-secret-canary")],
                 },
+                tool_policies: Vec::new(),
             },
         ]
     }
@@ -698,6 +732,13 @@ mod tests {
         assert_eq!(
             format!("{prepared:?}"),
             "PreparedCodexMcpThreadStartRequest([REDACTED])"
+        );
+        assert_eq!(
+            prepared
+                .tool_policies_by_definition()
+                .get(&McpDefinitionId("stdio-fixture".to_string()))
+                .and_then(|policies| policies.get("fixture.mutate")),
+            Some(&McpToolPolicyDecision::Deny)
         );
         assert_eq!(prepared.definitions_by_wire_name().len(), 2);
         assert!(prepared

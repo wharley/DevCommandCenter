@@ -10,6 +10,8 @@ import type {
 	ListMcpIntegrationsOutput,
 	RemoveMcpIntegrationInput,
 	RemoveMcpIntegrationOutput,
+	SetMcpToolPolicyInput,
+	SetMcpToolPolicyOutput,
 } from "@dcc/contracts";
 
 function isTauriRuntime(): boolean {
@@ -58,4 +60,11 @@ export function removeMcpIntegration(input: RemoveMcpIntegrationInput) {
 		MCP_METHODS.removeMcpIntegration,
 		{ input },
 	);
+}
+
+export function setMcpToolPolicy(input: SetMcpToolPolicyInput) {
+	requireTauriRuntime();
+	return invoke<SetMcpToolPolicyOutput>(MCP_METHODS.setMcpToolPolicy, {
+		input,
+	});
 }

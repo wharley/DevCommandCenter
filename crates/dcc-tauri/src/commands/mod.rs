@@ -33,7 +33,7 @@ pub use forge_commands::{
 };
 pub use mcp_commands::{
     activate_mcp_integration, create_mcp_integration, disable_mcp_integration,
-    list_mcp_integrations, remove_mcp_integration,
+    list_mcp_integrations, remove_mcp_integration, set_mcp_tool_policy,
 };
 pub use provider_commands::{list_providers, provider_account_usage};
 pub use session_commands::{

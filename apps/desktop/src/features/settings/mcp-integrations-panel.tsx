@@ -21,6 +21,7 @@ import type {
 	McpBindingScope,
 	McpIntegrationRecord,
 	McpSecretTarget,
+	McpToolPolicyDecision,
 	ProviderCatalog,
 } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +37,7 @@ import {
 	disableMcpIntegration,
 	listMcpIntegrations,
 	removeMcpIntegration,
+	setMcpToolPolicy,
 } from "@/lib/mcp-api";
 import { toast } from "sonner";
 import {
@@ -54,6 +56,8 @@ import {
 import {
 	deriveMcpIntegrationRuntimeView,
 	findOrphanMcpRuntimeStatuses,
+	getMcpToolPolicyDecision,
+	listMcpIntegrationTools,
 	type McpIntegrationRuntimeKind,
 } from "./mcp-integration-runtime";
 
@@ -347,6 +351,32 @@ export function McpIntegrationsPanel({
 				error instanceof Error
 					? error.message
 					: t("settings.integrations.errors.remove"),
+			);
+		} finally {
+			setBusyAction(null);
+		}
+	};
+
+	const handleToolPolicy = async (
+		integration: McpIntegrationRecord,
+		toolName: string,
+		decision: McpToolPolicyDecision,
+	) => {
+		const action = `policy:${integration.definition.id}:${toolName}:${decision}`;
+		setBusyAction(action);
+		try {
+			await setMcpToolPolicy({
+				definitionId: integration.definition.id,
+				toolName,
+				decision,
+			});
+			await refresh();
+			toast.success(t("settings.integrations.toolPolicyUpdated"));
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: t("settings.integrations.errors.toolPolicy"),
 			);
 		} finally {
 			setBusyAction(null);
@@ -881,13 +911,18 @@ export function McpIntegrationsPanel({
 				</div>
 				{sessionId ? (
 					<div className="mt-3 border-t border-border/50 pt-3 text-[11px] leading-relaxed text-muted-foreground">
-						{runtimeQuery.isPending
-							? t("settings.integrations.runtimeLoading")
-							: runtimeQuery.isError
-								? t("settings.integrations.runtimeLoadError")
-								: t("settings.integrations.runtimeSnapshot", {
-										count: runtimeStatuses.length,
-									})}
+						<p>
+							{runtimeQuery.isPending
+								? t("settings.integrations.runtimeLoading")
+								: runtimeQuery.isError
+									? t("settings.integrations.runtimeLoadError")
+									: t("settings.integrations.runtimeSnapshot", {
+											count: runtimeStatuses.length,
+										})}
+						</p>
+						<p className="mt-1.5 text-[10px]">
+							{t("settings.integrations.processLifecycleHint")}
+						</p>
 					</div>
 				) : null}
 			</div>
@@ -963,6 +998,10 @@ export function McpIntegrationsPanel({
 							},
 						);
 						const reportedStatus = runtimeView.status;
+						const tools = listMcpIntegrationTools(
+							integration,
+							reportedStatus?.tools ?? [],
+						);
 						const removing = busyAction === `remove:${definition.id}`;
 						const confirmingRemove =
 							removeTarget?.definition.id === definition.id;
@@ -1094,23 +1133,81 @@ export function McpIntegrationsPanel({
 											{t("settings.integrations.notReportedHint")}
 										</p>
 									) : null}
-									{reportedStatus?.tools &&
-									reportedStatus.tools.length > 0 ? (
-										<div className="mt-2 flex flex-wrap gap-1.5">
-											{reportedStatus.tools.slice(0, 8).map((tool) => (
-												<Badge
-													key={tool.name}
-													variant="outline"
-													className="font-mono text-[9px]"
-												>
-													{tool.name}
-												</Badge>
-											))}
-											{reportedStatus.tools.length > 8 ? (
-												<Badge variant="ghost">
-													+{reportedStatus.tools.length - 8}
-												</Badge>
-											) : null}
+									{tools.length > 0 ? (
+										<div className="mt-3 space-y-2 border-t border-border/50 pt-3">
+											<div>
+												<p className="text-[11px] font-medium text-foreground">
+													{t("settings.integrations.toolPoliciesTitle")}
+												</p>
+												<p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+													{t("settings.integrations.toolPoliciesHint")}
+												</p>
+											</div>
+											{tools.map((toolName) => {
+												const decision = getMcpToolPolicyDecision(
+													integration,
+													toolName,
+												);
+												const policyBusy = busyAction?.startsWith(
+													`policy:${definition.id}:${toolName}:`,
+												);
+												return (
+													<div
+														key={toolName}
+														className="flex flex-col gap-2 rounded-md border border-border/40 bg-background px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between"
+													>
+														<span
+															className="min-w-0 truncate font-mono text-[10px] text-foreground"
+															title={toolName}
+														>
+															{toolName}
+														</span>
+														<ToggleGroup
+															type="single"
+															value={decision}
+															onValueChange={(value) => {
+																if (
+																	value === "ask" ||
+																	value === "allow" ||
+																	value === "deny"
+																) {
+																	void handleToolPolicy(
+																		integration,
+																		toolName,
+																		value,
+																	);
+																}
+															}}
+															disabled={busyAction !== null}
+															className="grid shrink-0 grid-cols-3 gap-1"
+														>
+															{(["ask", "allow", "deny"] as const).map(
+																(value) => (
+																	<ToggleGroupItem
+																		key={value}
+																		value={value}
+																		className="h-7 min-w-14 rounded-md border border-border/50 px-2 text-[10px]"
+																		aria-label={t(
+																			`settings.integrations.toolPolicy.${value}`,
+																		)}
+																	>
+																		{policyBusy &&
+																		busyAction?.endsWith(
+																			`:${value}`,
+																		) ? (
+																			<Loader2 className="size-3 animate-spin" />
+																		) : (
+																			t(
+																				`settings.integrations.toolPolicy.${value}`,
+																			)
+																		)}
+																	</ToggleGroupItem>
+																),
+															)}
+														</ToggleGroup>
+													</div>
+												);
+											})}
 										</div>
 									) : null}
 									{reportedStatus?.boundedError ? (

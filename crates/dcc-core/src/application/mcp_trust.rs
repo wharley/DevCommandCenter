@@ -205,6 +205,28 @@ mod tests {
         async fn delete_mcp_binding(&self, _id: &McpBindingId) -> Result<()> {
             Ok(())
         }
+
+        async fn save_mcp_tool_policy(
+            &self,
+            _policy: &crate::domain::mcp::McpToolPolicy,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn list_mcp_tool_policies(
+            &self,
+            _definition_id: Option<&McpDefinitionId>,
+        ) -> Result<Vec<crate::domain::mcp::McpToolPolicy>> {
+            Ok(Vec::new())
+        }
+
+        async fn delete_mcp_tool_policy(
+            &self,
+            _definition_id: &McpDefinitionId,
+            _tool_name: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
     }
 
     fn placeholder_fingerprint() -> McpTrustFingerprint {

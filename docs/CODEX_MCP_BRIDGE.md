@@ -114,6 +114,14 @@ of the current provider-neutral permission contract. Turn cleanup, item
 completion, process exit, and explicit cancellation clear pending requests as
 denied or cancelled rather than allowing a tool to proceed.
 
+Persisted per-definition tool policies are evaluated only after the same
+owned-server, active-item, thread, and tool correlation succeeds. Unknown tools
+default to `Ask`. An explicit `Allow` or `Deny` answers the one-call elicitation
+directly and emits bounded request/resolution metadata without arguments,
+results, provider form content, or random server names. Policies are captured
+when the provider session starts, so changing one marks an existing session as
+requiring restart instead of claiming a live update.
+
 ## Conformance gate
 
 The repository now compiles the production `CodexAppServerAdapter` against the

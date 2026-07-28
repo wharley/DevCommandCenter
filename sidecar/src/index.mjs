@@ -12,6 +12,7 @@ import {
 	failedDccMcpStatus,
 	normalizeDccMcpServers,
 	readDccMcpStatus,
+	resolveDccMcpToolPolicy,
 } from "./mcp-config.mjs";
 import { handlePermissionRequest } from "./permission-bridge.mjs";
 
@@ -296,6 +297,44 @@ async function runTurn(payload, state) {
 						behavior: "deny",
 						message:
 							"The client captured your proposed plan. Stop here and wait for the user's next turn.",
+					};
+				}
+				const mcpPolicy = resolveDccMcpToolPolicy(
+					state.mcpProjection,
+					toolName,
+				);
+				if (
+					mcpPolicy?.decision === "allow" ||
+					mcpPolicy?.decision === "deny"
+				) {
+					const requestId =
+						typeof options?.toolUseID === "string" &&
+						options.toolUseID.trim().length > 0
+							? options.toolUseID.trim()
+							: randomUUID();
+					emit({
+						type: "dcc_permission_request",
+						request_id: requestId,
+						tool_name: mcpPolicy.toolName,
+						title: "DCC MCP tool policy",
+						description:
+							"An explicit DCC policy was applied without exposing tool arguments.",
+						command: null,
+						file: null,
+					});
+					emit({
+						type: "dcc_permission_resolved",
+						request_id: requestId,
+						behavior: mcpPolicy.decision,
+					});
+				}
+				if (mcpPolicy?.decision === "allow") {
+					return { behavior: "allow", updatedInput: input };
+				}
+				if (mcpPolicy?.decision === "deny") {
+					return {
+						behavior: "deny",
+						message: "DCC tool policy denied this MCP tool.",
 					};
 				}
 				return handlePermissionRequest(toolName, input, options, state, emit);

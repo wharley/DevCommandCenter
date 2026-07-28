@@ -1104,6 +1104,7 @@
       "runtimeLoading": "Reading the ephemeral runtime snapshot for this session…",
       "runtimeLoadError": "The runtime snapshot could not be read. Persisted settings remain available below.",
       "runtimeSnapshot": "{{count}} runtime status report(s) for this exact session.",
+      "processLifecycleHint": "MCP servers currently share the provider-session lifecycle. DCC will not present a separate stop control until the runtime exposes an independently owned process handle.",
       "runtimeStatus": "Session runtime",
       "runtime": {
         "disabled": "Disabled",
@@ -1123,6 +1124,14 @@
       "restartHint": "This configuration is newer than the session's last confirmed runtime state. Recreate or restart the provider session to apply it.",
       "notReportedHint": "The provider has not reported a state for this integration in the selected session. DCC does not infer success or failure.",
       "checkedAt": "Last checked {{date}}",
+      "toolPoliciesTitle": "Tool policies",
+      "toolPoliciesHint": "Unknown tools default to Ask. Allow bypasses the prompt and Deny blocks execution; changes apply after recreating or restarting the provider session.",
+      "toolPolicy": {
+        "ask": "Ask",
+        "allow": "Allow",
+        "deny": "Deny"
+      },
+      "toolPolicyUpdated": "Tool policy saved. The selected session may require restart.",
       "orphanRuntimeTitle": "{{count}} removed integration(s) still reported by this session",
       "orphanRuntimeHint": "The persisted definition is gone, but the provider session still reports an attachment. Restart or recreate that session to detach it.",
       "add": "Add integration",
@@ -1205,6 +1214,7 @@
         "activate": "The integration could not be enabled.",
         "disable": "The integration could not be disabled.",
         "remove": "The integration could not be removed.",
+        "toolPolicy": "The tool policy could not be saved.",
         "loading": "Integrations could not be loaded."
       }
     },

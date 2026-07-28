@@ -18,8 +18,8 @@ pub use mcp::{
     McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
     McpDefinitionOwnership, McpErrorCategory, McpImportSource, McpImportSourceKind, McpProbeReport,
     McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretBinding, McpSecretReferenceId,
-    McpSecretTarget, McpToolSummary, McpTransport, McpTransportKind, McpTrust, McpTrustDecision,
-    McpTrustFingerprint, McpValidationError,
+    McpSecretTarget, McpToolPolicy, McpToolPolicyDecision, McpToolSummary, McpTransport,
+    McpTransportKind, McpTrust, McpTrustDecision, McpTrustFingerprint, McpValidationError,
 };
 pub use mcp_conformance::{
     McpConformanceCheck, McpConformanceEvidence, McpConformanceEvidenceError,

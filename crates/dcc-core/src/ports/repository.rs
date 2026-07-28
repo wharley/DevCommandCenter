@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use crate::{
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
-        mcp::{McpBinding, McpBindingId, McpDefinition, McpDefinitionId},
+        mcp::{McpBinding, McpBindingId, McpDefinition, McpDefinitionId, McpToolPolicy},
         project::{Project, ProjectId},
         repository::{Repository, RepositoryId},
         session::{Session, SessionEventRecord, SessionId},
@@ -78,6 +78,17 @@ pub trait McpRepo: Send + Sync {
         definition_id: Option<&McpDefinitionId>,
     ) -> Result<Vec<McpBinding>>;
     async fn delete_mcp_binding(&self, id: &McpBindingId) -> Result<()>;
+
+    async fn save_mcp_tool_policy(&self, policy: &McpToolPolicy) -> Result<()>;
+    async fn list_mcp_tool_policies(
+        &self,
+        definition_id: Option<&McpDefinitionId>,
+    ) -> Result<Vec<McpToolPolicy>>;
+    async fn delete_mcp_tool_policy(
+        &self,
+        definition_id: &McpDefinitionId,
+        tool_name: &str,
+    ) -> Result<()>;
 }
 
 #[async_trait]

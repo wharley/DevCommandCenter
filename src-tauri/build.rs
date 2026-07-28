@@ -17,8 +17,9 @@ use dcc_core::{
             McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
             McpDefinitionOwnership, McpErrorCategory, McpImportSource, McpImportSourceKind,
             McpProbeReport, McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretBinding,
-            McpSecretReferenceId, McpSecretTarget, McpToolSummary, McpTransport, McpTransportKind,
-            McpTrust, McpTrustDecision, McpTrustFingerprint,
+            McpSecretReferenceId, McpSecretTarget, McpToolPolicy, McpToolPolicyDecision,
+            McpToolSummary, McpTransport, McpTransportKind, McpTrust, McpTrustDecision,
+            McpTrustFingerprint,
         },
         project::ProjectId,
         provider::{McpSupportLevel, ProviderCatalog, ProviderDescriptor},
@@ -77,7 +78,7 @@ use dcc_tauri::commands::{
         ActivateMcpIntegrationOutput, CreateMcpIntegrationInput, CreateMcpIntegrationOutput,
         DisableMcpIntegrationInput, DisableMcpIntegrationOutput, ListMcpIntegrationsOutput,
         McpCredentialInput, McpIntegrationRecord, RemoveMcpIntegrationInput,
-        RemoveMcpIntegrationOutput,
+        RemoveMcpIntegrationOutput, SetMcpToolPolicyInput, SetMcpToolPolicyOutput,
     },
     provider_commands::{
         ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
@@ -254,6 +255,7 @@ struct McpMethods {
     activate_mcp_integration: String,
     disable_mcp_integration: String,
     remove_mcp_integration: String,
+    set_mcp_tool_policy: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -500,6 +502,8 @@ fn main() {
         .typ::<ProviderAccountUsageInput>()
         .typ::<ProviderAccountUsageOutput>()
         .typ::<McpIntegrationRecord>()
+        .typ::<McpToolPolicy>()
+        .typ::<McpToolPolicyDecision>()
         .typ::<ListMcpIntegrationsOutput>()
         .typ::<McpCredentialInput>()
         .typ::<CreateMcpIntegrationInput>()
@@ -510,6 +514,8 @@ fn main() {
         .typ::<DisableMcpIntegrationOutput>()
         .typ::<RemoveMcpIntegrationInput>()
         .typ::<RemoveMcpIntegrationOutput>()
+        .typ::<SetMcpToolPolicyInput>()
+        .typ::<SetMcpToolPolicyOutput>()
         .typ::<StartThreadInput>()
         .typ::<StartThreadOutput>()
         .typ::<SendTurnInput>()
@@ -690,6 +696,7 @@ fn main() {
             activate_mcp_integration: "activate_mcp_integration".to_string(),
             disable_mcp_integration: "disable_mcp_integration".to_string(),
             remove_mcp_integration: "remove_mcp_integration".to_string(),
+            set_mcp_tool_policy: "set_mcp_tool_policy".to_string(),
         },
     );
 

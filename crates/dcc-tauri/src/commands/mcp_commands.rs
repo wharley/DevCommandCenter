@@ -6,7 +6,8 @@ use dcc_core::{
     domain::mcp::{
         McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
         McpDefinitionOwnership, McpSecretBinding, McpSecretReferenceId, McpSecretTarget,
-        McpTransport, McpTrust, McpTrustDecision, McpTrustFingerprint,
+        McpToolPolicy, McpToolPolicyDecision, McpTransport, McpTrust, McpTrustDecision,
+        McpTrustFingerprint,
     },
     ports::{CredentialStore, McpRepo, SecretValue},
     CoreError,
@@ -25,6 +26,7 @@ use crate::state::WorkspaceCommandState;
 pub struct McpIntegrationRecord {
     pub definition: McpDefinition,
     pub bindings: Vec<McpBinding>,
+    pub tool_policies: Vec<McpToolPolicy>,
     pub credential_count: usize,
 }
 
@@ -94,6 +96,20 @@ pub struct RemoveMcpIntegrationOutput {
     pub deleted_credentials: usize,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SetMcpToolPolicyInput {
+    pub definition_id: McpDefinitionId,
+    pub tool_name: String,
+    pub decision: McpToolPolicyDecision,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SetMcpToolPolicyOutput {
+    pub integration: McpIntegrationRecord,
+}
+
 #[derive(Debug, Error)]
 enum McpCommandError {
     #[error("{0}")]
@@ -158,6 +174,17 @@ pub async fn remove_mcp_integration(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+pub async fn set_mcp_tool_policy(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetMcpToolPolicyInput,
+) -> Result<SetMcpToolPolicyOutput, String> {
+    let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    set_tool_policy(&repo, input)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 async fn list_integrations<R>(repo: &R) -> McpCommandResult<ListMcpIntegrationsOutput>
 where
     R: McpRepo + Sync + ?Sized,
@@ -170,6 +197,13 @@ where
             .or_default()
             .push(binding);
     }
+    let mut policies_by_definition = HashMap::<McpDefinitionId, Vec<McpToolPolicy>>::new();
+    for policy in repo.list_mcp_tool_policies(None).await? {
+        policies_by_definition
+            .entry(policy.definition_id.clone())
+            .or_default()
+            .push(policy);
+    }
 
     let integrations = definitions
         .into_iter()
@@ -177,7 +211,10 @@ where
             let bindings = bindings_by_definition
                 .remove(&definition.id)
                 .unwrap_or_default();
-            integration_record(definition, bindings)
+            let policies = policies_by_definition
+                .remove(&definition.id)
+                .unwrap_or_default();
+            integration_record(definition, bindings, policies)
         })
         .collect();
     Ok(ListMcpIntegrationsOutput { integrations })
@@ -259,7 +296,7 @@ where
     }
 
     Ok(CreateMcpIntegrationOutput {
-        integration: integration_record(definition, vec![binding]),
+        integration: integration_record(definition, vec![binding], Vec::new()),
     })
 }
 
@@ -272,8 +309,11 @@ where
 {
     let output = activate_mcp_definition(repo, input).await?;
     let bindings = repo.list_mcp_bindings(Some(&output.definition.id)).await?;
+    let policies = repo
+        .list_mcp_tool_policies(Some(&output.definition.id))
+        .await?;
     Ok(ActivateMcpIntegrationOutput {
-        integration: integration_record(output.definition, bindings),
+        integration: integration_record(output.definition, bindings, policies),
         changed: output.changed,
     })
 }
@@ -296,8 +336,9 @@ where
         repo.save_mcp_definition(&definition).await?;
     }
     let bindings = repo.list_mcp_bindings(Some(&definition.id)).await?;
+    let policies = repo.list_mcp_tool_policies(Some(&definition.id)).await?;
     Ok(DisableMcpIntegrationOutput {
-        integration: integration_record(definition, bindings),
+        integration: integration_record(definition, bindings, policies),
         changed,
     })
 }
@@ -343,14 +384,58 @@ where
     })
 }
 
+async fn set_tool_policy<R>(
+    repo: &R,
+    input: SetMcpToolPolicyInput,
+) -> McpCommandResult<SetMcpToolPolicyOutput>
+where
+    R: McpRepo + Sync + ?Sized,
+{
+    let mut definition = repo
+        .get_mcp_definition(&input.definition_id)
+        .await?
+        .ok_or_else(|| CoreError::InvalidInput("MCP definition was not found".to_string()))?;
+    let tool_name = input.tool_name.trim().to_string();
+    let policy = McpToolPolicy {
+        definition_id: definition.id.clone(),
+        tool_name: tool_name.clone(),
+        decision: input.decision,
+        updated_at: Utc::now().to_rfc3339(),
+    };
+    policy
+        .validate()
+        .map_err(|error| CoreError::InvalidInput(error.to_string()))?;
+
+    definition.updated_at = policy.updated_at.clone();
+    repo.save_mcp_definition(&definition).await?;
+
+    match policy.decision {
+        McpToolPolicyDecision::Ask => {
+            repo.delete_mcp_tool_policy(&definition.id, &tool_name)
+                .await?;
+        }
+        McpToolPolicyDecision::Allow | McpToolPolicyDecision::Deny => {
+            repo.save_mcp_tool_policy(&policy).await?;
+        }
+    }
+
+    let bindings = repo.list_mcp_bindings(Some(&definition.id)).await?;
+    let policies = repo.list_mcp_tool_policies(Some(&definition.id)).await?;
+    Ok(SetMcpToolPolicyOutput {
+        integration: integration_record(definition, bindings, policies),
+    })
+}
+
 fn integration_record(
     definition: McpDefinition,
     bindings: Vec<McpBinding>,
+    tool_policies: Vec<McpToolPolicy>,
 ) -> McpIntegrationRecord {
     let credential_count = definition.secret_refs.len();
     McpIntegrationRecord {
         definition,
         bindings,
+        tool_policies,
         credential_count,
     }
 }
@@ -539,6 +624,44 @@ mod tests {
                 .expect("disable again")
                 .changed
         );
+    }
+
+    #[tokio::test]
+    async fn tool_policy_defaults_to_ask_and_persists_only_explicit_overrides() {
+        let repo = repo();
+        let credentials = TestCredentialStore::default();
+        let created = create_integration(&repo, &credentials, create_input("token"))
+            .await
+            .expect("create integration");
+        let definition_id = created.integration.definition.id;
+
+        let denied = set_tool_policy(
+            &repo,
+            SetMcpToolPolicyInput {
+                definition_id: definition_id.clone(),
+                tool_name: "payments.refund".to_string(),
+                decision: McpToolPolicyDecision::Deny,
+            },
+        )
+        .await
+        .expect("deny tool");
+        assert_eq!(denied.integration.tool_policies.len(), 1);
+        assert_eq!(
+            denied.integration.tool_policies[0].decision,
+            McpToolPolicyDecision::Deny
+        );
+
+        let reset = set_tool_policy(
+            &repo,
+            SetMcpToolPolicyInput {
+                definition_id,
+                tool_name: "payments.refund".to_string(),
+                decision: McpToolPolicyDecision::Ask,
+            },
+        )
+        .await
+        .expect("reset tool");
+        assert!(reset.integration.tool_policies.is_empty());
     }
 
     #[tokio::test]

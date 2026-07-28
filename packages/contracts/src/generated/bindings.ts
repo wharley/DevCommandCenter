@@ -4,7 +4,7 @@
 /* Constants */
 export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","startDelegation":"start_delegation"} as const;
 
-export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration"} as const;
+export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
 
 export const PROVIDER_METHODS = {"listProviders":"list_providers","providerAccountUsage":"provider_account_usage"} as const;
 
@@ -719,6 +719,7 @@ export type McpImportSourceKind = "providerConfig" | "projectFile" | "other";
 export type McpIntegrationRecord = {
 	definition: McpDefinition,
 	bindings: McpBinding[],
+	toolPolicies: McpToolPolicy[],
 	credentialCount: number,
 };
 
@@ -779,6 +780,15 @@ export type McpSupportLevel =
 { verifiedBridge: {
 	evidence: McpConformanceEvidence,
 } };
+
+export type McpToolPolicy = {
+	definitionId: McpDefinitionId,
+	toolName: string,
+	decision: McpToolPolicyDecision,
+	updatedAt: string,
+};
+
+export type McpToolPolicyDecision = "ask" | "allow" | "deny";
 
 export type McpToolSummary = {
 	name: string,
@@ -1134,6 +1144,16 @@ export type SessionSearchResult = {
 };
 
 export type SessionState = "draft" | "active" | "completed" | "aborted";
+
+export type SetMcpToolPolicyInput = {
+	definitionId: McpDefinitionId,
+	toolName: string,
+	decision: McpToolPolicyDecision,
+};
+
+export type SetMcpToolPolicyOutput = {
+	integration: McpIntegrationRecord,
+};
 
 export type StartDelegationInput = {
 	delegationId: DelegationId,

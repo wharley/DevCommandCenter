@@ -715,6 +715,9 @@ Updated July 28, 2026:
     deletion controls.
   - [x] Add evidence-backed compatibility, live per-session runtime snapshots,
     and restart-required views.
-  - [ ] Add DCC-owned process controls and per-tool policy views.
+  - [x] Add discovered-tool inventory plus persisted Ask, Allow, and Deny
+    policies enforced by the Claude and Codex bridges.
+  - [ ] Add DCC-owned process controls after the runtime exposes independently
+    owned MCP process handles.
 - [ ] Real-service smoke tests.
 - [ ] Additional provider bridges.

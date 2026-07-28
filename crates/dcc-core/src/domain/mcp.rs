@@ -471,6 +471,36 @@ pub struct McpToolSummary {
     pub name: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum McpToolPolicyDecision {
+    #[default]
+    Ask,
+    Allow,
+    Deny,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolPolicy {
+    pub definition_id: McpDefinitionId,
+    pub tool_name: String,
+    pub decision: McpToolPolicyDecision,
+    pub updated_at: String,
+}
+
+impl McpToolPolicy {
+    pub fn validate(&self) -> Result<(), McpValidationError> {
+        validate_non_empty("definitionId", &self.definition_id.0)?;
+        validate_non_empty("toolName", &self.tool_name)?;
+        validate_non_empty("updatedAt", &self.updated_at)?;
+        if !is_valid_tool_name(&self.tool_name) {
+            return Err(McpValidationError::InvalidToolName);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct McpProbeReport {
@@ -996,5 +1026,19 @@ mod tests {
             report.validate(),
             Err(McpValidationError::DuplicateToolName)
         );
+    }
+
+    #[test]
+    fn tool_policies_accept_only_bounded_protocol_tool_names() {
+        let mut policy = McpToolPolicy {
+            definition_id: McpDefinitionId("figma".to_string()),
+            tool_name: "get_design".to_string(),
+            decision: McpToolPolicyDecision::Deny,
+            updated_at: "2026-07-28T00:00:00Z".to_string(),
+        };
+        assert_eq!(policy.validate(), Ok(()));
+
+        policy.tool_name = "unsafe tool".to_string();
+        assert_eq!(policy.validate(), Err(McpValidationError::InvalidToolName));
     }
 }
