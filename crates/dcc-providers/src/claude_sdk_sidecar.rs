@@ -605,6 +605,10 @@ impl Provider for ClaudeSdkSidecarAdapter {
         self.capabilities.clone()
     }
 
+    fn accepts_dcc_mcp_projection(&self) -> bool {
+        true
+    }
+
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {
         self.start_runtime(cfg).await
     }

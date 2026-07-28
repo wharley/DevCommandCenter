@@ -12,11 +12,11 @@ use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
 use dcc_core::{
-    application::StartThreadInput,
+    application::{resolve_session_mcp_servers, ResolveSessionMcpInput, StartThreadInput},
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
         project::{Project, ProjectId},
-        provider::{ProviderEvent, SessionHandle},
+        provider::{ProviderEvent, ProviderId, SessionHandle},
         repository::{Repository, RepositoryId},
         session::{
             Session, SessionEventKind, SessionEventRecord, SessionId, SessionSearchResult, TurnId,
@@ -27,13 +27,17 @@ use dcc_core::{
         workspace_bundle::WorkspaceBundleState,
     },
     ports::{
-        DelegationRepo, EventBus, Input, ProjectRepo, Provider, ProviderRuntimeConfig,
-        RepositoryRepo, SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo,
-        WorkspaceBundleRepo, WorkspaceRepo,
+        DelegationRepo, EventBus, Input, ProjectRepo, Provider, ProviderMcpServerConfig,
+        ProviderRuntimeConfig, RepositoryRepo, SessionConfig, SessionEventRepo, SessionRepo,
+        ThreadRepo, WorkspaceBundleRepo, WorkspaceRepo,
     },
     Result,
 };
-use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
+use dcc_infra::{
+    credential_store::SystemCredentialStore,
+    db::{SqliteSessionRepo, SqliteWorkspaceRepo},
+    mcp_db::SqliteMcpRepo,
+};
 
 use crate::delivery_failure::{
     WorkspaceDeliveryFailureOperation, WorkspaceDeliveryFailureSnapshot,
@@ -364,6 +368,9 @@ impl SessionCommandState {
             .await?;
         let provider_runtime =
             self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
+        let mcp_servers = self
+            .resolve_provider_mcp_servers(session, provider.as_ref())
+            .await?;
 
         let handle = provider
             .prepare_session(SessionConfig {
@@ -373,7 +380,7 @@ impl SessionCommandState {
                 working_directory: Some(working_directory),
                 additional_working_directories,
                 provider_runtime: Some(provider_runtime),
-                mcp_servers: Vec::new(),
+                mcp_servers,
             })
             .await?;
 
@@ -393,6 +400,31 @@ impl SessionCommandState {
         self.spawn_provider_bridge(session.id.clone(), binding, provider)
             .await;
         Ok(())
+    }
+
+    async fn resolve_provider_mcp_servers(
+        &self,
+        session: &Session,
+        provider: &dyn Provider,
+    ) -> Result<Vec<ProviderMcpServerConfig>> {
+        // Only adapters with an explicit DCC projection path may receive
+        // registry definitions. Native provider configuration remains
+        // independent for every other provider.
+        if !provider.accepts_dcc_mcp_projection() {
+            return Ok(Vec::new());
+        }
+
+        let repo = SqliteMcpRepo::open(&self.db_path)?;
+        resolve_session_mcp_servers(
+            &repo,
+            &SystemCredentialStore::default(),
+            &ResolveSessionMcpInput {
+                provider_id: ProviderId(session.provider_id.clone()),
+                project_id: session.project_id.clone(),
+                session_id: session.id.clone(),
+            },
+        )
+        .await
     }
 
     pub async fn validate_start_thread_scope(&self, input: &StartThreadInput) -> Result<()> {

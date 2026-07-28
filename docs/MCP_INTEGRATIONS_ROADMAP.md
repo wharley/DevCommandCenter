@@ -688,7 +688,7 @@ Updated July 28, 2026:
   - [x] Shared provider conformance harness.
 - [ ] Claude bridge.
   - [x] Add the backend-only projection channel and documented Agent SDK injection.
-  - [ ] Resolve eligible session, project, and global bindings with OS credentials.
+  - [x] Resolve eligible session, project, and global bindings with OS credentials.
   - [ ] Normalize SDK status into DCC runtime status.
   - [ ] Verify approval, lifecycle, and both fixture transports through the harness.
 - [ ] Codex bridge.

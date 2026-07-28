@@ -49,6 +49,9 @@ pub enum ProviderMcpTransport {
     Stdio {
         executable: String,
         args: Vec<String>,
+        /// Optional server working directory. Provider adapters must reject
+        /// this explicitly when their documented transport cannot represent it.
+        cwd: Option<String>,
         environment: Vec<ProviderMcpSecret>,
     },
     Http {
@@ -185,6 +188,14 @@ pub enum Input {
 pub trait Provider: Send + Sync {
     fn id(&self) -> ProviderId;
     fn capabilities(&self) -> Capabilities;
+    /// Whether this exact adapter implementation accepts backend-only DCC MCP
+    /// projections through `SessionConfig`.
+    ///
+    /// This is an internal wiring contract, not conformance evidence or a
+    /// renderer-facing compatibility claim.
+    fn accepts_dcc_mcp_projection(&self) -> bool {
+        false
+    }
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle>;
     async fn send_input(&self, handle: &SessionHandle, input: Input) -> Result<()>;
     fn stream_events(&self, handle: &SessionHandle) -> BoxStream<'static, Result<ProviderEvent>>;

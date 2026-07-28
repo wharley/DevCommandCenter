@@ -9,6 +9,7 @@ pub mod mcp_conformance;
 pub mod mcp_trust;
 pub mod probe_mcp;
 pub mod record_plan_handoff;
+pub mod resolve_session_mcp;
 pub mod restore_session;
 pub mod resume_session;
 pub mod send_turn;
@@ -36,6 +37,7 @@ pub use probe_mcp::probe_mcp_definition;
 pub use record_plan_handoff::{
     record_plan_handoff, RecordPlanHandoffInput, RecordPlanHandoffOutput,
 };
+pub use resolve_session_mcp::{resolve_session_mcp_servers, ResolveSessionMcpInput};
 pub use restore_session::{restore_session, RestoreSessionInput, RestoreSessionOutput};
 pub use resume_session::{resume_session, ResumeSessionInput, ResumeSessionOutput};
 pub use send_turn::{

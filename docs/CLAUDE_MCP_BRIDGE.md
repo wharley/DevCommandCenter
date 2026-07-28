@@ -4,9 +4,10 @@ The Claude bridge projects DCC-owned external MCP definitions into the Claude
 Agent SDK without editing Claude configuration files or treating inherited
 servers as DCC-owned.
 
-This document describes the first Phase 3 slice. The production registry and
-scope resolver are intentionally not connected yet, so Claude remains
-`nativeConfig` rather than `verifiedBridge`.
+The production session path now resolves DCC registry scopes and OS-backed
+credentials for adapters that explicitly declare a projection channel. Claude
+is currently the only such adapter. It remains `nativeConfig` rather than
+`verifiedBridge` until the complete provider conformance suite passes.
 
 ## Documented SDK path
 
@@ -32,19 +33,23 @@ backend. The field is skipped by Serde and Specta, and credential values use
 
 When a Claude sidecar starts:
 
-1. Rust validates a bounded list of DCC-owned server projections.
-2. Only names under the `dcc-` namespace are accepted, then the Claude wire
+1. Rust selects enabled and trusted definitions through applicable DCC
+   bindings, then resolves their opaque references through the OS credential
+   store.
+2. The provider adapter validates a bounded list of DCC-owned server
+   projections.
+3. Only names under the `dcc-` namespace are accepted, then the Claude wire
    name receives a random per-session namespace to avoid colliding with an
    inherited user entry.
-3. stdio arguments, environment names, URLs, header names, and credential
+4. stdio arguments, environment names, URLs, header names, and credential
    values are checked for invalid or injection-shaped input.
-4. Rust serializes one `configure_mcp` NDJSON message directly to the sidecar's
+5. Rust serializes one `configure_mcp` NDJSON message directly to the sidecar's
    stdin.
-5. The serialized byte allocation is redacted from `Debug` and zeroized after
+6. The serialized byte allocation is redacted from `Debug` and zeroized after
    the write.
-6. The sidecar validates the message again and retains it only in process
+7. The sidecar validates the message again and retains it only in process
    memory for the provider session.
-7. Each Agent SDK query receives the DCC projection through `mcpServers` while
+8. Each Agent SDK query receives the DCC projection through `mcpServers` while
    `settingSources: ["user", "project", "local"]` continues loading
    provider-owned sources independently.
 
@@ -54,6 +59,30 @@ replace, or inspect inherited servers.
 stdio and HTTP projections set `alwaysLoad: true`. This gives the bounded
 startup window documented by the SDK and makes connection status observable
 before DCC treats tools as available.
+
+## Scope and credential resolution
+
+The resolver is provider-neutral. A definition is selected once when at least
+one enabled binding applies to the current session, its project, or the global
+scope. Provider exclusions are binding-local: an excluded binding does not
+cancel a second applicable binding for the same definition.
+
+Selected definitions must also be enabled and have a trust decision matching
+their current security fingerprint. Disabled and untrusted definitions are
+omitted. A binding that references an unavailable definition is treated as
+registry corruption and fails closed.
+
+Credential references are resolved only in the backend through
+`SystemCredentialStore`. Missing, locked, corrupt, or otherwise unavailable
+credentials abort provider attachment with the fixed message
+`MCP credential resolution failed`; definition names, credential references,
+and secret values are not included. Resolved values remain in `SecretValue`
+and `ProviderMcpSecret` allocations, both redacted from `Debug` and zeroized on
+drop.
+
+Adapter routing is an explicit code contract, not provider-name inference or a
+runtime trial. Providers without a declared DCC projection channel receive an
+empty projection and continue using only their native configuration.
 
 ## Status and failure boundary
 
@@ -77,25 +106,21 @@ conformance suite before the bridge is promoted.
 
 ## Deliberate limitations of this slice
 
-- The SQLite definition/binding resolver does not populate `SessionConfig`
-  yet; production sessions currently send an empty DCC projection.
-- Credential resolution from the OS store is not connected to session attach
-  yet.
 - The sidecar status event is not yet normalized into DCC runtime status.
 - The installed SDK stdio configuration has no per-server `cwd` field. The
-  resolver must reject definitions that require one unless a documented
-  provider mechanism is added.
+  Claude adapter rejects definitions that require one instead of silently
+  dropping it.
 - Disable/remove refresh behavior and the full Claude conformance adapter
   remain pending.
 - No `verifiedBridge` evidence is emitted by this slice.
 
-These boundaries let the next cut connect registry scopes and credentials
-without weakening provider ownership or exposing secrets.
+These boundaries keep the bridge unadvertised as verified while the next cut
+connects normalized runtime status.
 
 ## Offline checks
 
 ```sh
-cargo test -p dcc-core -p dcc-providers
+cargo test -p dcc-core -p dcc-providers -p dcc-tauri
 node --test sidecar/src/mcp-config.test.mjs
 node --check sidecar/src/index.mjs
 ```

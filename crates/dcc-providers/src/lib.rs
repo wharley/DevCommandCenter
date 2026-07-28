@@ -102,6 +102,21 @@ mod tests {
     }
 
     #[test]
+    fn only_adapters_with_an_explicit_projection_channel_accept_dcc_mcp() {
+        assert!(provider_runtime("claude_code")
+            .expect("Claude provider")
+            .accepts_dcc_mcp_projection());
+        for provider_id in PROVIDER_IDS
+            .into_iter()
+            .filter(|provider_id| *provider_id != "claude_code")
+        {
+            assert!(!provider_runtime(provider_id)
+                .expect("registered provider")
+                .accepts_dcc_mcp_projection());
+        }
+    }
+
+    #[test]
     fn stable_preset_does_not_claim_mcp_attachment() {
         assert_eq!(
             stable_cli_capabilities().mcp_support,

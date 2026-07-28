@@ -115,12 +115,14 @@ fn encode_mcp_configuration(servers: &[ProviderMcpServerConfig]) -> Result<Sensi
             ProviderMcpTransport::Stdio {
                 executable,
                 args,
+                cwd,
                 environment,
             } => {
                 if executable.trim().is_empty()
                     || executable.contains('\0')
                     || args.len() > MAX_ARGUMENT_COUNT
                     || args.iter().any(|argument| argument.contains('\0'))
+                    || cwd.is_some()
                 {
                     return Err(invalid_configuration());
                 }
@@ -257,6 +259,7 @@ mod tests {
                 transport: ProviderMcpTransport::Stdio {
                     executable: "/absolute/fixture".to_string(),
                     args: vec!["stdio".to_string()],
+                    cwd: None,
                     environment: vec![secret("FIXTURE_TOKEN", "secret-canary")],
                 },
             },
@@ -297,6 +300,7 @@ mod tests {
             transport: ProviderMcpTransport::Stdio {
                 executable: "/absolute/fixture".to_string(),
                 args: Vec::new(),
+                cwd: None,
                 environment: vec![secret(
                     "PRIVATE_KEY",
                     "-----BEGIN KEY-----\nabc\n-----END KEY-----",
@@ -328,6 +332,22 @@ mod tests {
             },
         };
         assert!(encode_mcp_configuration(&[injected_header]).is_err());
+    }
+
+    #[test]
+    fn rejects_stdio_working_directory_the_installed_sdk_cannot_represent() {
+        let server = ProviderMcpServerConfig {
+            definition_id: McpDefinitionId("fixture".to_string()),
+            server_name: "dcc-fixture".to_string(),
+            transport: ProviderMcpTransport::Stdio {
+                executable: "/absolute/fixture".to_string(),
+                args: Vec::new(),
+                cwd: Some("/workspace".to_string()),
+                environment: Vec::new(),
+            },
+        };
+
+        assert!(encode_mcp_configuration(&[server]).is_err());
     }
 
     #[tokio::test]
