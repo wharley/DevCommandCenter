@@ -313,6 +313,9 @@ remain intact. A DCC gateway can be evaluated later for servers that allow it.
 
 ### Deliverable 1.3 — Credential store
 
+Implementation policy:
+[MCP credential store](./MCP_CREDENTIAL_STORE.md).
+
 - Introduce a cross-platform credential-store port with macOS, Windows, and
   Linux implementations or an explicitly documented Linux fallback.
 - Store opaque IDs in SQLite.
@@ -662,7 +665,7 @@ Updated July 28, 2026:
 - [ ] Domain and credential-store foundation.
   - [x] Provider-neutral definitions, transports, bindings, trust, and runtime contracts.
   - [x] SQLite repositories and idempotent startup migrations.
-  - [ ] OS credential-store port and platform adapters.
+  - [x] OS credential-store port and platform adapters.
   - [ ] Fingerprint computation and activation service.
 - [ ] Offline fixture and conformance harness.
 - [ ] Claude bridge.

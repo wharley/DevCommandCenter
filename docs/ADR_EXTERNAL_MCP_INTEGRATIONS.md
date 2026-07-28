@@ -122,5 +122,6 @@ Before the first public release:
 ## Related documents
 
 - [External MCP integrations roadmap](./MCP_INTEGRATIONS_ROADMAP.md)
+- [MCP credential store policy](./MCP_CREDENTIAL_STORE.md)
 - [Integrated terminal and scope plan](./PLANO_TERMINAL_INTEGRADO_E_ESCOPO.md)
 - [Security policy](../SECURITY.md)
