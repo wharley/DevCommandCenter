@@ -15,6 +15,10 @@ pub mod gemini;
 #[allow(dead_code)]
 mod gemini_mcp;
 pub mod grok_acp;
+// The exact-version ACP projection remains inert until the installed Grok
+// runtime proves structured MCP ownership in permission and tool-call events.
+#[allow(dead_code)]
+mod grok_mcp;
 pub mod headless_cli;
 
 use std::{

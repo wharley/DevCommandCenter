@@ -156,3 +156,10 @@ projection builder but no production projection channel. Gemini ACP permission
 requests do not currently identify the MCP server and exact tool
 structurally, so DCC cannot mediate per-tool policy without heuristics. Gemini
 therefore remains `Unsupported` and is not eligible for conformance evidence.
+
+The [Grok MCP bridge](GROK_MCP_BRIDGE.md) also has an inert, exact-version ACP
+projection builder. Grok `0.2.101` reports HTTP/SSE MCP capability through ACP,
+but the exact installed runtime has not proven the structured ownership and
+reverse permission round trip required by DCC. Grok also imports provider-owned
+MCP configuration, so catalog presence cannot establish ownership. Grok
+therefore remains `Unsupported` and is not eligible for conformance evidence.

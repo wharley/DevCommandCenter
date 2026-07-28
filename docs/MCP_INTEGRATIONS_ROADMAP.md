@@ -750,5 +750,20 @@ Updated July 28, 2026:
     - [ ] Wire the production adapter only after an exact runtime exposes
       correlatable ownership, then run the shared authenticated conformance
       gate during final end-to-end validation.
-  - [ ] Grok.
+  - [ ] Grok through ACP.
+    - [x] Add an exact-version and capability-gated ACP v1 projection builder
+      for stdio and Streamable HTTP without modifying Grok-owned or imported
+      configuration.
+    - [x] Add random per-session wire names, redacted one-shot credentials,
+      and in-memory definition and policy ownership maps.
+    - [x] Confirm `grok-build 0.2.101` identity and MCP capabilities through a
+      no-model ACP initialization.
+    - [x] Document coexistence with Grok-, Cursor-, Claude-, plugin-, and
+      gateway-owned MCPs; catalog presence is not ownership evidence.
+    - [x] Document the activation blocker: the exact installed runtime has not
+      proven structured ownership through permission events, and the current
+      DCC adapter cannot answer reverse permission requests.
+    - [ ] Wire the production adapter only after the exact runtime proves that
+      boundary, then run the shared authenticated conformance gate during
+      final end-to-end validation.
   - [ ] Droid.
