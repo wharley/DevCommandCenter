@@ -358,6 +358,9 @@ Add a small, repository-owned MCP fixture with deterministic behavior:
 
 ### Deliverable 2.2 — Probe service
 
+Implementation policy:
+[MCP probe service](./MCP_PROBE.md).
+
 - Initialize and list tools for both MVP transports.
 - Bound startup, response size, stderr, and shutdown.
 - Normalize protocol, auth, executable, timeout, and transport failures.
@@ -675,7 +678,7 @@ Updated July 28, 2026:
   - [x] Fingerprint computation and activation service.
 - [ ] Offline fixture and conformance harness.
   - [x] Deterministic offline fixture for stdio and Streamable HTTP.
-  - [ ] Bounded probe service for both transports.
+  - [x] Bounded probe service for both transports.
   - [ ] Shared provider conformance harness.
 - [ ] Claude bridge.
 - [ ] Codex bridge.

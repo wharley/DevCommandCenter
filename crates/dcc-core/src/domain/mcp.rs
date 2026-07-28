@@ -9,6 +9,8 @@ use url::Url;
 use super::{project::ProjectId, provider::ProviderId, session::SessionId};
 
 const MAX_RUNTIME_ERROR_CHARS: usize = 512;
+const MAX_MCP_TOOL_COUNT: usize = 256;
+const MAX_MCP_TOOL_NAME_CHARS: usize = 128;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(transparent)]
@@ -471,6 +473,39 @@ pub struct McpToolSummary {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct McpProbeReport {
+    pub definition_id: McpDefinitionId,
+    pub transport: McpTransportKind,
+    pub protocol_version: String,
+    pub tools: Vec<McpToolSummary>,
+    pub checked_at: String,
+}
+
+impl McpProbeReport {
+    pub fn validate(&self) -> Result<(), McpValidationError> {
+        validate_non_empty("definitionId", &self.definition_id.0)?;
+        validate_non_empty("protocolVersion", &self.protocol_version)?;
+        validate_non_empty("checkedAt", &self.checked_at)?;
+        if self.tools.len() > MAX_MCP_TOOL_COUNT {
+            return Err(McpValidationError::TooManyTools);
+        }
+
+        let mut tools = HashSet::new();
+        for tool in &self.tools {
+            validate_non_empty("tools.name", &tool.name)?;
+            if !is_valid_tool_name(&tool.name) {
+                return Err(McpValidationError::InvalidToolName);
+            }
+            if !tools.insert(&tool.name) {
+                return Err(McpValidationError::DuplicateToolName);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct McpRuntimeStatus {
     pub definition_id: McpDefinitionId,
     pub provider_id: ProviderId,
@@ -490,10 +525,16 @@ impl McpRuntimeStatus {
         validate_non_empty("providerVersion", &self.provider_version)?;
         validate_non_empty("sessionId", &self.session_id.0)?;
         validate_non_empty("checkedAt", &self.checked_at)?;
+        if self.tools.len() > MAX_MCP_TOOL_COUNT {
+            return Err(McpValidationError::TooManyTools);
+        }
 
         let mut tools = HashSet::new();
         for tool in &self.tools {
             validate_non_empty("tools.name", &tool.name)?;
+            if !is_valid_tool_name(&tool.name) {
+                return Err(McpValidationError::InvalidToolName);
+            }
             if !tools.insert(&tool.name) {
                 return Err(McpValidationError::DuplicateToolName);
             }
@@ -546,8 +587,12 @@ pub enum McpValidationError {
     SecretTargetTransportMismatch,
     #[error("a provider may only be excluded once")]
     DuplicateProviderExclusion,
-    #[error("a tool may only appear once in runtime status")]
+    #[error("an MCP tool may only appear once")]
     DuplicateToolName,
+    #[error("MCP tool count exceeds the domain size limit")]
+    TooManyTools,
+    #[error("MCP tool name is invalid")]
+    InvalidToolName,
     #[error("failed runtime status must include a bounded error")]
     MissingRuntimeError,
     #[error("runtime error is only valid for failed or unsupported status")]
@@ -664,6 +709,14 @@ fn is_valid_http_header_name(value: &str) -> bool {
                         | b'~'
                 )
         })
+}
+
+fn is_valid_tool_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().count() <= MAX_MCP_TOOL_NAME_CHARS
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
 #[cfg(test)]
@@ -920,5 +973,28 @@ mod tests {
             "provider rejected attachment",
         ));
         assert_eq!(status.validate(), Ok(()));
+    }
+
+    #[test]
+    fn probe_reports_require_unique_tools() {
+        let report = McpProbeReport {
+            definition_id: McpDefinitionId("figma".to_string()),
+            transport: McpTransportKind::Http,
+            protocol_version: "2025-11-25".to_string(),
+            tools: vec![
+                McpToolSummary {
+                    name: "inspect".to_string(),
+                },
+                McpToolSummary {
+                    name: "inspect".to_string(),
+                },
+            ],
+            checked_at: "2026-07-28T00:00:00Z".to_string(),
+        };
+
+        assert_eq!(
+            report.validate(),
+            Err(McpValidationError::DuplicateToolName)
+        );
     }
 }

@@ -627,6 +627,14 @@ export type McpImportSource = {
 
 export type McpImportSourceKind = "providerConfig" | "projectFile" | "other";
 
+export type McpProbeReport = {
+	definitionId: McpDefinitionId,
+	transport: McpTransportKind,
+	protocolVersion: string,
+	tools: McpToolSummary[],
+	checkedAt: string,
+};
+
 export type McpRuntimeError = {
 	category: McpErrorCategory,
 	message: string,

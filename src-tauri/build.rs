@@ -16,7 +16,7 @@ use dcc_core::{
         mcp::{
             McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
             McpDefinitionOwnership, McpErrorCategory, McpImportSource, McpImportSourceKind,
-            McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretBinding,
+            McpProbeReport, McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretBinding,
             McpSecretReferenceId, McpSecretTarget, McpToolSummary, McpTransport, McpTransportKind,
             McpTrust, McpTrustDecision, McpTrustFingerprint,
         },
@@ -312,6 +312,7 @@ fn main() {
         .typ::<McpErrorCategory>()
         .typ::<McpRuntimeError>()
         .typ::<McpToolSummary>()
+        .typ::<McpProbeReport>()
         .typ::<McpRuntimeStatus>()
         .typ::<SessionState>()
         .typ::<TurnState>()

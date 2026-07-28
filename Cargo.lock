@@ -907,6 +907,7 @@ dependencies = [
  "futures",
  "keyring",
  "libc",
+ "reqwest 0.11.27",
  "rusqlite",
  "serde",
  "serde_json",
@@ -921,6 +922,8 @@ name = "dcc-mcp-fixture"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "dcc-core",
+ "dcc-infra",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",

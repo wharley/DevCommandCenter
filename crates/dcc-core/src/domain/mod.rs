@@ -15,7 +15,7 @@ pub use delegation::{
 };
 pub use mcp::{
     McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
-    McpDefinitionOwnership, McpErrorCategory, McpImportSource, McpImportSourceKind,
+    McpDefinitionOwnership, McpErrorCategory, McpImportSource, McpImportSourceKind, McpProbeReport,
     McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretBinding, McpSecretReferenceId,
     McpSecretTarget, McpToolSummary, McpTransport, McpTransportKind, McpTrust, McpTrustDecision,
     McpTrustFingerprint, McpValidationError,

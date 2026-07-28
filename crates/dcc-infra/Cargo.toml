@@ -16,9 +16,10 @@ futures = "0.3"
 keyring = { version = "=4.1.5", default-features = false, features = ["v1"] }
 libc = "0.2"
 rusqlite = { version = "0.32", features = ["bundled"] }
+reqwest = { version = "0.11", features = ["json"] }
 serde = "1"
 serde_json = "1"
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
 toml = "0.8"
 uuid = { version = "1", features = ["v4"] }
 
