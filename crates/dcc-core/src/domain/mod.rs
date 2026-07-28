@@ -1,5 +1,6 @@
 pub mod delegation;
 pub mod mcp;
+pub mod mcp_conformance;
 pub mod model_registry;
 pub mod project;
 pub mod provider;
@@ -19,6 +20,11 @@ pub use mcp::{
     McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretBinding, McpSecretReferenceId,
     McpSecretTarget, McpToolSummary, McpTransport, McpTransportKind, McpTrust, McpTrustDecision,
     McpTrustFingerprint, McpValidationError,
+};
+pub use mcp_conformance::{
+    McpConformanceCheck, McpConformanceEvidence, McpConformanceEvidenceError,
+    McpConformanceTransportEvidence, MCP_CONFORMANCE_ECHO_TOOL, MCP_CONFORMANCE_FIXTURE_VERSION,
+    MCP_CONFORMANCE_MUTATING_TOOL, MCP_CONFORMANCE_SUITE_VERSION, REQUIRED_MCP_CONFORMANCE_CHECKS,
 };
 pub use project::{Project, ProjectId};
 pub use provider::{

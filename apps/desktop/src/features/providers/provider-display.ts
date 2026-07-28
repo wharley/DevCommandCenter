@@ -8,6 +8,11 @@ export type ProviderChip = {
 	variant: "default" | "secondary" | "destructive" | "outline" | "ghost" | "link" | "success" | "warn";
 };
 
+function hasVerifiedMcpBridge(provider: ProviderDescriptor): boolean {
+	const support = provider.capabilities.mcpSupport;
+	return typeof support === "object" && support !== null && "verifiedBridge" in support;
+}
+
 export function summarizeProviderHealth(
 	health: ProviderDescriptor["health"],
 ): { label: string; variant: ProviderChip["variant"] } {
@@ -36,7 +41,7 @@ export function summarizeProviderHealth(
 
 export function getProviderChips(provider: ProviderDescriptor): ProviderChip[] {
 	const mcpChip: ProviderChip[] =
-		provider.capabilities.mcpSupport === "verifiedBridge"
+		hasVerifiedMcpBridge(provider)
 			? [{ label: "mcp verified", variant: "success" }]
 			: provider.capabilities.mcpSupport === "nativeConfig"
 				? [{ label: "mcp native config", variant: "outline" }]

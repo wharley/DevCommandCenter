@@ -489,6 +489,10 @@ fn tool_error(id: Value, message: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use dcc_core::domain::mcp_conformance::{
+        MCP_CONFORMANCE_ECHO_TOOL, MCP_CONFORMANCE_MUTATING_TOOL,
+    };
+
     use super::*;
 
     fn request(id: i64, method: &str, params: Value) -> Value {
@@ -576,6 +580,23 @@ mod tests {
             .expect("mutation tool");
         assert_eq!(mutation["annotations"]["readOnlyHint"], false);
         assert_eq!(mutation["annotations"]["openWorldHint"], false);
+    }
+
+    #[tokio::test]
+    async fn conformance_contract_names_are_present_in_the_offline_fixture() {
+        let response = FixtureServer::new()
+            .handle_message(request(1, "tools/list", json!({})))
+            .await
+            .expect("tools response");
+        let names = response["result"]["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&MCP_CONFORMANCE_ECHO_TOOL));
+        assert!(names.contains(&MCP_CONFORMANCE_MUTATING_TOOL));
     }
 
     #[tokio::test]

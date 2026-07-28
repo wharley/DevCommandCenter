@@ -30,11 +30,36 @@ describe("provider MCP support display", () => {
 	});
 
 	it("reserves the verified label for a conformance-tested DCC bridge", () => {
+		const checks = [
+			"fixtureAttached",
+			"sessionCreated",
+			"toolsVisible",
+			"readOnlyCall",
+			"mutatingApproval",
+			"disabled",
+			"removed",
+			"serverUnavailableFailsClosed",
+			"credentialUnavailableFailsClosed",
+		] as const;
 		const verified = {
 			...provider("codex"),
 			capabilities: {
 				...provider("codex").capabilities,
-				mcpSupport: "verifiedBridge" as const,
+				mcpSupport: {
+					verifiedBridge: {
+						evidence: {
+							providerId: "codex",
+							providerVersion: "1.2.3",
+							suiteVersion: "dcc-mcp-provider-conformance-v1",
+							fixtureVersion: "dcc-mcp-fixture-v1",
+							transports: [
+								{ transport: "stdio" as const, checks: [...checks] },
+								{ transport: "http" as const, checks: [...checks] },
+							],
+							verifiedAt: "2026-07-28T12:00:00Z",
+						},
+					},
+				},
 			},
 		};
 

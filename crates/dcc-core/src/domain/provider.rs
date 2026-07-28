@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use super::mcp_conformance::{McpConformanceEvidence, McpConformanceEvidenceError};
 use super::session::SessionId;
 use crate::ports::provider::{
     ProviderPermissionRequest, ProviderUserInputAnswer, ProviderUserInputQuestion,
@@ -29,8 +30,36 @@ pub enum McpSupportLevel {
     /// verify attachment, lifecycle, permissions, or tool visibility.
     NativeConfig,
     /// DCC owns a tested bridge that attaches servers and verifies tools
-    /// end-to-end through the provider adapter.
-    VerifiedBridge,
+    /// end-to-end through the provider adapter. The evidence value can only be
+    /// produced by a successful run of the shared conformance harness.
+    VerifiedBridge { evidence: McpConformanceEvidence },
+}
+
+impl McpSupportLevel {
+    pub fn verified_evidence(&self) -> Option<&McpConformanceEvidence> {
+        match self {
+            Self::VerifiedBridge { evidence } => Some(evidence),
+            Self::Unsupported | Self::NativeConfig => None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), McpConformanceEvidenceError> {
+        if let Self::VerifiedBridge { evidence } = self {
+            evidence.validate()?;
+        }
+        Ok(())
+    }
+
+    pub fn validate_for_provider(
+        &self,
+        provider_id: &ProviderId,
+        provider_version: &str,
+    ) -> Result<(), McpConformanceEvidenceError> {
+        if let Self::VerifiedBridge { evidence } = self {
+            evidence.validate_for_provider(provider_id, provider_version)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

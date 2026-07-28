@@ -368,6 +368,9 @@ Implementation policy:
 
 ### Deliverable 2.3 — Provider conformance suite
 
+Implementation contract:
+[MCP provider conformance](./MCP_PROVIDER_CONFORMANCE.md).
+
 Every verified bridge runs the same behavioral tests:
 
 1. attach the fixture;
@@ -667,19 +670,19 @@ Updated July 28, 2026:
 - [x] Current support and market-pattern review.
 - [x] Roadmap and open source trust model.
 - [x] Phase 0 ADR.
-- [ ] Capability truth cleanup.
+- [x] Capability truth cleanup.
   - [x] Replace the inherited MCP boolean with explicit support levels.
   - [x] Audit and downgrade current provider claims.
-  - [ ] Add provider-version evidence to bridge compatibility results.
+  - [x] Add provider-version evidence to bridge compatibility results.
 - [x] Domain and credential-store foundation.
   - [x] Provider-neutral definitions, transports, bindings, trust, and runtime contracts.
   - [x] SQLite repositories and idempotent startup migrations.
   - [x] OS credential-store port and platform adapters.
   - [x] Fingerprint computation and activation service.
-- [ ] Offline fixture and conformance harness.
+- [x] Offline fixture and conformance harness.
   - [x] Deterministic offline fixture for stdio and Streamable HTTP.
   - [x] Bounded probe service for both transports.
-  - [ ] Shared provider conformance harness.
+  - [x] Shared provider conformance harness.
 - [ ] Claude bridge.
 - [ ] Codex bridge.
 - [ ] MVP integrations UI.

@@ -597,6 +597,30 @@ export type McpBindingId = string;
 
 export type McpBindingScope = { type: "session"; sessionId: SessionId } | { type: "project"; projectId: ProjectId } | { type: "global" };
 
+export type McpConformanceCheck = "fixtureAttached" | "sessionCreated" | "toolsVisible" | "readOnlyCall" | "mutatingApproval" | "disabled" | "removed" | "serverUnavailableFailsClosed" | "credentialUnavailableFailsClosed";
+
+/**
+ *  Versioned, secret-free evidence produced only after the shared provider
+ *  conformance harness completes successfully.
+ *
+ *  Fields are deliberately private. Provider adapters can consume persisted
+ *  evidence, but normal Rust code cannot mint a `verifiedBridge` attestation by
+ *  assembling a struct and bypassing the harness.
+ */
+export type McpConformanceEvidence = {
+	providerId: ProviderId,
+	providerVersion: string,
+	suiteVersion: string,
+	fixtureVersion: string,
+	transports: McpConformanceTransportEvidence[],
+	verifiedAt: string,
+};
+
+export type McpConformanceTransportEvidence = {
+	transport: McpTransportKind,
+	checks: McpConformanceCheck[],
+};
+
 export type McpDefinition = {
 	id: McpDefinitionId,
 	displayName: string,
@@ -678,9 +702,12 @@ export type McpSupportLevel =
 "nativeConfig" |
 /**
  *  DCC owns a tested bridge that attaches servers and verifies tools
- *  end-to-end through the provider adapter.
+ *  end-to-end through the provider adapter. The evidence value can only be
+ *  produced by a successful run of the shared conformance harness.
  */
-"verifiedBridge";
+{ verifiedBridge: {
+	evidence: McpConformanceEvidence,
+} };
 
 export type McpToolSummary = {
 	name: string,
