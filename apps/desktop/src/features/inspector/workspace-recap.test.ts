@@ -51,6 +51,24 @@ describe("buildWorkspaceRecap", () => {
 		});
 	});
 
+	it("surfaces marker-free conflict edits as ready for explicit completion", () => {
+		const recap = buildWorkspaceRecap(
+			input({
+				commitMode: "complete-merge",
+				conflictCount: 3,
+			}),
+		);
+
+		expect(recap.state).toBe("ready_to_deliver");
+		expect(recap.messageKey).toBe("conflictResolutionReady");
+		expect(recap.action?.labelKey).toBe("commit.modes.complete-merge.idle");
+		expect(recap.signals[0]).toMatchObject({
+			id: "workspace",
+			state: "pending",
+			messageKey: "conflictResolutionReady",
+		});
+	});
+
 	it("treats raw conflict count as conflicts even without the commit mode", () => {
 		const recap = buildWorkspaceRecap(
 			input({ commitMode: "commit-and-push", conflictCount: 1, changedFilesCount: 5 }),

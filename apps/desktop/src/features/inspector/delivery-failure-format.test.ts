@@ -37,6 +37,9 @@ describe("buildDeliveryFailureComposerPrompt", () => {
 		expect(prompt).toContain("Attempt token: attempt-1");
 		expect(prompt).toContain("Commit: abc123");
 		expect(prompt).toContain("Do not bypass Git hooks, force-push, or merge automatically.");
+		expect(prompt).toContain(
+			"do not stage, commit, or push. Leave the explicit completion checkpoint to the DCC Inspector.",
+		);
 		expect(prompt).toContain("- src/main.ts");
 	});
 

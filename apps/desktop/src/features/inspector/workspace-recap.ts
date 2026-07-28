@@ -156,6 +156,16 @@ function sectionAction(
 function buildWorkspaceRecapPrimary(
 	input: WorkspaceRecapInput,
 ): Omit<WorkspaceRecap, "signals"> {
+	if (input.commitMode === "complete-merge") {
+		return {
+			state: "ready_to_deliver",
+			messageKey: "conflictResolutionReady",
+			params: { count: input.conflictCount },
+			tone: "ready",
+			action: gitAction("complete-merge"),
+		};
+	}
+
 	if (input.commitMode === "resolve-conflicts" || input.conflictCount > 0) {
 		return {
 			state: "blocked",
@@ -659,7 +669,15 @@ function buildWorkspaceDeliverySignals(
 	const checksRequired = Boolean(policy?.requireBeforeMergeChecks);
 	const signals: WorkspaceDeliverySignal[] = [];
 
-	if (input.conflictCount > 0 || input.commitMode === "resolve-conflicts") {
+	if (input.commitMode === "complete-merge") {
+		signals.push({
+			id: "workspace",
+			state: "pending",
+			messageKey: "conflictResolutionReady",
+			params: { count: input.conflictCount },
+			required: false,
+		});
+	} else if (input.conflictCount > 0 || input.commitMode === "resolve-conflicts") {
 		signals.push({
 			id: "workspace",
 			state: "blocked",

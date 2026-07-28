@@ -16,6 +16,7 @@ export function buildDeliveryFailureComposerPrompt(
 		"Investigate this DCC delivery failure using the captured context below.",
 		"Verify the current workspace state before editing or retrying. If the context is stale, stop and explain what changed.",
 		"Do not bypass Git hooks, force-push, or merge automatically.",
+		"If a merge is in progress, resolve every text conflict in the worktree and run relevant validations, but do not stage, commit, or push. Leave the explicit completion checkpoint to the DCC Inspector.",
 		"",
 		`Operation: ${failure.operation}`,
 		`Classification: ${failure.classification}`,
@@ -44,7 +45,7 @@ export function buildDeliveryFailureComposerPrompt(
 			? `- … ${failure.changedFiles.length - changedFiles.length} more path(s) omitted from agent context`
 			: null,
 		"",
-		"Explain the likely root cause, make only safe and scoped changes if needed, and tell me exactly which delivery step should be retried.",
+		"Explain the likely root cause, make only safe and scoped changes if needed, and finish with a brief status. The Inspector will offer the next safe action.",
 	].filter((part): part is string => part !== null);
 
 	return parts.join("\n");

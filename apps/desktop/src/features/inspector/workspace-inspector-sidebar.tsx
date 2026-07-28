@@ -81,19 +81,24 @@ import {
 	workspaceChangeRequestCreate,
 	workspaceChangeRequestMerge,
 	workspaceGitCommitPush,
+	workspaceGitCompleteMerge,
+	workspaceGitConflictState,
 	listGitTrackedFiles,
 	workspaceApplyDelegationWorktree,
 	workspaceGitStageAll,
+	workspaceGitMarkConflictResolved,
 	workspaceGitPush,
 	workspaceProjectAutomationConfig,
 	workspaceRunProjectTasks,
 	workspaceRemoveDelegationWorktree,
 	workspaceGitSyncBase,
+	workspaceGitValidationConfig,
 	workspaceRunSetup,
 } from "@/lib/workspace-api";
 import { loadWorkspaceSessions } from "@/lib/session-api";
 import { buildMissionSpecFilename } from "@/features/composer/WorkspaceComposer.logic";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
+import { isMergeConflictResolutionReady } from "@/features/merge/merge-conflict-readiness";
 import {
 	useWorkspaceGitBranchDiff,
 	WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY,
@@ -245,7 +250,8 @@ export type WorkspaceInspectorMode = "git" | "code";
 const SESSION_DOCK_TABS: InspectorTab[] = ["activity", "context", "spec"];
 const INSPECTOR_MODES: WorkspaceInspectorMode[] = ["git", "code"];
 const EMPTY_CODE_FILE_PATHS: string[] = [];
-type PendingGitConfirmation = "merge" | "sync-base" | null;
+const WORKSPACE_CONFLICT_STATE_QUERY_KEY = "workspaceGitConflictState";
+type PendingGitConfirmation = "merge" | "complete-merge" | "sync-base" | null;
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
 	return (
@@ -804,6 +810,8 @@ function inspectorActionTitle(
 			return t("inspector.gitAction.fixCi");
 		case "resolve-conflicts":
 			return t("inspector.gitAction.resolveConflicts");
+		case "complete-merge":
+			return t("inspector.gitAction.completeMerge");
 		case "merge":
 			return t("inspector.gitAction.merge");
 		case "merged":
@@ -1770,6 +1778,27 @@ export function WorkspaceInspectorSidebar({
 	);
 
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
+	const conflictStateQuery = useQuery({
+		queryKey: [
+			WORKSPACE_CONFLICT_STATE_QUERY_KEY,
+			workspacePath?.trim() ?? "",
+		],
+		queryFn: () =>
+			workspaceGitConflictState({
+				workspaceRoot: workspacePath?.trim() ?? "",
+			}),
+		enabled: Boolean(
+			workspacePath?.trim() &&
+				gitStatusQuery.data?.mergeInProgress &&
+				(gitStatusQuery.data.conflictCount ?? 0) > 0,
+		),
+		staleTime: 0,
+		refetchInterval: 5_000,
+		refetchOnWindowFocus: true,
+	});
+	const conflictResolutionReady = isMergeConflictResolutionReady(
+		conflictStateQuery.data,
+	);
 	const automationConfigQuery = useQuery({
 		queryKey: [WORKSPACE_AUTOMATION_QUERY_KEY, workspacePath?.trim() ?? ""],
 		queryFn: () => workspaceProjectAutomationConfig({ workspaceRoot: workspacePath?.trim() ?? "" }),
@@ -1915,7 +1944,9 @@ export function WorkspaceInspectorSidebar({
 	const commitMode = resolveCommitMode({
 		branch: currentBranch,
 		prStatus,
-		gitStatus: gitStatusQuery.data ?? null,
+		gitStatus: gitStatusQuery.data
+			? { ...gitStatusQuery.data, conflictResolutionReady }
+			: null,
 	});
 	const committedVsBaseCount = reviewBranchDiffQuery.data?.changes.length ?? 0;
 	const suppressEmptyCreatePr =
@@ -2021,6 +2052,10 @@ export function WorkspaceInspectorSidebar({
 
 		if (commitMode === "merge") {
 			setPendingGitConfirmation("merge");
+			return;
+		}
+		if (commitMode === "complete-merge") {
+			setPendingGitConfirmation("complete-merge");
 			return;
 		}
 
@@ -2191,6 +2226,91 @@ export function WorkspaceInspectorSidebar({
 		workspacePath,
 		workspaceName,
 	]);
+
+	const executeConfirmedCompleteMerge = useCallback(async () => {
+		const root = workspacePath?.trim();
+		if (!root) {
+			toast.error("No workspace path");
+			return;
+		}
+
+		const loadingToast = toast.loading(
+			t("inspector.gitConfirmation.completeMergeLoading"),
+		);
+		setIsGitActionInProgress(true);
+		try {
+			const conflictState = await workspaceGitConflictState({
+				workspaceRoot: root,
+			});
+			if (
+				conflictState.operation !== "merge" ||
+				(conflictState.conflicts.length > 0 &&
+					!isMergeConflictResolutionReady(conflictState))
+			) {
+				throw new Error(
+					t("inspector.gitConfirmation.completeMergeStateChanged"),
+				);
+			}
+
+			for (const conflict of conflictState.conflicts) {
+				await workspaceGitMarkConflictResolved({
+					workspaceRoot: root,
+					relativePath: conflict.path,
+					delete: false,
+				});
+			}
+
+			const validation = await workspaceGitValidationConfig({
+				workspaceRoot: root,
+			});
+			const result = await workspaceGitCompleteMerge({
+				workspaceRoot: root,
+				forgeLogin: selectedForgeLogin,
+				validationConfigHash: validation.configHash,
+				validationCommands: validation.commands,
+			});
+			if (!result.completed) {
+				throw new Error(
+					t("inspector.gitConfirmation.completeMergeValidationFailed"),
+				);
+			}
+
+			toast.success(t("inspector.gitConfirmation.completeMergeSuccess"), {
+				id: loadingToast,
+			});
+		} catch (error) {
+			const message = getInspectorActionErrorMessage(error, t);
+			toast.error(
+				t("inspector.gitConfirmation.completeMergeFailed", { message }),
+				{ id: loadingToast },
+			);
+		} finally {
+			setIsGitActionInProgress(false);
+			await Promise.allSettled([
+				queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_CONFLICT_STATE_QUERY_KEY, root],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_PIPELINE_QUERY_KEY, root],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_DELIVERY_FAILURE_QUERY_KEY, root],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: [WORKSPACE_REVIEW_STATE_QUERY_KEY, root],
+				}),
+			]);
+		}
+	}, [queryClient, selectedForgeLogin, t, workspacePath]);
 
 	const executeConfirmedMerge = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -3023,6 +3143,15 @@ export function WorkspaceInspectorSidebar({
 								(gitStatusQuery.isFetching && !gitStatusQuery.isPending)
 							}
 							onCommit={handleInspectorCommit}
+							onReviewConflictResolution={() => {
+								const root = workspacePath?.trim();
+								if (!root) return;
+								onOpenMergeConflictResolver({
+									workspaceRoot: root,
+									baseBranch: prStatus?.baseBranch ?? null,
+									forgeLogin: selectedForgeLogin,
+								});
+							}}
 							onContinueWorkspace={handleContinueWorkspace}
 							isContinuingWorkspace={isContinuingWorkspace}
 							onRetrySetup={handleRetrySetup}
@@ -4089,18 +4218,27 @@ export function WorkspaceInspectorSidebar({
 								? t("inspector.gitConfirmation.mergeTitle", {
 										requestLabel: forgeContext.requestLabel,
 									})
-								: t("inspector.gitConfirmation.syncTitle")}
+								: pendingGitConfirmation === "complete-merge"
+									? t("inspector.gitConfirmation.completeMergeTitle")
+									: t("inspector.gitConfirmation.syncTitle")}
 						</DialogTitle>
 						<DialogDescription className="text-[12px] leading-relaxed">
 							{pendingGitConfirmation === "merge"
 								? t("inspector.gitConfirmation.mergeDescription", {
 										requestLabel: forgeContext.requestLabel,
 									})
-								: prStatus?.baseBranch
-									? t("inspector.gitConfirmation.syncDescriptionWithBase", {
-											baseBranch: prStatus.baseBranch,
+								: pendingGitConfirmation === "complete-merge"
+									? t("inspector.gitConfirmation.completeMergeDescription", {
+											count:
+												conflictStateQuery.data?.conflicts.length ??
+												gitStatusQuery.data?.conflictCount ??
+												0,
 										})
-									: t("inspector.gitConfirmation.syncDescription")}
+									: prStatus?.baseBranch
+										? t("inspector.gitConfirmation.syncDescriptionWithBase", {
+												baseBranch: prStatus.baseBranch,
+											})
+										: t("inspector.gitConfirmation.syncDescription")}
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
@@ -4114,12 +4252,14 @@ export function WorkspaceInspectorSidebar({
 						<Button
 							type="button"
 							variant={pendingGitConfirmation === "merge" ? "destructive" : "default"}
-							disabled={isSyncingBase}
+							disabled={isSyncingBase || isGitActionInProgress}
 							onClick={() => {
 								const action = pendingGitConfirmation;
 								setPendingGitConfirmation(null);
 								if (action === "merge") {
 									void executeConfirmedMerge();
+								} else if (action === "complete-merge") {
+									void executeConfirmedCompleteMerge();
 								} else if (action === "sync-base") {
 									void executeConfirmedSyncBase();
 								}
@@ -4129,7 +4269,9 @@ export function WorkspaceInspectorSidebar({
 								? t("inspector.gitConfirmation.mergeConfirm", {
 										requestLabel: forgeContext.requestLabel,
 									})
-								: t("inspector.gitConfirmation.syncConfirm")}
+								: pendingGitConfirmation === "complete-merge"
+									? t("inspector.gitConfirmation.completeMergeConfirm")
+									: t("inspector.gitConfirmation.syncConfirm")}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

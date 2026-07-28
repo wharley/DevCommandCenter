@@ -288,18 +288,28 @@
     "gitConfirmation": {
       "mergeTitle": "Merge {{requestLabel}}?",
       "mergeDescription": "This will merge the current {{requestLabel}}. Use it only when you are sure the task is ready.",
+      "completeMergeTitle": "Complete this merge?",
+      "completeMergeDescription_one": "Stage {{count}} resolved file, run configured checks, create the merge commit, and push.",
+      "completeMergeDescription_other": "Stage {{count}} resolved files, run configured checks, create the merge commit, and push.",
       "syncTitle": "Update worktree with base?",
       "syncDescription": "This will fetch the latest base and merge it into this worktree. If there is a conflict, the worktree will be left in merge resolution state.",
       "syncDescriptionWithBase": "This will fetch the latest base and merge {{baseBranch}} into this worktree. If there is a conflict, the worktree will be left in merge resolution state.",
       "cancel": "Cancel",
       "mergeConfirm": "Merge {{requestLabel}}",
+      "completeMergeConfirm": "Complete and push",
+      "reviewResolution": "Review resolution",
       "syncConfirm": "Update worktree",
       "syncLoading": "Updating worktree with base...",
       "mergeLoading": "Merging {{requestLabel}}...",
+      "completeMergeLoading": "Completing merge...",
       "syncSuccess": "Worktree updated with {{baseRef}}",
       "syncAlreadyCurrent": "Worktree was already current with {{baseRef}}",
       "syncFailed": "Update failed: {{message}}",
       "mergeSuccess": "{{requestLabel}} merged",
+      "completeMergeSuccess": "Merge completed and pushed",
+      "completeMergeValidationFailed": "A configured check failed. Review the merge resolution before trying again.",
+      "completeMergeStateChanged": "The merge resolution changed. Review it before completing.",
+      "completeMergeFailed": "Could not complete the merge: {{message}}",
       "mergeFailed": "Failed to merge {{requestLabel}}: {{message}}"
     },
     "pipeline": {
@@ -459,6 +469,8 @@
       "signalDetails": "Show evaluated delivery signals",
       "required": "Project rule",
       "signals": {
+        "conflictResolutionReady_one": "{{count}} conflict edit is ready to complete.",
+        "conflictResolutionReady_other": "{{count}} conflict edits are ready to complete.",
         "workspaceConflicts_one": "{{count}} local conflict is unresolved.",
         "workspaceConflicts_other": "{{count}} local conflicts are unresolved.",
         "workspaceChanges_one": "{{count}} local file still needs a commit.",
@@ -505,6 +517,8 @@
         "activity": "View activity"
       },
       "messages": {
+        "conflictResolutionReady_one": "{{count}} conflict edit is ready — review or complete the merge.",
+        "conflictResolutionReady_other": "{{count}} conflict edits are ready — review or complete the merge.",
         "conflicts_one": "{{count}} conflict is blocking this branch — resolve it before anything else.",
         "conflicts_other": "{{count}} conflicts are blocking this branch — resolve them before anything else.",
         "merged": "{{pr}} merged. Continue this workspace from the updated base.",
@@ -755,6 +769,7 @@
       "push": "Push",
       "fixCi": "Fix CI",
       "resolveConflicts": "Resolve conflicts",
+      "completeMerge": "Complete merge",
       "merge": "Merge",
       "merged": "Merged",
       "closed": "Closed",
@@ -1331,6 +1346,12 @@
         "idle": "Resolve",
         "busy": "Resolving...",
         "done": "Resolved",
+        "error": "Retry"
+      },
+      "complete-merge": {
+        "idle": "Complete",
+        "busy": "Completing...",
+        "done": "Completed",
         "error": "Retry"
       },
       "merge": {

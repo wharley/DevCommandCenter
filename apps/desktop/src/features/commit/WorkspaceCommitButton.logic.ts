@@ -5,6 +5,7 @@ export type CommitMode =
 	| "push"
 	| "fix"
 	| "resolve-conflicts"
+	| "complete-merge"
 	| "merge"
 	| "merged"
 	| "closed";
@@ -19,6 +20,7 @@ export type WorkspaceGitStatusSummary = {
 	behindOfRemoteCount?: number;
 	conflictCount?: number;
 	mergeInProgress?: boolean;
+	conflictResolutionReady?: boolean;
 };
 
 export type WorkspacePrStatusSummary = {
@@ -55,7 +57,16 @@ function resolveFromContext(context: CommitModeContext) {
 	const prBelongsHere = !prHeadBranch || prHeadBranch === context.branch;
 	const prState = prBelongsHere ? context.prStatus?.state?.toLowerCase() : undefined;
 
-	if (context.gitStatus?.mergeInProgress || (context.gitStatus?.conflictCount ?? 0) > 0) {
+	if (context.gitStatus?.mergeInProgress) {
+		if (
+			(context.gitStatus.conflictCount ?? 0) === 0 ||
+			context.gitStatus.conflictResolutionReady
+		) {
+			return "complete-merge" as const;
+		}
+		return "resolve-conflicts" as const;
+	}
+	if ((context.gitStatus?.conflictCount ?? 0) > 0) {
 		return "resolve-conflicts" as const;
 	}
 	if (prState === "merged") return "merged" as const;
@@ -122,6 +133,7 @@ export function commitTranslationKey(mode: CommitMode, status: CommitButtonStatu
 		case "push":
 		case "fix":
 		case "resolve-conflicts":
+		case "complete-merge":
 		case "merge":
 			return `commit.modes.${mode}.${status}`;
 		default:
@@ -136,6 +148,8 @@ export function commitModeClassName(mode: CommitMode) {
 			return "bg-[var(--workspace-pr-closed-accent)] text-white hover:bg-[var(--workspace-pr-closed-accent)]";
 		case "resolve-conflicts":
 			return "bg-[var(--workspace-pr-conflicts-accent)] text-white hover:bg-[var(--workspace-pr-conflicts-accent)]";
+		case "complete-merge":
+			return "bg-emerald-600 text-white hover:bg-emerald-600/90";
 		case "merge":
 		case "open-pr":
 			return "bg-[var(--workspace-pr-open-accent)] text-white hover:bg-[var(--workspace-pr-open-accent)]";

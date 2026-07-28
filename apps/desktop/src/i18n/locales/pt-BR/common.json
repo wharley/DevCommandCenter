@@ -288,18 +288,28 @@
     "gitConfirmation": {
       "mergeTitle": "Mesclar {{requestLabel}}?",
       "mergeDescription": "Esta ação vai mesclar o {{requestLabel}} atual. Use somente quando você tiver certeza de que a task está pronta.",
+      "completeMergeTitle": "Concluir este merge?",
+      "completeMergeDescription_one": "Preparar {{count}} arquivo resolvido, executar os checks, criar o merge commit e enviar.",
+      "completeMergeDescription_other": "Preparar {{count}} arquivos resolvidos, executar os checks, criar o merge commit e enviar.",
       "syncTitle": "Atualizar worktree com a base?",
       "syncDescription": "Esta ação vai buscar a base mais recente e fazer merge neste worktree. Se houver conflito, o worktree ficará em estado de resolução de merge.",
       "syncDescriptionWithBase": "Esta ação vai buscar a base mais recente e fazer merge neste worktree a partir de {{baseBranch}}. Se houver conflito, o worktree ficará em estado de resolução de merge.",
       "cancel": "Cancelar",
       "mergeConfirm": "Mesclar {{requestLabel}}",
+      "completeMergeConfirm": "Concluir e enviar",
+      "reviewResolution": "Revisar resolução",
       "syncConfirm": "Atualizar worktree",
       "syncLoading": "Atualizando worktree com a base...",
       "mergeLoading": "Mesclando {{requestLabel}}...",
+      "completeMergeLoading": "Concluindo merge...",
       "syncSuccess": "Worktree atualizado com {{baseRef}}",
       "syncAlreadyCurrent": "Worktree já estava atualizado com {{baseRef}}",
       "syncFailed": "Falha ao atualizar: {{message}}",
       "mergeSuccess": "{{requestLabel}} mesclado",
+      "completeMergeSuccess": "Merge concluído e enviado",
+      "completeMergeValidationFailed": "Um check configurado falhou. Revise a resolução antes de tentar novamente.",
+      "completeMergeStateChanged": "A resolução mudou. Revise antes de concluir.",
+      "completeMergeFailed": "Não foi possível concluir o merge: {{message}}",
       "mergeFailed": "Falha ao mesclar {{requestLabel}}: {{message}}"
     },
     "pipeline": {
@@ -459,6 +469,8 @@
       "signalDetails": "Exibir sinais de entrega avaliados",
       "required": "Regra do projeto",
       "signals": {
+        "conflictResolutionReady_one": "{{count}} resolução está pronta para concluir.",
+        "conflictResolutionReady_other": "{{count}} resoluções estão prontas para concluir.",
         "workspaceConflicts_one": "{{count}} conflito local ainda não foi resolvido.",
         "workspaceConflicts_other": "{{count}} conflitos locais ainda não foram resolvidos.",
         "workspaceChanges_one": "{{count}} arquivo local ainda precisa de commit.",
@@ -505,6 +517,8 @@
         "activity": "Ver atividade"
       },
       "messages": {
+        "conflictResolutionReady_one": "{{count}} resolução pronta — revise ou conclua o merge.",
+        "conflictResolutionReady_other": "{{count}} resoluções prontas — revise ou conclua o merge.",
         "conflicts_one": "{{count}} conflito bloqueando esta branch — resolva antes de qualquer outra coisa.",
         "conflicts_other": "{{count}} conflitos bloqueando esta branch — resolva antes de qualquer outra coisa.",
         "merged": "{{pr}} mesclado. Continue este workspace a partir da base atualizada.",
@@ -755,6 +769,7 @@
       "push": "Enviar",
       "fixCi": "Corrigir CI",
       "resolveConflicts": "Resolver conflitos",
+      "completeMerge": "Concluir merge",
       "merge": "Mesclar",
       "merged": "Mesclado",
       "closed": "Fechado",
@@ -1331,6 +1346,12 @@
         "idle": "Resolver",
         "busy": "Resolvendo...",
         "done": "Resolvido",
+        "error": "Retry"
+      },
+      "complete-merge": {
+        "idle": "Concluir",
+        "busy": "Concluindo...",
+        "done": "Concluído",
         "error": "Retry"
       },
       "merge": {

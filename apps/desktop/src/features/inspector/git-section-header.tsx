@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChevronsRight, ExternalLink, RotateCcw } from "lucide-react";
+import { ChevronsRight, ExternalLink, FileDiff, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceCommitButton } from "@/features/commit";
@@ -16,6 +16,8 @@ function gitSectionHeaderHighlightClass(mode: CommitMode): string {
       return "bg-[var(--workspace-pr-closed-header-bg)]";
     case "resolve-conflicts":
       return "bg-[var(--workspace-pr-conflicts-header-bg)]";
+    case "complete-merge":
+      return "bg-emerald-500/[0.08]";
     case "merge":
     case "open-pr":
       return "bg-[var(--workspace-pr-open-header-bg)]";
@@ -30,6 +32,7 @@ export type GitSectionHeaderProps = {
   commitMode: CommitMode;
   isRefreshing?: boolean;
   onCommit?: () => Promise<void> | void;
+  onReviewConflictResolution?: () => void;
   onContinueWorkspace?: () => Promise<void> | void;
   isContinuingWorkspace?: boolean;
   onRetrySetup?: () => Promise<void> | void;
@@ -49,6 +52,7 @@ export function GitSectionHeader({
   commitMode,
   isRefreshing = false,
   onCommit,
+  onReviewConflictResolution,
   onContinueWorkspace,
   isContinuingWorkspace = false,
   onRetrySetup,
@@ -113,6 +117,25 @@ export function GitSectionHeader({
         {identitySlot}
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {commitMode === "complete-merge" && onReviewConflictResolution ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className="rounded-[9px]"
+                aria-label={t("inspector.gitConfirmation.reviewResolution")}
+                onClick={onReviewConflictResolution}
+              >
+                <FileDiff className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {t("inspector.gitConfirmation.reviewResolution")}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
         {showContinue ? (
           <Button
             type="button"

@@ -49,7 +49,7 @@ describe("resolveCommitMode", () => {
 		).toBe("commit-and-push");
 	});
 
-	it("returns to the resolver when a merge is still in progress after all files were staged", () => {
+	it("offers the completion checkpoint when all merge conflicts were staged", () => {
 		expect(
 			resolveCommitMode({
 				branch: "feature/statuslane",
@@ -62,7 +62,24 @@ describe("resolveCommitMode", () => {
 					mergeInProgress: true,
 				},
 			}),
-		).toBe("resolve-conflicts");
+		).toBe("complete-merge");
+	});
+
+	it("offers the completion checkpoint for marker-free agent edits that are still unmerged", () => {
+		expect(
+			resolveCommitMode({
+				branch: "feature/statuslane",
+				prStatus: { state: "open", mergeable: "CONFLICTING" },
+				gitStatus: {
+					staged: [],
+					unstaged: [{}],
+					aheadOfRemoteCount: 0,
+					conflictCount: 3,
+					mergeInProgress: true,
+					conflictResolutionReady: true,
+				},
+			}),
+		).toBe("complete-merge");
 	});
 
 	it("keeps unresolved local conflicts ahead of staged changes", () => {
