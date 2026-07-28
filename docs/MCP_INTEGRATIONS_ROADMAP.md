@@ -344,6 +344,9 @@ Implementation policy:
 
 ### Deliverable 2.1 — Offline fixture server
 
+Implementation:
+[DCC offline MCP fixture](./MCP_OFFLINE_FIXTURE.md).
+
 Add a small, repository-owned MCP fixture with deterministic behavior:
 
 - `stdio` and Streamable HTTP modes;
@@ -671,6 +674,9 @@ Updated July 28, 2026:
   - [x] OS credential-store port and platform adapters.
   - [x] Fingerprint computation and activation service.
 - [ ] Offline fixture and conformance harness.
+  - [x] Deterministic offline fixture for stdio and Streamable HTTP.
+  - [ ] Bounded probe service for both transports.
+  - [ ] Shared provider conformance harness.
 - [ ] Claude bridge.
 - [ ] Codex bridge.
 - [ ] MVP integrations UI.

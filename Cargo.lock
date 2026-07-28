@@ -917,6 +917,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dcc-mcp-fixture"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tower 0.5.3",
+ "url",
+]
+
+[[package]]
 name = "dcc-providers"
 version = "0.0.0"
 dependencies = [
