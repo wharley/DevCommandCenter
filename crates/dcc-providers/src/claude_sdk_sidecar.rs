@@ -23,6 +23,7 @@ use dcc_core::{
     CoreError, Result,
 };
 
+use crate::claude_mcp::write_initial_mcp_configuration;
 use crate::common::{
     apply_cli_spawn_environment, augmented_path, now_iso, parse_provider_stream_line,
     ParsedProviderLine, ProviderStreamState,
@@ -463,7 +464,7 @@ impl ClaudeSdkSidecarAdapter {
             CoreError::Provider(format!("failed to spawn Claude sidecar: {error}"))
         })?;
 
-        let stdin = child.stdin.take().ok_or_else(|| {
+        let mut stdin = child.stdin.take().ok_or_else(|| {
             CoreError::Provider("Claude sidecar did not expose stdin".to_string())
         })?;
         let stdout = child.stdout.take().ok_or_else(|| {
@@ -472,6 +473,10 @@ impl ClaudeSdkSidecarAdapter {
         let stderr = child.stderr.take().ok_or_else(|| {
             CoreError::Provider("Claude sidecar did not expose stderr".to_string())
         })?;
+        if let Err(error) = write_initial_mcp_configuration(&mut stdin, &cfg.mcp_servers).await {
+            let _ = child.start_kill();
+            return Err(error);
+        }
 
         let handle = SessionHandle {
             provider_id: self.id.clone(),

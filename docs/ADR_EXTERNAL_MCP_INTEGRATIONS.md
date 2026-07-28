@@ -126,6 +126,7 @@ Before the first public release:
 
 - [External MCP integrations roadmap](./MCP_INTEGRATIONS_ROADMAP.md)
 - [MCP provider conformance contract](./MCP_PROVIDER_CONFORMANCE.md)
+- [Claude MCP bridge](./CLAUDE_MCP_BRIDGE.md)
 - [MCP credential store policy](./MCP_CREDENTIAL_STORE.md)
 - [Integrated terminal and scope plan](./PLANO_TERMINAL_INTEGRADO_E_ESCOPO.md)
 - [Security policy](../SECURITY.md)

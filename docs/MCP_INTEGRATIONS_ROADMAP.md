@@ -390,6 +390,9 @@ Every verified bridge runs the same behavioral tests:
 
 ## Phase 3 — Claude bridge
 
+Current implementation:
+[Claude MCP bridge](./CLAUDE_MCP_BRIDGE.md).
+
 ### Deliverables
 
 - Inject resolved definitions through documented Claude Agent SDK options.
@@ -684,6 +687,10 @@ Updated July 28, 2026:
   - [x] Bounded probe service for both transports.
   - [x] Shared provider conformance harness.
 - [ ] Claude bridge.
+  - [x] Add the backend-only projection channel and documented Agent SDK injection.
+  - [ ] Resolve eligible session, project, and global bindings with OS credentials.
+  - [ ] Normalize SDK status into DCC runtime status.
+  - [ ] Verify approval, lifecycle, and both fixture transports through the harness.
 - [ ] Codex bridge.
 - [ ] MVP integrations UI.
 - [ ] Real-service smoke tests.

@@ -1,4 +1,5 @@
 pub mod claude_code;
+mod claude_mcp;
 pub mod claude_sdk_sidecar;
 pub mod codex;
 pub mod codex_app_server;

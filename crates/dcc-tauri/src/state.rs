@@ -373,6 +373,7 @@ impl SessionCommandState {
                 working_directory: Some(working_directory),
                 additional_working_directories,
                 provider_runtime: Some(provider_runtime),
+                mcp_servers: Vec::new(),
             })
             .await?;
 

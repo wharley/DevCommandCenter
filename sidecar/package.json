@@ -6,6 +6,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node src/index.mjs",
+    "test": "node --test src/*.test.mjs",
     "stage-vendor": "node scripts/stage-vendor.mjs"
   }
 }

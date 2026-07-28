@@ -17,7 +17,10 @@ pub use mcp_conformance::{
     MCP_CONFORMANCE_ECHO_VALUE,
 };
 pub use mcp_probe::{McpProbe, McpProbeResult};
-pub use provider::{Input, Provider, ProviderRuntimeConfig, ProviderTurnInput, SessionConfig};
+pub use provider::{
+    Input, Provider, ProviderMcpSecret, ProviderMcpServerConfig, ProviderMcpTransport,
+    ProviderRuntimeConfig, ProviderTurnInput, SessionConfig,
+};
 pub use repository::{
     DelegationRepo, McpRepo, ProjectRepo, RepositoryRepo, SessionEventRepo, SessionRepo,
     ThreadRepo, WorkspaceBundleRepo, WorkspaceRepo,

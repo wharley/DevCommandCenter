@@ -7,6 +7,11 @@ import { dirname, join } from "node:path";
 import readline from "node:readline";
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import {
+	dccMcpQueryOptions,
+	normalizeDccMcpServers,
+	readDccMcpStatus,
+} from "./mcp-config.mjs";
 
 const SIDECAR_VERSION = "0.1.34";
 
@@ -349,6 +354,7 @@ async function runTurn(payload, state) {
 	} catch {
 		// Rust validates and serializes this value. Ignore malformed manual overrides.
 	}
+	const mcpOptions = dccMcpQueryOptions(state.mcpProjection);
 	const q = query({
 		prompt,
 		options: {
@@ -369,6 +375,7 @@ async function runTurn(payload, state) {
 			},
 			includePartialMessages: true,
 			settingSources: ["user", "project", "local"],
+			...mcpOptions,
 			effort: normalizeEffort(payload?.effort),
 			systemPrompt: buildSystemPrompt(payload?.fastMode, payload?.toolInstructions),
 			canUseTool: async (toolName, input, options) => {
@@ -397,6 +404,20 @@ async function runTurn(payload, state) {
 	let sawTerminalResult = false;
 
 	try {
+		let mcpStatus;
+		try {
+			mcpStatus = await readDccMcpStatus(q, state.mcpProjection);
+		} catch {
+			throw new Error("DCC MCP attachment failed");
+		}
+		emit({
+			type: "dcc_mcp_status",
+			failed: mcpStatus.failed,
+			servers: mcpStatus.servers,
+		});
+		if (mcpStatus.failed.length > 0) {
+			throw new Error("one or more DCC MCP servers failed to attach");
+		}
 		for await (const message of q) {
 			updateResumeSessionId(message, state);
 			if (message && message.type === "result") {
@@ -439,6 +460,7 @@ async function main() {
 		activeTurnPromise: null,
 		pendingUserInputs: new Map(),
 		pendingPermissions: new Map(),
+		mcpProjection: normalizeDccMcpServers([]),
 	};
 
 	const rl = readline.createInterface({
@@ -463,6 +485,34 @@ async function main() {
 				result: "invalid Claude sidecar input payload",
 				session_id: state.resumeSessionId ?? null,
 			});
+			continue;
+		}
+
+		if (payload.type === "configure_mcp") {
+			if (state.running) {
+				emit({
+					type: "result",
+					is_error: true,
+					result: "cannot reconfigure DCC MCP servers during an active turn",
+					session_id: state.resumeSessionId ?? null,
+				});
+				continue;
+			}
+			try {
+				state.mcpProjection = normalizeDccMcpServers(payload.servers);
+				emit({
+					type: "dcc_mcp_configured",
+					servers: Object.keys(state.mcpProjection.servers),
+				});
+			} catch {
+				state.mcpProjection = normalizeDccMcpServers([]);
+				emit({
+					type: "result",
+					is_error: true,
+					result: "invalid DCC MCP configuration",
+					session_id: state.resumeSessionId ?? null,
+				});
+			}
 			continue;
 		}
 

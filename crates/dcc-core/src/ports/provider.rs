@@ -4,11 +4,13 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::{
+    domain::mcp::McpDefinitionId,
     domain::provider::{
         Capabilities, HealthStatus, ProviderAccountUsage, ProviderEvent, ProviderId, SessionHandle,
     },
     domain::session::SessionId,
     domain::workspace::WorkspaceId,
+    ports::credential_store::SecretValue,
     Result,
 };
 
@@ -23,6 +25,75 @@ pub struct SessionConfig {
     pub additional_working_directories: Vec<String>,
     #[serde(default)]
     pub provider_runtime: Option<ProviderRuntimeConfig>,
+    /// Backend-only MCP projections resolved for this provider session.
+    ///
+    /// This field is intentionally absent from renderer and persistence
+    /// contracts because it may contain credential values. Providers must
+    /// deliver it over a bounded private channel and discard it after attach.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub mcp_servers: Vec<ProviderMcpServerConfig>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProviderMcpServerConfig {
+    pub definition_id: McpDefinitionId,
+    /// Provider-local name owned by DCC. It must not collide with or replace
+    /// user-configured provider entries.
+    pub server_name: String,
+    pub transport: ProviderMcpTransport,
+}
+
+#[derive(Clone, Debug)]
+pub enum ProviderMcpTransport {
+    Stdio {
+        executable: String,
+        args: Vec<String>,
+        environment: Vec<ProviderMcpSecret>,
+    },
+    Http {
+        url: String,
+        headers: Vec<ProviderMcpSecret>,
+    },
+}
+
+pub struct ProviderMcpSecret {
+    pub name: String,
+    value: SecretValue,
+}
+
+impl ProviderMcpSecret {
+    pub fn new(name: impl Into<String>, value: SecretValue) -> Self {
+        Self {
+            name: name.into(),
+            value,
+        }
+    }
+
+    pub fn expose_secret(&self) -> &[u8] {
+        self.value.expose_secret()
+    }
+}
+
+impl Clone for ProviderMcpSecret {
+    fn clone(&self) -> Self {
+        let value = SecretValue::new(self.value.expose_secret().to_vec())
+            .expect("an existing provider MCP secret remains valid when cloned");
+        Self {
+            name: self.name.clone(),
+            value,
+        }
+    }
+}
+
+impl std::fmt::Debug for ProviderMcpSecret {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProviderMcpSecret")
+            .field("name", &self.name)
+            .field("value", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -125,5 +196,39 @@ pub trait Provider: Send + Sync {
         _runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<Option<ProviderAccountUsage>> {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::workspace::WorkspaceId;
+
+    #[test]
+    fn session_mcp_credentials_are_absent_from_serialized_and_debug_contracts() {
+        let config = SessionConfig {
+            workspace_id: WorkspaceId("workspace".to_string()),
+            session_id: SessionId("session".to_string()),
+            model: None,
+            working_directory: Some("/workspace".to_string()),
+            additional_working_directories: Vec::new(),
+            provider_runtime: None,
+            mcp_servers: vec![ProviderMcpServerConfig {
+                definition_id: McpDefinitionId("fixture".to_string()),
+                server_name: "dcc-fixture".to_string(),
+                transport: ProviderMcpTransport::Http {
+                    url: "https://example.com/mcp".to_string(),
+                    headers: vec![ProviderMcpSecret::new(
+                        "Authorization",
+                        SecretValue::new(b"secret-canary".to_vec()).expect("test secret"),
+                    )],
+                },
+            }],
+        };
+
+        let serialized = serde_json::to_string(&config).expect("serialize session config");
+        assert!(!serialized.contains("mcp_servers"));
+        assert!(!serialized.contains("secret-canary"));
+        assert!(!format!("{config:?}").contains("secret-canary"));
     }
 }

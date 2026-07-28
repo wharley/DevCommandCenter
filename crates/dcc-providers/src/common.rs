@@ -1501,6 +1501,7 @@ mod tests {
                 home_path: Some(shared_home.to_string_lossy().to_string()),
                 shadow_home_path: Some(shadow_home.to_string_lossy().to_string()),
             }),
+            mcp_servers: Vec::new(),
         };
 
         let layout = resolve_codex_home_layout(&cfg);
