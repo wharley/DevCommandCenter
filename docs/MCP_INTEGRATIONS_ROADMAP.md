@@ -665,6 +665,10 @@ The first public MCP integrations release is complete when:
 - Figma OAuth and one pinned command-based integration have passed documented,
   opt-in smoke tests.
 
+The final staged commands, bounded evidence record, cleanup requirements, and
+release-blocking distinction between required and optional providers are in
+[MCP release validation](MCP_RELEASE_VALIDATION.md).
+
 ## Progress
 
 Updated July 28, 2026:
@@ -781,3 +785,15 @@ Updated July 28, 2026:
     - [ ] Pin and audit an exact auto-update-disabled Droid runtime, require
       explicit server ownership in permissions, then run the shared
       authenticated conformance gate during final end-to-end validation.
+- [ ] Final MCP release validation.
+  - [x] Add one fork-safe local gate that refuses authenticated variables and
+    covers the MCP domain, infrastructure, adapters, fixture, desktop boundary,
+    sidecar, contracts, and integrations UI.
+  - [x] Document staged manual, authenticated, real-service, open-source, result
+    recording, and cleanup checklists.
+  - [ ] Run the manual integrations lifecycle against a release-candidate build.
+  - [ ] Run the authenticated Claude and Codex shared conformance gates.
+  - [ ] Run the read-only Figma and pinned Garu smokes on at least one verified
+    provider each.
+  - [ ] Complete the open-source security and dependency review, then record the
+    bounded release decision.

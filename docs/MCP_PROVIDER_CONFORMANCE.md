@@ -127,7 +127,19 @@ gate is executed successfully and the promotion change is reviewed.
 
 ## Running the offline gate
 
-From the repository root:
+For the complete local release gate across the domain, infrastructure,
+providers, fixture, Tauri boundary, sidecar, contracts, and integrations UI,
+run from the repository root:
+
+```sh
+yarn test:mcp:release-local
+```
+
+The script refuses authenticated MCP variables and never selects ignored
+provider or real-service tests. The staged account-backed release procedure is
+documented in [MCP release validation](MCP_RELEASE_VALIDATION.md).
+
+The focused conformance commands remain:
 
 ```sh
 cargo test -p dcc-core mcp_conformance

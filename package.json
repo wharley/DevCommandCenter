@@ -20,6 +20,7 @@
     "build:contracts": "yarn workspace @dcc/contracts build",
     "build:desktop": "yarn workspace @dcc/desktop build",
     "build:sidecars": "node scripts/build-sidecars.mjs",
+    "test:mcp:release-local": "bash scripts/validate-mcp-release-local.sh",
     "vite": "node scripts/ensure-node.mjs && vite",
     "vite:build": "node scripts/ensure-node.mjs && vite build",
     "lint": "eslint .",
