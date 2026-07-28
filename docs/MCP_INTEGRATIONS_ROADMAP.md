@@ -737,6 +737,18 @@ Updated July 28, 2026:
       per-tool policy fail-closed, and report only observed tool inventory.
     - [ ] Run the shared authenticated conformance gate during final
       end-to-end validation.
-  - [ ] Gemini.
+  - [ ] Gemini through ACP.
+    - [x] Add an exact-version and capability-gated ACP v1 projection builder
+      for stdio and Streamable HTTP without modifying Gemini-owned config.
+    - [x] Add random per-session server names, a launch-time MCP allowlist,
+      redacted one-shot credentials, and isolated policy-path requirements.
+    - [x] Confirm `gemini-cli 0.32.1` identity and MCP capabilities through an
+      isolated no-model ACP initialization.
+    - [x] Document the activation blocker: Gemini permission requests expose
+      no structured MCP server/tool ownership and cannot safely implement
+      `Ask`, `Allow`, and `Deny`.
+    - [ ] Wire the production adapter only after an exact runtime exposes
+      correlatable ownership, then run the shared authenticated conformance
+      gate during final end-to-end validation.
   - [ ] Grok.
   - [ ] Droid.

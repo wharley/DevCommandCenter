@@ -150,3 +150,9 @@ runtime, fail-closed approval correlation, and observed-only tool status. Its
 authenticated shared-harness test is ignored by default. Cursor remains
 `NativeConfig` and is not eligible for `VerifiedBridge` evidence until that
 gate passes both transports and the full lifecycle.
+
+The [Gemini MCP bridge](GEMINI_MCP_BRIDGE.md) has an inert, exact-version ACP
+projection builder but no production projection channel. Gemini ACP permission
+requests do not currently identify the MCP server and exact tool
+structurally, so DCC cannot mediate per-tool policy without heuristics. Gemini
+therefore remains `Unsupported` and is not eligible for conformance evidence.

@@ -10,6 +10,10 @@ mod cursor_acp;
 mod cursor_mcp;
 pub mod droid;
 pub mod gemini;
+// The exact-version ACP projection remains inert until Gemini emits
+// structured MCP ownership in permission and tool-call events.
+#[allow(dead_code)]
+mod gemini_mcp;
 pub mod grok_acp;
 pub mod headless_cli;
 
