@@ -163,3 +163,10 @@ but the exact installed runtime has not proven the structured ownership and
 reverse permission round trip required by DCC. Grok also imports provider-owned
 MCP configuration, so catalog presence cannot establish ownership. Grok
 therefore remains `Unsupported` and is not eligible for conformance evidence.
+
+The [Droid MCP bridge](DROID_MCP_BRIDGE.md) has an inert serializer pinned to
+the public Factory protocol schema, not to a Droid CLI runtime. Its lifecycle
+and inventory contracts are structured, but the public MCP permission request
+does not include the owning server name. No exact Droid runtime was available
+for local audit. Droid therefore remains `Unsupported` and is not eligible for
+conformance evidence.

@@ -766,4 +766,18 @@ Updated July 28, 2026:
     - [ ] Wire the production adapter only after the exact runtime proves that
       boundary, then run the shared authenticated conformance gate during
       final end-to-end validation.
-  - [ ] Droid.
+  - [ ] Droid through Factory stream JSON-RPC.
+    - [x] Audit the public SDK protocol path for session initialization,
+      reverse permissions, MCP inventory, status, toggles, and cleanup.
+    - [x] Add an inert protocol-pinned initialization serializer for stdio and
+      Streamable HTTP without editing Factory-owned configuration.
+    - [x] Add random per-session wire names, redacted one-shot credentials,
+      autonomy-off initialization, and fail-closed ownership checks.
+    - [x] Document the open-source boundary: DCC implements the Apache-2.0
+      public protocol but does not vendor the proprietary Droid CLI.
+    - [x] Document the activation blockers: Droid is not installed in the
+      audit environment, and the public MCP permission shape has no structured
+      server name.
+    - [ ] Pin and audit an exact auto-update-disabled Droid runtime, require
+      explicit server ownership in permissions, then run the shared
+      authenticated conformance gate during final end-to-end validation.

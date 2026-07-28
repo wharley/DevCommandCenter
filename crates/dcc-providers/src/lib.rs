@@ -9,6 +9,10 @@ pub mod cursor;
 mod cursor_acp;
 mod cursor_mcp;
 pub mod droid;
+// The Factory JSON-RPC projection remains inert until an exact Droid CLI
+// runtime exposes structured MCP server ownership in permission requests.
+#[allow(dead_code)]
+mod droid_mcp;
 pub mod gemini;
 // The exact-version ACP projection remains inert until Gemini emits
 // structured MCP ownership in permission and tool-call events.
