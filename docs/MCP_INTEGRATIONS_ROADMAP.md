@@ -726,3 +726,15 @@ Updated July 28, 2026:
     plus fork-safe execution documentation.
   - [ ] Run the authenticated opt-in smokes during final end-to-end validation.
 - [ ] Additional provider bridges.
+  - [ ] Cursor through ACP.
+    - [x] Add an exact-version and capability-gated ACP v1 projection builder
+      for stdio and Streamable HTTP without modifying Cursor-owned config.
+    - [x] Confirm the audited Cursor runtime starts and stops the offline stdio
+      fixture through `session/new`, without a model turn.
+    - [ ] Wire the production adapter, approval correlation, and honest runtime
+      inventory.
+    - [ ] Run the shared authenticated conformance gate during final
+      end-to-end validation.
+  - [ ] Gemini.
+  - [ ] Grok.
+  - [ ] Droid.

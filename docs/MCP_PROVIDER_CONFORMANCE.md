@@ -144,3 +144,9 @@ ignored harness, exact opt-in gates, read-only constraints, and fork policy are
 documented in [MCP real-service smoke tests](MCP_REAL_SERVICE_SMOKES.md). A
 real-service result cannot replace the shared offline provider conformance
 contract or create promotion evidence by itself.
+
+The [Cursor MCP bridge](CURSOR_MCP_BRIDGE.md) currently has only its
+exact-version ACP projection contract and a no-model fixture lifecycle
+observation. Cursor remains unsupported and is not eligible for conformance
+evidence until approval correlation and provider-reported tool visibility are
+wired into the production adapter.

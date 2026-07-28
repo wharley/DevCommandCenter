@@ -6,6 +6,10 @@ pub mod codex_app_server;
 mod codex_mcp;
 pub mod common;
 pub mod cursor;
+// The projection contract is intentionally inert until the Cursor ACP adapter
+// can correlate approvals and publish evidence-backed tool inventory.
+#[allow(dead_code)]
+mod cursor_mcp;
 pub mod droid;
 pub mod gemini;
 pub mod grok_acp;
