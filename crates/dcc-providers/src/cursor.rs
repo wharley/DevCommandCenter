@@ -14,8 +14,8 @@ use dcc_core::{
     application::{compose_fallback_prompt_for_provider, PromptInjectionOptions},
     domain::{
         provider::{
-            Capabilities, HealthStatus, ProviderDescriptor, ProviderEvent, ProviderId,
-            ProviderModelDescriptor, SessionHandle,
+            Capabilities, HealthStatus, McpSupportLevel, ProviderDescriptor, ProviderEvent,
+            ProviderId, ProviderModelDescriptor, SessionHandle,
         },
         session::SessionId,
     },
@@ -24,6 +24,7 @@ use dcc_core::{
 };
 
 use crate::common::{append_tool_instructions, experimental_cli_capabilities};
+use crate::cursor_acp::CursorBridgeProvider;
 
 const PROVIDER_LABEL: &str = "Cursor";
 const PROVIDER_DESCRIPTION: &str =
@@ -65,12 +66,18 @@ struct CursorCommandResult {
     code: i32,
 }
 
-pub fn adapter() -> CursorProvider {
-    CursorProvider::new("cursor", "cursor-agent", cursor_capabilities())
+pub fn adapter() -> CursorBridgeProvider {
+    let capabilities = cursor_capabilities();
+    CursorBridgeProvider::new(
+        "cursor-agent",
+        capabilities.clone(),
+        CursorProvider::new("cursor", "cursor-agent", capabilities),
+    )
 }
 
 fn cursor_capabilities() -> Capabilities {
     let mut capabilities = experimental_cli_capabilities();
+    capabilities.mcp_support = McpSupportLevel::NativeConfig;
     capabilities.supports_multi_root = true;
     capabilities
 }
@@ -1160,7 +1167,7 @@ mod tests {
 
     #[test]
     fn cursor_turn_args_use_native_plan_mode() {
-        let provider = adapter();
+        let provider = CursorProvider::new("cursor", "cursor-agent", cursor_capabilities());
         let plan_args = provider.cursor_turn_args("chat-1", None, "ship it", Some(true), &[]);
         assert!(plan_args.windows(2).any(|pair| pair == ["--mode", "plan"]));
 
@@ -1172,7 +1179,7 @@ mod tests {
 
     #[test]
     fn cursor_turn_args_include_each_authorized_directory() {
-        let provider = adapter();
+        let provider = CursorProvider::new("cursor", "cursor-agent", cursor_capabilities());
         let directories = vec![PathBuf::from("/tmp/api"), PathBuf::from("/tmp/web")];
         let args = provider.cursor_turn_args("chat-1", None, "ship it", Some(false), &directories);
         assert!(args

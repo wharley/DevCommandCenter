@@ -6,9 +6,7 @@ pub mod codex_app_server;
 mod codex_mcp;
 pub mod common;
 pub mod cursor;
-// The projection contract is intentionally inert until the Cursor ACP adapter
-// can correlate approvals and publish evidence-backed tool inventory.
-#[allow(dead_code)]
+mod cursor_acp;
 mod cursor_mcp;
 pub mod droid;
 pub mod gemini;
@@ -99,6 +97,7 @@ mod tests {
         claude_code, codex, common::stable_cli_capabilities, droid, gemini, grok_acp,
         provider_runtime, PROVIDER_IDS,
     };
+    use crate::cursor_mcp::CURSOR_MCP_RUNTIME_VERSION;
 
     #[test]
     fn registers_grok_runtime() {
@@ -120,9 +119,15 @@ mod tests {
                 .dcc_mcp_projection_version(),
             None | Some(crate::codex_mcp::CODEX_MCP_RUNTIME_VERSION)
         ));
+        assert!(matches!(
+            provider_runtime("cursor")
+                .expect("Cursor provider")
+                .dcc_mcp_projection_version(),
+            None | Some(CURSOR_MCP_RUNTIME_VERSION)
+        ));
         for provider_id in PROVIDER_IDS
             .into_iter()
-            .filter(|provider_id| !matches!(*provider_id, "claude_code" | "codex"))
+            .filter(|provider_id| !matches!(*provider_id, "claude_code" | "codex" | "cursor"))
         {
             assert_eq!(
                 provider_runtime(provider_id)
@@ -162,6 +167,12 @@ mod tests {
         assert_eq!(
             droid::descriptor(healthy.clone()).capabilities.mcp_support,
             McpSupportLevel::Unsupported
+        );
+        assert_eq!(
+            crate::cursor::descriptor(healthy.clone(), Vec::new())
+                .capabilities
+                .mcp_support,
+            McpSupportLevel::NativeConfig
         );
         assert_eq!(
             grok_acp::descriptor(healthy, stable_cli_capabilities())

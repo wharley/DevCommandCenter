@@ -31,7 +31,7 @@ use dcc_core::{
     },
 };
 use dcc_infra::{credential_store::InMemoryCredentialStore, mcp_db::SqliteMcpRepo};
-use dcc_providers::{claude_code, codex};
+use dcc_providers::{claude_code, codex, cursor};
 use futures::{stream::BoxStream, StreamExt};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -752,6 +752,17 @@ fn codex_adapter(workspace: PathBuf) -> ProviderMcpConformanceAdapter<impl Provi
     )
 }
 
+fn cursor_adapter(workspace: PathBuf) -> ProviderMcpConformanceAdapter<impl Provider> {
+    ProviderMcpConformanceAdapter::new(
+        cursor::adapter(),
+        "cursor",
+        "Cursor",
+        "DCC_CURSOR_CONFORMANCE_MODEL",
+        fixture_binary(),
+        workspace,
+    )
+}
+
 fn require_explicit_opt_in(variable: &str, instruction: &str) {
     assert_eq!(
         std::env::var(variable).ok().as_deref(),
@@ -807,6 +818,18 @@ async fn authenticated_codex_bridge_passes_the_shared_harness() {
     run_authenticated_gate(codex_adapter(workspace.clone()), workspace).await;
 }
 
+#[tokio::test]
+#[ignore = "requires explicit opt-in, cursor-agent 2026.07.23-e383d2b, and an authenticated Cursor account"]
+async fn authenticated_cursor_bridge_passes_the_shared_harness() {
+    require_explicit_opt_in(
+        "DCC_RUN_CURSOR_MCP_CONFORMANCE",
+        "set DCC_RUN_CURSOR_MCP_CONFORMANCE=1 after authenticating cursor-agent 2026.07.23-e383d2b",
+    );
+    let workspace = test_workspace("cursor");
+    std::fs::create_dir_all(&workspace).expect("create isolated conformance workspace");
+    run_authenticated_gate(cursor_adapter(workspace.clone()), workspace).await;
+}
+
 #[test]
 fn provider_tool_names_are_normalized_without_provider_heuristics() {
     assert!(tool_matches(
@@ -833,6 +856,12 @@ async fn missing_credentials_fail_before_each_provider_runtime_for_both_transpor
     let mut codex = codex_adapter(codex_workspace.clone());
     assert_missing_credentials_fail_closed("codex", &mut codex).await;
     let _ = std::fs::remove_dir_all(codex_workspace);
+
+    let cursor_workspace = test_workspace("cursor");
+    std::fs::create_dir_all(&cursor_workspace).expect("create isolated credential workspace");
+    let mut cursor = cursor_adapter(cursor_workspace.clone());
+    assert_missing_credentials_fail_closed("cursor", &mut cursor).await;
+    let _ = std::fs::remove_dir_all(cursor_workspace);
 }
 
 async fn assert_missing_credentials_fail_closed<P>(

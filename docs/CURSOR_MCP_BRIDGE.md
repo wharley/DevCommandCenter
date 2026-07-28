@@ -5,11 +5,14 @@ DCC does not edit Cursor's user or project `mcp.json`, does not register an
 extension, and does not infer support merely because Cursor can use MCP from
 its own configuration.
 
-Status as of July 28, 2026: the ACP projection payload and fail-closed runtime
-contract are implemented and tested offline. The production Cursor adapter
-still reports MCP as unsupported and receives no DCC MCP definitions. Approval
-routing, tool visibility, runtime status, and the shared conformance harness
-remain required before activation.
+Status as of July 28, 2026: the production provider is hybrid. Sessions without
+a DCC MCP projection retain the existing Cursor `stream-json` path. Sessions
+with a projection use `cursor-agent acp` only when the installed CLI exactly
+matches the audited version. Other versions receive no DCC definitions.
+
+The catalog reports `NativeConfig`, not `VerifiedBridge`. The shared
+authenticated conformance gate is implemented but remains ignored and has not
+been run.
 
 ## Why ACP
 
@@ -60,6 +63,50 @@ An upgrade or downgrade does not inherit compatibility. The new exact version
 must be audited and must pass conformance before DCC can activate its
 projection.
 
+## Production routing and permission boundary
+
+At provider construction, DCC executes only `cursor-agent --version`. The
+result enables the internal projection channel only for the exact audited
+version. This support probe never treats the generic `agent` command as Cursor;
+that command may belong to another provider.
+
+When no eligible DCC definition resolves for the session, the bridge delegates
+to the existing Cursor CLI adapter unchanged. When definitions are present, it:
+
+1. starts `cursor-agent acp` with piped stdin/stdout and discarded stderr;
+2. initializes ACP v1 and requires the `cursor_login` authentication method;
+3. writes the one-shot sensitive `session/new` request and immediately
+   zeroizes it;
+4. keeps definition ownership and explicit tool policies in backend-only
+   maps; and
+5. cancels pending permission requests with the ACP `cancelled` outcome.
+
+MCP ownership is accepted only when structured ACP fields contain both the
+exact randomized DCC wire server name and a bounded tool name. Human-readable
+titles, suffixes, annotations, and guessed naming conventions never establish
+ownership.
+
+An owned `session/request_permission` must also correlate with an active owned
+tool call. Unknown, malformed, ambiguous, or uncorrelated requests are
+cancelled. DCC selects only `allow_once` or `reject_once`; it never converts a
+single approval into Cursor's `allow_always` or `reject_always`.
+
+Unknown tools default to `Ask`. Explicit `Allow` and `Deny` policies are
+enforced only after the same ownership correlation succeeds.
+
+## Runtime truth
+
+Successful `session/new` produces `AttachingProvider`, not `Connected`.
+Acceptance of configuration is not proof that the model sees a tool.
+
+A definition becomes `Connected` only after Cursor emits a structured,
+DCC-owned tool call. The runtime inventory then contains only the exact
+observed tool. Arguments, raw input, tool output, stderr, and MCP deltas are not
+copied into that status or into MCP tool events.
+
+This observed inventory is deliberately incremental. It is not presented as a
+complete provider inventory and cannot create conformance evidence.
+
 ## Local protocol observation
 
 During development, the audited Cursor CLI:
@@ -75,22 +122,29 @@ current injection and child-lifecycle path, but it is deliberately not stored
 as conformance evidence: it does not prove tool inventory, tool calls,
 permission mediation, disable/remove behavior, or both transports.
 
-## Remaining activation gate
+## Remaining verification gate
 
-The production adapter may return a DCC MCP projection version only after it
-can:
+The production adapter now:
 
-1. start `cursor-agent acp` without falling back to the generic `agent`
-   executable;
-2. send the prepared session request over the private stdin channel;
-3. correlate ACP tool calls and `session/request_permission` requests with the
-   DCC definition and exact tool;
-4. enforce `Ask`, `Allow`, and `Deny` without trusting titles or MCP
-   annotations;
-5. publish a connected runtime snapshot only after tool visibility is proven;
-6. cancel the session and its DCC-projected MCP children deterministically; and
-7. pass the shared stdio and HTTP provider conformance harness.
+- starts the exact Cursor executable without a generic-command fallback;
+- sends the private ACP projection;
+- correlates structured tool and permission events;
+- enforces per-tool policy fail-closed; and
+- reports only observed runtime truth.
 
-Until then, Cursor stays honestly unsupported in the DCC integrations
-compatibility view. Users may continue using Cursor-native MCP configuration,
-which DCC neither owns nor modifies.
+The remaining release gate is the ignored, authenticated shared conformance
+test:
+
+```sh
+DCC_RUN_CURSOR_MCP_CONFORMANCE=1 \
+  cargo test -p dcc-mcp-fixture --test provider_conformance \
+  authenticated_cursor_bridge_passes_the_shared_harness -- --ignored --exact
+```
+
+Do not run this gate in fork CI. It requires the exact audited Cursor CLI and
+an authenticated account. Until it passes both fixture transports and the
+approval lifecycle, Cursor remains `NativeConfig` and receives no
+`VerifiedBridge` evidence.
+
+Users may continue using Cursor-native MCP configuration, which DCC neither
+owns nor modifies.

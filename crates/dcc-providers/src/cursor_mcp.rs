@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt,
     path::Path,
+    process::Command as StdCommand,
     str,
 };
 
@@ -21,6 +22,8 @@ use serde_json::Value;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
 use zeroize::Zeroize;
+
+use crate::common::augmented_path;
 
 const MAX_SERVER_COUNT: usize = 32;
 const MAX_SERVER_NAME_CHARS: usize = 64;
@@ -250,6 +253,18 @@ pub(crate) fn parse_cursor_cli_version_output(output: &str) -> Option<&str> {
 pub(crate) fn projection_version_for_cursor_output(output: &str) -> Option<&'static str> {
     (parse_cursor_cli_version_output(output) == Some(SUPPORTED_CURSOR_CLI_VERSION))
         .then_some(CURSOR_MCP_RUNTIME_VERSION)
+}
+
+pub(crate) fn detect_cursor_mcp_projection_version(binary: &str) -> Option<&'static str> {
+    let output = StdCommand::new(binary)
+        .arg("--version")
+        .env("PATH", augmented_path())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    projection_version_for_cursor_output(str::from_utf8(&output.stdout).ok()?)
 }
 
 fn validate_runtime_contract(

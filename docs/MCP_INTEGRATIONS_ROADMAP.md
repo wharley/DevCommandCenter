@@ -731,8 +731,10 @@ Updated July 28, 2026:
       for stdio and Streamable HTTP without modifying Cursor-owned config.
     - [x] Confirm the audited Cursor runtime starts and stops the offline stdio
       fixture through `session/new`, without a model turn.
-    - [ ] Wire the production adapter, approval correlation, and honest runtime
-      inventory.
+    - [x] Route projected sessions through the production ACP adapter while
+      preserving the existing adapter for sessions without DCC MCP servers.
+    - [x] Correlate structured DCC-owned tool and permission events, enforce
+      per-tool policy fail-closed, and report only observed tool inventory.
     - [ ] Run the shared authenticated conformance gate during final
       end-to-end validation.
   - [ ] Gemini.
