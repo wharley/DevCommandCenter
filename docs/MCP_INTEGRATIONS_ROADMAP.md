@@ -691,6 +691,9 @@ Updated July 28, 2026:
   - [x] Resolve eligible session, project, and global bindings with OS credentials.
   - [x] Normalize SDK status into DCC runtime status.
   - [ ] Verify approval, lifecycle, and both fixture transports through the harness.
+    - [x] Add the production-sidecar conformance adapter and compile it offline.
+    - [x] Prove permission denial and missing-credential fail-closed behavior offline.
+    - [ ] Run the authenticated opt-in gate during final end-to-end validation.
 - [ ] Codex bridge.
 - [ ] MVP integrations UI.
 - [ ] Real-service smoke tests.

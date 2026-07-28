@@ -445,6 +445,7 @@ impl ClaudeSdkSidecarAdapter {
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
+        command.kill_on_drop(true);
         Ok(command)
     }
 

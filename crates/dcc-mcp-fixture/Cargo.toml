@@ -13,6 +13,9 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 url = "2"
 
 [dev-dependencies]
+async-trait = "0.1"
 dcc-core = { path = "../dcc-core" }
 dcc-infra = { path = "../dcc-infra", features = ["test-support"] }
+dcc-providers = { path = "../dcc-providers" }
+futures = "0.3"
 tower = { version = "0.5", features = ["util"] }

@@ -123,32 +123,55 @@ to the definition, provider, exact runtime version, and session. The backend
 atomically replaces the in-memory snapshot and publishes
 `dcc/session/mcp/runtime-status`. These values are deliberately not appended
 to the durable session transcript. The snapshot is cleared when the provider
-runtime ends or is cancelled, preventing a stale `Connected` state.
+runtime ends or is cancelled, preventing a stale `Connected` state. The
+interactive sidecar process is also marked for termination on Rust-handle drop,
+covering interrupted tests and abnormal adapter teardown in addition to the
+normal explicit cancel path.
 
 MCP tools are not added to `allowedTools`. Anthropic documents that MCP tools
 require explicit permission unless specifically allowed, and that
 `acceptEdits` does not auto-approve them. The existing `canUseTool` callback
-therefore remains the DCC approval path. This must still pass the real provider
-conformance suite before the bridge is promoted.
+therefore remains the DCC approval path.
+
+The callback now lives in a separately tested sidecar module. Offline tests
+prove that MCP requests stay pending until DCC responds, that an explicit
+denial returns `deny`, and that aborting a request also fails closed. The real
+Claude conformance adapter additionally waits for the production
+`PermissionRequested` event, denies `fixture.mutate`, and rejects the run if a
+matching mutating tool call completes.
+
+## Conformance gate
+
+The repository now contains an opt-in `McpConformanceAdapter` for the production
+Claude sidecar. It drives the same shared steps for stdio and Streamable HTTP:
+status-based tool discovery, `fixture.echo`, mutation denial, disable, removal,
+server failure, credential failure, and final cleanup.
+
+The account-backed test remains ignored by default. It requires an existing
+Claude Code login and the non-secret opt-in
+`DCC_RUN_CLAUDE_MCP_CONFORMANCE=1`. This is intentional: a mocked provider
+response cannot create `verifiedBridge` evidence. Until the opt-in test is run
+successfully against the pinned SDK and reviewed, the catalog continues to
+report Claude as `nativeConfig`.
 
 ## Deliberate limitations of this slice
 
 - The installed SDK stdio configuration has no per-server `cwd` field. The
   Claude adapter rejects definitions that require one instead of silently
   dropping it.
-- Disable/remove refresh behavior and the full Claude conformance adapter
-  remain pending.
-- No `verifiedBridge` evidence is emitted by this slice.
+- The authenticated conformance execution and resulting promotion decision are
+  intentionally deferred to the final end-to-end validation.
+- No `verifiedBridge` evidence is persisted or advertised by this slice.
 
-These boundaries keep the bridge unadvertised as verified while the next cut
-drives approval, lifecycle, and both fixture transports through the shared
-provider conformance harness.
+These boundaries keep the bridge unadvertised as verified while allowing every
+contributor and fork to inspect and compile the exact promotion gate.
 
 ## Offline checks
 
 ```sh
 cargo test -p dcc-core -p dcc-providers -p dcc-tauri
-node --test sidecar/src/mcp-config.test.mjs
+cargo test -p dcc-mcp-fixture --test claude_conformance
+node --test sidecar/src/mcp-config.test.mjs sidecar/src/permission-bridge.test.mjs
 node --check sidecar/src/index.mjs
 ```
 

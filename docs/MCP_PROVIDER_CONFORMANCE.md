@@ -79,6 +79,44 @@ Provider-version evidence is exact. A provider upgrade must run its bridge
 suite again before that version can be advertised as verified. Phase 3 and
 Phase 4 will add real Claude and Codex adapter implementations to this harness.
 
+## Claude opt-in gate
+
+The Claude bridge adapter for this harness lives in
+`crates/dcc-mcp-fixture/tests/claude_conformance.rs`. It drives the production
+`ClaudeSdkSidecarAdapter`, the repository fixture binary, the normal sidecar
+permission callback, and the shared harness rather than returning synthetic
+success observations.
+
+The adapter covers both fixture transports and checks:
+
+- provider-visible tool discovery from the normalized runtime snapshot;
+- a real read-only `fixture.echo` call;
+- a real `fixture.mutate` permission request followed by denial, with no
+  completed mutating tool call;
+- refreshed-session behavior after the DCC projection is disabled;
+- provider-session and fixture cleanup after removal;
+- categorical failure after the stdio process or HTTP endpoint is unavailable;
+- credential resolution failure before any secret-bearing configuration
+  reaches Claude.
+
+The authenticated test is ignored by default and requires two deliberate
+conditions: an existing Claude Code login and
+`DCC_RUN_CLAUDE_MCP_CONFORMANCE=1`. It accepts an optional model identifier in
+`DCC_CLAUDE_CONFORMANCE_MODEL`; neither variable carries a credential.
+
+Run it only against the pinned runtime:
+
+```sh
+DCC_RUN_CLAUDE_MCP_CONFORMANCE=1 \
+  cargo test -p dcc-mcp-fixture --test claude_conformance \
+  authenticated_claude_bridge_passes_the_shared_harness -- --ignored --exact
+```
+
+The test uses an isolated system-temporary workspace and loopback fixture. It
+may consume provider quota. Its evidence remains process-local; DCC continues
+to advertise Claude as `nativeConfig` until this exact opt-in gate is executed
+successfully and the promotion change is reviewed.
+
 ## Running the offline gate
 
 From the repository root:
@@ -86,7 +124,9 @@ From the repository root:
 ```sh
 cargo test -p dcc-core mcp_conformance
 cargo test -p dcc-mcp-fixture conformance_contract_names
+cargo test -p dcc-mcp-fixture --test claude_conformance
+node --test sidecar/src/mcp-config.test.mjs sidecar/src/permission-bridge.test.mjs
 ```
 
-Both commands run without external network access, credentials, or provider
-accounts.
+These default commands run without external network access, credentials, or
+provider accounts. The ignored authenticated Claude test is not selected.

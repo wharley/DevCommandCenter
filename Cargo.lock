@@ -921,9 +921,12 @@ dependencies = [
 name = "dcc-mcp-fixture"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "axum",
  "dcc-core",
  "dcc-infra",
+ "dcc-providers",
+ "futures",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
