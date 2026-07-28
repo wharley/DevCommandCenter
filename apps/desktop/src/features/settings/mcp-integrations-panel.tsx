@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
 	ArrowLeft,
+	Activity,
+	AlertTriangle,
 	Braces,
 	Command,
 	Globe2,
@@ -19,6 +21,7 @@ import type {
 	McpBindingScope,
 	McpIntegrationRecord,
 	McpSecretTarget,
+	ProviderCatalog,
 } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +39,10 @@ import {
 } from "@/lib/mcp-api";
 import { toast } from "sonner";
 import {
+	listenMcpRuntimeStatusEvents,
+	loadMcpRuntimeStatuses,
+} from "@/lib/session-api";
+import {
 	buildMcpIntegrationInput,
 	createMcpIntegrationDraft,
 	formatMcpTransportPreview,
@@ -44,13 +51,21 @@ import {
 	type McpIntegrationDraftError,
 	type McpScopeContext,
 } from "./mcp-integration-form";
+import {
+	deriveMcpIntegrationRuntimeView,
+	findOrphanMcpRuntimeStatuses,
+	type McpIntegrationRuntimeKind,
+} from "./mcp-integration-runtime";
 
 export const MCP_INTEGRATIONS_QUERY_KEY = ["mcp", "integrations"] as const;
 
 type McpIntegrationsPanelProps = {
 	projectId: string | null;
 	sessionId: string | null;
+	sessionProviderId: string | null;
+	sessionCreatedAt: string | null;
 	workspaceName: string | null;
+	providerCatalog: ProviderCatalog | null;
 };
 
 type PanelView =
@@ -87,10 +102,30 @@ function errorMessageKey(error: McpIntegrationDraftError): string {
 	return `settings.integrations.errors.${error}`;
 }
 
+function runtimeStatusVariant(
+	kind: McpIntegrationRuntimeKind,
+): "success" | "warn" | "destructive" | "outline" | "secondary" {
+	if (kind === "connected" || kind === "serverReachable") return "success";
+	if (kind === "failed") return "destructive";
+	if (
+		kind === "restartRequired" ||
+		kind === "needsTrust" ||
+		kind === "probingServer" ||
+		kind === "attachingProvider"
+	) {
+		return "warn";
+	}
+	if (kind === "disabled") return "secondary";
+	return "outline";
+}
+
 export function McpIntegrationsPanel({
 	projectId,
 	sessionId,
+	sessionProviderId,
+	sessionCreatedAt,
 	workspaceName,
+	providerCatalog,
 }: McpIntegrationsPanelProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -115,6 +150,66 @@ export function McpIntegrationsPanel({
 		refetchOnWindowFocus: true,
 	});
 	const integrations = integrationsQuery.data?.integrations ?? [];
+	const runtimeQueryKey = useMemo(
+		() => ["mcp", "runtime-statuses", sessionId] as const,
+		[sessionId],
+	);
+	const runtimeQuery = useQuery({
+		queryKey: runtimeQueryKey,
+		queryFn: () =>
+			sessionId
+				? loadMcpRuntimeStatuses(sessionId)
+				: Promise.resolve({ statuses: [] }),
+		enabled: Boolean(sessionId),
+		staleTime: 3_000,
+		refetchInterval: sessionId ? 5_000 : false,
+		refetchOnWindowFocus: true,
+	});
+	const runtimeStatuses = runtimeQuery.data?.statuses ?? [];
+	const sessionProvider =
+		providerCatalog?.providers.find(
+			(provider) => provider.id === sessionProviderId,
+		) ?? null;
+	const providerSupport = sessionProvider?.capabilities.mcpSupport ?? null;
+	const providerSupportKind =
+		providerSupport &&
+		typeof providerSupport === "object" &&
+		"verifiedBridge" in providerSupport
+			? "verified"
+			: providerSupport === "nativeConfig"
+				? "native"
+				: providerSupport === "unsupported"
+					? "unsupported"
+					: "unknown";
+	const orphanRuntimeStatuses = useMemo(
+		() => findOrphanMcpRuntimeStatuses(integrations, runtimeStatuses),
+		[integrations, runtimeStatuses],
+	);
+
+	useEffect(() => {
+		if (!sessionId) return;
+		let disposed = false;
+		let unlisten: (() => void) | null = null;
+		void listenMcpRuntimeStatusEvents((event) => {
+			if (event.sessionId === sessionId) {
+				queryClient.setQueryData(runtimeQueryKey, {
+					statuses: event.statuses,
+				});
+			}
+		})
+			.then((dispose) => {
+				if (disposed) {
+					void dispose();
+				} else {
+					unlisten = dispose;
+				}
+			})
+			.catch(() => undefined);
+		return () => {
+			disposed = true;
+			if (unlisten) void unlisten();
+		};
+	}, [queryClient, runtimeQueryKey, sessionId]);
 
 	const refresh = async () => {
 		await queryClient.invalidateQueries({ queryKey: MCP_INTEGRATIONS_QUERY_KEY });
@@ -740,6 +835,81 @@ export function McpIntegrationsPanel({
 				</Button>
 			</div>
 
+			<div className="rounded-xl border border-border/60 bg-background p-4">
+				<div className="flex flex-wrap items-start justify-between gap-3">
+					<div className="flex min-w-0 items-start gap-3">
+						<div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+							<Activity className="size-4" />
+						</div>
+						<div>
+							<h3 className="text-[13px] font-medium text-foreground">
+								{t("settings.integrations.compatibilityTitle")}
+							</h3>
+							<p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+								{sessionId && sessionProviderId
+									? t(
+											`settings.integrations.compatibility.${providerSupportKind}`,
+											{
+												provider:
+													sessionProvider?.label ?? sessionProviderId,
+											},
+										)
+									: t("settings.integrations.compatibility.noSession")}
+							</p>
+						</div>
+					</div>
+					{sessionId && sessionProviderId ? (
+						<div className="flex flex-wrap items-center gap-1.5">
+							<Badge variant="outline">
+								{sessionProvider?.label ?? sessionProviderId}
+							</Badge>
+							<Badge
+								variant={
+									providerSupportKind === "verified"
+										? "success"
+										: providerSupportKind === "unsupported"
+											? "destructive"
+											: "outline"
+								}
+							>
+								{t(
+									`settings.integrations.compatibilityBadge.${providerSupportKind}`,
+								)}
+							</Badge>
+						</div>
+					) : null}
+				</div>
+				{sessionId ? (
+					<div className="mt-3 border-t border-border/50 pt-3 text-[11px] leading-relaxed text-muted-foreground">
+						{runtimeQuery.isPending
+							? t("settings.integrations.runtimeLoading")
+							: runtimeQuery.isError
+								? t("settings.integrations.runtimeLoadError")
+								: t("settings.integrations.runtimeSnapshot", {
+										count: runtimeStatuses.length,
+									})}
+					</div>
+				) : null}
+			</div>
+
+			{orphanRuntimeStatuses.length > 0 ? (
+				<div className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_45%,var(--border))] bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] p-4">
+					<div className="flex items-start gap-3">
+						<AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--warning)]" />
+						<div>
+							<p className="text-[12px] font-medium text-foreground">
+								{t("settings.integrations.orphanRuntimeTitle", {
+									count: orphanRuntimeStatuses.length,
+								})}
+							</p>
+							<p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+								{t("settings.integrations.orphanRuntimeHint")}
+							</p>
+						</div>
+					</div>
+				</div>
+			) : null}
+
 			{integrationsQuery.isPending ? (
 				<div className="flex items-center justify-center gap-2 rounded-xl border border-border/60 py-10 text-[12px] text-muted-foreground">
 					<Loader2 className="size-4 animate-spin" />
@@ -781,6 +951,18 @@ export function McpIntegrationsPanel({
 						const scope = integrationScope(integration);
 						const target = scopeTarget(scope);
 						const needsTrust = mcpIntegrationNeedsTrust(integration);
+						const runtimeView = deriveMcpIntegrationRuntimeView(
+							integration,
+							runtimeStatuses,
+							{
+								projectId,
+								sessionId,
+								sessionCreatedAt,
+								providerId: sessionProviderId,
+								providerSupport,
+							},
+						);
+						const reportedStatus = runtimeView.status;
 						const removing = busyAction === `remove:${definition.id}`;
 						const confirmingRemove =
 							removeTarget?.definition.id === definition.id;
@@ -882,6 +1064,69 @@ export function McpIntegrationsPanel({
 											<Trash2 className="size-3.5" />
 										</Button>
 									</div>
+								</div>
+
+								<div className="mt-4 rounded-lg border border-border/50 bg-muted/10 p-3">
+									<div className="flex flex-wrap items-center justify-between gap-2">
+										<div className="flex items-center gap-2">
+											<span className="text-[11px] font-medium text-foreground">
+												{t("settings.integrations.runtimeStatus")}
+											</span>
+											<Badge variant={runtimeStatusVariant(runtimeView.kind)}>
+												{t(
+													`settings.integrations.runtime.${runtimeView.kind}`,
+												)}
+											</Badge>
+										</div>
+										{reportedStatus ? (
+											<span className="font-mono text-[10px] text-muted-foreground">
+												{reportedStatus.providerId}{" "}
+												{reportedStatus.providerVersion}
+											</span>
+										) : null}
+									</div>
+									{runtimeView.kind === "restartRequired" ? (
+										<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+											{t("settings.integrations.restartHint")}
+										</p>
+									) : runtimeView.kind === "notReported" ? (
+										<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+											{t("settings.integrations.notReportedHint")}
+										</p>
+									) : null}
+									{reportedStatus?.tools &&
+									reportedStatus.tools.length > 0 ? (
+										<div className="mt-2 flex flex-wrap gap-1.5">
+											{reportedStatus.tools.slice(0, 8).map((tool) => (
+												<Badge
+													key={tool.name}
+													variant="outline"
+													className="font-mono text-[9px]"
+												>
+													{tool.name}
+												</Badge>
+											))}
+											{reportedStatus.tools.length > 8 ? (
+												<Badge variant="ghost">
+													+{reportedStatus.tools.length - 8}
+												</Badge>
+											) : null}
+										</div>
+									) : null}
+									{reportedStatus?.boundedError ? (
+										<p className="mt-2 break-words text-[11px] leading-relaxed text-destructive">
+											{reportedStatus.boundedError.message}
+										</p>
+									) : null}
+									{reportedStatus ? (
+										<p className="mt-2 text-[10px] text-muted-foreground">
+											{t("settings.integrations.checkedAt", {
+												date: new Date(
+													reportedStatus.checkedAt,
+												).toLocaleString(),
+											})}
+										</p>
+									) : null}
 								</div>
 
 								{confirmingRemove ? (

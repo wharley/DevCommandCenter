@@ -9,9 +9,9 @@ use dcc_core::application::{
 use dcc_core::domain::session::{SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary};
 use dcc_tauri::{
     commands::session_commands::{
-        self as session_command_impl, RespondToPermissionRequestInput,
-        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
-        SearchSessionsInput,
+        self as session_command_impl, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
+        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
+        RespondToUserInputOutput, SearchSessionsInput,
     },
     state::SessionCommandState,
 };
@@ -77,6 +77,14 @@ pub async fn list_thread_events(
     session_id: String,
 ) -> Result<Vec<SessionEventRecord>, String> {
     session_command_impl::list_thread_events(state, app, session_id).await
+}
+
+#[tauri::command]
+pub async fn list_mcp_runtime_statuses(
+    state: State<'_, SessionCommandState>,
+    input: ListMcpRuntimeStatusesInput,
+) -> Result<ListMcpRuntimeStatusesOutput, String> {
+    session_command_impl::list_mcp_runtime_statuses(state, input).await
 }
 
 #[tauri::command]

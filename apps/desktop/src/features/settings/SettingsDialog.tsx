@@ -112,6 +112,8 @@ type SettingsDialogProps = {
 	workspaceName: string | null;
 	projectId: string | null;
 	sessionId: string | null;
+	sessionProviderId: string | null;
+	sessionCreatedAt: string | null;
 };
 
 function forgeAccountInitials(value: string): string {
@@ -685,6 +687,8 @@ export function SettingsDialog({
 	workspaceName,
 	projectId,
 	sessionId,
+	sessionProviderId,
+	sessionCreatedAt,
 }: SettingsDialogProps) {
 	const { t, i18n } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -1081,7 +1085,10 @@ export function SettingsDialog({
 								<McpIntegrationsPanel
 									projectId={projectId}
 									sessionId={sessionId}
+									sessionProviderId={sessionProviderId}
+									sessionCreatedAt={sessionCreatedAt}
 									workspaceName={workspaceName}
+									providerCatalog={providerCatalog}
 								/>
 							) : null}
 

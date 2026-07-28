@@ -83,8 +83,9 @@ use dcc_tauri::commands::{
         ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
     },
     session_commands::{
-        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, SearchSessionsInput,
+        ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput, RespondToPermissionRequestInput,
+        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
+        SearchSessionsInput,
     },
     workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -231,6 +232,7 @@ struct SessionMethods {
     close_session: String,
     restore_session: String,
     list_thread_events: String,
+    list_mcp_runtime_statuses: String,
     list_workspace_sessions: String,
     search_sessions: String,
     respond_to_user_input: String,
@@ -524,6 +526,8 @@ fn main() {
         .typ::<CloseSessionOutput>()
         .typ::<RestoreSessionInput>()
         .typ::<RestoreSessionOutput>()
+        .typ::<ListMcpRuntimeStatusesInput>()
+        .typ::<ListMcpRuntimeStatusesOutput>()
         .typ::<RespondToUserInputInput>()
         .typ::<RespondToUserInputOutput>()
         .typ::<RespondToPermissionRequestInput>()
@@ -662,6 +666,7 @@ fn main() {
             close_session: "close_session".to_string(),
             restore_session: "restore_session".to_string(),
             list_thread_events: "list_thread_events".to_string(),
+            list_mcp_runtime_statuses: "list_mcp_runtime_statuses".to_string(),
             list_workspace_sessions: "list_workspace_sessions".to_string(),
             search_sessions: "search_sessions".to_string(),
             respond_to_user_input: "respond_to_user_input".to_string(),

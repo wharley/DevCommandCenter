@@ -4057,6 +4057,12 @@ export default function App() {
 					selectedWorkspace?.projectId ?? selectedWorkspace?.id ?? null
 				}
 				sessionId={effectiveSelectedSessionId}
+				sessionProviderId={
+					selectedSessionSummary?.session.providerId ?? null
+				}
+				sessionCreatedAt={
+					selectedSessionSummary?.session.createdAt ?? null
+				}
 			/>
 			<SkillsDialog
 				open={isSkillsOpen}

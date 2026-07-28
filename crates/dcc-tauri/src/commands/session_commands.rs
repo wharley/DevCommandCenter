@@ -13,7 +13,10 @@ use dcc_core::{
         RecordPlanHandoffOutput, RestoreSessionInput, RestoreSessionOutput, ResumeSessionInput,
         ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
     },
-    domain::session::{SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary},
+    domain::{
+        mcp::McpRuntimeStatus,
+        session::{SessionEventRecord, SessionId, SessionSearchResult, WorkspaceSessionSummary},
+    },
     ports::{
         provider::ProviderPermissionResponse, provider::ProviderUserInputAnswer,
         provider::ProviderUserInputResponse, Input, ProviderTurnInput, SessionEventRepo,
@@ -58,6 +61,18 @@ pub struct SearchSessionsInput {
     pub query: String,
     #[serde(default = "default_search_limit")]
     pub limit: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListMcpRuntimeStatusesInput {
+    pub session_id: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListMcpRuntimeStatusesOutput {
+    pub statuses: Vec<McpRuntimeStatus>,
 }
 
 fn default_search_limit() -> usize {
@@ -210,6 +225,30 @@ pub async fn list_thread_events(
     SessionEventRepo::list_events_by_session(&*state, &session_id)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn list_mcp_runtime_statuses(
+    state: State<'_, SessionCommandState>,
+    input: ListMcpRuntimeStatusesInput,
+) -> Result<ListMcpRuntimeStatusesOutput, String> {
+    let session_id = SessionId(input.session_id.trim().to_string());
+    if session_id.0.is_empty() {
+        return Err("sessionId is required".to_string());
+    }
+    if state
+        .peek_session(&session_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
+        return Err("session not found".to_string());
+    }
+
+    let statuses = state
+        .list_mcp_runtime_statuses(&session_id)
+        .map_err(|error| error.to_string())?;
+    Ok(ListMcpRuntimeStatusesOutput { statuses })
 }
 
 #[tauri::command]

@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { SESSION_METHODS } from "@dcc/contracts";
 import type {
 	CoreEvent,
+	ListMcpRuntimeStatusesOutput,
+	McpRuntimeStatus,
 	SessionEventRecord,
 	SessionSearchResult,
 	WorkspaceSessionSummary,
@@ -85,6 +87,36 @@ export function loadSessionThreadEvents(sessionId: string) {
 	return invoke<SessionEventRecord[]>(SESSION_METHODS.listThreadEvents, {
 		sessionId,
 	});
+}
+
+export function loadMcpRuntimeStatuses(sessionId: string) {
+	return invoke<ListMcpRuntimeStatusesOutput>(
+		SESSION_METHODS.listMcpRuntimeStatuses,
+		{ input: { sessionId } },
+	);
+}
+
+export async function listenMcpRuntimeStatusEvents(
+	handler: (event: {
+		sessionId: string;
+		statuses: McpRuntimeStatus[];
+	}) => void,
+) {
+	return listen<CoreEvent>(
+		"dcc/session/mcp/runtime-status",
+		({ payload }) => {
+			if (
+				"sessionMcpRuntimeStatusChanged" in payload &&
+				payload.sessionMcpRuntimeStatusChanged
+			) {
+				handler({
+					sessionId:
+						payload.sessionMcpRuntimeStatusChanged.session_id,
+					statuses: payload.sessionMcpRuntimeStatusChanged.statuses,
+				});
+			}
+		},
+	);
 }
 
 export function loadWorkspaceSessions(workspaceId: string) {

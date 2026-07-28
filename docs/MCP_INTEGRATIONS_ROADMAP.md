@@ -713,6 +713,8 @@ Updated July 28, 2026:
   - [x] Add the integrations surface and URL/command creation flow.
   - [x] Add trust review plus enable, disable, remove, and optional credential
     deletion controls.
-  - [ ] Add live compatibility, restart, process, and tool-policy views.
+  - [x] Add evidence-backed compatibility, live per-session runtime snapshots,
+    and restart-required views.
+  - [ ] Add DCC-owned process controls and per-tool policy views.
 - [ ] Real-service smoke tests.
 - [ ] Additional provider bridges.

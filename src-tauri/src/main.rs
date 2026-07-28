@@ -6953,6 +6953,7 @@ pub fn run() {
             session_commands::close_session,
             session_commands::restore_session,
             session_commands::list_thread_events,
+            session_commands::list_mcp_runtime_statuses,
             session_commands::approve_plan,
             session_commands::record_plan_handoff,
             session_commands::list_workspace_sessions,
