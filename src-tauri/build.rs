@@ -13,8 +13,15 @@ use dcc_core::{
             Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
             DelegationStatus,
         },
+        mcp::{
+            McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
+            McpDefinitionOwnership, McpErrorCategory, McpImportSource, McpImportSourceKind,
+            McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretBinding,
+            McpSecretReferenceId, McpSecretTarget, McpToolSummary, McpTransport, McpTransportKind,
+            McpTrust, McpTrustDecision, McpTrustFingerprint,
+        },
         project::ProjectId,
-        provider::{ProviderCatalog, ProviderDescriptor},
+        provider::{McpSupportLevel, ProviderCatalog, ProviderDescriptor},
         repository::{Repository, RepositoryId},
         session::{
             Checkpoint, CheckpointId, Session, SessionEventKind, SessionEventRecord, SessionId,
@@ -273,6 +280,7 @@ fn main() {
         .typ::<CheckpointId>()
         .typ::<ProviderCatalog>()
         .typ::<ProviderDescriptor>()
+        .typ::<McpSupportLevel>()
         .typ::<dcc_core::domain::provider::ProviderAccountUsage>()
         .typ::<dcc_core::domain::provider::ProviderAccountUsageState>()
         .typ::<dcc_core::domain::provider::ProviderUsageWindow>()
@@ -284,6 +292,27 @@ fn main() {
         .typ::<DelegationContextPolicy>()
         .typ::<DelegationBudget>()
         .typ::<Delegation>()
+        .typ::<McpDefinitionId>()
+        .typ::<McpBindingId>()
+        .typ::<McpSecretReferenceId>()
+        .typ::<McpTrustFingerprint>()
+        .typ::<McpTransportKind>()
+        .typ::<McpTransport>()
+        .typ::<McpImportSourceKind>()
+        .typ::<McpImportSource>()
+        .typ::<McpDefinitionOwnership>()
+        .typ::<McpSecretTarget>()
+        .typ::<McpSecretBinding>()
+        .typ::<McpTrustDecision>()
+        .typ::<McpTrust>()
+        .typ::<McpDefinition>()
+        .typ::<McpBindingScope>()
+        .typ::<McpBinding>()
+        .typ::<McpRuntimeState>()
+        .typ::<McpErrorCategory>()
+        .typ::<McpRuntimeError>()
+        .typ::<McpToolSummary>()
+        .typ::<McpRuntimeStatus>()
         .typ::<SessionState>()
         .typ::<TurnState>()
         .typ::<Turn>()
@@ -637,4 +666,14 @@ fn main() {
     builder
         .export(Typescript::default(), &output_path)
         .expect("failed to export DCC contracts");
+
+    let generated =
+        fs::read_to_string(&output_path).expect("failed to read generated DCC contracts");
+    let normalized = generated
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&output_path, format!("{normalized}\n"))
+        .expect("failed to normalize generated DCC contracts");
 }

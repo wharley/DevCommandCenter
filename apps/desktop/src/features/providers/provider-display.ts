@@ -35,6 +35,13 @@ export function summarizeProviderHealth(
 }
 
 export function getProviderChips(provider: ProviderDescriptor): ProviderChip[] {
+	const mcpChip: ProviderChip[] =
+		provider.capabilities.mcpSupport === "verifiedBridge"
+			? [{ label: "mcp verified", variant: "success" }]
+			: provider.capabilities.mcpSupport === "nativeConfig"
+				? [{ label: "mcp native config", variant: "outline" }]
+				: [];
+
 	return [
 		{
 			label: provider.stable ? "stable" : "experimental",
@@ -50,7 +57,7 @@ export function getProviderChips(provider: ProviderDescriptor): ProviderChip[] {
 		...(provider.capabilities.tools
 			? [{ label: "tools", variant: "outline" as const }]
 			: []),
-		...(provider.capabilities.mcp ? [{ label: "mcp", variant: "outline" as const }] : []),
+		...mcpChip,
 		...(provider.capabilities.resumable
 			? [{ label: "resumable", variant: "outline" as const }]
 			: []),

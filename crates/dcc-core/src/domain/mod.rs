@@ -1,4 +1,5 @@
 pub mod delegation;
+pub mod mcp;
 pub mod model_registry;
 pub mod project;
 pub mod provider;
@@ -11,6 +12,13 @@ pub mod workspace_bundle;
 pub use delegation::{
     Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
     DelegationStatus,
+};
+pub use mcp::{
+    McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
+    McpDefinitionOwnership, McpErrorCategory, McpImportSource, McpImportSourceKind,
+    McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretBinding, McpSecretReferenceId,
+    McpSecretTarget, McpToolSummary, McpTransport, McpTransportKind, McpTrust, McpTrustDecision,
+    McpTrustFingerprint, McpValidationError,
 };
 pub use project::{Project, ProjectId};
 pub use provider::{

@@ -21,7 +21,9 @@ use uuid::Uuid;
 use dcc_core::{
     application::compose_wire_prompt_for_provider,
     domain::{
-        provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
+        provider::{
+            Capabilities, HealthStatus, McpSupportLevel, ProviderEvent, ProviderId, SessionHandle,
+        },
         session::SessionId,
         workspace::WorkspaceId,
     },
@@ -1429,7 +1431,7 @@ impl Provider for CliProviderAdapter {
 pub fn stable_cli_capabilities() -> Capabilities {
     Capabilities {
         streaming: true,
-        mcp: true,
+        mcp_support: McpSupportLevel::Unsupported,
         tools: true,
         vision: true,
         resumable: true,
@@ -1445,7 +1447,7 @@ pub fn stable_cli_capabilities() -> Capabilities {
 pub fn experimental_cli_capabilities() -> Capabilities {
     Capabilities {
         streaming: true,
-        mcp: false,
+        mcp_support: McpSupportLevel::Unsupported,
         tools: true,
         vision: false,
         resumable: false,

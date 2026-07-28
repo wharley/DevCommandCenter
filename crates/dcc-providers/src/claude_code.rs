@@ -1,6 +1,6 @@
 use dcc_core::domain::{
     model_registry,
-    provider::{Capabilities, HealthStatus, ProviderDescriptor, ProviderId},
+    provider::{Capabilities, HealthStatus, McpSupportLevel, ProviderDescriptor, ProviderId},
 };
 
 use crate::{claude_sdk_sidecar::ClaudeSdkSidecarAdapter, common::stable_cli_capabilities};
@@ -17,6 +17,7 @@ pub fn adapter() -> ClaudeSdkSidecarAdapter {
 
 fn claude_code_capabilities() -> Capabilities {
     let mut capabilities = stable_cli_capabilities();
+    capabilities.mcp_support = McpSupportLevel::NativeConfig;
     capabilities.can_request_delegation = true;
     capabilities.supports_multi_root = true;
     capabilities

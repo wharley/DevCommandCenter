@@ -23,7 +23,7 @@ function makeProvider(id: string, stable: boolean) {
 		capabilities: {
 			streaming: false,
 			tools: false,
-			mcp: false,
+			mcpSupport: "unsupported" as const,
 			resumable: false,
 			vision: false,
 			experimental: false,
@@ -93,7 +93,7 @@ describe("resolveSelectedModelId", () => {
 		capabilities: {
 			streaming: false,
 			tools: false,
-			mcp: false,
+			mcpSupport: "unsupported" as const,
 			resumable: false,
 			vision: false,
 			experimental: false,

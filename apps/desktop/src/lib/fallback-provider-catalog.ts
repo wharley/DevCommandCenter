@@ -10,7 +10,7 @@ const stableHealth = "Healthy" as const;
 
 const stableCapabilities = {
 	streaming: true,
-	mcp: true,
+	mcpSupport: "unsupported",
 	tools: true,
 	vision: true,
 	resumable: true,
@@ -32,9 +32,14 @@ const multiRootDelegationRequesterCapabilities = {
 	supportsMultiRoot: true,
 } as const;
 
+const nativeMcpMultiRootDelegationRequesterCapabilities = {
+	...multiRootDelegationRequesterCapabilities,
+	mcpSupport: "nativeConfig",
+} as const;
+
 const experimentalCapabilities = {
 	streaming: true,
-	mcp: false,
+	mcpSupport: "unsupported",
 	tools: true,
 	vision: false,
 	resumable: false,
@@ -64,7 +69,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...multiRootDelegationRequesterCapabilities },
+			capabilities: { ...nativeMcpMultiRootDelegationRequesterCapabilities },
 			health: stableHealth,
 			stable: true,
 		},
@@ -79,7 +84,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...multiRootDelegationRequesterCapabilities },
+			capabilities: { ...nativeMcpMultiRootDelegationRequesterCapabilities },
 			health: stableHealth,
 			stable: true,
 		},

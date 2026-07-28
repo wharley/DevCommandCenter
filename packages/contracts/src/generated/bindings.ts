@@ -53,7 +53,7 @@ export type CancelDelegationOutput = {
 
 export type Capabilities = {
 	streaming: boolean,
-	mcp: boolean,
+	mcpSupport: McpSupportLevel,
 	tools: boolean,
 	vision: boolean,
 	resumable: boolean,
@@ -578,6 +578,129 @@ export type ListWorkspaceBundlesOutput = {
 export type ListWorkspacesOutput = {
 	workspaces: Workspace[],
 };
+
+export type McpBinding = {
+	id: McpBindingId,
+	definitionId: McpDefinitionId,
+	scope: McpBindingScope,
+	enabled: boolean,
+	/**
+	 *  Advanced escape hatch. The default is every verified compatible
+	 *  provider, represented by an empty list.
+	 */
+	providerExclusions?: ProviderId[],
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type McpBindingId = string;
+
+export type McpBindingScope = { type: "session"; sessionId: SessionId } | { type: "project"; projectId: ProjectId } | { type: "global" };
+
+export type McpDefinition = {
+	id: McpDefinitionId,
+	displayName: string,
+	transport: McpTransport,
+	secretRefs?: McpSecretBinding[],
+	enabled: boolean,
+	ownership: McpDefinitionOwnership,
+	trust: McpTrust,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type McpDefinitionId = string;
+
+export type McpDefinitionOwnership = { type: "dccManaged" } | { type: "importedReadOnly"; source: McpImportSource };
+
+export type McpErrorCategory = "invalidDefinition" | "authentication" | "executableNotFound" | "timeout" | "protocol" | "transport" | "provider" | "permissionBoundary" | "unknown";
+
+export type McpImportSource = {
+	kind: McpImportSourceKind,
+	/**
+	 *  Local path or provider-owned source label. It is identity metadata, not
+	 *  authority for DCC to modify the source.
+	 */
+	locator: string,
+	definitionKey: string | null,
+};
+
+export type McpImportSourceKind = "providerConfig" | "projectFile" | "other";
+
+export type McpRuntimeError = {
+	category: McpErrorCategory,
+	message: string,
+	truncated: boolean,
+};
+
+export type McpRuntimeState = "disabled" | "needsTrust" | "probingServer" | "serverReachable" | "attachingProvider" | "connected" | "unsupported" | "failed";
+
+export type McpRuntimeStatus = {
+	definitionId: McpDefinitionId,
+	providerId: ProviderId,
+	providerVersion: string,
+	sessionId: SessionId,
+	state: McpRuntimeState,
+	tools?: McpToolSummary[],
+	checkedAt: string,
+	boundedError: McpRuntimeError | null,
+};
+
+export type McpSecretBinding = {
+	target: McpSecretTarget,
+	// Opaque credential-store reference. This is never the secret value.
+	secretRef: McpSecretReferenceId,
+};
+
+export type McpSecretReferenceId = string;
+
+export type McpSecretTarget = { type: "environmentVariable"; name: string } | { type: "httpHeader"; name: string };
+
+/**
+ *  Describes the MCP attachment contract that the DCC adapter can actually
+ *  guarantee. Parsing MCP-shaped tool events alone does not raise this level.
+ */
+export type McpSupportLevel =
+// DCC cannot reliably attach an external MCP server through this adapter.
+"unsupported" |
+/**
+ *  The provider may load its own MCP configuration, but DCC does not own or
+ *  verify attachment, lifecycle, permissions, or tool visibility.
+ */
+"nativeConfig" |
+/**
+ *  DCC owns a tested bridge that attaches servers and verifies tools
+ *  end-to-end through the provider adapter.
+ */
+"verifiedBridge";
+
+export type McpToolSummary = {
+	name: string,
+};
+
+export type McpTransport =
+/**
+ *  A direct executable plus an argument array. DCC must not reinterpret
+ *  these fields as a shell command string.
+ */
+{ type: "stdio"; executable: string; args: string[]; cwd: string | null } |
+/**
+ *  Streamable HTTP endpoint. Authentication headers are represented by
+ *  `McpSecretBinding`, never embedded in this URL.
+ */
+{ type: "http"; url: string };
+
+export type McpTransportKind = "stdio" | "http";
+
+export type McpTrust = {
+	// Fingerprint computed from all security-relevant definition fields.
+	currentFingerprint: McpTrustFingerprint,
+	decision: McpTrustDecision,
+};
+
+export type McpTrustDecision = { type: "untrusted" } | { type: "trusted"; fingerprint: McpTrustFingerprint; trustedAt: string };
+
+export type McpTrustFingerprint = string;
 
 export type MissionSpecContextFileState = "current" | "missing" | "stale" | "invalid" | "symlink";
 

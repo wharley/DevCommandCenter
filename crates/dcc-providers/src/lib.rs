@@ -87,11 +87,54 @@ pub async fn provider_descriptors() -> Vec<ProviderDescriptor> {
 
 #[cfg(test)]
 mod tests {
-    use super::{provider_runtime, PROVIDER_IDS};
+    use dcc_core::domain::provider::{HealthStatus, McpSupportLevel};
+
+    use super::{
+        claude_code, codex, common::stable_cli_capabilities, droid, gemini, grok_acp,
+        provider_runtime, PROVIDER_IDS,
+    };
 
     #[test]
     fn registers_grok_runtime() {
         assert!(PROVIDER_IDS.contains(&"grok"));
         assert!(provider_runtime("grok").is_some());
+    }
+
+    #[test]
+    fn stable_preset_does_not_claim_mcp_attachment() {
+        assert_eq!(
+            stable_cli_capabilities().mcp_support,
+            McpSupportLevel::Unsupported
+        );
+    }
+
+    #[test]
+    fn provider_mcp_levels_match_the_current_adapter_contracts() {
+        let healthy = HealthStatus::Healthy;
+
+        assert_eq!(
+            claude_code::descriptor(healthy.clone())
+                .capabilities
+                .mcp_support,
+            McpSupportLevel::NativeConfig
+        );
+        assert_eq!(
+            codex::descriptor(healthy.clone()).capabilities.mcp_support,
+            McpSupportLevel::NativeConfig
+        );
+        assert_eq!(
+            gemini::descriptor(healthy.clone()).capabilities.mcp_support,
+            McpSupportLevel::Unsupported
+        );
+        assert_eq!(
+            droid::descriptor(healthy.clone()).capabilities.mcp_support,
+            McpSupportLevel::Unsupported
+        );
+        assert_eq!(
+            grok_acp::descriptor(healthy, stable_cli_capabilities())
+                .capabilities
+                .mcp_support,
+            McpSupportLevel::Unsupported
+        );
     }
 }

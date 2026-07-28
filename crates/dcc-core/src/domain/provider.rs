@@ -17,11 +17,27 @@ pub struct SessionHandle {
     pub handle_id: String,
 }
 
+/// Describes the MCP attachment contract that the DCC adapter can actually
+/// guarantee. Parsing MCP-shaped tool events alone does not raise this level.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum McpSupportLevel {
+    /// DCC cannot reliably attach an external MCP server through this adapter.
+    #[default]
+    Unsupported,
+    /// The provider may load its own MCP configuration, but DCC does not own or
+    /// verify attachment, lifecycle, permissions, or tool visibility.
+    NativeConfig,
+    /// DCC owns a tested bridge that attaches servers and verifies tools
+    /// end-to-end through the provider adapter.
+    VerifiedBridge,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     pub streaming: bool,
-    pub mcp: bool,
+    pub mcp_support: McpSupportLevel,
     pub tools: bool,
     pub vision: bool,
     pub resumable: bool,

@@ -864,7 +864,7 @@ mod tests {
             "gemini",
             Capabilities {
                 streaming: true,
-                mcp: false,
+                mcp_support: dcc_core::domain::provider::McpSupportLevel::Unsupported,
                 tools: true,
                 vision: false,
                 resumable: false,

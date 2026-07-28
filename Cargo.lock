@@ -838,8 +838,10 @@ dependencies = [
  "chrono",
  "futures",
  "serde",
+ "serde_json",
  "specta",
  "thiserror 2.0.18",
+ "url",
  "uuid",
 ]
 

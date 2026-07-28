@@ -88,11 +88,22 @@ worktree.
 
 ---
 
-## 2. MCP-server expondo primitivas do DCC — **faz sentido, fase posterior**
+## 2. MCP em duas direções
 
-Validado pelo Clauge (que expõe 45+ tools via MCP). Alinhado ao foco: expor as **primitivas próprias
+### 2.1 MCP-server expondo primitivas do DCC — **implementado**
+
+Validado pelo Claude (que expõe 45+ tools via MCP). Alinhado ao foco: expor as **primitivas próprias
 do DCC** (worktrees, missions, status/atenção de agentes) como servidor MCP para *outros* agentes
-consumirem. Diferenciado e dentro do eixo. Não bloqueia o item 1; fica para depois.
+consumirem. Diferenciado e dentro do eixo.
+
+### 2.2 DCC consumindo MCPs externos — **roadmap próprio**
+
+É a direção inversa: cadastrar um servidor externo por URL ou comando e disponibilizá-lo, com escopo,
+permissões e lifecycle confiáveis, para cada provider cujo adapter tenha compatibilidade comprovada.
+Figma, gateways de pagamento e ferramentas de observabilidade são exemplos desse fluxo.
+
+O plano técnico, o modelo de confiança open source e os critérios que impedem suporte por heurística
+estão em [`MCP_INTEGRATIONS_ROADMAP.md`](MCP_INTEGRATIONS_ROADMAP.md).
 
 ---
 
