@@ -122,6 +122,12 @@ results, provider form content, or random server names. Policies are captured
 when the provider session starts, so changing one marks an existing session as
 requiring restart instead of claiming a live update.
 
+The status inventory retains only the bounded tool name and explicitly present
+boolean `readOnlyHint`, `destructiveHint`, `idempotentHint`, and
+`openWorldHint` values. Free-form annotation fields are discarded. These values
+are renderer-visible hints only; they do not participate in approval
+correlation or policy resolution.
+
 ## Conformance gate
 
 The repository now compiles the production `CodexAppServerAdapter` against the

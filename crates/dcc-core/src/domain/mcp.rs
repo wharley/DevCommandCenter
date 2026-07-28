@@ -469,6 +469,16 @@ impl McpRuntimeError {
 #[serde(rename_all = "camelCase")]
 pub struct McpToolSummary {
     pub name: String,
+    pub annotations: McpToolAnnotations,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolAnnotations {
+    pub read_only_hint: Option<bool>,
+    pub destructive_hint: Option<bool>,
+    pub idempotent_hint: Option<bool>,
+    pub open_world_hint: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -986,6 +996,7 @@ mod tests {
             state: McpRuntimeState::Connected,
             tools: vec![McpToolSummary {
                 name: "get_design".to_string(),
+                annotations: McpToolAnnotations::default(),
             }],
             checked_at: "2026-07-28T00:00:00Z".to_string(),
             bounded_error: None,
@@ -1014,9 +1025,11 @@ mod tests {
             tools: vec![
                 McpToolSummary {
                     name: "inspect".to_string(),
+                    annotations: McpToolAnnotations::default(),
                 },
                 McpToolSummary {
                     name: "inspect".to_string(),
+                    annotations: McpToolAnnotations::default(),
                 },
             ],
             checked_at: "2026-07-28T00:00:00Z".to_string(),
@@ -1040,5 +1053,32 @@ mod tests {
 
         policy.tool_name = "unsafe tool".to_string();
         assert_eq!(policy.validate(), Err(McpValidationError::InvalidToolName));
+    }
+
+    #[test]
+    fn tool_annotations_preserve_only_explicit_boolean_hints() {
+        let tool: McpToolSummary = serde_json::from_value(serde_json::json!({
+            "name": "inspect",
+            "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": null,
+                "title": "untrusted free-form text"
+            }
+        }))
+        .expect("deserialize tool hints");
+
+        assert_eq!(
+            tool.annotations,
+            McpToolAnnotations {
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: None,
+                open_world_hint: None,
+            }
+        );
+        assert!(!serde_json::to_string(&tool)
+            .expect("serialize tool hints")
+            .contains("untrusted"));
     }
 }

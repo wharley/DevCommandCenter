@@ -6,7 +6,8 @@ use std::{
 use dcc_core::{
     domain::{
         mcp::{
-            McpErrorCategory, McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpToolSummary,
+            McpErrorCategory, McpRuntimeError, McpRuntimeState, McpRuntimeStatus,
+            McpToolAnnotations, McpToolSummary,
         },
         provider::ProviderId,
         session::SessionId,
@@ -253,13 +254,7 @@ fn parse_claude_mcp_status_snapshot_inner(
             }
             raw_tools
                 .iter()
-                .map(|tool| {
-                    tool.as_str()
-                        .map(|name| McpToolSummary {
-                            name: name.to_string(),
-                        })
-                        .ok_or_else(invalid_status_payload)
-                })
+                .map(parse_claude_tool_summary)
                 .collect::<Result<Vec<_>>>()?
         } else {
             Vec::new()
@@ -280,6 +275,37 @@ fn parse_claude_mcp_status_snapshot_inner(
     }
     statuses.sort_unstable_by(|left, right| left.definition_id.0.cmp(&right.definition_id.0));
     Ok(statuses)
+}
+
+fn parse_claude_tool_summary(tool: &Value) -> Result<McpToolSummary> {
+    if let Some(name) = tool.as_str() {
+        return Ok(McpToolSummary {
+            name: name.to_string(),
+            annotations: McpToolAnnotations::default(),
+        });
+    }
+    let name = tool
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(invalid_status_payload)?;
+    let annotations = tool.get("annotations").and_then(Value::as_object);
+    Ok(McpToolSummary {
+        name: name.to_string(),
+        annotations: McpToolAnnotations {
+            read_only_hint: annotations
+                .and_then(|value| value.get("readOnlyHint"))
+                .and_then(Value::as_bool),
+            destructive_hint: annotations
+                .and_then(|value| value.get("destructiveHint"))
+                .and_then(Value::as_bool),
+            idempotent_hint: annotations
+                .and_then(|value| value.get("idempotentHint"))
+                .and_then(Value::as_bool),
+            open_world_hint: annotations
+                .and_then(|value| value.get("openWorldHint"))
+                .and_then(Value::as_bool),
+        },
+    })
 }
 
 fn collect_secret_map(
@@ -525,7 +551,18 @@ mod tests {
                     "definitionId": "connected",
                     "name": "dcc-connected",
                     "status": "connected",
-                    "tools": ["fixture.echo", "fixture.mutate"],
+                    "tools": [
+                        {
+                            "name": "fixture.echo",
+                            "annotations": {
+                                "readOnlyHint": true,
+                                "destructiveHint": false,
+                                "openWorldHint": false,
+                                "untrustedText": "not forwarded"
+                            }
+                        },
+                        "fixture.mutate"
+                    ],
                     "url": "https://secret.example/mcp"
                 },
                 {
@@ -574,6 +611,15 @@ mod tests {
         );
         assert_eq!(statuses[1].tools.len(), 2);
         assert_eq!(
+            statuses[1].tools[0].annotations,
+            McpToolAnnotations {
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: None,
+                open_world_hint: Some(false),
+            }
+        );
+        assert_eq!(
             statuses[0]
                 .bounded_error
                 .as_ref()
@@ -585,6 +631,7 @@ mod tests {
         assert!(!debug.contains("secret-canary"));
         assert!(!debug.contains("secret.example"));
         assert!(!debug.contains("raw provider failure"));
+        assert!(!debug.contains("not forwarded"));
     }
 
     #[test]

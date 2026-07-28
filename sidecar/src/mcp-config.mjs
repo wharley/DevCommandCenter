@@ -169,11 +169,11 @@ export function resolveDccMcpToolPolicy(projection, toolName) {
 	return null;
 }
 
-function boundedToolNames(tools) {
+function boundedToolSummaries(tools) {
 	if (!Array.isArray(tools)) {
 		return [];
 	}
-	const names = [];
+	const summaries = [];
 	const seen = new Set();
 	for (const tool of tools) {
 		const name = tool?.name;
@@ -187,12 +187,24 @@ function boundedToolNames(tools) {
 			continue;
 		}
 		seen.add(name);
-		names.push(name);
-		if (names.length === 256) {
+		const annotations = {};
+		if (isRecord(tool.annotations)) {
+			if (typeof tool.annotations.readOnly === "boolean") {
+				annotations.readOnlyHint = tool.annotations.readOnly;
+			}
+			if (typeof tool.annotations.destructive === "boolean") {
+				annotations.destructiveHint = tool.annotations.destructive;
+			}
+			if (typeof tool.annotations.openWorld === "boolean") {
+				annotations.openWorldHint = tool.annotations.openWorld;
+			}
+		}
+		summaries.push({ name, annotations });
+		if (summaries.length === 256) {
 			break;
 		}
 	}
-	return names;
+	return summaries;
 }
 
 export function dccMcpQueryOptions(projection) {
@@ -250,7 +262,7 @@ export async function readDccMcpStatus(query, projection) {
 			status: normalizedStatus,
 			tools:
 				normalizedStatus === "connected"
-					? boundedToolNames(status.tools)
+					? boundedToolSummaries(status.tools)
 					: [],
 		});
 	}

@@ -17,9 +17,9 @@ use dcc_core::{
             McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
             McpDefinitionOwnership, McpErrorCategory, McpImportSource, McpImportSourceKind,
             McpProbeReport, McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretBinding,
-            McpSecretReferenceId, McpSecretTarget, McpToolPolicy, McpToolPolicyDecision,
-            McpToolSummary, McpTransport, McpTransportKind, McpTrust, McpTrustDecision,
-            McpTrustFingerprint,
+            McpSecretReferenceId, McpSecretTarget, McpToolAnnotations, McpToolPolicy,
+            McpToolPolicyDecision, McpToolSummary, McpTransport, McpTransportKind, McpTrust,
+            McpTrustDecision, McpTrustFingerprint,
         },
         project::ProjectId,
         provider::{McpSupportLevel, ProviderCatalog, ProviderDescriptor},
@@ -331,6 +331,7 @@ fn main() {
         .typ::<McpRuntimeState>()
         .typ::<McpErrorCategory>()
         .typ::<McpRuntimeError>()
+        .typ::<McpToolAnnotations>()
         .typ::<McpToolSummary>()
         .typ::<McpProbeReport>()
         .typ::<McpRuntimeStatus>()

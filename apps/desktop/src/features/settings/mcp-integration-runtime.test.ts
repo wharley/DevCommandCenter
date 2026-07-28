@@ -8,6 +8,7 @@ import {
 	findOrphanMcpRuntimeStatuses,
 	getMcpToolPolicyDecision,
 	listMcpIntegrationTools,
+	listMcpToolAnnotationHints,
 	type McpRuntimeContext,
 } from "./mcp-integration-runtime";
 
@@ -65,7 +66,17 @@ function status(
 		providerVersion: "1.2.3",
 		sessionId: "session-1",
 		state: "connected",
-		tools: [{ name: "get_design" }],
+		tools: [
+			{
+				name: "get_design",
+				annotations: {
+					readOnlyHint: null,
+					destructiveHint: null,
+					idempotentHint: null,
+					openWorldHint: null,
+				},
+			},
+		],
 		checkedAt: "2026-07-28T10:01:00Z",
 		boundedError: null,
 		...overrides,
@@ -80,7 +91,17 @@ describe("MCP integration runtime view", () => {
 			context,
 		);
 		expect(view.kind).toBe("connected");
-		expect(view.status?.tools).toEqual([{ name: "get_design" }]);
+		expect(view.status?.tools).toEqual([
+			{
+				name: "get_design",
+				annotations: {
+					readOnlyHint: null,
+					destructiveHint: null,
+					idempotentHint: null,
+					openWorldHint: null,
+				},
+			},
+		]);
 	});
 
 	it("requires restart when configuration is newer than the runtime snapshot", () => {
@@ -172,5 +193,36 @@ describe("MCP integration runtime view", () => {
 		).toEqual(["legacy_mutation", "read_design"]);
 		expect(getMcpToolPolicyDecision(record, "read_design")).toBe("ask");
 		expect(getMcpToolPolicyDecision(record, "legacy_mutation")).toBe("deny");
+	});
+
+	it("shows only explicit annotation hints without changing the Ask default", () => {
+		const record = integration();
+		const runtimeTool = {
+			name: "update_design",
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: true,
+				idempotentHint: null,
+				openWorldHint: false,
+			},
+		};
+
+		expect(listMcpToolAnnotationHints(runtimeTool)).toEqual([
+			"mayModify",
+			"destructive",
+			"closedWorld",
+		]);
+		expect(getMcpToolPolicyDecision(record, runtimeTool.name)).toBe("ask");
+		expect(
+			listMcpToolAnnotationHints({
+				name: "unknown",
+				annotations: {
+					readOnlyHint: null,
+					destructiveHint: null,
+					idempotentHint: null,
+					openWorldHint: null,
+				},
+			}),
+		).toEqual([]);
 	});
 });

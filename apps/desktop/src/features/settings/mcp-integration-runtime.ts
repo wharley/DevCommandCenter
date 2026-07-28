@@ -3,6 +3,7 @@ import type {
 	McpRuntimeState,
 	McpRuntimeStatus,
 	McpSupportLevel,
+	McpToolSummary,
 	McpToolPolicyDecision,
 } from "@dcc/contracts";
 import { mcpIntegrationNeedsTrust } from "./mcp-integration-form";
@@ -139,4 +140,41 @@ export function getMcpToolPolicyDecision(
 		integration.toolPolicies.find((policy) => policy.toolName === toolName)
 			?.decision ?? "ask"
 	);
+}
+
+export type McpToolAnnotationHint =
+	| "readOnly"
+	| "mayModify"
+	| "destructive"
+	| "nonDestructive"
+	| "idempotent"
+	| "nonIdempotent"
+	| "openWorld"
+	| "closedWorld";
+
+export function listMcpToolAnnotationHints(
+	tool: McpToolSummary | undefined,
+): McpToolAnnotationHint[] {
+	const annotations = tool?.annotations;
+	if (!annotations) {
+		return [];
+	}
+	const hints: McpToolAnnotationHint[] = [];
+	if (annotations.readOnlyHint != null) {
+		hints.push(annotations.readOnlyHint ? "readOnly" : "mayModify");
+	}
+	if (annotations.destructiveHint != null) {
+		hints.push(
+			annotations.destructiveHint ? "destructive" : "nonDestructive",
+		);
+	}
+	if (annotations.idempotentHint != null) {
+		hints.push(
+			annotations.idempotentHint ? "idempotent" : "nonIdempotent",
+		);
+	}
+	if (annotations.openWorldHint != null) {
+		hints.push(annotations.openWorldHint ? "openWorld" : "closedWorld");
+	}
+	return hints;
 }

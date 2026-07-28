@@ -57,6 +57,7 @@ import {
 	deriveMcpIntegrationRuntimeView,
 	findOrphanMcpRuntimeStatuses,
 	getMcpToolPolicyDecision,
+	listMcpToolAnnotationHints,
 	listMcpIntegrationTools,
 	type McpIntegrationRuntimeKind,
 } from "./mcp-integration-runtime";
@@ -1148,6 +1149,11 @@ export function McpIntegrationsPanel({
 													integration,
 													toolName,
 												);
+												const annotationHints = listMcpToolAnnotationHints(
+													reportedStatus?.tools?.find(
+														(tool) => tool.name === toolName,
+													),
+												);
 												const policyBusy = busyAction?.startsWith(
 													`policy:${definition.id}:${toolName}:`,
 												);
@@ -1156,12 +1162,32 @@ export function McpIntegrationsPanel({
 														key={toolName}
 														className="flex flex-col gap-2 rounded-md border border-border/40 bg-background px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between"
 													>
-														<span
-															className="min-w-0 truncate font-mono text-[10px] text-foreground"
-															title={toolName}
-														>
-															{toolName}
-														</span>
+														<div className="min-w-0">
+															<span
+																className="block truncate font-mono text-[10px] text-foreground"
+																title={toolName}
+															>
+																{toolName}
+															</span>
+															{annotationHints.length > 0 ? (
+																<div className="mt-1.5 flex flex-wrap gap-1">
+																	{annotationHints.map((hint) => (
+																		<Badge
+																			key={hint}
+																			variant="outline"
+																			className="h-5 px-1.5 text-[8px] font-normal text-muted-foreground"
+																			title={t(
+																				"settings.integrations.toolAnnotationsDisclaimer",
+																			)}
+																		>
+																			{t(
+																				`settings.integrations.toolAnnotation.${hint}`,
+																			)}
+																		</Badge>
+																	))}
+																</div>
+															) : null}
+														</div>
 														<ToggleGroup
 															type="single"
 															value={decision}

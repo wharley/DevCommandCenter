@@ -7,7 +7,7 @@ use dcc_core::{
     domain::{
         mcp::{
             McpDefinitionId, McpErrorCategory, McpRuntimeError, McpRuntimeState, McpRuntimeStatus,
-            McpToolPolicyDecision, McpToolSummary,
+            McpToolAnnotations, McpToolPolicyDecision, McpToolSummary,
         },
         provider::ProviderId,
         session::SessionId,
@@ -503,8 +503,25 @@ fn parse_tool_inventory(raw_server: &serde_json::Value) -> Result<Vec<McpToolSum
         if key != name {
             return Err(invalid_status_payload());
         }
+        let annotations = tool
+            .get("annotations")
+            .and_then(serde_json::Value::as_object);
         tools.push(McpToolSummary {
             name: name.to_string(),
+            annotations: McpToolAnnotations {
+                read_only_hint: annotations
+                    .and_then(|value| value.get("readOnlyHint"))
+                    .and_then(serde_json::Value::as_bool),
+                destructive_hint: annotations
+                    .and_then(|value| value.get("destructiveHint"))
+                    .and_then(serde_json::Value::as_bool),
+                idempotent_hint: annotations
+                    .and_then(|value| value.get("idempotentHint"))
+                    .and_then(serde_json::Value::as_bool),
+                open_world_hint: annotations
+                    .and_then(|value| value.get("openWorldHint"))
+                    .and_then(serde_json::Value::as_bool),
+            },
         });
     }
     tools.sort_unstable_by(|left, right| left.name.cmp(&right.name));
@@ -877,7 +894,17 @@ mod tests {
                         "name": "dcc-session-0",
                         "authStatus": "unsupported",
                         "tools": {
-                            "fixture.echo": { "name": "fixture.echo", "inputSchema": {} },
+                            "fixture.echo": {
+                                "name": "fixture.echo",
+                                "inputSchema": {},
+                                "annotations": {
+                                    "readOnlyHint": true,
+                                    "destructiveHint": false,
+                                    "idempotentHint": true,
+                                    "openWorldHint": false,
+                                    "untrustedText": "not forwarded"
+                                }
+                            },
                             "fixture.fail": { "name": "fixture.fail", "inputSchema": {} }
                         },
                         "resources": [],
@@ -918,6 +945,16 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["fixture.echo", "fixture.fail"]
         );
+        assert_eq!(
+            statuses[1].tools[0].annotations,
+            McpToolAnnotations {
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }
+        );
+        assert!(!format!("{statuses:?}").contains("not forwarded"));
     }
 
     #[test]

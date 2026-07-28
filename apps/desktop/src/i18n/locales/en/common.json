@@ -1125,7 +1125,18 @@
       "notReportedHint": "The provider has not reported a state for this integration in the selected session. DCC does not infer success or failure.",
       "checkedAt": "Last checked {{date}}",
       "toolPoliciesTitle": "Tool policies",
-      "toolPoliciesHint": "Unknown tools default to Ask. Allow bypasses the prompt and Deny blocks execution; changes apply after recreating or restarting the provider session.",
+      "toolPoliciesHint": "Unknown tools default to Ask. Allow bypasses the prompt and Deny blocks execution; changes apply after recreating or restarting the provider session. Server-reported hints never change policy.",
+      "toolAnnotationsDisclaimer": "Reported by the MCP server as an untrusted hint. It does not grant permission or change policy.",
+      "toolAnnotation": {
+        "readOnly": "Server says read-only",
+        "mayModify": "Server says may modify",
+        "destructive": "Server says destructive",
+        "nonDestructive": "Server says non-destructive",
+        "idempotent": "Server says idempotent",
+        "nonIdempotent": "Server says non-idempotent",
+        "openWorld": "Server says open-world",
+        "closedWorld": "Server says closed-world"
+      },
       "toolPolicy": {
         "ask": "Ask",
         "allow": "Allow",

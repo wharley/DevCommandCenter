@@ -781,6 +781,13 @@ export type McpSupportLevel =
 	evidence: McpConformanceEvidence,
 } };
 
+export type McpToolAnnotations = {
+	readOnlyHint: boolean | null,
+	destructiveHint: boolean | null,
+	idempotentHint: boolean | null,
+	openWorldHint: boolean | null,
+};
+
 export type McpToolPolicy = {
 	definitionId: McpDefinitionId,
 	toolName: string,
@@ -792,6 +799,7 @@ export type McpToolPolicyDecision = "ask" | "allow" | "deny";
 
 export type McpToolSummary = {
 	name: string,
+	annotations: McpToolAnnotations,
 };
 
 export type McpTransport =

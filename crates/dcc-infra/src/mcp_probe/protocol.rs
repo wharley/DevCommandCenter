@@ -1,5 +1,5 @@
 use dcc_core::{
-    domain::mcp::{McpErrorCategory, McpRuntimeError, McpToolSummary},
+    domain::mcp::{McpErrorCategory, McpRuntimeError, McpToolAnnotations, McpToolSummary},
     ports::McpProbeResult,
 };
 use serde_json::{json, Value};
@@ -111,9 +111,22 @@ pub(super) fn parse_tools_response(
         }
         summaries.push(McpToolSummary {
             name: name.to_string(),
+            annotations: parse_tool_annotations(tool),
         });
     }
     Ok(summaries)
+}
+
+fn parse_tool_annotations(tool: &Value) -> McpToolAnnotations {
+    let Some(annotations) = tool.get("annotations").and_then(Value::as_object) else {
+        return McpToolAnnotations::default();
+    };
+    McpToolAnnotations {
+        read_only_hint: annotations.get("readOnlyHint").and_then(Value::as_bool),
+        destructive_hint: annotations.get("destructiveHint").and_then(Value::as_bool),
+        idempotent_hint: annotations.get("idempotentHint").and_then(Value::as_bool),
+        open_world_hint: annotations.get("openWorldHint").and_then(Value::as_bool),
+    }
 }
 
 pub(super) async fn write_message<W>(writer: &mut W, message: &Value) -> McpProbeResult<()>
@@ -266,7 +279,14 @@ mod tests {
                     "tools": [{
                         "name": "fixture.echo",
                         "description": "ignored",
-                        "inputSchema": { "type": "object" }
+                        "inputSchema": { "type": "object" },
+                        "annotations": {
+                            "readOnlyHint": true,
+                            "destructiveHint": false,
+                            "idempotentHint": "not-a-boolean",
+                            "openWorldHint": false,
+                            "unknownHint": true
+                        }
                     }]
                 }
             }),
@@ -277,7 +297,13 @@ mod tests {
         assert_eq!(
             tools,
             vec![McpToolSummary {
-                name: "fixture.echo".to_string()
+                name: "fixture.echo".to_string(),
+                annotations: McpToolAnnotations {
+                    read_only_hint: Some(true),
+                    destructive_hint: Some(false),
+                    idempotent_hint: None,
+                    open_world_hint: Some(false),
+                },
             }]
         );
     }

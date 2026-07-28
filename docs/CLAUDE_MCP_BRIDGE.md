@@ -112,6 +112,11 @@ Provider configuration, URLs, headers, environment values, descriptions, and
 raw SDK errors are not forwarded. A thrown attach error becomes the fixed
 message `DCC MCP attachment failed`. `failed` and `needs-auth` statuses fail the
 turn closed; `pending` remains distinct because the SDK may still be connecting.
+For connected tools, the sidecar keeps only a bounded name and boolean
+`readOnly`, `destructive`, and `openWorld` annotations exposed by the pinned SDK,
+mapping them to the provider-neutral hint contract. Free-form annotation data
+is discarded. Missing booleans remain unknown rather than receiving inferred
+defaults.
 
 The Claude adapter declares the exact runtime key
 `claude-agent-sdk@0.2.126+claude-code@2.1.126`. A test binds that key to the
@@ -136,6 +141,8 @@ applies it in `canUseTool` when Claude requests a callback, so native tools and
 provider-owned MCP servers cannot inherit DCC policy by a display-name match.
 Policy records contain only bounded definition IDs, tool names, decisions, and
 timestamps; arguments and results never enter persistence or renderer state.
+Tool annotations are displayed as untrusted server hints and never select or
+change one of those decisions.
 
 The callback now lives in a separately tested sidecar module. Offline tests
 prove that MCP requests stay pending until DCC responds, that an explicit

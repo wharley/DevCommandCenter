@@ -125,7 +125,18 @@ test("builds documented query options and returns only bounded DCC status metada
 				{
 					name: "dcc-fixture",
 					status: "connected",
-					tools: [{ name: "fixture.echo", description: "not forwarded" }],
+					tools: [
+						{
+							name: "fixture.echo",
+							description: "not forwarded",
+							annotations: {
+								readOnly: true,
+								destructive: false,
+								openWorld: false,
+								untrustedText: "not forwarded",
+							},
+						},
+					],
 				},
 				{
 					name: "user-configured-server",
@@ -145,7 +156,16 @@ test("builds documented query options and returns only bounded DCC status metada
 			definitionId: "fixture",
 			name: "dcc-fixture",
 			status: "connected",
-			tools: ["fixture.echo"],
+			tools: [
+				{
+					name: "fixture.echo",
+					annotations: {
+						readOnlyHint: true,
+						destructiveHint: false,
+						openWorldHint: false,
+					},
+				},
+			],
 		},
 	]);
 	assert.equal(JSON.stringify(status).includes("not forwarded"), false);
@@ -227,7 +247,7 @@ test("keeps every projected server in a deterministic fail-closed snapshot", asy
 			definitionId: "connected",
 			name: "dcc-connected",
 			status: "connected",
-			tools: ["fixture.echo"],
+			tools: [{ name: "fixture.echo", annotations: {} }],
 		},
 		{
 			definitionId: "missing",

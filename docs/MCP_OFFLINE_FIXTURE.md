@@ -58,7 +58,9 @@ fixture bound to loopback. It must not be deployed as a shared service.
 Tool annotations are untrusted hints, not authorization. In particular, the
 fixture does not assert that approval occurred before `fixture.mutate` runs.
 The provider conformance harness must prove that the DCC/provider approval
-boundary prevented an unapproved call.
+boundary prevented an unapproved call. Probe and provider status normalization
+retain only explicitly present boolean hints; descriptions, annotation titles,
+and unknown metadata do not cross into the renderer contract.
 
 Mutation affects memory only. The fixture never writes project files, invokes
 commands, resolves credentials, or contacts another host.

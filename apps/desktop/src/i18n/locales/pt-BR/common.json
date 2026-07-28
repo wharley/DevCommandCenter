@@ -1125,7 +1125,18 @@
       "notReportedHint": "O provedor não informou um estado para esta integração na sessão selecionada. O DCC não presume sucesso nem falha.",
       "checkedAt": "Última verificação em {{date}}",
       "toolPoliciesTitle": "Políticas das ferramentas",
-      "toolPoliciesHint": "Ferramentas desconhecidas usam Perguntar. Permitir ignora a confirmação e Negar bloqueia a execução; alterações valem após recriar ou reiniciar a sessão do provedor.",
+      "toolPoliciesHint": "Ferramentas desconhecidas usam Perguntar. Permitir ignora a confirmação e Negar bloqueia a execução; alterações valem após recriar ou reiniciar a sessão do provedor. Dicas informadas pelo servidor nunca alteram a política.",
+      "toolAnnotationsDisclaimer": "Informado pelo servidor MCP como uma dica não confiável. Isso não concede permissão nem altera a política.",
+      "toolAnnotation": {
+        "readOnly": "Servidor diz: somente leitura",
+        "mayModify": "Servidor diz: pode modificar",
+        "destructive": "Servidor diz: destrutiva",
+        "nonDestructive": "Servidor diz: não destrutiva",
+        "idempotent": "Servidor diz: idempotente",
+        "nonIdempotent": "Servidor diz: não idempotente",
+        "openWorld": "Servidor diz: mundo aberto",
+        "closedWorld": "Servidor diz: mundo fechado"
+      },
       "toolPolicy": {
         "ask": "Perguntar",
         "allow": "Permitir",

@@ -717,6 +717,8 @@ Updated July 28, 2026:
     and restart-required views.
   - [x] Add discovered-tool inventory plus persisted Ask, Allow, and Deny
     policies enforced by the Claude and Codex bridges.
+  - [x] Show explicitly reported boolean tool annotations as untrusted hints
+    without changing approval policy.
   - [ ] Add DCC-owned process controls after the runtime exposes independently
     owned MCP process handles.
 - [ ] Real-service smoke tests.
