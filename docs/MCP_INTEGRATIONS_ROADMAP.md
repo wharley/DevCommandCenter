@@ -722,4 +722,7 @@ Updated July 28, 2026:
   - [ ] Add DCC-owned process controls after the runtime exposes independently
     owned MCP process handles.
 - [ ] Real-service smoke tests.
+  - [x] Add ignored, fail-closed Figma and pinned Garu read-only smoke harnesses
+    plus fork-safe execution documentation.
+  - [ ] Run the authenticated opt-in smokes during final end-to-end validation.
 - [ ] Additional provider bridges.

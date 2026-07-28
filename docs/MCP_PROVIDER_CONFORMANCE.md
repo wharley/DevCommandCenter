@@ -138,3 +138,9 @@ node --test sidecar/src/mcp-config.test.mjs sidecar/src/permission-bridge.test.m
 
 These default commands run without external network access, credentials, or
 provider accounts. The ignored authenticated Claude test is not selected.
+
+Real-service Figma and pinned command-server checks are a separate layer. Their
+ignored harness, exact opt-in gates, read-only constraints, and fork policy are
+documented in [MCP real-service smoke tests](MCP_REAL_SERVICE_SMOKES.md). A
+real-service result cannot replace the shared offline provider conformance
+contract or create promotion evidence by itself.
