@@ -335,6 +335,10 @@ export async function createDiffEditor(options: {
 		readOnly: true,
 		renderOverviewRuler: false,
 		renderSideBySide: !options.inline,
+		// Keep modified files in a stable before/after layout when the DCC window
+		// is narrow. Monaco otherwise switches to its inline view below 900px,
+		// making the original file appear to disappear.
+		useInlineViewWhenSpaceIsLimited: false,
 		scrollBeyondLastLine: false,
 		smoothScrolling: true,
 		glyphMargin: true,

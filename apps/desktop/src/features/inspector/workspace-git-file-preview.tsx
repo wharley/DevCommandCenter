@@ -138,8 +138,8 @@ function WorkspaceGitMonacoDiff({
 	}
 
 	return (
-		<div className="relative flex min-h-[280px] flex-1 overflow-hidden rounded-md border border-border/50 bg-background/60">
-			<div ref={hostRef} className="h-full min-h-0 flex-1" />
+		<div className="relative flex min-h-[280px] min-w-0 flex-1 overflow-hidden rounded-md border border-border/50 bg-background/60">
+			<div ref={hostRef} className="h-full min-h-0 min-w-0 flex-1" />
 			{surfaceStatus.kind === "loading" ? (
 				<div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/70">
 					<span className="inline-flex items-center gap-2 text-[11px] text-muted-foreground">

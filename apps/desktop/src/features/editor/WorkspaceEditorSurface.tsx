@@ -173,8 +173,8 @@ function WorkspaceEditorDiff({
 	}, [focusLine]);
 
 	return (
-		<div className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
-			<div ref={hostRef} className="h-full min-h-0 flex-1" />
+		<div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+			<div ref={hostRef} className="h-full min-h-0 min-w-0 flex-1" />
 			{loading ? (
 				<div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/70">
 					<span className="text-[11px] text-muted-foreground">Loading editor...</span>
@@ -753,7 +753,7 @@ export function WorkspaceEditorSurface({
 		<section
 			aria-label="Workspace editor surface"
 			data-focus-scope="editor"
-			className="flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground"
+			className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background text-foreground"
 		>
 			<div
 				className="flex h-9 items-center border-b border-border"
