@@ -4,6 +4,7 @@ pub mod fs;
 pub mod git;
 mod git_command;
 mod git_parsing;
+pub mod mcp_db;
 pub mod process;
 mod repo_config;
 mod workspace_setup_plan;

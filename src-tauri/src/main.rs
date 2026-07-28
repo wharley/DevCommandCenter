@@ -56,6 +56,7 @@ use coderabbit_commands::{
     workspace_coderabbit_review_load, workspace_coderabbit_review_save,
     workspace_coderabbit_review_start,
 };
+use dcc_infra::mcp_db::SqliteMcpRepo;
 use delegation_commands::{
     approve_delegation, cancel_delegation, complete_delegation, create_delegation, fail_delegation,
     get_delegation, list_delegations, start_delegation,
@@ -6974,6 +6975,8 @@ pub fn run() {
                 .map_err(|e| format!("failed to migrate legacy schema: {e}"))?;
             conn.execute_batch(APP_SCHEMA_SQL)
                 .map_err(|e| format!("failed to apply schema: {e}"))?;
+            SqliteMcpRepo::apply_migrations(&conn)
+                .map_err(|e| format!("failed to apply MCP schema: {e}"))?;
             sync_existing_repo_configs(&conn)
                 .map_err(|e| format!("failed to sync repo configs: {e}"))?;
             eprintln!("[DCC] Database ready at {:?}", db_path);

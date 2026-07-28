@@ -661,7 +661,7 @@ Updated July 28, 2026:
   - [ ] Add provider-version evidence to bridge compatibility results.
 - [ ] Domain and credential-store foundation.
   - [x] Provider-neutral definitions, transports, bindings, trust, and runtime contracts.
-  - [ ] SQLite repositories and migrations.
+  - [x] SQLite repositories and idempotent startup migrations.
   - [ ] OS credential-store port and platform adapters.
   - [ ] Fingerprint computation and activation service.
 - [ ] Offline fixture and conformance harness.

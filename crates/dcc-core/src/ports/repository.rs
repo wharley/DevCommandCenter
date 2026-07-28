@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use crate::{
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
+        mcp::{McpBinding, McpBindingId, McpDefinition, McpDefinitionId},
         project::{Project, ProjectId},
         repository::{Repository, RepositoryId},
         session::{Session, SessionEventRecord, SessionId},
@@ -61,6 +62,22 @@ pub trait RepositoryRepo: Send + Sync {
 pub trait ProjectRepo: Send + Sync {
     async fn save_project(&self, project: &Project) -> Result<()>;
     async fn get_project(&self, id: &ProjectId) -> Result<Option<Project>>;
+}
+
+#[async_trait]
+pub trait McpRepo: Send + Sync {
+    async fn save_mcp_definition(&self, definition: &McpDefinition) -> Result<()>;
+    async fn get_mcp_definition(&self, id: &McpDefinitionId) -> Result<Option<McpDefinition>>;
+    async fn list_mcp_definitions(&self) -> Result<Vec<McpDefinition>>;
+    async fn delete_mcp_definition(&self, id: &McpDefinitionId) -> Result<()>;
+
+    async fn save_mcp_binding(&self, binding: &McpBinding) -> Result<()>;
+    async fn get_mcp_binding(&self, id: &McpBindingId) -> Result<Option<McpBinding>>;
+    async fn list_mcp_bindings(
+        &self,
+        definition_id: Option<&McpDefinitionId>,
+    ) -> Result<Vec<McpBinding>>;
+    async fn delete_mcp_binding(&self, id: &McpBindingId) -> Result<()>;
 }
 
 #[async_trait]
