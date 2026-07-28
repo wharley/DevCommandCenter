@@ -700,7 +700,8 @@ Updated July 28, 2026:
   - [x] Preserve native `CODEX_HOME` and keep MCP credentials off argv,
     persistence, diagnostics, and renderer contracts.
   - [x] Normalize app-server startup, inventory, and tool-call status.
-  - [ ] Route approvals through the DCC permission boundary.
+  - [x] Route one-call approvals through the DCC permission boundary with
+    fail-closed ownership and lifecycle correlation.
   - [ ] Verify lifecycle and both fixture transports through the harness.
 - [ ] MVP integrations UI.
 - [ ] Real-service smoke tests.

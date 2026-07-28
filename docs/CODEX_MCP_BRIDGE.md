@@ -83,14 +83,44 @@ The schema-backed `mcpToolCall` item lifecycle becomes the existing DCC
 tool-started, tool-completed, and tool-failed events. Arguments, results, raw
 provider errors, and random server names do not cross that event boundary.
 
+## Tool approval boundary
+
+Every DCC-projected server sets Codex
+`default_tools_approval_mode = "prompt"`. Threads and turns that contain the
+projection use the app-server's granular approval policy with only
+`mcp_elicitations` enabled. Sandbox, rule, skill, and standalone permission
+approvals remain disabled in this channel.
+
+Codex 0.145.0 represents an MCP tool approval as the documented
+`mcpServer/elicitation/request` form whose `_meta.codex_approval_kind` is
+`mcp_tool_call`. DCC accepts that request only when:
+
+- its JSON-RPC ID, thread, server, turn, item, and tool fields are bounded;
+- the random server name belongs to the current DCC projection;
+- exactly one unclaimed active `mcpToolCall` item matches that server and turn;
+- the request uses the audited MCP tool-approval metadata.
+
+The prior `item/started` notification provides the tool identity. DCC does not
+parse the provider-controlled elicitation message or forward tool arguments,
+form content, metadata, or random server names into renderer events. An
+unowned, malformed, out-of-thread, or ambiguous request is declined
+automatically.
+
+The existing DCC permission card receives an opaque DCC request ID. `allow`
+maps to the app-server's one-call `accept`, while `deny` maps to `decline`.
+Other behaviors are rejected. DCC intentionally does not expose Codex's
+session or persistent approval hints yet, because those choices are not part
+of the current provider-neutral permission contract. Turn cleanup, item
+completion, process exit, and explicit cancellation clear pending requests as
+denied or cancelled rather than allowing a tool to proceed.
+
 ## Remaining verification
 
 Safe injection, explicit version gating, and runtime status normalization do
 not yet constitute full Codex conformance. The remaining bridge work is:
 
-1. route tool approvals through the DCC permission boundary;
-2. run both offline fixture transports through the shared conformance harness;
-3. verify direct and configured Codex homes during final end-to-end validation.
+1. run both offline fixture transports through the shared conformance harness;
+2. verify direct and configured Codex homes during final end-to-end validation.
 
 Until those gates pass, the public capability remains `nativeConfig`; the
 backend-only projection version is internal wiring evidence, not a general

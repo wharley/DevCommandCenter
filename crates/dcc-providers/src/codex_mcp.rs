@@ -47,7 +47,7 @@ struct RpcRequest<'a> {
 #[serde(rename_all = "camelCase")]
 struct CodexThreadStartParams<'a> {
     cwd: &'a str,
-    approval_policy: &'static str,
+    approval_policy: CodexMcpApprovalPolicy,
     sandbox: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     runtime_workspace_roots: Option<Vec<&'a str>>,
@@ -60,6 +60,32 @@ struct CodexThreadConfig<'a> {
 }
 
 #[derive(Serialize)]
+pub(crate) struct CodexMcpApprovalPolicy {
+    granular: CodexMcpGranularApprovalPolicy,
+}
+
+#[derive(Serialize)]
+struct CodexMcpGranularApprovalPolicy {
+    sandbox_approval: bool,
+    rules: bool,
+    skill_approval: bool,
+    request_permissions: bool,
+    mcp_elicitations: bool,
+}
+
+pub(crate) const fn codex_mcp_approval_policy() -> CodexMcpApprovalPolicy {
+    CodexMcpApprovalPolicy {
+        granular: CodexMcpGranularApprovalPolicy {
+            sandbox_approval: false,
+            rules: false,
+            skill_approval: false,
+            request_permissions: false,
+            mcp_elicitations: true,
+        },
+    }
+}
+
+#[derive(Serialize)]
 #[serde(untagged)]
 enum CodexMcpServer<'a> {
     Stdio {
@@ -68,10 +94,12 @@ enum CodexMcpServer<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         cwd: Option<&'a str>,
         env: BTreeMap<&'a str, &'a str>,
+        default_tools_approval_mode: &'static str,
     },
     Http {
         url: &'a str,
         http_headers: BTreeMap<&'a str, &'a str>,
+        default_tools_approval_mode: &'static str,
     },
 }
 
@@ -193,6 +221,7 @@ pub(crate) fn prepare_thread_start_request(
                         validate_environment_name,
                         validate_environment_value,
                     )?,
+                    default_tools_approval_mode: "prompt",
                 }
             }
             ProviderMcpTransport::Http { url, headers } => {
@@ -200,6 +229,7 @@ pub(crate) fn prepare_thread_start_request(
                 CodexMcpServer::Http {
                     url,
                     http_headers: collect_header_map(headers)?,
+                    default_tools_approval_mode: "prompt",
                 }
             }
         };
@@ -223,7 +253,7 @@ pub(crate) fn prepare_thread_start_request(
         method: "thread/start",
         params: CodexThreadStartParams {
             cwd,
-            approval_policy: "never",
+            approval_policy: codex_mcp_approval_policy(),
             sandbox: "workspace-write",
             runtime_workspace_roots,
             config: CodexThreadConfig {
@@ -685,6 +715,18 @@ mod tests {
             value.pointer("/params/runtimeWorkspaceRoots"),
             Some(&serde_json::json!(["/workspace", "/shared"]))
         );
+        assert_eq!(
+            value.pointer("/params/approvalPolicy"),
+            Some(&serde_json::json!({
+                "granular": {
+                    "sandbox_approval": false,
+                    "rules": false,
+                    "skill_approval": false,
+                    "request_permissions": false,
+                    "mcp_elicitations": true
+                }
+            }))
+        );
         let servers = value
             .pointer("/params/config/mcp_servers")
             .and_then(serde_json::Value::as_object)
@@ -698,6 +740,10 @@ mod tests {
             server.get("command").and_then(serde_json::Value::as_str) == Some("fixture-bin")
                 && server.get("cwd").and_then(serde_json::Value::as_str) == Some("/workspace/tools")
                 && server
+                    .get("default_tools_approval_mode")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("prompt")
+                && server
                     .pointer("/env/FIXTURE_TOKEN")
                     .and_then(serde_json::Value::as_str)
                     == Some("stdio-secret-canary")
@@ -705,6 +751,10 @@ mod tests {
         assert!(servers.values().any(|server| {
             server.get("url").and_then(serde_json::Value::as_str)
                 == Some("https://mcp.example.test/rpc")
+                && server
+                    .get("default_tools_approval_mode")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("prompt")
                 && server
                     .pointer("/http_headers/Authorization")
                     .and_then(serde_json::Value::as_str)
