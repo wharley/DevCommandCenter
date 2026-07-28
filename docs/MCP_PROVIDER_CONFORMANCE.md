@@ -76,17 +76,18 @@ semantics that affect conformance creates a new fixture version. Evidence with
 unknown versions or incomplete transport/check coverage is rejected.
 
 Provider-version evidence is exact. A provider upgrade must run its bridge
-suite again before that version can be advertised as verified. Claude now has a
-production-sidecar conformance adapter. The Codex bridge must add its real
-app-server adapter to this harness before it can claim full conformance.
+suite again before that version can be advertised as verified. Claude and
+Codex now share a production-provider conformance driver. Each bridge must
+still pass its account-backed opt-in gate at the exact audited runtime before
+it can claim full conformance.
 
-## Claude opt-in gate
+## Provider opt-in gates
 
-The Claude bridge adapter for this harness lives in
-`crates/dcc-mcp-fixture/tests/claude_conformance.rs`. It drives the production
-`ClaudeSdkSidecarAdapter`, the repository fixture binary, the normal sidecar
-permission callback, and the shared harness rather than returning synthetic
-success observations.
+The provider driver for this harness lives in
+`crates/dcc-mcp-fixture/tests/provider_conformance.rs`. It drives either the
+production `ClaudeSdkSidecarAdapter` or `CodexAppServerAdapter`, the repository
+fixture binary, the provider's normal permission callback, and the shared
+harness rather than returning synthetic success observations.
 
 The adapter covers both fixture transports and checks:
 
@@ -98,25 +99,31 @@ The adapter covers both fixture transports and checks:
 - provider-session and fixture cleanup after removal;
 - categorical failure after the stdio process or HTTP endpoint is unavailable;
 - credential resolution failure before any secret-bearing configuration
-  reaches Claude.
+  reaches the selected provider.
 
-The authenticated test is ignored by default and requires two deliberate
-conditions: an existing Claude Code login and
-`DCC_RUN_CLAUDE_MCP_CONFORMANCE=1`. It accepts an optional model identifier in
-`DCC_CLAUDE_CONFORMANCE_MODEL`; neither variable carries a credential.
+The authenticated tests are ignored by default. Claude requires an existing
+Claude Code login and `DCC_RUN_CLAUDE_MCP_CONFORMANCE=1`; Codex requires an
+existing Codex login, the exact audited `codex-cli 0.145.0`, and
+`DCC_RUN_CODEX_MCP_CONFORMANCE=1`. Optional model overrides use
+`DCC_CLAUDE_CONFORMANCE_MODEL` and `DCC_CODEX_CONFORMANCE_MODEL`. None of these
+variables carries a credential.
 
-Run it only against the pinned runtime:
+Run each gate only against its pinned runtime:
 
 ```sh
 DCC_RUN_CLAUDE_MCP_CONFORMANCE=1 \
-  cargo test -p dcc-mcp-fixture --test claude_conformance \
+  cargo test -p dcc-mcp-fixture --test provider_conformance \
   authenticated_claude_bridge_passes_the_shared_harness -- --ignored --exact
+
+DCC_RUN_CODEX_MCP_CONFORMANCE=1 \
+  cargo test -p dcc-mcp-fixture --test provider_conformance \
+  authenticated_codex_bridge_passes_the_shared_harness -- --ignored --exact
 ```
 
-The test uses an isolated system-temporary workspace and loopback fixture. It
+Each test uses an isolated system-temporary workspace and loopback fixture. It
 may consume provider quota. Its evidence remains process-local; DCC continues
-to advertise Claude as `nativeConfig` until this exact opt-in gate is executed
-successfully and the promotion change is reviewed.
+to advertise both providers as `nativeConfig` until the corresponding opt-in
+gate is executed successfully and the promotion change is reviewed.
 
 ## Running the offline gate
 
@@ -125,7 +132,7 @@ From the repository root:
 ```sh
 cargo test -p dcc-core mcp_conformance
 cargo test -p dcc-mcp-fixture conformance_contract_names
-cargo test -p dcc-mcp-fixture --test claude_conformance
+cargo test -p dcc-mcp-fixture --test provider_conformance
 node --test sidecar/src/mcp-config.test.mjs sidecar/src/permission-bridge.test.mjs
 ```
 

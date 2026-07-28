@@ -114,14 +114,32 @@ of the current provider-neutral permission contract. Turn cleanup, item
 completion, process exit, and explicit cancellation clear pending requests as
 denied or cancelled rather than allowing a tool to proceed.
 
-## Remaining verification
+## Conformance gate
 
-Safe injection, explicit version gating, and runtime status normalization do
-not yet constitute full Codex conformance. The remaining bridge work is:
+The repository now compiles the production `CodexAppServerAdapter` against the
+same provider-neutral conformance driver used by Claude. The driver covers
+stdio and Streamable HTTP discovery, `fixture.echo`, explicit denial of
+`fixture.mutate`, disable, removal, server failure, credential failure, and
+final cleanup.
 
-1. run both offline fixture transports through the shared conformance harness;
-2. verify direct and configured Codex homes during final end-to-end validation.
+The default suite remains offline. It proves that missing credentials fail
+before Codex attachment and compiles the real lifecycle and approval path, but
+does not manufacture provider success or consume an account. The full gate is
+ignored by default and requires the non-secret
+`DCC_RUN_CODEX_MCP_CONFORMANCE=1`, an authenticated account, and the audited
+`codex-cli 0.145.0`:
 
-Until those gates pass, the public capability remains `nativeConfig`; the
+```sh
+DCC_RUN_CODEX_MCP_CONFORMANCE=1 \
+  cargo test -p dcc-mcp-fixture --test provider_conformance \
+  authenticated_codex_bridge_passes_the_shared_harness -- --ignored --exact
+```
+
+An optional model override can be provided through
+`DCC_CODEX_CONFORMANCE_MODEL`. The authenticated execution, direct and
+configured `CODEX_HOME` checks, and promotion decision remain deferred to the
+final end-to-end validation.
+
+Until that gate passes, the public capability remains `nativeConfig`; the
 backend-only projection version is internal wiring evidence, not a general
 compatibility claim.

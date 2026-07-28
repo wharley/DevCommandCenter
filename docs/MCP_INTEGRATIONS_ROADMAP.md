@@ -703,6 +703,10 @@ Updated July 28, 2026:
   - [x] Route one-call approvals through the DCC permission boundary with
     fail-closed ownership and lifecycle correlation.
   - [ ] Verify lifecycle and both fixture transports through the harness.
+    - [x] Add the production app-server adapter to the shared conformance
+      driver and compile it offline.
+    - [x] Prove missing-credential fail-closed behavior for both transports.
+    - [ ] Run the authenticated opt-in gate during final end-to-end validation.
 - [ ] MVP integrations UI.
 - [ ] Real-service smoke tests.
 - [ ] Additional provider bridges.

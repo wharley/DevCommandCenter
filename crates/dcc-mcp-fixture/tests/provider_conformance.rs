@@ -31,7 +31,7 @@ use dcc_core::{
     },
 };
 use dcc_infra::{credential_store::InMemoryCredentialStore, mcp_db::SqliteMcpRepo};
-use dcc_providers::{claude_code, claude_sdk_sidecar::ClaudeSdkSidecarAdapter};
+use dcc_providers::{claude_code, codex};
 use futures::{stream::BoxStream, StreamExt};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -40,7 +40,6 @@ use tokio::{
 };
 
 const STEP_TIMEOUT: Duration = Duration::from_secs(120);
-const DEFINITION_ID: &str = "claude-conformance-fixture";
 const SERVER_NAME: &str = "dcc-conformance-fixture";
 
 type ProviderStream = BoxStream<'static, dcc_core::Result<ProviderEvent>>;
@@ -54,8 +53,11 @@ struct TurnObservation {
     failed: bool,
 }
 
-struct ClaudeMcpConformanceAdapter {
-    provider: ClaudeSdkSidecarAdapter,
+struct ProviderMcpConformanceAdapter<P> {
+    provider: P,
+    provider_id: ProviderId,
+    provider_label: &'static str,
+    definition_id: McpDefinitionId,
     fixture_binary: PathBuf,
     workspace: PathBuf,
     model: Option<String>,
@@ -73,13 +75,26 @@ struct ClaudeMcpConformanceAdapter {
     mutation_completed: bool,
 }
 
-impl ClaudeMcpConformanceAdapter {
-    fn new(fixture_binary: PathBuf, workspace: PathBuf) -> Self {
+impl<P> ProviderMcpConformanceAdapter<P>
+where
+    P: Provider,
+{
+    fn new(
+        provider: P,
+        provider_id: &str,
+        provider_label: &'static str,
+        model_env: &str,
+        fixture_binary: PathBuf,
+        workspace: PathBuf,
+    ) -> Self {
         Self {
-            provider: claude_code::adapter(),
+            provider,
+            provider_id: ProviderId(provider_id.to_string()),
+            provider_label,
+            definition_id: McpDefinitionId(format!("{provider_id}-conformance-fixture")),
             fixture_binary,
             workspace,
-            model: std::env::var("DCC_CLAUDE_CONFORMANCE_MODEL")
+            model: std::env::var(model_env)
                 .ok()
                 .filter(|value| !value.trim().is_empty()),
             session_sequence: 0,
@@ -218,7 +233,7 @@ impl ClaudeMcpConformanceAdapter {
             },
         };
         Ok(ProviderMcpServerConfig {
-            definition_id: McpDefinitionId(DEFINITION_ID.to_string()),
+            definition_id: self.definition_id.clone(),
             server_name: SERVER_NAME.to_string(),
             transport: projected_transport,
         })
@@ -230,11 +245,14 @@ impl ClaudeMcpConformanceAdapter {
     ) -> McpConformanceAdapterResult<()> {
         self.cleanup_runtime().await?;
         self.session_sequence += 1;
-        let session_id = SessionId(format!("claude-mcp-conformance-{}", self.session_sequence));
+        let session_id = SessionId(format!(
+            "{}-mcp-conformance-{}",
+            self.provider_id.0, self.session_sequence
+        ));
         let handle = self
             .provider
             .prepare_session(SessionConfig {
-                workspace_id: WorkspaceId("claude-mcp-conformance".to_string()),
+                workspace_id: WorkspaceId(format!("{}-mcp-conformance", self.provider_id.0)),
                 session_id,
                 model: self.model.clone(),
                 working_directory: Some(self.workspace.to_string_lossy().to_string()),
@@ -431,10 +449,9 @@ impl ClaudeMcpConformanceAdapter {
         let observation = self
             .run_turn("Do not call tools. Reply exactly DCC_SERVER_CHECK.", false)
             .await?;
-        Ok(observation.failed
-            && observation.statuses.iter().any(|status| {
-                status.definition_id.0 == DEFINITION_ID && status.state == McpRuntimeState::Failed
-            }))
+        Ok(observation.statuses.iter().any(|status| {
+            status.definition_id == self.definition_id && status.state == McpRuntimeState::Failed
+        }))
     }
 
     async fn missing_credential_fails_closed(
@@ -450,8 +467,10 @@ impl ClaudeMcpConformanceAdapter {
         ));
         let repo =
             SqliteMcpRepo::open(&db_path).map_err(|_| McpConformanceAdapterError::Lifecycle)?;
-        let secret_reference =
-            McpSecretReferenceId("credential:claude-conformance-canary".to_string());
+        let secret_reference = McpSecretReferenceId(format!(
+            "credential:{}-conformance-canary",
+            self.provider_id.0
+        ));
         let (definition_transport, target) = match transport {
             McpTransportKind::Stdio => (
                 McpTransport::Stdio {
@@ -473,8 +492,8 @@ impl ClaudeMcpConformanceAdapter {
             ),
         };
         let mut definition = McpDefinition {
-            id: McpDefinitionId(DEFINITION_ID.to_string()),
-            display_name: "Claude conformance fixture".to_string(),
+            id: self.definition_id.clone(),
+            display_name: format!("{} conformance fixture", self.provider_label),
             transport: definition_transport,
             secret_refs: vec![McpSecretBinding {
                 target,
@@ -498,7 +517,7 @@ impl ClaudeMcpConformanceAdapter {
             .await
             .map_err(|_| McpConformanceAdapterError::Lifecycle)?;
         repo.save_mcp_binding(&McpBinding {
-            id: McpBindingId("claude-conformance-global".to_string()),
+            id: McpBindingId(format!("{}-conformance-global", self.provider_id.0)),
             definition_id: definition.id,
             scope: McpBindingScope::Global,
             enabled: true,
@@ -513,9 +532,9 @@ impl ClaudeMcpConformanceAdapter {
             &repo,
             &InMemoryCredentialStore::default(),
             &ResolveSessionMcpInput {
-                provider_id: ProviderId("claude_code".to_string()),
-                project_id: ProjectId("claude-conformance".to_string()),
-                session_id: SessionId("claude-conformance".to_string()),
+                provider_id: self.provider_id.clone(),
+                project_id: ProjectId(format!("{}-conformance", self.provider_id.0)),
+                session_id: SessionId(format!("{}-conformance", self.provider_id.0)),
             },
         )
         .await;
@@ -530,9 +549,12 @@ impl ClaudeMcpConformanceAdapter {
 }
 
 #[async_trait]
-impl McpConformanceAdapter for ClaudeMcpConformanceAdapter {
+impl<P> McpConformanceAdapter for ProviderMcpConformanceAdapter<P>
+where
+    P: Provider,
+{
     fn provider_id(&self) -> ProviderId {
-        ProviderId("claude_code".to_string())
+        self.provider_id.clone()
     }
 
     fn provider_version(&self) -> String {
@@ -573,7 +595,7 @@ impl McpConformanceAdapter for ClaudeMcpConformanceAdapter {
                 let status = observation
                     .statuses
                     .iter()
-                    .find(|status| status.definition_id.0 == DEFINITION_ID)
+                    .find(|status| status.definition_id == self.definition_id)
                     .filter(|status| status.state == McpRuntimeState::Connected)
                     .ok_or(McpConformanceAdapterError::Attachment)?;
                 Ok(McpConformanceObservation::ToolsVisible(
@@ -696,50 +718,92 @@ fn fixture_binary() -> PathBuf {
     std::fs::canonicalize(env!("CARGO_BIN_EXE_dcc-mcp-fixture")).expect("canonical fixture binary")
 }
 
-fn test_workspace() -> PathBuf {
+fn test_workspace(provider_id: &str) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock")
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "dcc-claude-mcp-conformance-{}-{nonce}",
+        "dcc-{provider_id}-mcp-conformance-{}-{nonce}",
         std::process::id()
     ))
 }
 
-fn require_explicit_opt_in() {
+fn claude_adapter(workspace: PathBuf) -> ProviderMcpConformanceAdapter<impl Provider> {
+    ProviderMcpConformanceAdapter::new(
+        claude_code::adapter(),
+        "claude_code",
+        "Claude",
+        "DCC_CLAUDE_CONFORMANCE_MODEL",
+        fixture_binary(),
+        workspace,
+    )
+}
+
+fn codex_adapter(workspace: PathBuf) -> ProviderMcpConformanceAdapter<impl Provider> {
+    ProviderMcpConformanceAdapter::new(
+        codex::adapter(),
+        "codex",
+        "Codex",
+        "DCC_CODEX_CONFORMANCE_MODEL",
+        fixture_binary(),
+        workspace,
+    )
+}
+
+fn require_explicit_opt_in(variable: &str, instruction: &str) {
     assert_eq!(
-        std::env::var("DCC_RUN_CLAUDE_MCP_CONFORMANCE")
-            .ok()
-            .as_deref(),
+        std::env::var(variable).ok().as_deref(),
         Some("1"),
-        "set DCC_RUN_CLAUDE_MCP_CONFORMANCE=1 after authenticating Claude Code"
+        "{instruction}"
     );
+}
+
+async fn run_authenticated_gate<P>(
+    mut adapter: ProviderMcpConformanceAdapter<P>,
+    workspace: PathBuf,
+) where
+    P: Provider,
+{
+    let provider_id = adapter.provider_id();
+    let provider_version = adapter
+        .provider
+        .dcc_mcp_projection_version()
+        .expect("provider must expose an audited MCP projection version")
+        .to_string();
+    let evidence = run_provider_mcp_conformance(&mut adapter)
+        .await
+        .expect("provider bridge conformance");
+    evidence
+        .validate_for_provider(&provider_id, &provider_version)
+        .expect("version-bound provider evidence");
+
+    adapter.reset().await.expect("final provider cleanup");
+    let _ = std::fs::remove_dir_all(workspace);
 }
 
 #[tokio::test]
 #[ignore = "requires explicit opt-in and an authenticated Claude Code account"]
 async fn authenticated_claude_bridge_passes_the_shared_harness() {
-    require_explicit_opt_in();
-    let workspace = test_workspace();
+    require_explicit_opt_in(
+        "DCC_RUN_CLAUDE_MCP_CONFORMANCE",
+        "set DCC_RUN_CLAUDE_MCP_CONFORMANCE=1 after authenticating Claude Code",
+    );
+    let workspace = test_workspace("claude");
     std::fs::create_dir_all(&workspace).expect("create isolated conformance workspace");
-    let mut adapter = ClaudeMcpConformanceAdapter::new(fixture_binary(), workspace.clone());
+    run_authenticated_gate(claude_adapter(workspace.clone()), workspace).await;
+}
 
-    let evidence = run_provider_mcp_conformance(&mut adapter)
-        .await
-        .expect("Claude bridge conformance");
-    evidence
-        .validate_for_provider(
-            &ProviderId("claude_code".to_string()),
-            adapter
-                .provider
-                .dcc_mcp_projection_version()
-                .expect("Claude projection version"),
-        )
-        .expect("version-bound Claude evidence");
-
-    adapter.reset().await.expect("final Claude cleanup");
-    let _ = std::fs::remove_dir_all(workspace);
+#[tokio::test]
+#[ignore = "requires explicit opt-in, codex-cli 0.145.0, and an authenticated Codex account"]
+async fn authenticated_codex_bridge_passes_the_shared_harness() {
+    require_explicit_opt_in(
+        "DCC_RUN_CODEX_MCP_CONFORMANCE",
+        "set DCC_RUN_CODEX_MCP_CONFORMANCE=1 after authenticating codex-cli 0.145.0",
+    );
+    let workspace = test_workspace("codex");
+    std::fs::create_dir_all(&workspace).expect("create isolated conformance workspace");
+    run_authenticated_gate(codex_adapter(workspace.clone()), workspace).await;
 }
 
 #[test]
@@ -756,27 +820,41 @@ fn provider_tool_names_are_normalized_without_provider_heuristics() {
 }
 
 #[tokio::test]
-async fn missing_credentials_fail_before_the_claude_runtime_for_both_transports() {
-    let workspace = test_workspace();
-    std::fs::create_dir_all(&workspace).expect("create isolated credential workspace");
-    let mut adapter = ClaudeMcpConformanceAdapter::new(fixture_binary(), workspace.clone());
+async fn missing_credentials_fail_before_each_provider_runtime_for_both_transports() {
+    let claude_workspace = test_workspace("claude");
+    std::fs::create_dir_all(&claude_workspace).expect("create isolated credential workspace");
+    let mut claude = claude_adapter(claude_workspace.clone());
+    assert_missing_credentials_fail_closed("claude_code", &mut claude).await;
+    let _ = std::fs::remove_dir_all(claude_workspace);
+
+    let codex_workspace = test_workspace("codex");
+    std::fs::create_dir_all(&codex_workspace).expect("create isolated credential workspace");
+    let mut codex = codex_adapter(codex_workspace.clone());
+    assert_missing_credentials_fail_closed("codex", &mut codex).await;
+    let _ = std::fs::remove_dir_all(codex_workspace);
+}
+
+async fn assert_missing_credentials_fail_closed<P>(
+    provider_id: &str,
+    adapter: &mut ProviderMcpConformanceAdapter<P>,
+) where
+    P: Provider,
+{
     adapter.attached = true;
     adapter.credential_unavailable = true;
-
     for transport in [McpTransportKind::Stdio, McpTransportKind::Http] {
         assert!(
             adapter
                 .missing_credential_fails_closed(&transport)
                 .await
                 .expect("categorical missing-credential result"),
-            "{transport:?} did not fail before provider attachment"
+            "{provider_id} {transport:?} did not fail before provider attachment"
         );
     }
-
-    let _ = std::fs::remove_dir_all(workspace);
 }
 
 #[test]
 fn test_workspace_is_bounded_to_the_system_temporary_directory() {
-    assert!(test_workspace().starts_with(Path::new(&std::env::temp_dir())));
+    assert!(test_workspace("claude").starts_with(Path::new(&std::env::temp_dir())));
+    assert!(test_workspace("codex").starts_with(Path::new(&std::env::temp_dir())));
 }

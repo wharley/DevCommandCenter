@@ -170,7 +170,7 @@ contributor and fork to inspect and compile the exact promotion gate.
 
 ```sh
 cargo test -p dcc-core -p dcc-providers -p dcc-tauri
-cargo test -p dcc-mcp-fixture --test claude_conformance
+cargo test -p dcc-mcp-fixture --test provider_conformance
 node --test sidecar/src/mcp-config.test.mjs sidecar/src/permission-bridge.test.mjs
 node --check sidecar/src/index.mjs
 ```
