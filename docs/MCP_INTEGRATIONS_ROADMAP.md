@@ -637,13 +637,13 @@ default migration because it can:
 
 - Contributors can run the default suite without external accounts.
 - Authenticated smokes are opt-in and safe for forks.
-- Dependency licenses and notices are reviewed.
+- Dependencies added by the MCP work have a recorded license review.
 - Presets, if present, are data-only and link to official sources.
 - Security reporting documentation covers MCP commands, OAuth, secrets, and
   tool-approval bypasses.
 
-The scoped dependency and reporting review, including the remaining repository
-setting and pre-existing distribution blockers, is recorded in
+The scoped dependency and reporting review, plus optional project-wide
+follow-ups that are not MCP release blockers, is recorded in
 [MCP open source review](MCP_OPEN_SOURCE_REVIEW.md).
 
 ### Product gate
@@ -797,11 +797,10 @@ Updated July 28, 2026:
     recording, and cleanup checklists.
   - [ ] Run the manual integrations lifecycle against a release-candidate build.
   - [ ] Run the authenticated Claude and Codex shared conformance gates.
-  - [ ] Run the read-only Figma and pinned Garu smokes on at least one verified
-    provider each.
+  - [ ] Run the read-only Figma smoke and one reviewed pinned command-based
+    smoke on at least one verified provider each. The current opt-in command
+    harness uses Garu as an example, not as a bundled integration.
   - [x] Document the MCP security-reporting surface, explicit workspace license
     metadata, scoped dependency inventory, and external-component boundary.
-  - [ ] Enable GitHub private vulnerability reporting, verify maintainer
-    notifications, and complete the pre-existing Anthropic distribution review.
-  - [ ] Generate the release-wide composition/notices record and then record the
-    bounded release decision.
+  - [ ] Record the bounded release decision after the required MCP validation
+    layers pass.

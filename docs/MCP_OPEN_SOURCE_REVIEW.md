@@ -54,7 +54,7 @@ reported integrity
 This value is audit evidence, not a DCC installer or permission to execute the
 package without the existing opt-in gate.
 
-## Pre-existing distribution item
+## Pre-existing project distribution note
 
 The root application already depended on
 `@anthropic-ai/claude-agent-sdk@0.2.126` and
@@ -64,10 +64,10 @@ README files refer users to Anthropic terms rather than an SPDX open-source
 license.
 
 The MCP work did not introduce these packages, but the Claude bridge uses the
-existing sidecar. A release-wide distribution review must therefore confirm
-that the way signed DCC artifacts stage and ship those packages complies with
-their current terms. This review is a release blocker and must not be marked
-complete merely because the new MCP-specific Rust dependencies are permissive.
+existing sidecar. Reviewing how signed DCC artifacts stage and ship those
+packages is a general project compliance follow-up. It is not caused by MCP and
+does not block MCP development, validation, or release on its own. This scoped
+inventory makes no legal conclusion about the pre-existing distribution.
 
 ## Security reporting review
 
@@ -83,18 +83,24 @@ The root [security policy](../SECURITY.md) now explicitly covers:
 
 The repository's GitHub private vulnerability reporting setting was confirmed
 disabled through the GitHub API on July 28, 2026. Enabling it is an external
-repository administration action and remains a release blocker. Until then,
-the public security-contact issue form permits only a request for a private
-channel and forbids vulnerability details.
+repository administration action and is optional hardening, not an MCP
+requirement or release blocker. Until then, the public security-contact issue
+form permits only a request for a private channel and forbids vulnerability
+details.
 
-## Required release actions
+## Non-blocking project follow-ups
 
-- Enable GitHub private vulnerability reporting and verify the private report
-  form is visible from a non-administrator account.
-- Confirm security-alert notifications reach at least one active maintainer.
-- Complete and record the Anthropic package distribution review.
-- Generate the normal release-wide third-party notices or composition report;
-  do not treat this scoped MCP inventory as exhaustive.
+- Consider enabling GitHub private vulnerability reporting and verifying the
+  private report form from a non-administrator account.
+- Consider confirming security-alert notifications reach an active maintainer.
+- Review the pre-existing Anthropic package distribution as part of the normal
+  project-wide compliance process.
+- Generate release-wide third-party notices or a composition report when the
+  broader DCC release process calls for one; this scoped MCP inventory is not
+  exhaustive.
 - Re-run the dependency review whenever an MCP dependency, external command
   version, or bundled provider runtime changes.
 - Keep authenticated and real-service tests ignored in public/fork CI.
+
+The first four items are broader repository-maintenance recommendations. They
+are not prerequisites imposed by the external MCP feature.

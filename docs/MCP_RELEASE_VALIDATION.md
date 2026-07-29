@@ -20,10 +20,10 @@ The release may proceed only when every required row is complete:
 | Claude shared conformance | Yes | Pending authenticated opt-in run |
 | Codex shared conformance | Yes | Pending authenticated opt-in run |
 | Figma read-only smoke | Yes, on at least one verified provider | Pending |
-| Garu pinned read-only smoke | Yes, on at least one verified provider | Pending |
+| Pinned command-based read-only smoke | Yes, on at least one verified provider | Current opt-in harness uses Garu; another reviewed target may satisfy the gate |
 | Cursor shared conformance | No promotion without it | Pending |
 | Gemini, Grok, and Droid | No; they must remain honestly unsupported | Blocked by documented protocol/runtime boundaries |
-| Security and dependency review | Yes | MCP inventory complete; repository settings and pre-existing Anthropic distribution review pending |
+| MCP-scoped security and dependency review | Yes | Complete |
 
 An optional-provider failure blocks promotion of that provider, not the release,
 when the product continues to report its actual lower support level. A Claude
@@ -153,6 +153,11 @@ Before promotion:
 - verify presets, if added later, are data-only and link to official sources;
 - confirm diagnostics and renderer contracts contain no secret values; and
 - publish only the bounded result record below.
+
+Optional repository-wide hardening and compliance follow-ups are recorded
+separately in [MCP open source review](MCP_OPEN_SOURCE_REVIEW.md). GitHub private
+vulnerability reporting and review of pre-existing Anthropic packages are not
+requirements introduced by MCP and do not block this gate.
 
 ## Bounded result record
 
