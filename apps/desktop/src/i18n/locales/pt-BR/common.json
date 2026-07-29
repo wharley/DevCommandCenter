@@ -81,6 +81,11 @@
       "completed": "Concluído",
       "aborted": "Interrompido"
     },
+    "workspaceState": {
+      "readyToStart": "Pronto para começar",
+      "initializing": "Preparando workspace…",
+      "setupPending": "Setup pendente"
+    },
     "activityTime": {
       "ago": "há {{time}}",
       "units": {

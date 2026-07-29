@@ -151,6 +151,17 @@ export const WorkspaceRailRowItem = memo(
 			recapMessage && railRecap?.prTitle
 				? `${recapMessage} — ${railRecap.prTitle}`
 				: recapMessage ?? undefined;
+		const hasPriorityWorkspaceStatus =
+			workspace.status === "initializing" ||
+			workspace.status === "setup_pending";
+		const workspaceStatusMessage =
+			workspace.status === "initializing"
+				? t("sidebar.workspaceState.initializing")
+				: workspace.status === "setup_pending"
+					? t("sidebar.workspaceState.setupPending")
+					: workspace.status === "ready" && !activity && !recapMessage
+						? t("sidebar.workspaceState.readyToStart")
+						: null;
 		const [pendingAction, setPendingAction] = useState<
 			"restore" | "delete" | null
 		>(null);
@@ -225,7 +236,32 @@ export const WorkspaceRailRowItem = memo(
 									</span>
 								) : null}
 							</div>
-							{activity && (
+							{workspaceStatusMessage ? (
+								<div className="mt-px flex min-w-0 items-center gap-1.5">
+									<span
+										aria-hidden
+										className={cn(
+											"size-[6px] shrink-0 rounded-full",
+											workspace.status === "initializing" &&
+												"animate-pulse bg-muted-foreground/45",
+											workspace.status === "setup_pending" &&
+												"bg-amber-500/80",
+											workspace.status === "ready" &&
+												"bg-muted-foreground/35",
+										)}
+									/>
+									<span
+										className={cn(
+											"truncate text-[10.5px] font-medium leading-4 text-muted-foreground",
+											workspace.status === "setup_pending" &&
+												"text-amber-700 dark:text-amber-300/90",
+										)}
+									>
+										{workspaceStatusMessage}
+									</span>
+								</div>
+							) : null}
+							{activity && !hasPriorityWorkspaceStatus && (
 								<div className="mt-px flex min-w-0 items-center gap-1.5">
 									<span
 										aria-hidden
@@ -256,7 +292,7 @@ export const WorkspaceRailRowItem = memo(
 									</span>
 								</div>
 							)}
-							{recapMessage && railRecap ? (
+							{recapMessage && railRecap && !hasPriorityWorkspaceStatus ? (
 								<p
 									className={cn(
 										"truncate text-[10.5px] leading-4",
