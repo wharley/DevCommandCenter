@@ -597,7 +597,7 @@ async fn authenticated_claude_figma_read_only_smoke() {
 }
 
 #[tokio::test]
-#[ignore = "requires explicit opt-in, codex-cli 0.145.0, provider-native Figma OAuth, and a disposable read-only node"]
+#[ignore = "requires explicit opt-in, a negotiated codex-cli MCP runtime, provider-native Figma OAuth, and a disposable read-only node"]
 async fn authenticated_codex_figma_read_only_smoke() {
     let spec = figma_spec("DCC_RUN_CODEX_FIGMA_MCP_SMOKE")
         .expect("invalid categorical Figma smoke configuration");
@@ -622,7 +622,7 @@ async fn authenticated_claude_garu_read_only_smoke() {
 }
 
 #[tokio::test]
-#[ignore = "requires explicit opt-in, codex-cli 0.145.0, a dedicated Garu account, an API key, and pinned third-party package execution"]
+#[ignore = "requires explicit opt-in, a negotiated codex-cli MCP runtime, a dedicated Garu account, an API key, and pinned third-party package execution"]
 async fn authenticated_codex_garu_read_only_smoke() {
     let spec = garu_spec("DCC_RUN_CODEX_GARU_MCP_SMOKE")
         .expect("invalid categorical Garu smoke configuration");

@@ -773,13 +773,22 @@ export type McpSupportLevel =
  */
 "nativeConfig" |
 /**
+ *  DCC has a backend-only projection path that negotiates the required MCP
+ *  contract when a session starts. The reported provider version is
+ *  diagnostic metadata, not a compatibility allowlist or conformance
+ *  evidence; the live per-session runtime status remains authoritative.
+ */
+({ runtimeBridge: {
+	providerVersion: string,
+} }) & { verifiedBridge?: never } |
+/**
  *  DCC owns a tested bridge that attaches servers and verifies tools
  *  end-to-end through the provider adapter. The evidence value can only be
  *  produced by a successful run of the shared conformance harness.
  */
-{ verifiedBridge: {
+({ verifiedBridge: {
 	evidence: McpConformanceEvidence,
-} };
+} }) & { runtimeBridge?: never };
 
 export type McpToolAnnotations = {
 	readOnlyHint: boolean | null,

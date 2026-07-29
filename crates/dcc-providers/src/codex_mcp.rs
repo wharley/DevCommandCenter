@@ -31,8 +31,11 @@ const MAX_SECRET_COUNT: usize = 64;
 const MAX_STATUS_ITEM_COUNT: usize = 512;
 const MAX_TOOL_COUNT: usize = 256;
 
-pub(crate) const CODEX_MCP_RUNTIME_VERSION: &str = "codex-cli@0.145.0+app-server-protocol-v2";
-pub(crate) const SUPPORTED_CODEX_CLI_VERSION: &str = "0.145.0";
+pub(crate) const CODEX_MCP_PROTOCOL_VERSION: &str = "app-server-protocol-v2";
+
+pub(crate) fn codex_mcp_runtime_version(cli_version: &str) -> String {
+    format!("codex-cli@{cli_version}+{CODEX_MCP_PROTOCOL_VERSION}")
+}
 pub(crate) type CodexMcpDefinitionMap = HashMap<String, McpDefinitionId>;
 pub(crate) type CodexMcpToolPolicyMap =
     HashMap<McpDefinitionId, HashMap<String, McpToolPolicyDecision>>;
@@ -301,11 +304,13 @@ pub(crate) fn prepare_thread_start_request(
 pub(crate) fn initial_codex_mcp_status_snapshot(
     definitions_by_wire_name: &CodexMcpDefinitionMap,
     provider_id: &ProviderId,
+    provider_version: &str,
     session_id: &SessionId,
 ) -> Vec<McpRuntimeStatus> {
     status_snapshot_for_all(
         definitions_by_wire_name,
         provider_id,
+        provider_version,
         session_id,
         McpRuntimeState::AttachingProvider,
         None,
@@ -315,6 +320,7 @@ pub(crate) fn initial_codex_mcp_status_snapshot(
 pub(crate) fn failed_codex_mcp_status_snapshot(
     definitions_by_wire_name: &CodexMcpDefinitionMap,
     provider_id: &ProviderId,
+    provider_version: &str,
     session_id: &SessionId,
     category: McpErrorCategory,
     message: &'static str,
@@ -322,6 +328,7 @@ pub(crate) fn failed_codex_mcp_status_snapshot(
     status_snapshot_for_all(
         definitions_by_wire_name,
         provider_id,
+        provider_version,
         session_id,
         McpRuntimeState::Failed,
         Some((category, message)),
@@ -332,6 +339,7 @@ pub(crate) fn parse_codex_mcp_status_snapshot(
     value: &serde_json::Value,
     definitions_by_wire_name: &CodexMcpDefinitionMap,
     provider_id: &ProviderId,
+    provider_version: &str,
     session_id: &SessionId,
 ) -> Result<Vec<McpRuntimeStatus>> {
     let raw_servers = value
@@ -362,6 +370,7 @@ pub(crate) fn parse_codex_mcp_status_snapshot(
             statuses.push(runtime_status(
                 definition_id.clone(),
                 provider_id,
+                provider_version,
                 session_id,
                 McpRuntimeState::AttachingProvider,
                 Vec::new(),
@@ -394,6 +403,7 @@ pub(crate) fn parse_codex_mcp_status_snapshot(
         statuses.push(runtime_status(
             definition_id.clone(),
             provider_id,
+            provider_version,
             session_id,
             state,
             tools,
@@ -409,6 +419,7 @@ pub(crate) fn parse_codex_mcp_startup_status(
     value: &serde_json::Value,
     definitions_by_wire_name: &CodexMcpDefinitionMap,
     provider_id: &ProviderId,
+    provider_version: &str,
     session_id: &SessionId,
     active_thread_id: Option<&str>,
 ) -> Option<Result<McpRuntimeStatus>> {
@@ -462,6 +473,7 @@ pub(crate) fn parse_codex_mcp_startup_status(
         runtime_status(
             definition_id,
             provider_id,
+            provider_version,
             session_id,
             state,
             Vec::new(),
@@ -531,6 +543,7 @@ fn parse_tool_inventory(raw_server: &serde_json::Value) -> Result<Vec<McpToolSum
 fn status_snapshot_for_all(
     definitions_by_wire_name: &CodexMcpDefinitionMap,
     provider_id: &ProviderId,
+    provider_version: &str,
     session_id: &SessionId,
     state: McpRuntimeState,
     error: Option<(McpErrorCategory, &'static str)>,
@@ -542,7 +555,7 @@ fn status_snapshot_for_all(
         .map(|definition_id| McpRuntimeStatus {
             definition_id,
             provider_id: provider_id.clone(),
-            provider_version: CODEX_MCP_RUNTIME_VERSION.to_string(),
+            provider_version: provider_version.to_string(),
             session_id: session_id.clone(),
             state: state.clone(),
             tools: Vec::new(),
@@ -559,6 +572,7 @@ fn status_snapshot_for_all(
 fn runtime_status(
     definition_id: McpDefinitionId,
     provider_id: &ProviderId,
+    provider_version: &str,
     session_id: &SessionId,
     state: McpRuntimeState,
     tools: Vec<McpToolSummary>,
@@ -568,7 +582,7 @@ fn runtime_status(
     let status = McpRuntimeStatus {
         definition_id,
         provider_id: provider_id.clone(),
-        provider_version: CODEX_MCP_RUNTIME_VERSION.to_string(),
+        provider_version: provider_version.to_string(),
         session_id: session_id.clone(),
         state,
         tools,
@@ -705,6 +719,8 @@ mod tests {
     };
 
     use super::*;
+
+    const TEST_RUNTIME_VERSION: &str = "codex-cli@0.146.0+app-server-protocol-v2";
 
     fn secret(name: &str, value: &str) -> ProviderMcpSecret {
         ProviderMcpSecret::new(
@@ -921,6 +937,7 @@ mod tests {
             }),
             &definitions,
             &ProviderId("codex".to_string()),
+            TEST_RUNTIME_VERSION,
             &SessionId("session-1".to_string()),
         )
         .expect("valid status snapshot");
@@ -973,6 +990,7 @@ mod tests {
             }),
             &definitions,
             &ProviderId("codex".to_string()),
+            TEST_RUNTIME_VERSION,
             &SessionId("session-1".to_string()),
             Some("thread-1"),
         )
@@ -991,6 +1009,7 @@ mod tests {
             }),
             &definitions,
             &ProviderId("codex".to_string()),
+            TEST_RUNTIME_VERSION,
             &SessionId("session-1".to_string()),
             None,
         )
@@ -1003,6 +1022,7 @@ mod tests {
             }),
             &definitions,
             &ProviderId("codex".to_string()),
+            TEST_RUNTIME_VERSION,
             &SessionId("session-1".to_string()),
             Some("active-thread"),
         )
@@ -1014,6 +1034,7 @@ mod tests {
             }),
             &definitions,
             &ProviderId("codex".to_string()),
+            TEST_RUNTIME_VERSION,
             &SessionId("session-1".to_string()),
             None,
         )
@@ -1046,6 +1067,7 @@ mod tests {
             }),
             &definitions,
             &ProviderId("codex".to_string()),
+            TEST_RUNTIME_VERSION,
             &SessionId("session-1".to_string()),
         )
         .expect("valid partial snapshot");
@@ -1071,6 +1093,7 @@ mod tests {
             }),
             &definitions,
             &ProviderId("codex".to_string()),
+            TEST_RUNTIME_VERSION,
             &SessionId("session-1".to_string()),
         )
         .is_err());

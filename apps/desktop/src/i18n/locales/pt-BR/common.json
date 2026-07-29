@@ -1090,6 +1090,7 @@
       "compatibilityTitle": "Compatibilidade da sessão selecionada",
       "compatibility": {
         "verified": "{{provider}} possui uma bridge MCP verificada pelo DCC. Os resultados ao vivo abaixo ainda valem somente para esta sessão exata.",
+        "runtime": "{{provider}} possui uma bridge do DCC que negocia o contrato MCP ao iniciar a sessão. Runtime detectado: {{version}}. O resultado ao vivo abaixo é o que vale.",
         "native": "{{provider}} expõe configuração MCP nativa, mas sua bridge no DCC ainda não foi verificada. Nenhum suporte é presumido sem um relato do runtime.",
         "unsupported": "{{provider}} ainda não expõe ao DCC um contrato confiável para conectar MCP.",
         "unknown": "O provedor selecionado não está presente no catálogo atual de capacidades.",
@@ -1097,6 +1098,7 @@
       },
       "compatibilityBadge": {
         "verified": "Bridge verificada",
+        "runtime": "Negociação em runtime",
         "native": "Somente config nativa",
         "unsupported": "Sem suporte",
         "unknown": "Desconhecido"

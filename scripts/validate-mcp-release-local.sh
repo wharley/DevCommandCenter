@@ -58,6 +58,7 @@ run_gate node --test \
 run_gate yarn workspace @dcc/contracts typecheck
 run_gate yarn workspace @dcc/desktop typecheck
 run_gate yarn workspace @dcc/desktop test \
+  src/features/providers/provider-display.test.ts \
   src/features/settings/mcp-integration-form.test.ts \
   src/features/settings/mcp-integration-runtime.test.ts
 

@@ -95,7 +95,7 @@ DCC_RUN_CLAUDE_MCP_CONFORMANCE=1 \
   authenticated_claude_bridge_passes_the_shared_harness -- --ignored --exact
 ```
 
-Codex, using the exact audited `codex-cli 0.145.0`:
+Codex, recording the detected CLI and negotiated projection version:
 
 ```sh
 DCC_RUN_CODEX_MCP_CONFORMANCE=1 \
@@ -114,7 +114,8 @@ DCC_RUN_CURSOR_MCP_CONFORMANCE=1 \
 Record the exact provider projection version and the categorical outcome.
 Never preserve prompts, tool arguments, tool results, credentials, provider
 transcripts, or raw stderr as release artifacts. A successful result is valid
-only for the exact audited runtime.
+only for the runtime recorded in that evidence. Nearby versions may negotiate
+the same contract, but do not inherit full conformance evidence.
 
 Gemini, Grok, and Droid have no authenticated command in this checklist. Their
 current ownership or runtime blockers are documented in their bridge documents,

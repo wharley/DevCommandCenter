@@ -103,12 +103,13 @@ The adapter covers both fixture transports and checks:
 
 The authenticated tests are ignored by default. Claude requires an existing
 Claude Code login and `DCC_RUN_CLAUDE_MCP_CONFORMANCE=1`; Codex requires an
-existing Codex login, the exact audited `codex-cli 0.145.0`, and
-`DCC_RUN_CODEX_MCP_CONFORMANCE=1`. Optional model overrides use
+existing Codex login and `DCC_RUN_CODEX_MCP_CONFORMANCE=1`. The harness records
+the detected Codex runtime identity after its app-server contract negotiates
+successfully. Optional model overrides use
 `DCC_CLAUDE_CONFORMANCE_MODEL` and `DCC_CODEX_CONFORMANCE_MODEL`. None of these
 variables carries a credential.
 
-Run each gate only against its pinned runtime:
+Run each gate against the runtime whose evidence you intend to record:
 
 ```sh
 DCC_RUN_CLAUDE_MCP_CONFORMANCE=1 \
@@ -121,9 +122,9 @@ DCC_RUN_CODEX_MCP_CONFORMANCE=1 \
 ```
 
 Each test uses an isolated system-temporary workspace and loopback fixture. It
-may consume provider quota. Its evidence remains process-local; DCC continues
-to advertise both providers as `nativeConfig` until the corresponding opt-in
-gate is executed successfully and the promotion change is reviewed.
+may consume provider quota. Its evidence remains process-local; DCC advertises
+an available unverified projection as `runtimeBridge` until the corresponding
+opt-in gate is executed successfully and the promotion change is reviewed.
 
 ## Running the offline gate
 

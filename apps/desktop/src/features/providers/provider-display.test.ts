@@ -68,4 +68,28 @@ describe("provider MCP support display", () => {
 			variant: "success",
 		});
 	});
+
+	it("shows runtime negotiation without claiming conformance", () => {
+		const runtimeBridge = {
+			...provider("codex"),
+			capabilities: {
+				...provider("codex").capabilities,
+				mcpSupport: {
+					runtimeBridge: {
+						providerVersion:
+							"codex-cli@0.146.0+app-server-protocol-v2",
+					},
+				},
+			},
+		};
+
+		expect(getProviderChips(runtimeBridge)).toContainEqual({
+			label: "mcp runtime bridge",
+			variant: "warn",
+		});
+		expect(getProviderChips(runtimeBridge)).not.toContainEqual({
+			label: "mcp verified",
+			variant: "success",
+		});
+	});
 });

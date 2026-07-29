@@ -15,7 +15,7 @@ use dcc_core::{
     application::{resolve_session_mcp_servers, ResolveSessionMcpInput, StartThreadInput},
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
-        mcp::{McpRuntimeState, McpRuntimeStatus},
+        mcp::{McpErrorCategory, McpRuntimeError, McpRuntimeState, McpRuntimeStatus},
         project::{Project, ProjectId},
         provider::{ProviderEvent, ProviderId, SessionHandle},
         repository::{Repository, RepositoryId},
@@ -379,7 +379,7 @@ impl SessionCommandState {
             .map(|server| server.definition_id.clone())
             .collect::<Vec<_>>();
 
-        let handle = provider
+        let handle = match provider
             .prepare_session(SessionConfig {
                 workspace_id: session.workspace_id.clone(),
                 session_id: session.id.clone(),
@@ -389,7 +389,45 @@ impl SessionCommandState {
                 provider_runtime: Some(provider_runtime),
                 mcp_servers,
             })
-            .await?;
+            .await
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                if let Some(provider_version) = mcp_projection_version.as_deref() {
+                    if !projected_definition_ids.is_empty() {
+                        let checked_at = Utc::now().to_rfc3339();
+                        let statuses = projected_definition_ids
+                            .iter()
+                            .cloned()
+                            .map(|definition_id| McpRuntimeStatus {
+                                definition_id,
+                                provider_id: ProviderId(session.provider_id.clone()),
+                                provider_version: provider_version.to_string(),
+                                session_id: session.id.clone(),
+                                state: McpRuntimeState::Failed,
+                                tools: Vec::new(),
+                                checked_at: checked_at.clone(),
+                                bounded_error: Some(McpRuntimeError::bounded(
+                                    McpErrorCategory::Protocol,
+                                    format!(
+                                        "MCP bridge contract negotiation failed for {provider_version}"
+                                    ),
+                                )),
+                            })
+                            .collect();
+                        let _ = self
+                            .replace_mcp_runtime_statuses(
+                                &session.id,
+                                &session.provider_id,
+                                provider_version,
+                                statuses,
+                            )
+                            .await;
+                    }
+                }
+                return Err(error);
+            }
+        };
 
         let binding = ProviderSessionBinding {
             provider_id: session.provider_id.clone(),

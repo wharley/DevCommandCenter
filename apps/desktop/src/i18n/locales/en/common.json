@@ -1090,6 +1090,7 @@
       "compatibilityTitle": "Selected session compatibility",
       "compatibility": {
         "verified": "{{provider}} has a DCC-verified MCP bridge. Live results below still refer to this exact session.",
+        "runtime": "{{provider}} has a DCC bridge that negotiates its MCP contract when the session starts. Detected runtime: {{version}}. The live result below is authoritative.",
         "native": "{{provider}} exposes native MCP configuration, but its DCC bridge is not verified yet. No support is inferred without a runtime report.",
         "unsupported": "{{provider}} does not currently expose a reliable MCP attachment contract to DCC.",
         "unknown": "The selected provider is not present in the current capability catalog.",
@@ -1097,6 +1098,7 @@
       },
       "compatibilityBadge": {
         "verified": "Verified bridge",
+        "runtime": "Runtime negotiation",
         "native": "Native config only",
         "unsupported": "Unsupported",
         "unknown": "Unknown"

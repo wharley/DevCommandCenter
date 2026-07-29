@@ -32,7 +32,9 @@ use std::{
 
 use futures::future::join_all;
 
-use dcc_core::domain::provider::{HealthStatus, ProviderCatalog, ProviderDescriptor};
+use dcc_core::domain::provider::{
+    HealthStatus, McpSupportLevel, ProviderCatalog, ProviderDescriptor,
+};
 use dcc_core::ports::Provider;
 
 pub const PROVIDER_IDS: [&str; 6] = ["claude_code", "codex", "gemini", "droid", "cursor", "grok"];
@@ -81,6 +83,20 @@ async fn provider_health_statuses() -> Vec<HealthStatus> {
         .collect()
 }
 
+fn expose_runtime_mcp_bridge(descriptor: &mut ProviderDescriptor, provider_version: Option<&str>) {
+    let Some(provider_version) = provider_version else {
+        return;
+    };
+    if !matches!(
+        descriptor.capabilities.mcp_support,
+        McpSupportLevel::VerifiedBridge { .. }
+    ) {
+        descriptor.capabilities.mcp_support = McpSupportLevel::RuntimeBridge {
+            provider_version: provider_version.to_string(),
+        };
+    }
+}
+
 pub async fn provider_catalog() -> ProviderCatalog {
     let health = provider_health_statuses().await;
     let mut providers = Vec::with_capacity(PROVIDER_IDS.len());
@@ -94,6 +110,12 @@ pub async fn provider_catalog() -> ProviderCatalog {
         health[5].clone(),
         common::stable_cli_capabilities(),
     ));
+    for descriptor in &mut providers {
+        let runtime_version = provider_registry()
+            .get(&descriptor.id.0)
+            .and_then(|provider| provider.dcc_mcp_projection_version());
+        expose_runtime_mcp_bridge(descriptor, runtime_version);
+    }
     ProviderCatalog { providers }
 }
 
@@ -106,8 +128,8 @@ mod tests {
     use dcc_core::domain::provider::{HealthStatus, McpSupportLevel};
 
     use super::{
-        claude_code, codex, common::stable_cli_capabilities, droid, gemini, grok_acp,
-        provider_runtime, PROVIDER_IDS,
+        claude_code, codex, common::stable_cli_capabilities, droid, expose_runtime_mcp_bridge,
+        gemini, grok_acp, provider_runtime, PROVIDER_IDS,
     };
     use crate::cursor_mcp::CURSOR_MCP_RUNTIME_VERSION;
 
@@ -129,7 +151,7 @@ mod tests {
             provider_runtime("codex")
                 .expect("Codex provider")
                 .dcc_mcp_projection_version(),
-            None | Some(crate::codex_mcp::CODEX_MCP_RUNTIME_VERSION)
+            None | Some(_)
         ));
         assert!(matches!(
             provider_runtime("cursor")
@@ -192,5 +214,25 @@ mod tests {
                 .mcp_support,
             McpSupportLevel::Unsupported
         );
+    }
+
+    #[test]
+    fn runtime_projection_is_visible_without_claiming_verified_conformance() {
+        let mut descriptor = codex::descriptor(HealthStatus::Healthy);
+        expose_runtime_mcp_bridge(
+            &mut descriptor,
+            Some("codex-cli@0.146.0+app-server-protocol-v2"),
+        );
+        assert_eq!(
+            descriptor.capabilities.mcp_support,
+            McpSupportLevel::RuntimeBridge {
+                provider_version: "codex-cli@0.146.0+app-server-protocol-v2".to_string(),
+            }
+        );
+        assert!(descriptor
+            .capabilities
+            .mcp_support
+            .verified_evidence()
+            .is_none());
     }
 }

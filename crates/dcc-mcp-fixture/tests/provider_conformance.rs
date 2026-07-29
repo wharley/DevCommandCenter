@@ -807,11 +807,11 @@ async fn authenticated_claude_bridge_passes_the_shared_harness() {
 }
 
 #[tokio::test]
-#[ignore = "requires explicit opt-in, codex-cli 0.145.0, and an authenticated Codex account"]
+#[ignore = "requires explicit opt-in and an authenticated Codex account; records the negotiated codex-cli runtime"]
 async fn authenticated_codex_bridge_passes_the_shared_harness() {
     require_explicit_opt_in(
         "DCC_RUN_CODEX_MCP_CONFORMANCE",
-        "set DCC_RUN_CODEX_MCP_CONFORMANCE=1 after authenticating codex-cli 0.145.0",
+        "set DCC_RUN_CODEX_MCP_CONFORMANCE=1 after authenticating codex-cli",
     );
     let workspace = test_workspace("codex");
     std::fs::create_dir_all(&workspace).expect("create isolated conformance workspace");

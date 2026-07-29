@@ -78,6 +78,34 @@ type PanelView =
 	| { type: "create" }
 	| { type: "review"; integration: McpIntegrationRecord };
 
+type ProviderSupportKind =
+	| "verified"
+	| "runtime"
+	| "native"
+	| "unsupported"
+	| "unknown";
+
+function providerSupportKind(
+	support: ProviderCatalog["providers"][number]["capabilities"]["mcpSupport"] | null,
+): ProviderSupportKind {
+	if (support && typeof support === "object") {
+		if ("verifiedBridge" in support) return "verified";
+		if ("runtimeBridge" in support) return "runtime";
+	}
+	if (support === "nativeConfig") return "native";
+	if (support === "unsupported") return "unsupported";
+	return "unknown";
+}
+
+function providerRuntimeVersion(
+	support: ProviderCatalog["providers"][number]["capabilities"]["mcpSupport"] | null,
+): string | null {
+	if (support && typeof support === "object" && "runtimeBridge" in support) {
+		return support.runtimeBridge?.providerVersion ?? null;
+	}
+	return null;
+}
+
 function scopeTarget(scope: McpBindingScope): string | null {
 	if (scope.type === "session") return scope.sessionId;
 	if (scope.type === "project") return scope.projectId;
@@ -176,16 +204,9 @@ export function McpIntegrationsPanel({
 			(provider) => provider.id === sessionProviderId,
 		) ?? null;
 	const providerSupport = sessionProvider?.capabilities.mcpSupport ?? null;
-	const providerSupportKind =
-		providerSupport &&
-		typeof providerSupport === "object" &&
-		"verifiedBridge" in providerSupport
-			? "verified"
-			: providerSupport === "nativeConfig"
-				? "native"
-				: providerSupport === "unsupported"
-					? "unsupported"
-					: "unknown";
+	const selectedProviderSupportKind = providerSupportKind(providerSupport);
+	const selectedProviderRuntimeVersion =
+		providerRuntimeVersion(providerSupport);
 	const orphanRuntimeStatuses = useMemo(
 		() => findOrphanMcpRuntimeStatuses(integrations, runtimeStatuses),
 		[integrations, runtimeStatuses],
@@ -879,10 +900,11 @@ export function McpIntegrationsPanel({
 							<p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
 								{sessionId && sessionProviderId
 									? t(
-											`settings.integrations.compatibility.${providerSupportKind}`,
+											`settings.integrations.compatibility.${selectedProviderSupportKind}`,
 											{
 												provider:
 													sessionProvider?.label ?? sessionProviderId,
+												version: selectedProviderRuntimeVersion ?? "",
 											},
 										)
 									: t("settings.integrations.compatibility.noSession")}
@@ -896,15 +918,17 @@ export function McpIntegrationsPanel({
 							</Badge>
 							<Badge
 								variant={
-									providerSupportKind === "verified"
+									selectedProviderSupportKind === "verified"
 										? "success"
-										: providerSupportKind === "unsupported"
+										: selectedProviderSupportKind === "runtime"
+											? "warn"
+										: selectedProviderSupportKind === "unsupported"
 											? "destructive"
 											: "outline"
 								}
 							>
 								{t(
-									`settings.integrations.compatibilityBadge.${providerSupportKind}`,
+									`settings.integrations.compatibilityBadge.${selectedProviderSupportKind}`,
 								)}
 							</Badge>
 						</div>

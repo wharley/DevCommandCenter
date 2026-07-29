@@ -43,10 +43,10 @@ use dcc_core::{
 };
 
 use crate::codex_mcp::{
-    codex_mcp_approval_policy, failed_codex_mcp_status_snapshot, initial_codex_mcp_status_snapshot,
-    merge_codex_mcp_status, parse_codex_mcp_startup_status, parse_codex_mcp_status_snapshot,
-    prepare_thread_start_request, CodexMcpDefinitionMap, CodexMcpToolPolicyMap,
-    CODEX_MCP_RUNTIME_VERSION, SUPPORTED_CODEX_CLI_VERSION,
+    codex_mcp_approval_policy, codex_mcp_runtime_version, failed_codex_mcp_status_snapshot,
+    initial_codex_mcp_status_snapshot, merge_codex_mcp_status, parse_codex_mcp_startup_status,
+    parse_codex_mcp_status_snapshot, prepare_thread_start_request, CodexMcpDefinitionMap,
+    CodexMcpToolPolicyMap,
 };
 use crate::common::{append_tool_instructions, augmented_path};
 
@@ -104,10 +104,12 @@ fn thread_start_params(cwd: &str, additional_working_directories: &[String]) -> 
 }
 
 fn parse_codex_cli_version_output(output: &str) -> Option<&str> {
+    const MAX_CODEX_VERSION_CHARS: usize = 64;
     let mut fields = output.split_whitespace();
     match (fields.next(), fields.next(), fields.next()) {
         (Some("codex-cli"), Some(version), None)
             if !version.is_empty()
+                && version.chars().count() <= MAX_CODEX_VERSION_CHARS
                 && version.bytes().all(|byte| {
                     byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+')
                 }) =>
@@ -118,12 +120,23 @@ fn parse_codex_cli_version_output(output: &str) -> Option<&str> {
     }
 }
 
-fn projection_version_for_cli_output(output: &str) -> Option<&'static str> {
-    (parse_codex_cli_version_output(output) == Some(SUPPORTED_CODEX_CLI_VERSION))
-        .then_some(CODEX_MCP_RUNTIME_VERSION)
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CodexMcpProjection {
+    cli_version: String,
+    runtime_version: String,
 }
 
-fn detect_codex_mcp_projection_version() -> Option<&'static str> {
+impl CodexMcpProjection {
+    fn from_cli_output(output: &str) -> Option<Self> {
+        let cli_version = parse_codex_cli_version_output(output)?.to_string();
+        Some(Self {
+            runtime_version: codex_mcp_runtime_version(&cli_version),
+            cli_version,
+        })
+    }
+}
+
+fn detect_codex_mcp_projection() -> Option<CodexMcpProjection> {
     let output = StdCommand::new("codex")
         .arg("--version")
         .env("PATH", augmented_path())
@@ -132,7 +145,7 @@ fn detect_codex_mcp_projection_version() -> Option<&'static str> {
     if !output.status.success() {
         return None;
     }
-    projection_version_for_cli_output(str::from_utf8(&output.stdout).ok()?)
+    CodexMcpProjection::from_cli_output(str::from_utf8(&output.stdout).ok()?)
 }
 
 fn initialize_result_codex_version(result: &Value) -> Option<&str> {
@@ -142,6 +155,29 @@ fn initialize_result_codex_version(result: &Value) -> Option<&str> {
         .next()?
         .strip_prefix("dcc/")
         .filter(|version| !version.is_empty())
+}
+
+fn validate_codex_mcp_projection(
+    projection: Option<&CodexMcpProjection>,
+    initialize_result: &Value,
+) -> Result<()> {
+    let detected = projection.ok_or_else(|| {
+        CoreError::Provider(
+            "Codex MCP bridge could not detect the installed codex-cli version".to_string(),
+        )
+    })?;
+    let reported = initialize_result_codex_version(initialize_result).ok_or_else(|| {
+        CoreError::Provider(
+            "Codex MCP bridge initialize response omitted the runtime version".to_string(),
+        )
+    })?;
+    if reported != detected.cli_version {
+        return Err(CoreError::Provider(format!(
+            "Codex MCP bridge version mismatch: detected {}, app-server reported {}",
+            detected.cli_version, reported
+        )));
+    }
+    Ok(())
 }
 
 fn codex_reasoning_effort(effort: Option<&str>) -> Option<&'static str> {
@@ -728,6 +764,7 @@ type PendingMap = Arc<Mutex<HashMap<u64, PendingResponse>>>;
 
 struct SessionRuntime {
     handle: SessionHandle,
+    mcp_provider_version: Option<String>,
     stdin: Mutex<ChildStdin>,
     child: Mutex<Child>,
     thread_id: Mutex<Option<String>>,
@@ -742,6 +779,12 @@ struct SessionRuntime {
 }
 
 impl SessionRuntime {
+    fn mcp_provider_version(&self) -> Result<&str> {
+        self.mcp_provider_version.as_deref().ok_or_else(|| {
+            CoreError::Provider("Codex MCP bridge runtime version is unavailable".to_string())
+        })
+    }
+
     async fn send_request(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
@@ -771,9 +814,11 @@ impl SessionRuntime {
         let tool_policies = prepared.tool_policies_by_definition().clone();
         *self.mcp_definitions_by_wire_name.lock().await = definitions.clone();
         *self.mcp_tool_policies.lock().await = tool_policies;
+        let provider_version = self.mcp_provider_version()?;
         self.publish_mcp_status_snapshot(initial_codex_mcp_status_snapshot(
             &definitions,
             &self.handle.provider_id,
+            provider_version,
             &self.handle.session_id,
         ));
         let (tx, rx) = oneshot::channel();
@@ -1020,6 +1065,10 @@ async fn refresh_codex_mcp_statuses(runtime: &Arc<SessionRuntime>) {
     if definitions.is_empty() {
         return;
     }
+    let provider_version = match runtime.mcp_provider_version() {
+        Ok(provider_version) => provider_version,
+        Err(_) => return,
+    };
     let thread_id = runtime.thread_id.lock().await.clone();
     let result = match thread_id {
         Some(thread_id) => fetch_codex_mcp_status_snapshot(runtime, &thread_id, &definitions).await,
@@ -1047,6 +1096,7 @@ async fn refresh_codex_mcp_statuses(runtime: &Arc<SessionRuntime>) {
         Err(_) => runtime.publish_mcp_status_snapshot(failed_codex_mcp_status_snapshot(
             &definitions,
             &runtime.handle.provider_id,
+            provider_version,
             &runtime.handle.session_id,
             McpErrorCategory::Protocol,
             "Unable to read Codex MCP status",
@@ -1121,6 +1171,7 @@ async fn fetch_codex_mcp_status_snapshot(
         &json!({ "data": data }),
         definitions,
         &runtime.handle.provider_id,
+        runtime.mcp_provider_version()?,
         &runtime.handle.session_id,
     )
 }
@@ -1141,18 +1192,18 @@ pub struct CodexAppServerAdapter {
     pub description: String,
     pub capabilities: Capabilities,
     pub stable: bool,
-    mcp_projection_version: Option<&'static str>,
+    mcp_projection: Option<CodexMcpProjection>,
     state: Arc<AdapterState>,
 }
 
 impl CodexAppServerAdapter {
     pub fn new(capabilities: Capabilities) -> Self {
-        Self::with_mcp_projection_version(capabilities, detect_codex_mcp_projection_version())
+        Self::with_mcp_projection(capabilities, detect_codex_mcp_projection())
     }
 
-    fn with_mcp_projection_version(
+    fn with_mcp_projection(
         capabilities: Capabilities,
-        mcp_projection_version: Option<&'static str>,
+        mcp_projection: Option<CodexMcpProjection>,
     ) -> Self {
         Self {
             id: ProviderId("codex".to_string()),
@@ -1160,7 +1211,7 @@ impl CodexAppServerAdapter {
             description: "OpenAI Codex provider via app-server protocol.".to_string(),
             capabilities,
             stable: true,
-            mcp_projection_version,
+            mcp_projection,
             state: Arc::new(AdapterState::default()),
         }
     }
@@ -1223,6 +1274,10 @@ impl CodexAppServerAdapter {
         let (events_tx, _) = broadcast::channel(128);
         let runtime = Arc::new(SessionRuntime {
             handle: handle.clone(),
+            mcp_provider_version: self
+                .mcp_projection
+                .as_ref()
+                .map(|projection| projection.runtime_version.clone()),
             stdin: Mutex::new(stdin),
             child: Mutex::new(child),
             thread_id: Mutex::new(None),
@@ -1253,7 +1308,7 @@ impl CodexAppServerAdapter {
         );
 
         // Handshake + thread/start
-        if let Err(e) = Self::handshake(&runtime, &cfg, self.mcp_projection_version).await {
+        if let Err(e) = Self::handshake(&runtime, &cfg, self.mcp_projection.as_ref()).await {
             self.state.sessions.lock().await.remove(&session_key);
             let _ = runtime.child.lock().await.start_kill();
             return Err(e);
@@ -1265,7 +1320,7 @@ impl CodexAppServerAdapter {
     async fn handshake(
         runtime: &Arc<SessionRuntime>,
         cfg: &SessionConfig,
-        mcp_projection_version: Option<&str>,
+        mcp_projection: Option<&CodexMcpProjection>,
     ) -> Result<()> {
         // initialize
         let uses_experimental_api =
@@ -1273,14 +1328,8 @@ impl CodexAppServerAdapter {
         let initialize_result = runtime
             .send_request("initialize", initialize_params(uses_experimental_api))
             .await?;
-        if !cfg.mcp_servers.is_empty()
-            && (mcp_projection_version != Some(CODEX_MCP_RUNTIME_VERSION)
-                || initialize_result_codex_version(&initialize_result)
-                    != Some(SUPPORTED_CODEX_CLI_VERSION))
-        {
-            return Err(CoreError::Provider(format!(
-                "Codex MCP projection requires audited codex-cli {SUPPORTED_CODEX_CLI_VERSION}"
-            )));
+        if !cfg.mcp_servers.is_empty() {
+            validate_codex_mcp_projection(mcp_projection, &initialize_result)?;
         }
 
         // initialized notification (no response expected)
@@ -1417,10 +1466,15 @@ impl CodexAppServerAdapter {
                     if method == "mcpServer/startupStatus/updated" {
                         let definitions = runtime.mcp_definitions_by_wire_name.lock().await.clone();
                         let thread_id = runtime.thread_id.lock().await.clone();
+                        let provider_version = match runtime.mcp_provider_version() {
+                            Ok(provider_version) => provider_version,
+                            Err(_) => continue,
+                        };
                         match parse_codex_mcp_startup_status(
                             params,
                             &definitions,
                             &runtime.handle.provider_id,
+                            provider_version,
                             &runtime.handle.session_id,
                             thread_id.as_deref(),
                         ) {
@@ -1440,6 +1494,7 @@ impl CodexAppServerAdapter {
                                     failed_codex_mcp_status_snapshot(
                                         &definitions,
                                         &runtime.handle.provider_id,
+                                        provider_version,
                                         &runtime.handle.session_id,
                                         McpErrorCategory::Protocol,
                                         "Invalid Codex MCP startup status",
@@ -1576,7 +1631,9 @@ impl Provider for CodexAppServerAdapter {
     }
 
     fn dcc_mcp_projection_version(&self) -> Option<&str> {
-        self.mcp_projection_version
+        self.mcp_projection
+            .as_ref()
+            .map(|projection| projection.runtime_version.as_str())
     }
 
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {
@@ -1749,28 +1806,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gates_mcp_projection_on_the_exact_audited_codex_version() {
+    fn derives_mcp_projection_identity_from_any_well_formed_codex_version() {
         assert_eq!(
             parse_codex_cli_version_output("codex-cli 0.145.0\n"),
             Some("0.145.0")
         );
         assert_eq!(
-            projection_version_for_cli_output("codex-cli 0.145.0\n"),
-            Some(CODEX_MCP_RUNTIME_VERSION)
+            CodexMcpProjection::from_cli_output("codex-cli 0.145.0\n"),
+            Some(CodexMcpProjection {
+                cli_version: "0.145.0".to_string(),
+                runtime_version: codex_mcp_runtime_version("0.145.0"),
+            })
         );
         assert_eq!(
-            projection_version_for_cli_output("codex-cli 0.146.0\n"),
+            CodexMcpProjection::from_cli_output("codex-cli 0.146.0\n"),
+            Some(CodexMcpProjection {
+                cli_version: "0.146.0".to_string(),
+                runtime_version: codex_mcp_runtime_version("0.146.0"),
+            })
+        );
+        assert_eq!(CodexMcpProjection::from_cli_output("codex 0.145.0\n"), None);
+        assert_eq!(
+            CodexMcpProjection::from_cli_output(&format!("codex-cli {}\n", "1".repeat(65))),
             None
         );
-        assert_eq!(projection_version_for_cli_output("codex 0.145.0\n"), None);
 
-        let adapter = CodexAppServerAdapter::with_mcp_projection_version(
+        let adapter = CodexAppServerAdapter::with_mcp_projection(
             crate::codex::stable_codex_capabilities(),
-            Some(CODEX_MCP_RUNTIME_VERSION),
+            CodexMcpProjection::from_cli_output("codex-cli 0.146.0\n"),
         );
         assert_eq!(
             adapter.dcc_mcp_projection_version(),
-            Some(CODEX_MCP_RUNTIME_VERSION)
+            Some("codex-cli@0.146.0+app-server-protocol-v2")
         );
     }
 
@@ -1788,6 +1855,25 @@ mod tests {
             })),
             None
         );
+
+        let projection = CodexMcpProjection::from_cli_output("codex-cli 0.146.0\n");
+        assert!(validate_codex_mcp_projection(
+            projection.as_ref(),
+            &json!({ "userAgent": "dcc/0.146.0 (macOS 26.5; arm64)" }),
+        )
+        .is_ok());
+        assert!(validate_codex_mcp_projection(
+            projection.as_ref(),
+            &json!({ "userAgent": "dcc/0.147.0 (macOS 26.5; arm64)" }),
+        )
+        .expect_err("runtime replacement must require a fresh negotiation")
+        .to_string()
+        .contains("detected 0.146.0, app-server reported 0.147.0"));
+        assert!(validate_codex_mcp_projection(
+            projection.as_ref(),
+            &json!({ "userAgent": "malformed" }),
+        )
+        .is_err());
     }
 
     #[test]

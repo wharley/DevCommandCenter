@@ -24,7 +24,7 @@ pub struct SessionHandle {
 /// Describes the MCP attachment contract that the DCC adapter can actually
 /// guarantee. Parsing MCP-shaped tool events alone does not raise this level.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum McpSupportLevel {
     /// DCC cannot reliably attach an external MCP server through this adapter.
     #[default]
@@ -32,6 +32,11 @@ pub enum McpSupportLevel {
     /// The provider may load its own MCP configuration, but DCC does not own or
     /// verify attachment, lifecycle, permissions, or tool visibility.
     NativeConfig,
+    /// DCC has a backend-only projection path that negotiates the required MCP
+    /// contract when a session starts. The reported provider version is
+    /// diagnostic metadata, not a compatibility allowlist or conformance
+    /// evidence; the live per-session runtime status remains authoritative.
+    RuntimeBridge { provider_version: String },
     /// DCC owns a tested bridge that attaches servers and verifies tools
     /// end-to-end through the provider adapter. The evidence value can only be
     /// produced by a successful run of the shared conformance harness.
@@ -42,13 +47,16 @@ impl McpSupportLevel {
     pub fn verified_evidence(&self) -> Option<&McpConformanceEvidence> {
         match self {
             Self::VerifiedBridge { evidence } => Some(evidence),
-            Self::Unsupported | Self::NativeConfig => None,
+            Self::Unsupported | Self::NativeConfig | Self::RuntimeBridge { .. } => None,
         }
     }
 
     pub fn validate(&self) -> Result<(), McpConformanceEvidenceError> {
         if let Self::VerifiedBridge { evidence } = self {
             evidence.validate()?;
+        }
+        if let Self::RuntimeBridge { provider_version } = self {
+            validate_provider_version(provider_version)?;
         }
         Ok(())
     }
@@ -63,6 +71,13 @@ impl McpSupportLevel {
         }
         Ok(())
     }
+}
+
+fn validate_provider_version(provider_version: &str) -> Result<(), McpConformanceEvidenceError> {
+    if provider_version.trim().is_empty() || provider_version.chars().count() > 128 {
+        return Err(McpConformanceEvidenceError::InvalidProviderMetadata);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -143,6 +158,40 @@ pub struct ProviderAccountUsage {
     pub plan_type: Option<String>,
     pub updated_at: String,
     pub is_cached: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::McpSupportLevel;
+
+    #[test]
+    fn runtime_bridge_serializes_camel_case_diagnostic_version() {
+        let support = McpSupportLevel::RuntimeBridge {
+            provider_version: "codex-cli@0.146.0+app-server-protocol-v2".to_string(),
+        };
+        support.validate().expect("valid runtime bridge");
+
+        let value = serde_json::to_value(support).expect("serialize runtime bridge");
+        assert_eq!(
+            value["runtimeBridge"]["providerVersion"],
+            "codex-cli@0.146.0+app-server-protocol-v2"
+        );
+        assert!(value["runtimeBridge"].get("provider_version").is_none());
+    }
+
+    #[test]
+    fn runtime_bridge_rejects_missing_or_unbounded_version_metadata() {
+        assert!(McpSupportLevel::RuntimeBridge {
+            provider_version: String::new(),
+        }
+        .validate()
+        .is_err());
+        assert!(McpSupportLevel::RuntimeBridge {
+            provider_version: "v".repeat(129),
+        }
+        .validate()
+        .is_err());
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

@@ -13,6 +13,11 @@ function hasVerifiedMcpBridge(provider: ProviderDescriptor): boolean {
 	return typeof support === "object" && support !== null && "verifiedBridge" in support;
 }
 
+function hasRuntimeMcpBridge(provider: ProviderDescriptor): boolean {
+	const support = provider.capabilities.mcpSupport;
+	return typeof support === "object" && support !== null && "runtimeBridge" in support;
+}
+
 export function summarizeProviderHealth(
 	health: ProviderDescriptor["health"],
 ): { label: string; variant: ProviderChip["variant"] } {
@@ -43,9 +48,11 @@ export function getProviderChips(provider: ProviderDescriptor): ProviderChip[] {
 	const mcpChip: ProviderChip[] =
 		hasVerifiedMcpBridge(provider)
 			? [{ label: "mcp verified", variant: "success" }]
-			: provider.capabilities.mcpSupport === "nativeConfig"
-				? [{ label: "mcp native config", variant: "outline" }]
-				: [];
+			: hasRuntimeMcpBridge(provider)
+				? [{ label: "mcp runtime bridge", variant: "warn" }]
+				: provider.capabilities.mcpSupport === "nativeConfig"
+					? [{ label: "mcp native config", variant: "outline" }]
+					: [];
 
 	return [
 		{

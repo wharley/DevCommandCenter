@@ -4,23 +4,28 @@ The Codex bridge projects DCC-owned MCP definitions into a single app-server
 thread. It does not edit Codex configuration files, replace native MCP entries,
 or change the configured `CODEX_HOME`.
 
-## Audited runtime contract
-
-The first supported runtime is:
-
-```text
-codex-cli@0.145.0+app-server-protocol-v2
-```
+## Runtime-negotiated contract
 
 DCC probes `codex --version` before advertising its private projection channel
-and requires the exact audited CLI version. During app-server initialization it
-also verifies the version reported in `userAgent`. A missing, malformed, older,
-or newer version disables DCC projection while leaving the provider's native
-configuration behavior available.
+and derives a diagnostic identity such as:
 
-This exact-version allowlist is intentional. A Codex upgrade must be checked
-against the generated app-server schema and the offline conformance suite before
-its version is added. DCC does not infer compatibility from a nearby version.
+```text
+codex-cli@0.146.0+app-server-protocol-v2
+```
+
+The version is evidence metadata, not a compatibility allowlist. During
+app-server initialization DCC requires a bounded, well-formed version in
+`userAgent` that matches the executable it launched. It then exercises the
+actual contract through `thread/start.params.config.mcp_servers` and
+`mcpServerStatus/list`. A version change alone does not disable MCP projection;
+a missing field, rejected request, malformed status, or lost permission
+correlation fails closed.
+
+The provider catalog reports this path as `runtimeBridge`, distinct from a
+`verifiedBridge` backed by the complete authenticated conformance suite. The
+selected session's live status is authoritative. A failed negotiation records a
+bounded protocol error with the detected runtime identity rather than silently
+falling back to a compatibility guess.
 
 ## Session-only projection
 
@@ -91,7 +96,8 @@ projection use the app-server's granular approval policy with only
 `mcp_elicitations` enabled. Sandbox, rule, skill, and standalone permission
 approvals remain disabled in this channel.
 
-Codex 0.145.0 represents an MCP tool approval as the documented
+The negotiated app-server contract represents an MCP tool approval as the
+documented
 `mcpServer/elicitation/request` form whose `_meta.codex_approval_kind` is
 `mcp_tool_call`. DCC accepts that request only when:
 
@@ -140,8 +146,7 @@ The default suite remains offline. It proves that missing credentials fail
 before Codex attachment and compiles the real lifecycle and approval path, but
 does not manufacture provider success or consume an account. The full gate is
 ignored by default and requires the non-secret
-`DCC_RUN_CODEX_MCP_CONFORMANCE=1`, an authenticated account, and the audited
-`codex-cli 0.145.0`:
+`DCC_RUN_CODEX_MCP_CONFORMANCE=1` and an authenticated account:
 
 ```sh
 DCC_RUN_CODEX_MCP_CONFORMANCE=1 \
@@ -154,6 +159,5 @@ An optional model override can be provided through
 configured `CODEX_HOME` checks, and promotion decision remain deferred to the
 final end-to-end validation.
 
-Until that gate passes, the public capability remains `nativeConfig`; the
-backend-only projection version is internal wiring evidence, not a general
-compatibility claim.
+Until that gate passes for a runtime, the public capability remains
+`runtimeBridge`; it must not be presented as conformance-verified.
