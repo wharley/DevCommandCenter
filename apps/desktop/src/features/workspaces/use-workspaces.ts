@@ -4,6 +4,8 @@ import type { WorkspaceStatus, WorkspaceSummary } from "./types";
 import {
 	archiveWorkspace as apiArchiveWorkspace,
 	archiveWorkspaceBundle as apiArchiveWorkspaceBundle,
+	completeWorkspace as apiCompleteWorkspace,
+	completeWorkspaceBundle as apiCompleteWorkspaceBundle,
 	createWorkspaceBundleForRepos,
 	createWorkspaceForRepo,
 	createWorkspaceFromSourceUrl as apiCreateWorkspaceFromSourceUrl,
@@ -35,6 +37,10 @@ export type WorkspaceBundleCreationResult = {
 	primaryWorkspace: WorkspaceSummary;
 	workspaces: WorkspaceCreationResult[];
 };
+
+function isWorkspaceSelectable(workspace: WorkspaceSummary) {
+	return workspace.status !== "archived" && workspace.status !== "completed";
+}
 
 function applyStatusOverride(
 	workspace: WorkspaceSummary,
@@ -125,6 +131,8 @@ export function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
 			? "ready"
 			: workspace.state === "archived"
 				? "archived"
+				: workspace.state === "completed"
+					? "completed"
 				: workspace.state === "initializing"
 					? "initializing"
 					: "setup_pending";
@@ -173,8 +181,8 @@ export function daemonCombToWorkspaceSummary(comb: DaemonComb): WorkspaceSummary
 }
 
 export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
-	const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
-		workspaces[0]?.id ?? null,
+	const [selectedWorkspaceId, setSelectedWorkspaceIdState] = useState<string | null>(
+		workspaces.find(isWorkspaceSelectable)?.id ?? null,
 	);
 	const [optimisticCreated, setOptimisticCreated] = useState<WorkspaceSummary[]>([]);
 	const [hiddenWorkspaceIds, setHiddenWorkspaceIds] = useState<string[]>([]);
@@ -212,11 +220,15 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 	}, [workspaces]);
 
 	useEffect(() => {
-		setSelectedWorkspaceId((current) => {
+		setSelectedWorkspaceIdState((current) => {
 			const nextSelectedWorkspaceId =
-				current && workspaceList.some((workspace) => workspace.id === current)
+				current &&
+				workspaceList.some(
+					(workspace) =>
+						workspace.id === current && isWorkspaceSelectable(workspace),
+				)
 					? current
-					: workspaceList[0]?.id ?? null;
+					: workspaceList.find(isWorkspaceSelectable)?.id ?? null;
 			return current === nextSelectedWorkspaceId ? current : nextSelectedWorkspaceId;
 		});
 	}, [workspaceList]);
@@ -225,6 +237,17 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 
 	const selectedWorkspace =
 		filteredWorkspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null;
+	const setSelectedWorkspaceId = useCallback((workspaceId: string | null) => {
+		if (
+			workspaceId === null ||
+			workspaceListRef.current.some(
+				(workspace) =>
+					workspace.id === workspaceId && isWorkspaceSelectable(workspace),
+			)
+		) {
+			setSelectedWorkspaceIdState(workspaceId);
+		}
+	}, []);
 
 	const createWorkspace = useCallback(async (input: CreateWorkspaceForRepoInput) => {
 		setIsCreatingWorkspace(true);
@@ -241,7 +264,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 					: current,
 			);
 			setStatusOverrides((current) => removeStatusOverrides(current, [summary.id]));
-			setSelectedWorkspaceId(summary.id);
+			setSelectedWorkspaceIdState(summary.id);
 			return {
 				workspace: summary,
 				setupHints: result.setupHints,
@@ -268,7 +291,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 						: current,
 				);
 				setStatusOverrides((current) => removeStatusOverrides(current, [summary.id]));
-				setSelectedWorkspaceId(summary.id);
+				setSelectedWorkspaceIdState(summary.id);
 				return {
 					workspace: summary,
 					setupHints: result.setupHints,
@@ -319,7 +342,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 					current.filter((workspaceId) => !createdIds.includes(workspaceId)),
 				);
 				setStatusOverrides((current) => removeStatusOverrides(current, createdIds));
-				setSelectedWorkspaceId(primaryWorkspace.id);
+				setSelectedWorkspaceIdState(primaryWorkspace.id);
 				return {
 					bundle: result.summary,
 					primaryWorkspace,
@@ -347,7 +370,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 					: current,
 			);
 			setStatusOverrides((current) => removeStatusOverrides(current, [summary.id]));
-			setSelectedWorkspaceId(summary.id);
+			setSelectedWorkspaceIdState(summary.id);
 			return {
 				workspace: summary,
 				setupHints: result.setupHints,
@@ -390,18 +413,41 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 			}
 			return next;
 		});
+		setSelectedWorkspaceIdState(workspaceId);
+	}, []);
+
+	const completeWorkspace = useCallback(async (workspaceId: string) => {
+		const workspace = workspaceListRef.current.find((candidate) => candidate.id === workspaceId);
+		const affectedWorkspaceIds = workspaceMutationIds(workspace, workspaceId);
+		if (workspace?.bundleId) {
+			await apiCompleteWorkspaceBundle(workspace.bundleId);
+		} else {
+			await apiCompleteWorkspace(workspaceId);
+		}
+		setStatusOverrides((current) => {
+			const next = { ...current };
+			for (const affectedWorkspaceId of affectedWorkspaceIds) {
+				next[affectedWorkspaceId] = "completed";
+			}
+			return next;
+		});
 	}, []);
 
 	const deleteWorkspace = useCallback(
-		async (workspaceId: string) => {
+		async (
+			workspaceId: string,
+			options: { deleteRemoteBranch?: boolean } = {},
+		) => {
 			const workspace = workspaceListRef.current.find(
 				(candidate) => candidate.id === workspaceId,
 			);
 			const affectedWorkspaceIds = workspaceMutationIds(workspace, workspaceId);
 			if (workspace?.bundleId) {
-				await apiDeleteWorkspaceBundle(workspace.bundleId);
+				await apiDeleteWorkspaceBundle(workspace.bundleId, {
+					deleteRemoteBranches: options.deleteRemoteBranch,
+				});
 			} else {
-				await apiDeleteWorkspace(workspaceId);
+				await apiDeleteWorkspace(workspaceId, options);
 			}
 			const nextState = removeWorkspacesFromList(
 				workspaceListRef.current,
@@ -417,7 +463,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 			setStatusOverrides((current) =>
 				removeStatusOverrides(current, affectedWorkspaceIds),
 			);
-			setSelectedWorkspaceId(nextState.selectedWorkspaceId);
+			setSelectedWorkspaceIdState(nextState.selectedWorkspaceId);
 		},
 		[],
 	);
@@ -444,7 +490,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 				...uniqueWorkspaceIds.filter((workspaceId) => !current.includes(workspaceId)),
 			]);
 			setStatusOverrides((current) => removeStatusOverrides(current, uniqueWorkspaceIds));
-			setSelectedWorkspaceId(nextState.selectedWorkspaceId);
+			setSelectedWorkspaceIdState(nextState.selectedWorkspaceId);
 		},
 		[],
 	);
@@ -453,6 +499,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 		allWorkspaces: workspaceList,
 		archiveWorkspace,
 		cloneWorkspaceFromUrl,
+		completeWorkspace,
 		createWorkspace,
 		createWorkspaceFromSourceUrl,
 		createWorkspaceBundle,

@@ -1,8 +1,13 @@
 import { cva } from "class-variance-authority";
-import { Archive, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { CircleCheck, CirclePause, Loader2, RotateCcw, Trash2 } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { WorkspaceRecapTone } from "@/features/inspector/workspace-recap";
 import type { WorkspaceAgentActivity } from "./use-workspace-agent-states";
@@ -39,6 +44,7 @@ export type WorkspaceRailRowProps = {
 	metadataEnabled?: boolean;
 	onSelect?: (workspaceId: string) => void;
 	onArchiveWorkspace?: (workspaceId: string) => void;
+	onCompleteWorkspace?: (workspaceId: string) => void | Promise<void>;
 	onRestoreWorkspace?: (workspaceId: string) => void;
 	onDeleteWorkspace?: (workspaceId: string) => void;
 };
@@ -129,6 +135,7 @@ export const WorkspaceRailRowItem = memo(
 		metadataEnabled = true,
 		onSelect,
 		onArchiveWorkspace,
+		onCompleteWorkspace,
 		onRestoreWorkspace,
 		onDeleteWorkspace,
 	}: WorkspaceRailRowProps) {
@@ -139,7 +146,16 @@ export const WorkspaceRailRowItem = memo(
 			workspacePath,
 			branch: workspace.branch,
 			activity: activity ?? null,
-			enabled: metadataEnabled && workspace.status !== "archived",
+			enabled:
+				metadataEnabled &&
+				workspace.status !== "archived" &&
+				workspace.status !== "completed",
+			onPullRequestMerged:
+				workspace.status === "ready" &&
+				!workspace.bundleId &&
+				onCompleteWorkspace
+					? () => onCompleteWorkspace(workspace.id)
+					: undefined,
 		});
 		const recapMessage = railRecap
 			? t(
@@ -151,12 +167,23 @@ export const WorkspaceRailRowItem = memo(
 			recapMessage && railRecap?.prTitle
 				? `${recapMessage} — ${railRecap.prTitle}`
 				: recapMessage ?? undefined;
+		const hasPriorityWorkspaceStatus =
+			workspace.status === "initializing" ||
+			workspace.status === "setup_pending";
+		const workspaceStatusMessage =
+			workspace.status === "initializing"
+				? t("sidebar.workspaceState.initializing")
+				: workspace.status === "setup_pending"
+					? t("sidebar.workspaceState.setupPending")
+					: workspace.status === "ready" && !activity && !recapMessage
+						? t("sidebar.workspaceState.readyToStart")
+						: null;
 		const [pendingAction, setPendingAction] = useState<
-			"restore" | "delete" | null
+			"restore" | "complete" | null
 		>(null);
 
 		const runRowAction = (
-			action: "restore" | "delete",
+			action: "restore" | "complete",
 			handler: (workspaceId: string) => void | Promise<void>,
 		) => {
 			if (pendingAction) {
@@ -170,21 +197,29 @@ export const WorkspaceRailRowItem = memo(
 		};
 
 		const isPending = pendingAction !== null;
+		const canSelect =
+			workspace.status !== "archived" && workspace.status !== "completed";
 
 		return (
 			<div className="px-[2px]">
 				<div
-					role="button"
-					tabIndex={0}
+					role={canSelect ? "button" : undefined}
+					tabIndex={canSelect ? 0 : -1}
 					aria-current={selected ? "location" : undefined}
-					aria-label={`Open workspace ${displayTitle}`}
+					aria-label={
+						canSelect
+							? t("sidebar.openWorkspace", { label: displayTitle })
+							: undefined
+					}
 					data-active={selected ? "true" : "false"}
 					data-workspace-id={workspace.id}
 					onClick={() => {
 						if (isPending) {
 							return;
 						}
-						onSelect?.(workspace.id);
+						if (canSelect) {
+							onSelect?.(workspace.id);
+						}
 					}}
 					onKeyDown={(event) => {
 						if (event.key === "Enter" || event.key === " ") {
@@ -192,13 +227,17 @@ export const WorkspaceRailRowItem = memo(
 							if (isPending) {
 								return;
 							}
-							onSelect?.(workspace.id);
+							if (canSelect) {
+								onSelect?.(workspace.id);
+							}
 						}
 					}}
 					className={cn(
 						rowVariants({ active: selected }),
 						"w-full text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
-						workspace.status === "archived" && !selected && "opacity-50",
+						(workspace.status === "archived" || workspace.status === "completed") &&
+							!selected &&
+							"opacity-50",
 						isPending && "pointer-events-none opacity-60",
 					)}
 				>
@@ -211,7 +250,16 @@ export const WorkspaceRailRowItem = memo(
 					<div className="flex min-w-0 items-start gap-2">
 						<WorkspaceRailAvatar title={displayTitle} subtitle={workspace.name} />
 						<div className="min-w-0 flex-1">
-							<div className="flex min-w-0 items-center gap-1.5 transition-[padding] group-hover/dccRailRow:pr-6 group-focus-within/dccRailRow:pr-6">
+							<div
+								className={cn(
+									"flex min-w-0 items-center gap-1.5 transition-[padding]",
+									workspace.status === "ready" &&
+										onCompleteWorkspace &&
+										onArchiveWorkspace
+										? "group-hover/dccRailRow:pr-12 group-focus-within/dccRailRow:pr-12"
+										: "group-hover/dccRailRow:pr-6 group-focus-within/dccRailRow:pr-6",
+								)}
+							>
 								<span
 									className="min-w-0 truncate font-medium leading-5 text-foreground"
 									title={displayTitle}
@@ -225,7 +273,32 @@ export const WorkspaceRailRowItem = memo(
 									</span>
 								) : null}
 							</div>
-							{activity && (
+							{workspaceStatusMessage ? (
+								<div className="mt-px flex min-w-0 items-center gap-1.5">
+									<span
+										aria-hidden
+										className={cn(
+											"size-[6px] shrink-0 rounded-full",
+											workspace.status === "initializing" &&
+												"animate-pulse bg-muted-foreground/45",
+											workspace.status === "setup_pending" &&
+												"bg-amber-500/80",
+											workspace.status === "ready" &&
+												"bg-muted-foreground/35",
+										)}
+									/>
+									<span
+										className={cn(
+											"truncate text-[10.5px] font-medium leading-4 text-muted-foreground",
+											workspace.status === "setup_pending" &&
+												"text-amber-700 dark:text-amber-300/90",
+										)}
+									>
+										{workspaceStatusMessage}
+									</span>
+								</div>
+							) : null}
+							{activity && !hasPriorityWorkspaceStatus && (
 								<div className="mt-px flex min-w-0 items-center gap-1.5">
 									<span
 										aria-hidden
@@ -256,7 +329,7 @@ export const WorkspaceRailRowItem = memo(
 									</span>
 								</div>
 							)}
-							{recapMessage && railRecap ? (
+							{recapMessage && railRecap && !hasPriorityWorkspaceStatus ? (
 								<p
 									className={cn(
 										"truncate text-[10.5px] leading-4",
@@ -275,92 +348,127 @@ export const WorkspaceRailRowItem = memo(
 							)}
 						>
 							{workspace.status === "archived" ? (
-								<>
-									{onRestoreWorkspace && (
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon-xs"
-											aria-label={
-												pendingAction === "restore"
-													? t("sidebar.restoringWorkspace")
-													: "Restore workspace"
-											}
-											disabled={isPending}
-											className="text-muted-foreground/60 hover:text-foreground disabled:opacity-100"
-											onClick={(event) => {
-												event.stopPropagation();
-												runRowAction("restore", onRestoreWorkspace);
-											}}
-										>
-											{pendingAction === "restore" ? (
-												<Loader2
-													className="size-3.5 animate-spin"
-													strokeWidth={2}
-													aria-hidden
-												/>
-											) : (
-												<RotateCcw
-													className="size-3.5"
-													strokeWidth={2}
-													aria-hidden
-												/>
-											)}
-										</Button>
-									)}
-									{onDeleteWorkspace && (
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon-xs"
-											aria-label={
-												pendingAction === "delete"
-													? t("sidebar.deletingWorkspace")
-													: "Delete workspace permanently"
-											}
-											disabled={isPending}
-											className="text-muted-foreground/60 hover:text-destructive disabled:opacity-100"
-											onClick={(event) => {
-												event.stopPropagation();
-												runRowAction("delete", onDeleteWorkspace);
-											}}
-										>
-											{pendingAction === "delete" ? (
-												<Loader2
-													className="size-3.5 animate-spin text-destructive"
-													strokeWidth={2}
-													aria-hidden
-												/>
-											) : (
-												<Trash2
-													className="size-3.5"
-													strokeWidth={2}
-													aria-hidden
-												/>
-											)}
-										</Button>
-									)}
-								</>
-							) : (
-								onArchiveWorkspace && (
+								onRestoreWorkspace && (
 									<Button
 										type="button"
 										variant="ghost"
 										size="icon-xs"
-										aria-label="Archive workspace"
-										className="text-muted-foreground/60 hover:text-foreground"
+										aria-label={
+											pendingAction === "restore"
+												? t("sidebar.restoringWorkspace")
+												: t("sidebar.restoreWorkspace")
+										}
+										disabled={isPending}
+										className="text-muted-foreground/60 hover:text-foreground disabled:opacity-100"
 										onClick={(event) => {
 											event.stopPropagation();
-											onArchiveWorkspace(workspace.id);
+											runRowAction("restore", onRestoreWorkspace);
 										}}
 									>
-										<Archive
+										{pendingAction === "restore" ? (
+											<Loader2
+												className="size-3.5 animate-spin"
+												strokeWidth={2}
+												aria-hidden
+											/>
+										) : (
+											<RotateCcw
+												className="size-3.5"
+												strokeWidth={2}
+												aria-hidden
+											/>
+										)}
+									</Button>
+								)
+							) : workspace.status === "completed" ? (
+								onDeleteWorkspace && (
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										aria-label={t("sidebar.deleteWorkspace")}
+										className="text-muted-foreground/60 hover:text-destructive"
+										onClick={(event) => {
+											event.stopPropagation();
+											onDeleteWorkspace(workspace.id);
+										}}
+									>
+										<Trash2
 											className="size-3.5"
 											strokeWidth={2}
 											aria-hidden
 										/>
 									</Button>
 								)
+							) : (
+								<>
+									{workspace.status === "ready" && onCompleteWorkspace ? (
+										<Tooltip>
+											<TooltipTrigger asChild>
+												<Button
+													type="button"
+													variant="ghost"
+													size="icon-xs"
+													aria-label={
+														pendingAction === "complete"
+															? t("sidebar.completingWorkspace")
+															: t("sidebar.completeWorkspace")
+													}
+													disabled={isPending}
+													className="text-muted-foreground/60 hover:text-emerald-600 disabled:opacity-100 dark:hover:text-emerald-400"
+													onClick={(event) => {
+														event.stopPropagation();
+														runRowAction("complete", onCompleteWorkspace);
+													}}
+												>
+													{pendingAction === "complete" ? (
+														<Loader2
+															className="size-3.5 animate-spin"
+															strokeWidth={2}
+															aria-hidden
+														/>
+													) : (
+														<CircleCheck
+															className="size-3.5"
+															strokeWidth={2}
+															aria-hidden
+														/>
+													)}
+												</Button>
+											</TooltipTrigger>
+											<TooltipContent side="top">
+												{t("sidebar.completeWorkspace")}
+											</TooltipContent>
+										</Tooltip>
+									) : null}
+									{onArchiveWorkspace ? (
+										<Tooltip>
+											<TooltipTrigger asChild>
+												<Button
+													type="button"
+													variant="ghost"
+													size="icon-xs"
+													aria-label={t("sidebar.moveWorkspaceToWaiting")}
+													disabled={isPending}
+													className="text-muted-foreground/60 hover:text-amber-600 dark:hover:text-amber-400"
+													onClick={(event) => {
+														event.stopPropagation();
+														onArchiveWorkspace(workspace.id);
+													}}
+												>
+													<CirclePause
+														className="size-3.5"
+														strokeWidth={2}
+														aria-hidden
+													/>
+												</Button>
+											</TooltipTrigger>
+											<TooltipContent side="top">
+												{t("sidebar.moveWorkspaceToWaiting")}
+											</TooltipContent>
+										</Tooltip>
+									) : null}
+								</>
 							)}
 						</div>
 					</div>
@@ -377,6 +485,7 @@ export const WorkspaceRailRowItem = memo(
 		previous.workspace === next.workspace &&
 		previous.onSelect === next.onSelect &&
 		previous.onArchiveWorkspace === next.onArchiveWorkspace &&
+		previous.onCompleteWorkspace === next.onCompleteWorkspace &&
 		previous.onRestoreWorkspace === next.onRestoreWorkspace &&
 		previous.onDeleteWorkspace === next.onDeleteWorkspace,
 );

@@ -432,6 +432,7 @@ impl SqliteWorkspaceRepo {
             WorkspaceState::SetupPending => "setup_pending",
             WorkspaceState::Ready => "ready",
             WorkspaceState::Archived => "archived",
+            WorkspaceState::Completed => "completed",
         }
     }
 
@@ -439,6 +440,7 @@ impl SqliteWorkspaceRepo {
         match state {
             WorkspaceBundleState::Ready => "ready",
             WorkspaceBundleState::Archived => "archived",
+            WorkspaceBundleState::Completed => "completed",
         }
     }
 
@@ -449,6 +451,7 @@ impl SqliteWorkspaceRepo {
         match value {
             "ready" => Ok(WorkspaceBundleState::Ready),
             "archived" => Ok(WorkspaceBundleState::Archived),
+            "completed" => Ok(WorkspaceBundleState::Completed),
             other => Err(rusqlite::Error::FromSqlConversionFailure(
                 column,
                 rusqlite::types::Type::Text,
@@ -520,6 +523,7 @@ impl SqliteWorkspaceRepo {
             "setup_pending" => WorkspaceState::SetupPending,
             "ready" => WorkspaceState::Ready,
             "archived" => WorkspaceState::Archived,
+            "completed" => WorkspaceState::Completed,
             other => {
                 return Err(rusqlite::Error::FromSqlConversionFailure(
                     7,
@@ -1871,6 +1875,21 @@ impl WorkspaceBundleRepo for SqliteWorkspaceRepo {
                     )
                     .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 }
+                WorkspaceBundleState::Completed => {
+                    tx.execute(
+                        r#"
+						UPDATE dcc_workspaces
+						   SET state = 'completed', updated_at = ?1
+						 WHERE id IN (
+						       SELECT workspace_id
+						         FROM dcc_workspace_bundle_members
+						        WHERE bundle_id = ?2
+						 )
+						"#,
+                        params![updated_at.clone(), id.0.clone()],
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                }
                 WorkspaceBundleState::Ready => {
                     tx.execute(
                         r#"
@@ -3203,6 +3222,20 @@ mod tests {
             restored_states.get("workspace-frontend"),
             Some(&WorkspaceState::Ready)
         );
+
+        let completed = futures::executor::block_on(repo.set_workspace_bundle_state(
+            &bundle.id,
+            WorkspaceBundleState::Completed,
+            "2026-01-01T00:03:00Z".to_string(),
+        ))
+        .expect("complete workspace bundle")
+        .expect("workspace bundle exists");
+        assert_eq!(completed.bundle.state, WorkspaceBundleState::Completed);
+        let completed_workspaces =
+            futures::executor::block_on(repo.list_workspaces()).expect("list workspaces");
+        assert!(completed_workspaces
+            .iter()
+            .all(|workspace| workspace.state == WorkspaceState::Completed));
 
         futures::executor::block_on(repo.delete_workspace(&workspaces[0].id))
             .expect("delete primary workspace");

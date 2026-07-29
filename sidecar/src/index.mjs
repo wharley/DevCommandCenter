@@ -16,7 +16,7 @@ import {
 } from "./mcp-config.mjs";
 import { handlePermissionRequest } from "./permission-bridge.mjs";
 
-const SIDECAR_VERSION = "0.1.34";
+const SIDECAR_VERSION = "0.1.35";
 
 function emit(value) {
 	process.stdout.write(`${JSON.stringify(value)}\n`);

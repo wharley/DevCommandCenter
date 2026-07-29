@@ -14,6 +14,10 @@ describe("getWorkspaceTone", () => {
 		expect(getWorkspaceTone("archived")).toBe("secondary");
 	});
 
+	it("maps completed workspaces to secondary", () => {
+		expect(getWorkspaceTone("completed")).toBe("secondary");
+	});
+
 	it("keeps initializing workspaces secondary", () => {
 		expect(getWorkspaceTone("initializing")).toBe("secondary");
 	});

@@ -4109,6 +4109,119 @@ async fn cleanup_unused_workspace_push_target(
     }
 }
 
+fn workspace_remote_branch_target(
+    workspace: &Workspace,
+) -> Result<Option<(String, String)>, String> {
+    let source = workspace.source.as_ref();
+    let branch = source
+        .and_then(|source| {
+            source
+                .push_target
+                .as_ref()
+                .map(|target| target.branch_name.as_str())
+        })
+        .or_else(|| source.map(|source| source.head_branch.as_str()))
+        .unwrap_or(workspace.base_branch.as_str())
+        .trim();
+    if branch.is_empty() {
+        return Ok(None);
+    }
+    if source.is_some_and(|source| source.base_branch.trim() == branch) {
+        return Err(format!(
+            "Refusing to delete `{branch}` because it is the workspace base branch."
+        ));
+    }
+
+    let configured_remote = |key: &str| -> Option<String> {
+        let output = run_git_output(&workspace.root_path, &["config", "--get", key]).ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        (!value.is_empty() && value != ".").then_some(value)
+    };
+    let remote = source
+        .and_then(|source| {
+            source
+                .push_target
+                .as_ref()
+                .map(|target| target.remote_name.trim())
+                .filter(|remote| !remote.is_empty())
+        })
+        .or_else(|| {
+            source
+                .map(|source| source.remote_name.trim())
+                .filter(|remote| !remote.is_empty())
+        })
+        .map(str::to_string)
+        .or_else(|| configured_remote(&format!("branch.{branch}.pushRemote")))
+        .or_else(|| configured_remote(&format!("branch.{branch}.remote")));
+
+    let Some(remote) = remote else {
+        let output = run_git_output(&workspace.root_path, &["remote"])?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let has_origin = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|candidate| candidate.trim() == "origin");
+        return Ok(has_origin.then(|| ("origin".to_string(), branch.to_string())));
+    };
+
+    Ok(Some((remote, branch.to_string())))
+}
+
+fn remote_default_branch(root: &str, remote: &str) -> Result<Option<String>, String> {
+    let output = run_git_output(root, &["ls-remote", "--symref", remote, "HEAD"])?;
+    if !output.status.success() {
+        return Err(git_output_err("git ls-remote --symref", &output.stderr));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("ref: refs/heads/")
+                .and_then(|rest| rest.split_whitespace().next())
+                .map(str::to_string)
+        }))
+}
+
+fn delete_workspace_remote_branch(workspace: &Workspace) -> Result<(), String> {
+    let Some((remote, branch)) = workspace_remote_branch_target(workspace)? else {
+        return Ok(());
+    };
+    if matches!(branch.as_str(), "main" | "master" | "trunk") {
+        return Err(format!(
+            "Refusing to delete protected branch `{branch}` from `{remote}`."
+        ));
+    }
+    if remote_default_branch(&workspace.root_path, &remote)?.as_deref() == Some(branch.as_str()) {
+        return Err(format!(
+            "Refusing to delete `{branch}` because it is the default branch on `{remote}`."
+        ));
+    }
+
+    let remote_ref = format!("refs/heads/{branch}");
+    let existing = run_git_output(
+        &workspace.root_path,
+        &["ls-remote", "--heads", &remote, &remote_ref],
+    )?;
+    if !existing.status.success() {
+        return Err(git_output_err("git ls-remote --heads", &existing.stderr));
+    }
+    if String::from_utf8_lossy(&existing.stdout).trim().is_empty() {
+        return Ok(());
+    }
+
+    let output = run_git_output(
+        &workspace.root_path,
+        &["push", &remote, "--delete", &branch],
+    )?;
+    if !output.status.success() {
+        return Err(git_output_err("git push --delete", &output.stderr));
+    }
+    Ok(())
+}
+
 async fn resolve_workspace_source_url_inner(
     db_path: &Path,
     repo: &SqliteWorkspaceRepo,
@@ -4839,6 +4952,14 @@ pub async fn archive_workspace_bundle(
 }
 
 #[tauri::command]
+pub async fn complete_workspace_bundle(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceBundleIdInput,
+) -> Result<WorkspaceBundleStateOutput, String> {
+    set_workspace_bundle_state(state, input, WorkspaceBundleState::Completed).await
+}
+
+#[tauri::command]
 pub async fn restore_workspace_bundle(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceBundleIdInput,
@@ -4849,7 +4970,7 @@ pub async fn restore_workspace_bundle(
 #[tauri::command]
 pub async fn delete_workspace_bundle(
     state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceBundleIdInput,
+    input: DeleteWorkspaceBundleInput,
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let session_repo =
@@ -4870,6 +4991,12 @@ pub async fn delete_workspace_bundle(
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("workspace not found: {}", member.workspace_id.0))?;
         created_workspaces.push(workspace);
+    }
+
+    if input.delete_remote_branches {
+        for workspace in &created_workspaces {
+            delete_workspace_remote_branch(workspace)?;
+        }
     }
 
     let mut cleanup_errors = Vec::new();
@@ -5110,6 +5237,64 @@ mod editor_workspace_file_tests {
     }
 
     #[test]
+    fn project_removal_cleans_nested_worktree_before_deleting_records() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = TestDir::new("delete-project-with-worktree");
+        let repository_root = dir.path.join("repository");
+        let worktree_root = repository_root.join(".dcc-worktrees").join("feature");
+        fs::create_dir_all(&worktree_root).expect("create nested worktree");
+        fs::write(worktree_root.join("tracked.txt"), "worktree contents")
+            .expect("write worktree file");
+
+        let connection = Arc::new(Mutex::new(
+            rusqlite::Connection::open_in_memory().expect("in-memory database"),
+        ));
+        let repo =
+            SqliteWorkspaceRepo::from_connection(connection.clone()).expect("workspace repository");
+        let session_repo =
+            SqliteSessionRepo::from_connection(connection).expect("session repository");
+        let repository_root = repository_root.to_string_lossy().into_owned();
+        let worktree_root = worktree_root.to_string_lossy().into_owned();
+        let repository = registered_repository("project-1", &repository_root);
+        let workspace = Workspace {
+            id: WorkspaceId("workspace-1".to_string()),
+            project_id: repository.project_id.clone(),
+            name: Some("Feature".to_string()),
+            root_path: repository_root.clone(),
+            base_branch: "main".to_string(),
+            worktree_path: Some(worktree_root.clone()),
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        futures::executor::block_on(repo.save_repository(&repository)).expect("save repository");
+        futures::executor::block_on(repo.save_workspace(&workspace)).expect("save workspace");
+
+        let removed = futures::executor::block_on(delete_repository_with_workspaces(
+            &repo,
+            &session_repo,
+            &repository.id,
+        ))
+        .expect("remove project");
+
+        assert_eq!(removed.len(), 1);
+        assert!(!Path::new(&worktree_root).exists());
+        assert!(Path::new(&repository_root).exists());
+        assert!(
+            futures::executor::block_on(repo.get_repository(&repository.id))
+                .expect("read repository")
+                .is_none()
+        );
+        assert!(futures::executor::block_on(repo.list_workspaces())
+            .expect("list workspaces")
+            .is_empty());
+    }
+
+    #[test]
     fn delivery_policy_writer_preserves_unknown_keys_and_omits_neutral_values() {
         let mut document = "[delivery]\ncustom_signal = \"kept\"\nrequire_pipeline = false\n"
             .parse::<TomlDocument>()
@@ -5314,6 +5499,24 @@ mod editor_workspace_file_tests {
             preferred_fork_remote_name("company/platform team/widgets"),
             "dcc-company-platform-team"
         );
+    }
+
+    #[test]
+    fn remote_branch_deletion_targets_the_workspace_push_remote_and_rejects_its_base() {
+        let mut workspace = imported_fork_workspace("fork-delete", "/tmp/widgets", "dcc-wharley");
+        assert_eq!(
+            workspace_remote_branch_target(&workspace).expect("resolve remote branch"),
+            Some(("dcc-wharley".to_string(), "feature/review".to_string()))
+        );
+
+        let source = workspace.source.as_mut().expect("workspace source");
+        source.head_branch = "main".to_string();
+        source
+            .push_target
+            .as_mut()
+            .expect("workspace push target")
+            .branch_name = "main".to_string();
+        assert!(workspace_remote_branch_target(&workspace).is_err());
     }
 
     #[test]
@@ -6774,6 +6977,22 @@ pub struct WorkspaceIdInput {
     pub workspace_id: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteWorkspaceInput {
+    pub workspace_id: String,
+    #[serde(default)]
+    pub delete_remote_branch: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteWorkspaceBundleInput {
+    pub bundle_id: WorkspaceBundleId,
+    #[serde(default)]
+    pub delete_remote_branches: bool,
+}
+
 async fn ensure_workspace_is_not_a_bundle_member(
     repo: &SqliteWorkspaceRepo,
     workspace_id: &WorkspaceId,
@@ -6812,6 +7031,26 @@ pub async fn archive_workspace(
 }
 
 #[tauri::command]
+pub async fn complete_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceIdInput,
+) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
+    let id = WorkspaceId(input.workspace_id);
+    ensure_workspace_is_not_a_bundle_member(&repo, &id, "complete").await?;
+    let mut workspace = repo
+        .get_workspace(&id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    workspace.state = WorkspaceState::Completed;
+    workspace.updated_at = Utc::now().to_rfc3339();
+    repo.save_workspace(&workspace)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn restore_workspace(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceIdInput,
@@ -6833,7 +7072,7 @@ pub async fn restore_workspace(
 #[tauri::command]
 pub async fn delete_workspace(
     state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceIdInput,
+    input: DeleteWorkspaceInput,
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
@@ -6844,6 +7083,9 @@ pub async fn delete_workspace(
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    if input.delete_remote_branch {
+        delete_workspace_remote_branch(&workspace)?;
+    }
     cleanup_delegation_worktrees(&session_repo, &workspace).await?;
     cleanup_workspace_files(&workspace)?;
     cleanup_unused_workspace_push_target(&repo, &workspace).await?;
@@ -6931,6 +7173,60 @@ pub async fn delete_repository(
     input: RepositoryIdInput,
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
+    let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = RepositoryId(input.repository_id);
-    repo.delete_repository(&id).await.map_err(|e| e.to_string())
+    let removed_workspaces = delete_repository_with_workspaces(&repo, &session_repo, &id).await?;
+    for workspace in removed_workspaces {
+        state.clear_delivery_failures(&workspace.root_path);
+        if let Some(worktree_path) = workspace.worktree_path.as_deref() {
+            state.clear_delivery_failures(worktree_path);
+        }
+    }
+    Ok(())
+}
+
+async fn delete_repository_with_workspaces(
+    repo: &SqliteWorkspaceRepo,
+    session_repo: &SqliteSessionRepo,
+    id: &RepositoryId,
+) -> Result<Vec<Workspace>, String> {
+    let repository = repo
+        .get_repository(id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let repository_root = repository
+        .as_ref()
+        .map(|repository| repository.root_path.trim())
+        .filter(|root| !root.is_empty())
+        .unwrap_or(id.0.trim());
+    let mut workspaces = repo
+        .list_workspaces()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|workspace| workspace.root_path.trim() == repository_root)
+        .collect::<Vec<_>>();
+    workspaces.sort_unstable_by(|left, right| {
+        let left_depth = left
+            .worktree_path
+            .as_deref()
+            .map(|path| Path::new(path).components().count())
+            .unwrap_or_default();
+        let right_depth = right
+            .worktree_path
+            .as_deref()
+            .map(|path| Path::new(path).components().count())
+            .unwrap_or_default();
+        right_depth.cmp(&left_depth)
+    });
+
+    for workspace in &workspaces {
+        cleanup_delegation_worktrees(session_repo, workspace).await?;
+        cleanup_workspace_files(workspace)?;
+    }
+
+    repo.delete_repository(id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(workspaces)
 }

@@ -18,6 +18,7 @@ import type {
 	DelegationContextPolicy,
 	MissionSpecEntry,
 	ProviderCatalog,
+	Repository,
 	SessionEventRecord,
 	SessionSearchResult,
 	WorkspaceSessionSummary,
@@ -146,6 +147,7 @@ import {
 	daemonCombToWorkspaceSummary,
 	workspaceToSummary,
 } from "./features/workspaces/use-workspaces";
+import { removeProjectFromDcc } from "./features/workspaces/project-removal";
 import type { WorkspaceSummary } from "./features/workspaces/types";
 import {
 	deliverMultiWorkspace,
@@ -863,11 +865,11 @@ export default function App() {
 		allWorkspaces,
 		archiveWorkspace,
 		cloneWorkspaceFromUrl,
+		completeWorkspace,
 		createWorkspace,
 		createWorkspaceFromSourceUrl,
 		createWorkspaceBundle,
 		deleteWorkspace,
-		deleteWorkspaces,
 		filteredWorkspaces,
 		isCreatingWorkspace,
 		restoreWorkspace,
@@ -3629,14 +3631,24 @@ export default function App() {
 		},
 		[refreshWorkspaceCollections, restoreWorkspace],
 	);
-	const handleDeleteWorkspace = useCallback(
+	const handleCompleteWorkspace = useCallback(
 		async (workspaceId: string) => {
+			await completeWorkspace(workspaceId);
+			await refreshWorkspaceCollections();
+		},
+		[completeWorkspace, refreshWorkspaceCollections],
+	);
+	const handleDeleteWorkspace = useCallback(
+		async (
+			workspaceId: string,
+			options: { deleteRemoteBranch?: boolean } = {},
+		) => {
 			const workspace = allWorkspaces.find((candidate) => candidate.id === workspaceId);
 			const affectedWorkspaceIds =
 				workspace?.bundleId && workspace.memberWorkspaceIds?.length
 					? workspace.memberWorkspaceIds
 					: [workspaceId];
-			await deleteWorkspace(workspaceId);
+			await deleteWorkspace(workspaceId, options);
 			for (const affectedWorkspaceId of affectedWorkspaceIds) {
 				queryClient.removeQueries({
 					queryKey: getWorkspaceSessionsCacheKey(
@@ -3665,11 +3677,50 @@ export default function App() {
 				showRemoteUnsupported("workspaces");
 				return;
 			}
-			await deleteRepository(input.repositoryId);
-			await deleteWorkspaces(input.workspaceIds);
-			void queryClient.invalidateQueries({ queryKey: ["repositories"] });
+			await removeProjectFromDcc(input, {
+				deleteRepository,
+				removeLocalState: (workspaceIds) => {
+					const removedWorkspaceIds = new Set(workspaceIds);
+					queryClient.setQueryData<WorkspaceSummary[]>(
+						["workspaces", backendCacheKey],
+						(current = []) =>
+							current.filter(
+								(workspace) => !removedWorkspaceIds.has(workspace.id),
+							),
+					);
+					queryClient.setQueryData<Repository[]>(
+						["repositories", backendCacheKey],
+						(current = []) =>
+							current.filter(
+								(repository) => repository.id !== input.repositoryId,
+							),
+					);
+					for (const workspaceId of workspaceIds) {
+						queryClient.removeQueries({
+							queryKey: getWorkspaceSessionsCacheKey(
+								backendCacheKey,
+								workspaceId,
+							),
+						});
+						queryClient.removeQueries({
+							queryKey: ["multiWorkspaceChanges", workspaceId],
+						});
+					}
+				},
+				refreshRepositories: () =>
+					queryClient.invalidateQueries({
+						queryKey: ["repositories", backendCacheKey],
+					}),
+				refreshWorkspaces: refreshWorkspaceCollections,
+			});
 		},
-		[deleteWorkspaces, isRemoteBackend, queryClient, showRemoteUnsupported],
+		[
+			backendCacheKey,
+			isRemoteBackend,
+			queryClient,
+			refreshWorkspaceCollections,
+			showRemoteUnsupported,
+		],
 	);
 	const handleRemoteWorkspaceMutation = useCallback(() => {
 		showRemoteUnsupported("workspaces");
@@ -3711,6 +3762,9 @@ export default function App() {
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
 							onArchiveWorkspace={
 								isRemoteBackend ? handleRemoteWorkspaceMutation : handleArchiveWorkspace
+							}
+							onCompleteWorkspace={
+								isRemoteBackend ? undefined : handleCompleteWorkspace
 							}
 							onRestoreWorkspace={
 								isRemoteBackend ? handleRemoteWorkspaceMutation : handleRestoreWorkspace

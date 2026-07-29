@@ -1,7 +1,8 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-	Archive,
+	CircleCheckBig,
 	ChevronRight,
+	Clock3,
 	FolderPlus,
 	Loader2,
 	MoreHorizontal,
@@ -62,10 +63,11 @@ import {
 	projectWorkspaceRailGroups,
 } from "./workspace-rail-projection";
 import {
-	ARCHIVED_SECTION_ID,
+	COMPLETED_SECTION_ID,
 	findSelectedRailSectionId,
 	initialsFromWorkspaceLabel,
 	ProjectGroupGlyph,
+	WAITING_SECTION_ID,
 	workspaceRailDisplayTitle,
 } from "./workspace-rail-shared";
 import { WorkspaceRailRowItem } from "./workspace-rail-row";
@@ -79,7 +81,7 @@ type VirtualItem =
 			sourceKey?: string;
 			rowCount: number;
 			canCollapse: boolean;
-			headerVariant: "project" | "archived";
+			headerVariant: "project" | "waiting" | "completed";
 	  }
 	| { kind: "row"; groupId: string; workspace: WorkspaceSummary }
 	| { kind: "group-gap"; size: number }
@@ -204,8 +206,12 @@ type WorkspacesSidebarProps = {
 	onOpenSkills: () => void;
 	onToggleCollapsed: () => void;
 	onArchiveWorkspace?: (workspaceId: string) => void;
+	onCompleteWorkspace?: (workspaceId: string) => void | Promise<void>;
 	onRestoreWorkspace?: (workspaceId: string) => void;
-	onDeleteWorkspace?: (workspaceId: string) => void;
+	onDeleteWorkspace?: (
+		workspaceId: string,
+		options?: { deleteRemoteBranch?: boolean },
+	) => void | Promise<void>;
 	onDeleteProject?: (input: {
 		repositoryId: string;
 		workspaceIds: string[];
@@ -237,6 +243,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onOpenSkills,
 	onToggleCollapsed,
 	onArchiveWorkspace,
+	onCompleteWorkspace,
 	onRestoreWorkspace,
 	onDeleteWorkspace,
 	onDeleteProject,
@@ -249,7 +256,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		scope: sessionQueryScope,
 	});
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
-	const { activeGroups, archivedRows } = useMemo(
+	const { activeGroups, waitingRows, completedRows } = useMemo(
 		() => projectWorkspaceRailGroups(workspaces, repositories),
 		[repositories, workspaces],
 	);
@@ -261,6 +268,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		null,
 	);
 	const [isRemovingProject, setIsRemovingProject] = useState(false);
+	const [workspaceDeletionTarget, setWorkspaceDeletionTarget] =
+		useState<WorkspaceSummary | null>(null);
+	const [deleteRemoteBranch, setDeleteRemoteBranch] = useState(true);
+	const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false);
 
 	const [sectionOpenState, setSectionOpenState] = useState(() => ({
 		...createInitialRailSectionState(activeGroups),
@@ -280,9 +291,15 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				}
 			}
 
-			const archivedValue = current[ARCHIVED_SECTION_ID] ?? false;
-			next[ARCHIVED_SECTION_ID] = archivedValue;
-			if (current[ARCHIVED_SECTION_ID] !== archivedValue) {
+			const waitingValue = current[WAITING_SECTION_ID] ?? false;
+			next[WAITING_SECTION_ID] = waitingValue;
+			if (current[WAITING_SECTION_ID] !== waitingValue) {
+				changed = true;
+			}
+
+			const completedValue = current[COMPLETED_SECTION_ID] ?? false;
+			next[COMPLETED_SECTION_ID] = completedValue;
+			if (current[COMPLETED_SECTION_ID] !== completedValue) {
 				changed = true;
 			}
 
@@ -292,7 +309,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 			return changed ? next : current;
 		});
-	}, [activeGroups, archivedRows]);
+	}, [activeGroups]);
 
 	useEffect(() => {
 		writeStoredRailSectionState(sectionOpenState);
@@ -307,7 +324,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		const selectedSectionId = findSelectedRailSectionId(
 			selectedWorkspaceId,
 			activeGroups,
-			archivedRows,
+			waitingRows,
+			completedRows,
 		);
 
 		if (!selectedSectionId) {
@@ -318,7 +336,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		setSectionOpenState((current) =>
 			current[selectedSectionId] ? current : { ...current, [selectedSectionId]: true },
 		);
-	}, [activeGroups, archivedRows, selectedWorkspaceId]);
+	}, [activeGroups, completedRows, selectedWorkspaceId, waitingRows]);
 
 	const flatItems = useMemo(() => {
 		const items: VirtualItem[] = [];
@@ -359,36 +377,50 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			}
 		}
 
-		const previousGroup = visibleGroups.at(-1);
-		items.push({
-			kind: "group-gap",
-			size: getGroupGapSize(
-				(previousGroup?.rows.length ?? 0) > 0,
-				archivedRows.length > 0,
-			),
-		});
-		items.push({
-			kind: "group-header",
-			groupId: ARCHIVED_SECTION_ID,
-			label: t("sidebar.archived"),
-			rowCount: archivedRows.length,
-			canCollapse: archivedRows.length > 0,
-			headerVariant: "archived",
-		});
+		const specialSections = [
+			{
+				id: WAITING_SECTION_ID,
+				label: t("sidebar.waiting"),
+				rows: waitingRows,
+				headerVariant: "waiting" as const,
+			},
+			{
+				id: COMPLETED_SECTION_ID,
+				label: t("sidebar.completed"),
+				rows: completedRows,
+				headerVariant: "completed" as const,
+			},
+		];
+		let previousHasRows = (visibleGroups.at(-1)?.rows.length ?? 0) > 0;
+		for (const section of specialSections) {
+			items.push({
+				kind: "group-gap",
+				size: getGroupGapSize(previousHasRows, section.rows.length > 0),
+			});
+			items.push({
+				kind: "group-header",
+				groupId: section.id,
+				label: section.label,
+				rowCount: section.rows.length,
+				canCollapse: section.rows.length > 0,
+				headerVariant: section.headerVariant,
+			});
 
-		if (sectionOpenState[ARCHIVED_SECTION_ID] && archivedRows.length > 0) {
-			for (const row of archivedRows) {
-				items.push({
-					kind: "row",
-					groupId: ARCHIVED_SECTION_ID,
-					workspace: row,
-				});
+			if (sectionOpenState[section.id] && section.rows.length > 0) {
+				for (const row of section.rows) {
+					items.push({
+						kind: "row",
+						groupId: section.id,
+						workspace: row,
+					});
+				}
 			}
+			previousHasRows = section.rows.length > 0;
 		}
 
 		items.push({ kind: "bottom-padding" });
 		return items;
-	}, [activeGroups, archivedRows, sectionOpenState, t]);
+	}, [activeGroups, completedRows, sectionOpenState, t, waitingRows]);
 
 	const virtualizer = useVirtualizer({
 		count: flatItems.length,
@@ -493,6 +525,45 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		}
 	}, [onDeleteProject, projectRemovalTarget, t]);
 
+	const openWorkspaceDeletionDialog = useCallback(
+		(workspaceId: string) => {
+			const workspace =
+				workspaces.find((candidate) => candidate.id === workspaceId) ?? null;
+			if (!workspace) {
+				return;
+			}
+			setWorkspaceDeletionTarget(workspace);
+			setDeleteRemoteBranch(true);
+		},
+		[workspaces],
+	);
+
+	const handleConfirmWorkspaceDeletion = useCallback(async () => {
+		if (!workspaceDeletionTarget || !onDeleteWorkspace) {
+			return;
+		}
+		setIsDeletingWorkspace(true);
+		try {
+			await onDeleteWorkspace(workspaceDeletionTarget.id, {
+				deleteRemoteBranch,
+			});
+			setWorkspaceDeletionTarget(null);
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: t("sidebar.deleteWorkspaceError"),
+			);
+		} finally {
+			setIsDeletingWorkspace(false);
+		}
+	}, [
+		deleteRemoteBranch,
+		onDeleteWorkspace,
+		t,
+		workspaceDeletionTarget,
+	]);
+
 	const renderItem = useCallback(
 		(item: VirtualItem) => {
 			if (item.kind === "group-gap" || item.kind === "bottom-padding") {
@@ -501,9 +572,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 			if (item.kind === "group-header") {
 				const isOpen =
-					item.groupId === ARCHIVED_SECTION_ID
-						? (sectionOpenState[item.groupId] ?? false)
-						: (sectionOpenState[item.groupId] ?? true);
+					item.headerVariant === "project"
+						? (sectionOpenState[item.groupId] ?? true)
+						: (sectionOpenState[item.groupId] ?? false);
 				const isEmptyGroup = item.rowCount === 0;
 				const repository =
 					item.headerVariant === "project" && item.sourceKey
@@ -543,8 +614,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									strokeWidth={2.2}
 									aria-hidden
 								/>
-								{item.headerVariant === "archived" ? (
-									<Archive
+								{item.headerVariant === "waiting" ? (
+									<Clock3
+										className="size-[13px] shrink-0 text-muted-foreground/75"
+										strokeWidth={1.9}
+										aria-hidden
+									/>
+								) : item.headerVariant === "completed" ? (
+									<CircleCheckBig
 										className="size-[13px] shrink-0 text-muted-foreground/75"
 										strokeWidth={1.9}
 										aria-hidden
@@ -652,10 +729,18 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					selected={selectedWorkspaceId === item.workspace.id}
 					activity={workspaceAgentActivities[item.workspace.id] ?? null}
 					metadataEnabled={showAgentStates}
-					onSelect={onSelectWorkspace}
+					onSelect={
+						item.workspace.status === "archived" ||
+						item.workspace.status === "completed"
+							? undefined
+							: onSelectWorkspace
+					}
 					onArchiveWorkspace={onArchiveWorkspace}
+					onCompleteWorkspace={onCompleteWorkspace}
 					onRestoreWorkspace={onRestoreWorkspace}
-					onDeleteWorkspace={onDeleteWorkspace}
+					onDeleteWorkspace={
+						onDeleteWorkspace ? openWorkspaceDeletionDialog : undefined
+					}
 				/>
 			);
 		},
@@ -663,12 +748,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			isCreatingWorkspace,
 			isRemovingProject,
 			onArchiveWorkspace,
+			onCompleteWorkspace,
 			onCreateWorkspaceFromProject,
 			onDeleteProject,
 			onDeleteWorkspace,
 			onRestoreWorkspace,
 			onSelectWorkspace,
 			openProjectRemovalDialog,
+			openWorkspaceDeletionDialog,
 			repositoriesBySourceKey,
 			sectionOpenState,
 			selectedWorkspaceId,
@@ -922,9 +1009,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				<div
 					ref={scrollContainerRef}
 					data-slot="workspace-groups-scroll"
-					className="min-h-0 flex-1 overflow-hidden"
+					className="scrollbar-stable min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-width:thin]"
 				>
-					{activeGroups.length === 0 && archivedRows.length === 0 ? (
+					{activeGroups.length === 0 &&
+					waitingRows.length === 0 &&
+					completedRows.length === 0 ? (
 						<div className="flex h-full min-h-full flex-col items-center justify-center px-4 py-8 text-center">
 							<div className="mb-3 flex size-11 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-muted-foreground">
 								<FolderPlus className="size-5" strokeWidth={1.9} aria-hidden />
@@ -1085,6 +1174,83 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								</>
 							) : (
 								t("sidebar.removeProjectConfirm")
+							)}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog
+				open={workspaceDeletionTarget !== null}
+				onOpenChange={(open) => {
+					if (!open && !isDeletingWorkspace) {
+						setWorkspaceDeletionTarget(null);
+					}
+				}}
+			>
+				<DialogContent showCloseButton={!isDeletingWorkspace}>
+					<DialogHeader>
+						<DialogTitle>
+							{t("sidebar.deleteWorkspaceTitle", {
+								label: workspaceDeletionTarget
+									? workspaceRailDisplayTitle(workspaceDeletionTarget)
+									: "",
+							})}
+						</DialogTitle>
+						<DialogDescription>
+							{t("sidebar.deleteWorkspaceDescription")}
+						</DialogDescription>
+					</DialogHeader>
+					<label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5 text-sm">
+						<input
+							type="checkbox"
+							checked={deleteRemoteBranch}
+							disabled={isDeletingWorkspace}
+							onChange={(event) => setDeleteRemoteBranch(event.target.checked)}
+							className="mt-0.5 size-4 accent-primary"
+						/>
+						<span className="min-w-0">
+							<span className="block font-medium text-foreground">
+								{workspaceDeletionTarget?.bundleId
+									? t("sidebar.deleteRemoteBranches")
+									: t("sidebar.deleteRemoteBranch")}
+							</span>
+							{!workspaceDeletionTarget?.bundleId &&
+							workspaceDeletionTarget?.branch ? (
+								<span className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">
+									{workspaceDeletionTarget.branch}
+								</span>
+							) : null}
+						</span>
+					</label>
+					<DialogFooter>
+						<Button
+							type="button"
+							variant="outline"
+							disabled={isDeletingWorkspace}
+							onClick={() => setWorkspaceDeletionTarget(null)}
+						>
+							{t("sidebar.cancel")}
+						</Button>
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={
+								isDeletingWorkspace ||
+								!workspaceDeletionTarget ||
+								!onDeleteWorkspace
+							}
+							onClick={() => {
+								void handleConfirmWorkspaceDeletion();
+							}}
+						>
+							{isDeletingWorkspace ? (
+								<>
+									<Loader2 className="size-3.5 animate-spin" aria-hidden />
+									{t("sidebar.deletingWorkspace")}
+								</>
+							) : (
+								t("sidebar.deleteWorkspaceConfirm")
 							)}
 						</Button>
 					</DialogFooter>

@@ -91,17 +91,21 @@ export function projectWorkspaceRepositories(
 
 /**
  * Sidebar spine: group active workspaces by project path (t3-style),
- * archived rows lifted into a dedicated section handled by the shell component.
+ * paused and completed rows lifted into dedicated sections handled by the shell component.
  */
 export function projectWorkspaceRailGroups(
 	workspaces: WorkspaceSummary[],
 	repositories: Repository[] = [],
 ): {
 	activeGroups: DccWorkspaceRailGroup[];
-	archivedRows: DccWorkspaceRailRow[];
+	waitingRows: DccWorkspaceRailRow[];
+	completedRows: DccWorkspaceRailRow[];
 } {
-	const archivedRows = workspaces.filter((w) => w.status === "archived");
-	const active = workspaces.filter((w) => w.status !== "archived");
+	const waitingRows = workspaces.filter((workspace) => workspace.status === "archived");
+	const completedRows = workspaces.filter((workspace) => workspace.status === "completed");
+	const active = workspaces.filter(
+		(workspace) => workspace.status !== "archived" && workspace.status !== "completed",
+	);
 
 	const byKey = new Map<string, WorkspaceSummary[]>();
 	for (const repository of repositories) {
@@ -140,7 +144,7 @@ export function projectWorkspaceRailGroups(
 		})
 		.sort((a, b) => a.label.localeCompare(b.label));
 
-	return { activeGroups, archivedRows };
+	return { activeGroups, waitingRows, completedRows };
 }
 
 function hashId(key: string): string {

@@ -56,7 +56,11 @@ export function WorkspaceCommandPalette({
 		() => [
 			{
 				label: t("commandPalette.switchWorkspace"),
-				items: workspaces,
+				items: workspaces.filter(
+					(workspace) =>
+						workspace.status !== "archived" &&
+						workspace.status !== "completed",
+				),
 			},
 		],
 		[t, workspaces],

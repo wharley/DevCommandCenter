@@ -7,6 +7,7 @@ export function getWorkspaceTone(status: WorkspaceSummary["status"]): WorkspaceT
 	case "setup_pending":
 		return "warn";
 	case "archived":
+	case "completed":
 		return "secondary";
 	default:
 		return "secondary";

@@ -1,6 +1,11 @@
 import type { WorkspaceSetupReport } from "@dcc/contracts";
 
-export type WorkspaceStatus = "ready" | "setup_pending" | "initializing" | "archived";
+export type WorkspaceStatus =
+	| "ready"
+	| "setup_pending"
+	| "initializing"
+	| "archived"
+	| "completed";
 
 export interface WorkspaceSummary {
 	id: string;

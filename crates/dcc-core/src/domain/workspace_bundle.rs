@@ -11,6 +11,7 @@ pub struct WorkspaceBundleId(pub String);
 pub enum WorkspaceBundleState {
     Ready,
     Archived,
+    Completed,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -44,6 +45,7 @@ impl WorkspaceBundleState {
     pub fn from_workspace_state(state: &WorkspaceState) -> Self {
         match state {
             WorkspaceState::Archived => Self::Archived,
+            WorkspaceState::Completed => Self::Completed,
             WorkspaceState::Initializing | WorkspaceState::SetupPending | WorkspaceState::Ready => {
                 Self::Ready
             }

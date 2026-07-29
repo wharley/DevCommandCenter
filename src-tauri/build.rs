@@ -92,7 +92,8 @@ use dcc_tauri::commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
         CompiledMissionSpecContextFile, CreateWorkspaceBundleForReposInput,
         CreateWorkspaceBundleForReposOutput, CreateWorkspaceForRepoOutput,
-        CreateWorkspaceFromSourceUrlInput, CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput,
+        CreateWorkspaceFromSourceUrlInput, CreateWorkspaceFromUrlOutput,
+        DeleteWorkspaceBundleInput, DeleteWorkspaceInput, ListChildDirectoriesInput,
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
         ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
         ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspaceBundlesOutput,
@@ -136,12 +137,14 @@ use tauri_specta::Builder;
 #[serde(rename_all = "camelCase")]
 struct WorkspaceMethods {
     archive_workspace_bundle: String,
+    complete_workspace_bundle: String,
     create_workspace_bundle_for_repos: String,
     create_workspace_for_repo: String,
     create_workspace_from_source_url: String,
     create_workspace_from_url: String,
     resolve_workspace_source_url: String,
     archive_workspace: String,
+    complete_workspace: String,
     restore_workspace: String,
     restore_workspace_bundle: String,
     delete_workspace_bundle: String,
@@ -354,6 +357,8 @@ fn main() {
         .typ::<CreateWorkspaceBundleForReposOutput>()
         .typ::<WorkspaceBundleIdInput>()
         .typ::<WorkspaceBundleStateOutput>()
+        .typ::<DeleteWorkspaceBundleInput>()
+        .typ::<DeleteWorkspaceInput>()
         .typ::<CreateWorkspaceFromUrlInput>()
         .typ::<CreateWorkspaceFromUrlOutput>()
         .typ::<WorkspaceRunSetupInput>()
@@ -561,12 +566,14 @@ fn main() {
             "WORKSPACE_METHODS",
             WorkspaceMethods {
                 archive_workspace_bundle: "archive_workspace_bundle".to_string(),
+                complete_workspace_bundle: "complete_workspace_bundle".to_string(),
                 create_workspace_bundle_for_repos: "create_workspace_bundle_for_repos".to_string(),
                 create_workspace_for_repo: "create_workspace_for_repo".to_string(),
                 create_workspace_from_source_url: "create_workspace_from_source_url".to_string(),
                 create_workspace_from_url: "create_workspace_from_url".to_string(),
                 resolve_workspace_source_url: "resolve_workspace_source_url".to_string(),
                 archive_workspace: "archive_workspace".to_string(),
+                complete_workspace: "complete_workspace".to_string(),
                 restore_workspace: "restore_workspace".to_string(),
                 restore_workspace_bundle: "restore_workspace_bundle".to_string(),
                 delete_workspace_bundle: "delete_workspace_bundle".to_string(),
