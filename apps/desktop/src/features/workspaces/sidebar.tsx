@@ -1009,7 +1009,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				<div
 					ref={scrollContainerRef}
 					data-slot="workspace-groups-scroll"
-					className="min-h-0 flex-1 overflow-hidden"
+					className="scrollbar-stable min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-width:thin]"
 				>
 					{activeGroups.length === 0 &&
 					waitingRows.length === 0 &&
