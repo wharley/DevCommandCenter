@@ -146,6 +146,7 @@ import {
 	daemonCombToWorkspaceSummary,
 	workspaceToSummary,
 } from "./features/workspaces/use-workspaces";
+import { removeProjectFromDcc } from "./features/workspaces/project-removal";
 import type { WorkspaceSummary } from "./features/workspaces/types";
 import {
 	deliverMultiWorkspace,
@@ -861,7 +862,6 @@ export default function App() {
 		createWorkspaceFromSourceUrl,
 		createWorkspaceBundle,
 		deleteWorkspace,
-		deleteWorkspaces,
 		filteredWorkspaces,
 		isCreatingWorkspace,
 		restoreWorkspace,
@@ -3659,11 +3659,33 @@ export default function App() {
 				showRemoteUnsupported("workspaces");
 				return;
 			}
-			await deleteRepository(input.repositoryId);
-			await deleteWorkspaces(input.workspaceIds);
-			void queryClient.invalidateQueries({ queryKey: ["repositories"] });
+			await removeProjectFromDcc(input, {
+				deleteRepository,
+				removeWorkspaceCaches: (workspaceIds) => {
+					for (const workspaceId of workspaceIds) {
+						queryClient.removeQueries({
+							queryKey: getWorkspaceSessionsCacheKey(
+								backendCacheKey,
+								workspaceId,
+							),
+						});
+						queryClient.removeQueries({
+							queryKey: ["multiWorkspaceChanges", workspaceId],
+						});
+					}
+				},
+				refreshRepositories: () =>
+					queryClient.invalidateQueries({ queryKey: ["repositories"] }),
+				refreshWorkspaces: refreshWorkspaceCollections,
+			});
 		},
-		[deleteWorkspaces, isRemoteBackend, queryClient, showRemoteUnsupported],
+		[
+			backendCacheKey,
+			isRemoteBackend,
+			queryClient,
+			refreshWorkspaceCollections,
+			showRemoteUnsupported,
+		],
 	);
 	const handleRemoteWorkspaceMutation = useCallback(() => {
 		showRemoteUnsupported("workspaces");

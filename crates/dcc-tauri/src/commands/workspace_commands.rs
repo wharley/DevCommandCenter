@@ -5110,6 +5110,64 @@ mod editor_workspace_file_tests {
     }
 
     #[test]
+    fn project_removal_cleans_nested_worktree_before_deleting_records() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = TestDir::new("delete-project-with-worktree");
+        let repository_root = dir.path.join("repository");
+        let worktree_root = repository_root.join(".dcc-worktrees").join("feature");
+        fs::create_dir_all(&worktree_root).expect("create nested worktree");
+        fs::write(worktree_root.join("tracked.txt"), "worktree contents")
+            .expect("write worktree file");
+
+        let connection = Arc::new(Mutex::new(
+            rusqlite::Connection::open_in_memory().expect("in-memory database"),
+        ));
+        let repo =
+            SqliteWorkspaceRepo::from_connection(connection.clone()).expect("workspace repository");
+        let session_repo =
+            SqliteSessionRepo::from_connection(connection).expect("session repository");
+        let repository_root = repository_root.to_string_lossy().into_owned();
+        let worktree_root = worktree_root.to_string_lossy().into_owned();
+        let repository = registered_repository("project-1", &repository_root);
+        let workspace = Workspace {
+            id: WorkspaceId("workspace-1".to_string()),
+            project_id: repository.project_id.clone(),
+            name: Some("Feature".to_string()),
+            root_path: repository_root.clone(),
+            base_branch: "main".to_string(),
+            worktree_path: Some(worktree_root.clone()),
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        futures::executor::block_on(repo.save_repository(&repository)).expect("save repository");
+        futures::executor::block_on(repo.save_workspace(&workspace)).expect("save workspace");
+
+        let removed = futures::executor::block_on(delete_repository_with_workspaces(
+            &repo,
+            &session_repo,
+            &repository.id,
+        ))
+        .expect("remove project");
+
+        assert_eq!(removed.len(), 1);
+        assert!(!Path::new(&worktree_root).exists());
+        assert!(Path::new(&repository_root).exists());
+        assert!(
+            futures::executor::block_on(repo.get_repository(&repository.id))
+                .expect("read repository")
+                .is_none()
+        );
+        assert!(futures::executor::block_on(repo.list_workspaces())
+            .expect("list workspaces")
+            .is_empty());
+    }
+
+    #[test]
     fn delivery_policy_writer_preserves_unknown_keys_and_omits_neutral_values() {
         let mut document = "[delivery]\ncustom_signal = \"kept\"\nrequire_pipeline = false\n"
             .parse::<TomlDocument>()
@@ -6931,6 +6989,60 @@ pub async fn delete_repository(
     input: RepositoryIdInput,
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
+    let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = RepositoryId(input.repository_id);
-    repo.delete_repository(&id).await.map_err(|e| e.to_string())
+    let removed_workspaces = delete_repository_with_workspaces(&repo, &session_repo, &id).await?;
+    for workspace in removed_workspaces {
+        state.clear_delivery_failures(&workspace.root_path);
+        if let Some(worktree_path) = workspace.worktree_path.as_deref() {
+            state.clear_delivery_failures(worktree_path);
+        }
+    }
+    Ok(())
+}
+
+async fn delete_repository_with_workspaces(
+    repo: &SqliteWorkspaceRepo,
+    session_repo: &SqliteSessionRepo,
+    id: &RepositoryId,
+) -> Result<Vec<Workspace>, String> {
+    let repository = repo
+        .get_repository(id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let repository_root = repository
+        .as_ref()
+        .map(|repository| repository.root_path.trim())
+        .filter(|root| !root.is_empty())
+        .unwrap_or(id.0.trim());
+    let mut workspaces = repo
+        .list_workspaces()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|workspace| workspace.root_path.trim() == repository_root)
+        .collect::<Vec<_>>();
+    workspaces.sort_unstable_by(|left, right| {
+        let left_depth = left
+            .worktree_path
+            .as_deref()
+            .map(|path| Path::new(path).components().count())
+            .unwrap_or_default();
+        let right_depth = right
+            .worktree_path
+            .as_deref()
+            .map(|path| Path::new(path).components().count())
+            .unwrap_or_default();
+        right_depth.cmp(&left_depth)
+    });
+
+    for workspace in &workspaces {
+        cleanup_delegation_worktrees(session_repo, workspace).await?;
+        cleanup_workspace_files(workspace)?;
+    }
+
+    repo.delete_repository(id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(workspaces)
 }
