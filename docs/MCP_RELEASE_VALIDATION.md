@@ -5,9 +5,12 @@ integrations release. It separates deterministic contributor checks from
 account-backed provider conformance and real-service smokes. Passing one layer
 never substitutes for another.
 
-Status as of July 28, 2026: the local gate and all opt-in harnesses are
-implemented. No authenticated conformance or real-service result has been
-recorded.
+Status as of July 29, 2026: the local gate passes and all opt-in harnesses are
+implemented. A Codex conformance run passed on `e95abff`, before the read-only
+evidence assertion was strengthened on `c703dfc`, so the final release commit
+still requires one Codex confirmation. Claude failed categorically at the
+stdio read-only call after discovery. Cursor did not expose pre-call tool
+inventory and remains unverified. No real-service result has been recorded.
 
 ## Release decision
 
@@ -15,20 +18,27 @@ The release may proceed only when every required row is complete:
 
 | Layer | Required for the first release | Current state |
 | --- | --- | --- |
-| Local MCP gate | Yes | Ready to run |
-| Manual integrations lifecycle | Yes | Pending final validation |
-| Claude shared conformance | Yes | Pending authenticated opt-in run |
-| Codex shared conformance | Yes | Pending authenticated opt-in run |
+| Local MCP gate | Yes | Passed on `c703dfc` |
+| Manual integrations lifecycle | Yes | Codex project-scope stdio `Ask` path passed; remaining lifecycle pending |
+| Claude shared conformance | Yes | Failed at stdio read-only call; release blocked pending a local fix and one rerun |
+| Codex shared conformance | Yes | Passed on `e95abff`; final strengthened release-candidate rerun pending |
 | Figma read-only smoke | Yes, on at least one verified provider | Pending |
 | Pinned command-based read-only smoke | Yes, on at least one verified provider | Current opt-in harness uses Garu; another reviewed target may satisfy the gate |
-| Cursor shared conformance | No promotion without it | Pending |
+| Cursor shared conformance | No, unless Cursor support is promoted in this release | Failed to expose pre-call inventory; remains honestly unverified |
 | Gemini, Grok, and Droid | No; they must remain honestly unsupported | Blocked by documented protocol/runtime boundaries |
 | MCP-scoped security and dependency review | Yes | Complete |
 
-An optional-provider failure blocks promotion of that provider, not the release,
-when the product continues to report its actual lower support level. A Claude
-or Codex failure blocks the first release because both are required by the
-definition of done.
+An optional-provider failure blocks promotion of that provider, not the
+release, when the product continues to report its actual lower support level.
+A Claude or Codex failure blocks the first release because both are required by
+the definition of done. Cursor remains optional for this release and cannot be
+promoted from observed-only inventory.
+
+Authenticated gates consume provider quota. Run one provider at a time, stop
+after the first categorical failure, and do not retry without a relevant code
+or runtime change. A successful run is repeated only once against the final
+release-candidate commit when intervening gate changes make the earlier
+evidence stale.
 
 ## Layer 1 — Local contributor gate
 

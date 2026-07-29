@@ -24,6 +24,76 @@ This roadmap covers DCC **consuming external MCP servers**. It is separate from
 the existing `dcc mcp` command, where DCC acts as a server and exposes its own
 worktree, process, pane, and diff primitives to external agents.
 
+## Delivery checkpoint — July 29, 2026
+
+External MCP integrations remain unreleased. The implementation is isolated on
+`feat/external-mcp-integrations`; `main` remains the `v0.1.34` hotfix and
+release line until the required provider and lifecycle gates pass. MCP commits
+must not return to `main` incrementally merely because an offline slice is
+complete.
+
+Current evidence:
+
+- the fork-safe local MCP release gate passes;
+- the DCC UI completed a real Codex project-scope stdio flow through
+  connection, tool discovery, `Ask`, approval, `fixture.echo`, and result
+  delivery;
+- the authenticated Codex shared conformance gate passed on `e95abff`, before
+  the read-only evidence assertion was strengthened on `c703dfc`; one final
+  Codex run is therefore still required against the eventual release
+  candidate;
+- the authenticated Claude gate reached tool discovery but failed on the
+  second turn before `fixture.echo` started or requested permission;
+- the authenticated Cursor gate stopped at tool inventory because the current
+  ACP bridge reports only tools observed during a call. DCC will not infer
+  inventory or promote Cursor from that incomplete evidence.
+
+The first release remains blocked until Claude and Codex pass the same complete
+stdio and Streamable HTTP conformance contract. Cursor, Gemini, Grok, and Droid
+may remain honestly unverified or unsupported and do not block that release
+unless the product scope is explicitly expanded to promise them.
+
+### Next execution slices
+
+Work proceeds in small, independently reviewable cuts:
+
+1. **Claude local diagnosis, no provider quota**
+   - classify the second-turn sidecar failure without retaining provider
+     payloads;
+   - add a deterministic regression around repeated turns with an active MCP
+     projection;
+   - reconcile the bundled Agent SDK and Claude Code runtime versions only if
+     the failure requires an upgrade;
+   - rerun the local MCP release gate.
+2. **Claude authenticated confirmation**
+   - run one authenticated Claude conformance gate only after the local
+     regression is green;
+   - do not retry an unchanged failure;
+   - record only the bounded runtime, result, and failure category.
+3. **Codex release-candidate confirmation**
+   - rerun the strengthened authenticated gate once against the final commit;
+   - retain runtime negotiation instead of introducing a CLI version
+     allowlist.
+4. **Manual lifecycle completion**
+   - cover `Ask`, `Allow`, and `Deny`;
+   - cover session, project, and global scopes;
+   - cover stdio and loopback Streamable HTTP;
+   - verify disable, removal, restart, credential retention/deletion, and
+     preservation of provider-owned configuration.
+5. **Real-service opt-in smokes**
+   - run the read-only Figma smoke on a disposable file;
+   - select and review one pinned, read-only command server; Garu remains an
+     optional harness target rather than a bundled integration.
+6. **Release candidate**
+   - run repository lint, typecheck, tests, and production build;
+   - create a version only after every required row in the release checklist
+     is complete;
+   - validate the signed draft artifacts before publishing.
+
+Authenticated gates are quota-bearing. Run one provider at a time, use the
+bounded low-effort harness, stop on the first categorical failure, and never
+repeat a failed gate without a relevant code or runtime change.
+
 ## Product principles
 
 - **Open and generic:** URL and command-based servers are first-class. A
@@ -675,7 +745,7 @@ release-blocking distinction between required and optional providers are in
 
 ## Progress
 
-Updated July 28, 2026:
+Updated July 29, 2026:
 
 - [x] Product and architecture discussion.
 - [x] Current support and market-pattern review.
@@ -701,7 +771,12 @@ Updated July 28, 2026:
   - [ ] Verify approval, lifecycle, and both fixture transports through the harness.
     - [x] Add the production-sidecar conformance adapter and compile it offline.
     - [x] Prove permission denial and missing-credential fail-closed behavior offline.
-    - [ ] Run the authenticated opt-in gate during final end-to-end validation.
+    - [x] Run the first authenticated opt-in attempt and record a bounded
+      failure at the stdio read-only call after tool discovery.
+    - [ ] Fix the Claude second-turn sidecar failure without heuristic
+      ownership or unbounded provider diagnostics.
+    - [ ] Rerun one authenticated opt-in gate after the local regression is
+      green.
 - [ ] Codex bridge.
   - [x] Add runtime-negotiated, session-only projection through
     `thread/start.params.config.mcp_servers`.
@@ -716,7 +791,9 @@ Updated July 28, 2026:
     - [x] Add the production app-server adapter to the shared conformance
       driver and compile it offline.
     - [x] Prove missing-credential fail-closed behavior for both transports.
-    - [ ] Run the authenticated opt-in gate during final end-to-end validation.
+    - [x] Pass the first authenticated opt-in gate on `e95abff`.
+    - [ ] Rerun the strengthened gate once against the final release-candidate
+      commit.
 - [ ] MVP integrations UI.
   - [x] Add renderer-safe list, create, activate, disable, and remove commands.
   - [x] Keep credential values write-only and make credential deletion explicit.
@@ -745,8 +822,11 @@ Updated July 28, 2026:
       preserving the existing adapter for sessions without DCC MCP servers.
     - [x] Correlate structured DCC-owned tool and permission events, enforce
       per-tool policy fail-closed, and report only observed tool inventory.
-    - [ ] Run the shared authenticated conformance gate during final
-      end-to-end validation.
+    - [x] Run the first authenticated conformance attempt and record that the
+      audited runtime did not expose pre-call tool inventory.
+    - [ ] Keep Cursor unverified until its runtime exposes sufficient
+      structured inventory; do not replace that evidence with tool-name
+      heuristics.
   - [ ] Gemini through ACP.
     - [x] Add an exact-version and capability-gated ACP v1 projection builder
       for stdio and Streamable HTTP without modifying Gemini-owned config.
@@ -795,10 +875,16 @@ Updated July 28, 2026:
   - [x] Add one fork-safe local gate that refuses authenticated variables and
     covers the MCP domain, infrastructure, adapters, fixture, desktop boundary,
     sidecar, contracts, and integrations UI.
+  - [x] Pass the local gate after strengthening the read-only conformance
+    assertion on `c703dfc`.
   - [x] Document staged manual, authenticated, real-service, open-source, result
     recording, and cleanup checklists.
   - [ ] Run the manual integrations lifecycle against a release-candidate build.
-  - [ ] Run the authenticated Claude and Codex shared conformance gates.
+    - [x] Validate the Codex project-scope stdio happy path manually.
+    - [ ] Validate remaining policies, scopes, HTTP, disable, remove, restart,
+      credentials, and provider-owned configuration preservation.
+  - [ ] Pass the authenticated Claude and Codex shared conformance gates on the
+    final release-candidate commit.
   - [ ] Run the read-only Figma smoke and one reviewed pinned command-based
     smoke on at least one verified provider each. The current opt-in command
     harness uses Garu as an example, not as a bundled integration.
