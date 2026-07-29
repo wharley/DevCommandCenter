@@ -6,29 +6,29 @@ use dcc_tauri::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
         CreateWorkspaceBundleForReposInput, CreateWorkspaceBundleForReposOutput,
         CreateWorkspaceForRepoOutput, CreateWorkspaceFromSourceUrlInput,
-        CreateWorkspaceFromUrlOutput, ListChildDirectoriesInput, ListChildDirectoriesOutput,
-        ListGitTrackedFilesInput, ListGitTrackedFilesOutput, ListLocalBranchesInput,
-        ListLocalBranchesOutput, ListMissionSpecsInput, ListMissionSpecsOutput,
-        ListRepositoriesOutput, ListWorkspaceBundlesOutput, ListWorkspacesOutput,
-        MissionSpecContextStatusInput, MissionSpecContextStatusOutput, ReadWorkspaceFileInput,
-        ReadWorkspaceFileOutput, RepositoryIdInput, ResolveWorkspaceSourceUrlInput,
-        SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
-        SearchWorkspaceOutput, WorkspaceApplyDelegationWorktreeInput,
-        WorkspaceApplyDelegationWorktreeOutput, WorkspaceBundleIdInput, WorkspaceBundleStateOutput,
-        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
-        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
-        WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
-        WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictStateInput,
-        WorkspaceGitConflictStateOutput, WorkspaceGitFilePreviewContentOutput,
-        WorkspaceGitFilePreviewInput, WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput,
-        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
-        WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput,
-        WorkspaceIdInput, WorkspacePrepareDelegationWorktreeInput,
-        WorkspacePrepareDelegationWorktreeOutput, WorkspaceProjectAutomationConfigOutput,
-        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunProjectTasksInput,
-        WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
-        WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution, WriteWorkspaceFileInput,
-        WriteWorkspaceFileOutput,
+        CreateWorkspaceFromUrlOutput, DeleteWorkspaceBundleInput, DeleteWorkspaceInput,
+        ListChildDirectoriesInput, ListChildDirectoriesOutput, ListGitTrackedFilesInput,
+        ListGitTrackedFilesOutput, ListLocalBranchesInput, ListLocalBranchesOutput,
+        ListMissionSpecsInput, ListMissionSpecsOutput, ListRepositoriesOutput,
+        ListWorkspaceBundlesOutput, ListWorkspacesOutput, MissionSpecContextStatusInput,
+        MissionSpecContextStatusOutput, ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
+        RepositoryIdInput, ResolveWorkspaceSourceUrlInput, SaveMissionValidationInput,
+        SaveMissionValidationOutput, SearchWorkspaceInput, SearchWorkspaceOutput,
+        WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
+        WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
+        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitAcceptConflictInput,
+        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
+        WorkspaceGitCompleteMergeInput, WorkspaceGitCompleteMergeOutput,
+        WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
+        WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput,
+        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
+        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput,
+        WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput, WorkspaceIdInput,
+        WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
+        WorkspaceProjectAutomationConfigOutput, WorkspaceRemoveDelegationWorktreeInput,
+        WorkspaceRunProjectTasksInput, WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput,
+        WorkspaceRunSetupOutput, WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution,
+        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
     },
     delivery_failure::{
         WorkspaceDeliveryFailureInput, WorkspaceDeliveryFailureOutput,
@@ -83,6 +83,14 @@ pub async fn archive_workspace_bundle(
 }
 
 #[tauri::command]
+pub async fn complete_workspace_bundle(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceBundleIdInput,
+) -> Result<WorkspaceBundleStateOutput, String> {
+    dcc_tauri::commands::workspace_commands::complete_workspace_bundle(state, input).await
+}
+
+#[tauri::command]
 pub async fn restore_workspace_bundle(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceBundleIdInput,
@@ -93,7 +101,7 @@ pub async fn restore_workspace_bundle(
 #[tauri::command]
 pub async fn delete_workspace_bundle(
     state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceBundleIdInput,
+    input: DeleteWorkspaceBundleInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::workspace_commands::delete_workspace_bundle(state, input).await
 }
@@ -435,6 +443,14 @@ pub async fn archive_workspace(
 }
 
 #[tauri::command]
+pub async fn complete_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceIdInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::complete_workspace(state, input).await
+}
+
+#[tauri::command]
 pub async fn restore_workspace(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceIdInput,
@@ -445,7 +461,7 @@ pub async fn restore_workspace(
 #[tauri::command]
 pub async fn delete_workspace(
     state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceIdInput,
+    input: DeleteWorkspaceInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::workspace_commands::delete_workspace(state, input).await
 }

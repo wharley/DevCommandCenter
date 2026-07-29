@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type {
 	WorkspaceGitStatusOutput,
 	WorkspacePrStatusOutput,
@@ -87,6 +87,7 @@ export function useWorkspaceRailRecap(input: {
 	branch: string;
 	activity: WorkspaceAgentActivity | null;
 	enabled: boolean;
+	onPullRequestMerged?: () => void | Promise<void>;
 }): WorkspaceRailRecap | null {
 	const root = input.enabled ? input.workspacePath : null;
 	const gitStatusQuery = useWorkspaceGitStatus(root, RAIL_GIT_QUERY_OPTIONS);
@@ -97,6 +98,27 @@ export function useWorkspaceRailRecap(input: {
 		null,
 		RAIL_PROVIDER_QUERY_OPTIONS,
 	);
+	const completionAttemptedRef = useRef(false);
+	const pullRequestMerged = prStatusQuery.data?.state?.toLowerCase() === "merged";
+	useEffect(() => {
+		if (!pullRequestMerged) {
+			completionAttemptedRef.current = false;
+			return;
+		}
+		if (!input.onPullRequestMerged || completionAttemptedRef.current) {
+			return;
+		}
+		completionAttemptedRef.current = true;
+		void Promise.resolve()
+			.then(() => input.onPullRequestMerged?.())
+			.catch(() => {
+				completionAttemptedRef.current = false;
+			});
+	}, [
+		input.onPullRequestMerged,
+		prStatusQuery.dataUpdatedAt,
+		pullRequestMerged,
+	]);
 	const gitStatusIsClean =
 		Boolean(gitStatusQuery.data) &&
 		(gitStatusQuery.data?.staged.length ?? 0) === 0 &&

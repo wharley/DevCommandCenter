@@ -147,12 +147,24 @@ export function archiveWorkspace(workspaceId: string) {
 	return invoke<void>(WORKSPACE_METHODS.archiveWorkspace, { input: { workspaceId } });
 }
 
+export function completeWorkspace(workspaceId: string) {
+	return invoke<void>(WORKSPACE_METHODS.completeWorkspace, { input: { workspaceId } });
+}
+
 export function restoreWorkspace(workspaceId: string) {
 	return invoke<void>(WORKSPACE_METHODS.restoreWorkspace, { input: { workspaceId } });
 }
 
-export function deleteWorkspace(workspaceId: string) {
-	return invoke<void>(WORKSPACE_METHODS.deleteWorkspace, { input: { workspaceId } });
+export function deleteWorkspace(
+	workspaceId: string,
+	options: { deleteRemoteBranch?: boolean } = {},
+) {
+	return invoke<void>(WORKSPACE_METHODS.deleteWorkspace, {
+		input: {
+			workspaceId,
+			deleteRemoteBranch: options.deleteRemoteBranch ?? false,
+		},
+	});
 }
 
 export function deleteRepository(repositoryId: string) {
@@ -329,15 +341,27 @@ export function archiveWorkspaceBundle(bundleId: string) {
 	});
 }
 
+export function completeWorkspaceBundle(bundleId: string) {
+	return invoke<WorkspaceBundleStateOutput>(WORKSPACE_METHODS.completeWorkspaceBundle, {
+		input: { bundleId },
+	});
+}
+
 export function restoreWorkspaceBundle(bundleId: string) {
 	return invoke<WorkspaceBundleStateOutput>(WORKSPACE_METHODS.restoreWorkspaceBundle, {
 		input: { bundleId },
 	});
 }
 
-export function deleteWorkspaceBundle(bundleId: string) {
+export function deleteWorkspaceBundle(
+	bundleId: string,
+	options: { deleteRemoteBranches?: boolean } = {},
+) {
 	return invoke<void>(WORKSPACE_METHODS.deleteWorkspaceBundle, {
-		input: { bundleId },
+		input: {
+			bundleId,
+			deleteRemoteBranches: options.deleteRemoteBranches ?? false,
+		},
 	});
 }
 

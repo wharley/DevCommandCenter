@@ -4,7 +4,8 @@ import type { DccWorkspaceRailRow } from "./workspace-rail-projection";
 import type { WorkspaceSummary } from "./types";
 import { cn } from "@/lib/utils";
 
-export const ARCHIVED_SECTION_ID = "dccArchived";
+export const WAITING_SECTION_ID = "dccWaiting";
+export const COMPLETED_SECTION_ID = "dccCompleted";
 
 /** Branch / workflow chroma aligned to shell tokens (maps DCC coarse status → rail hints). */
 export type WorkspaceRailBranchTone =
@@ -26,7 +27,7 @@ export const workspaceRailBranchToneClasses: Record<
 export function branchToneFromWorkspace(
 	workspace: Pick<WorkspaceSummary, "status">,
 ): WorkspaceRailBranchTone {
-	if (workspace.status === "archived") {
+	if (workspace.status === "archived" || workspace.status === "completed") {
 		return "inactive";
 	}
 	if (workspace.status === "initializing") {
@@ -69,7 +70,8 @@ export function workspaceRailDisplayTitle(
 export function findSelectedRailSectionId(
 	selectedWorkspaceId: string | null | undefined,
 	groups: DccWorkspaceRailGroup[],
-	archivedRows: DccWorkspaceRailRow[],
+	waitingRows: DccWorkspaceRailRow[],
+	completedRows: DccWorkspaceRailRow[],
 ): string | null {
 	if (!selectedWorkspaceId) {
 		return null;
@@ -81,8 +83,12 @@ export function findSelectedRailSectionId(
 		}
 	}
 
-	if (archivedRows.some((row) => row.id === selectedWorkspaceId)) {
-		return ARCHIVED_SECTION_ID;
+	if (waitingRows.some((row) => row.id === selectedWorkspaceId)) {
+		return WAITING_SECTION_ID;
+	}
+
+	if (completedRows.some((row) => row.id === selectedWorkspaceId)) {
+		return COMPLETED_SECTION_ID;
 	}
 
 	return null;

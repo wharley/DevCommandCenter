@@ -85,7 +85,11 @@ export function useWorkspaceAgentActivities(
 	const trackedWorkspaces = useMemo(
 		() =>
 			isEnabled
-				? workspaces.filter((workspace) => workspace.status !== "archived")
+				? workspaces.filter(
+						(workspace) =>
+							workspace.status !== "archived" &&
+							workspace.status !== "completed",
+					)
 				: [],
 		[isEnabled, workspaces],
 	);

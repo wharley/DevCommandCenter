@@ -5,8 +5,8 @@ import {
 } from "./workspace-rail-projection";
 
 describe("projectWorkspaceRailGroups", () => {
-	it("groups active workspaces by project path and isolates archived rows", () => {
-		const { activeGroups, archivedRows } = projectWorkspaceRailGroups(
+	it("groups active workspaces by project path and separates waiting and completed rows", () => {
+		const { activeGroups, waitingRows, completedRows } = projectWorkspaceRailGroups(
 			[
 				{
 					id: "a",
@@ -26,10 +26,17 @@ describe("projectWorkspaceRailGroups", () => {
 				},
 				{
 					id: "c",
-					name: "Archived Spike",
+					name: "Waiting Spike",
 					branch: "spike",
 					status: "archived",
 					projectId: "project-spike",
+				},
+				{
+					id: "d",
+					name: "Completed Feature",
+					branch: "feature/done",
+					status: "completed",
+					projectId: "project-done",
 				},
 			],
 			[
@@ -57,19 +64,28 @@ describe("projectWorkspaceRailGroups", () => {
 				{ id: "a", name: "Alpha" },
 			],
 		});
-		expect(archivedRows).toEqual([
+		expect(waitingRows).toEqual([
 			{
 				id: "c",
-				name: "Archived Spike",
+				name: "Waiting Spike",
 				branch: "spike",
 				status: "archived",
 				projectId: "project-spike",
 			},
 		]);
+		expect(completedRows).toEqual([
+			{
+				id: "d",
+				name: "Completed Feature",
+				branch: "feature/done",
+				status: "completed",
+				projectId: "project-done",
+			},
+		]);
 	});
 
 	it("keeps repository groups visible even when they have no active workspaces", () => {
-		const { activeGroups, archivedRows } = projectWorkspaceRailGroups(
+		const { activeGroups, waitingRows, completedRows } = projectWorkspaceRailGroups(
 			[],
 			[
 				{
@@ -96,7 +112,8 @@ describe("projectWorkspaceRailGroups", () => {
 				rows: [],
 			},
 		]);
-		expect(archivedRows).toEqual([]);
+		expect(waitingRows).toEqual([]);
+		expect(completedRows).toEqual([]);
 	});
 
 	it("builds repository-level options for quick workspace creation", () => {

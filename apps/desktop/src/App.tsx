@@ -859,6 +859,7 @@ export default function App() {
 		allWorkspaces,
 		archiveWorkspace,
 		cloneWorkspaceFromUrl,
+		completeWorkspace,
 		createWorkspace,
 		createWorkspaceFromSourceUrl,
 		createWorkspaceBundle,
@@ -3624,14 +3625,24 @@ export default function App() {
 		},
 		[refreshWorkspaceCollections, restoreWorkspace],
 	);
-	const handleDeleteWorkspace = useCallback(
+	const handleCompleteWorkspace = useCallback(
 		async (workspaceId: string) => {
+			await completeWorkspace(workspaceId);
+			await refreshWorkspaceCollections();
+		},
+		[completeWorkspace, refreshWorkspaceCollections],
+	);
+	const handleDeleteWorkspace = useCallback(
+		async (
+			workspaceId: string,
+			options: { deleteRemoteBranch?: boolean } = {},
+		) => {
 			const workspace = allWorkspaces.find((candidate) => candidate.id === workspaceId);
 			const affectedWorkspaceIds =
 				workspace?.bundleId && workspace.memberWorkspaceIds?.length
 					? workspace.memberWorkspaceIds
 					: [workspaceId];
-			await deleteWorkspace(workspaceId);
+			await deleteWorkspace(workspaceId, options);
 			for (const affectedWorkspaceId of affectedWorkspaceIds) {
 				queryClient.removeQueries({
 					queryKey: getWorkspaceSessionsCacheKey(
@@ -3745,6 +3756,9 @@ export default function App() {
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
 							onArchiveWorkspace={
 								isRemoteBackend ? handleRemoteWorkspaceMutation : handleArchiveWorkspace
+							}
+							onCompleteWorkspace={
+								isRemoteBackend ? undefined : handleCompleteWorkspace
 							}
 							onRestoreWorkspace={
 								isRemoteBackend ? handleRemoteWorkspaceMutation : handleRestoreWorkspace

@@ -13,6 +13,7 @@ pub enum WorkspaceState {
     SetupPending,
     Ready,
     Archived,
+    Completed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]

@@ -77,12 +77,13 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
 use workspace_commands::{
-    archive_workspace, archive_workspace_bundle, compile_mission_spec_context,
-    create_workspace_bundle_for_repos, create_workspace_for_repo, create_workspace_from_source_url,
-    create_workspace_from_url, delete_repository, delete_workspace, delete_workspace_bundle,
-    list_child_directories, list_git_tracked_files, list_local_branches, list_mission_specs,
-    list_repositories, list_workspace_bundles, list_workspaces, mission_spec_context_status,
-    read_workspace_file, resolve_workspace_source_url, restore_workspace, restore_workspace_bundle,
+    archive_workspace, archive_workspace_bundle, compile_mission_spec_context, complete_workspace,
+    complete_workspace_bundle, create_workspace_bundle_for_repos, create_workspace_for_repo,
+    create_workspace_from_source_url, create_workspace_from_url, delete_repository,
+    delete_workspace, delete_workspace_bundle, list_child_directories, list_git_tracked_files,
+    list_local_branches, list_mission_specs, list_repositories, list_workspace_bundles,
+    list_workspaces, mission_spec_context_status, read_workspace_file,
+    resolve_workspace_source_url, restore_workspace, restore_workspace_bundle,
     save_mission_validation, search_workspace, workspace_apply_delegation_worktree,
     workspace_continue_from_base_branch, workspace_delivery_failure_snapshot,
     workspace_delivery_recovery_execute, workspace_git_abort_merge, workspace_git_accept_conflict,
@@ -6853,6 +6854,8 @@ pub fn run() {
             create_workspace_from_url,
             archive_workspace,
             archive_workspace_bundle,
+            complete_workspace,
+            complete_workspace_bundle,
             restore_workspace,
             restore_workspace_bundle,
             delete_workspace_bundle,
