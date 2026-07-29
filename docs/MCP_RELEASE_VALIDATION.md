@@ -23,7 +23,7 @@ The release may proceed only when every required row is complete:
 | Garu pinned read-only smoke | Yes, on at least one verified provider | Pending |
 | Cursor shared conformance | No promotion without it | Pending |
 | Gemini, Grok, and Droid | No; they must remain honestly unsupported | Blocked by documented protocol/runtime boundaries |
-| Security and dependency review | Yes | Pending final review |
+| Security and dependency review | Yes | MCP inventory complete; repository settings and pre-existing Anthropic distribution review pending |
 
 An optional-provider failure blocks promotion of that provider, not the release,
 when the product continues to report its actual lower support level. A Claude
@@ -142,6 +142,8 @@ shell history, `.env`, CI configuration, screenshots, issues, or artifacts.
 
 Before promotion:
 
+- follow the scoped findings and remaining actions in
+  [MCP open source review](MCP_OPEN_SOURCE_REVIEW.md);
 - verify all real-service and authenticated tests remain `#[ignore]`;
 - verify no fork- or pull-request-triggered workflow receives MCP credentials;
 - review new dependency licenses and notices, including pinned smoke-test

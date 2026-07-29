@@ -2,6 +2,7 @@
 name = "dcc-infra"
 version = "0.0.0"
 edition = "2021"
+license.workspace = true
 publish = false
 
 [features]

@@ -1,0 +1,17 @@
+name: Security contact request
+description: Request a private reporting channel without disclosing vulnerability details
+title: "[Security contact]: private channel requested"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is public. Do not include vulnerability details, proof of concept, logs, local paths, provider names, repository data, credentials, tokens, or screenshots.
+
+        First check the repository Security tab for a private "Report a vulnerability" button. Use this form only when that private channel is unavailable.
+  - type: checkboxes
+    id: safe_request
+    attributes:
+      label: Public-content confirmation
+      options:
+        - label: I confirm that this issue contains only a request for a private contact channel and no vulnerability details or sensitive data.
+          required: true

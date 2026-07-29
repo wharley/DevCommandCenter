@@ -4,3 +4,6 @@ members = [
   "src-tauri",
   "crates/*",
 ]
+
+[workspace.package]
+license = "Apache-2.0"

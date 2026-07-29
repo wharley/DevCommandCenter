@@ -642,6 +642,10 @@ default migration because it can:
 - Security reporting documentation covers MCP commands, OAuth, secrets, and
   tool-approval bypasses.
 
+The scoped dependency and reporting review, including the remaining repository
+setting and pre-existing distribution blockers, is recorded in
+[MCP open source review](MCP_OPEN_SOURCE_REVIEW.md).
+
 ### Product gate
 
 - The primary flow asks for server details and scope, not a provider matrix.
@@ -795,5 +799,9 @@ Updated July 28, 2026:
   - [ ] Run the authenticated Claude and Codex shared conformance gates.
   - [ ] Run the read-only Figma and pinned Garu smokes on at least one verified
     provider each.
-  - [ ] Complete the open-source security and dependency review, then record the
+  - [x] Document the MCP security-reporting surface, explicit workspace license
+    metadata, scoped dependency inventory, and external-component boundary.
+  - [ ] Enable GitHub private vulnerability reporting, verify maintainer
+    notifications, and complete the pre-existing Anthropic distribution review.
+  - [ ] Generate the release-wide composition/notices record and then record the
     bounded release decision.
