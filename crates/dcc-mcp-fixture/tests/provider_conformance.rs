@@ -611,7 +611,22 @@ where
                         true,
                     )
                     .await?;
-                if observation.failed || !observation.text.contains(MCP_CONFORMANCE_ECHO_VALUE) {
+                let echo_completed = observation
+                    .completed_actions
+                    .iter()
+                    .any(|action| tool_matches(action, "fixture_echo"));
+                let allow_resolved = observation
+                    .permission_resolutions
+                    .iter()
+                    .any(|(_, behavior)| behavior == "allow");
+                let expected_text = observation.text.contains(MCP_CONFORMANCE_ECHO_VALUE);
+                if observation.failed || !echo_completed || !allow_resolved || !expected_text {
+                    eprintln!(
+                        "read-only conformance observation: provider_failed={}, \
+                         echo_completed={echo_completed}, allow_resolved={allow_resolved}, \
+                         expected_text={expected_text}",
+                        observation.failed,
+                    );
                     return Err(McpConformanceAdapterError::Protocol);
                 }
                 Ok(McpConformanceObservation::ReadOnlyResult(
