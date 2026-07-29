@@ -126,6 +126,16 @@ may consume provider quota. Its evidence remains process-local; DCC advertises
 an available unverified projection as `runtimeBridge` until the corresponding
 opt-in gate is executed successfully and the promotion change is reviewed.
 
+The latest bounded local confirmations both passed on commit `c1ccc0b` on July
+29, 2026:
+
+- Claude:
+  `claude-agent-sdk@0.2.126+claude-code@2.1.126`, stdio and Streamable HTTP;
+- Codex: `codex-cli@0.146.0+app-server-protocol-v2`, stdio and Streamable HTTP.
+
+These results contain no provider transcript or credential data and do not by
+themselves change the renderer-facing support level.
+
 ## Running the offline gate
 
 For the complete local release gate across the domain, infrastructure,

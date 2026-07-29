@@ -38,48 +38,37 @@ Current evidence:
 - the DCC UI completed a real Codex project-scope stdio flow through
   connection, tool discovery, `Ask`, approval, `fixture.echo`, and result
   delivery;
-- the authenticated Codex shared conformance gate passed on `e95abff`, before
-  the read-only evidence assertion was strengthened on `c703dfc`; one final
-  Codex run is therefore still required against the eventual release
-  candidate;
+- the strengthened authenticated Codex shared conformance gate passes both
+  transports on `c1ccc0b` with
+  `codex-cli@0.146.0+app-server-protocol-v2`;
 - the authenticated Claude gate passes the complete stdio and Streamable HTTP
   contract on `claude-agent-sdk@0.2.126+claude-code@2.1.126` after deterministic
   fixes for consecutive-turn readiness and actual SDK `tool_result` lifecycle
-  normalization; the bounded commit record remains pending;
+  normalization, with final confirmation on `c1ccc0b`;
 - the authenticated Cursor gate stopped at tool inventory because the current
   ACP bridge reports only tools observed during a call. DCC will not infer
   inventory or promote Cursor from that incomplete evidence.
 
-The first release remains blocked on the final Codex confirmation, bounded
-release-candidate records, manual lifecycle coverage, and real-service smokes.
-Cursor, Gemini, Grok, and Droid may remain honestly unverified or unsupported
-and do not block that release unless the product scope is explicitly expanded
-to promise them.
+The first release remains blocked on manual lifecycle coverage, real-service
+smokes, and the reviewed promotion decision. Cursor, Gemini, Grok, and Droid
+may remain honestly unverified or unsupported and do not block that release
+unless the product scope is explicitly expanded to promise them.
 
 ### Next execution slices
 
 Work proceeds in small, independently reviewable cuts:
 
-1. **Claude bounded release-candidate record**
-   - commit the deterministic lifecycle fixes;
-   - repeat only if the release-candidate state differs from the validated
-     working tree;
-   - record only the bounded runtime, result, and failure category.
-2. **Codex release-candidate confirmation**
-   - rerun the strengthened authenticated gate once against the final commit;
-   - retain runtime negotiation instead of introducing a CLI version
-     allowlist.
-3. **Manual lifecycle completion**
+1. **Manual lifecycle completion**
    - cover `Ask`, `Allow`, and `Deny`;
    - cover session, project, and global scopes;
    - cover stdio and loopback Streamable HTTP;
    - verify disable, removal, restart, credential retention/deletion, and
      preservation of provider-owned configuration.
-4. **Real-service opt-in smokes**
+2. **Real-service opt-in smokes**
    - run the read-only Figma smoke on a disposable file;
    - select and review one pinned, read-only command server; Garu remains an
      optional harness target rather than a bundled integration.
-5. **Release candidate**
+3. **Release candidate**
    - run repository lint, typecheck, tests, and production build;
    - create a version only after every required row in the release checklist
      is complete;

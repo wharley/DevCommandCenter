@@ -5,15 +5,11 @@ integrations release. It separates deterministic contributor checks from
 account-backed provider conformance and real-service smokes. Passing one layer
 never substitutes for another.
 
-Status as of July 29, 2026: the local gate and the complete Claude opt-in
-harness pass on the current working tree. The Claude result covers stdio and
-Streamable HTTP on
-`claude-agent-sdk@0.2.126+claude-code@2.1.126`; a bounded commit record is still
-required after the fixes are committed. A Codex conformance run passed on
-`e95abff`, before the read-only evidence assertion was strengthened on
-`c703dfc`, so the final release commit still requires one Codex confirmation.
-Cursor did not expose pre-call tool inventory and remains unverified. No
-real-service result has been recorded.
+Status as of July 29, 2026: the local gate and both required provider
+conformance harnesses pass. Claude and Codex each passed the complete stdio and
+Streamable HTTP contract on commit `c1ccc0b` with their exact projection
+runtimes. Cursor did not expose pre-call tool inventory and remains unverified.
+No real-service result has been recorded.
 
 ## Release decision
 
@@ -21,10 +17,10 @@ The release may proceed only when every required row is complete:
 
 | Layer | Required for the first release | Current state |
 | --- | --- | --- |
-| Local MCP gate | Yes | Passed on the current working tree on July 29, 2026; commit record pending |
+| Local MCP gate | Yes | Passed for the tree committed as `c1ccc0b` on July 29, 2026 |
 | Manual integrations lifecycle | Yes | Codex project-scope stdio `Ask` path passed; remaining lifecycle pending |
-| Claude shared conformance | Yes | Passed both transports on the current working tree with the pinned runtime; commit record pending |
-| Codex shared conformance | Yes | Passed on `e95abff`; final strengthened release-candidate rerun pending |
+| Claude shared conformance | Yes | Passed both transports on `c1ccc0b` with `claude-agent-sdk@0.2.126+claude-code@2.1.126` |
+| Codex shared conformance | Yes | Passed both transports on `c1ccc0b` with `codex-cli@0.146.0+app-server-protocol-v2` |
 | Figma read-only smoke | Yes, on at least one verified provider | Pending |
 | Pinned command-based read-only smoke | Yes, on at least one verified provider | Current opt-in harness uses Garu; another reviewed target may satisfy the gate |
 | Cursor shared conformance | No, unless Cursor support is promoted in this release | Failed to expose pre-call inventory; remains honestly unverified |

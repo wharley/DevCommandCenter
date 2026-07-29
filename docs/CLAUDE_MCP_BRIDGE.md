@@ -167,9 +167,9 @@ On July 29, 2026, the complete shared harness passed for stdio and Streamable
 HTTP against
 `claude-agent-sdk@0.2.126+claude-code@2.1.126` after fixing terminal-result
 ordering between consecutive turns and normalizing tool completion from the
-SDK's actual `tool_result`. The result was produced from an uncommitted working
-tree, so it validates the bridge but is not yet the bounded release-candidate
-record required for promotion.
+SDK's actual `tool_result`. The final confirmation passed on commit `c1ccc0b`;
+promotion still requires the separate reviewed product decision that persists
+and advertises evidence.
 
 ## Deliberate limitations of this slice
 
