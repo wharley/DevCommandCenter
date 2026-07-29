@@ -34,7 +34,7 @@ complete.
 
 Current evidence:
 
-- the fork-safe local MCP release gate passes;
+- the fork-safe local MCP release gate passes on the current working tree;
 - the DCC UI completed a real Codex project-scope stdio flow through
   connection, tool discovery, `Ask`, approval, `fixture.echo`, and result
   delivery;
@@ -42,49 +42,44 @@ Current evidence:
   the read-only evidence assertion was strengthened on `c703dfc`; one final
   Codex run is therefore still required against the eventual release
   candidate;
-- the authenticated Claude gate reached tool discovery but failed on the
-  second turn before `fixture.echo` started or requested permission;
+- the authenticated Claude gate passes the complete stdio and Streamable HTTP
+  contract on `claude-agent-sdk@0.2.126+claude-code@2.1.126` after deterministic
+  fixes for consecutive-turn readiness and actual SDK `tool_result` lifecycle
+  normalization; the bounded commit record remains pending;
 - the authenticated Cursor gate stopped at tool inventory because the current
   ACP bridge reports only tools observed during a call. DCC will not infer
   inventory or promote Cursor from that incomplete evidence.
 
-The first release remains blocked until Claude and Codex pass the same complete
-stdio and Streamable HTTP conformance contract. Cursor, Gemini, Grok, and Droid
-may remain honestly unverified or unsupported and do not block that release
-unless the product scope is explicitly expanded to promise them.
+The first release remains blocked on the final Codex confirmation, bounded
+release-candidate records, manual lifecycle coverage, and real-service smokes.
+Cursor, Gemini, Grok, and Droid may remain honestly unverified or unsupported
+and do not block that release unless the product scope is explicitly expanded
+to promise them.
 
 ### Next execution slices
 
 Work proceeds in small, independently reviewable cuts:
 
-1. **Claude local diagnosis, no provider quota**
-   - classify the second-turn sidecar failure without retaining provider
-     payloads;
-   - add a deterministic regression around repeated turns with an active MCP
-     projection;
-   - reconcile the bundled Agent SDK and Claude Code runtime versions only if
-     the failure requires an upgrade;
-   - rerun the local MCP release gate.
-2. **Claude authenticated confirmation**
-   - run one authenticated Claude conformance gate only after the local
-     regression is green;
-   - do not retry an unchanged failure;
+1. **Claude bounded release-candidate record**
+   - commit the deterministic lifecycle fixes;
+   - repeat only if the release-candidate state differs from the validated
+     working tree;
    - record only the bounded runtime, result, and failure category.
-3. **Codex release-candidate confirmation**
+2. **Codex release-candidate confirmation**
    - rerun the strengthened authenticated gate once against the final commit;
    - retain runtime negotiation instead of introducing a CLI version
      allowlist.
-4. **Manual lifecycle completion**
+3. **Manual lifecycle completion**
    - cover `Ask`, `Allow`, and `Deny`;
    - cover session, project, and global scopes;
    - cover stdio and loopback Streamable HTTP;
    - verify disable, removal, restart, credential retention/deletion, and
      preservation of provider-owned configuration.
-5. **Real-service opt-in smokes**
+4. **Real-service opt-in smokes**
    - run the read-only Figma smoke on a disposable file;
    - select and review one pinned, read-only command server; Garu remains an
      optional harness target rather than a bundled integration.
-6. **Release candidate**
+5. **Release candidate**
    - run repository lint, typecheck, tests, and production build;
    - create a version only after every required row in the release checklist
      is complete;

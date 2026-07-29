@@ -19,7 +19,7 @@ use dcc_core::{
             McpTrustFingerprint,
         },
         project::ProjectId,
-        provider::{ProviderEvent, ProviderId, SessionHandle},
+        provider::{HealthStatus, ProviderEvent, ProviderId, SessionHandle},
         session::SessionId,
         workspace::WorkspaceId,
     },
@@ -793,6 +793,17 @@ async fn run_authenticated_gate<P>(
     P: Provider,
 {
     let provider_id = adapter.provider_id();
+    match adapter
+        .provider
+        .healthcheck()
+        .await
+        .expect("provider preflight healthcheck")
+    {
+        HealthStatus::Healthy => {}
+        HealthStatus::Degraded { reason } | HealthStatus::Unhealthy { reason } => {
+            panic!("provider preflight failed: {reason}");
+        }
+    }
     let provider_version = adapter
         .provider
         .dcc_mcp_projection_version()

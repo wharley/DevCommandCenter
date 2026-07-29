@@ -54,7 +54,8 @@ run_gate cargo test --locked -p dcc-mcp-fixture
 run_gate cargo test --locked -p dcc-tauri mcp_commands
 run_gate node --test \
   sidecar/src/mcp-config.test.mjs \
-  sidecar/src/permission-bridge.test.mjs
+  sidecar/src/permission-bridge.test.mjs \
+  sidecar/src/turn-lifecycle.test.mjs
 run_gate yarn workspace @dcc/contracts typecheck
 run_gate yarn workspace @dcc/desktop typecheck
 run_gate yarn workspace @dcc/desktop test \

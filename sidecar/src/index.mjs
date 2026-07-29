@@ -15,6 +15,7 @@ import {
 	resolveDccMcpToolPolicy,
 } from "./mcp-config.mjs";
 import { handlePermissionRequest } from "./permission-bridge.mjs";
+import { finishTurn } from "./turn-lifecycle.mjs";
 
 const SIDECAR_VERSION = "0.1.35";
 
@@ -341,7 +342,7 @@ async function runTurn(payload, state) {
 			},
 		},
 	});
-	let sawTerminalResult = false;
+	let terminalResult = null;
 
 	try {
 		let mcpStatus;
@@ -367,18 +368,19 @@ async function runTurn(payload, state) {
 		for await (const message of q) {
 			updateResumeSessionId(message, state);
 			if (message && message.type === "result") {
-				sawTerminalResult = true;
+				terminalResult = message;
+				continue;
 			}
 			emit(message);
 		}
 	} catch (error) {
-		if (!sawTerminalResult) {
-			emit({
+		if (!terminalResult) {
+			terminalResult = {
 				type: "result",
 				is_error: true,
 				result: error instanceof Error ? error.message : String(error),
 				session_id: state.resumeSessionId ?? null,
-			});
+			};
 		}
 	} finally {
 		try {
@@ -387,6 +389,15 @@ async function runTurn(payload, state) {
 			// Ignore close failures during shutdown.
 		}
 	}
+
+	return (
+		terminalResult ?? {
+			type: "result",
+			is_error: true,
+			result: "Claude SDK query ended without a terminal result",
+			session_id: state.resumeSessionId ?? null,
+		}
+	);
 }
 
 async function main() {
@@ -521,28 +532,21 @@ async function main() {
 		}
 
 		state.running = true;
-		state.activeTurnPromise = runTurn(payload, state)
-			.catch((error) => {
-				emit({
+		state.activeTurnPromise = (async () => {
+			let terminalResult;
+			try {
+				terminalResult = await runTurn(payload, state);
+			} catch (error) {
+				terminalResult = {
 					type: "result",
 					is_error: true,
 					result:
 						error instanceof Error ? error.message : String(error),
 					session_id: state.resumeSessionId ?? null,
-				});
-			})
-			.finally(() => {
-				for (const pending of state.pendingUserInputs.values()) {
-					pending.resolve([]);
-				}
-				state.pendingUserInputs.clear();
-				for (const pending of state.pendingPermissions.values()) {
-					pending.resolve("deny");
-				}
-				state.pendingPermissions.clear();
-				state.running = false;
-				state.activeTurnPromise = null;
-			});
+				};
+			}
+			finishTurn(state, terminalResult, emit);
+		})();
 	}
 }
 

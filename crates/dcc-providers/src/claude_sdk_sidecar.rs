@@ -184,6 +184,13 @@ fn oauth_token_from_credentials(raw: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+fn claude_auth_reports_logged_out(raw: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(raw)
+        .ok()
+        .and_then(|value| value.get("loggedIn").and_then(Value::as_bool))
+        == Some(false)
+}
+
 #[cfg(target_os = "macos")]
 async fn claude_oauth_token_from_keychain() -> Option<String> {
     let mut command = Command::new("security");
@@ -864,28 +871,25 @@ impl Provider for ClaudeSdkSidecarAdapter {
     async fn healthcheck(&self) -> Result<HealthStatus> {
         let mut auth_command = self.binary_command(&["--auth-status"])?;
         match auth_command.output().await {
-            Ok(output) if output.status.success() => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if let Ok(value) = serde_json::from_str::<Value>(&stdout) {
-                    if value.get("loggedIn").and_then(Value::as_bool) == Some(false) {
-                        return Ok(HealthStatus::Unhealthy {
-                            reason: "Claude Code is not authenticated. Run `claude auth login`."
-                                .to_string(),
-                        });
-                    }
-                }
-            }
             Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let reason = if !stderr.is_empty() {
-                    stderr
-                } else if !stdout.is_empty() {
-                    stdout
-                } else {
-                    format!("Claude auth check exited with status {}", output.status)
-                };
-                return Ok(HealthStatus::Degraded { reason });
+                if claude_auth_reports_logged_out(&output.stdout) {
+                    return Ok(HealthStatus::Unhealthy {
+                        reason: "Claude Code is not authenticated. Run `claude auth login`."
+                            .to_string(),
+                    });
+                }
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    let reason = if !stderr.is_empty() {
+                        stderr
+                    } else if !stdout.is_empty() {
+                        stdout
+                    } else {
+                        format!("Claude auth check exited with status {}", output.status)
+                    };
+                    return Ok(HealthStatus::Degraded { reason });
+                }
             }
             Err(error) => {
                 return Ok(HealthStatus::Unhealthy {
@@ -1032,5 +1036,16 @@ mod account_usage_tests {
         );
 
         assert_eq!(token.as_deref(), Some("oauth-token"));
+    }
+
+    #[test]
+    fn recognizes_logged_out_auth_status_even_when_cli_uses_a_failure_exit_code() {
+        assert!(claude_auth_reports_logged_out(
+            br#"{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}"#
+        ));
+        assert!(!claude_auth_reports_logged_out(
+            br#"{"loggedIn":true,"authMethod":"oauth","apiProvider":"firstParty"}"#
+        ));
+        assert!(!claude_auth_reports_logged_out(b"not json"));
     }
 }

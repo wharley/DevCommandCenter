@@ -5,9 +5,9 @@ Agent SDK without editing Claude configuration files or treating inherited
 servers as DCC-owned.
 
 The production session path now resolves DCC registry scopes and OS-backed
-credentials for adapters that explicitly declare a projection channel. Claude
-is currently the only such adapter. It remains `nativeConfig` rather than
-`verifiedBridge` until the complete provider conformance suite passes.
+credentials for adapters that explicitly declare a projection channel. The
+catalog exposes Claude's exact projection runtime as `runtimeBridge`; it does
+not claim `verifiedBridge` without persisted, reviewed conformance evidence.
 
 ## Documented SDK path
 
@@ -161,18 +161,24 @@ server failure, credential failure, and final cleanup.
 The account-backed test remains ignored by default. It requires an existing
 Claude Code login and the non-secret opt-in
 `DCC_RUN_CLAUDE_MCP_CONFORMANCE=1`. This is intentional: a mocked provider
-response cannot create `verifiedBridge` evidence. Until the opt-in test is run
-successfully against the pinned SDK and reviewed, the catalog continues to
-report Claude as `nativeConfig`.
+response cannot create `verifiedBridge` evidence.
+
+On July 29, 2026, the complete shared harness passed for stdio and Streamable
+HTTP against
+`claude-agent-sdk@0.2.126+claude-code@2.1.126` after fixing terminal-result
+ordering between consecutive turns and normalizing tool completion from the
+SDK's actual `tool_result`. The result was produced from an uncommitted working
+tree, so it validates the bridge but is not yet the bounded release-candidate
+record required for promotion.
 
 ## Deliberate limitations of this slice
 
 - The installed SDK stdio configuration has no per-server `cwd` field. The
   Claude adapter rejects definitions that require one instead of silently
   dropping it.
-- The authenticated conformance execution and resulting promotion decision are
-  intentionally deferred to the final end-to-end validation.
-- No `verifiedBridge` evidence is persisted or advertised by this slice.
+- No `verifiedBridge` evidence is persisted or advertised by this slice; the
+  final promotion decision remains bound to a reviewed release-candidate
+  record.
 
 These boundaries keep the bridge unadvertised as verified while allowing every
 contributor and fork to inspect and compile the exact promotion gate.
@@ -182,7 +188,8 @@ contributor and fork to inspect and compile the exact promotion gate.
 ```sh
 cargo test -p dcc-core -p dcc-providers -p dcc-tauri
 cargo test -p dcc-mcp-fixture --test provider_conformance
-node --test sidecar/src/mcp-config.test.mjs sidecar/src/permission-bridge.test.mjs
+node --test sidecar/src/mcp-config.test.mjs sidecar/src/permission-bridge.test.mjs \
+  sidecar/src/turn-lifecycle.test.mjs
 node --check sidecar/src/index.mjs
 ```
 

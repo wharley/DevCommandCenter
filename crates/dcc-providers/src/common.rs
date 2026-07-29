@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     process::Stdio,
@@ -67,6 +67,7 @@ enum ProviderEnvelope {
 #[derive(Debug, Default)]
 pub(crate) struct ProviderStreamState {
     claude_blocks: HashMap<u64, ClaudeBlockState>,
+    claude_pending_tool_calls: HashSet<String>,
     claude_streamed_text_emitted: bool,
     pub(crate) gemini_streamed_text_emitted: bool,
     codex_last_agent_message_id: Option<String>,
@@ -416,6 +417,7 @@ fn parse_claude_stream_value(
                         .and_then(Value::as_str)
                         .map(str::to_string)
                         .unwrap_or_else(|| claude_tool_call_id(index));
+                    state.claude_pending_tool_calls.insert(id.clone());
                     state
                         .claude_blocks
                         .insert(index, ClaudeBlockState::ToolCall { id: id.clone() });
@@ -476,9 +478,7 @@ fn parse_claude_stream_value(
                 Some(ClaudeBlockState::Reasoning { id }) => {
                     Some(ProviderEvent::ReasoningCompleted { id, at })
                 }
-                Some(ClaudeBlockState::ToolCall { id }) => {
-                    Some(ProviderEvent::ToolCallCompleted { id, at })
-                }
+                Some(ClaudeBlockState::ToolCall { .. }) => None,
                 None => None,
             }
         }
@@ -489,7 +489,7 @@ fn parse_claude_stream_value(
 
 fn parse_claude_terminal_value(
     value: &Value,
-    state: &ProviderStreamState,
+    state: &mut ProviderStreamState,
 ) -> Option<ProviderEvent> {
     let kind = value.get("type").and_then(Value::as_str)?;
     let at = now_iso();
@@ -514,6 +514,37 @@ fn parse_claude_terminal_value(
             } else {
                 Some(ProviderEvent::TextDelta { content: text })
             }
+        }
+        "user" => {
+            let content = value.pointer("/message/content")?.as_array()?;
+            for block in content.iter().filter_map(Value::as_object) {
+                if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+                    continue;
+                }
+                let Some(id) = block.get("tool_use_id").and_then(Value::as_str) else {
+                    continue;
+                };
+                if !state.claude_pending_tool_calls.remove(id) {
+                    continue;
+                }
+                return if block
+                    .get("is_error")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    Some(ProviderEvent::ToolCallFailed {
+                        id: id.to_string(),
+                        reason: Some("tool execution failed".to_string()),
+                        at,
+                    })
+                } else {
+                    Some(ProviderEvent::ToolCallCompleted {
+                        id: id.to_string(),
+                        at,
+                    })
+                };
+            }
+            None
         }
         "dcc_user_input_request" => {
             let id = value
@@ -1648,6 +1679,60 @@ mod tests {
         match assistant {
             ParsedProviderLine::Ignored => {}
             other => panic!("expected assistant fallback to stay ignored, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn completes_claude_tools_only_after_the_sdk_reports_the_tool_result() {
+        let mut state = ProviderStreamState::default();
+
+        let started = parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-success","name":"mcp__dcc-fixture__fixture_echo","input":{}}}}"#,
+            &mut state,
+        );
+        match started {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallStarted { id, action, .. }) => {
+                assert_eq!(id, "tool-success");
+                assert_eq!(action, "mcp__dcc-fixture__fixture_echo");
+            }
+            other => panic!("expected tool call start, got {other:?}"),
+        }
+
+        let proposed = parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+            &mut state,
+        );
+        assert!(matches!(proposed, ParsedProviderLine::Ignored));
+
+        let completed = parse_provider_stream_line(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-success","content":"fixture result"}]}}"#,
+            &mut state,
+        );
+        match completed {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallCompleted { id, .. }) => {
+                assert_eq!(id, "tool-success");
+            }
+            other => panic!("expected executed tool completion, got {other:?}"),
+        }
+
+        let _ = parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool-denied","name":"mcp__dcc-fixture__fixture_mutate","input":{}}}}"#,
+            &mut state,
+        );
+        let _ = parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":1}}"#,
+            &mut state,
+        );
+        let denied = parse_provider_stream_line(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-denied","content":"User denied tool execution.","is_error":true}]}}"#,
+            &mut state,
+        );
+        match denied {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallFailed { id, reason, .. }) => {
+                assert_eq!(id, "tool-denied");
+                assert_eq!(reason.as_deref(), Some("tool execution failed"));
+            }
+            other => panic!("expected denied tool failure, got {other:?}"),
         }
     }
 

@@ -146,7 +146,8 @@ The focused conformance commands remain:
 cargo test -p dcc-core mcp_conformance
 cargo test -p dcc-mcp-fixture conformance_contract_names
 cargo test -p dcc-mcp-fixture --test provider_conformance
-node --test sidecar/src/mcp-config.test.mjs sidecar/src/permission-bridge.test.mjs
+node --test sidecar/src/mcp-config.test.mjs sidecar/src/permission-bridge.test.mjs \
+  sidecar/src/turn-lifecycle.test.mjs
 ```
 
 These default commands run without external network access, credentials, or
