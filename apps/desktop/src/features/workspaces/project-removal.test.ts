@@ -7,8 +7,8 @@ describe("removeProjectFromDcc", () => {
 		const deleteRepository = vi.fn(async () => {
 			calls.push("delete-repository");
 		});
-		const removeWorkspaceCaches = vi.fn(() => {
-			calls.push("remove-workspace-caches");
+		const removeLocalState = vi.fn(() => {
+			calls.push("remove-local-state");
 		});
 		const refreshRepositories = vi.fn(async () => {
 			calls.push("refresh-repositories");
@@ -24,7 +24,7 @@ describe("removeProjectFromDcc", () => {
 			},
 			{
 				deleteRepository,
-				removeWorkspaceCaches,
+				removeLocalState,
 				refreshRepositories,
 				refreshWorkspaces,
 			},
@@ -32,15 +32,15 @@ describe("removeProjectFromDcc", () => {
 
 		expect(deleteRepository).toHaveBeenCalledOnce();
 		expect(deleteRepository).toHaveBeenCalledWith("/repo/project");
-		expect(removeWorkspaceCaches).toHaveBeenCalledWith(["workspace-1", "workspace-2"]);
+		expect(removeLocalState).toHaveBeenCalledWith(["workspace-1", "workspace-2"]);
 		expect(refreshRepositories).toHaveBeenCalledOnce();
 		expect(refreshWorkspaces).toHaveBeenCalledOnce();
 		expect(calls[0]).toBe("delete-repository");
-		expect(calls[1]).toBe("remove-workspace-caches");
+		expect(calls[1]).toBe("remove-local-state");
 	});
 
 	it("does not update local state when backend removal fails", async () => {
-		const removeWorkspaceCaches = vi.fn();
+		const removeLocalState = vi.fn();
 		const refreshRepositories = vi.fn();
 		const refreshWorkspaces = vi.fn();
 
@@ -51,14 +51,14 @@ describe("removeProjectFromDcc", () => {
 					deleteRepository: async () => {
 						throw new Error("cleanup failed");
 					},
-					removeWorkspaceCaches,
+					removeLocalState,
 					refreshRepositories,
 					refreshWorkspaces,
 				},
 			),
 		).rejects.toThrow("cleanup failed");
 
-		expect(removeWorkspaceCaches).not.toHaveBeenCalled();
+		expect(removeLocalState).not.toHaveBeenCalled();
 		expect(refreshRepositories).not.toHaveBeenCalled();
 		expect(refreshWorkspaces).not.toHaveBeenCalled();
 	});

@@ -5,7 +5,7 @@ export type ProjectRemovalInput = {
 
 type ProjectRemovalActions = {
 	deleteRepository: (repositoryId: string) => Promise<void>;
-	removeWorkspaceCaches: (workspaceIds: string[]) => void;
+	removeLocalState: (workspaceIds: string[]) => void;
 	refreshRepositories: () => Promise<unknown>;
 	refreshWorkspaces: () => Promise<unknown>;
 };
@@ -15,6 +15,6 @@ export async function removeProjectFromDcc(
 	actions: ProjectRemovalActions,
 ) {
 	await actions.deleteRepository(input.repositoryId);
-	actions.removeWorkspaceCaches([...new Set(input.workspaceIds)]);
+	actions.removeLocalState([...new Set(input.workspaceIds)]);
 	await Promise.all([actions.refreshRepositories(), actions.refreshWorkspaces()]);
 }

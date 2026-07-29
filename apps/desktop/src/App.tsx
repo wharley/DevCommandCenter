@@ -18,6 +18,7 @@ import type {
 	DelegationContextPolicy,
 	MissionSpecEntry,
 	ProviderCatalog,
+	Repository,
 	SessionEventRecord,
 	SessionSearchResult,
 	WorkspaceSessionSummary,
@@ -3661,7 +3662,22 @@ export default function App() {
 			}
 			await removeProjectFromDcc(input, {
 				deleteRepository,
-				removeWorkspaceCaches: (workspaceIds) => {
+				removeLocalState: (workspaceIds) => {
+					const removedWorkspaceIds = new Set(workspaceIds);
+					queryClient.setQueryData<WorkspaceSummary[]>(
+						["workspaces", backendCacheKey],
+						(current = []) =>
+							current.filter(
+								(workspace) => !removedWorkspaceIds.has(workspace.id),
+							),
+					);
+					queryClient.setQueryData<Repository[]>(
+						["repositories", backendCacheKey],
+						(current = []) =>
+							current.filter(
+								(repository) => repository.id !== input.repositoryId,
+							),
+					);
 					for (const workspaceId of workspaceIds) {
 						queryClient.removeQueries({
 							queryKey: getWorkspaceSessionsCacheKey(
@@ -3675,7 +3691,9 @@ export default function App() {
 					}
 				},
 				refreshRepositories: () =>
-					queryClient.invalidateQueries({ queryKey: ["repositories"] }),
+					queryClient.invalidateQueries({
+						queryKey: ["repositories", backendCacheKey],
+					}),
 				refreshWorkspaces: refreshWorkspaceCollections,
 			});
 		},
