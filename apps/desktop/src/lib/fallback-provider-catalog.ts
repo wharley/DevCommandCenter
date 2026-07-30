@@ -11,6 +11,7 @@ const stableHealth = "Healthy" as const;
 const stableCapabilities = {
 	streaming: true,
 	mcpSupport: "unsupported",
+	mcpOauthSupport: "unsupported",
 	tools: true,
 	vision: true,
 	resumable: true,
@@ -34,6 +35,7 @@ const multiRootDelegationRequesterCapabilities = {
 
 const claudeRuntimeMcpCapabilities = {
 	...multiRootDelegationRequesterCapabilities,
+	mcpOauthSupport: "managedDuringTurn",
 	mcpSupport: {
 		runtimeBridge: {
 			providerVersion: "claude-agent-sdk@0.2.126+claude-code@2.1.126",
@@ -43,6 +45,7 @@ const claudeRuntimeMcpCapabilities = {
 
 const codexRuntimeMcpCapabilities = {
 	...multiRootDelegationRequesterCapabilities,
+	mcpOauthSupport: "interactivePreflight",
 	mcpSupport: {
 		runtimeBridge: {
 			providerVersion: "codex-cli@0.146.0+app-server-protocol-v2",
@@ -53,6 +56,7 @@ const codexRuntimeMcpCapabilities = {
 const experimentalCapabilities = {
 	streaming: true,
 	mcpSupport: "unsupported",
+	mcpOauthSupport: "unsupported",
 	tools: true,
 	vision: false,
 	resumable: false,

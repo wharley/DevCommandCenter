@@ -29,8 +29,9 @@ pub use mcp_conformance::{
 };
 pub use project::{Project, ProjectId};
 pub use provider::{
-    Capabilities, HealthStatus, ProviderAccountUsage, ProviderAccountUsageState, ProviderCatalog,
-    ProviderDescriptor, ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
+    Capabilities, HealthStatus, McpOauthSupport, ProviderAccountUsage, ProviderAccountUsageState,
+    ProviderCatalog, ProviderDescriptor, ProviderEvent, ProviderId, ProviderUsageWindow,
+    SessionHandle,
 };
 pub use repository::{Repository, RepositoryId};
 pub use session::{

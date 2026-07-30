@@ -43,6 +43,23 @@ pub enum McpSupportLevel {
     VerifiedBridge { evidence: McpConformanceEvidence },
 }
 
+/// Declares how an adapter handles interactive OAuth for DCC-projected MCP
+/// servers. This is an executable adapter contract, not provider-name
+/// inference in the renderer.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum McpOauthSupport {
+    /// The adapter exposes no DCC-controlled interactive OAuth operation.
+    #[default]
+    Unsupported,
+    /// The adapter completes OAuth as part of normal turn attachment and
+    /// withholds the user prompt until the MCP server is ready.
+    ManagedDuringTurn,
+    /// DCC can start OAuth before the turn and observe completion through the
+    /// provider runtime status channel.
+    InteractivePreflight,
+}
+
 impl McpSupportLevel {
     pub fn verified_evidence(&self) -> Option<&McpConformanceEvidence> {
         match self {
@@ -85,6 +102,8 @@ fn validate_provider_version(provider_version: &str) -> Result<(), McpConformanc
 pub struct Capabilities {
     pub streaming: bool,
     pub mcp_support: McpSupportLevel,
+    #[serde(default)]
+    pub mcp_oauth_support: McpOauthSupport,
     pub tools: bool,
     pub vision: bool,
     pub resumable: bool,

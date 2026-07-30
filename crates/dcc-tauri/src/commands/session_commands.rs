@@ -1,20 +1,24 @@
+use std::time::{Duration, Instant};
+
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, State};
+use tokio::time::sleep;
 
 use dcc_core::{
     application::{
         abort_run as run_abort_run, approve_plan as run_approve_plan,
         close_session as run_close_session, record_plan_handoff as run_record_plan_handoff,
         restore_session as run_restore_session, resume_session as run_resume_session,
-        send_turn as run_send_turn, send_turn_selection_differs_from_session,
-        start_thread as run_start_thread, AbortRunInput, AbortRunOutput, ApprovePlanInput,
-        ApprovePlanOutput, CloseSessionInput, CloseSessionOutput, RecordPlanHandoffInput,
-        RecordPlanHandoffOutput, RestoreSessionInput, RestoreSessionOutput, ResumeSessionInput,
-        ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
+        send_turn as run_send_turn, start_thread as run_start_thread, AbortRunInput,
+        AbortRunOutput, ApprovePlanInput, ApprovePlanOutput, CloseSessionInput, CloseSessionOutput,
+        RecordPlanHandoffInput, RecordPlanHandoffOutput, RestoreSessionInput, RestoreSessionOutput,
+        ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput,
+        StartThreadOutput,
     },
     domain::{
         mcp::{McpDefinitionId, McpErrorCategory, McpRuntimeState, McpRuntimeStatus},
+        provider::McpOauthSupport,
         session::{SessionEventRecord, SessionId, SessionSearchResult, WorkspaceSessionSummary},
     },
     ports::{
@@ -88,6 +92,125 @@ pub struct StartMcpOauthOutput {
     pub authorization_url: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum McpTurnPreflightState {
+    Ready,
+    AuthenticationRequired {
+        #[serde(rename = "definitionId")]
+        definition_id: McpDefinitionId,
+        #[serde(rename = "authorizationUrl")]
+        authorization_url: String,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareTurnOutput {
+    pub preflight: McpTurnPreflightState,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WaitMcpOauthInput {
+    pub session_id: String,
+    pub definition_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WaitMcpOauthOutput {
+    pub connected: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum McpPreflightReadiness {
+    Ready,
+    Attaching,
+    AuthenticationRequired(McpDefinitionId),
+    Failed(String),
+}
+
+const MCP_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(30);
+const MCP_OAUTH_COMPLETION_TIMEOUT: Duration = Duration::from_secs(300);
+const MCP_PREFLIGHT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+fn classify_mcp_preflight(statuses: &[McpRuntimeStatus]) -> McpPreflightReadiness {
+    if let Some(status) = statuses.iter().find(|status| {
+        status.state == McpRuntimeState::Failed
+            && status
+                .bounded_error
+                .as_ref()
+                .is_some_and(|error| error.category == McpErrorCategory::Authentication)
+    }) {
+        return McpPreflightReadiness::AuthenticationRequired(status.definition_id.clone());
+    }
+    if let Some(status) = statuses
+        .iter()
+        .find(|status| status.state == McpRuntimeState::Failed)
+    {
+        return McpPreflightReadiness::Failed(
+            status
+                .bounded_error
+                .as_ref()
+                .map(|error| error.message.clone())
+                .unwrap_or_else(|| "MCP provider attachment failed".to_string()),
+        );
+    }
+    if statuses
+        .iter()
+        .any(|status| status.state == McpRuntimeState::NeedsTrust)
+    {
+        return McpPreflightReadiness::Failed(
+            "MCP integration requires trust approval before the turn".to_string(),
+        );
+    }
+    if statuses
+        .iter()
+        .any(|status| status.state == McpRuntimeState::Unsupported)
+    {
+        return McpPreflightReadiness::Failed(
+            "MCP integration is unsupported by this provider runtime".to_string(),
+        );
+    }
+    if statuses.iter().any(|status| {
+        matches!(
+            status.state,
+            McpRuntimeState::ProbingServer
+                | McpRuntimeState::ServerReachable
+                | McpRuntimeState::AttachingProvider
+        )
+    }) {
+        return McpPreflightReadiness::Attaching;
+    }
+    McpPreflightReadiness::Ready
+}
+
+async fn wait_for_mcp_preflight(
+    state: &SessionCommandState,
+    session_id: &SessionId,
+) -> Result<McpPreflightReadiness, String> {
+    let deadline = Instant::now() + MCP_PREFLIGHT_TIMEOUT;
+    loop {
+        let readiness = classify_mcp_preflight(
+            &state
+                .list_mcp_runtime_statuses(session_id)
+                .map_err(|error| error.to_string())?,
+        );
+        if readiness != McpPreflightReadiness::Attaching {
+            return Ok(readiness);
+        }
+        if Instant::now() >= deadline {
+            return Err("MCP provider attachment timed out before the turn".to_string());
+        }
+        sleep(MCP_PREFLIGHT_POLL_INTERVAL).await;
+    }
+}
+
 fn default_search_limit() -> usize {
     40
 }
@@ -117,13 +240,22 @@ pub async fn send_turn(
     _app: AppHandle,
     input: SendTurnInput,
 ) -> Result<SendTurnOutput, String> {
-    if let Some(session) = state
-        .peek_session(&input.session_id)
+    let session = state
+        .prepare_provider_session_for_turn(&input)
         .await
+        .map_err(|error| error.to_string())?;
+    if state
+        .session_mcp_oauth_support(&session.id)
         .map_err(|error| error.to_string())?
+        == McpOauthSupport::InteractivePreflight
     {
-        if send_turn_selection_differs_from_session(&session, &input) {
-            let _ = state.cancel_provider_session(&input.session_id).await;
+        match wait_for_mcp_preflight(&state, &session.id).await? {
+            McpPreflightReadiness::Ready => {}
+            McpPreflightReadiness::AuthenticationRequired(_) => {
+                return Err("MCP authentication must complete before sending the turn".to_string());
+            }
+            McpPreflightReadiness::Failed(message) => return Err(message),
+            McpPreflightReadiness::Attaching => unreachable!("bounded wait resolves attaching"),
         }
     }
 
@@ -154,10 +286,6 @@ pub async fn send_turn(
             reason
         }
     };
-
-    if let Err(error) = state.attach_provider_session(&output.session).await {
-        return Err(abort_turn(error.to_string()).await);
-    }
 
     if let Err(error) = state
         .set_active_turn(&output.session.id, Some(turn_id.0.clone()))
@@ -262,6 +390,111 @@ pub async fn list_mcp_runtime_statuses(
         .list_mcp_runtime_statuses(&session_id)
         .map_err(|error| error.to_string())?;
     Ok(ListMcpRuntimeStatusesOutput { statuses })
+}
+
+#[tauri::command]
+pub async fn prepare_turn(
+    state: State<'_, SessionCommandState>,
+    input: SendTurnInput,
+) -> Result<PrepareTurnOutput, String> {
+    let session = state
+        .prepare_provider_session_for_turn(&input)
+        .await
+        .map_err(|error| error.to_string())?;
+    if state
+        .session_mcp_oauth_support(&session.id)
+        .map_err(|error| error.to_string())?
+        != McpOauthSupport::InteractivePreflight
+    {
+        return Ok(PrepareTurnOutput {
+            preflight: McpTurnPreflightState::Ready,
+        });
+    }
+
+    match wait_for_mcp_preflight(&state, &session.id).await? {
+        McpPreflightReadiness::Ready => Ok(PrepareTurnOutput {
+            preflight: McpTurnPreflightState::Ready,
+        }),
+        McpPreflightReadiness::AuthenticationRequired(definition_id) => {
+            let result = state
+                .start_mcp_oauth(&session.id, &definition_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(PrepareTurnOutput {
+                preflight: McpTurnPreflightState::AuthenticationRequired {
+                    definition_id,
+                    authorization_url: result.authorization_url,
+                },
+            })
+        }
+        McpPreflightReadiness::Failed(message) => Err(message),
+        McpPreflightReadiness::Attaching => unreachable!("bounded wait resolves attaching"),
+    }
+}
+
+#[tauri::command]
+pub async fn wait_mcp_oauth(
+    state: State<'_, SessionCommandState>,
+    input: WaitMcpOauthInput,
+) -> Result<WaitMcpOauthOutput, String> {
+    let session_id = SessionId(input.session_id.trim().to_string());
+    let definition_id = McpDefinitionId(input.definition_id.trim().to_string());
+    if session_id.0.is_empty() || definition_id.0.is_empty() {
+        return Err("sessionId and definitionId are required".to_string());
+    }
+    if state
+        .session_mcp_oauth_support(&session_id)
+        .map_err(|error| error.to_string())?
+        != McpOauthSupport::InteractivePreflight
+    {
+        return Err("provider does not expose interactive MCP OAuth preflight".to_string());
+    }
+
+    let deadline = Instant::now() + MCP_OAUTH_COMPLETION_TIMEOUT;
+    loop {
+        let statuses = state
+            .list_mcp_runtime_statuses(&session_id)
+            .map_err(|error| error.to_string())?;
+        let status = statuses
+            .iter()
+            .find(|status| status.definition_id == definition_id)
+            .ok_or_else(|| "MCP integration is no longer attached to this session".to_string())?;
+        match status.state {
+            McpRuntimeState::Connected => {
+                return Ok(WaitMcpOauthOutput { connected: true });
+            }
+            McpRuntimeState::Failed
+                if status
+                    .bounded_error
+                    .as_ref()
+                    .is_some_and(|error| error.category == McpErrorCategory::Authentication) => {}
+            McpRuntimeState::ProbingServer
+            | McpRuntimeState::ServerReachable
+            | McpRuntimeState::AttachingProvider => {}
+            McpRuntimeState::Failed => {
+                return Err(status
+                    .bounded_error
+                    .as_ref()
+                    .map(|error| error.message.clone())
+                    .unwrap_or_else(|| "MCP provider attachment failed".to_string()));
+            }
+            McpRuntimeState::Disabled => {
+                return Err("MCP integration was disabled during authentication".to_string());
+            }
+            McpRuntimeState::NeedsTrust => {
+                return Err(
+                    "MCP integration requires trust approval during authentication".to_string(),
+                );
+            }
+            McpRuntimeState::Unsupported => {
+                return Err("MCP integration became unsupported during authentication".to_string());
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err("MCP OAuth authentication timed out".to_string());
+        }
+        sleep(MCP_PREFLIGHT_POLL_INTERVAL).await;
+    }
 }
 
 #[tauri::command]
@@ -379,4 +612,75 @@ pub async fn respond_to_permission_request(
         .await
         .map_err(|error| error.to_string())?;
     Ok(RespondToPermissionRequestOutput { ok: true })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dcc_core::domain::{provider::ProviderId, session::SessionId};
+
+    fn status(
+        definition_id: &str,
+        state: McpRuntimeState,
+        error: Option<(McpErrorCategory, &str)>,
+    ) -> McpRuntimeStatus {
+        McpRuntimeStatus {
+            definition_id: McpDefinitionId(definition_id.to_string()),
+            provider_id: ProviderId("codex".to_string()),
+            provider_version: "codex@test".to_string(),
+            session_id: SessionId("session-1".to_string()),
+            state,
+            tools: Vec::new(),
+            checked_at: "2026-07-30T00:00:00Z".to_string(),
+            bounded_error: error.map(|(category, message)| {
+                dcc_core::domain::mcp::McpRuntimeError::bounded(category, message)
+            }),
+        }
+    }
+
+    #[test]
+    fn authentication_challenge_has_priority_over_other_runtime_failures() {
+        let readiness = classify_mcp_preflight(&[
+            status(
+                "broken",
+                McpRuntimeState::Failed,
+                Some((McpErrorCategory::Protocol, "protocol failed")),
+            ),
+            status(
+                "clickup",
+                McpRuntimeState::Failed,
+                Some((McpErrorCategory::Authentication, "authentication required")),
+            ),
+        ]);
+
+        assert_eq!(
+            readiness,
+            McpPreflightReadiness::AuthenticationRequired(McpDefinitionId("clickup".to_string()))
+        );
+    }
+
+    #[test]
+    fn preflight_waits_for_transient_attachment_states() {
+        for state in [
+            McpRuntimeState::ProbingServer,
+            McpRuntimeState::ServerReachable,
+            McpRuntimeState::AttachingProvider,
+        ] {
+            assert_eq!(
+                classify_mcp_preflight(&[status("clickup", state, None)]),
+                McpPreflightReadiness::Attaching
+            );
+        }
+    }
+
+    #[test]
+    fn preflight_is_ready_when_every_projected_server_is_connected() {
+        assert_eq!(
+            classify_mcp_preflight(&[
+                status("clickup", McpRuntimeState::Connected, None),
+                status("linear", McpRuntimeState::Connected, None),
+            ]),
+            McpPreflightReadiness::Ready
+        );
+    }
 }

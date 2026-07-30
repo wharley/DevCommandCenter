@@ -125,7 +125,7 @@ pub async fn provider_descriptors() -> Vec<ProviderDescriptor> {
 
 #[cfg(test)]
 mod tests {
-    use dcc_core::domain::provider::{HealthStatus, McpSupportLevel};
+    use dcc_core::domain::provider::{HealthStatus, McpOauthSupport, McpSupportLevel};
 
     use super::{
         claude_code, codex, common::stable_cli_capabilities, droid, expose_runtime_mcp_bridge,
@@ -213,6 +213,26 @@ mod tests {
                 .capabilities
                 .mcp_support,
             McpSupportLevel::Unsupported
+        );
+    }
+
+    #[test]
+    fn provider_oauth_flow_matches_each_adapter_contract() {
+        assert_eq!(
+            claude_code::descriptor(HealthStatus::Healthy)
+                .capabilities
+                .mcp_oauth_support,
+            McpOauthSupport::ManagedDuringTurn
+        );
+        assert_eq!(
+            codex::descriptor(HealthStatus::Healthy)
+                .capabilities
+                .mcp_oauth_support,
+            McpOauthSupport::InteractivePreflight
+        );
+        assert_eq!(
+            stable_cli_capabilities().mcp_oauth_support,
+            McpOauthSupport::Unsupported
         );
     }
 

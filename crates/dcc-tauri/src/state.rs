@@ -13,7 +13,11 @@ use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
 use dcc_core::{
-    application::{resolve_session_mcp_servers, ResolveSessionMcpInput, StartThreadInput},
+    application::{
+        prepare_session_for_turn, resolve_session_mcp_servers,
+        send_turn_selection_differs_from_session, ResolveSessionMcpInput, SendTurnInput,
+        StartThreadInput,
+    },
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
         mcp::{
@@ -21,7 +25,7 @@ use dcc_core::{
             McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretReferenceId, McpTransport,
         },
         project::{Project, ProjectId},
-        provider::{ProviderEvent, ProviderId, SessionHandle},
+        provider::{McpOauthSupport, ProviderEvent, ProviderId, SessionHandle},
         repository::{Repository, RepositoryId},
         session::{
             Session, SessionEventKind, SessionEventRecord, SessionId, SessionSearchResult, TurnId,
@@ -479,6 +483,41 @@ impl SessionCommandState {
         self.spawn_provider_bridge(session.id.clone(), binding, provider)
             .await;
         Ok(())
+    }
+
+    /// Applies provider/model selection and attaches its runtime before a turn
+    /// is recorded. This keeps OAuth and MCP startup failures outside durable
+    /// user-turn history.
+    pub async fn prepare_provider_session_for_turn(
+        &self,
+        input: &SendTurnInput,
+    ) -> Result<Session> {
+        let current = self
+            .peek_session(&input.session_id)
+            .await?
+            .ok_or_else(|| dcc_core::CoreError::Repository("session not found".to_string()))?;
+        if send_turn_selection_differs_from_session(&current, input) {
+            let _ = self.cancel_provider_session(&input.session_id).await;
+        }
+        let session = prepare_session_for_turn(self, input).await?;
+        self.attach_provider_session(&session).await?;
+        Ok(session)
+    }
+
+    pub fn session_mcp_oauth_support(&self, session_id: &SessionId) -> Result<McpOauthSupport> {
+        let binding = self.provider_binding(session_id)?.ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "no provider binding for session {}",
+                session_id.0
+            ))
+        })?;
+        let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "unknown provider runtime: {}",
+                binding.provider_id
+            ))
+        })?;
+        Ok(provider.capabilities().mcp_oauth_support)
     }
 
     async fn resolve_provider_mcp_servers(

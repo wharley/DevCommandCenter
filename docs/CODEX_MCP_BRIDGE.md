@@ -88,9 +88,11 @@ For a DCC-owned server reported as `notLoggedIn`, the selected session can
 explicitly start Codex's native `mcpServer/oauth/login` flow. DCC resolves the
 definition to its private wire name in the backend, requests an authorization
 URL for the active thread, and exposes only a bounded HTTPS (or loopback HTTP)
-URL after rejecting embedded credentials. The renderer opens that URL only
-after the user clicks **Connect with OAuth**. DCC does not receive, persist, or
-render the resulting access or refresh token. A matching
+URL after rejecting embedded credentials. When a pending user turn encounters
+that status, DCC opens the URL as a preflight, waits for the matching server to
+become connected, and then sends the original prompt without creating an
+interrupted turn. The settings action remains an explicit recovery path. DCC
+does not receive, persist, or render the resulting access or refresh token. A matching
 `mcpServer/oauthLogin/completed` notification triggers a fresh status
 inventory; notifications for unknown wire names or other threads are ignored.
 

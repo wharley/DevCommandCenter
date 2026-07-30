@@ -5,6 +5,7 @@ import type {
 	CoreEvent,
 	ListMcpRuntimeStatusesOutput,
 	McpRuntimeStatus,
+	PrepareTurnOutput,
 	SessionEventRecord,
 	SessionSearchResult,
 	WorkspaceSessionSummary,
@@ -32,7 +33,10 @@ import type {
 	StartMcpOauthOutput,
 	StartThreadInput,
 	StartThreadOutput,
+	WaitMcpOauthOutput,
 } from "@dcc/contracts";
+import { resolveMcpTurnPreflight } from "./mcp-turn-preflight";
+import { openExternal } from "./shell-api";
 
 // Re-exported only because a few consumers still listen for it. Safe to drop
 // once the remote-core-event listeners are removed.
@@ -42,7 +46,23 @@ export function startThread(input: StartThreadInput) {
 	return invoke<StartThreadOutput>(SESSION_METHODS.startThread, { input });
 }
 
-export function sendTurn(input: SendTurnInput) {
+function prepareTurn(input: SendTurnInput) {
+	return invoke<PrepareTurnOutput>(SESSION_METHODS.prepareTurn, { input });
+}
+
+function waitMcpOauth(sessionId: string, definitionId: string) {
+	return invoke<WaitMcpOauthOutput>(SESSION_METHODS.waitMcpOauth, {
+		input: { sessionId, definitionId },
+	});
+}
+
+export async function sendTurn(input: SendTurnInput) {
+	await resolveMcpTurnPreflight(input, {
+		prepareTurn,
+		openAuthorizationUrl: openExternal,
+		waitForOauth: ({ sessionId, definitionId }) =>
+			waitMcpOauth(sessionId, definitionId),
+	});
 	return invoke<SendTurnOutput>(SESSION_METHODS.sendTurn, { input });
 }
 

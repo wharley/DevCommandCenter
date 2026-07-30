@@ -8,7 +8,7 @@ export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration",
 
 export const PROVIDER_METHODS = {"listProviders":"list_providers","providerAccountUsage":"provider_account_usage"} as const;
 
-export const SESSION_METHODS = {"abortRun":"abort_run","approvePlan":"approve_plan","closeSession":"close_session","listMcpRuntimeStatuses":"list_mcp_runtime_statuses","listThreadEvents":"list_thread_events","listWorkspaceSessions":"list_workspace_sessions","recordPlanHandoff":"record_plan_handoff","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","searchSessions":"search_sessions","sendTurn":"send_turn","startMcpOauth":"start_mcp_oauth","startThread":"start_thread"} as const;
+export const SESSION_METHODS = {"abortRun":"abort_run","approvePlan":"approve_plan","closeSession":"close_session","listMcpRuntimeStatuses":"list_mcp_runtime_statuses","listThreadEvents":"list_thread_events","listWorkspaceSessions":"list_workspace_sessions","prepareTurn":"prepare_turn","recordPlanHandoff":"record_plan_handoff","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","searchSessions":"search_sessions","sendTurn":"send_turn","startMcpOauth":"start_mcp_oauth","startThread":"start_thread","waitMcpOauth":"wait_mcp_oauth"} as const;
 
 export const WORKSPACE_METHODS = {"archiveWorkspace":"archive_workspace","archiveWorkspaceBundle":"archive_workspace_bundle","compileMissionSpecContext":"compile_mission_spec_context","completeWorkspace":"complete_workspace","completeWorkspaceBundle":"complete_workspace_bundle","createWorkspaceBundleForRepos":"create_workspace_bundle_for_repos","createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromSourceUrl":"create_workspace_from_source_url","createWorkspaceFromUrl":"create_workspace_from_url","deleteRepository":"delete_repository","deleteWorkspace":"delete_workspace","deleteWorkspaceBundle":"delete_workspace_bundle","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listMissionSpecs":"list_mission_specs","listRepositories":"list_repositories","listWorkspaceBundles":"list_workspace_bundles","listWorkspaces":"list_workspaces","missionSpecContextStatus":"mission_spec_context_status","readWorkspaceFile":"read_workspace_file","resolveWorkspaceSourceUrl":"resolve_workspace_source_url","restoreWorkspace":"restore_workspace","restoreWorkspaceBundle":"restore_workspace_bundle","saveMissionValidation":"save_mission_validation","searchWorkspace":"search_workspace","workspaceApplyDelegationWorktree":"workspace_apply_delegation_worktree","workspaceBackfillForgeRepoBindings":"workspace_backfill_forge_repo_bindings","workspaceChangeRequestCreate":"workspace_change_request_create","workspaceChangeRequestMerge":"workspace_change_request_merge","workspaceChangeRequestViewWeb":"workspace_change_request_view_web","workspaceCoderabbitCliStatus":"workspace_coderabbit_cli_status","workspaceCoderabbitDiffFingerprint":"workspace_coderabbit_diff_fingerprint","workspaceCoderabbitDoctor":"workspace_coderabbit_doctor","workspaceCoderabbitLogout":"workspace_coderabbit_logout","workspaceCoderabbitReview":"workspace_coderabbit_review","workspaceCoderabbitReviewCancel":"workspace_coderabbit_review_cancel","workspaceCoderabbitReviewClear":"workspace_coderabbit_review_clear","workspaceCoderabbitReviewHistory":"workspace_coderabbit_review_history","workspaceCoderabbitReviewJob":"workspace_coderabbit_review_job","workspaceCoderabbitReviewLoad":"workspace_coderabbit_review_load","workspaceCoderabbitReviewSave":"workspace_coderabbit_review_save","workspaceCoderabbitReviewStart":"workspace_coderabbit_review_start","workspaceContinueFromBaseBranch":"workspace_continue_from_base_branch","workspaceDeliveryFailureSnapshot":"workspace_delivery_failure_snapshot","workspaceDeliveryRecoveryExecute":"workspace_delivery_recovery_execute","workspaceForgeCliAccounts":"workspace_forge_cli_accounts","workspaceForgeCliHosts":"workspace_forge_cli_hosts","workspaceForgeCliSelectLogin":"workspace_forge_cli_select_login","workspaceForgeCliStatus":"workspace_forge_cli_status","workspaceForgeContext":"workspace_forge_context","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrMerge":"workspace_gh_pr_merge","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitAbortMerge":"workspace_git_abort_merge","workspaceGitAcceptConflict":"workspace_git_accept_conflict","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitCompleteMerge":"workspace_git_complete_merge","workspaceGitConflictState":"workspace_git_conflict_state","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitFilePreview":"workspace_git_file_preview","workspaceGitFilePreviewContent":"workspace_git_file_preview_content","workspaceGitMarkConflictResolved":"workspace_git_mark_conflict_resolved","workspaceGitPush":"workspace_git_push","workspaceGitStageAll":"workspace_git_stage_all","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitSyncBase":"workspace_git_sync_base","workspaceGitUnstageFile":"workspace_git_unstage_file","workspaceGitValidationConfig":"workspace_git_validation_config","workspaceGithubCliStatus":"workspace_github_cli_status","workspacePipelineJobLog":"workspace_pipeline_job_log","workspacePipelineJobRetry":"workspace_pipeline_job_retry","workspacePipelineStatus":"workspace_pipeline_status","workspacePrReviewComments":"workspace_pr_review_comments","workspacePrStatus":"workspace_pr_status","workspacePrepareDelegationWorktree":"workspace_prepare_delegation_worktree","workspaceProjectAutomationConfig":"workspace_project_automation_config","workspaceRemoveDelegationWorktree":"workspace_remove_delegation_worktree","workspaceRetryRepositoryForgeBinding":"workspace_retry_repository_forge_binding","workspaceReviewState":"workspace_review_state","workspaceRunProjectTasks":"workspace_run_project_tasks","workspaceRunSetup":"workspace_run_setup","workspaceSaveProjectAutomation":"workspace_save_project_automation","writeWorkspaceFile":"write_workspace_file"} as const;
 
@@ -70,6 +70,7 @@ export type CancelDelegationOutput = {
 export type Capabilities = {
 	streaming: boolean,
 	mcpSupport: McpSupportLevel,
+	mcpOauthSupport?: McpOauthSupport,
 	tools: boolean,
 	vision: boolean,
 	resumable: boolean,
@@ -743,6 +744,25 @@ export type McpIntegrationRecord = {
 	oauthProviderIds: ProviderId[],
 };
 
+/**
+ *  Declares how an adapter handles interactive OAuth for DCC-projected MCP
+ *  servers. This is an executable adapter contract, not provider-name
+ *  inference in the renderer.
+ */
+export type McpOauthSupport =
+// The adapter exposes no DCC-controlled interactive OAuth operation.
+"unsupported" |
+/**
+ *  The adapter completes OAuth as part of normal turn attachment and
+ *  withholds the user prompt until the MCP server is ready.
+ */
+"managedDuringTurn" |
+/**
+ *  DCC can start OAuth before the turn and observe completion through the
+ *  provider runtime status channel.
+ */
+"interactivePreflight";
+
 export type McpProbeReport = {
 	definitionId: McpDefinitionId,
 	transport: McpTransportKind,
@@ -855,6 +875,8 @@ export type McpTrustDecision = { type: "untrusted" } | { type: "trusted"; finger
 
 export type McpTrustFingerprint = string;
 
+export type McpTurnPreflightState = { state: "ready" } | { state: "authenticationRequired"; definitionId: McpDefinitionId; authorizationUrl: string };
+
 export type MissionSpecContextFileState = "current" | "missing" | "stale" | "invalid" | "symlink";
 
 export type MissionSpecContextFileStatus = {
@@ -884,6 +906,10 @@ export type MissionValidationEntry = {
 	relativePath: string,
 	content: string,
 	historyRelativePath: string | null,
+};
+
+export type PrepareTurnOutput = {
+	preflight: McpTurnPreflightState,
 };
 
 export type ProjectId = string;
@@ -1249,6 +1275,15 @@ export type Turn = {
 export type TurnId = string;
 
 export type TurnState = "running" | "completed" | "aborted";
+
+export type WaitMcpOauthInput = {
+	sessionId: string,
+	definitionId: string,
+};
+
+export type WaitMcpOauthOutput = {
+	connected: boolean,
+};
 
 export type Workspace = {
 	id: WorkspaceId,

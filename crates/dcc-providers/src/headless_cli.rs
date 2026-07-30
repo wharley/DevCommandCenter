@@ -865,6 +865,7 @@ mod tests {
             Capabilities {
                 streaming: true,
                 mcp_support: dcc_core::domain::provider::McpSupportLevel::Unsupported,
+                mcp_oauth_support: dcc_core::domain::provider::McpOauthSupport::Unsupported,
                 tools: true,
                 vision: false,
                 resumable: false,

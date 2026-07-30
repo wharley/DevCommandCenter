@@ -10,8 +10,9 @@ use dcc_core::domain::session::{SessionEventRecord, SessionSearchResult, Workspa
 use dcc_tauri::{
     commands::session_commands::{
         self as session_command_impl, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
-        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput,
+        PrepareTurnOutput, RespondToPermissionRequestInput, RespondToPermissionRequestOutput,
+        RespondToUserInputInput, RespondToUserInputOutput, SearchSessionsInput, StartMcpOauthInput,
+        StartMcpOauthOutput, WaitMcpOauthInput, WaitMcpOauthOutput,
     },
     state::SessionCommandState,
 };
@@ -32,6 +33,22 @@ pub async fn send_turn(
     input: SendTurnInput,
 ) -> Result<SendTurnOutput, String> {
     session_command_impl::send_turn(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn prepare_turn(
+    state: State<'_, SessionCommandState>,
+    input: SendTurnInput,
+) -> Result<PrepareTurnOutput, String> {
+    session_command_impl::prepare_turn(state, input).await
+}
+
+#[tauri::command]
+pub async fn wait_mcp_oauth(
+    state: State<'_, SessionCommandState>,
+    input: WaitMcpOauthInput,
+) -> Result<WaitMcpOauthOutput, String> {
+    session_command_impl::wait_mcp_oauth(state, input).await
 }
 
 #[tauri::command]

@@ -1,7 +1,7 @@
 # ADR: External MCP integrations
 
 - **Status:** Accepted
-- **Date:** July 28, 2026; amended July 29, 2026
+- **Date:** July 28, 2026; amended July 29 and July 30, 2026
 - **Scope:** DCC consuming external MCP servers
 
 ## Context
@@ -88,6 +88,29 @@ credential reference. Access tokens, refresh tokens, and dynamic client
 registration secrets live together in a versioned credential-store envelope.
 Provider-native grants remain owned by the provider and are never copied into
 DCC storage.
+
+### Turn-bound OAuth negotiation
+
+Interactive OAuth behavior is an adapter capability, not a provider-name check
+in the renderer. An adapter declares one of three contracts:
+
+- `unsupported`: DCC cannot coordinate interactive OAuth for that runtime;
+- `managedDuringTurn`: the adapter withholds the prompt and resolves attachment
+  as part of its own turn lifecycle;
+- `interactivePreflight`: DCC can start OAuth and observe the resulting runtime
+  status before creating the durable turn.
+
+For `interactivePreflight`, DCC first applies the composer's provider, model,
+and runtime selection, attaches the provider session, and resolves each
+reported authentication challenge. The renderer opens only the validated URL
+returned by the backend and waits for the exact definition to become connected.
+Only then is the original `SendTurnInput` committed and sent. Authentication,
+attachment, timeout, trust, and protocol failures therefore do not create a
+failed user turn or require the user to retype the prompt.
+
+The command that finally records the turn repeats the readiness check. This
+keeps non-renderer callers from bypassing preflight and protects against state
+changes between authorization and send.
 
 ### Trust and ownership
 

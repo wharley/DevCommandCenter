@@ -22,7 +22,7 @@ use dcc_core::{
             McpTrustDecision, McpTrustFingerprint,
         },
         project::ProjectId,
-        provider::{McpSupportLevel, ProviderCatalog, ProviderDescriptor},
+        provider::{McpOauthSupport, McpSupportLevel, ProviderCatalog, ProviderDescriptor},
         repository::{Repository, RepositoryId},
         session::{
             Checkpoint, CheckpointId, Session, SessionEventKind, SessionEventRecord, SessionId,
@@ -85,9 +85,10 @@ use dcc_tauri::commands::{
         ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
     },
     session_commands::{
-        ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput, RespondToPermissionRequestInput,
-        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
-        SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput,
+        ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput, McpTurnPreflightState,
+        PrepareTurnOutput, RespondToPermissionRequestInput, RespondToPermissionRequestOutput,
+        RespondToUserInputInput, RespondToUserInputOutput, SearchSessionsInput, StartMcpOauthInput,
+        StartMcpOauthOutput, WaitMcpOauthInput, WaitMcpOauthOutput,
     },
     workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -229,6 +230,7 @@ struct WorkspaceMethods {
 #[serde(rename_all = "camelCase")]
 struct SessionMethods {
     start_thread: String,
+    prepare_turn: String,
     send_turn: String,
     approve_plan: String,
     record_plan_handoff: String,
@@ -239,6 +241,7 @@ struct SessionMethods {
     list_thread_events: String,
     list_mcp_runtime_statuses: String,
     start_mcp_oauth: String,
+    wait_mcp_oauth: String,
     list_workspace_sessions: String,
     search_sessions: String,
     respond_to_user_input: String,
@@ -307,6 +310,7 @@ fn main() {
         .typ::<ProviderCatalog>()
         .typ::<ProviderDescriptor>()
         .typ::<McpSupportLevel>()
+        .typ::<McpOauthSupport>()
         .typ::<dcc_core::domain::provider::ProviderAccountUsage>()
         .typ::<dcc_core::domain::provider::ProviderAccountUsageState>()
         .typ::<dcc_core::domain::provider::ProviderUsageWindow>()
@@ -529,6 +533,8 @@ fn main() {
         .typ::<SetMcpToolPolicyOutput>()
         .typ::<StartThreadInput>()
         .typ::<StartThreadOutput>()
+        .typ::<McpTurnPreflightState>()
+        .typ::<PrepareTurnOutput>()
         .typ::<SendTurnInput>()
         .typ::<SendTurnOutput>()
         .typ::<ApprovePlanInput>()
@@ -547,6 +553,8 @@ fn main() {
         .typ::<ListMcpRuntimeStatusesOutput>()
         .typ::<StartMcpOauthInput>()
         .typ::<StartMcpOauthOutput>()
+        .typ::<WaitMcpOauthInput>()
+        .typ::<WaitMcpOauthOutput>()
         .typ::<RespondToUserInputInput>()
         .typ::<RespondToUserInputOutput>()
         .typ::<RespondToPermissionRequestInput>()
@@ -679,6 +687,7 @@ fn main() {
         "SESSION_METHODS",
         SessionMethods {
             start_thread: "start_thread".to_string(),
+            prepare_turn: "prepare_turn".to_string(),
             send_turn: "send_turn".to_string(),
             approve_plan: "approve_plan".to_string(),
             record_plan_handoff: "record_plan_handoff".to_string(),
@@ -689,6 +698,7 @@ fn main() {
             list_thread_events: "list_thread_events".to_string(),
             list_mcp_runtime_statuses: "list_mcp_runtime_statuses".to_string(),
             start_mcp_oauth: "start_mcp_oauth".to_string(),
+            wait_mcp_oauth: "wait_mcp_oauth".to_string(),
             list_workspace_sessions: "list_workspace_sessions".to_string(),
             search_sessions: "search_sessions".to_string(),
             respond_to_user_input: "respond_to_user_input".to_string(),

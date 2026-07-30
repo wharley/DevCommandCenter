@@ -733,7 +733,7 @@ release-blocking distinction between required and optional providers are in
 
 ## Progress
 
-Updated July 29, 2026:
+Updated July 30, 2026:
 
 - [x] Product and architecture discussion.
 - [x] Current support and market-pattern review.
@@ -743,6 +743,11 @@ Updated July 29, 2026:
   - [x] Replace the inherited MCP boolean with explicit support levels.
   - [x] Audit and downgrade current provider claims.
   - [x] Add provider-version evidence to bridge compatibility results.
+  - [x] Declare provider-owned MCP OAuth lifecycle capabilities.
+- [x] Turn-bound OAuth negotiation.
+  - [x] Keep Claude prompt release inside its adapter-managed attachment wait.
+  - [x] Preflight Codex OAuth before durable turn creation.
+  - [x] Preserve the original prompt across browser authorization and resume.
 - [x] Domain and credential-store foundation.
   - [x] Provider-neutral definitions, transports, bindings, trust, and runtime contracts.
   - [x] SQLite repositories and idempotent startup migrations.

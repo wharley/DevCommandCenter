@@ -1,6 +1,9 @@
 use dcc_core::domain::{
     model_registry,
-    provider::{Capabilities, HealthStatus, McpSupportLevel, ProviderDescriptor, ProviderId},
+    provider::{
+        Capabilities, HealthStatus, McpOauthSupport, McpSupportLevel, ProviderDescriptor,
+        ProviderId,
+    },
 };
 
 use crate::{codex_app_server::CodexAppServerAdapter, common::stable_cli_capabilities};
@@ -27,6 +30,7 @@ pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
 pub fn stable_codex_capabilities() -> Capabilities {
     let mut capabilities = stable_cli_capabilities();
     capabilities.mcp_support = McpSupportLevel::NativeConfig;
+    capabilities.mcp_oauth_support = McpOauthSupport::InteractivePreflight;
     capabilities.can_request_delegation = true;
     capabilities.supports_multi_root = true;
     capabilities

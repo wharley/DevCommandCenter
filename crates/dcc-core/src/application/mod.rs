@@ -41,7 +41,7 @@ pub use resolve_session_mcp::{resolve_session_mcp_servers, ResolveSessionMcpInpu
 pub use restore_session::{restore_session, RestoreSessionInput, RestoreSessionOutput};
 pub use resume_session::{resume_session, ResumeSessionInput, ResumeSessionOutput};
 pub use send_turn::{
-    merge_send_turn_session_selection, send_turn, send_turn_selection_differs_from_session,
-    SendTurnInput, SendTurnOutput,
+    merge_send_turn_session_selection, prepare_session_for_turn, send_turn,
+    send_turn_selection_differs_from_session, SendTurnInput, SendTurnOutput,
 };
 pub use start_thread::{start_thread, StartThreadInput, StartThreadOutput};

@@ -80,6 +80,39 @@ pub fn send_turn_selection_differs_from_session(session: &Session, input: &SendT
     p != session.provider_id || m != session.model || r != session.provider_runtime
 }
 
+/// Applies the composer's provider/model/runtime selection without creating a
+/// turn. Provider adapters can then complete MCP attachment and OAuth
+/// preflight before the user prompt enters durable history.
+pub async fn prepare_session_for_turn<S>(sessions: &S, input: &SendTurnInput) -> Result<Session>
+where
+    S: SessionRepo + Sync,
+{
+    let mut session = sessions
+        .get_session(&input.session_id)
+        .await?
+        .ok_or_else(|| crate::CoreError::Repository("session not found".to_string()))?;
+
+    if session.state != SessionState::Active {
+        return Err(crate::CoreError::InvalidInput(
+            "session must be active to prepare a turn".to_string(),
+        ));
+    }
+
+    let (merged_provider, merged_model, merged_provider_runtime) =
+        merge_send_turn_session_selection(&session, input);
+    if merged_provider != session.provider_id
+        || merged_model != session.model
+        || merged_provider_runtime != session.provider_runtime
+    {
+        session.provider_id = merged_provider;
+        session.model = merged_model;
+        session.provider_runtime = merged_provider_runtime;
+        session.updated_at = now_iso();
+        sessions.save_session(&session).await?;
+    }
+    Ok(session)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SendTurnOutput {
@@ -103,29 +136,7 @@ where
     E: SessionEventRepo + Sync,
     B: EventBus + Sync,
 {
-    let mut session = sessions
-        .get_session(&input.session_id)
-        .await?
-        .ok_or_else(|| crate::CoreError::Repository("session not found".to_string()))?;
-
-    let (merged_provider, merged_model, merged_provider_runtime) =
-        merge_send_turn_session_selection(&session, &input);
-    if merged_provider != session.provider_id
-        || merged_model != session.model
-        || merged_provider_runtime != session.provider_runtime
-    {
-        session.provider_id = merged_provider;
-        session.model = merged_model;
-        session.provider_runtime = merged_provider_runtime;
-        session.updated_at = now_iso();
-        sessions.save_session(&session).await?;
-    }
-
-    if session.state != SessionState::Active {
-        return Err(crate::CoreError::InvalidInput(
-            "session must be active to send a turn".to_string(),
-        ));
-    }
+    let mut session = prepare_session_for_turn(sessions, &input).await?;
 
     let history = session_events
         .list_events_by_session(&input.session_id)
@@ -431,5 +442,60 @@ mod tests {
                 .and_then(|runtime| runtime.home_path.as_deref()),
             Some("/tmp/gemini-home")
         );
+    }
+
+    #[test]
+    fn prepare_session_updates_selection_without_creating_a_turn() {
+        let sessions = FakeSessionRepo::default();
+        let session_events = FakeSessionEventRepo::default();
+        let events = FakeEventBus::default();
+        let session_id = SessionId("session-preflight".to_string());
+
+        sessions
+            .sessions
+            .lock()
+            .expect("sessions lock poisoned")
+            .push(Session {
+                id: session_id.clone(),
+                project_id: crate::domain::project::ProjectId("project-1".to_string()),
+                workspace_id: crate::domain::workspace::WorkspaceId("workspace-1".to_string()),
+                additional_workspace_ids: Vec::new(),
+                provider_id: "claude_code".to_string(),
+                model: Some("claude-sonnet".to_string()),
+                provider_runtime: None,
+                working_directory_override: None,
+                state: SessionState::Active,
+                created_at: "2026-05-01T12:00:00Z".to_string(),
+                updated_at: "2026-05-01T12:00:00Z".to_string(),
+            });
+
+        let prepared = futures::executor::block_on(prepare_session_for_turn(
+            &sessions,
+            &SendTurnInput {
+                session_id,
+                prompt: "must remain pending".to_string(),
+                tool_instructions: None,
+                provider_id: Some("codex".to_string()),
+                model: Some("gpt-5.6".to_string()),
+                provider_runtime: None,
+                plan_mode: None,
+                effort: None,
+                fast_mode: None,
+            },
+        ))
+        .expect("preflight should update the provider selection");
+
+        assert_eq!(prepared.provider_id, "codex");
+        assert_eq!(prepared.model.as_deref(), Some("gpt-5.6"));
+        assert!(session_events
+            .events
+            .lock()
+            .expect("session events lock poisoned")
+            .is_empty());
+        assert!(events
+            .events
+            .lock()
+            .expect("events lock poisoned")
+            .is_empty());
     }
 }

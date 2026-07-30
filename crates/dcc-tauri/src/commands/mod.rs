@@ -37,9 +37,9 @@ pub use mcp_commands::{
 };
 pub use provider_commands::{list_providers, provider_account_usage};
 pub use session_commands::{
-    abort_run, approve_plan, list_mcp_runtime_statuses, list_thread_events, record_plan_handoff,
-    respond_to_permission_request, respond_to_user_input, resume_session, send_turn,
-    start_mcp_oauth, start_thread,
+    abort_run, approve_plan, list_mcp_runtime_statuses, list_thread_events, prepare_turn,
+    record_plan_handoff, respond_to_permission_request, respond_to_user_input, resume_session,
+    send_turn, start_mcp_oauth, start_thread, wait_mcp_oauth,
 };
 pub use workspace_commands::{
     archive_workspace, archive_workspace_bundle, compile_mission_spec_context, complete_workspace,

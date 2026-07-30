@@ -1078,7 +1078,8 @@ export function McpIntegrationsPanel({
 						);
 						const reportedStatus = runtimeView.status;
 						const needsOauth =
-							sessionProviderId === "codex" &&
+							sessionProvider?.capabilities.mcpOauthSupport ===
+								"interactivePreflight" &&
 							reportedStatus?.state === "failed" &&
 							reportedStatus.boundedError?.category === "authentication";
 						const oauthBusy =
