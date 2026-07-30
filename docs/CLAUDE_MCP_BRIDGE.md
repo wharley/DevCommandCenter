@@ -176,6 +176,10 @@ and advertises evidence.
 - The installed SDK stdio configuration has no per-server `cwd` field. The
   Claude adapter rejects definitions that require one instead of silently
   dropping it.
+- The installed Agent SDK reports `needs-auth` and can reconnect an MCP server,
+  but its programmatic query surface does not expose the native interactive
+  OAuth-start operation. DCC therefore reports the authentication failure
+  without presenting a non-functional connection action for Claude sessions.
 - No `verifiedBridge` evidence is persisted or advertised by this slice; the
   final promotion decision remains bound to a reviewed release-candidate
   record.

@@ -18,8 +18,9 @@ pub use mcp_conformance::{
 };
 pub use mcp_probe::{McpProbe, McpProbeResult};
 pub use provider::{
-    Input, Provider, ProviderMcpSecret, ProviderMcpServerConfig, ProviderMcpToolPolicy,
-    ProviderMcpTransport, ProviderRuntimeConfig, ProviderTurnInput, SessionConfig,
+    Input, Provider, ProviderMcpOauthStart, ProviderMcpSecret, ProviderMcpServerConfig,
+    ProviderMcpToolPolicy, ProviderMcpTransport, ProviderRuntimeConfig, ProviderTurnInput,
+    SessionConfig,
 };
 pub use repository::{
     DelegationRepo, McpRepo, ProjectRepo, RepositoryRepo, SessionEventRepo, SessionRepo,

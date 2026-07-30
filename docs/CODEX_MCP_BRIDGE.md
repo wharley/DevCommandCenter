@@ -84,6 +84,16 @@ user-configured Codex entries remain visible to Codex but are ignored by the
 DCC runtime-status projection. Once a thread ID is known, notifications for
 other threads are ignored.
 
+For a DCC-owned server reported as `notLoggedIn`, the selected session can
+explicitly start Codex's native `mcpServer/oauth/login` flow. DCC resolves the
+definition to its private wire name in the backend, requests an authorization
+URL for the active thread, and exposes only a bounded HTTPS (or loopback HTTP)
+URL after rejecting embedded credentials. The renderer opens that URL only
+after the user clicks **Connect with OAuth**. DCC does not receive, persist, or
+render the resulting access or refresh token. A matching
+`mcpServer/oauthLogin/completed` notification triggers a fresh status
+inventory; notifications for unknown wire names or other threads are ignored.
+
 The schema-backed `mcpToolCall` item lifecycle becomes the existing DCC
 tool-started, tool-completed, and tool-failed events. Arguments, results, raw
 provider errors, and random server names do not cross that event boundary.

@@ -1142,6 +1142,9 @@
       },
       "restartHint": "Esta configuração é mais nova que o último estado confirmado do runtime da sessão. Recrie ou reinicie a sessão do provedor para aplicá-la.",
       "notReportedHint": "O provedor não informou um estado para esta integração na sessão selecionada. O DCC não presume sucesso nem falha.",
+      "oauthConnect": "Conectar com OAuth",
+      "oauthHint": "A autorização abre no navegador e permanece sob responsabilidade do runtime do provedor.",
+      "oauthOpened": "Autorização MCP aberta no navegador.",
       "checkedAt": "Última verificação em {{date}}",
       "toolPoliciesTitle": "Políticas das ferramentas",
       "toolPoliciesHint": "Ferramentas desconhecidas usam Perguntar. Permitir ignora a confirmação e Negar bloqueia a execução; alterações valem após recriar ou reiniciar a sessão do provedor. Dicas informadas pelo servidor nunca alteram a política.",
@@ -1233,6 +1236,7 @@
       "deleteCredentials": "Também excluir credenciais do DCC",
       "deleteCredentialsHint": "Deixe desligado para preservar as credenciais separadamente da definição.",
       "errors": {
+        "oauth": "Não foi possível iniciar a autorização MCP.",
         "displayName": "Informe um nome de exibição.",
         "url": "Informe uma URL HTTP ou HTTPS válida e sem credenciais embutidas.",
         "executable": "Informe um executável direto.",

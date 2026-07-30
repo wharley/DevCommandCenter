@@ -1142,6 +1142,9 @@
       },
       "restartHint": "This configuration is newer than the session's last confirmed runtime state. Recreate or restart the provider session to apply it.",
       "notReportedHint": "The provider has not reported a state for this integration in the selected session. DCC does not infer success or failure.",
+      "oauthConnect": "Connect with OAuth",
+      "oauthHint": "Authorization opens in the browser and remains owned by the provider runtime.",
+      "oauthOpened": "MCP authorization opened in the browser.",
       "checkedAt": "Last checked {{date}}",
       "toolPoliciesTitle": "Tool policies",
       "toolPoliciesHint": "Unknown tools default to Ask. Allow bypasses the prompt and Deny blocks execution; changes apply after recreating or restarting the provider session. Server-reported hints never change policy.",
@@ -1233,6 +1236,7 @@
       "deleteCredentials": "Also delete DCC-owned credentials",
       "deleteCredentialsHint": "Leave this off to preserve credentials independently from the definition.",
       "errors": {
+        "oauth": "Could not start MCP authorization.",
         "displayName": "Enter a display name.",
         "url": "Enter a valid HTTP or HTTPS URL without embedded credentials.",
         "executable": "Enter a direct executable.",

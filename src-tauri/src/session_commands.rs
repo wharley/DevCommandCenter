@@ -11,7 +11,7 @@ use dcc_tauri::{
     commands::session_commands::{
         self as session_command_impl, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
         RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, SearchSessionsInput,
+        RespondToUserInputOutput, SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput,
     },
     state::SessionCommandState,
 };
@@ -85,6 +85,14 @@ pub async fn list_mcp_runtime_statuses(
     input: ListMcpRuntimeStatusesInput,
 ) -> Result<ListMcpRuntimeStatusesOutput, String> {
     session_command_impl::list_mcp_runtime_statuses(state, input).await
+}
+
+#[tauri::command]
+pub async fn start_mcp_oauth(
+    state: State<'_, SessionCommandState>,
+    input: StartMcpOauthInput,
+) -> Result<StartMcpOauthOutput, String> {
+    session_command_impl::start_mcp_oauth(state, input).await
 }
 
 #[tauri::command]

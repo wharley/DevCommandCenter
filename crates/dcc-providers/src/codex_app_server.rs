@@ -15,6 +15,7 @@ use futures::{
     stream::{self, BoxStream},
     StreamExt,
 };
+use reqwest::Url;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::{
@@ -28,7 +29,10 @@ use uuid::Uuid;
 use dcc_core::{
     application::{compose_fallback_prompt_for_provider, PromptInjectionOptions},
     domain::{
-        mcp::{McpErrorCategory, McpRuntimeState, McpRuntimeStatus, McpToolPolicyDecision},
+        mcp::{
+            McpDefinitionId, McpErrorCategory, McpRuntimeState, McpRuntimeStatus,
+            McpToolPolicyDecision,
+        },
         provider::{
             Capabilities, HealthStatus, ProviderAccountUsage, ProviderAccountUsageState,
             ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
@@ -37,7 +41,7 @@ use dcc_core::{
     },
     ports::{
         provider::{ProviderPermissionRequest, ProviderPermissionResponse},
-        Input, Provider, ProviderRuntimeConfig, SessionConfig,
+        Input, Provider, ProviderMcpOauthStart, ProviderRuntimeConfig, SessionConfig,
     },
     CoreError, Result,
 };
@@ -1059,6 +1063,7 @@ async fn handle_codex_mcp_elicitation_request(
 const MAX_CODEX_MCP_STATUS_PAGES: usize = 8;
 const MAX_CODEX_MCP_STATUS_ITEMS: usize = 512;
 const MAX_CODEX_MCP_CURSOR_CHARS: usize = 1_024;
+const MAX_CODEX_MCP_AUTHORIZATION_URL_CHARS: usize = 8_192;
 
 async fn refresh_codex_mcp_statuses(runtime: &Arc<SessionRuntime>) {
     let definitions = runtime.mcp_definitions_by_wire_name.lock().await.clone();
@@ -1102,6 +1107,35 @@ async fn refresh_codex_mcp_statuses(runtime: &Arc<SessionRuntime>) {
             "Unable to read Codex MCP status",
         )),
     }
+}
+
+fn validate_codex_mcp_authorization_url(value: &Value) -> Result<String> {
+    let raw = value
+        .get("authorizationUrl")
+        .and_then(Value::as_str)
+        .filter(|value| {
+            !value.trim().is_empty()
+                && value.chars().count() <= MAX_CODEX_MCP_AUTHORIZATION_URL_CHARS
+        })
+        .ok_or_else(|| {
+            CoreError::Provider("Codex returned an invalid MCP OAuth authorization URL".to_string())
+        })?;
+    let parsed = Url::parse(raw).map_err(|_| {
+        CoreError::Provider("Codex returned an invalid MCP OAuth authorization URL".to_string())
+    })?;
+    let is_loopback_http = parsed.scheme() == "http"
+        && parsed
+            .host_str()
+            .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1"));
+    if (parsed.scheme() != "https" && !is_loopback_http)
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(CoreError::Provider(
+            "Codex returned an invalid MCP OAuth authorization URL".to_string(),
+        ));
+    }
+    Ok(raw.to_string())
 }
 
 async fn fetch_codex_mcp_status_snapshot(
@@ -1505,6 +1539,26 @@ impl CodexAppServerAdapter {
                         }
                         continue;
                     }
+                    if method == "mcpServer/oauthLogin/completed" {
+                        let name = params.get("name").and_then(Value::as_str);
+                        let notified_thread_id = params.get("threadId").and_then(Value::as_str);
+                        let thread_id = runtime.thread_id.lock().await.clone();
+                        let definitions = runtime.mcp_definitions_by_wire_name.lock().await.clone();
+                        let belongs_to_runtime =
+                            name.is_some_and(|name| definitions.contains_key(name));
+                        let belongs_to_thread = match (notified_thread_id, thread_id.as_deref()) {
+                            (Some(notified), Some(active)) => notified == active,
+                            (None, Some(_)) => true,
+                            _ => false,
+                        };
+                        if belongs_to_runtime && belongs_to_thread {
+                            let refresh_runtime = runtime.clone();
+                            tokio::spawn(async move {
+                                refresh_codex_mcp_statuses(&refresh_runtime).await;
+                            });
+                        }
+                        continue;
+                    }
                     if method == "error" && should_suppress_codex_error(params, &runtime).await {
                         continue;
                     }
@@ -1717,6 +1771,49 @@ impl Provider for CodexAppServerAdapter {
         Ok(())
     }
 
+    async fn start_mcp_oauth(
+        &self,
+        handle: &SessionHandle,
+        definition_id: &McpDefinitionId,
+    ) -> Result<ProviderMcpOauthStart> {
+        let runtime = self
+            .session_runtime(&handle.session_id)
+            .await
+            .ok_or_else(|| CoreError::Provider("Codex MCP runtime is unavailable".to_string()))?;
+        let thread_id =
+            runtime.thread_id.lock().await.clone().ok_or_else(|| {
+                CoreError::Provider("Codex MCP runtime is unavailable".to_string())
+            })?;
+        let definitions = runtime.mcp_definitions_by_wire_name.lock().await;
+        let wire_name = definitions
+            .iter()
+            .find_map(|(wire_name, candidate)| {
+                (candidate == definition_id).then(|| wire_name.clone())
+            })
+            .ok_or_else(|| {
+                CoreError::Provider(
+                    "MCP integration is not attached to this Codex session".to_string(),
+                )
+            })?;
+        drop(definitions);
+
+        let response = runtime
+            .send_request(
+                "mcpServer/oauth/login",
+                json!({
+                    "name": wire_name,
+                    "scopes": null,
+                    "threadId": thread_id,
+                    "timeoutSecs": 300,
+                }),
+            )
+            .await
+            .map_err(|_| CoreError::Provider("MCP OAuth login could not start".to_string()))?;
+        Ok(ProviderMcpOauthStart {
+            authorization_url: validate_codex_mcp_authorization_url(&response)?,
+        })
+    }
+
     fn stream_events(&self, handle: &SessionHandle) -> BoxStream<'static, Result<ProviderEvent>> {
         let runtime = self
             .state
@@ -1872,6 +1969,29 @@ mod tests {
         assert!(validate_codex_mcp_projection(
             projection.as_ref(),
             &json!({ "userAgent": "malformed" }),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn validates_mcp_oauth_authorization_urls_before_exposing_them() {
+        assert_eq!(
+            validate_codex_mcp_authorization_url(
+                &json!({ "authorizationUrl": "https://app.clickup.com/api?state=test" })
+            )
+            .expect("https authorization URL should be accepted"),
+            "https://app.clickup.com/api?state=test"
+        );
+        assert!(validate_codex_mcp_authorization_url(
+            &json!({ "authorizationUrl": "http://127.0.0.1:43123/callback" })
+        )
+        .is_ok());
+        assert!(validate_codex_mcp_authorization_url(
+            &json!({ "authorizationUrl": "http://example.com/oauth" })
+        )
+        .is_err());
+        assert!(validate_codex_mcp_authorization_url(
+            &json!({ "authorizationUrl": "https://user:secret@example.com/oauth" })
         )
         .is_err());
     }

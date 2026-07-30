@@ -14,6 +14,11 @@ use crate::{
     Result,
 };
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderMcpOauthStart {
+    pub authorization_url: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub struct SessionConfig {
     pub workspace_id: WorkspaceId,
@@ -208,6 +213,15 @@ pub trait Provider: Send + Sync {
     }
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle>;
     async fn send_input(&self, handle: &SessionHandle, input: Input) -> Result<()>;
+    async fn start_mcp_oauth(
+        &self,
+        _handle: &SessionHandle,
+        _definition_id: &McpDefinitionId,
+    ) -> Result<ProviderMcpOauthStart> {
+        Err(crate::CoreError::Provider(
+            "MCP OAuth is not supported by this provider runtime".to_string(),
+        ))
+    }
     fn stream_events(&self, handle: &SessionHandle) -> BoxStream<'static, Result<ProviderEvent>>;
     async fn cancel(&self, handle: &SessionHandle) -> Result<()>;
     async fn resume(&self, previous: &SessionId) -> Result<SessionHandle>;

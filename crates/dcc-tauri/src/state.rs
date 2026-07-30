@@ -28,9 +28,9 @@ use dcc_core::{
         workspace_bundle::WorkspaceBundleState,
     },
     ports::{
-        DelegationRepo, EventBus, Input, ProjectRepo, Provider, ProviderMcpServerConfig,
-        ProviderRuntimeConfig, RepositoryRepo, SessionConfig, SessionEventRepo, SessionRepo,
-        ThreadRepo, WorkspaceBundleRepo, WorkspaceRepo,
+        DelegationRepo, EventBus, Input, ProjectRepo, Provider, ProviderMcpOauthStart,
+        ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo, SessionConfig,
+        SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceBundleRepo, WorkspaceRepo,
     },
     Result,
 };
@@ -1147,6 +1147,28 @@ impl SessionCommandState {
             other => other,
         };
         provider.send_input(&binding.handle, input).await
+    }
+
+    pub async fn start_mcp_oauth(
+        &self,
+        session_id: &SessionId,
+        definition_id: &dcc_core::domain::mcp::McpDefinitionId,
+    ) -> Result<ProviderMcpOauthStart> {
+        let binding = self.provider_binding(session_id)?.ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "no provider binding for session {}",
+                session_id.0
+            ))
+        })?;
+        let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "unknown provider runtime: {}",
+                binding.provider_id
+            ))
+        })?;
+        provider
+            .start_mcp_oauth(&binding.handle, definition_id)
+            .await
     }
 
     async fn multi_workspace_scope_instructions(

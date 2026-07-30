@@ -9,6 +9,7 @@ import {
 	Command,
 	Globe2,
 	KeyRound,
+	Link2,
 	Loader2,
 	Plus,
 	Power,
@@ -43,7 +44,9 @@ import { toast } from "sonner";
 import {
 	listenMcpRuntimeStatusEvents,
 	loadMcpRuntimeStatuses,
+	startMcpOauth,
 } from "@/lib/session-api";
+import { openExternal } from "@/lib/shell-api";
 import {
 	buildMcpIntegrationInput,
 	createMcpIntegrationDraft,
@@ -399,6 +402,28 @@ export function McpIntegrationsPanel({
 				error instanceof Error
 					? error.message
 					: t("settings.integrations.errors.toolPolicy"),
+			);
+		} finally {
+			setBusyAction(null);
+		}
+	};
+
+	const handleMcpOauth = async (integration: McpIntegrationRecord) => {
+		if (!sessionId) return;
+		const action = `oauth:${integration.definition.id}`;
+		setBusyAction(action);
+		try {
+			const result = await startMcpOauth({
+				sessionId,
+				definitionId: integration.definition.id,
+			});
+			await openExternal(result.authorizationUrl);
+			toast.success(t("settings.integrations.oauthOpened"));
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: t("settings.integrations.errors.oauth"),
 			);
 		} finally {
 			setBusyAction(null);
@@ -1023,6 +1048,12 @@ export function McpIntegrationsPanel({
 							},
 						);
 						const reportedStatus = runtimeView.status;
+						const needsOauth =
+							sessionProviderId === "codex" &&
+							reportedStatus?.state === "failed" &&
+							reportedStatus.boundedError?.category === "authentication";
+						const oauthBusy =
+							busyAction === `oauth:${definition.id}`;
 						const tools = listMcpIntegrationTools(
 							integration,
 							reportedStatus?.tools ?? [],
@@ -1264,6 +1295,27 @@ export function McpIntegrationsPanel({
 										<p className="mt-2 break-words text-[11px] leading-relaxed text-destructive">
 											{reportedStatus.boundedError.message}
 										</p>
+									) : null}
+									{needsOauth ? (
+										<div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/50 pt-3">
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												disabled={busyAction !== null}
+												onClick={() => void handleMcpOauth(integration)}
+											>
+												{oauthBusy ? (
+													<Loader2 className="size-3.5 animate-spin" />
+												) : (
+													<Link2 className="size-3.5" />
+												)}
+												{t("settings.integrations.oauthConnect")}
+											</Button>
+											<span className="text-[10px] leading-relaxed text-muted-foreground">
+												{t("settings.integrations.oauthHint")}
+											</span>
+										</div>
 									) : null}
 									{reportedStatus ? (
 										<p className="mt-2 text-[10px] text-muted-foreground">

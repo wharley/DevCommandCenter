@@ -14,7 +14,7 @@ use dcc_core::{
         ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
     },
     domain::{
-        mcp::McpRuntimeStatus,
+        mcp::{McpDefinitionId, McpErrorCategory, McpRuntimeState, McpRuntimeStatus},
         session::{SessionEventRecord, SessionId, SessionSearchResult, WorkspaceSessionSummary},
     },
     ports::{
@@ -73,6 +73,19 @@ pub struct ListMcpRuntimeStatusesInput {
 #[serde(rename_all = "camelCase")]
 pub struct ListMcpRuntimeStatusesOutput {
     pub statuses: Vec<McpRuntimeStatus>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StartMcpOauthInput {
+    pub session_id: String,
+    pub definition_id: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StartMcpOauthOutput {
+    pub authorization_url: String,
 }
 
 fn default_search_limit() -> usize {
@@ -249,6 +262,40 @@ pub async fn list_mcp_runtime_statuses(
         .list_mcp_runtime_statuses(&session_id)
         .map_err(|error| error.to_string())?;
     Ok(ListMcpRuntimeStatusesOutput { statuses })
+}
+
+#[tauri::command]
+pub async fn start_mcp_oauth(
+    state: State<'_, SessionCommandState>,
+    input: StartMcpOauthInput,
+) -> Result<StartMcpOauthOutput, String> {
+    let session_id = SessionId(input.session_id.trim().to_string());
+    let definition_id = McpDefinitionId(input.definition_id.trim().to_string());
+    if session_id.0.is_empty() || definition_id.0.is_empty() {
+        return Err("sessionId and definitionId are required".to_string());
+    }
+    let status = state
+        .list_mcp_runtime_statuses(&session_id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|status| status.definition_id == definition_id)
+        .ok_or_else(|| "MCP integration is not attached to this session".to_string())?;
+    let requires_authentication = status.state == McpRuntimeState::Failed
+        && status
+            .bounded_error
+            .as_ref()
+            .is_some_and(|error| error.category == McpErrorCategory::Authentication);
+    if !requires_authentication {
+        return Err("MCP integration does not require authentication".to_string());
+    }
+
+    let result = state
+        .start_mcp_oauth(&session_id, &definition_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(StartMcpOauthOutput {
+        authorization_url: result.authorization_url,
+    })
 }
 
 #[tauri::command]

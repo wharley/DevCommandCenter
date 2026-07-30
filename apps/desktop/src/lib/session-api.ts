@@ -28,6 +28,8 @@ import type {
 	ResumeSessionOutput,
 	SendTurnInput,
 	SendTurnOutput,
+	StartMcpOauthInput,
+	StartMcpOauthOutput,
 	StartThreadInput,
 	StartThreadOutput,
 } from "@dcc/contracts";
@@ -94,6 +96,10 @@ export function loadMcpRuntimeStatuses(sessionId: string) {
 		SESSION_METHODS.listMcpRuntimeStatuses,
 		{ input: { sessionId } },
 	);
+}
+
+export function startMcpOauth(input: StartMcpOauthInput) {
+	return invoke<StartMcpOauthOutput>(SESSION_METHODS.startMcpOauth, { input });
 }
 
 export async function listenMcpRuntimeStatusEvents(
