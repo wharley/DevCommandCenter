@@ -20,6 +20,7 @@ import type { WorkspaceSummary } from "./types";
 import {
 	initialsFromWorkspaceLabel,
 	workspaceRailDisplayTitle,
+	workspaceRailStatusTakesRecapSlot,
 } from "./workspace-rail-shared";
 
 const rowVariants = cva(
@@ -167,13 +168,15 @@ export const WorkspaceRailRowItem = memo(
 			recapMessage && railRecap?.prTitle
 				? `${recapMessage} — ${railRecap.prTitle}`
 				: recapMessage ?? undefined;
-		const hasPriorityWorkspaceStatus =
-			workspace.status === "initializing" ||
-			workspace.status === "setup_pending";
+		const hasPriorityWorkspaceStatus = workspaceRailStatusTakesRecapSlot(
+			workspace.status,
+			Boolean(recapMessage),
+		);
 		const workspaceStatusMessage =
 			workspace.status === "initializing"
 				? t("sidebar.workspaceState.initializing")
-				: workspace.status === "setup_pending"
+				: workspace.status === "setup_pending" &&
+						hasPriorityWorkspaceStatus
 					? t("sidebar.workspaceState.setupPending")
 					: workspace.status === "ready" && !activity && !recapMessage
 						? t("sidebar.workspaceState.readyToStart")

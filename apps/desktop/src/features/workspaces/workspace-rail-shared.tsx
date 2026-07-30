@@ -67,6 +67,18 @@ export function workspaceRailDisplayTitle(
 	return branch.length > 0 ? humanizeWorkspaceBranchLabel(branch) : name;
 }
 
+/**
+ * Initializing owns the secondary rail line because the workspace is not ready
+ * yet. Setup pending is a fallback hint: once useful recap data exists, the
+ * recap is more actionable and keeps the line.
+ */
+export function workspaceRailStatusTakesRecapSlot(
+	status: WorkspaceSummary["status"],
+	hasRecap: boolean,
+): boolean {
+	return status === "initializing" || (status === "setup_pending" && !hasRecap);
+}
+
 export function findSelectedRailSectionId(
 	selectedWorkspaceId: string | null | undefined,
 	groups: DccWorkspaceRailGroup[],
