@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import {
 	existsSync,
 	readFileSync,
+	readdirSync,
 	statSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 
 import {
@@ -122,6 +125,7 @@ test("projects remote HTTPS servers through the bundled ephemeral OAuth proxy", 
 	]);
 	assert.deepEqual(remote.env, {
 		MCP_REMOTE_CONFIG_DIR: "/private/session/oauth",
+		DCC_MCP_REMOTE_STATE_DIR: "/private/session/oauth/state",
 		[`DCC_MCP_REMOTE_HEADER_${authorizationIdentity}`]:
 			"Bearer secret-canary",
 		[`DCC_MCP_REMOTE_HEADER_${tenantIdentity}`]: "tenant-a",
@@ -130,6 +134,70 @@ test("projects remote HTTPS servers through the bundled ephemeral OAuth proxy", 
 	assert.equal(runtimeProjection.servers["dcc-loopback"].type, "http");
 	assert.equal(runtimeProjection.definitionIds, projection.definitionIds);
 	assert.equal(runtimeProjection.toolPolicies, projection.toolPolicies);
+});
+
+test("the pinned mcp-remote bundle writes into the DCC private state directory", async () => {
+	const require = createRequire(import.meta.url);
+	const packageJsonPath = require.resolve("mcp-remote/package.json");
+	const packageDirectory = dirname(packageJsonPath);
+	const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+	assert.equal(packageJson.version, "0.1.38");
+
+	const chunks = readdirSync(join(packageDirectory, "dist"))
+		.filter((name) => /^chunk-[A-Za-z0-9]+\.js$/.test(name))
+		.map((name) => join(packageDirectory, "dist", name))
+		.filter((path) =>
+			readFileSync(path, "utf8").includes("function getConfigDir()"),
+		);
+	assert.equal(chunks.length, 1);
+
+	const projection = normalizeDccMcpServers([
+		{
+			definitionId: "remote",
+			name: "dcc-remote",
+			transport: {
+				type: "http",
+				url: "https://mcp.example.com/mcp",
+				headers: {},
+			},
+		},
+	]);
+	const bridge = createEphemeralMcpOAuthBridge(import.meta.url);
+	const runtimeProjection = bridge.project(projection);
+	const stateDirectory =
+		runtimeProjection.servers["dcc-remote"].env.DCC_MCP_REMOTE_STATE_DIR;
+	const serverHash = createHash("md5")
+		.update("https://mcp.example.com/mcp")
+		.digest("hex");
+	const previousStateDirectory = process.env.DCC_MCP_REMOTE_STATE_DIR;
+	process.env.DCC_MCP_REMOTE_STATE_DIR = stateDirectory;
+	try {
+		const { NodeOAuthClientProvider } = await import(
+			pathToFileURL(chunks[0]).href
+		);
+		const provider = new NodeOAuthClientProvider({
+			serverUrl: "https://mcp.example.com/mcp",
+			serverUrlHash: serverHash,
+			host: "127.0.0.1",
+			callbackPort: 3335,
+		});
+		await provider.saveTokens({
+			access_token: "upstream-fixture-access-token",
+			token_type: "bearer",
+		});
+		assert.equal(
+			existsSync(join(stateDirectory, `${serverHash}_tokens.json`)),
+			true,
+		);
+		assert.equal(bridge.collectUpdates().length, 1);
+	} finally {
+		if (previousStateDirectory === undefined) {
+			delete process.env.DCC_MCP_REMOTE_STATE_DIR;
+		} else {
+			process.env.DCC_MCP_REMOTE_STATE_DIR = previousStateDirectory;
+		}
+		bridge.cleanup();
+	}
 });
 
 test("keeps OAuth files private to the provider session and removes them", () => {
@@ -148,10 +216,14 @@ test("keeps OAuth files private to the provider session and removes them", () =>
 	const runtimeProjection = bridge.project(projection);
 	const authConfigDir =
 		runtimeProjection.servers["dcc-remote"].env.MCP_REMOTE_CONFIG_DIR;
+	const stateDirectory =
+		runtimeProjection.servers["dcc-remote"].env.DCC_MCP_REMOTE_STATE_DIR;
 
 	assert.equal(existsSync(authConfigDir), true);
+	assert.equal(existsSync(stateDirectory), true);
 	if (process.platform !== "win32") {
 		assert.equal(statSync(authConfigDir).mode & 0o777, 0o700);
+		assert.equal(statSync(stateDirectory).mode & 0o777, 0o700);
 	}
 
 	bridge.cleanup();
@@ -189,7 +261,8 @@ test("restores and captures provider-neutral OAuth state in the private session 
 	const authConfigDir =
 		runtimeProjection.servers["dcc-remote"].env.MCP_REMOTE_CONFIG_DIR;
 	const serverHash = createHash("md5").update(serverUrl).digest("hex");
-	const stateDirectory = join(authConfigDir, "mcp-remote-0.1.38");
+	const stateDirectory =
+		runtimeProjection.servers["dcc-remote"].env.DCC_MCP_REMOTE_STATE_DIR;
 	const tokensPath = join(stateDirectory, `${serverHash}_tokens.json`);
 	const clientInfoPath = join(
 		stateDirectory,

@@ -13,7 +13,9 @@ import { fileURLToPath } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageDir = path.join(scriptDir, "..", "node_modules", "mcp-remote");
 const packageJsonPath = path.join(packageDir, "package.json");
-const marker = "/* dcc: propagate negotiated MCP protocol version */";
+const protocolMarker = "/* dcc: propagate negotiated MCP protocol version */";
+const stateDirectoryMarker =
+	"/* dcc: use the exact private OAuth state directory when provided */";
 
 if (!fs.existsSync(packageJsonPath)) {
 	console.warn("[patch-mcp-remote] skip: node_modules/mcp-remote missing");
@@ -44,26 +46,26 @@ if (candidates.length !== 1) {
 
 const target = candidates[0];
 let source = fs.readFileSync(target, "utf8");
-if (source.includes(marker)) {
-	console.log("[patch-mcp-remote] protocol version propagation already applied");
-	process.exit(0);
-}
+let changed = false;
 
-const stateBefore = `  let transportToClientClosed = false;
+if (source.includes(protocolMarker)) {
+	console.log("[patch-mcp-remote] protocol version propagation already applied");
+} else {
+	const stateBefore = `  let transportToClientClosed = false;
   let transportToServerClosed = false;`;
-const stateAfter = `  ${marker}
+	const stateAfter = `  ${protocolMarker}
   let initializeRequestId = null;
   let transportToClientClosed = false;
   let transportToServerClosed = false;`;
-const requestBefore = `    if (message.method === "initialize") {
+	const requestBefore = `    if (message.method === "initialize") {
       const { clientInfo } = message.params;`;
-const requestAfter = `    if (message.method === "initialize") {
+	const requestAfter = `    if (message.method === "initialize") {
       initializeRequestId = message.id;
       const { clientInfo } = message.params;`;
-const responseBefore = `  transportToServer.onmessage = (_message) => {
+	const responseBefore = `  transportToServer.onmessage = (_message) => {
     const message = messageTransformer.interceptResponse(_message);
     log("[Remote\\u2192Local]", message.method || message.id);`;
-const responseAfter = `  transportToServer.onmessage = (_message) => {
+	const responseAfter = `  transportToServer.onmessage = (_message) => {
     const message = messageTransformer.interceptResponse(_message);
     if (initializeRequestId !== null && message.id === initializeRequestId && typeof message.result?.protocolVersion === "string") {
       transportToServer.setProtocolVersion(message.result.protocolVersion);
@@ -71,16 +73,43 @@ const responseAfter = `  transportToServer.onmessage = (_message) => {
     }
     log("[Remote\\u2192Local]", message.method || message.id);`;
 
-for (const [before, after, label] of [
-	[stateBefore, stateAfter, "state"],
-	[requestBefore, requestAfter, "initialize request"],
-	[responseBefore, responseAfter, "initialize response"],
-]) {
-	if (!source.includes(before)) {
-		throw new Error(`[patch-mcp-remote] ${label} snippet not found`);
+	for (const [before, after, label] of [
+		[stateBefore, stateAfter, "state"],
+		[requestBefore, requestAfter, "initialize request"],
+		[responseBefore, responseAfter, "initialize response"],
+	]) {
+		if (!source.includes(before)) {
+			throw new Error(`[patch-mcp-remote] ${label} snippet not found`);
+		}
+		source = source.replace(before, after);
 	}
-	source = source.replace(before, after);
+	changed = true;
 }
 
-fs.writeFileSync(target, source);
-console.log("[patch-mcp-remote] protocol version propagation applied");
+if (source.includes(stateDirectoryMarker)) {
+	console.log("[patch-mcp-remote] private OAuth state directory already applied");
+} else {
+	const directoryBefore = `function getConfigDir() {
+  const baseConfigDir = process.env.MCP_REMOTE_CONFIG_DIR || path.join(os.homedir(), ".mcp-auth");
+  return path.join(baseConfigDir, \`mcp-remote-\${version2}\`);
+}`;
+	const directoryAfter = `function getConfigDir() {
+  ${stateDirectoryMarker}
+  const dccStateDirectory = process.env.DCC_MCP_REMOTE_STATE_DIR;
+  if (dccStateDirectory) return dccStateDirectory;
+  const baseConfigDir = process.env.MCP_REMOTE_CONFIG_DIR || path.join(os.homedir(), ".mcp-auth");
+  return path.join(baseConfigDir, \`mcp-remote-\${version2}\`);
+}`;
+	if (!source.includes(directoryBefore)) {
+		throw new Error(
+			"[patch-mcp-remote] OAuth state directory snippet not found",
+		);
+	}
+	source = source.replace(directoryBefore, directoryAfter);
+	changed = true;
+}
+
+if (changed) {
+	fs.writeFileSync(target, source);
+	console.log("[patch-mcp-remote] DCC compatibility patches applied");
+}

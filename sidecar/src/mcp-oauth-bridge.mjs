@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 const AUTH_DIRECTORY_PREFIX = "dcc-claude-mcp-oauth-";
 const HEADER_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 const AUTH_TIMEOUT_SECONDS = "180";
-const MCP_REMOTE_STATE_DIRECTORY = "mcp-remote-0.1.38";
+const MCP_REMOTE_STATE_DIRECTORY = "state";
 const OAUTH_STATE_VERSION = 1;
 const MAX_OAUTH_STATE_BYTES = 64 * 1024;
 
@@ -133,6 +133,7 @@ export function projectRemoteHttpServersThroughOAuthProxy(
 		];
 		const env = {
 			MCP_REMOTE_CONFIG_DIR: launcher.authConfigDir,
+			DCC_MCP_REMOTE_STATE_DIR: remoteStateDirectory(launcher.authConfigDir),
 		};
 		const proxyHeaders = {};
 		for (const [headerName, headerValue] of Object.entries(

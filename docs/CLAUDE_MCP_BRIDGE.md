@@ -113,7 +113,11 @@ policy.
 protocol version to its HTTP transport. The postinstall patch sets that
 version so subsequent requests carry `MCP-Protocol-Version`. It fails closed if
 the pinned package layout or version changes, and the local strict HTTP fixture
-exercises `initialize` followed by `tools/list`.
+exercises `initialize` followed by `tools/list`. The published package also
+embeds an older internal version in its state-directory name. The same pinned
+patch makes the proxy honor the exact private state directory supplied by DCC,
+so capture and restoration do not depend on inconsistent or future upstream
+directory names.
 
 The Agent SDK can report a projected server as `pending` while its OAuth
 callback and tool discovery are still completing. For queries with DCC-owned
