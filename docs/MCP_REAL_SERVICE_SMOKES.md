@@ -5,8 +5,11 @@ and Codex adapters against real services. They are intentionally separate from
 the offline conformance suite, ignored by default, and never selected by normal
 CI.
 
-Status as of July 28, 2026: the harness and offline configuration tests are
-implemented; no authenticated real-service run has been recorded yet.
+Status as of July 30, 2026: the harness and offline configuration tests are
+implemented. Separately from this opt-in harness, a ClickUp remote OAuth server
+passed manual read-only validation through the production Claude and Codex
+bridges on macOS. That result covers the generic remote OAuth Preview flow; it
+does not claim that either branded target below has been executed.
 
 The first targets are:
 

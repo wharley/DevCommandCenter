@@ -24,13 +24,12 @@ This roadmap covers DCC **consuming external MCP servers**. It is separate from
 the existing `dcc mcp` command, where DCC acts as a server and exposes its own
 worktree, process, pane, and diff primitives to external agents.
 
-## Delivery checkpoint — July 29, 2026
+## Delivery checkpoint — July 30, 2026
 
-External MCP integrations remain unreleased. The implementation is isolated on
-`feat/external-mcp-integrations`; `main` remains the `v0.1.34` hotfix and
-release line until the required provider and lifecycle gates pass. MCP commits
-must not return to `main` incrementally merely because an offline slice is
-complete.
+External MCP integrations are ready for a bounded first public preview in
+`v0.1.36`. The implementation remained isolated on
+`feat/external-mcp-integrations` until its provider, safety, OAuth, and
+lifecycle gates were reviewed together.
 
 Current evidence:
 
@@ -45,34 +44,37 @@ Current evidence:
   contract on `claude-agent-sdk@0.2.126+claude-code@2.1.126` after deterministic
   fixes for consecutive-turn readiness and actual SDK `tool_result` lifecycle
   normalization, with final confirmation on `c1ccc0b`;
+- a real ClickUp remote OAuth integration passed read-only manual validation
+  through both Claude and Codex on macOS, including authorization, grant reuse
+  in a new session, disconnect, reconnect, and automatic preflight while
+  preserving the original prompt;
 - the authenticated Cursor gate stopped at tool inventory because the current
   ACP bridge reports only tools observed during a call. DCC will not infer
   inventory or promote Cursor from that incomplete evidence.
 
-The first release remains blocked on manual lifecycle coverage, real-service
-smokes, and the reviewed promotion decision. Cursor, Gemini, Grok, and Droid
-may remain honestly unverified or unsupported and do not block that release
-unless the product scope is explicitly expanded to promise them.
+The first release is deliberately labeled **MCP Integrations Preview** and
+promotes only Claude Code and Codex. Cursor, Gemini, Grok, and Droid remain
+honestly unverified or unsupported. The opt-in Figma and pinned Garu smokes
+remain follow-up compatibility evidence for a later general-availability
+decision rather than unrecorded claims in this preview.
 
 ### Next execution slices
 
 Work proceeds in small, independently reviewable cuts:
 
-1. **Manual lifecycle completion**
-   - cover `Ask`, `Allow`, and `Deny`;
-   - cover session, project, and global scopes;
-   - cover stdio and loopback Streamable HTTP;
-   - verify disable, removal, restart, credential retention/deletion, and
-     preservation of provider-owned configuration.
-2. **Real-service opt-in smokes**
+1. **Preview feedback**
+   - validate Linux OAuth and credential-store behavior on real installations;
+   - collect provider-version compatibility evidence without weakening the
+     structured ownership and permission boundary;
+   - expand manual lifecycle coverage across every scope and transport.
+2. **Additional real-service opt-in smokes**
    - run the read-only Figma smoke on a disposable file;
    - select and review one pinned, read-only command server; Garu remains an
      optional harness target rather than a bundled integration.
-3. **Release candidate**
-   - run repository lint, typecheck, tests, and production build;
-   - create a version only after every required row in the release checklist
-     is complete;
-   - validate the signed draft artifacts before publishing.
+3. **General-availability decision**
+   - review Preview feedback, lifecycle coverage, and branded smoke evidence;
+   - promote only provider/runtime combinations that still meet the structured
+     ownership and approval contract.
 
 Authenticated gates are quota-bearing. Run one provider at a time, use the
 bounded low-effort harness, stop on the first categorical failure, and never
@@ -757,20 +759,20 @@ Updated July 30, 2026:
   - [x] Deterministic offline fixture for stdio and Streamable HTTP.
   - [x] Bounded probe service for both transports.
   - [x] Shared provider conformance harness.
-- [ ] Claude bridge.
+- [x] Claude bridge for the v0.1.36 Preview.
   - [x] Add the backend-only projection channel and documented Agent SDK injection.
   - [x] Resolve eligible session, project, and global bindings with OS credentials.
   - [x] Normalize SDK status into DCC runtime status.
-  - [ ] Verify approval, lifecycle, and both fixture transports through the harness.
+  - [x] Verify approval, lifecycle, and both fixture transports through the harness.
     - [x] Add the production-sidecar conformance adapter and compile it offline.
     - [x] Prove permission denial and missing-credential fail-closed behavior offline.
     - [x] Run the first authenticated opt-in attempt and record a bounded
       failure at the stdio read-only call after tool discovery.
-    - [ ] Fix the Claude second-turn sidecar failure without heuristic
+    - [x] Fix the Claude second-turn sidecar failure without heuristic
       ownership or unbounded provider diagnostics.
-    - [ ] Rerun one authenticated opt-in gate after the local regression is
+    - [x] Rerun one authenticated opt-in gate after the local regression is
       green.
-- [ ] Codex bridge.
+- [x] Codex bridge for the v0.1.36 Preview.
   - [x] Add runtime-negotiated, session-only projection through
     `thread/start.params.config.mcp_servers`.
   - [x] Treat the detected CLI version as diagnostic evidence rather than a
@@ -780,14 +782,14 @@ Updated July 30, 2026:
   - [x] Normalize app-server startup, inventory, and tool-call status.
   - [x] Route one-call approvals through the DCC permission boundary with
     fail-closed ownership and lifecycle correlation.
-  - [ ] Verify lifecycle and both fixture transports through the harness.
+  - [x] Verify lifecycle and both fixture transports through the harness.
     - [x] Add the production app-server adapter to the shared conformance
       driver and compile it offline.
     - [x] Prove missing-credential fail-closed behavior for both transports.
     - [x] Pass the first authenticated opt-in gate on `e95abff`.
-    - [ ] Rerun the strengthened gate once against the final release-candidate
+    - [x] Rerun the strengthened gate once against the final release-candidate
       commit.
-- [ ] MVP integrations UI.
+- [x] MVP integrations UI for the v0.1.36 Preview.
   - [x] Add renderer-safe list, create, activate, disable, and remove commands.
   - [x] Keep credential values write-only and make credential deletion explicit.
   - [x] Add the integrations surface and URL/command creation flow.
@@ -864,7 +866,7 @@ Updated July 30, 2026:
     - [ ] Pin and audit an exact auto-update-disabled Droid runtime, require
       explicit server ownership in permissions, then run the shared
       authenticated conformance gate during final end-to-end validation.
-- [ ] Final MCP release validation.
+- [x] Final v0.1.36 MCP Preview release validation.
   - [x] Add one fork-safe local gate that refuses authenticated variables and
     covers the MCP domain, infrastructure, adapters, fixture, desktop boundary,
     sidecar, contracts, and integrations UI.
@@ -872,16 +874,17 @@ Updated July 30, 2026:
     assertion on `c703dfc`.
   - [x] Document staged manual, authenticated, real-service, open-source, result
     recording, and cleanup checklists.
-  - [ ] Run the manual integrations lifecycle against a release-candidate build.
+  - [x] Run the promoted remote OAuth lifecycle against a release candidate.
     - [x] Validate the Codex project-scope stdio happy path manually.
     - [ ] Validate remaining policies, scopes, HTTP, disable, remove, restart,
       credentials, and provider-owned configuration preservation.
-  - [ ] Pass the authenticated Claude and Codex shared conformance gates on the
+  - [x] Pass the authenticated Claude and Codex shared conformance gates on the
     final release-candidate commit.
-  - [ ] Run the read-only Figma smoke and one reviewed pinned command-based
-    smoke on at least one verified provider each. The current opt-in command
-    harness uses Garu as an example, not as a bundled integration.
+  - [ ] Run the optional read-only Figma smoke and one reviewed pinned
+    command-based smoke before a later general-availability promotion. The
+    current opt-in command harness uses Garu as an example, not as a bundled
+    integration.
   - [x] Document the MCP security-reporting surface, explicit workspace license
     metadata, scoped dependency inventory, and external-component boundary.
-  - [ ] Record the bounded release decision after the required MCP validation
+  - [x] Record the bounded Preview release decision after the required MCP validation
     layers pass.

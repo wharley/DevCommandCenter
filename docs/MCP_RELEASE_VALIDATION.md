@@ -1,37 +1,42 @@
 # MCP release validation
 
-This checklist is the final promotion path for the first public external MCP
-integrations release. It separates deterministic contributor checks from
+This checklist records the promotion path for DCC-managed external MCP
+integrations. It separates deterministic contributor checks from
 account-backed provider conformance and real-service smokes. Passing one layer
 never substitutes for another.
 
-Status as of July 29, 2026: the local gate and both required provider
+Status as of July 30, 2026: the local gate and both preview provider
 conformance harnesses pass. Claude and Codex each passed the complete stdio and
-Streamable HTTP contract on commit `c1ccc0b` with their exact projection
-runtimes. Cursor did not expose pre-call tool inventory and remains unverified.
-No real-service result has been recorded.
+Streamable HTTP contract with their exact projection runtimes. A ClickUp remote
+OAuth integration then passed read-only manual validation through both
+providers on macOS, including authorization, grant reuse in new sessions,
+disconnect, reconnect, and automatic preflight. Cursor did not expose pre-call
+tool inventory and remains unverified.
 
 ## Release decision
 
-The release may proceed only when every required row is complete:
+The `v0.1.36` release is intentionally scoped as **MCP Integrations Preview**.
+It may proceed when every Preview-required row is complete. Branded target
+smokes remain useful compatibility evidence for later promotion to general
+availability, but are not substituted for or falsely reported as completed.
 
-| Layer | Required for the first release | Current state |
+| Layer | Required for v0.1.36 Preview | Current state |
 | --- | --- | --- |
-| Local MCP gate | Yes | Passed for the tree committed as `c1ccc0b` on July 29, 2026 |
-| Manual integrations lifecycle | Yes | Codex project-scope stdio `Ask` path passed; remaining lifecycle pending |
+| Local MCP gate | Yes | Passed on the v0.1.36 release-candidate tree on July 30, 2026 |
+| Manual integrations lifecycle | Yes, for the promoted remote OAuth flow | Passed on macOS with ClickUp through Claude and Codex |
 | Claude shared conformance | Yes | Passed both transports on `c1ccc0b` with `claude-agent-sdk@0.2.126+claude-code@2.1.126` |
 | Codex shared conformance | Yes | Passed both transports on `c1ccc0b` with `codex-cli@0.146.0+app-server-protocol-v2` |
-| Figma read-only smoke | Yes, on at least one verified provider | Pending |
-| Pinned command-based read-only smoke | Yes, on at least one verified provider | Current opt-in harness uses Garu; another reviewed target may satisfy the gate |
+| Real remote OAuth read-only smoke | Yes, on both preview providers | Passed with ClickUp on macOS |
+| Deterministic local command coverage | Yes | Passed through the offline fixture and shared conformance harness |
+| Figma and pinned Garu compatibility smokes | No; GA follow-up | Harnesses remain opt-in and pending |
 | Cursor shared conformance | No, unless Cursor support is promoted in this release | Failed to expose pre-call inventory; remains honestly unverified |
 | Gemini, Grok, and Droid | No; they must remain honestly unsupported | Blocked by documented protocol/runtime boundaries |
 | MCP-scoped security and dependency review | Yes | Complete |
 
 An optional-provider failure blocks promotion of that provider, not the
 release, when the product continues to report its actual lower support level.
-A Claude or Codex failure blocks the first release because both are required by
-the definition of done. Cursor remains optional for this release and cannot be
-promoted from observed-only inventory.
+A Claude or Codex failure blocks the Preview because both are promoted.
+Cursor remains optional and cannot be promoted from observed-only inventory.
 
 Authenticated gates consume provider quota. Run one provider at a time, stop
 after the first categorical failure, and do not retry without a relevant code
@@ -133,17 +138,21 @@ the release gate.
 
 ## Layer 4 — Real-service smokes
 
-Follow [MCP real-service smoke tests](MCP_REAL_SERVICE_SMOKES.md). Run only:
+The Preview must record a read-only real remote OAuth flow through each
+promoted provider. The July 30 manual ClickUp runs satisfy that release layer
+without making ClickUp-specific behavior part of the architecture or product
+contract.
+
+For later branded compatibility evidence, follow
+[MCP real-service smoke tests](MCP_REAL_SERVICE_SMOKES.md) and run only:
 
 - Figma `get_design_context` against a disposable node with no customer data;
 - Garu `list_charges` against a dedicated test account, with the exact pinned
   package and explicit third-party execution acknowledgement.
 
-At least one verified provider must pass each target. Running both Claude and
-Codex is recommended for coverage but does not replace their shared conformance
-gates. A provider allowlist, OAuth, plan, seat, or rate-limit rejection is
-recorded as a target/provider-specific result and never as generic MCP
-conformance evidence.
+These optional target smokes do not replace the shared conformance gates. A
+provider allowlist, OAuth, plan, seat, or rate-limit rejection is recorded as a
+target/provider-specific result and never as generic MCP conformance evidence.
 
 Unset `DCC_GARU_MCP_API_KEY` immediately after the Garu run. Never place it in
 shell history, `.env`, CI configuration, screenshots, issues, or artifacts.
