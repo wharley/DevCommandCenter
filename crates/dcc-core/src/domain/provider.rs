@@ -205,6 +205,11 @@ pub enum ProviderEvent {
     McpRuntimeStatusSnapshot {
         statuses: Vec<McpRuntimeStatus>,
     },
+    /// Backend-only signal that an adapter captured new OAuth state. The
+    /// credential bytes remain in the provider's private drain channel.
+    McpOauthStateChanged {
+        definition_id: crate::domain::mcp::McpDefinitionId,
+    },
     TextDelta {
         content: String,
     },

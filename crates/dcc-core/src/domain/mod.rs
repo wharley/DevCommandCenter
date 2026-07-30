@@ -16,11 +16,11 @@ pub use delegation::{
 };
 pub use mcp::{
     McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
-    McpDefinitionOwnership, McpErrorCategory, McpImportSource, McpImportSourceKind, McpProbeReport,
-    McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretBinding, McpSecretReferenceId,
-    McpSecretTarget, McpToolAnnotations, McpToolPolicy, McpToolPolicyDecision, McpToolSummary,
-    McpTransport, McpTransportKind, McpTrust, McpTrustDecision, McpTrustFingerprint,
-    McpValidationError,
+    McpDefinitionOwnership, McpErrorCategory, McpImportSource, McpImportSourceKind, McpOauthGrant,
+    McpOauthResourceFingerprint, McpProbeReport, McpRuntimeError, McpRuntimeState,
+    McpRuntimeStatus, McpSecretBinding, McpSecretReferenceId, McpSecretTarget, McpToolAnnotations,
+    McpToolPolicy, McpToolPolicyDecision, McpToolSummary, McpTransport, McpTransportKind, McpTrust,
+    McpTrustDecision, McpTrustFingerprint, McpValidationError,
 };
 pub use mcp_conformance::{
     McpConformanceCheck, McpConformanceEvidence, McpConformanceEvidenceError,

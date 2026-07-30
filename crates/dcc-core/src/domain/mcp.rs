@@ -37,6 +37,82 @@ impl McpTrustFingerprint {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(transparent)]
+pub struct McpOauthResourceFingerprint(pub String);
+
+impl McpOauthResourceFingerprint {
+    pub fn validate(&self) -> Result<(), McpValidationError> {
+        if self.0.len() != 64 || !self.0.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(McpValidationError::InvalidOauthResourceFingerprint);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct McpOauthGrant {
+    pub definition_id: McpDefinitionId,
+    /// Adapter identity that owns this grant. Provider-native grants remain
+    /// owned by the provider and never receive a DCC record.
+    pub provider_id: ProviderId,
+    /// Binds the credential to the normalized remote resource. A URL change
+    /// cannot silently reuse a grant issued for a different resource.
+    pub resource_fingerprint: McpOauthResourceFingerprint,
+    /// Opaque reference to the serialized grant in the OS credential store.
+    pub secret_ref: McpSecretReferenceId,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl McpOauthGrant {
+    pub fn validate(&self) -> Result<(), McpValidationError> {
+        validate_non_empty("oauthGrant.definitionId", &self.definition_id.0)?;
+        validate_non_empty("oauthGrant.providerId", &self.provider_id.0)?;
+        self.resource_fingerprint.validate()?;
+        validate_non_empty("oauthGrant.secretRef", &self.secret_ref.0)?;
+        validate_non_empty("oauthGrant.createdAt", &self.created_at)?;
+        validate_non_empty("oauthGrant.updatedAt", &self.updated_at)
+    }
+}
+
+pub fn mcp_oauth_resource_fingerprint(
+    definition: &McpDefinition,
+) -> Result<McpOauthResourceFingerprint, McpValidationError> {
+    let McpTransport::Http { url: resource_url } = &definition.transport else {
+        return Err(McpValidationError::InvalidUrl);
+    };
+    let url = Url::parse(resource_url).map_err(|_| McpValidationError::InvalidUrl)?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.username() != ""
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(McpValidationError::InvalidUrl);
+    }
+    let mut digest = Sha256::new();
+    digest.update(b"dcc-mcp-oauth-resource-v1\0");
+    digest.update(url.as_str().as_bytes());
+    let mut bindings = definition.secret_refs.iter().collect::<Vec<_>>();
+    bindings.sort_unstable_by(|left, right| {
+        left.target
+            .identity()
+            .cmp(&right.target.identity())
+            .then_with(|| left.secret_ref.0.cmp(&right.secret_ref.0))
+    });
+    for binding in bindings {
+        digest.update(b"\0");
+        digest.update(binding.target.identity().as_bytes());
+        digest.update(b"\0");
+        digest.update(binding.secret_ref.0.as_bytes());
+    }
+    Ok(McpOauthResourceFingerprint(format!(
+        "{:x}",
+        digest.finalize()
+    )))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum McpTransportKind {
@@ -615,6 +691,8 @@ pub enum McpValidationError {
     InvalidUrl,
     #[error("trust fingerprint must be a 64-character hexadecimal SHA-256 digest")]
     InvalidTrustFingerprint,
+    #[error("OAuth resource fingerprint must be a 64-character hexadecimal SHA-256 digest")]
+    InvalidOauthResourceFingerprint,
     #[error("current trust fingerprint does not match the MCP definition")]
     TrustFingerprintMismatch,
     #[error("a secret target may only be bound once")]

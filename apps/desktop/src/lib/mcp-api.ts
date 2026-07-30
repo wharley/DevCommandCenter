@@ -7,6 +7,8 @@ import type {
 	CreateMcpIntegrationOutput,
 	DisableMcpIntegrationInput,
 	DisableMcpIntegrationOutput,
+	DisconnectMcpOauthInput,
+	DisconnectMcpOauthOutput,
 	ListMcpIntegrationsOutput,
 	RemoveMcpIntegrationInput,
 	RemoveMcpIntegrationOutput,
@@ -60,6 +62,13 @@ export function removeMcpIntegration(input: RemoveMcpIntegrationInput) {
 		MCP_METHODS.removeMcpIntegration,
 		{ input },
 	);
+}
+
+export function disconnectMcpOauth(input: DisconnectMcpOauthInput) {
+	requireTauriRuntime();
+	return invoke<DisconnectMcpOauthOutput>(MCP_METHODS.disconnectMcpOauth, {
+		input,
+	});
 }
 
 export function setMcpToolPolicy(input: SetMcpToolPolicyInput) {

@@ -520,6 +520,7 @@ mod tests {
                     cwd: None,
                     environment: vec![secret("FIXTURE_TOKEN", "stdio-secret")],
                 },
+                oauth_state: None,
                 tool_policies: vec![ProviderMcpToolPolicy {
                     tool_name: "fixture.mutate".to_string(),
                     decision: McpToolPolicyDecision::Deny,
@@ -532,6 +533,7 @@ mod tests {
                     url: "https://fixture.example/mcp".to_string(),
                     headers: vec![secret("Authorization", "http-secret")],
                 },
+                oauth_state: None,
                 tool_policies: vec![ProviderMcpToolPolicy {
                     tool_name: "fixture.echo".to_string(),
                     decision: McpToolPolicyDecision::Allow,

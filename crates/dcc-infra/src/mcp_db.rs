@@ -11,8 +11,10 @@ use serde::{de::DeserializeOwned, Serialize};
 use dcc_core::{
     domain::mcp::{
         McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
-        McpDefinitionOwnership, McpToolPolicy, McpToolPolicyDecision, McpTransport, McpTrust,
+        McpDefinitionOwnership, McpOauthGrant, McpOauthResourceFingerprint, McpSecretReferenceId,
+        McpToolPolicy, McpToolPolicyDecision, McpTransport, McpTrust,
     },
+    domain::provider::ProviderId,
     ports::McpRepo,
     CoreError, Result,
 };
@@ -73,6 +75,21 @@ CREATE TABLE IF NOT EXISTS dcc_mcp_tool_policies (
 
 CREATE INDEX IF NOT EXISTS idx_dcc_mcp_tool_policies_definition
 ON dcc_mcp_tool_policies(definition_id, tool_name);
+
+CREATE TABLE IF NOT EXISTS dcc_mcp_oauth_grants (
+    definition_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    resource_fingerprint TEXT NOT NULL CHECK (length(resource_fingerprint) = 64),
+    secret_ref TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (definition_id, provider_id),
+    UNIQUE(secret_ref),
+    FOREIGN KEY (definition_id) REFERENCES dcc_mcp_definitions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_mcp_oauth_grants_definition
+ON dcc_mcp_oauth_grants(definition_id, provider_id);
 "#;
 
 #[derive(Clone)]
@@ -216,6 +233,25 @@ impl SqliteMcpRepo {
             )
         })?;
         Ok(policy)
+    }
+
+    fn oauth_grant_from_row(row: &Row<'_>) -> rusqlite::Result<McpOauthGrant> {
+        let grant = McpOauthGrant {
+            definition_id: McpDefinitionId(row.get(0)?),
+            provider_id: ProviderId(row.get(1)?),
+            resource_fingerprint: McpOauthResourceFingerprint(row.get(2)?),
+            secret_ref: McpSecretReferenceId(row.get(3)?),
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        };
+        grant.validate().map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
+        Ok(grant)
     }
 }
 
@@ -500,6 +536,106 @@ impl McpRepo for SqliteMcpRepo {
         .map_err(repository_error)?;
         Ok(())
     }
+
+    async fn save_mcp_oauth_grant(&self, grant: &McpOauthGrant) -> Result<()> {
+        grant
+            .validate()
+            .map_err(|error| CoreError::InvalidInput(error.to_string()))?;
+        let conn = self.lock_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_mcp_oauth_grants (
+                definition_id, provider_id, resource_fingerprint,
+                secret_ref, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(definition_id, provider_id) DO UPDATE SET
+                resource_fingerprint = excluded.resource_fingerprint,
+                secret_ref = excluded.secret_ref,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                grant.definition_id.0,
+                grant.provider_id.0,
+                grant.resource_fingerprint.0,
+                grant.secret_ref.0,
+                grant.created_at,
+                grant.updated_at,
+            ],
+        )
+        .map_err(repository_error)?;
+        Ok(())
+    }
+
+    async fn get_mcp_oauth_grant(
+        &self,
+        definition_id: &McpDefinitionId,
+        provider_id: &ProviderId,
+    ) -> Result<Option<McpOauthGrant>> {
+        let conn = self.lock_connection()?;
+        conn.query_row(
+            r#"
+            SELECT definition_id, provider_id, resource_fingerprint,
+                   secret_ref, created_at, updated_at
+              FROM dcc_mcp_oauth_grants
+             WHERE definition_id = ?1 AND provider_id = ?2
+            "#,
+            params![definition_id.0, provider_id.0],
+            Self::oauth_grant_from_row,
+        )
+        .optional()
+        .map_err(repository_error)
+    }
+
+    async fn list_mcp_oauth_grants(
+        &self,
+        definition_id: Option<&McpDefinitionId>,
+    ) -> Result<Vec<McpOauthGrant>> {
+        let conn = self.lock_connection()?;
+        let sql = if definition_id.is_some() {
+            r#"
+            SELECT definition_id, provider_id, resource_fingerprint,
+                   secret_ref, created_at, updated_at
+              FROM dcc_mcp_oauth_grants
+             WHERE definition_id = ?1
+             ORDER BY provider_id ASC
+            "#
+        } else {
+            r#"
+            SELECT definition_id, provider_id, resource_fingerprint,
+                   secret_ref, created_at, updated_at
+              FROM dcc_mcp_oauth_grants
+             ORDER BY definition_id ASC, provider_id ASC
+            "#
+        };
+        let mut statement = conn.prepare(sql).map_err(repository_error)?;
+        let rows = if let Some(definition_id) = definition_id {
+            statement
+                .query_map(params![definition_id.0], Self::oauth_grant_from_row)
+                .map_err(repository_error)?
+        } else {
+            statement
+                .query_map([], Self::oauth_grant_from_row)
+                .map_err(repository_error)?
+        };
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(repository_error)
+    }
+
+    async fn delete_mcp_oauth_grant(
+        &self,
+        definition_id: &McpDefinitionId,
+        provider_id: &ProviderId,
+    ) -> Result<()> {
+        let conn = self.lock_connection()?;
+        conn.execute(
+            "DELETE FROM dcc_mcp_oauth_grants WHERE definition_id = ?1 AND provider_id = ?2",
+            params![definition_id.0, provider_id.0],
+        )
+        .map_err(repository_error)?;
+        Ok(())
+    }
 }
 
 fn serialize_json(value: &impl Serialize) -> Result<String> {
@@ -741,6 +877,55 @@ mod tests {
         block_on(repo.delete_mcp_definition(&definition.id)).expect("delete definition");
         assert!(block_on(repo.list_mcp_tool_policies(Some(&definition.id)))
             .expect("list cascaded policies")
+            .is_empty());
+    }
+
+    #[test]
+    fn persists_only_oauth_grant_metadata_and_cascades_with_definition() {
+        let (repo, conn) = in_memory_repo();
+        let definition = http_definition("oauth-fixture");
+        block_on(repo.save_mcp_definition(&definition)).expect("save definition");
+        let grant = McpOauthGrant {
+            definition_id: definition.id.clone(),
+            provider_id: ProviderId("claude_code".to_string()),
+            resource_fingerprint: McpOauthResourceFingerprint("b".repeat(64)),
+            secret_ref: McpSecretReferenceId("oauth-grant:opaque".to_string()),
+            created_at: "2026-07-30T00:00:00Z".to_string(),
+            updated_at: "2026-07-30T00:00:00Z".to_string(),
+        };
+
+        block_on(repo.save_mcp_oauth_grant(&grant)).expect("save OAuth grant");
+        assert_eq!(
+            block_on(
+                repo.get_mcp_oauth_grant(&definition.id, &ProviderId("claude_code".to_string()))
+            )
+            .expect("get OAuth grant"),
+            Some(grant.clone())
+        );
+        assert_eq!(
+            block_on(repo.list_mcp_oauth_grants(Some(&definition.id))).expect("list OAuth grants"),
+            vec![grant]
+        );
+
+        let conn = conn.lock().expect("lock sqlite");
+        let columns = conn
+            .prepare("PRAGMA table_info(dcc_mcp_oauth_grants)")
+            .expect("prepare OAuth grant columns")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query OAuth grant columns")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("collect OAuth grant columns");
+        assert!(!columns.iter().any(|column| {
+            matches!(
+                column.as_str(),
+                "access_token" | "refresh_token" | "client_secret" | "token"
+            )
+        }));
+        drop(conn);
+
+        block_on(repo.delete_mcp_definition(&definition.id)).expect("delete definition");
+        assert!(block_on(repo.list_mcp_oauth_grants(Some(&definition.id)))
+            .expect("list cascaded OAuth grants")
             .is_empty());
     }
 

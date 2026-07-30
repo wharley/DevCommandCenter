@@ -8,16 +8,16 @@ use sha2::{Digest, Sha256};
 use crate::{
     domain::{
         mcp::{
-            McpBindingScope, McpDefinition, McpDefinitionId, McpSecretTarget, McpToolPolicy,
-            McpTransport,
+            mcp_oauth_resource_fingerprint, McpBindingScope, McpDefinition, McpDefinitionId,
+            McpSecretTarget, McpToolPolicy, McpTransport,
         },
         project::ProjectId,
         provider::ProviderId,
         session::SessionId,
     },
     ports::{
-        CredentialStore, McpRepo, ProviderMcpSecret, ProviderMcpServerConfig,
-        ProviderMcpToolPolicy, ProviderMcpTransport,
+        CredentialStore, McpRepo, ProviderMcpOauthState, ProviderMcpSecret,
+        ProviderMcpServerConfig, ProviderMcpToolPolicy, ProviderMcpTransport,
     },
     CoreError, Result,
 };
@@ -115,8 +115,18 @@ pub async fn resolve_session_mcp_servers(
         let policies = policies_by_definition
             .remove(&definition.id)
             .unwrap_or_default();
-        servers
-            .push(project_definition(definition, server_name, policies, credential_store).await?);
+        let oauth_state =
+            resolve_oauth_state(repo, credential_store, &definition, &input.provider_id).await?;
+        servers.push(
+            project_definition(
+                definition,
+                server_name,
+                policies,
+                credential_store,
+                oauth_state,
+            )
+            .await?,
+        );
     }
     Ok(servers)
 }
@@ -144,6 +154,7 @@ async fn project_definition(
     server_name: String,
     mut policies: Vec<McpToolPolicy>,
     credential_store: &dyn CredentialStore,
+    oauth_state: Option<ProviderMcpOauthState>,
 ) -> Result<ProviderMcpServerConfig> {
     let mut secrets = Vec::with_capacity(definition.secret_refs.len());
     for binding in &definition.secret_refs {
@@ -189,8 +200,36 @@ async fn project_definition(
         definition_id: definition.id,
         server_name,
         transport,
+        oauth_state,
         tool_policies,
     })
+}
+
+async fn resolve_oauth_state(
+    repo: &dyn McpRepo,
+    credential_store: &dyn CredentialStore,
+    definition: &McpDefinition,
+    provider_id: &ProviderId,
+) -> Result<Option<ProviderMcpOauthState>> {
+    let McpTransport::Http { .. } = &definition.transport else {
+        return Ok(None);
+    };
+    let Some(grant) = repo
+        .get_mcp_oauth_grant(&definition.id, provider_id)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let expected_fingerprint =
+        mcp_oauth_resource_fingerprint(definition).map_err(|_| invalid_registry("OAuth grant"))?;
+    if grant.resource_fingerprint != expected_fingerprint {
+        return Ok(None);
+    }
+    credential_store
+        .resolve_secret(&grant.secret_ref)
+        .await
+        .map_err(|_| credential_resolution_failed())
+        .map(|state| state.map(ProviderMcpOauthState::new))
 }
 
 fn invalid_registry(entity: &str) -> CoreError {
@@ -209,8 +248,9 @@ mod tests {
 
     use crate::{
         domain::mcp::{
-            McpBinding, McpBindingId, McpDefinitionId, McpDefinitionOwnership, McpSecretBinding,
-            McpSecretReferenceId, McpTrust, McpTrustDecision, McpTrustFingerprint,
+            McpBinding, McpBindingId, McpDefinitionId, McpDefinitionOwnership, McpOauthGrant,
+            McpSecretBinding, McpSecretReferenceId, McpTrust, McpTrustDecision,
+            McpTrustFingerprint,
         },
         ports::{CredentialStoreError, CredentialStoreResult, SecretValue},
     };
@@ -222,6 +262,7 @@ mod tests {
         definitions: Arc<Mutex<Vec<McpDefinition>>>,
         bindings: Arc<Mutex<Vec<McpBinding>>>,
         policies: Arc<Mutex<Vec<crate::domain::mcp::McpToolPolicy>>>,
+        oauth_grants: Arc<Mutex<Vec<McpOauthGrant>>>,
     }
 
     #[async_trait]
@@ -329,6 +370,22 @@ mod tests {
                 &policy.definition_id != definition_id || policy.tool_name != tool_name
             });
             Ok(())
+        }
+
+        async fn get_mcp_oauth_grant(
+            &self,
+            definition_id: &McpDefinitionId,
+            provider_id: &ProviderId,
+        ) -> Result<Option<McpOauthGrant>> {
+            Ok(self
+                .oauth_grants
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|grant| {
+                    &grant.definition_id == definition_id && &grant.provider_id == provider_id
+                })
+                .cloned())
         }
     }
 
@@ -613,6 +670,51 @@ mod tests {
         };
         assert_eq!(cwd.as_deref(), Some("/workspace"));
         assert!(!format!("{servers:?}").contains("secret-canary"));
+    }
+
+    #[test]
+    fn restores_matching_oauth_grant_without_exposing_it_in_debug_output() {
+        let repo = FakeMcpRepo::default();
+        let credentials = FakeCredentialStore::default();
+        let url = "https://oauth-fixture.example/mcp";
+        let definition = trusted_definition(
+            "oauth-fixture",
+            McpTransport::Http {
+                url: url.to_string(),
+            },
+            Vec::new(),
+        );
+        repo.definitions.lock().unwrap().push(definition.clone());
+        repo.bindings.lock().unwrap().push(binding(
+            "oauth-global",
+            "oauth-fixture",
+            McpBindingScope::Global,
+            Vec::new(),
+        ));
+        repo.oauth_grants.lock().unwrap().push(McpOauthGrant {
+            definition_id: definition.id.clone(),
+            provider_id: ProviderId("claude_code".to_string()),
+            resource_fingerprint: mcp_oauth_resource_fingerprint(&definition).expect("fingerprint"),
+            secret_ref: McpSecretReferenceId("oauth-grant:fixture".to_string()),
+            created_at: "2026-07-30T00:00:00Z".to_string(),
+            updated_at: "2026-07-30T00:00:00Z".to_string(),
+        });
+        credentials.insert(
+            "oauth-grant:fixture",
+            r#"{"version":1,"clientInfo":null,"tokens":{"access_token":"oauth-canary"}}"#,
+        );
+
+        let servers =
+            futures::executor::block_on(resolve_session_mcp_servers(&repo, &credentials, &input()))
+                .expect("resolve OAuth state");
+        let state = servers[0]
+            .oauth_state
+            .as_ref()
+            .expect("restored OAuth state");
+        assert!(std::str::from_utf8(state.expose_secret())
+            .expect("UTF-8 OAuth state")
+            .contains("oauth-canary"));
+        assert!(!format!("{servers:?}").contains("oauth-canary"));
     }
 
     #[test]

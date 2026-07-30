@@ -47,6 +47,10 @@ pub struct ProviderMcpServerConfig {
     /// user-configured provider entries.
     pub server_name: String,
     pub transport: ProviderMcpTransport,
+    /// Optional adapter-owned remote OAuth state restored from the OS
+    /// credential store. It is backend-only and must never enter renderer or
+    /// persisted provider configuration contracts.
+    pub oauth_state: Option<ProviderMcpOauthState>,
     /// Explicit overrides only. Missing tools always default to Ask.
     pub tool_policies: Vec<ProviderMcpToolPolicy>,
 }
@@ -77,6 +81,46 @@ pub enum ProviderMcpTransport {
 pub struct ProviderMcpSecret {
     pub name: String,
     value: SecretValue,
+}
+
+pub struct ProviderMcpOauthState {
+    value: SecretValue,
+}
+
+impl ProviderMcpOauthState {
+    pub fn new(value: SecretValue) -> Self {
+        Self { value }
+    }
+
+    pub fn expose_secret(&self) -> &[u8] {
+        self.value.expose_secret()
+    }
+
+    pub fn into_secret(self) -> SecretValue {
+        self.value
+    }
+}
+
+impl Clone for ProviderMcpOauthState {
+    fn clone(&self) -> Self {
+        Self {
+            value: SecretValue::new(self.value.expose_secret().to_vec())
+                .expect("an existing provider MCP OAuth state remains valid when cloned"),
+        }
+    }
+}
+
+impl std::fmt::Debug for ProviderMcpOauthState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ProviderMcpOauthState([REDACTED])")
+    }
+}
+
+#[derive(Debug)]
+pub struct ProviderMcpOauthUpdate {
+    pub definition_id: McpDefinitionId,
+    /// `None` means the remote OAuth implementation invalidated its grant.
+    pub state: Option<ProviderMcpOauthState>,
 }
 
 impl ProviderMcpSecret {
@@ -222,6 +266,14 @@ pub trait Provider: Send + Sync {
             "MCP OAuth is not supported by this provider runtime".to_string(),
         ))
     }
+    /// Drains adapter-owned OAuth grant updates captured on a backend-private
+    /// channel. Provider-native OAuth implementations return no updates.
+    async fn take_mcp_oauth_updates(
+        &self,
+        _handle: &SessionHandle,
+    ) -> Result<Vec<ProviderMcpOauthUpdate>> {
+        Ok(Vec::new())
+    }
     fn stream_events(&self, handle: &SessionHandle) -> BoxStream<'static, Result<ProviderEvent>>;
     async fn cancel(&self, handle: &SessionHandle) -> Result<()>;
     async fn resume(&self, previous: &SessionId) -> Result<SessionHandle>;
@@ -258,6 +310,9 @@ mod tests {
                         SecretValue::new(b"secret-canary".to_vec()).expect("test secret"),
                     )],
                 },
+                oauth_state: Some(ProviderMcpOauthState::new(
+                    SecretValue::new(b"oauth-state-canary".to_vec()).expect("OAuth state"),
+                )),
                 tool_policies: Vec::new(),
             }],
         };
@@ -265,6 +320,8 @@ mod tests {
         let serialized = serde_json::to_string(&config).expect("serialize session config");
         assert!(!serialized.contains("mcp_servers"));
         assert!(!serialized.contains("secret-canary"));
+        assert!(!serialized.contains("oauth-state-canary"));
         assert!(!format!("{config:?}").contains("secret-canary"));
+        assert!(!format!("{config:?}").contains("oauth-state-canary"));
     }
 }

@@ -1977,10 +1977,10 @@ mod tests {
     fn validates_mcp_oauth_authorization_urls_before_exposing_them() {
         assert_eq!(
             validate_codex_mcp_authorization_url(
-                &json!({ "authorizationUrl": "https://app.clickup.com/api?state=test" })
+                &json!({ "authorizationUrl": "https://auth.example.test/authorize?state=test" })
             )
             .expect("https authorization URL should be accepted"),
-            "https://app.clickup.com/api?state=test"
+            "https://auth.example.test/authorize?state=test"
         );
         assert!(validate_codex_mcp_authorization_url(
             &json!({ "authorizationUrl": "http://127.0.0.1:43123/callback" })

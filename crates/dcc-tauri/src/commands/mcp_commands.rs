@@ -9,6 +9,7 @@ use dcc_core::{
         McpToolPolicy, McpToolPolicyDecision, McpTransport, McpTrust, McpTrustDecision,
         McpTrustFingerprint,
     },
+    domain::provider::ProviderId,
     ports::{CredentialStore, McpRepo, SecretValue},
     CoreError,
 };
@@ -28,6 +29,7 @@ pub struct McpIntegrationRecord {
     pub bindings: Vec<McpBinding>,
     pub tool_policies: Vec<McpToolPolicy>,
     pub credential_count: usize,
+    pub oauth_provider_ids: Vec<ProviderId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -94,6 +96,19 @@ pub struct RemoveMcpIntegrationInput {
 pub struct RemoveMcpIntegrationOutput {
     pub removed: bool,
     pub deleted_credentials: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DisconnectMcpOauthInput {
+    pub definition_id: McpDefinitionId,
+    pub provider_id: ProviderId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DisconnectMcpOauthOutput {
+    pub disconnected: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -175,6 +190,17 @@ pub async fn remove_mcp_integration(
 }
 
 #[tauri::command]
+pub async fn disconnect_mcp_oauth(
+    state: State<'_, WorkspaceCommandState>,
+    input: DisconnectMcpOauthInput,
+) -> Result<DisconnectMcpOauthOutput, String> {
+    let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    disconnect_oauth(&repo, &SystemCredentialStore::default(), input)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn set_mcp_tool_policy(
     state: State<'_, WorkspaceCommandState>,
     input: SetMcpToolPolicyInput,
@@ -204,6 +230,14 @@ where
             .or_default()
             .push(policy);
     }
+    let mut grants_by_definition =
+        HashMap::<McpDefinitionId, Vec<dcc_core::domain::mcp::McpOauthGrant>>::new();
+    for grant in repo.list_mcp_oauth_grants(None).await? {
+        grants_by_definition
+            .entry(grant.definition_id.clone())
+            .or_default()
+            .push(grant);
+    }
 
     let integrations = definitions
         .into_iter()
@@ -214,7 +248,10 @@ where
             let policies = policies_by_definition
                 .remove(&definition.id)
                 .unwrap_or_default();
-            integration_record(definition, bindings, policies)
+            let grants = grants_by_definition
+                .remove(&definition.id)
+                .unwrap_or_default();
+            integration_record(definition, bindings, policies, grants)
         })
         .collect();
     Ok(ListMcpIntegrationsOutput { integrations })
@@ -296,7 +333,7 @@ where
     }
 
     Ok(CreateMcpIntegrationOutput {
-        integration: integration_record(definition, vec![binding], Vec::new()),
+        integration: integration_record(definition, vec![binding], Vec::new(), Vec::new()),
     })
 }
 
@@ -312,8 +349,11 @@ where
     let policies = repo
         .list_mcp_tool_policies(Some(&output.definition.id))
         .await?;
+    let grants = repo
+        .list_mcp_oauth_grants(Some(&output.definition.id))
+        .await?;
     Ok(ActivateMcpIntegrationOutput {
-        integration: integration_record(output.definition, bindings, policies),
+        integration: integration_record(output.definition, bindings, policies, grants),
         changed: output.changed,
     })
 }
@@ -337,8 +377,9 @@ where
     }
     let bindings = repo.list_mcp_bindings(Some(&definition.id)).await?;
     let policies = repo.list_mcp_tool_policies(Some(&definition.id)).await?;
+    let grants = repo.list_mcp_oauth_grants(Some(&definition.id)).await?;
     Ok(DisableMcpIntegrationOutput {
-        integration: integration_record(definition, bindings, policies),
+        integration: integration_record(definition, bindings, policies, grants),
         changed,
     })
 }
@@ -358,6 +399,7 @@ where
             deleted_credentials: 0,
         });
     };
+    let oauth_grants = repo.list_mcp_oauth_grants(Some(&definition.id)).await?;
 
     let mut deleted_credentials = 0;
     if input.delete_credentials {
@@ -371,6 +413,13 @@ where
         for binding in &definition.secret_refs {
             if unique_references.insert(binding.secret_ref.clone())
                 && credential_store.delete_secret(&binding.secret_ref).await?
+            {
+                deleted_credentials += 1;
+            }
+        }
+        for grant in &oauth_grants {
+            if unique_references.insert(grant.secret_ref.clone())
+                && credential_store.delete_secret(&grant.secret_ref).await?
             {
                 deleted_credentials += 1;
             }
@@ -421,22 +470,52 @@ where
 
     let bindings = repo.list_mcp_bindings(Some(&definition.id)).await?;
     let policies = repo.list_mcp_tool_policies(Some(&definition.id)).await?;
+    let grants = repo.list_mcp_oauth_grants(Some(&definition.id)).await?;
     Ok(SetMcpToolPolicyOutput {
-        integration: integration_record(definition, bindings, policies),
+        integration: integration_record(definition, bindings, policies, grants),
     })
+}
+
+async fn disconnect_oauth<R, C>(
+    repo: &R,
+    credential_store: &C,
+    input: DisconnectMcpOauthInput,
+) -> McpCommandResult<DisconnectMcpOauthOutput>
+where
+    R: McpRepo + Sync + ?Sized,
+    C: CredentialStore + Sync + ?Sized,
+{
+    let Some(grant) = repo
+        .get_mcp_oauth_grant(&input.definition_id, &input.provider_id)
+        .await?
+    else {
+        return Ok(DisconnectMcpOauthOutput {
+            disconnected: false,
+        });
+    };
+    let _ = credential_store.delete_secret(&grant.secret_ref).await?;
+    repo.delete_mcp_oauth_grant(&input.definition_id, &input.provider_id)
+        .await?;
+    Ok(DisconnectMcpOauthOutput { disconnected: true })
 }
 
 fn integration_record(
     definition: McpDefinition,
     bindings: Vec<McpBinding>,
     tool_policies: Vec<McpToolPolicy>,
+    mut oauth_grants: Vec<dcc_core::domain::mcp::McpOauthGrant>,
 ) -> McpIntegrationRecord {
-    let credential_count = definition.secret_refs.len();
+    oauth_grants.sort_unstable_by(|left, right| left.provider_id.0.cmp(&right.provider_id.0));
+    let credential_count = definition.secret_refs.len() + oauth_grants.len();
     McpIntegrationRecord {
         definition,
         bindings,
         tool_policies,
         credential_count,
+        oauth_provider_ids: oauth_grants
+            .into_iter()
+            .map(|grant| grant.provider_id)
+            .collect(),
     }
 }
 
@@ -714,6 +793,66 @@ mod tests {
             .resolve_secret(&deleted_reference)
             .await
             .expect("resolve deleted credential")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn disconnect_oauth_deletes_the_keychain_value_and_grant_metadata() {
+        let repo = repo();
+        let credentials = TestCredentialStore::default();
+        let created = create_integration(&repo, &credentials, create_input("header"))
+            .await
+            .expect("create integration");
+        let definition_id = created.integration.definition.id;
+        let provider_id = ProviderId("claude_code".to_string());
+        let oauth_reference = McpSecretReferenceId("oauth-grant:fixture".to_string());
+        credentials
+            .store_secret(
+                &oauth_reference,
+                SecretValue::new(b"oauth-state".to_vec()).expect("OAuth state"),
+            )
+            .await
+            .expect("store OAuth state");
+        repo.save_mcp_oauth_grant(&dcc_core::domain::mcp::McpOauthGrant {
+            definition_id: definition_id.clone(),
+            provider_id: provider_id.clone(),
+            resource_fingerprint: dcc_core::domain::mcp::McpOauthResourceFingerprint(
+                "a".repeat(64),
+            ),
+            secret_ref: oauth_reference.clone(),
+            created_at: "2026-07-30T00:00:00Z".to_string(),
+            updated_at: "2026-07-30T00:00:00Z".to_string(),
+        })
+        .await
+        .expect("save OAuth grant");
+
+        let listed = list_integrations(&repo).await.expect("list integrations");
+        assert_eq!(listed.integrations[0].credential_count, 2);
+        assert_eq!(
+            listed.integrations[0].oauth_provider_ids,
+            vec![provider_id.clone()]
+        );
+
+        let result = disconnect_oauth(
+            &repo,
+            &credentials,
+            DisconnectMcpOauthInput {
+                definition_id: definition_id.clone(),
+                provider_id: provider_id.clone(),
+            },
+        )
+        .await
+        .expect("disconnect OAuth");
+        assert!(result.disconnected);
+        assert!(credentials
+            .resolve_secret(&oauth_reference)
+            .await
+            .expect("resolve deleted OAuth state")
+            .is_none());
+        assert!(repo
+            .get_mcp_oauth_grant(&definition_id, &provider_id)
+            .await
+            .expect("load deleted OAuth grant")
             .is_none());
     }
 

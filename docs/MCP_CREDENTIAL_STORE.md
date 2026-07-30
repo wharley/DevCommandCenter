@@ -31,6 +31,9 @@ key source, explicit user consent, and its own ADR.
 
 - The OS entry service is `com.devcommandcenter.app.mcp`.
 - Entry usernames are opaque credential reference IDs.
+- DCC-managed OAuth envelopes may contain access tokens, refresh tokens, and
+  dynamic client registration data. SQLite stores only their provider/resource
+  binding and opaque reference.
 - Secret bytes are capped, redacted from `Debug`, and zeroized on drop.
 - Backend errors are converted to bounded categories without forwarding raw
   platform errors or malformed credential bytes.
@@ -47,6 +50,5 @@ key source, explicit user consent, and its own ADR.
 
 ## Deliberately deferred
 
-- OAuth token acquisition and refresh.
-- Resolving references into MCP transports.
+- Static OAuth client configuration and custom scope/resource input.
 - An opt-in native credential-store smoke test in release CI.

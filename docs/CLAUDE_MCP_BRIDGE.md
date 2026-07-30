@@ -86,14 +86,27 @@ The Claude OAuth bridge:
 - suppresses proxy diagnostics that could contain authorization URLs or header
   metadata;
 - stores OAuth registration, verifier, and token files only inside a
-  mode-`0700` random temporary directory owned by the provider session; and
+  mode-`0700` random temporary directory owned by the provider session;
+- restores only the matching definition, provider, and resource-bound grant
+  from the OS credential store before the proxy starts;
+- captures updated tokens and dynamic client registration through a
+  backend-private adapter channel, then stores their versioned envelope under
+  an opaque credential reference; and
 - recursively removes that exact directory when the Claude sidecar exits.
 
-Tokens are intentionally ephemeral in this slice. They remain available across
-turns of the same Claude session, but a new Claude provider session may require
-browser authorization again. Persisting remote OAuth tokens will require an
-OS-credential-store implementation rather than copying the proxy's plaintext
-file format into application data.
+The plaintext files remain ephemeral even though the grant survives. SQLite
+contains only grant metadata and an opaque credential reference; the renderer
+never receives the envelope. A resource or protected-header reference change
+invalidates reuse. The settings UI can explicitly disconnect the DCC-owned
+grant for the selected provider. Provider-native grants, including Codex OAuth,
+remain outside this path.
+
+The persisted envelope deliberately excludes the PKCE verifier and proxy
+lockfile. Those values remain session-only. Static OAuth client configuration,
+custom scopes, and explicit resource parameters are separate registry
+capabilities; the current bridge covers standards-compatible discovery and
+dynamic registration rather than claiming every proprietary OAuth client
+policy.
 
 `mcp-remote@0.1.38` also required a narrow pinned patch: after forwarding the
 `initialize` response, the upstream proxy did not propagate the negotiated

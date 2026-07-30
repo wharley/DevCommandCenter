@@ -16,6 +16,7 @@ import {
 	Server,
 	ShieldCheck,
 	Trash2,
+	Unlink,
 	X,
 } from "lucide-react";
 import type {
@@ -36,6 +37,7 @@ import {
 	activateMcpIntegration,
 	createMcpIntegration,
 	disableMcpIntegration,
+	disconnectMcpOauth,
 	listMcpIntegrations,
 	removeMcpIntegration,
 	setMcpToolPolicy,
@@ -183,6 +185,7 @@ export function McpIntegrationsPanel({
 		queryKey: MCP_INTEGRATIONS_QUERY_KEY,
 		queryFn: listMcpIntegrations,
 		staleTime: 5_000,
+		refetchInterval: 5_000,
 		refetchOnWindowFocus: true,
 	});
 	const integrations = integrationsQuery.data?.integrations ?? [];
@@ -424,6 +427,32 @@ export function McpIntegrationsPanel({
 				error instanceof Error
 					? error.message
 					: t("settings.integrations.errors.oauth"),
+			);
+		} finally {
+			setBusyAction(null);
+		}
+	};
+
+	const handleDisconnectMcpOauth = async (
+		integration: McpIntegrationRecord,
+	) => {
+		if (!sessionProviderId) return;
+		const action = `oauth-disconnect:${integration.definition.id}`;
+		setBusyAction(action);
+		try {
+			await disconnectMcpOauth({
+				definitionId: integration.definition.id,
+				providerId: sessionProviderId,
+			});
+			await queryClient.invalidateQueries({
+				queryKey: MCP_INTEGRATIONS_QUERY_KEY,
+			});
+			toast.success(t("settings.integrations.oauthDisconnected"));
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: t("settings.integrations.errors.oauthDisconnect"),
 			);
 		} finally {
 			setBusyAction(null);
@@ -1054,6 +1083,13 @@ export function McpIntegrationsPanel({
 							reportedStatus.boundedError?.category === "authentication";
 						const oauthBusy =
 							busyAction === `oauth:${definition.id}`;
+						const hasManagedOauth =
+							sessionProviderId !== null &&
+							integration.oauthProviderIds.some(
+								(providerId) => providerId === sessionProviderId,
+							);
+						const oauthDisconnectBusy =
+							busyAction === `oauth-disconnect:${definition.id}`;
 						const tools = listMcpIntegrationTools(
 							integration,
 							reportedStatus?.tools ?? [],
@@ -1314,6 +1350,31 @@ export function McpIntegrationsPanel({
 											</Button>
 											<span className="text-[10px] leading-relaxed text-muted-foreground">
 												{t("settings.integrations.oauthHint")}
+											</span>
+										</div>
+									) : null}
+									{hasManagedOauth ? (
+										<div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/50 pt-3">
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												disabled={busyAction !== null}
+												onClick={() =>
+													void handleDisconnectMcpOauth(integration)
+												}
+											>
+												{oauthDisconnectBusy ? (
+													<Loader2 className="size-3.5 animate-spin" />
+												) : (
+													<Unlink className="size-3.5" />
+												)}
+												{t("settings.integrations.oauthDisconnect")}
+											</Button>
+											<span className="text-[10px] leading-relaxed text-muted-foreground">
+												{t(
+													"settings.integrations.oauthDisconnectHint",
+												)}
 											</span>
 										</div>
 									) : null}

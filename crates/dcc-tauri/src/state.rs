@@ -7,6 +7,7 @@ use std::{
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
@@ -15,7 +16,10 @@ use dcc_core::{
     application::{resolve_session_mcp_servers, ResolveSessionMcpInput, StartThreadInput},
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
-        mcp::{McpErrorCategory, McpRuntimeError, McpRuntimeState, McpRuntimeStatus},
+        mcp::{
+            mcp_oauth_resource_fingerprint, McpDefinitionId, McpErrorCategory, McpOauthGrant,
+            McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretReferenceId, McpTransport,
+        },
         project::{Project, ProjectId},
         provider::{ProviderEvent, ProviderId, SessionHandle},
         repository::{Repository, RepositoryId},
@@ -28,9 +32,10 @@ use dcc_core::{
         workspace_bundle::WorkspaceBundleState,
     },
     ports::{
-        DelegationRepo, EventBus, Input, ProjectRepo, Provider, ProviderMcpOauthStart,
-        ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo, SessionConfig,
-        SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceBundleRepo, WorkspaceRepo,
+        CredentialStore, DelegationRepo, EventBus, Input, McpRepo, ProjectRepo, Provider,
+        ProviderMcpOauthStart, ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo,
+        SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceBundleRepo,
+        WorkspaceRepo,
     },
     Result,
 };
@@ -188,6 +193,7 @@ struct ProviderSessionBinding {
     provider_id: String,
     handle: SessionHandle,
     current_turn_id: Arc<AsyncMutex<Option<String>>>,
+    projected_mcp_definition_ids: Arc<HashSet<McpDefinitionId>>,
 }
 
 #[derive(Default, Debug)]
@@ -433,6 +439,9 @@ impl SessionCommandState {
             provider_id: session.provider_id.clone(),
             handle: handle.clone(),
             current_turn_id: Arc::new(AsyncMutex::new(None)),
+            projected_mcp_definition_ids: Arc::new(
+                projected_definition_ids.iter().cloned().collect(),
+            ),
         };
 
         {
@@ -571,6 +580,117 @@ impl SessionCommandState {
             },
         )
         .await
+    }
+
+    fn mcp_oauth_credential_reference(
+        provider_id: &str,
+        definition_id: &McpDefinitionId,
+    ) -> McpSecretReferenceId {
+        let mut digest = Sha256::new();
+        digest.update(b"dcc-mcp-oauth-grant-v1\0");
+        digest.update(provider_id.as_bytes());
+        digest.update(b"\0");
+        digest.update(definition_id.0.as_bytes());
+        McpSecretReferenceId(format!("oauth-grant:{:x}", digest.finalize()))
+    }
+
+    async fn persist_provider_mcp_oauth_updates(
+        &self,
+        binding: &ProviderSessionBinding,
+        provider: &dyn Provider,
+        signaled_definition_id: &McpDefinitionId,
+    ) -> Result<()> {
+        if !binding
+            .projected_mcp_definition_ids
+            .contains(signaled_definition_id)
+        {
+            return Err(dcc_core::CoreError::Provider(
+                "provider returned OAuth state for an unknown MCP definition".to_string(),
+            ));
+        }
+
+        let updates = provider.take_mcp_oauth_updates(&binding.handle).await?;
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        let repo = SqliteMcpRepo::open(&self.db_path)?;
+        let credential_store = SystemCredentialStore::default();
+        let provider_id = ProviderId(binding.provider_id.clone());
+        for update in updates {
+            if !binding
+                .projected_mcp_definition_ids
+                .contains(&update.definition_id)
+            {
+                return Err(dcc_core::CoreError::Provider(
+                    "provider returned OAuth state for an unknown MCP definition".to_string(),
+                ));
+            }
+            let definition = repo
+                .get_mcp_definition(&update.definition_id)
+                .await?
+                .ok_or_else(|| {
+                    dcc_core::CoreError::Repository(
+                        "OAuth state references a missing MCP definition".to_string(),
+                    )
+                })?;
+            let McpTransport::Http { .. } = &definition.transport else {
+                return Err(dcc_core::CoreError::Provider(
+                    "provider returned OAuth state for a non-HTTP MCP definition".to_string(),
+                ));
+            };
+            let resource_fingerprint =
+                mcp_oauth_resource_fingerprint(&definition).map_err(|_| {
+                    dcc_core::CoreError::Provider(
+                        "provider returned OAuth state for an invalid MCP resource".to_string(),
+                    )
+                })?;
+            let existing = repo
+                .get_mcp_oauth_grant(&update.definition_id, &provider_id)
+                .await?;
+            let Some(state) = update.state else {
+                if let Some(existing) = existing {
+                    credential_store
+                        .delete_secret(&existing.secret_ref)
+                        .await
+                        .map_err(|_| {
+                            dcc_core::CoreError::Provider(
+                                "MCP OAuth credential persistence failed".to_string(),
+                            )
+                        })?;
+                    repo.delete_mcp_oauth_grant(&update.definition_id, &provider_id)
+                        .await?;
+                }
+                continue;
+            };
+            let now = Utc::now().to_rfc3339();
+            let secret_ref =
+                Self::mcp_oauth_credential_reference(&binding.provider_id, &update.definition_id);
+            let created_at = existing
+                .as_ref()
+                .filter(|grant| grant.resource_fingerprint == resource_fingerprint)
+                .map(|grant| grant.created_at.clone())
+                .unwrap_or_else(|| now.clone());
+
+            credential_store
+                .store_secret(&secret_ref, state.into_secret())
+                .await
+                .map_err(|_| {
+                    dcc_core::CoreError::Provider(
+                        "MCP OAuth credential persistence failed".to_string(),
+                    )
+                })?;
+            repo.save_mcp_oauth_grant(&McpOauthGrant {
+                definition_id: update.definition_id,
+                provider_id: provider_id.clone(),
+                resource_fingerprint,
+                secret_ref,
+                created_at,
+                updated_at: now,
+            })
+            .await?;
+        }
+        Ok(())
     }
 
     pub async fn validate_start_thread_scope(&self, input: &StartThreadInput) -> Result<()> {
@@ -762,6 +882,47 @@ impl SessionCommandState {
                                     statuses,
                                 )
                                 .await;
+                        }
+                    }
+                    Ok(ProviderEvent::McpOauthStateChanged { definition_id }) => {
+                        if state
+                            .persist_provider_mcp_oauth_updates(
+                                &binding,
+                                provider.as_ref(),
+                                &definition_id,
+                            )
+                            .await
+                            .is_err()
+                        {
+                            if let Some(provider_version) = provider.dcc_mcp_projection_version() {
+                                let mut statuses = state
+                                    .lock_store()
+                                    .ok()
+                                    .and_then(|store| {
+                                        store.mcp_runtime_statuses.get(&session_id).cloned()
+                                    })
+                                    .unwrap_or_default();
+                                if let Some(status) = statuses
+                                    .iter_mut()
+                                    .find(|status| status.definition_id == definition_id)
+                                {
+                                    status.state = McpRuntimeState::Failed;
+                                    status.tools.clear();
+                                    status.checked_at = Utc::now().to_rfc3339();
+                                    status.bounded_error = Some(McpRuntimeError::bounded(
+                                        McpErrorCategory::Authentication,
+                                        "MCP OAuth credential persistence failed",
+                                    ));
+                                    let _ = state
+                                        .replace_mcp_runtime_statuses(
+                                            &session_id,
+                                            &binding.provider_id,
+                                            provider_version,
+                                            statuses,
+                                        )
+                                        .await;
+                                }
+                            }
                         }
                     }
                     Ok(ProviderEvent::TextDelta { content }) => {

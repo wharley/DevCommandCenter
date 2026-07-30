@@ -46,6 +46,8 @@ struct ClaudeMcpServer<'a> {
     definition_id: &'a str,
     name: String,
     transport: ClaudeMcpTransport<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    oauth_state: Option<&'a str>,
     tool_policies: &'a [ProviderMcpToolPolicy],
 }
 
@@ -124,6 +126,11 @@ fn encode_mcp_configuration(servers: &[ProviderMcpServerConfig]) -> Result<Sensi
             return Err(invalid_configuration());
         }
         validate_tool_policies(&server.tool_policies)?;
+        let oauth_state = server
+            .oauth_state
+            .as_ref()
+            .map(|state| str::from_utf8(state.expose_secret()).map_err(|_| invalid_configuration()))
+            .transpose()?;
 
         let transport = match &server.transport {
             ProviderMcpTransport::Stdio {
@@ -132,7 +139,8 @@ fn encode_mcp_configuration(servers: &[ProviderMcpServerConfig]) -> Result<Sensi
                 cwd,
                 environment,
             } => {
-                if executable.trim().is_empty()
+                if oauth_state.is_some()
+                    || executable.trim().is_empty()
                     || executable.contains('\0')
                     || args.len() > MAX_ARGUMENT_COUNT
                     || args.iter().any(|argument| argument.contains('\0'))
@@ -167,6 +175,7 @@ fn encode_mcp_configuration(servers: &[ProviderMcpServerConfig]) -> Result<Sensi
             definition_id: &server.definition_id.0,
             name: format!("dcc-{session_namespace}-{index}"),
             transport,
+            oauth_state,
             tool_policies: &server.tool_policies,
         });
     }
@@ -438,6 +447,7 @@ mod tests {
                     cwd: None,
                     environment: vec![secret("FIXTURE_TOKEN", "secret-canary")],
                 },
+                oauth_state: None,
                 tool_policies: vec![ProviderMcpToolPolicy {
                     tool_name: "fixture.mutate".to_string(),
                     decision: McpToolPolicyDecision::Deny,
@@ -450,6 +460,7 @@ mod tests {
                     url: "http://127.0.0.1:8765/mcp".to_string(),
                     headers: vec![secret("Authorization", "Bearer secret-canary")],
                 },
+                oauth_state: None,
                 tool_policies: Vec::new(),
             },
         ];
@@ -488,6 +499,7 @@ mod tests {
                     "-----BEGIN KEY-----\nabc\n-----END KEY-----",
                 )],
             },
+            oauth_state: None,
             tool_policies: Vec::new(),
         };
 
@@ -503,6 +515,7 @@ mod tests {
                 url: "https://example.com/mcp".to_string(),
                 headers: Vec::new(),
             },
+            oauth_state: None,
             tool_policies: Vec::new(),
         };
         assert!(encode_mcp_configuration(&[user_owned_name]).is_err());
@@ -514,6 +527,7 @@ mod tests {
                 url: "https://example.com/mcp".to_string(),
                 headers: vec![secret("Authorization", "Bearer ok\r\nX-Evil: yes")],
             },
+            oauth_state: None,
             tool_policies: Vec::new(),
         };
         assert!(encode_mcp_configuration(&[injected_header]).is_err());
@@ -530,6 +544,7 @@ mod tests {
                 cwd: Some("/workspace".to_string()),
                 environment: Vec::new(),
             },
+            oauth_state: None,
             tool_policies: Vec::new(),
         };
 

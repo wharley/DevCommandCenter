@@ -4,7 +4,7 @@
 /* Constants */
 export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","startDelegation":"start_delegation"} as const;
 
-export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
+export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
 
 export const PROVIDER_METHODS = {"listProviders":"list_providers","providerAccountUsage":"provider_account_usage"} as const;
 
@@ -474,6 +474,15 @@ export type DisableMcpIntegrationOutput = {
 	changed: boolean,
 };
 
+export type DisconnectMcpOauthInput = {
+	definitionId: McpDefinitionId,
+	providerId: ProviderId,
+};
+
+export type DisconnectMcpOauthOutput = {
+	disconnected: boolean,
+};
+
 export type FailDelegationInput = {
 	delegationId: DelegationId,
 	reason: string | null,
@@ -731,6 +740,7 @@ export type McpIntegrationRecord = {
 	bindings: McpBinding[],
 	toolPolicies: McpToolPolicy[],
 	credentialCount: number,
+	oauthProviderIds: ProviderId[],
 };
 
 export type McpProbeReport = {

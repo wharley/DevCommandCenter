@@ -3,7 +3,9 @@ use async_trait::async_trait;
 use crate::{
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
-        mcp::{McpBinding, McpBindingId, McpDefinition, McpDefinitionId, McpToolPolicy},
+        mcp::{
+            McpBinding, McpBindingId, McpDefinition, McpDefinitionId, McpOauthGrant, McpToolPolicy,
+        },
         project::{Project, ProjectId},
         repository::{Repository, RepositoryId},
         session::{Session, SessionEventRecord, SessionId},
@@ -89,6 +91,39 @@ pub trait McpRepo: Send + Sync {
         definition_id: &McpDefinitionId,
         tool_name: &str,
     ) -> Result<()>;
+
+    async fn save_mcp_oauth_grant(&self, grant: &McpOauthGrant) -> Result<()> {
+        let _ = grant;
+        Err(crate::CoreError::Repository(
+            "MCP OAuth grant persistence is unavailable".to_string(),
+        ))
+    }
+
+    async fn get_mcp_oauth_grant(
+        &self,
+        definition_id: &McpDefinitionId,
+        provider_id: &crate::domain::provider::ProviderId,
+    ) -> Result<Option<McpOauthGrant>> {
+        let _ = (definition_id, provider_id);
+        Ok(None)
+    }
+
+    async fn list_mcp_oauth_grants(
+        &self,
+        definition_id: Option<&McpDefinitionId>,
+    ) -> Result<Vec<McpOauthGrant>> {
+        let _ = definition_id;
+        Ok(Vec::new())
+    }
+
+    async fn delete_mcp_oauth_grant(
+        &self,
+        definition_id: &McpDefinitionId,
+        provider_id: &crate::domain::provider::ProviderId,
+    ) -> Result<()> {
+        let _ = (definition_id, provider_id);
+        Ok(())
+    }
 }
 
 #[async_trait]

@@ -358,6 +358,15 @@ async function runTurn(payload, state) {
 		},
 	});
 	let terminalResult = null;
+	const publishMcpOauthUpdates = () => {
+		for (const update of state.mcpOauthBridge.collectUpdates()) {
+			emit({
+				type: "dcc_mcp_oauth_state",
+				definition_id: update.definitionId,
+				state: update.state,
+			});
+		}
+	};
 
 	try {
 		let mcpStatus;
@@ -387,6 +396,7 @@ async function runTurn(payload, state) {
 		if (mcpStatus.failed.length > 0) {
 			throw new Error("one or more DCC MCP servers failed to attach");
 		}
+		publishMcpOauthUpdates();
 		deferredPrompt?.release();
 		for await (const message of q) {
 			updateResumeSessionId(message, state);
@@ -396,6 +406,7 @@ async function runTurn(payload, state) {
 			}
 			emit(message);
 		}
+		publishMcpOauthUpdates();
 	} catch (error) {
 		if (!terminalResult) {
 			terminalResult = {

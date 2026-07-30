@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { existsSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+	existsSync,
+	readFileSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -83,6 +91,18 @@ test("projects remote HTTPS servers through the bundled ephemeral OAuth proxy", 
 		},
 	);
 	const remote = runtimeProjection.servers["dcc-remote"];
+	const authorizationIdentity = createHash("sha256")
+		.update("remote")
+		.update("\0")
+		.update("authorization")
+		.digest("hex")
+		.slice(0, 24);
+	const tenantIdentity = createHash("sha256")
+		.update("remote")
+		.update("\0")
+		.update("x-tenant")
+		.digest("hex")
+		.slice(0, 24);
 
 	assert.equal(remote.type, "stdio");
 	assert.equal(remote.command, "/absolute/node");
@@ -96,14 +116,15 @@ test("projects remote HTTPS servers through the bundled ephemeral OAuth proxy", 
 		"180",
 		"--silent",
 		"--header",
-		"Authorization:${DCC_MCP_REMOTE_HEADER_0_0}",
+		`Authorization:\${DCC_MCP_REMOTE_HEADER_${authorizationIdentity}}`,
 		"--header",
-		"X-Tenant:${DCC_MCP_REMOTE_HEADER_0_1}",
+		`X-Tenant:\${DCC_MCP_REMOTE_HEADER_${tenantIdentity}}`,
 	]);
 	assert.deepEqual(remote.env, {
 		MCP_REMOTE_CONFIG_DIR: "/private/session/oauth",
-		DCC_MCP_REMOTE_HEADER_0_0: "Bearer secret-canary",
-		DCC_MCP_REMOTE_HEADER_0_1: "tenant-a",
+		[`DCC_MCP_REMOTE_HEADER_${authorizationIdentity}`]:
+			"Bearer secret-canary",
+		[`DCC_MCP_REMOTE_HEADER_${tenantIdentity}`]: "tenant-a",
 	});
 	assert.equal(JSON.stringify(remote.args).includes("secret-canary"), false);
 	assert.equal(runtimeProjection.servers["dcc-loopback"].type, "http");
@@ -137,8 +158,82 @@ test("keeps OAuth files private to the provider session and removes them", () =>
 	assert.equal(existsSync(authConfigDir), false);
 });
 
+test("restores and captures provider-neutral OAuth state in the private session directory", () => {
+	const initialState = {
+		version: 1,
+		clientInfo: {
+			client_id: "public-client",
+			redirect_uris: ["http://127.0.0.1:3335/oauth/callback"],
+		},
+		tokens: {
+			access_token: "first-access-token",
+			refresh_token: "first-refresh-token",
+			token_type: "bearer",
+		},
+	};
+	const serverUrl = "https://mcp.example.com/mcp";
+	const projection = normalizeDccMcpServers([
+		{
+			definitionId: "remote",
+			name: "dcc-remote",
+			transport: {
+				type: "http",
+				url: serverUrl,
+				headers: {},
+			},
+			oauthState: JSON.stringify(initialState),
+		},
+	]);
+	const bridge = createEphemeralMcpOAuthBridge(import.meta.url);
+	const runtimeProjection = bridge.project(projection);
+	const authConfigDir =
+		runtimeProjection.servers["dcc-remote"].env.MCP_REMOTE_CONFIG_DIR;
+	const serverHash = createHash("md5").update(serverUrl).digest("hex");
+	const stateDirectory = join(authConfigDir, "mcp-remote-0.1.38");
+	const tokensPath = join(stateDirectory, `${serverHash}_tokens.json`);
+	const clientInfoPath = join(
+		stateDirectory,
+		`${serverHash}_client_info.json`,
+	);
+
+	assert.deepEqual(JSON.parse(readFileSync(tokensPath, "utf8")), initialState.tokens);
+	assert.deepEqual(
+		JSON.parse(readFileSync(clientInfoPath, "utf8")),
+		initialState.clientInfo,
+	);
+	if (process.platform !== "win32") {
+		assert.equal(statSync(tokensPath).mode & 0o777, 0o600);
+		assert.equal(statSync(clientInfoPath).mode & 0o777, 0o600);
+	}
+	assert.deepEqual(bridge.collectUpdates(), []);
+
+	const refreshedTokens = {
+		...initialState.tokens,
+		access_token: "refreshed-access-token",
+	};
+	writeFileSync(tokensPath, JSON.stringify(refreshedTokens), { mode: 0o600 });
+	const updates = bridge.collectUpdates();
+	assert.equal(updates.length, 1);
+	assert.equal(updates[0].definitionId, "remote");
+	assert.deepEqual(JSON.parse(updates[0].state), {
+		version: 1,
+		clientInfo: initialState.clientInfo,
+		tokens: refreshedTokens,
+	});
+	assert.deepEqual(bridge.collectUpdates(), []);
+
+	unlinkSync(tokensPath);
+	assert.deepEqual(bridge.collectUpdates(), [
+		{ definitionId: "remote", state: null },
+	]);
+	assert.deepEqual(bridge.collectUpdates(), []);
+
+	bridge.cleanup();
+	assert.equal(existsSync(authConfigDir), false);
+});
+
 test("does not deliver the user prompt until MCP attachment is ready", async () => {
-	const deferred = createDeferredUserPrompt("read ClickUp");
+	const deferred = createDeferredUserPrompt("read remote task");
 	const iterator = deferred.stream[Symbol.asyncIterator]();
 	let delivered = false;
 	const next = iterator.next().then((value) => {
@@ -157,7 +252,7 @@ test("does not deliver the user prompt until MCP attachment is ready", async () 
 			session_id: "",
 			message: {
 				role: "user",
-				content: [{ type: "text", text: "read ClickUp" }],
+				content: [{ type: "text", text: "read remote task" }],
 			},
 			parent_tool_use_id: null,
 		},

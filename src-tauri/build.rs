@@ -76,9 +76,10 @@ use dcc_tauri::commands::{
     },
     mcp_commands::{
         ActivateMcpIntegrationOutput, CreateMcpIntegrationInput, CreateMcpIntegrationOutput,
-        DisableMcpIntegrationInput, DisableMcpIntegrationOutput, ListMcpIntegrationsOutput,
-        McpCredentialInput, McpIntegrationRecord, RemoveMcpIntegrationInput,
-        RemoveMcpIntegrationOutput, SetMcpToolPolicyInput, SetMcpToolPolicyOutput,
+        DisableMcpIntegrationInput, DisableMcpIntegrationOutput, DisconnectMcpOauthInput,
+        DisconnectMcpOauthOutput, ListMcpIntegrationsOutput, McpCredentialInput,
+        McpIntegrationRecord, RemoveMcpIntegrationInput, RemoveMcpIntegrationOutput,
+        SetMcpToolPolicyInput, SetMcpToolPolicyOutput,
     },
     provider_commands::{
         ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
@@ -259,6 +260,7 @@ struct McpMethods {
     activate_mcp_integration: String,
     disable_mcp_integration: String,
     remove_mcp_integration: String,
+    disconnect_mcp_oauth: String,
     set_mcp_tool_policy: String,
 }
 
@@ -521,6 +523,8 @@ fn main() {
         .typ::<DisableMcpIntegrationOutput>()
         .typ::<RemoveMcpIntegrationInput>()
         .typ::<RemoveMcpIntegrationOutput>()
+        .typ::<DisconnectMcpOauthInput>()
+        .typ::<DisconnectMcpOauthOutput>()
         .typ::<SetMcpToolPolicyInput>()
         .typ::<SetMcpToolPolicyOutput>()
         .typ::<StartThreadInput>()
@@ -708,6 +712,7 @@ fn main() {
             activate_mcp_integration: "activate_mcp_integration".to_string(),
             disable_mcp_integration: "disable_mcp_integration".to_string(),
             remove_mcp_integration: "remove_mcp_integration".to_string(),
+            disconnect_mcp_oauth: "disconnect_mcp_oauth".to_string(),
             set_mcp_tool_policy: "set_mcp_tool_policy".to_string(),
         },
     );

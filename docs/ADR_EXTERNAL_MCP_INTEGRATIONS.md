@@ -47,9 +47,11 @@ operation for remote HTTPS servers, its DCC adapter may translate that one
 remote definition through a pinned, bundled stdio-to-HTTP OAuth transport. The
 projection must remain session-owned, preserve the original DCC definition and
 tool-policy identity, bind callbacks to loopback, keep secrets out of arguments
-and renderer state, and clean up ephemeral credentials with the provider
-session. This is not a general shared DCC gateway and does not change other
-providers' direct attachment paths.
+and renderer state, and clean up its plaintext session projection with the
+provider session. A DCC-owned OAuth grant may survive in the OS credential
+store behind provider, definition, and resource-bound metadata. This is not a
+general shared DCC gateway and does not change other providers' direct
+attachment paths.
 
 ### Tools-first boundary
 
@@ -79,6 +81,13 @@ and environment values will be represented by opaque references whose values
 live in an operating-system credential store. Secret values must not be
 returned to the renderer or written to project files, generated provider
 configuration, logs, analytics, crash reports, or snapshots.
+
+Adapter-owned remote OAuth grants follow the same boundary. SQLite stores only
+the definition, adapter owner, resource fingerprint, timestamps, and opaque
+credential reference. Access tokens, refresh tokens, and dynamic client
+registration secrets live together in a versioned credential-store envelope.
+Provider-native grants remain owned by the provider and are never copied into
+DCC storage.
 
 ### Trust and ownership
 
