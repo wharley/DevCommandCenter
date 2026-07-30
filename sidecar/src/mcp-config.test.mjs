@@ -13,6 +13,10 @@ import {
 	createEphemeralMcpOAuthBridge,
 	projectRemoteHttpServersThroughOAuthProxy,
 } from "./mcp-oauth-bridge.mjs";
+import {
+	createDeferredUserPrompt,
+	waitForDccMcpReadiness,
+} from "./mcp-readiness.mjs";
 
 test("normalizes DCC-owned stdio and HTTP servers for the Agent SDK", () => {
 	const projection = normalizeDccMcpServers([
@@ -131,6 +135,118 @@ test("keeps OAuth files private to the provider session and removes them", () =>
 
 	bridge.cleanup();
 	assert.equal(existsSync(authConfigDir), false);
+});
+
+test("does not deliver the user prompt until MCP attachment is ready", async () => {
+	const deferred = createDeferredUserPrompt("read ClickUp");
+	const iterator = deferred.stream[Symbol.asyncIterator]();
+	let delivered = false;
+	const next = iterator.next().then((value) => {
+		delivered = true;
+		return value;
+	});
+
+	await Promise.resolve();
+	assert.equal(delivered, false);
+
+	deferred.release();
+	assert.deepEqual(await next, {
+		done: false,
+		value: {
+			type: "user",
+			session_id: "",
+			message: {
+				role: "user",
+				content: [{ type: "text", text: "read ClickUp" }],
+			},
+			parent_tool_use_id: null,
+		},
+	});
+	assert.deepEqual(await iterator.next(), { done: true, value: undefined });
+});
+
+test("waits through pending MCP status before releasing a connected snapshot", async () => {
+	const projection = normalizeDccMcpServers([
+		{
+			definitionId: "remote",
+			name: "dcc-remote",
+			transport: {
+				type: "http",
+				url: "https://mcp.example.com/mcp",
+				headers: {},
+			},
+		},
+	]);
+	const statuses = [
+		[{ name: "dcc-remote", status: "pending", tools: [] }],
+		[
+			{
+				name: "dcc-remote",
+				status: "connected",
+				tools: [{ name: "task.get" }],
+			},
+		],
+	];
+	const snapshots = [];
+	let clock = 0;
+	const result = await waitForDccMcpReadiness(
+		{
+			async mcpServerStatus() {
+				return statuses.shift();
+			},
+		},
+		projection,
+		{
+			timeoutMs: 1_000,
+			pollIntervalMs: 50,
+			onSnapshot: (snapshot) => snapshots.push(snapshot),
+			now: () => clock,
+			wait: async (milliseconds) => {
+				clock += milliseconds;
+			},
+		},
+	);
+
+	assert.equal(snapshots.length, 2);
+	assert.equal(snapshots[0].servers[0].status, "pending");
+	assert.equal(result.servers[0].status, "connected");
+	assert.deepEqual(result.servers[0].tools, [
+		{ name: "task.get", annotations: {} },
+	]);
+});
+
+test("fails closed when MCP attachment remains pending until timeout", async () => {
+	const projection = normalizeDccMcpServers([
+		{
+			definitionId: "remote",
+			name: "dcc-remote",
+			transport: {
+				type: "http",
+				url: "https://mcp.example.com/mcp",
+				headers: {},
+			},
+		},
+	]);
+	let clock = 0;
+	const result = await waitForDccMcpReadiness(
+		{
+			async mcpServerStatus() {
+				return [{ name: "dcc-remote", status: "pending", tools: [] }];
+			},
+		},
+		projection,
+		{
+			timeoutMs: 100,
+			pollIntervalMs: 50,
+			now: () => clock,
+			wait: async (milliseconds) => {
+				clock += milliseconds;
+			},
+		},
+	);
+
+	assert.deepEqual(result.failed, ["dcc-remote"]);
+	assert.equal(result.servers[0].status, "failed");
 });
 
 test("resolves only explicit policies for DCC-owned MCP tools", () => {

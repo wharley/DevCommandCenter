@@ -102,6 +102,16 @@ version so subsequent requests carry `MCP-Protocol-Version`. It fails closed if
 the pinned package layout or version changes, and the local strict HTTP fixture
 exercises `initialize` followed by `tools/list`.
 
+The Agent SDK can report a projected server as `pending` while its OAuth
+callback and tool discovery are still completing. For queries with DCC-owned
+MCP servers, the sidecar starts the provider process with an async prompt stream
+but withholds the user message until every projected server leaves `pending`.
+It publishes changed status snapshots during that wait. The prompt is released
+only after attachment succeeds; authentication, provider, and bounded timeout
+failures close the query without delivering the prompt. This prevents the
+first model turn from taking a tool snapshot before a newly authorized server
+is available.
+
 ## Scope and credential resolution
 
 The resolver is provider-neutral. A definition is selected once when at least
@@ -154,6 +164,8 @@ Provider configuration, URLs, headers, environment values, descriptions, and
 raw SDK errors are not forwarded. A thrown attach error becomes the fixed
 message `DCC MCP attachment failed`. `failed` and `needs-auth` statuses fail the
 turn closed; `pending` remains distinct because the SDK may still be connecting.
+The sidecar polls `pending` for at most the bounded OAuth attachment window and
+converts an expired wait into a fail-closed provider attachment status.
 For connected tools, the sidecar keeps only a bounded name and boolean
 `readOnly`, `destructive`, and `openWorld` annotations exposed by the pinned SDK,
 mapping them to the provider-neutral hint contract. Free-form annotation data

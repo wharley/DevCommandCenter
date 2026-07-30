@@ -11,13 +11,16 @@ import {
 	dccMcpQueryOptions,
 	failedDccMcpStatus,
 	normalizeDccMcpServers,
-	readDccMcpStatus,
 	resolveDccMcpToolPolicy,
 } from "./mcp-config.mjs";
 import {
 	createEphemeralMcpOAuthBridge,
 	runBundledMcpRemoteProxy,
 } from "./mcp-oauth-bridge.mjs";
+import {
+	createDeferredUserPrompt,
+	waitForDccMcpReadiness,
+} from "./mcp-readiness.mjs";
 import { handlePermissionRequest } from "./permission-bridge.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
 
@@ -265,8 +268,13 @@ async function runTurn(payload, state) {
 		state.mcpProjection,
 	);
 	const mcpOptions = dccMcpQueryOptions(runtimeMcpProjection);
+	const hasDccMcpServers =
+		Object.keys(runtimeMcpProjection.servers).length > 0;
+	const deferredPrompt = hasDccMcpServers
+		? createDeferredUserPrompt(prompt)
+		: null;
 	const q = query({
-		prompt,
+		prompt: deferredPrompt?.stream ?? prompt,
 		options: {
 			cwd: process.cwd(),
 			additionalDirectories,
@@ -354,7 +362,19 @@ async function runTurn(payload, state) {
 	try {
 		let mcpStatus;
 		try {
-			mcpStatus = await readDccMcpStatus(q, state.mcpProjection);
+			mcpStatus = await waitForDccMcpReadiness(
+				q,
+				state.mcpProjection,
+				{
+					onSnapshot(snapshot) {
+						emit({
+							type: "dcc_mcp_status",
+							failed: snapshot.failed,
+							servers: snapshot.servers,
+						});
+					},
+				},
+			);
 		} catch {
 			mcpStatus = failedDccMcpStatus(state.mcpProjection);
 			emit({
@@ -364,14 +384,10 @@ async function runTurn(payload, state) {
 			});
 			throw new Error("DCC MCP attachment failed");
 		}
-		emit({
-			type: "dcc_mcp_status",
-			failed: mcpStatus.failed,
-			servers: mcpStatus.servers,
-		});
 		if (mcpStatus.failed.length > 0) {
 			throw new Error("one or more DCC MCP servers failed to attach");
 		}
+		deferredPrompt?.release();
 		for await (const message of q) {
 			updateResumeSessionId(message, state);
 			if (message && message.type === "result") {
@@ -390,6 +406,7 @@ async function runTurn(payload, state) {
 			};
 		}
 	} finally {
+		deferredPrompt?.cancel();
 		try {
 			q.close();
 		} catch {
