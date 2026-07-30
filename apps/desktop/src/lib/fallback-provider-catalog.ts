@@ -32,9 +32,22 @@ const multiRootDelegationRequesterCapabilities = {
 	supportsMultiRoot: true,
 } as const;
 
-const nativeMcpMultiRootDelegationRequesterCapabilities = {
+const claudeRuntimeMcpCapabilities = {
 	...multiRootDelegationRequesterCapabilities,
-	mcpSupport: "nativeConfig",
+	mcpSupport: {
+		runtimeBridge: {
+			providerVersion: "claude-agent-sdk@0.2.126+claude-code@2.1.126",
+		},
+	},
+} as const;
+
+const codexRuntimeMcpCapabilities = {
+	...multiRootDelegationRequesterCapabilities,
+	mcpSupport: {
+		runtimeBridge: {
+			providerVersion: "codex-cli@0.146.0+app-server-protocol-v2",
+		},
+	},
 } as const;
 
 const experimentalCapabilities = {
@@ -69,7 +82,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...nativeMcpMultiRootDelegationRequesterCapabilities },
+			capabilities: { ...claudeRuntimeMcpCapabilities },
 			health: stableHealth,
 			stable: true,
 		},
@@ -84,7 +97,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...nativeMcpMultiRootDelegationRequesterCapabilities },
+			capabilities: { ...codexRuntimeMcpCapabilities },
 			health: stableHealth,
 			stable: true,
 		},

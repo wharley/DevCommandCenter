@@ -21,11 +21,15 @@ licenses compatible with the repository's Apache-2.0 source distribution:
 | `zeroize` | `1.8.2` | Reduce lifetime of backend-only secret buffers | Apache-2.0 OR MIT |
 | `tokio-stream` | `0.1.18` | Repository-owned offline fixture | MIT |
 | `tower` | `0.5.3` | Offline fixture tests | MIT |
+| `mcp-remote` | `0.1.38` | Pinned Claude remote-HTTPS OAuth transport bridge | MIT |
 
 The Cargo metadata review also confirmed MIT or Apache-2.0 declarations for
 `keyring-core`, `apple-native-keyring-store`,
 `windows-native-keyring-store`, `zbus-secret-service-keyring-store`,
 `secret-service`, `security-framework`, and `zbus` in the selected lockfile.
+The installed npm metadata for the new bridge and its direct runtime
+dependencies (`express`, `open`, `strict-url-sanitise`, and `undici`) declares
+MIT.
 
 All DCC Cargo and Node workspace packages now declare `Apache-2.0` explicitly,
 matching the root [LICENSE](../LICENSE). The internal packages remain

@@ -1,7 +1,7 @@
 # ADR: External MCP integrations
 
 - **Status:** Accepted
-- **Date:** July 28, 2026
+- **Date:** July 28, 2026; amended July 29, 2026
 - **Scope:** DCC consuming external MCP servers
 
 ## Context
@@ -40,6 +40,16 @@ claiming proxy support for protocol capabilities that have not been tested.
 
 A gateway may be reconsidered after the direct bridges and tools-first
 permission boundary are stable.
+
+The July 29 amendment permits one narrow adapter-local exception: when a
+runtime accepts stdio MCP servers but exposes no programmatic OAuth-start
+operation for remote HTTPS servers, its DCC adapter may translate that one
+remote definition through a pinned, bundled stdio-to-HTTP OAuth transport. The
+projection must remain session-owned, preserve the original DCC definition and
+tool-policy identity, bind callbacks to loopback, keep secrets out of arguments
+and renderer state, and clean up ephemeral credentials with the provider
+session. This is not a general shared DCC gateway and does not change other
+providers' direct attachment paths.
 
 ### Tools-first boundary
 

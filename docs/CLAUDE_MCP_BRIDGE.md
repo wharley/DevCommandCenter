@@ -20,7 +20,8 @@ independent `.mcp.json`/`settingSources` path in the
 The bundled versions for this slice are:
 
 - `@anthropic-ai/claude-agent-sdk` `0.2.126`;
-- `@anthropic-ai/claude-code` `2.1.126`.
+- `@anthropic-ai/claude-code` `2.1.126`;
+- `mcp-remote` `0.1.38`, pinned for the Claude remote-OAuth transport bridge.
 
 The installed TypeScript contract also exposes `mcpServerStatus()` and defines
 `mcpServers` as an in-memory query option. No provider file mutation is needed.
@@ -59,6 +60,47 @@ replace, or inspect inherited servers.
 stdio and HTTP projections set `alwaysLoad: true`. This gives the bounded
 startup window documented by the SDK and makes connection status observable
 before DCC treats tools as available.
+
+### Remote HTTPS OAuth
+
+The installed Claude Agent SDK can report `needs-auth`, but it does not expose
+the interactive OAuth-start operation through its programmatic query surface.
+For a DCC-owned remote HTTPS definition, the sidecar therefore projects an
+adapter-local stdio transport backed by the pinned
+[`mcp-remote`](https://github.com/geelen/mcp-remote) bridge. ClickUp documents
+this bridge for Claude clients that need to connect to its remote MCP endpoint.
+
+This remains one DCC definition. Codex receives the original HTTPS definition
+and uses its native OAuth operation; Claude receives the session-local transport
+projection. No provider configuration file or duplicate integration is
+created.
+
+The Claude OAuth bridge:
+
+- launches only from the already bundled sidecar, never through `npx` or a
+  floating package version;
+- forces Streamable HTTP instead of transport fallback;
+- binds the OAuth callback server to loopback and uses the upstream PKCE flow;
+- passes resolved DCC headers through child-only environment variables, never
+  command arguments or renderer state;
+- suppresses proxy diagnostics that could contain authorization URLs or header
+  metadata;
+- stores OAuth registration, verifier, and token files only inside a
+  mode-`0700` random temporary directory owned by the provider session; and
+- recursively removes that exact directory when the Claude sidecar exits.
+
+Tokens are intentionally ephemeral in this slice. They remain available across
+turns of the same Claude session, but a new Claude provider session may require
+browser authorization again. Persisting remote OAuth tokens will require an
+OS-credential-store implementation rather than copying the proxy's plaintext
+file format into application data.
+
+`mcp-remote@0.1.38` also required a narrow pinned patch: after forwarding the
+`initialize` response, the upstream proxy did not propagate the negotiated
+protocol version to its HTTP transport. The postinstall patch sets that
+version so subsequent requests carry `MCP-Protocol-Version`. It fails closed if
+the pinned package layout or version changes, and the local strict HTTP fixture
+exercises `initialize` followed by `tools/list`.
 
 ## Scope and credential resolution
 
@@ -178,8 +220,9 @@ and advertises evidence.
   dropping it.
 - The installed Agent SDK reports `needs-auth` and can reconnect an MCP server,
   but its programmatic query surface does not expose the native interactive
-  OAuth-start operation. DCC therefore reports the authentication failure
-  without presenting a non-functional connection action for Claude sessions.
+  OAuth-start operation. Remote HTTPS definitions use the session-local bridge
+  described above; other transport-specific native authorization mechanisms
+  remain unsupported until they expose a safe runtime contract.
 - No `verifiedBridge` evidence is persisted or advertised by this slice; the
   final promotion decision remains bound to a reviewed release-candidate
   record.
@@ -195,6 +238,7 @@ cargo test -p dcc-mcp-fixture --test provider_conformance
 node --test sidecar/src/mcp-config.test.mjs sidecar/src/permission-bridge.test.mjs \
   sidecar/src/turn-lifecycle.test.mjs
 node --check sidecar/src/index.mjs
+node scripts/patch-mcp-remote.mjs
 ```
 
 The tests use placeholder credentials, make no provider request, and require no

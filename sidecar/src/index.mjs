@@ -14,6 +14,10 @@ import {
 	readDccMcpStatus,
 	resolveDccMcpToolPolicy,
 } from "./mcp-config.mjs";
+import {
+	createEphemeralMcpOAuthBridge,
+	runBundledMcpRemoteProxy,
+} from "./mcp-oauth-bridge.mjs";
 import { handlePermissionRequest } from "./permission-bridge.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
 
@@ -257,7 +261,10 @@ async function runTurn(payload, state) {
 	} catch {
 		// Rust validates and serializes this value. Ignore malformed manual overrides.
 	}
-	const mcpOptions = dccMcpQueryOptions(state.mcpProjection);
+	const runtimeMcpProjection = state.mcpOauthBridge.project(
+		state.mcpProjection,
+	);
+	const mcpOptions = dccMcpQueryOptions(runtimeMcpProjection);
 	const q = query({
 		prompt,
 		options: {
@@ -401,6 +408,10 @@ async function runTurn(payload, state) {
 }
 
 async function main() {
+	if (await runBundledMcpRemoteProxy()) {
+		return;
+	}
+
 	if (process.argv.includes("--version")) {
 		process.stdout.write(`dcc-claude-sidecar ${SIDECAR_VERSION}\n`);
 		return;
@@ -418,6 +429,7 @@ async function main() {
 		pendingUserInputs: new Map(),
 		pendingPermissions: new Map(),
 		mcpProjection: normalizeDccMcpServers([]),
+		mcpOauthBridge: createEphemeralMcpOAuthBridge(import.meta.url),
 	};
 
 	const rl = readline.createInterface({

@@ -148,6 +148,9 @@ because a file exists in a checkout or worktree.
   confirmation UI.
 - OAuth callbacks bind to loopback, use state and PKCE where supported, expire
   quickly, and cannot reuse mobile-pairing credentials.
+- An adapter-local OAuth bridge that cannot write directly to the OS credential
+  store uses a random mode-`0700` session directory and removes it at provider
+  shutdown; it must not persist plaintext OAuth tokens in application data.
 - Headers that carry credentials are stored as secret references, not plain
   definition fields.
 - Network access by an MCP server is never described as sandboxed unless DCC

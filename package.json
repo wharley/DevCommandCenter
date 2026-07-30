@@ -26,7 +26,7 @@
     "vite:build": "node scripts/ensure-node.mjs && vite build",
     "lint": "eslint .",
     "preinstall": "node scripts/check-node-version.mjs",
-    "postinstall": "node scripts/patch-xterm-viewport.mjs"
+    "postinstall": "node scripts/patch-xterm-viewport.mjs && node scripts/patch-mcp-remote.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.0",
@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.126",
-    "@anthropic-ai/claude-code": "2.1.126"
+    "@anthropic-ai/claude-code": "2.1.126",
+    "mcp-remote": "0.1.38"
   }
 }

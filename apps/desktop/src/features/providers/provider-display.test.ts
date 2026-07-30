@@ -11,12 +11,14 @@ function provider(id: string) {
 }
 
 describe("provider MCP support display", () => {
-	it("describes native configuration without claiming a verified DCC bridge", () => {
-		expect(provider("claude_code").capabilities.mcpSupport).toBe("nativeConfig");
-		expect(provider("codex").capabilities.mcpSupport).toBe("nativeConfig");
+	it("describes the bundled runtime bridges without claiming verification", () => {
 		expect(getProviderChips(provider("claude_code"))).toContainEqual({
-			label: "mcp native config",
-			variant: "outline",
+			label: "mcp runtime bridge",
+			variant: "warn",
+		});
+		expect(getProviderChips(provider("codex"))).toContainEqual({
+			label: "mcp runtime bridge",
+			variant: "warn",
 		});
 	});
 

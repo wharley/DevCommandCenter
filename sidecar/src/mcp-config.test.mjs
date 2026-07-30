@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync, statSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -8,6 +9,10 @@ import {
 	readDccMcpStatus,
 	resolveDccMcpToolPolicy,
 } from "./mcp-config.mjs";
+import {
+	createEphemeralMcpOAuthBridge,
+	projectRemoteHttpServersThroughOAuthProxy,
+} from "./mcp-oauth-bridge.mjs";
 
 test("normalizes DCC-owned stdio and HTTP servers for the Agent SDK", () => {
 	const projection = normalizeDccMcpServers([
@@ -38,6 +43,94 @@ test("normalizes DCC-owned stdio and HTTP servers for the Agent SDK", () => {
 	]);
 	assert.equal(projection.servers["dcc-command-fixture"].alwaysLoad, true);
 	assert.equal(projection.servers["dcc-http-fixture"].type, "http");
+});
+
+test("projects remote HTTPS servers through the bundled ephemeral OAuth proxy", () => {
+	const projection = normalizeDccMcpServers([
+		{
+			definitionId: "remote",
+			name: "dcc-remote",
+			transport: {
+				type: "http",
+				url: "https://mcp.example.com/mcp",
+				headers: {
+					Authorization: "Bearer secret-canary",
+					"X-Tenant": "tenant-a",
+				},
+			},
+		},
+		{
+			definitionId: "loopback",
+			name: "dcc-loopback",
+			transport: {
+				type: "http",
+				url: "http://127.0.0.1:8765/mcp",
+				headers: {},
+			},
+		},
+	]);
+
+	const runtimeProjection = projectRemoteHttpServersThroughOAuthProxy(
+		projection,
+		{
+			command: "/absolute/node",
+			args: ["/absolute/sidecar.mjs", "--dcc-mcp-remote-proxy"],
+			authConfigDir: "/private/session/oauth",
+		},
+	);
+	const remote = runtimeProjection.servers["dcc-remote"];
+
+	assert.equal(remote.type, "stdio");
+	assert.equal(remote.command, "/absolute/node");
+	assert.deepEqual(remote.args, [
+		"/absolute/sidecar.mjs",
+		"--dcc-mcp-remote-proxy",
+		"https://mcp.example.com/mcp",
+		"--transport",
+		"http-only",
+		"--auth-timeout",
+		"180",
+		"--silent",
+		"--header",
+		"Authorization:${DCC_MCP_REMOTE_HEADER_0_0}",
+		"--header",
+		"X-Tenant:${DCC_MCP_REMOTE_HEADER_0_1}",
+	]);
+	assert.deepEqual(remote.env, {
+		MCP_REMOTE_CONFIG_DIR: "/private/session/oauth",
+		DCC_MCP_REMOTE_HEADER_0_0: "Bearer secret-canary",
+		DCC_MCP_REMOTE_HEADER_0_1: "tenant-a",
+	});
+	assert.equal(JSON.stringify(remote.args).includes("secret-canary"), false);
+	assert.equal(runtimeProjection.servers["dcc-loopback"].type, "http");
+	assert.equal(runtimeProjection.definitionIds, projection.definitionIds);
+	assert.equal(runtimeProjection.toolPolicies, projection.toolPolicies);
+});
+
+test("keeps OAuth files private to the provider session and removes them", () => {
+	const projection = normalizeDccMcpServers([
+		{
+			definitionId: "remote",
+			name: "dcc-remote",
+			transport: {
+				type: "http",
+				url: "https://mcp.example.com/mcp",
+				headers: {},
+			},
+		},
+	]);
+	const bridge = createEphemeralMcpOAuthBridge(import.meta.url);
+	const runtimeProjection = bridge.project(projection);
+	const authConfigDir =
+		runtimeProjection.servers["dcc-remote"].env.MCP_REMOTE_CONFIG_DIR;
+
+	assert.equal(existsSync(authConfigDir), true);
+	if (process.platform !== "win32") {
+		assert.equal(statSync(authConfigDir).mode & 0o777, 0o700);
+	}
+
+	bridge.cleanup();
+	assert.equal(existsSync(authConfigDir), false);
 });
 
 test("resolves only explicit policies for DCC-owned MCP tools", () => {
