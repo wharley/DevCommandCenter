@@ -6,6 +6,8 @@ import {
 	Activity,
 	AlertTriangle,
 	Braces,
+	ChevronDown,
+	ChevronRight,
 	Command,
 	Globe2,
 	KeyRound,
@@ -64,6 +66,7 @@ import {
 	getMcpToolPolicyDecision,
 	listMcpToolAnnotationHints,
 	listMcpIntegrationTools,
+	summarizeMcpToolPolicies,
 	type McpIntegrationRuntimeKind,
 } from "./mcp-integration-runtime";
 
@@ -180,6 +183,9 @@ export function McpIntegrationsPanel({
 		null,
 	);
 	const [deleteCredentials, setDeleteCredentials] = useState(false);
+	const [expandedToolPolicyIds, setExpandedToolPolicyIds] = useState<
+		Set<string>
+	>(() => new Set());
 
 	const integrationsQuery = useQuery({
 		queryKey: MCP_INTEGRATIONS_QUERY_KEY,
@@ -257,6 +263,18 @@ export function McpIntegrationsPanel({
 		value: McpIntegrationDraft[Key],
 	) => {
 		setDraft((current) => ({ ...current, [key]: value }));
+	};
+
+	const toggleToolPolicies = (definitionId: string) => {
+		setExpandedToolPolicyIds((current) => {
+			const next = new Set(current);
+			if (next.has(definitionId)) {
+				next.delete(definitionId);
+			} else {
+				next.add(definitionId);
+			}
+			return next;
+		});
 	};
 
 	const addCredential = () => {
@@ -1095,6 +1113,14 @@ export function McpIntegrationsPanel({
 							integration,
 							reportedStatus?.tools ?? [],
 						);
+						const toolPolicySummary = summarizeMcpToolPolicies(
+							integration,
+							tools,
+						);
+						const toolPoliciesExpanded =
+							expandedToolPolicyIds.has(definition.id);
+						const toolPoliciesRegionId = `mcp-tool-policies-${definition.id}`;
+						const toolPoliciesTriggerId = `${toolPoliciesRegionId}-trigger`;
 						const removing = busyAction === `remove:${definition.id}`;
 						const confirmingRemove =
 							removeTarget?.definition.id === definition.id;
@@ -1226,108 +1252,6 @@ export function McpIntegrationsPanel({
 											{t("settings.integrations.notReportedHint")}
 										</p>
 									) : null}
-									{tools.length > 0 ? (
-										<div className="mt-3 space-y-2 border-t border-border/50 pt-3">
-											<div>
-												<p className="text-[11px] font-medium text-foreground">
-													{t("settings.integrations.toolPoliciesTitle")}
-												</p>
-												<p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-													{t("settings.integrations.toolPoliciesHint")}
-												</p>
-											</div>
-											{tools.map((toolName) => {
-												const decision = getMcpToolPolicyDecision(
-													integration,
-													toolName,
-												);
-												const annotationHints = listMcpToolAnnotationHints(
-													reportedStatus?.tools?.find(
-														(tool) => tool.name === toolName,
-													),
-												);
-												const policyBusy = busyAction?.startsWith(
-													`policy:${definition.id}:${toolName}:`,
-												);
-												return (
-													<div
-														key={toolName}
-														className="flex flex-col gap-2 rounded-md border border-border/40 bg-background px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between"
-													>
-														<div className="min-w-0">
-															<span
-																className="block truncate font-mono text-[10px] text-foreground"
-																title={toolName}
-															>
-																{toolName}
-															</span>
-															{annotationHints.length > 0 ? (
-																<div className="mt-1.5 flex flex-wrap gap-1">
-																	{annotationHints.map((hint) => (
-																		<Badge
-																			key={hint}
-																			variant="outline"
-																			className="h-5 px-1.5 text-[8px] font-normal text-muted-foreground"
-																			title={t(
-																				"settings.integrations.toolAnnotationsDisclaimer",
-																			)}
-																		>
-																			{t(
-																				`settings.integrations.toolAnnotation.${hint}`,
-																			)}
-																		</Badge>
-																	))}
-																</div>
-															) : null}
-														</div>
-														<ToggleGroup
-															type="single"
-															value={decision}
-															onValueChange={(value) => {
-																if (
-																	value === "ask" ||
-																	value === "allow" ||
-																	value === "deny"
-																) {
-																	void handleToolPolicy(
-																		integration,
-																		toolName,
-																		value,
-																	);
-																}
-															}}
-															disabled={busyAction !== null}
-															className="grid shrink-0 grid-cols-3 gap-1"
-														>
-															{(["ask", "allow", "deny"] as const).map(
-																(value) => (
-																	<ToggleGroupItem
-																		key={value}
-																		value={value}
-																		className="h-7 min-w-14 rounded-md border border-border/50 px-2 text-[10px]"
-																		aria-label={t(
-																			`settings.integrations.toolPolicy.${value}`,
-																		)}
-																	>
-																		{policyBusy &&
-																		busyAction?.endsWith(
-																			`:${value}`,
-																		) ? (
-																			<Loader2 className="size-3 animate-spin" />
-																		) : (
-																			t(
-																				`settings.integrations.toolPolicy.${value}`,
-																			)
-																		)}
-																	</ToggleGroupItem>
-																),
-															)}
-														</ToggleGroup>
-													</div>
-												);
-											})}
-										</div>
-									) : null}
 									{reportedStatus?.boundedError ? (
 										<p className="mt-2 break-words text-[11px] leading-relaxed text-destructive">
 											{reportedStatus.boundedError.message}
@@ -1373,10 +1297,166 @@ export function McpIntegrationsPanel({
 												{t("settings.integrations.oauthDisconnect")}
 											</Button>
 											<span className="text-[10px] leading-relaxed text-muted-foreground">
-												{t(
-													"settings.integrations.oauthDisconnectHint",
-												)}
+												{t("settings.integrations.oauthDisconnectHint")}
 											</span>
+										</div>
+									) : null}
+									{tools.length > 0 ? (
+										<div className="mt-3 border-t border-border/50 pt-3">
+											<button
+												id={toolPoliciesTriggerId}
+												type="button"
+												className="flex w-full flex-wrap items-center justify-between gap-3 rounded-md text-left outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+												aria-expanded={toolPoliciesExpanded}
+												aria-controls={toolPoliciesRegionId}
+												onClick={() => toggleToolPolicies(definition.id)}
+											>
+												<div className="flex min-w-0 items-center gap-2">
+													{toolPoliciesExpanded ? (
+														<ChevronDown
+															className="size-4 shrink-0 text-muted-foreground"
+															aria-hidden="true"
+														/>
+													) : (
+														<ChevronRight
+															className="size-4 shrink-0 text-muted-foreground"
+															aria-hidden="true"
+														/>
+													)}
+													<span className="text-[11px] font-medium text-foreground">
+														{t("settings.integrations.toolPoliciesTitle")}
+													</span>
+												</div>
+												<div className="flex flex-wrap justify-end gap-1">
+													<Badge variant="secondary">
+														{t("settings.integrations.toolCount", {
+															count: toolPolicySummary.total,
+														})}
+													</Badge>
+													<Badge variant="outline">
+														{t("settings.integrations.toolAskCount", {
+															count: toolPolicySummary.ask,
+														})}
+													</Badge>
+													{toolPolicySummary.allow > 0 ? (
+														<Badge variant="success">
+															{t("settings.integrations.toolAllowCount", {
+																count: toolPolicySummary.allow,
+															})}
+														</Badge>
+													) : null}
+													{toolPolicySummary.deny > 0 ? (
+														<Badge variant="destructive">
+															{t("settings.integrations.toolDenyCount", {
+																count: toolPolicySummary.deny,
+															})}
+														</Badge>
+													) : null}
+												</div>
+											</button>
+											{toolPoliciesExpanded ? (
+												<div
+													id={toolPoliciesRegionId}
+													role="region"
+													aria-labelledby={toolPoliciesTriggerId}
+													className="mt-3 space-y-2"
+												>
+													<p className="text-[10px] leading-relaxed text-muted-foreground">
+														{t("settings.integrations.toolPoliciesHint")}
+													</p>
+													{tools.map((toolName) => {
+														const decision = getMcpToolPolicyDecision(
+															integration,
+															toolName,
+														);
+														const annotationHints =
+															listMcpToolAnnotationHints(
+																reportedStatus?.tools?.find(
+																	(tool) => tool.name === toolName,
+																),
+															);
+														const policyBusy = busyAction?.startsWith(
+															`policy:${definition.id}:${toolName}:`,
+														);
+														return (
+															<div
+																key={toolName}
+																className="flex flex-col gap-2 rounded-md border border-border/40 bg-background px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between"
+															>
+																<div className="min-w-0">
+																	<span
+																		className="block truncate font-mono text-[10px] text-foreground"
+																		title={toolName}
+																	>
+																		{toolName}
+																	</span>
+																	{annotationHints.length > 0 ? (
+																		<div className="mt-1.5 flex flex-wrap gap-1">
+																			{annotationHints.map((hint) => (
+																				<Badge
+																					key={hint}
+																					variant="outline"
+																					className="h-5 px-1.5 text-[8px] font-normal text-muted-foreground"
+																					title={t(
+																						"settings.integrations.toolAnnotationsDisclaimer",
+																					)}
+																				>
+																					{t(
+																						`settings.integrations.toolAnnotation.${hint}`,
+																					)}
+																				</Badge>
+																			))}
+																		</div>
+																	) : null}
+																</div>
+																<ToggleGroup
+																	type="single"
+																	value={decision}
+																	onValueChange={(value) => {
+																		if (
+																			value === "ask" ||
+																			value === "allow" ||
+																			value === "deny"
+																		) {
+																			void handleToolPolicy(
+																				integration,
+																				toolName,
+																				value,
+																			);
+																		}
+																	}}
+																	disabled={busyAction !== null}
+																	className="grid shrink-0 grid-cols-3 gap-1"
+																>
+																	{(
+																		["ask", "allow", "deny"] as const
+																	).map((value) => (
+																		<ToggleGroupItem
+																			key={value}
+																			value={value}
+																			className="h-7 min-w-14 rounded-md border border-border/50 px-2 text-[10px]"
+																			aria-label={t(
+																				`settings.integrations.toolPolicy.${value}`,
+																			)}
+																		>
+																			{policyBusy &&
+																			busyAction?.endsWith(
+																				`:${value}`,
+																			) ? (
+																				<Loader2 className="size-3 animate-spin" />
+																			) : (
+																				t(
+																					`settings.integrations.toolPolicy.${value}`,
+																				)
+																			)}
+																		</ToggleGroupItem>
+																	))}
+																</ToggleGroup>
+															</div>
+														);
+													})}
+												</div>
+											) : null}
 										</div>
 									) : null}
 									{reportedStatus ? (

@@ -9,6 +9,7 @@ import {
 	getMcpToolPolicyDecision,
 	listMcpIntegrationTools,
 	listMcpToolAnnotationHints,
+	summarizeMcpToolPolicies,
 	type McpRuntimeContext,
 } from "./mcp-integration-runtime";
 
@@ -194,6 +195,32 @@ describe("MCP integration runtime view", () => {
 		).toEqual(["legacy_mutation", "read_design"]);
 		expect(getMcpToolPolicyDecision(record, "read_design")).toBe("ask");
 		expect(getMcpToolPolicyDecision(record, "legacy_mutation")).toBe("deny");
+	});
+
+	it("summarizes effective policies including the default Ask decision", () => {
+		const record = integration();
+		record.toolPolicies = [
+			{
+				definitionId: "figma",
+				toolName: "create_design",
+				decision: "allow",
+				updatedAt: "2026-07-28T09:30:00Z",
+			},
+			{
+				definitionId: "figma",
+				toolName: "delete_design",
+				decision: "deny",
+				updatedAt: "2026-07-28T09:30:00Z",
+			},
+		];
+
+		expect(
+			summarizeMcpToolPolicies(record, [
+				"create_design",
+				"delete_design",
+				"read_design",
+			]),
+		).toEqual({ total: 3, ask: 1, allow: 1, deny: 1 });
 	});
 
 	it("shows only explicit annotation hints without changing the Ask default", () => {

@@ -142,6 +142,29 @@ export function getMcpToolPolicyDecision(
 	);
 }
 
+export type McpToolPolicySummary = {
+	total: number;
+	ask: number;
+	allow: number;
+	deny: number;
+};
+
+export function summarizeMcpToolPolicies(
+	integration: McpIntegrationRecord,
+	toolNames: string[],
+): McpToolPolicySummary {
+	const summary: McpToolPolicySummary = {
+		total: toolNames.length,
+		ask: 0,
+		allow: 0,
+		deny: 0,
+	};
+	for (const toolName of toolNames) {
+		summary[getMcpToolPolicyDecision(integration, toolName)] += 1;
+	}
+	return summary;
+}
+
 export type McpToolAnnotationHint =
 	| "readOnly"
 	| "mayModify"
