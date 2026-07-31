@@ -91,8 +91,6 @@ import type {
 	SaveMissionValidationOutput,
 	WorkspaceForgeContextInput,
 	WorkspaceForgeContextOutput,
-	WorkspaceContinueFromBaseBranchInput,
-	WorkspaceContinueFromBaseBranchOutput,
 	WorkspaceDeliveryFailureInput,
 	WorkspaceDeliveryFailureOutput,
 	WorkspaceDeliveryRecoveryInput,
@@ -549,13 +547,6 @@ export function workspaceGitSyncBase(input: WorkspaceGitSyncBaseInput) {
 	return invoke<WorkspaceGitSyncBaseOutput>(WORKSPACE_METHODS.workspaceGitSyncBase, {
 		input,
 	});
-}
-
-export function workspaceContinueFromBaseBranch(input: WorkspaceContinueFromBaseBranchInput) {
-	return invoke<WorkspaceContinueFromBaseBranchOutput>(
-		WORKSPACE_METHODS.workspaceContinueFromBaseBranch,
-		{ input },
-	);
 }
 
 export function workspaceRunSetup(input: WorkspaceRunSetupInput) {

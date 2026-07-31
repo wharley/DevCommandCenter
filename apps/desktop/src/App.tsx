@@ -4040,6 +4040,9 @@ export default function App() {
 									onClearMissionSpecAutoCompileFailure={
 										clearMissionSpecAutoCompileFailure
 									}
+									onCompleteWorkspace={
+										isRemoteBackend ? undefined : handleCompleteWorkspace
+									}
 									reviewDelegationRequest={reviewDelegationRequest}
 									activeTab={inspectorTab}
 									onTabChange={setInspectorTab}

@@ -36,8 +36,7 @@ export type WorkspaceRecapActionKind =
 	| "delivery"
 	| "sync"
 	| "automation"
-	| "activity"
-	| "continue";
+	| "activity";
 
 export type WorkspaceRecapAction = {
 	kind: WorkspaceRecapActionKind;
@@ -124,7 +123,7 @@ export function workspaceRecapActionForMode(
 	if (!action) {
 		return action;
 	}
-	if (mode === "git" && (action.kind === "git" || action.kind === "continue")) {
+	if (mode === "git" && action.kind === "git") {
 		return null;
 	}
 	if (action.kind === "git") {
@@ -182,7 +181,7 @@ function buildWorkspaceRecapPrimary(
 			messageKey: "merged",
 			params: { pr: prRef(input) },
 			tone: "done",
-			action: { kind: "continue", labelKey: "inspector.recap.actions.continue" },
+			action: null,
 		};
 	}
 

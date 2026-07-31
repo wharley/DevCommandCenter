@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChevronsRight, ExternalLink, FileDiff, RotateCcw } from "lucide-react";
+import { ExternalLink, FileDiff, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceCommitButton } from "@/features/commit";
@@ -33,8 +33,6 @@ export type GitSectionHeaderProps = {
   isRefreshing?: boolean;
   onCommit?: () => Promise<void> | void;
   onReviewConflictResolution?: () => void;
-  onContinueWorkspace?: () => Promise<void> | void;
-  isContinuingWorkspace?: boolean;
   onRetrySetup?: () => Promise<void> | void;
   isRetryingSetup?: boolean;
   showRetrySetup?: boolean;
@@ -53,8 +51,6 @@ export function GitSectionHeader({
   isRefreshing = false,
   onCommit,
   onReviewConflictResolution,
-  onContinueWorkspace,
-  isContinuingWorkspace = false,
   onRetrySetup,
   isRetryingSetup = false,
   showRetrySetup = false,
@@ -69,7 +65,6 @@ export function GitSectionHeader({
 }: GitSectionHeaderProps) {
   const { t } = useTranslation("common");
   const highlightClass = gitSectionHeaderHighlightClass(commitMode);
-  const showContinue = commitMode === "merged" && Boolean(onContinueWorkspace);
   const showPrLink = Boolean(prUrl);
   const prLabel = prProvider === "gitlab" ? "MR" : "PR";
 
@@ -136,21 +131,6 @@ export function GitSectionHeader({
             </TooltipContent>
           </Tooltip>
         ) : null}
-        {showContinue ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px] font-medium"
-            disabled={isContinuingWorkspace}
-            onClick={() => {
-              void onContinueWorkspace?.();
-            }}
-          >
-            <ChevronsRight className="size-3.5" />
-            {t("inspector.recap.actions.continue")}
-          </Button>
-        ) : null}
         {showRetrySetup ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -173,7 +153,7 @@ export function GitSectionHeader({
             <TooltipContent side="bottom">{retrySetupLabel}</TooltipContent>
           </Tooltip>
         ) : null}
-        {!showContinue && !hideCommitAction && !suppressCommitButton ? (
+        {commitMode !== "merged" && !hideCommitAction && !suppressCommitButton ? (
           <WorkspaceCommitButton
             mode={commitMode}
             prProvider={prProvider}

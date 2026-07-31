@@ -76,7 +76,6 @@ import {
 	compileMissionSpecContext,
 	missionSpecContextStatus,
 	workspaceCodeRabbitDiffFingerprint,
-	workspaceContinueFromBaseBranch,
 	workspaceChangeRequestViewWeb,
 	workspaceChangeRequestCreate,
 	workspaceChangeRequestMerge,
@@ -234,6 +233,7 @@ type WorkspaceInspectorSidebarProps = {
 		workspaceRoot: string;
 		specRelativePath: string;
 	}) => void;
+	onCompleteWorkspace?: (workspaceId: string) => void | Promise<void>;
 	activeTab: InspectorTab;
 	onTabChange: (tab: InspectorTab) => void;
 	mode: WorkspaceInspectorMode;
@@ -1487,6 +1487,7 @@ export function WorkspaceInspectorSidebar({
 	onContinueMissionCriterion,
 	missionSpecAutoCompileFailures,
 	onClearMissionSpecAutoCompileFailure,
+	onCompleteWorkspace,
 	activeTab,
 	onTabChange,
 	mode: inspectorMode,
@@ -1903,13 +1904,16 @@ export function WorkspaceInspectorSidebar({
 		codeRabbitStatus?.auth?.message ??
 		codeRabbitStatus?.message ??
 		(codeRabbitStatusQuery.isPending ? t("inspector.codeRabbit.checking") : null);
-	const [isContinuingWorkspace, setIsContinuingWorkspace] = useState(false);
 	const [isSyncingBase, setIsSyncingBase] = useState(false);
 	const [isGitActionInProgress, setIsGitActionInProgress] = useState(false);
 	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
 	const [isCompilingSpecContext, setIsCompilingSpecContext] = useState(false);
 	const [pendingGitConfirmation, setPendingGitConfirmation] =
 		useState<PendingGitConfirmation>(null);
+	const mergedCompletionRef = useRef<{
+		workspaceId: string;
+		promise: Promise<void>;
+	} | null>(null);
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const hasWorkingTreeChanges =
 		(gitStatusQuery.data?.staged.length ?? 0) > 0 ||
@@ -1948,6 +1952,57 @@ export function WorkspaceInspectorSidebar({
 			? { ...gitStatusQuery.data, conflictResolutionReady }
 			: null,
 	});
+	const completeMergedWorkspace = useCallback((): Promise<void> => {
+		if (!workspaceId || !onCompleteWorkspace) {
+			return Promise.resolve();
+		}
+		const current = mergedCompletionRef.current;
+		if (current?.workspaceId === workspaceId) {
+			return current.promise;
+		}
+
+		let promise: Promise<void>;
+		promise = Promise.resolve(onCompleteWorkspace(workspaceId)).catch((error) => {
+			if (mergedCompletionRef.current?.promise === promise) {
+				mergedCompletionRef.current = null;
+			}
+			throw error;
+		});
+		mergedCompletionRef.current = { workspaceId, promise };
+		return promise;
+	}, [onCompleteWorkspace, workspaceId]);
+
+	useEffect(() => {
+		if (
+			workspaceStatus === "completed" ||
+			workspaceStatus === "archived"
+		) {
+			if (mergedCompletionRef.current?.workspaceId === workspaceId) {
+				mergedCompletionRef.current = null;
+			}
+			return;
+		}
+		if (
+			commitMode !== "merged" ||
+			!onCompleteWorkspace
+		) {
+			return;
+		}
+		void completeMergedWorkspace().catch((error) => {
+			toast.error(
+				t("sidebar.completeWorkspaceError", {
+					message: getInspectorActionErrorMessage(error, t),
+				}),
+			);
+		});
+	}, [
+		commitMode,
+		completeMergedWorkspace,
+		onCompleteWorkspace,
+		prStatusQuery.dataUpdatedAt,
+		t,
+		workspaceStatus,
+	]);
 	const committedVsBaseCount = reviewBranchDiffQuery.data?.changes.length ?? 0;
 	const suppressEmptyCreatePr =
 		commitMode === "create-pr" && committedVsBaseCount === 0;
@@ -2336,6 +2391,15 @@ export function WorkspaceInspectorSidebar({
 				}),
 				{ id: loadingToast },
 			);
+			try {
+				await completeMergedWorkspace();
+			} catch (completionError) {
+				toast.error(
+					t("sidebar.completeWorkspaceError", {
+						message: getInspectorActionErrorMessage(completionError, t),
+					}),
+				);
+			}
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
 			});
@@ -2372,7 +2436,14 @@ export function WorkspaceInspectorSidebar({
 		} finally {
 			setIsGitActionInProgress(false);
 		}
-	}, [forgeContext.requestLabel, queryClient, selectedForgeLogin, t, workspacePath]);
+	}, [
+		completeMergedWorkspace,
+		forgeContext.requestLabel,
+		queryClient,
+		selectedForgeLogin,
+		t,
+		workspacePath,
+	]);
 
 	const executeConfirmedSyncBase = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -2433,66 +2504,6 @@ export function WorkspaceInspectorSidebar({
 	const handleSyncBase = useCallback(() => {
 		setPendingGitConfirmation("sync-base");
 	}, []);
-
-	const handleContinueWorkspace = useCallback(async () => {
-		const root = workspacePath?.trim();
-		if (!root) {
-			toast.error("No workspace path");
-			throw new Error("No workspace path");
-		}
-
-		setIsContinuingWorkspace(true);
-		const loadingToast = toast.loading("Continuing workspace...");
-		try {
-			const result = await workspaceContinueFromBaseBranch({
-				workspaceRoot: root,
-				baseBranch: null,
-				targetBranch: prStatus?.baseBranch ?? null,
-				newBranchName: workspaceName ?? null,
-			});
-			if (!result?.success) {
-				throw new Error("Unable to continue workspace.");
-			}
-			toast.success(`Workspace moved to ${result.branch}`, { id: loadingToast });
-			await queryClient.invalidateQueries({
-				queryKey: ["workspaces"],
-			});
-			await queryClient.invalidateQueries({
-				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
-			});
-			if (result.workspaceRoot && result.workspaceRoot !== root) {
-				await queryClient.invalidateQueries({
-					queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, result.workspaceRoot],
-				});
-			}
-			await queryClient.invalidateQueries({
-				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
-			});
-			await queryClient.invalidateQueries({
-				queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, root],
-			});
-			await queryClient.invalidateQueries({
-				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
-			});
-			if (result.workspaceRoot && result.workspaceRoot !== root) {
-				await queryClient.invalidateQueries({
-					queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, result.workspaceRoot],
-				});
-				await queryClient.invalidateQueries({
-					queryKey: [WORKSPACE_FORGE_CONTEXT_QUERY_KEY, result.workspaceRoot],
-				});
-				await queryClient.invalidateQueries({
-					queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, result.workspaceRoot],
-				});
-			}
-		} catch (error) {
-			const message = getInspectorActionErrorMessage(error);
-			toast.error(`Continue failed: ${message}`, { id: loadingToast });
-			throw error;
-		} finally {
-			setIsContinuingWorkspace(false);
-		}
-	}, [prStatus?.baseBranch, queryClient, workspaceName, workspacePath]);
 
 	const handleRetrySetup = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -3021,10 +3032,6 @@ export function WorkspaceInspectorSidebar({
 				selectInspectorMode("git");
 				return;
 			}
-			case "continue": {
-				void handleContinueWorkspace().catch(() => undefined);
-				return;
-			}
 			case "activity": {
 				openSessionDock("activity");
 				return;
@@ -3056,7 +3063,6 @@ export function WorkspaceInspectorSidebar({
 			}
 		}
 	}, [
-		handleContinueWorkspace,
 		handleSyncBase,
 		openSessionDock,
 		selectInspectorMode,
@@ -3130,7 +3136,6 @@ export function WorkspaceInspectorSidebar({
 						recap={workspaceRecap}
 						action={visibleWorkspaceRecapAction}
 						requestLabel={forgeContext.requestLabel}
-						busy={isContinuingWorkspace}
 						onAction={handleRecapAction}
 					/>
 				) : null}
@@ -3152,8 +3157,6 @@ export function WorkspaceInspectorSidebar({
 									forgeLogin: selectedForgeLogin,
 								});
 							}}
-							onContinueWorkspace={handleContinueWorkspace}
-							isContinuingWorkspace={isContinuingWorkspace}
 							onRetrySetup={handleRetrySetup}
 							isRetryingSetup={isRetryingSetup}
 							showRetrySetup={isSetupPending}

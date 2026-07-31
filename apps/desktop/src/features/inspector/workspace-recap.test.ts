@@ -77,7 +77,7 @@ describe("buildWorkspaceRecap", () => {
 		expect(recap.params.count).toBe(1);
 	});
 
-	it("offers continue after a merge", () => {
+	it("reports delivery without offering a second action after a merge", () => {
 		const recap = buildWorkspaceRecap(
 			input({ commitMode: "merged", prNumber: 42, turnRunning: true }),
 		);
@@ -85,7 +85,7 @@ describe("buildWorkspaceRecap", () => {
 		expect(recap.state).toBe("delivered");
 		expect(recap.params.pr).toBe("PR #42");
 		expect(recap.tone).toBe("done");
-		expect(recap.action?.kind).toBe("continue");
+		expect(recap.action).toBeNull();
 	});
 
 	it("reports a closed PR without inventing a next git step", () => {
@@ -475,15 +475,6 @@ describe("workspaceRecapActionForMode", () => {
 			kind: "git",
 			labelKey: "inspector.recap.actions.changes",
 		});
-	});
-
-	it("leaves the post-merge Continue CTA only in the visible Git header", () => {
-		const continueAction: WorkspaceRecapAction = {
-			kind: "continue",
-			labelKey: "inspector.recap.actions.continue",
-		};
-		expect(workspaceRecapActionForMode(continueAction, "git")).toBeNull();
-		expect(workspaceRecapActionForMode(continueAction, "code")).toBe(continueAction);
 	});
 
 	it("preserves recap actions that are not duplicated by the Git header", () => {
