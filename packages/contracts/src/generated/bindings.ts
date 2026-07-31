@@ -459,11 +459,13 @@ export type DelegationStatus = "draft" | "queued" | "running" | "review_pending"
 export type DeleteWorkspaceBundleInput = {
 	bundleId: WorkspaceBundleId,
 	deleteRemoteBranches?: boolean,
+	expectedRemoteTargets?: WorkspaceRemoteBranchDeletionTarget[],
 };
 
 export type DeleteWorkspaceInput = {
 	workspaceId: string,
 	deleteRemoteBranch?: boolean,
+	expectedRemoteTarget?: WorkspaceRemoteBranchDeletionTarget | null,
 };
 
 export type DisableMcpIntegrationInput = {
@@ -653,6 +655,7 @@ export type ListWorkspaceBundlesOutput = {
 
 export type ListWorkspacesOutput = {
 	workspaces: Workspace[],
+	remoteBranchDeletionTargets: { [key in string]: WorkspaceRemoteBranchDeletionTarget },
 };
 
 export type McpBinding = {
@@ -1906,6 +1909,11 @@ export type WorkspacePushTarget = {
 	remoteCreated?: boolean,
 };
 
+export type WorkspaceRemoteBranchDeletionTarget = {
+	remote: string,
+	branch: string,
+};
+
 export type WorkspaceRemoveDelegationWorktreeInput = {
 	workspaceRoot: string,
 	worktreePath: string,
@@ -2064,4 +2072,3 @@ export type WriteWorkspaceFileOutput = {
 	// The current on-disk content, present only when `conflicted` is true.
 	diskContent: string | null,
 };
-

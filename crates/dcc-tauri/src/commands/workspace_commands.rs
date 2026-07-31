@@ -213,8 +213,19 @@ pub struct WorkspaceSetupHint {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceRemoteBranchDeletionTarget {
+    pub remote: String,
+    pub branch: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct ListWorkspacesOutput {
     pub workspaces: Vec<Workspace>,
+    /// Remote branches that the delete-workspace action would target, keyed by
+    /// workspace id. Workspaces without a safely identifiable branch are
+    /// intentionally omitted.
+    pub remote_branch_deletion_targets: BTreeMap<String, WorkspaceRemoteBranchDeletionTarget>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -4113,7 +4124,7 @@ fn workspace_remote_branch_target(
     workspace: &Workspace,
 ) -> Result<Option<(String, String)>, String> {
     let source = workspace.source.as_ref();
-    let branch = source
+    let source_branch = source
         .and_then(|source| {
             source
                 .push_target
@@ -4121,15 +4132,29 @@ fn workspace_remote_branch_target(
                 .map(|target| target.branch_name.as_str())
         })
         .or_else(|| source.map(|source| source.head_branch.as_str()))
-        .unwrap_or(workspace.base_branch.as_str())
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty());
+    let active_root = resolve_workspace_active_root(workspace);
+    let current_branch = resolve_current_branch_name(active_root)
+        .ok()
+        .filter(|branch| branch != "HEAD");
+    let branch = current_branch
+        .as_deref()
+        .or(source_branch)
+        .unwrap_or_default()
         .trim();
     if branch.is_empty() {
         return Ok(None);
     }
-    if source.is_some_and(|source| source.base_branch.trim() == branch) {
+    if workspace.base_branch.trim() == branch
+        || source.is_some_and(|source| source.base_branch.trim() == branch)
+    {
         return Err(format!(
             "Refusing to delete `{branch}` because it is the workspace base branch."
         ));
+    }
+    if matches!(branch, "main" | "master" | "trunk") {
+        return Err(format!("Refusing to delete protected branch `{branch}`."));
     }
 
     let configured_remote = |key: &str| -> Option<String> {
@@ -4140,32 +4165,33 @@ fn workspace_remote_branch_target(
         let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
         (!value.is_empty() && value != ".").then_some(value)
     };
-    let remote = source
+    let source_remote = source
+        .filter(|_| source_branch == Some(branch))
         .and_then(|source| {
             source
                 .push_target
                 .as_ref()
                 .map(|target| target.remote_name.trim())
                 .filter(|remote| !remote.is_empty())
+                .or_else(|| {
+                    let remote = source.remote_name.trim();
+                    (!remote.is_empty()).then_some(remote)
+                })
         })
-        .or_else(|| {
-            source
-                .map(|source| source.remote_name.trim())
-                .filter(|remote| !remote.is_empty())
-        })
-        .map(str::to_string)
+        .map(str::to_string);
+    // Imported branch/PR workspaces have an explicit push target recorded by DCC.
+    // For regular worktree branches, follow Git's push-remote precedence so the
+    // branch is removed from the same remote it would normally be pushed to.
+    let remote = source_remote
         .or_else(|| configured_remote(&format!("branch.{branch}.pushRemote")))
+        .or_else(|| configured_remote("remote.pushDefault"))
         .or_else(|| configured_remote(&format!("branch.{branch}.remote")));
 
     let Some(remote) = remote else {
-        let output = run_git_output(&workspace.root_path, &["remote"])?;
-        if !output.status.success() {
-            return Ok(None);
-        }
-        let has_origin = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .any(|candidate| candidate.trim() == "origin");
-        return Ok(has_origin.then(|| ("origin".to_string(), branch.to_string())));
+        // Having an `origin` remote alone does not prove that this local branch
+        // was published there. Without an explicit push/tracking destination,
+        // do not offer remote deletion.
+        return Ok(None);
     };
 
     Ok(Some((remote, branch.to_string())))
@@ -4185,16 +4211,12 @@ fn remote_default_branch(root: &str, remote: &str) -> Result<Option<String>, Str
         }))
 }
 
-fn delete_workspace_remote_branch(workspace: &Workspace) -> Result<(), String> {
-    let Some((remote, branch)) = workspace_remote_branch_target(workspace)? else {
-        return Ok(());
-    };
-    if matches!(branch.as_str(), "main" | "master" | "trunk") {
-        return Err(format!(
-            "Refusing to delete protected branch `{branch}` from `{remote}`."
-        ));
-    }
-    if remote_default_branch(&workspace.root_path, &remote)?.as_deref() == Some(branch.as_str()) {
+fn delete_workspace_remote_branch_target(
+    workspace: &Workspace,
+    remote: &str,
+    branch: &str,
+) -> Result<(), String> {
+    if remote_default_branch(&workspace.root_path, remote)?.as_deref() == Some(branch) {
         return Err(format!(
             "Refusing to delete `{branch}` because it is the default branch on `{remote}`."
         ));
@@ -4203,7 +4225,7 @@ fn delete_workspace_remote_branch(workspace: &Workspace) -> Result<(), String> {
     let remote_ref = format!("refs/heads/{branch}");
     let existing = run_git_output(
         &workspace.root_path,
-        &["ls-remote", "--heads", &remote, &remote_ref],
+        &["ls-remote", "--heads", remote, &remote_ref],
     )?;
     if !existing.status.success() {
         return Err(git_output_err("git ls-remote --heads", &existing.stderr));
@@ -4212,14 +4234,28 @@ fn delete_workspace_remote_branch(workspace: &Workspace) -> Result<(), String> {
         return Ok(());
     }
 
-    let output = run_git_output(
-        &workspace.root_path,
-        &["push", &remote, "--delete", &branch],
-    )?;
+    let output = run_git_output(&workspace.root_path, &["push", remote, "--delete", branch])?;
     if !output.status.success() {
         return Err(git_output_err("git push --delete", &output.stderr));
     }
     Ok(())
+}
+
+fn delete_workspace_remote_branch(
+    workspace: &Workspace,
+    expected: &WorkspaceRemoteBranchDeletionTarget,
+) -> Result<(), String> {
+    let Some((remote, branch)) = workspace_remote_branch_target(workspace)? else {
+        return Err("The worktree no longer has a remote branch to delete. Review the deletion confirmation and try again.".to_string());
+    };
+    if branch != expected.branch.trim() || remote != expected.remote.trim() {
+        return Err(format!(
+            "The remote branch changed from `{}/{}` to `{remote}/{branch}`. Review the deletion confirmation and try again.",
+            expected.remote.trim(),
+            expected.branch.trim()
+        ));
+    }
+    delete_workspace_remote_branch_target(workspace, &remote, &branch)
 }
 
 async fn resolve_workspace_source_url_inner(
@@ -4889,6 +4925,7 @@ pub async fn list_workspaces(
         .await
         .map_err(|error| error.to_string())?;
     let mut healthy_workspaces = Vec::with_capacity(workspaces.len());
+    let mut remote_branch_deletion_targets = BTreeMap::new();
     for workspace in workspaces {
         if resolve_workspace_broken_reason(&workspace).is_some() {
             repo.delete_workspace(&workspace.id)
@@ -4896,11 +4933,18 @@ pub async fn list_workspaces(
                 .map_err(|error| error.to_string())?;
             continue;
         }
+        if let Ok(Some((remote, branch))) = workspace_remote_branch_target(&workspace) {
+            remote_branch_deletion_targets.insert(
+                workspace.id.0.clone(),
+                WorkspaceRemoteBranchDeletionTarget { remote, branch },
+            );
+        }
         healthy_workspaces.push(workspace);
     }
 
     Ok(ListWorkspacesOutput {
         workspaces: healthy_workspaces,
+        remote_branch_deletion_targets,
     })
 }
 
@@ -4994,8 +5038,40 @@ pub async fn delete_workspace_bundle(
     }
 
     if input.delete_remote_branches {
-        for workspace in &created_workspaces {
-            delete_workspace_remote_branch(workspace)?;
+        let targets = created_workspaces
+            .iter()
+            .filter_map(|workspace| {
+                workspace_remote_branch_target(workspace)
+                    .ok()
+                    .flatten()
+                    .map(|(remote, branch)| (workspace, remote, branch))
+            })
+            .collect::<Vec<_>>();
+        let mut actual_targets = targets
+            .iter()
+            .map(|(_, remote, branch)| (remote.clone(), branch.clone()))
+            .collect::<Vec<_>>();
+        let mut expected_targets = input
+            .expected_remote_targets
+            .iter()
+            .map(|target| {
+                (
+                    target.remote.trim().to_string(),
+                    target.branch.trim().to_string(),
+                )
+            })
+            .filter(|(remote, branch)| !remote.is_empty() && !branch.is_empty())
+            .collect::<Vec<_>>();
+        actual_targets.sort();
+        expected_targets.sort();
+        if actual_targets != expected_targets {
+            return Err(
+                "The worktree branches changed after the deletion dialog opened. Review the deletion confirmation and try again."
+                    .to_string(),
+            );
+        }
+        for (workspace, remote, branch) in targets {
+            delete_workspace_remote_branch_target(workspace, &remote, &branch)?;
         }
     }
 
@@ -5455,6 +5531,44 @@ mod editor_workspace_file_tests {
         assert!(output.status.success());
     }
 
+    fn initialize_branch_test_repository(root: &str, branch: &str) {
+        initialize_remote_test_repository(root);
+        let output = run_git_output(
+            root,
+            &[
+                "-c",
+                "user.name=DCC Tests",
+                "-c",
+                "user.email=dcc@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ],
+        )
+        .expect("initial commit");
+        assert!(output.status.success());
+        let output = run_git_output(root, &["switch", "-c", branch]).expect("create branch");
+        assert!(output.status.success());
+        let output = run_git_output(
+            root,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/widgets.git",
+            ],
+        )
+        .expect("add origin");
+        assert!(output.status.success());
+        let output = run_git_output(
+            root,
+            &["config", &format!("branch.{branch}.remote"), "origin"],
+        )
+        .expect("configure branch remote");
+        assert!(output.status.success());
+    }
+
     fn imported_fork_workspace(id: &str, root: &str, remote_name: &str) -> Workspace {
         Workspace {
             id: WorkspaceId(id.to_string()),
@@ -5517,6 +5631,159 @@ mod editor_workspace_file_tests {
             .expect("workspace push target")
             .branch_name = "main".to_string();
         assert!(workspace_remote_branch_target(&workspace).is_err());
+    }
+
+    #[test]
+    fn remote_branch_deletion_uses_the_worktree_branch_instead_of_the_stored_base() {
+        let dir = TestDir::new("delete-worktree-branch");
+        initialize_branch_test_repository(dir.as_str(), "main-dcc034343943u433443433443");
+        let mut workspace = imported_fork_workspace("completed", dir.as_str(), "dcc-wharley");
+        workspace.worktree_path = Some(dir.as_str().to_string());
+        workspace.source = None;
+
+        assert_eq!(
+            workspace_remote_branch_target(&workspace).expect("resolve worktree branch"),
+            Some((
+                "origin".to_string(),
+                "main-dcc034343943u433443433443".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn remote_branch_deletion_prefers_the_recorded_workspace_push_target() {
+        let dir = TestDir::new("delete-workspace-push-target");
+        initialize_branch_test_repository(dir.as_str(), "feature/review");
+        let output = run_git_output(
+            dir.as_str(),
+            &[
+                "remote",
+                "add",
+                "dcc-wharley",
+                "https://github.com/wharley/widgets.git",
+            ],
+        )
+        .expect("add workspace push remote");
+        assert!(output.status.success());
+        let output = run_git_output(
+            dir.as_str(),
+            &["config", "branch.feature/review.remote", "origin"],
+        )
+        .expect("configure tracking remote");
+        assert!(output.status.success());
+
+        let mut workspace = imported_fork_workspace("fork", dir.as_str(), "dcc-wharley");
+        workspace.worktree_path = Some(dir.as_str().to_string());
+
+        assert_eq!(
+            workspace_remote_branch_target(&workspace).expect("resolve workspace push target"),
+            Some(("dcc-wharley".to_string(), "feature/review".to_string()))
+        );
+    }
+
+    #[test]
+    fn remote_branch_deletion_prefers_push_default_over_tracking_remote() {
+        let dir = TestDir::new("delete-push-default");
+        initialize_branch_test_repository(dir.as_str(), "feature/completed");
+        let output = run_git_output(
+            dir.as_str(),
+            &[
+                "remote",
+                "add",
+                "fork",
+                "https://github.com/wharley/widgets.git",
+            ],
+        )
+        .expect("add push remote");
+        assert!(output.status.success());
+        for (key, value) in [
+            ("remote.pushDefault", "fork"),
+            ("branch.feature/completed.remote", "origin"),
+        ] {
+            let output = run_git_output(dir.as_str(), &["config", key, value])
+                .expect("configure branch remote");
+            assert!(output.status.success());
+        }
+
+        let mut workspace = imported_fork_workspace("completed", dir.as_str(), "dcc-wharley");
+        workspace.worktree_path = Some(dir.as_str().to_string());
+        workspace.source = None;
+
+        assert_eq!(
+            workspace_remote_branch_target(&workspace).expect("resolve push default"),
+            Some(("fork".to_string(), "feature/completed".to_string()))
+        );
+    }
+
+    #[test]
+    fn remote_branch_deletion_does_not_fall_back_to_base_for_a_detached_worktree() {
+        let dir = TestDir::new("delete-detached-worktree");
+        initialize_branch_test_repository(dir.as_str(), "feature/completed");
+        let output =
+            run_git_output(dir.as_str(), &["checkout", "--detach"]).expect("detach worktree");
+        assert!(output.status.success());
+        let mut workspace = imported_fork_workspace("detached", dir.as_str(), "dcc-wharley");
+        workspace.worktree_path = Some(dir.as_str().to_string());
+        workspace.source = None;
+
+        assert_eq!(
+            workspace_remote_branch_target(&workspace).expect("resolve detached worktree"),
+            None
+        );
+    }
+
+    #[test]
+    fn remote_branch_deletion_does_not_guess_origin_without_a_push_destination() {
+        let dir = TestDir::new("delete-unpublished-worktree");
+        initialize_branch_test_repository(dir.as_str(), "feature/local-only");
+        let output = run_git_output(
+            dir.as_str(),
+            &["config", "--unset", "branch.feature/local-only.remote"],
+        )
+        .expect("remove branch remote");
+        assert!(output.status.success());
+        let mut workspace = imported_fork_workspace("local-only", dir.as_str(), "dcc-wharley");
+        workspace.worktree_path = Some(dir.as_str().to_string());
+        workspace.source = None;
+
+        assert_eq!(
+            workspace_remote_branch_target(&workspace).expect("resolve unpublished branch"),
+            None
+        );
+    }
+
+    #[test]
+    fn remote_branch_deletion_prefers_a_new_worktree_branch_over_stale_source_metadata() {
+        let dir = TestDir::new("delete-continued-worktree");
+        initialize_branch_test_repository(dir.as_str(), "feature/continued");
+        let mut workspace = imported_fork_workspace("continued", dir.as_str(), "dcc-wharley");
+        workspace.worktree_path = Some(dir.as_str().to_string());
+
+        assert_eq!(
+            workspace_remote_branch_target(&workspace).expect("resolve continued worktree"),
+            Some(("origin".to_string(), "feature/continued".to_string()))
+        );
+    }
+
+    #[test]
+    fn remote_branch_deletion_rejects_a_stale_confirmed_branch() {
+        let dir = TestDir::new("delete-stale-confirmation");
+        initialize_branch_test_repository(dir.as_str(), "feature/current");
+        let mut workspace = imported_fork_workspace("stale", dir.as_str(), "dcc-wharley");
+        workspace.worktree_path = Some(dir.as_str().to_string());
+        workspace.source = None;
+
+        let error = delete_workspace_remote_branch(
+            &workspace,
+            &WorkspaceRemoteBranchDeletionTarget {
+                remote: "origin".to_string(),
+                branch: "feature/previous".to_string(),
+            },
+        )
+        .expect_err("stale confirmation must be rejected");
+        assert!(
+            error.contains("changed from `origin/feature/previous` to `origin/feature/current`")
+        );
     }
 
     #[test]
@@ -6983,6 +7250,8 @@ pub struct DeleteWorkspaceInput {
     pub workspace_id: String,
     #[serde(default)]
     pub delete_remote_branch: bool,
+    #[serde(default)]
+    pub expected_remote_target: Option<WorkspaceRemoteBranchDeletionTarget>,
 }
 
 #[derive(Clone, Debug, Deserialize, Type)]
@@ -6991,6 +7260,8 @@ pub struct DeleteWorkspaceBundleInput {
     pub bundle_id: WorkspaceBundleId,
     #[serde(default)]
     pub delete_remote_branches: bool,
+    #[serde(default)]
+    pub expected_remote_targets: Vec<WorkspaceRemoteBranchDeletionTarget>,
 }
 
 async fn ensure_workspace_is_not_a_bundle_member(
@@ -7084,7 +7355,11 @@ pub async fn delete_workspace(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("workspace not found: {}", id.0))?;
     if input.delete_remote_branch {
-        delete_workspace_remote_branch(&workspace)?;
+        let expected_target = input.expected_remote_target.as_ref().ok_or_else(|| {
+            "The remote branch was not confirmed. Reopen the deletion dialog and try again."
+                .to_string()
+        })?;
+        delete_workspace_remote_branch(&workspace, expected_target)?;
     }
     cleanup_delegation_worktrees(&session_repo, &workspace).await?;
     cleanup_workspace_files(&workspace)?;

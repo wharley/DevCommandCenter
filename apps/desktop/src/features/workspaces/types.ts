@@ -1,4 +1,7 @@
-import type { WorkspaceSetupReport } from "@dcc/contracts";
+import type {
+	WorkspaceRemoteBranchDeletionTarget,
+	WorkspaceSetupReport,
+} from "@dcc/contracts";
 
 export type WorkspaceStatus =
 	| "ready"
@@ -23,6 +26,7 @@ export interface WorkspaceSummary {
 	additionalWorkspaceIds?: string[];
 	memberWorkspaceIds?: string[];
 	memberNames?: string[];
+	remoteDeletionTargets?: WorkspaceRemoteBranchDeletionTarget[];
 }
 
 export type WorkspaceTone = "success" | "warn" | "secondary";

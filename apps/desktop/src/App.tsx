@@ -21,6 +21,7 @@ import type {
 	Repository,
 	SessionEventRecord,
 	SessionSearchResult,
+	WorkspaceRemoteBranchDeletionTarget,
 	WorkspaceSessionSummary,
 } from "@dcc/contracts";
 import {
@@ -794,7 +795,12 @@ export default function App() {
 		queryKey: ["workspaces", backendCacheKey],
 		queryFn: async () => {
 			const result = await listWorkspaces();
-			return result.workspaces.map(workspaceToSummary);
+			return result.workspaces.map((workspace) =>
+				workspaceToSummary(
+					workspace,
+					result.remoteBranchDeletionTargets?.[workspace.id] ?? null,
+				),
+			);
 		},
 		staleTime: 60_000,
 		refetchOnWindowFocus: false,
@@ -844,6 +850,9 @@ export default function App() {
 					return workspace;
 				}
 				const memberWorkspaceIds = bundle.members.map((member) => member.workspaceId);
+				const deletableMemberWorkspaceIds = bundle.members
+					.filter((member) => member.createdForBundle)
+					.map((member) => member.workspaceId);
 				return {
 					...workspace,
 					name: bundle.bundle.name,
@@ -858,6 +867,12 @@ export default function App() {
 								workspacesFromBackend.find((candidate) => candidate.id === workspaceId)?.name,
 						)
 						.filter((name): name is string => Boolean(name)),
+					remoteDeletionTargets: deletableMemberWorkspaceIds.flatMap(
+						(workspaceId) =>
+							workspacesFromBackend.find(
+								(candidate) => candidate.id === workspaceId,
+							)?.remoteDeletionTargets ?? [],
+					),
 				};
 			});
 	}, [workspaceBundlesFromBackend, workspacesFromBackend]);
@@ -3641,7 +3656,11 @@ export default function App() {
 	const handleDeleteWorkspace = useCallback(
 		async (
 			workspaceId: string,
-			options: { deleteRemoteBranch?: boolean } = {},
+			options: {
+				deleteRemoteBranch?: boolean;
+				expectedRemoteTarget?: WorkspaceRemoteBranchDeletionTarget | null;
+				expectedRemoteTargets?: WorkspaceRemoteBranchDeletionTarget[];
+			} = {},
 		) => {
 			const workspace = allWorkspaces.find((candidate) => candidate.id === workspaceId);
 			const affectedWorkspaceIds =
