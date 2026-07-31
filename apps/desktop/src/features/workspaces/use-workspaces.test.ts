@@ -37,21 +37,27 @@ describe("workspaceToSummary", () => {
 	});
 
 	it("preserves completed workspaces for the cleanup section", () => {
-		const summary = workspaceToSummary({
-			id: "completed-1",
-			projectId: "widgets",
-			name: "Finished task",
-			rootPath: "/repo/widgets",
-			baseBranch: "feature/finished",
-			worktreePath: "/repo/.dcc-worktrees/completed-1",
-			source: null,
-			state: "completed",
-			setupReport: null,
-			createdAt: "2026-01-01T00:00:00Z",
-			updatedAt: "2026-01-01T00:05:00Z",
-		});
+		const summary = workspaceToSummary(
+			{
+				id: "completed-1",
+				projectId: "widgets",
+				name: "Finished task",
+				rootPath: "/repo/widgets",
+				baseBranch: "main",
+				worktreePath: "/repo/.dcc-worktrees/completed-1",
+				source: null,
+				state: "completed",
+				setupReport: null,
+				createdAt: "2026-01-01T00:00:00Z",
+				updatedAt: "2026-01-01T00:05:00Z",
+			},
+			{ remote: "origin", branch: "feature/finished" },
+		);
 
 		expect(summary.status).toBe("completed");
+		expect(summary.remoteDeletionTargets).toEqual([
+			{ remote: "origin", branch: "feature/finished" },
+		]);
 	});
 });
 

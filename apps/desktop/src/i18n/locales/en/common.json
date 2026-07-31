@@ -82,6 +82,7 @@
     "deleteWorkspaceDescription": "The local worktree and conversations linked to this workspace will be permanently removed.",
     "deleteRemoteBranch": "Also delete the remote branch",
     "deleteRemoteBranches": "Also delete the remote branches",
+    "noRemoteBranchToDelete": "No deletable remote branch was identified for this worktree. Only local workspace data will be removed.",
     "deleteWorkspaceConfirm": "Delete workspace",
     "deleteWorkspaceError": "Failed to delete workspace",
     "moveWorkspaceToWaiting": "Put workspace on hold",

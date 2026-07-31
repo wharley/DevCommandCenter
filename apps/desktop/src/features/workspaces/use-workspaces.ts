@@ -22,6 +22,7 @@ import type {
 	CreateWorkspaceFromUrlInput,
 	Workspace,
 	WorkspaceBundleSummary,
+	WorkspaceRemoteBranchDeletionTarget,
 	WorkspaceSetupHint,
 	WorkspaceSetupReport,
 } from "@dcc/contracts";
@@ -125,7 +126,10 @@ export function workspaceMutationIds(
 	return [...new Set(workspace.memberWorkspaceIds)];
 }
 
-export function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
+export function workspaceToSummary(
+	workspace: Workspace,
+	remoteDeletionTarget?: WorkspaceRemoteBranchDeletionTarget | null,
+): WorkspaceSummary {
 	const status =
 		workspace.state === "ready"
 			? "ready"
@@ -150,6 +154,7 @@ export function workspaceToSummary(workspace: Workspace): WorkspaceSummary {
 		rootPath: workspace.rootPath,
 		worktreePath: workspace.worktreePath,
 		setupReport: workspace.setupReport,
+		remoteDeletionTargets: remoteDeletionTarget ? [remoteDeletionTarget] : [],
 		createdAt: workspace.createdAt,
 		updatedAt: workspace.updatedAt,
 	};
@@ -436,7 +441,11 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 	const deleteWorkspace = useCallback(
 		async (
 			workspaceId: string,
-			options: { deleteRemoteBranch?: boolean } = {},
+			options: {
+				deleteRemoteBranch?: boolean;
+				expectedRemoteTarget?: WorkspaceRemoteBranchDeletionTarget | null;
+				expectedRemoteTargets?: WorkspaceRemoteBranchDeletionTarget[];
+			} = {},
 		) => {
 			const workspace = workspaceListRef.current.find(
 				(candidate) => candidate.id === workspaceId,
@@ -445,6 +454,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 			if (workspace?.bundleId) {
 				await apiDeleteWorkspaceBundle(workspace.bundleId, {
 					deleteRemoteBranches: options.deleteRemoteBranch,
+					expectedRemoteTargets: options.expectedRemoteTargets,
 				});
 			} else {
 				await apiDeleteWorkspace(workspaceId, options);

@@ -50,7 +50,7 @@ import {
 } from "../../components/ui/dropdown-menu";
 import { Popover, PopoverTrigger } from "../../components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
-import type { Repository } from "@dcc/contracts";
+import type { Repository, WorkspaceRemoteBranchDeletionTarget } from "@dcc/contracts";
 import { cn } from "@/lib/utils";
 import type { WorkspaceSummary } from "./types";
 import {
@@ -210,7 +210,11 @@ type WorkspacesSidebarProps = {
 	onRestoreWorkspace?: (workspaceId: string) => void;
 	onDeleteWorkspace?: (
 		workspaceId: string,
-		options?: { deleteRemoteBranch?: boolean },
+		options?: {
+			deleteRemoteBranch?: boolean;
+			expectedRemoteTarget?: WorkspaceRemoteBranchDeletionTarget | null;
+			expectedRemoteTargets?: WorkspaceRemoteBranchDeletionTarget[];
+		},
 	) => void | Promise<void>;
 	onDeleteProject?: (input: {
 		repositoryId: string;
@@ -270,7 +274,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	const [isRemovingProject, setIsRemovingProject] = useState(false);
 	const [workspaceDeletionTarget, setWorkspaceDeletionTarget] =
 		useState<WorkspaceSummary | null>(null);
-	const [deleteRemoteBranch, setDeleteRemoteBranch] = useState(true);
+	const [deleteRemoteBranch, setDeleteRemoteBranch] = useState(false);
 	const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false);
 
 	const [sectionOpenState, setSectionOpenState] = useState(() => ({
@@ -533,7 +537,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				return;
 			}
 			setWorkspaceDeletionTarget(workspace);
-			setDeleteRemoteBranch(true);
+			setDeleteRemoteBranch(false);
 		},
 		[workspaces],
 	);
@@ -544,8 +548,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		}
 		setIsDeletingWorkspace(true);
 		try {
+			const remoteTargets = workspaceDeletionTarget.remoteDeletionTargets ?? [];
 			await onDeleteWorkspace(workspaceDeletionTarget.id, {
 				deleteRemoteBranch,
+				expectedRemoteTarget: remoteTargets[0] ?? null,
+				expectedRemoteTargets: remoteTargets,
 			});
 			setWorkspaceDeletionTarget(null);
 		} catch (error) {
@@ -1201,28 +1208,37 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							{t("sidebar.deleteWorkspaceDescription")}
 						</DialogDescription>
 					</DialogHeader>
-					<label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5 text-sm">
-						<input
-							type="checkbox"
-							checked={deleteRemoteBranch}
-							disabled={isDeletingWorkspace}
-							onChange={(event) => setDeleteRemoteBranch(event.target.checked)}
-							className="mt-0.5 size-4 accent-primary"
-						/>
-						<span className="min-w-0">
-							<span className="block font-medium text-foreground">
-								{workspaceDeletionTarget?.bundleId
-									? t("sidebar.deleteRemoteBranches")
-									: t("sidebar.deleteRemoteBranch")}
-							</span>
-							{!workspaceDeletionTarget?.bundleId &&
-							workspaceDeletionTarget?.branch ? (
-								<span className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">
-									{workspaceDeletionTarget.branch}
+					{workspaceDeletionTarget?.remoteDeletionTargets?.length ? (
+						<label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5 text-sm">
+							<input
+								type="checkbox"
+								checked={deleteRemoteBranch}
+								disabled={isDeletingWorkspace}
+								onChange={(event) => setDeleteRemoteBranch(event.target.checked)}
+								className="mt-0.5 size-4 accent-primary"
+							/>
+							<span className="min-w-0">
+								<span className="block font-medium text-foreground">
+									{workspaceDeletionTarget.bundleId
+										? t("sidebar.deleteRemoteBranches")
+										: t("sidebar.deleteRemoteBranch")}
 								</span>
-							) : null}
-						</span>
-					</label>
+								<span className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">
+									{[
+										...new Set(
+											workspaceDeletionTarget.remoteDeletionTargets.map(
+												(target) => `${target.remote}/${target.branch}`,
+											),
+										),
+									].join(", ")}
+								</span>
+							</span>
+						</label>
+					) : (
+						<p className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground">
+							{t("sidebar.noRemoteBranchToDelete")}
+						</p>
+					)}
 					<DialogFooter>
 						<Button
 							type="button"

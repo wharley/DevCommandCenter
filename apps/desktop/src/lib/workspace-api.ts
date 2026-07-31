@@ -77,6 +77,7 @@ import type {
 	WorkspaceGitSyncBaseInput,
 	WorkspaceGitSyncBaseOutput,
 	WorkspaceGitValidationConfigOutput,
+	WorkspaceRemoteBranchDeletionTarget,
 	WorkspaceProjectAutomationConfigOutput,
 	WorkspaceRunProjectTasksInput,
 	WorkspaceRunProjectTasksOutput,
@@ -157,12 +158,16 @@ export function restoreWorkspace(workspaceId: string) {
 
 export function deleteWorkspace(
 	workspaceId: string,
-	options: { deleteRemoteBranch?: boolean } = {},
+	options: {
+		deleteRemoteBranch?: boolean;
+		expectedRemoteTarget?: WorkspaceRemoteBranchDeletionTarget | null;
+	} = {},
 ) {
 	return invoke<void>(WORKSPACE_METHODS.deleteWorkspace, {
 		input: {
 			workspaceId,
 			deleteRemoteBranch: options.deleteRemoteBranch ?? false,
+			expectedRemoteTarget: options.expectedRemoteTarget ?? null,
 		},
 	});
 }
@@ -355,12 +360,16 @@ export function restoreWorkspaceBundle(bundleId: string) {
 
 export function deleteWorkspaceBundle(
 	bundleId: string,
-	options: { deleteRemoteBranches?: boolean } = {},
+	options: {
+		deleteRemoteBranches?: boolean;
+		expectedRemoteTargets?: WorkspaceRemoteBranchDeletionTarget[];
+	} = {},
 ) {
 	return invoke<void>(WORKSPACE_METHODS.deleteWorkspaceBundle, {
 		input: {
 			bundleId,
 			deleteRemoteBranches: options.deleteRemoteBranches ?? false,
+			expectedRemoteTargets: options.expectedRemoteTargets ?? [],
 		},
 	});
 }
