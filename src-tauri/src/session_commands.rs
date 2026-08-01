@@ -9,10 +9,11 @@ use dcc_core::application::{
 use dcc_core::domain::session::{SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary};
 use dcc_tauri::{
     commands::session_commands::{
-        self as session_command_impl, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
-        PrepareTurnOutput, RespondToPermissionRequestInput, RespondToPermissionRequestOutput,
-        RespondToUserInputInput, RespondToUserInputOutput, SearchSessionsInput, StartMcpOauthInput,
-        StartMcpOauthOutput, WaitMcpOauthInput, WaitMcpOauthOutput,
+        self as session_command_impl, ApplyTaskTitleInput, ApplyTaskTitleOutput,
+        ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput, PrepareTurnOutput,
+        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
+        RespondToUserInputOutput, SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput,
+        WaitMcpOauthInput, WaitMcpOauthOutput,
     },
     state::SessionCommandState,
 };
@@ -24,6 +25,14 @@ pub async fn start_thread(
     input: StartThreadInput,
 ) -> Result<StartThreadOutput, String> {
     session_command_impl::start_thread(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn apply_task_title(
+    state: State<'_, SessionCommandState>,
+    input: ApplyTaskTitleInput,
+) -> Result<ApplyTaskTitleOutput, String> {
+    session_command_impl::apply_task_title(state, input).await
 }
 
 #[tauri::command]

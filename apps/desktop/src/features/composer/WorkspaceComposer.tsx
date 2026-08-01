@@ -35,10 +35,18 @@ import {
 } from "@/components/ui/tooltip";
 import { pathBasename } from "@/lib/path-basename";
 import { cn } from "@/lib/utils";
-import type { ProviderCatalog, ProviderRuntimeConfig } from "@dcc/contracts";
+import type {
+	ProviderCatalog,
+	ProviderRuntimeConfig,
+	WorkspaceSetupReport,
+} from "@dcc/contracts";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import { canAbortRun } from "@/features/sessions/session-chrome-state";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import {
+	ExecutionDock,
+	type ExecutionDockChangeSummary,
+} from "./ExecutionDock";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
 import { ContextBar } from "./ContextBar";
 import { ComposerProviderModelMenu } from "./ComposerProviderModelMenu";
@@ -115,8 +123,17 @@ type WorkspaceComposerProps = {
 	pendingPrompt: string | null;
 	/** Text to append to the draft (e.g. a diff annotation); nonce re-fires it. */
 	prefill?: { text: string; nonce: number } | null;
+	focusRequestKey?: number | null;
 	workspacePath: string | null;
+	workspaceSetupReport?: WorkspaceSetupReport | null;
+	projectRootPath: string | null;
 	workspaceBranch: string | null;
+	projectLabel: string | null;
+	currentBranch: string | null;
+	isIsolatedWorkspace: boolean;
+	gitChangeSummary: ExecutionDockChangeSummary | null;
+	gitStatusState?: "loading" | "ready" | "error";
+	contextProjects?: Array<{ id: string; name: string; branch: string }>;
 	showPlanFollowUpPrompt: boolean;
 	planTitle: string | null;
 	planNeedsInput: boolean;
@@ -130,6 +147,11 @@ type WorkspaceComposerProps = {
 	openDelegateMenuSignal?: number;
 	onAbortSession: () => void;
 	onReviewPlan: () => void;
+	onReviewChanges?: () => void;
+	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
+	onCreateTaskFromSourceUrl?: (url: string) => Promise<void>;
+	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
+	onSkipRecommendedSetup?: () => Promise<void>;
 };
 
 export function WorkspaceComposer({
@@ -142,8 +164,17 @@ export function WorkspaceComposer({
 	sessionSnapshot,
 	pendingPrompt,
 	prefill,
+	focusRequestKey = null,
 	workspacePath,
+	workspaceSetupReport = null,
+	projectRootPath,
 	workspaceBranch,
+	projectLabel,
+	currentBranch,
+	isIsolatedWorkspace,
+	gitChangeSummary,
+	gitStatusState = "ready",
+	contextProjects = [],
 	showPlanFollowUpPrompt,
 	planTitle,
 	planNeedsInput,
@@ -155,6 +186,11 @@ export function WorkspaceComposer({
 	openDelegateMenuSignal,
 	onAbortSession,
 	onReviewPlan,
+	onReviewChanges,
+	onCreateTaskFromBranch,
+	onCreateTaskFromSourceUrl,
+	onRunRecommendedSetup,
+	onSkipRecommendedSetup,
 }: WorkspaceComposerProps) {
 	const { t } = useTranslation("common");
 	const [hasContent, setHasContent] = useState(false);
@@ -579,8 +615,27 @@ export function WorkspaceComposer({
 		);
 	}, [workspaceBranch, workspacePath]);
 
-	return (
+	return [
+		<ExecutionDock
+			key="execution-dock"
+			projectLabel={projectLabel}
+			workspacePath={workspacePath}
+			projectRootPath={projectRootPath}
+			baseBranch={workspaceBranch}
+			currentBranch={currentBranch}
+			isIsolatedWorkspace={isIsolatedWorkspace}
+			changeSummary={gitChangeSummary}
+			gitStatusState={gitStatusState}
+			contextProjects={contextProjects}
+			setupReport={workspaceSetupReport}
+			onReviewChanges={onReviewChanges}
+			onCreateTaskFromBranch={onCreateTaskFromBranch}
+			onCreateTaskFromSourceUrl={onCreateTaskFromSourceUrl}
+			onRunRecommendedSetup={onRunRecommendedSetup}
+			onSkipRecommendedSetup={onSkipRecommendedSetup}
+		/>,
 		<div
+			key="composer-surface"
 			ref={composerRootRef}
 			aria-label={t("composer.ariaLabel")}
 			data-focus-scope="composer"
@@ -665,7 +720,10 @@ export function WorkspaceComposer({
 					onSubmit={handleSubmitDraft}
 				/>
 				<AutoResizePlugin />
-				<EditorRefPlugin editorRef={editorRef} />
+				<EditorRefPlugin
+					editorRef={editorRef}
+					focusRequestKey={focusRequestKey}
+				/>
 				<EditablePlugin disabled={inputDisabled} />
 				<DraftPersistencePlugin draftKey={composerDraftKey} />
 				<HasContentPlugin onChange={setHasContent} />
@@ -992,6 +1050,6 @@ export function WorkspaceComposer({
 					)}
 				</div>
 			</div>
-		</div>
-	);
+		</div>,
+	];
 }

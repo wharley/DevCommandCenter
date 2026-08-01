@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import type { WorkspaceSessionSummary } from "@dcc/contracts";
+import type { WorkspaceSessionSummary, WorkspaceSetupReport } from "@dcc/contracts";
 import {
 	WorkspaceEditorSurface,
 	type DiffAnnotationRequest,
@@ -129,6 +129,11 @@ type WorkspacePanelProps = {
 	workspaceName: string;
 	workspaceBranch: string;
 	workspacePath: string | null;
+	workspaceSetupReport?: WorkspaceSetupReport | null;
+	projectRootPath?: string | null;
+	projectLabel?: string | null;
+	isIsolatedWorkspace?: boolean;
+	workspaceContextProjects?: Array<{ id: string; name: string; branch: string }>;
 	sessionQueryScope?: string;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
@@ -173,12 +178,17 @@ type WorkspacePanelProps = {
 	terminalScopes?: TerminalScopeTarget[];
 	onOpenTerminal?: (request: OpenTerminalRequest) => void;
 	externalComposerPrefill?: ComposerPrefill | null;
+	composerFocusRequestKey?: number | null;
 	/** Current inspector visibility — picks the open vs. close affordance. */
 	inspectorCollapsed?: boolean;
 	/** Toggles the inspector open/closed — wired to the header control. */
 	onToggleInspector?: () => void;
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
+	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
+	onCreateTaskFromSourceUrl?: (url: string) => Promise<void>;
+	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
+	onSkipRecommendedSetup?: () => Promise<void>;
 	/** Opens the inspector and previews an implementation delegation diff. */
 	onReviewDelegation?: (delegationId: string) => void;
 	onRerunDelegation?: (input: {
@@ -199,6 +209,11 @@ export function WorkspacePanel({
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
+	workspaceSetupReport = null,
+	projectRootPath = null,
+	projectLabel = null,
+	isIsolatedWorkspace = true,
+	workspaceContextProjects = [],
 	sessionQueryScope = "local",
 	selectedProviderLabel,
 	selectedModelLabel,
@@ -236,9 +251,14 @@ export function WorkspacePanel({
 	terminalScopes,
 	onOpenTerminal,
 	externalComposerPrefill,
+	composerFocusRequestKey = null,
 	inspectorCollapsed,
 	onToggleInspector,
 	onReviewChanges,
+	onCreateTaskFromBranch,
+	onCreateTaskFromSourceUrl,
+	onRunRecommendedSetup,
+	onSkipRecommendedSetup,
 	onReviewDelegation,
 	onRerunDelegation,
 	onResolveConflictWithAgent,
@@ -388,12 +408,6 @@ export function WorkspacePanel({
 	const selectedSessionTitle =
 		sessions.find((session) => session.session.id === effectiveSessionId)?.thread
 			.title ?? workspaceName;
-	const pathCaption =
-		workspacePath && workspacePath.length > 0
-			? workspacePath.length > 52
-				? `…${workspacePath.slice(-51)}`
-				: workspacePath
-			: null;
 	const historyEvents = threadHistoryQuery.data ?? [];
 	const hasLoaded = sessionSnapshot
 		? Boolean(threadHistoryQuery.isFetched || sessionEvents.length > 0)
@@ -401,8 +415,7 @@ export function WorkspacePanel({
 	const hasEmptyThread = !sessionSnapshot;
 	const sessionState = sessionSnapshot?.state ?? null;
 	const lastTurnState = sessionSnapshot?.lastTurnState ?? null;
-	const isGitRepo = Boolean(workspaceBranch) || Boolean(workspacePath);
-	// Hoisted here (always mounted) so the header's changes pill has data even while
+	// Hoisted here (always mounted) so the execution dock stays accurate even while
 	// the inspector is collapsed. Shares React Query's cache with the inspector's own
 	// useWorkspaceGitStatus call — one network request, not two.
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
@@ -781,9 +794,7 @@ export function WorkspacePanel({
 			>
 				<DccWorkbenchChatHeader
 					threadTitle={selectedSessionTitle}
-					projectBadgeLabel={workspaceBranch || null}
-					isGitRepo={isGitRepo}
-					pathCaption={pathCaption}
+					projectLabel={projectLabel}
 					sessions={sessions}
 					selectedSessionId={selectedSessionId}
 					isLoadingSessions={isLoadingSessions}
@@ -802,7 +813,6 @@ export function WorkspacePanel({
 					onOpenTerminal={onOpenTerminal ? openPreferredTerminal : undefined}
 					terminalScopes={terminalScopes}
 					workspacePath={workspacePath}
-					gitChangeSummary={gitChangeSummary}
 					inspectorCollapsed={inspectorCollapsed}
 					onToggleInspector={onToggleInspector}
 				/>
@@ -858,20 +868,40 @@ export function WorkspacePanel({
 						sessionSnapshot={sessionSnapshot}
 						pendingPrompt={pendingPrompt}
 						prefill={composerPrefill}
-					workspacePath={workspacePath}
-					workspaceBranch={workspaceBranch}
-					showPlanFollowUpPrompt={showPlanFollowUpPrompt}
-					planTitle={activePlanTitle}
-					planNeedsInput={activePlanNeedsInput}
-					planApproved={isLatestPlanApproved}
-					onSelectProvider={onSelectProvider}
-					onSelectModel={onSelectModel}
-					onSubmitPrompt={onSubmitPrompt}
-					onDelegatePrompt={sessionSnapshot ? onDelegatePrompt : undefined}
-					openDelegateMenuSignal={(delegateSignal ?? 0) + localDelegateMenuBumps}
-					onAbortSession={onAbortSession}
-					onReviewPlan={onOpenPlanSurface}
-				/>
+						focusRequestKey={composerFocusRequestKey}
+						workspacePath={workspacePath}
+						workspaceSetupReport={workspaceSetupReport}
+						projectRootPath={projectRootPath}
+						workspaceBranch={workspaceBranch}
+						projectLabel={projectLabel}
+						currentBranch={gitStatusQuery.data?.currentBranch ?? null}
+						isIsolatedWorkspace={isIsolatedWorkspace}
+						gitChangeSummary={gitChangeSummary}
+						gitStatusState={
+							gitStatusQuery.isLoading
+								? "loading"
+								: gitStatusQuery.isError
+									? "error"
+									: "ready"
+						}
+						contextProjects={workspaceContextProjects}
+						showPlanFollowUpPrompt={showPlanFollowUpPrompt}
+						planTitle={activePlanTitle}
+						planNeedsInput={activePlanNeedsInput}
+						planApproved={isLatestPlanApproved}
+						onSelectProvider={onSelectProvider}
+						onSelectModel={onSelectModel}
+						onSubmitPrompt={onSubmitPrompt}
+						onDelegatePrompt={sessionSnapshot ? onDelegatePrompt : undefined}
+						openDelegateMenuSignal={(delegateSignal ?? 0) + localDelegateMenuBumps}
+						onAbortSession={onAbortSession}
+						onReviewPlan={onOpenPlanSurface}
+						onReviewChanges={onReviewChanges ?? onToggleInspector}
+						onCreateTaskFromBranch={onCreateTaskFromBranch}
+						onCreateTaskFromSourceUrl={onCreateTaskFromSourceUrl}
+						onRunRecommendedSetup={onRunRecommendedSetup}
+						onSkipRecommendedSetup={onSkipRecommendedSetup}
+					/>
 				</div>
 			</div>
 		</div>

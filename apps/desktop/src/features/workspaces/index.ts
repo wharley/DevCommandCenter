@@ -1,5 +1,8 @@
 export { getWorkspaceTone } from "./data";
-export { CreateWorkspaceDialog } from "./create-workspace-dialog";
+export {
+	CreateWorkspaceDialog,
+	notifyWorkspaceCreationResult,
+} from "./create-workspace-dialog";
 export { WorkspacesSidebar } from "./sidebar";
 export { WorkspaceCommandPalette } from "./workspace-command-palette";
 export { useWorkspacesPanel } from "./use-workspaces";

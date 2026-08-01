@@ -1,7 +1,6 @@
 import {
 	AlertCircle,
 	Clock3,
-	FileDiff,
 	GitFork,
 	History,
 	PanelRightClose,
@@ -15,7 +14,6 @@ import {
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -44,9 +42,7 @@ import { useActiveTerminalCount } from "@/features/terminal/use-active-terminal-
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
-	projectBadgeLabel: string | null;
-	isGitRepo: boolean;
-	pathCaption: string | null;
+	projectLabel: string | null;
 	workspacePath: string | null;
 	sessions: WorkspaceSessionSummary[];
 	selectedSessionId: string | null;
@@ -65,12 +61,6 @@ export type DccWorkbenchChatHeaderProps = {
 	onInstallUpdate: () => void;
 	onOpenTerminal?: () => void;
 	terminalScopes?: TerminalScopeTarget[];
-	/** Uncommitted git changes summary; drives the calm-mode changes pill. */
-	gitChangeSummary?: {
-		files: number;
-		additions: number;
-		deletions: number;
-	} | null;
 	/** Current inspector visibility — picks the open vs. close affordance. */
 	inspectorCollapsed?: boolean;
 	/** Toggles the inspector open/closed. */
@@ -81,9 +71,7 @@ export type DccWorkbenchChatHeaderProps = {
 
 export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	threadTitle,
-	projectBadgeLabel,
-	isGitRepo,
-	pathCaption,
+	projectLabel,
 	workspacePath,
 	sessions,
 	selectedSessionId,
@@ -102,16 +90,13 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	onInstallUpdate,
 	onOpenTerminal,
 	terminalScopes,
-	gitChangeSummary,
 	inspectorCollapsed,
 	onToggleInspector,
 }: DccWorkbenchChatHeaderProps) {
 	const { t } = useTranslation("common");
-	const inspectorHintActive = Boolean(inspectorCollapsed && gitChangeSummary);
 	const handleInspectorToggle = () => {
 		onToggleInspector?.();
 	};
-	const showProjectBadge = Boolean(projectBadgeLabel);
 	const resumeOk = canResumeSession(sessionSnapshot);
 	const visibleSessionList = visibleSessions(sessions);
 	const archivedSessionList = sessions.filter(isSessionArchived);
@@ -127,28 +112,18 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	return (
 		<div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-2">
 			<div className="flex min-w-0 items-center justify-between gap-3 overflow-hidden sm:gap-4">
-				<div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
+				<div className="flex min-w-0 flex-1 items-center overflow-hidden">
 					<h2
-						className="min-w-0 shrink truncate text-sm font-medium text-foreground"
-						title={threadTitle}
+						className="min-w-0 truncate text-sm font-medium text-foreground"
+						title={projectLabel ? `${projectLabel} / ${threadTitle}` : threadTitle}
 					>
+						{projectLabel ? (
+							<span className="font-normal text-muted-foreground">
+								{projectLabel} <span className="px-1 text-border">/</span>
+							</span>
+						) : null}
 						{threadTitle}
 					</h2>
-					{showProjectBadge ? (
-						<Badge variant="outline" className="min-w-0 shrink overflow-hidden">
-							<span className="min-w-0 truncate">{projectBadgeLabel}</span>
-						</Badge>
-					) : null}
-					{showProjectBadge && !isGitRepo ? (
-						<Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
-							{t("workbench.noGit")}
-						</Badge>
-					) : null}
-					{pathCaption ? (
-						<span className="hidden max-w-[16rem] truncate text-[11px] text-muted-foreground md:inline">
-							{pathCaption}
-						</span>
-					) : null}
 				</div>
 
 				<div className="flex shrink-0 items-center justify-end gap-1.5 @3xl/header-actions:gap-2">
@@ -240,77 +215,33 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						</Tooltip>
 					) : null}
 					{onToggleInspector ? (
-						inspectorCollapsed && gitChangeSummary ? (
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button
-										type="button"
-										variant="ghost"
-										size="sm"
-										onClick={handleInspectorToggle}
-										aria-label={t("workbench.changesPill.aria", {
-											count: gitChangeSummary.files,
-										})}
-										className={cn(
-											"h-7 shrink-0 gap-1.5 rounded-md border border-border/50 bg-muted/25 px-2 text-[12px] font-normal hover:bg-accent/60",
-											inspectorHintActive && "inspector-hint-pulse",
-										)}
-									>
-										<FileDiff
-											className="size-3.5 text-muted-foreground"
-											strokeWidth={1.8}
-										/>
-										<span className="tabular-nums text-foreground">
-											{gitChangeSummary.files}
-										</span>
-										{gitChangeSummary.additions > 0 ? (
-											<span className="tabular-nums text-emerald-600 dark:text-emerald-400">
-												+{gitChangeSummary.additions}
-											</span>
-										) : null}
-										{gitChangeSummary.deletions > 0 ? (
-											<span className="tabular-nums text-destructive">
-												−{gitChangeSummary.deletions}
-											</span>
-										) : null}
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent side="bottom">
-									{t("workbench.changesPill.tooltip")}
-								</TooltipContent>
-							</Tooltip>
-						) : (
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-sm"
-										onClick={handleInspectorToggle}
-										aria-label={
-											inspectorCollapsed
-												? t("workbench.inspectorToggle.open")
-												: t("workbench.inspectorToggle.close")
-										}
-										className={cn(
-											"shrink-0 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-											inspectorHintActive && "inspector-hint-pulse",
-										)}
-									>
-										{inspectorCollapsed ? (
-											<PanelRightOpen className="size-3.5" strokeWidth={1.8} />
-										) : (
-											<PanelRightClose className="size-3.5" strokeWidth={1.8} />
-										)}
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent side="bottom">
-									{inspectorCollapsed
-										? t("workbench.inspectorToggle.open")
-										: t("workbench.inspectorToggle.close")}
-								</TooltipContent>
-							</Tooltip>
-						)
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-sm"
+									onClick={handleInspectorToggle}
+									aria-label={
+										inspectorCollapsed
+											? t("workbench.inspectorToggle.open")
+											: t("workbench.inspectorToggle.close")
+									}
+									className="shrink-0 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+								>
+									{inspectorCollapsed ? (
+										<PanelRightOpen className="size-3.5" strokeWidth={1.8} />
+									) : (
+										<PanelRightClose className="size-3.5" strokeWidth={1.8} />
+									)}
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent side="bottom">
+								{inspectorCollapsed
+									? t("workbench.inspectorToggle.open")
+									: t("workbench.inspectorToggle.close")}
+							</TooltipContent>
+						</Tooltip>
 					) : null}
 				</div>
 			</div>

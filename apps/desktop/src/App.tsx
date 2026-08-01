@@ -48,6 +48,7 @@ import {
 	WorkspacesSidebar,
 	WorkspaceCommandPalette,
 	CreateWorkspaceDialog,
+	notifyWorkspaceCreationResult,
 	useWorkspacesPanel,
 	type ExistingRepositoryContext,
 } from "./features/workspaces";
@@ -102,6 +103,7 @@ import {
 } from "./lib/workspace-api";
 import {
 	abortRun,
+	applyTaskTitle,
 	closeSession,
 	loadSessionThreadEvents,
 	resumeSession,
@@ -148,6 +150,7 @@ import {
 	daemonCombToWorkspaceSummary,
 	workspaceToSummary,
 } from "./features/workspaces/use-workspaces";
+import { deriveTaskTitle } from "./features/workspaces/task-title";
 import { removeProjectFromDcc } from "./features/workspaces/project-removal";
 import type { WorkspaceSummary } from "./features/workspaces/types";
 import {
@@ -878,6 +881,7 @@ export default function App() {
 	}, [workspaceBundlesFromBackend, workspacesFromBackend]);
 	const {
 		allWorkspaces,
+		applyWorkspaceTitle,
 		archiveWorkspace,
 		cloneWorkspaceFromUrl,
 		completeWorkspace,
@@ -1185,6 +1189,94 @@ export default function App() {
 	const activeWorkspace =
 		selectedBundleMembers.find((workspace) => workspace.id === selectedBundleMemberId) ??
 		selectedWorkspace;
+	const activeProjectRootPath = activeWorkspace?.rootPath ?? null;
+	const activeProjectId = activeWorkspace?.projectId ?? null;
+	const canCreateTaskFromDock =
+		selectedBundleMembers.length <= 1 &&
+		Boolean(activeProjectRootPath && activeProjectId);
+	const composerFocusSequenceRef = useRef(0);
+	const [pendingComposerFocusRequest, setPendingComposerFocusRequest] = useState<{
+		workspaceId: string;
+		key: number;
+	} | null>(null);
+	const requestNewTaskComposerFocus = useCallback((workspaceId: string) => {
+		composerFocusSequenceRef.current += 1;
+		setPendingComposerFocusRequest({
+			workspaceId,
+			key: composerFocusSequenceRef.current,
+		});
+	}, []);
+	const composerFocusRequestKey =
+		pendingComposerFocusRequest &&
+		pendingComposerFocusRequest.workspaceId === selectedWorkspace?.id
+			? pendingComposerFocusRequest.key
+			: null;
+	useEffect(() => {
+		if (composerFocusRequestKey === null) {
+			return;
+		}
+		const timeout = window.setTimeout(() => {
+			setPendingComposerFocusRequest((current) =>
+				current?.key === composerFocusRequestKey ? null : current,
+			);
+		}, 1_000);
+		return () => window.clearTimeout(timeout);
+	}, [composerFocusRequestKey]);
+	const handleCreateTaskFromDockBranch = useCallback(
+		async (baseBranch: string) => {
+			if (!activeProjectRootPath || !activeProjectId) {
+				throw new Error(t("composer.executionDock.origin.unavailable"));
+			}
+			const result = await createWorkspace({
+				projectId: activeProjectId,
+				workspaceRoot: activeProjectRootPath,
+				baseBranch,
+				name: null,
+			});
+			notifyWorkspaceCreationResult(t, "open", result);
+			void queryClient.invalidateQueries({
+				queryKey: ["workspaces", backendCacheKey],
+			});
+			requestNewTaskComposerFocus(result.workspace.id);
+		},
+		[
+			activeProjectId,
+			activeProjectRootPath,
+			backendCacheKey,
+			createWorkspace,
+			queryClient,
+			requestNewTaskComposerFocus,
+			t,
+		],
+	);
+	const handleCreateTaskFromDockSource = useCallback(
+		async (url: string) => {
+			if (!activeProjectRootPath || !activeProjectId) {
+				throw new Error(t("composer.executionDock.origin.unavailable"));
+			}
+			const result = await createWorkspaceFromSourceUrl({
+				projectId: activeProjectId,
+				workspaceRoot: activeProjectRootPath,
+				url,
+				name: null,
+				forgeLogin: null,
+			});
+			notifyWorkspaceCreationResult(t, "open", result);
+			void queryClient.invalidateQueries({
+				queryKey: ["workspaces", backendCacheKey],
+			});
+			requestNewTaskComposerFocus(result.workspace.id);
+		},
+		[
+			activeProjectId,
+			activeProjectRootPath,
+			backendCacheKey,
+			createWorkspaceFromSourceUrl,
+			queryClient,
+			requestNewTaskComposerFocus,
+			t,
+		],
+	);
 	const handleDeliverWorkspaceScope = useCallback(async (): Promise<
 		MultiWorkspaceDeliveryResult[]
 	> => {
@@ -1803,7 +1895,7 @@ export default function App() {
 				providerId: selectedProvider.id,
 				model: selectedModel?.id ?? null,
 				providerRuntime: selectedProviderRuntime,
-				title: `${selectedWorkspace.name} session`,
+				title: selectedWorkspace.name,
 			});
 
 			const snapshot: RuntimeSessionSnapshot = {
@@ -2610,6 +2702,9 @@ export default function App() {
 		if (trimmedPrompt.length === 0) {
 			return;
 		}
+		const automaticTaskTitle = selectedWorkspace?.isAutoNamed
+			? deriveTaskTitle(trimmedPrompt, selectedWorkspace.name)
+			: null;
 
 		const targetSessionId = options?.targetSessionId ?? null;
 		const targetSessionSummary =
@@ -2659,7 +2754,7 @@ export default function App() {
 					providerId: selectedProvider.id,
 					model: selectedModel?.id ?? null,
 					providerRuntime: selectedProviderRuntime,
-					title: `${selectedWorkspace.name} session`,
+					title: automaticTaskTitle ?? selectedWorkspace.name,
 				});
 
 				currentSession = {
@@ -2707,6 +2802,47 @@ export default function App() {
 
 			if (!currentSessionId || !currentSession) {
 				return;
+			}
+
+			if (automaticTaskTitle && selectedWorkspace) {
+				try {
+					const titled = await applyTaskTitle({
+						workspaceId: selectedWorkspace.id,
+						sessionId: currentSessionId,
+						title: automaticTaskTitle,
+					});
+					if (titled.applied) {
+						applyWorkspaceTitle(selectedWorkspace.id, automaticTaskTitle);
+						queryClient.setQueryData<WorkspaceSummary[]>(
+							["workspaces", backendCacheKey],
+							(current = []) =>
+								current.map((workspace) =>
+									workspace.id === selectedWorkspace.id
+										? {
+											...workspace,
+											name: automaticTaskTitle,
+											isAutoNamed: false,
+										}
+										: workspace,
+								),
+						);
+						queryClient.setQueryData<WorkspaceSessionSummary[]>(
+							getWorkspaceSessionsCacheKey(
+								backendCacheKey,
+								selectedWorkspace.id,
+							),
+							(current = []) =>
+								current.map((summary) =>
+									summary.session.id === currentSessionId
+										? { ...summary, thread: titled.thread }
+										: summary,
+								),
+						);
+					}
+				} catch (error) {
+					// Naming is UX metadata and must never block the user's first turn.
+					console.error("[dcc] automatic task title failed:", error);
+				}
 			}
 
 			const turnProvider = targetSessionProvider ?? selectedProvider;
@@ -2900,24 +3036,25 @@ export default function App() {
 			setPendingPromptSessionId((current) =>
 				current === currentSessionId ? null : current,
 			);
-			}
-		}, [
+		}
+	}, [
+			applyWorkspaceTitle,
 			backendCacheKey,
 			providerChoices,
 			queryClient,
 			registerMissionSpecAutoCompileAttempt,
 			selectedModel,
-		selectedProvider,
-		selectedProviderBlockReason,
-		selectedProviderRuntime,
-		selectedSessionId,
-		selectedSessionSnapshot,
-		selectedLocalWorkspacePath,
-		selectedWorkspaceAdditionalWorkspaceIds,
-		selectedWorkspace,
-		sessionEvents,
-		t,
-		workspaceSessions,
+			selectedProvider,
+			selectedProviderBlockReason,
+			selectedProviderRuntime,
+			selectedSessionId,
+			selectedSessionSnapshot,
+			selectedLocalWorkspacePath,
+			selectedWorkspaceAdditionalWorkspaceIds,
+			selectedWorkspace,
+			sessionEvents,
+			t,
+			workspaceSessions,
 	]);
 
 	const handleGeneratePlanFromSpec = useCallback(
@@ -3615,6 +3752,33 @@ export default function App() {
 		},
 		[isRemoteBackend, showRemoteUnsupported],
 	);
+	const handleQuickCreateTask = useCallback(
+		async (input: {
+			projectId: string;
+			workspaceRoot: string;
+			baseBranch: string;
+			label: string;
+		}) => {
+			try {
+				const result = await createWorkspace({
+					projectId: input.projectId,
+					workspaceRoot: input.workspaceRoot,
+					baseBranch: input.baseBranch,
+					name: null,
+				});
+				notifyWorkspaceCreationResult(t, "open", result);
+				void queryClient.invalidateQueries({
+					queryKey: ["workspaces", backendCacheKey],
+				});
+				requestNewTaskComposerFocus(result.workspace.id);
+			} catch (error) {
+				toast.error(t("workspaceDialog.toastCreateError"), {
+					description: error instanceof Error ? error.message : String(error),
+				});
+			}
+		},
+		[backendCacheKey, createWorkspace, queryClient, requestNewTaskComposerFocus, t],
+	);
 
 	const handleWorkspaceDialogOpenChange = useCallback((open: boolean) => {
 		setIsCreateWorkspaceOpen(open);
@@ -3774,7 +3938,7 @@ export default function App() {
 							onCreateWorkspaceFromProject={
 								isRemoteBackend
 									? undefined
-									: (repository) => openWorkspaceDialog("open", repository)
+									: (repository) => void handleQuickCreateTask(repository)
 							}
 							onOpenSettings={() => setIsSettingsOpen(true)}
 							onOpenSkills={() => setIsSkillsOpen(true)}
@@ -3868,15 +4032,30 @@ export default function App() {
 								mode={workspaceCreationMode}
 								repositoryContext={workspaceRepositoryContext}
 								onOpenChange={handleWorkspaceDialogOpenChange}
-								onCreateWorkspace={createWorkspace}
-								onCreateWorkspaceFromSourceUrl={createWorkspaceFromSourceUrl}
-								onCreateWorkspaceBundle={async (input) => {
-									const result = await createWorkspaceBundle(input);
-									void queryClient.invalidateQueries({ queryKey: ["workspaceBundles"] });
-									void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+								onCreateWorkspace={async (input) => {
+									const result = await createWorkspace(input);
+									requestNewTaskComposerFocus(result.workspace.id);
 									return result;
 								}}
-								onCloneWorkspace={cloneWorkspaceFromUrl}
+								onCreateWorkspaceFromSourceUrl={async (input) => {
+									const result = await createWorkspaceFromSourceUrl(input);
+									requestNewTaskComposerFocus(result.workspace.id);
+									return result;
+								}}
+								onCreateWorkspaceBundle={async (input) => {
+									const result = await createWorkspaceBundle(input);
+									void queryClient.invalidateQueries({
+										queryKey: ["workspaceBundles"],
+									});
+									void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+									requestNewTaskComposerFocus(result.primaryWorkspace.id);
+									return result;
+								}}
+								onCloneWorkspace={async (input) => {
+									const result = await cloneWorkspaceFromUrl(input);
+									requestNewTaskComposerFocus(result.workspace.id);
+									return result;
+								}}
 								repositories={repositoriesFromBackend}
 								isSubmitting={isCreatingWorkspace}
 							/>
@@ -3886,6 +4065,10 @@ export default function App() {
 									workspaceName={selectedWorkspace.name}
 									workspaceBranch={selectedWorkspace.branch}
 									workspacePath={selectedSessionWorkspacePath}
+									workspaceSetupReport={
+										activeWorkspace?.setupReport ?? selectedWorkspace.setupReport ?? null
+									}
+									composerFocusRequestKey={composerFocusRequestKey}
 									terminalWorkspaceId={activeWorkspace?.id ?? selectedWorkspace.id}
 									terminalWorkspaceName={activeWorkspace?.name ?? selectedWorkspace.name}
 									terminalWorkspaceBranch={activeWorkspace?.branch ?? selectedWorkspace.branch}
@@ -3895,13 +4078,14 @@ export default function App() {
 										selectedWorkspacePath ??
 										(isRemoteBackend ? null : (activeWorkspace?.worktreePath ?? null))
 									}
-					workspaceScopeOptions={selectedBundleMembers.map((workspace, index) => ({
+									workspaceScopeOptions={selectedBundleMembers.map((workspace, index) => ({
 										id: workspace.id,
 										name: workspace.name,
 										branch: workspace.branch,
-						hasChanges: bundleMemberChangeQueries[index]?.data?.hasChanges ?? null,
-						needsDelivery:
-							bundleMemberChangeQueries[index]?.data?.needsDelivery ?? null,
+										hasChanges:
+											bundleMemberChangeQueries[index]?.data?.hasChanges ?? null,
+										needsDelivery:
+											bundleMemberChangeQueries[index]?.data?.needsDelivery ?? null,
 									}))}
 									selectedWorkspaceScopeId={activeWorkspace?.id ?? selectedWorkspace.id}
 									onSelectWorkspaceScope={setSelectedBundleMemberId}
@@ -3945,6 +4129,16 @@ export default function App() {
 									inspectorCollapsed={inspectorCollapsed}
 									onToggleInspector={toggleGitInspector}
 									onReviewChanges={openGitInspector}
+									onCreateTaskFromBranch={
+										canCreateTaskFromDock
+											? handleCreateTaskFromDockBranch
+											: undefined
+									}
+									onCreateTaskFromSourceUrl={
+										canCreateTaskFromDock
+											? handleCreateTaskFromDockSource
+											: undefined
+									}
 									onReviewDelegation={handleReviewDelegation}
 									onRerunDelegation={handleRerunDelegation}
 									onResolveConflictWithAgent={handleResolveConflictWithAgent}

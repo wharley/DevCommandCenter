@@ -37,9 +37,9 @@ pub use mcp_commands::{
 };
 pub use provider_commands::{list_providers, provider_account_usage};
 pub use session_commands::{
-    abort_run, approve_plan, list_mcp_runtime_statuses, list_thread_events, prepare_turn,
-    record_plan_handoff, respond_to_permission_request, respond_to_user_input, resume_session,
-    send_turn, start_mcp_oauth, start_thread, wait_mcp_oauth,
+    abort_run, apply_task_title, approve_plan, list_mcp_runtime_statuses, list_thread_events,
+    prepare_turn, record_plan_handoff, respond_to_permission_request, respond_to_user_input,
+    resume_session, send_turn, start_mcp_oauth, start_thread, wait_mcp_oauth,
 };
 pub use workspace_commands::{
     archive_workspace, archive_workspace_bundle, compile_mission_spec_context, complete_workspace,
@@ -55,6 +55,7 @@ pub use workspace_commands::{
     workspace_git_mark_conflict_resolved, workspace_git_push, workspace_git_stage_all,
     workspace_git_stage_file, workspace_git_status, workspace_git_sync_base,
     workspace_git_unstage_file, workspace_git_validation_config,
-    workspace_project_automation_config, workspace_run_project_tasks, workspace_run_setup,
-    workspace_save_project_automation,
+    workspace_project_automation_config, workspace_record_setup_outcome,
+    workspace_run_project_tasks, workspace_run_setup, workspace_save_project_automation,
+    workspace_skip_setup,
 };

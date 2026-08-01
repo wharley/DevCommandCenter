@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
 	AlertTriangleIcon,
@@ -12,13 +13,23 @@ import type {
 	CoreEvent,
 	ProviderCatalog,
 	ProviderRuntimeConfig,
+	WorkspaceSetupReport,
 } from "@dcc/contracts";
 import { WorkspaceTerminalDrawer } from "@/features/terminal";
 import {
 	addTerminal as addTerminalTab,
 	ensureTerminal as ensureTerminalTab,
 	setActiveTerminal as setActiveTerminalTab,
+	getTerminalRuntimeId,
+	renameTerminal as renameTerminalTab,
 } from "@/features/terminal/terminal-tabs-store";
+import {
+	attachTerminal,
+	detachTerminal,
+	ensureTerminal as ensureTerminalRuntime,
+	writeTerminalInput,
+	type TerminalListener,
+} from "@/features/terminal/terminal-store";
 import { WorkspacePanel } from "@/features/panel";
 import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surface";
 import type { AppUpdateInfo } from "@/features/updater";
@@ -50,6 +61,11 @@ import {
 } from "@/features/workspaces/workbench-command";
 import { recordUxMetric } from "@/lib/ux-metrics";
 import { openExternal } from "@/lib/shell-api";
+import {
+	workspaceRecordSetupOutcome,
+	workspaceSkipSetup,
+} from "@/lib/workspace-api";
+import { pathBasename } from "@/lib/path-basename";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -69,6 +85,7 @@ type SessionWorkbenchProps = {
 	workspaceName: string;
 	workspaceBranch: string;
 	workspacePath: string | null;
+	workspaceSetupReport?: WorkspaceSetupReport | null;
 	/** Active worktree/member id used to isolate terminal state and runtime ownership. */
 	terminalWorkspaceId?: string | null;
 	/** Active worktree/member labels used by the terminal runtime context. */
@@ -131,12 +148,15 @@ type SessionWorkbenchProps = {
 		planTitle: string | null;
 	}) => Promise<boolean>;
 	composerPrefill?: { text: string; nonce: number } | null;
+	composerFocusRequestKey?: number | null;
 	/** Current inspector visibility — picks the open vs. close affordance. */
 	inspectorCollapsed?: boolean;
 	/** Toggles the inspector open/closed — wired to the header control. */
 	onToggleInspector?: () => void;
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
+	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
+	onCreateTaskFromSourceUrl?: (url: string) => Promise<void>;
 	/** Opens the inspector and previews an implementation delegation diff. */
 	onReviewDelegation?: (delegationId: string) => void;
 	onRerunDelegation?: (input: {
@@ -157,6 +177,7 @@ export function SessionWorkbench({
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
+	workspaceSetupReport = null,
 	terminalWorkspaceId,
 	terminalWorkspaceName,
 	terminalWorkspaceBranch,
@@ -202,9 +223,12 @@ export function SessionWorkbench({
 	onOpenPlanSurface,
 	onImplementPlanInNewThread,
 	composerPrefill,
+	composerFocusRequestKey = null,
 	inspectorCollapsed,
 	onToggleInspector,
 	onReviewChanges,
+	onCreateTaskFromBranch,
+	onCreateTaskFromSourceUrl,
 	onReviewDelegation,
 	onRerunDelegation,
 	onResolveConflictWithAgent,
@@ -213,6 +237,7 @@ export function SessionWorkbench({
 	delegateSignal,
 }: SessionWorkbenchProps) {
 	const { t } = useTranslation("common");
+	const queryClient = useQueryClient();
 	const [terminalUiStates, setTerminalUiStates] =
 		useState<WorkspaceTerminalUiStates>({});
 	const [deliveryOpen, setDeliveryOpen] = useState(false);
@@ -222,6 +247,9 @@ export function SessionWorkbench({
 	>(null);
 	const [deliveryError, setDeliveryError] = useState<string | null>(null);
 	const sessionState = sessionSnapshot?.state ?? "idle";
+	const projectLabel = terminalRootPath
+		? pathBasename(terminalRootPath)
+		: (projectId ?? workspaceName);
 	const sessionId = sessionSnapshot?.sessionId ?? null;
 	const terminalWorkspaceKey = terminalWorkspaceId ?? workspaceId;
 	const terminalUiState = getWorkspaceTerminalUiState(
@@ -305,6 +333,114 @@ export function SessionWorkbench({
 		},
 		[terminalScopes, updateTerminalUiState],
 	);
+	const refreshWorkspaceSetupState = useCallback(async () => {
+		await Promise.all([
+			queryClient.invalidateQueries({
+				queryKey: ["workspaces", sessionQueryScope],
+			}),
+			queryClient.invalidateQueries({
+				queryKey: ["workspaceBundles", sessionQueryScope],
+			}),
+		]);
+	}, [queryClient, sessionQueryScope]);
+	const handleRunRecommendedSetup = useCallback(
+		async (commands: string[]) => {
+			const scope = terminalScopes.find(
+				(item) => item.kind === "worktree" && Boolean(item.cwd),
+			);
+			if (!scope?.cwd || commands.length === 0) {
+				throw new Error(t("composer.executionDock.setup.unavailable"));
+			}
+			// Setup must never be typed into an existing terminal that may already be busy.
+			const terminalId = addTerminalTab(scope.scopeKey, {
+				reuseAtCapacity: false,
+			});
+			if (!terminalId) {
+				throw new Error(t("composer.executionDock.setup.unavailable"));
+			}
+			renameTerminalTab(
+				scope.scopeKey,
+				terminalId,
+				t("composer.executionDock.setup.terminalTitle"),
+			);
+			updateTerminalUiState((current) => ({
+				...current,
+				open: true,
+				expanded: false,
+				scopeKind: "worktree",
+			}));
+			const runtimeId = getTerminalRuntimeId(scope.scopeKey, terminalId);
+			const snapshot = await ensureTerminalRuntime(runtimeId, scope.cwd, {
+				title: "Setup",
+				workspaceName: terminalWorkspaceName ?? workspaceName,
+				workspaceBranch: terminalWorkspaceBranch ?? workspaceBranch,
+				providerLabel: selectedProviderLabel,
+				sessionState,
+				sessionId,
+			});
+			if (snapshot.status !== "running") {
+				throw new Error(t("composer.executionDock.setup.unavailable"));
+			}
+
+			await new Promise<void>((resolve, reject) => {
+				const marker = `__DCC_SETUP_DONE_${crypto.randomUUID()}__`;
+				let tail = "";
+				let settled = false;
+				const finish = (success: boolean) => {
+					if (settled) return;
+					settled = true;
+					detachTerminal(runtimeId, listener);
+					void workspaceRecordSetupOutcome({
+						workspaceRoot: scope.cwd!,
+						success,
+					})
+						.then(refreshWorkspaceSetupState)
+						.then(() => {
+							if (success) resolve();
+							else reject(new Error(t("composer.executionDock.setup.commandFailed")));
+						})
+						.catch(reject);
+				};
+				const listener: TerminalListener = {
+					onChunk(data) {
+						tail = `${tail}${data}`.slice(-8192);
+						const match = tail.match(new RegExp(`${marker}:(\\d+)`));
+						if (match) finish(match[1] === "0");
+					},
+					onStatusChange(status) {
+						if (status === "exited" || status === "error") finish(false);
+					},
+				};
+				attachTerminal(runtimeId, listener);
+				const commandChain = commands.map((command) => `( ${command} )`).join(" && ");
+				writeTerminalInput(
+					runtimeId,
+					`{ ${commandChain}; }; __dcc_setup_status=$?; printf '\\n${marker}:%s\\n' "$__dcc_setup_status"\r`,
+				);
+			});
+		},
+		[
+			refreshWorkspaceSetupState,
+			selectedProviderLabel,
+			sessionId,
+			sessionState,
+			t,
+			terminalScopes,
+			terminalWorkspaceBranch,
+			terminalWorkspaceName,
+			updateTerminalUiState,
+			workspaceBranch,
+			workspaceName,
+		],
+	);
+	const handleSkipRecommendedSetup = useCallback(async () => {
+		const workspaceRoot = terminalWorktreePath ?? workspacePath;
+		if (!workspaceRoot) {
+			throw new Error(t("composer.executionDock.setup.unavailable"));
+		}
+		await workspaceSkipSetup({ workspaceRoot });
+		await refreshWorkspaceSetupState();
+	}, [refreshWorkspaceSetupState, t, terminalWorktreePath, workspacePath]);
 	const handleTerminalOpenChange = useCallback((next: boolean) => {
 		updateTerminalUiState((current) => ({
 			...current,
@@ -448,6 +584,11 @@ export function SessionWorkbench({
 						workspaceName={workspaceName}
 						workspaceBranch={workspaceBranch}
 						workspacePath={workspacePath}
+						workspaceSetupReport={workspaceSetupReport}
+						projectRootPath={terminalRootPath}
+						projectLabel={projectLabel}
+						isIsolatedWorkspace={Boolean(terminalWorktreePath)}
+						workspaceContextProjects={workspaceScopeOptions}
 						sessionQueryScope={sessionQueryScope}
 						selectedProviderLabel={selectedProviderLabel}
 						selectedModelLabel={selectedModelLabel}
@@ -485,9 +626,14 @@ export function SessionWorkbench({
 						terminalScopes={terminalScopes}
 						onOpenTerminal={handleOpenTerminal}
 						externalComposerPrefill={composerPrefill}
+						composerFocusRequestKey={composerFocusRequestKey}
 						inspectorCollapsed={inspectorCollapsed}
 						onToggleInspector={onToggleInspector}
 						onReviewChanges={onReviewChanges}
+						onCreateTaskFromBranch={onCreateTaskFromBranch}
+						onCreateTaskFromSourceUrl={onCreateTaskFromSourceUrl}
+						onRunRecommendedSetup={handleRunRecommendedSetup}
+						onSkipRecommendedSetup={handleSkipRecommendedSetup}
 						onReviewDelegation={onReviewDelegation}
 						onRerunDelegation={onRerunDelegation}
 						onResolveConflictWithAgent={onResolveConflictWithAgent}

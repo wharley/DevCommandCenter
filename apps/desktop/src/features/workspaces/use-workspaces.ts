@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DaemonComb } from "@/lib/daemon-api";
+import i18n from "@/i18n/config";
 import type { WorkspaceStatus, WorkspaceSummary } from "./types";
 import {
 	archiveWorkspace as apiArchiveWorkspace,
@@ -53,6 +54,16 @@ function applyStatusOverride(
 		: workspace;
 }
 
+function applyNameOverride(
+	workspace: WorkspaceSummary,
+	nameOverrides: Readonly<Record<string, string>>,
+): WorkspaceSummary {
+	const name = nameOverrides[workspace.id];
+	return name && name !== workspace.name
+		? { ...workspace, name, isAutoNamed: false }
+		: workspace;
+}
+
 function removeStatusOverrides(
 	statusOverrides: Partial<Record<string, WorkspaceStatus>>,
 	workspaceIds: readonly string[],
@@ -75,16 +86,21 @@ function mergeWorkspaceSummaries(
 	workspaces: WorkspaceSummary[],
 	optimisticCreated: WorkspaceSummary[],
 	statusOverrides: Partial<Record<string, WorkspaceStatus>>,
+	nameOverrides: Readonly<Record<string, string>>,
 	hiddenWorkspaceIds: readonly string[],
 ): WorkspaceSummary[] {
 	const hiddenIds = new Set(hiddenWorkspaceIds);
 	const backendIds = new Set(workspaces.map((workspace) => workspace.id));
 	const mergedCreated = optimisticCreated
 		.filter((workspace) => !hiddenIds.has(workspace.id) && !backendIds.has(workspace.id))
-		.map((workspace) => applyStatusOverride(workspace, statusOverrides));
+		.map((workspace) =>
+			applyNameOverride(applyStatusOverride(workspace, statusOverrides), nameOverrides),
+		);
 	const mergedBackend = workspaces
 		.filter((workspace) => !hiddenIds.has(workspace.id))
-		.map((workspace) => applyStatusOverride(workspace, statusOverrides));
+		.map((workspace) =>
+			applyNameOverride(applyStatusOverride(workspace, statusOverrides), nameOverrides),
+		);
 	return [...mergedCreated, ...mergedBackend];
 }
 
@@ -141,13 +157,15 @@ export function workspaceToSummary(
 					? "initializing"
 					: "setup_pending";
 
+	const explicitName = workspace.name?.trim() || null;
+	const sourceName =
+		workspace.source?.title?.trim() ||
+		workspace.source?.headBranch?.trim() ||
+		null;
 	return {
 		id: workspace.id,
-		name:
-			workspace.name ??
-			workspace.source?.title ??
-			workspace.source?.headBranch ??
-			workspace.baseBranch,
+		name: explicitName ?? sourceName ?? i18n.t("sidebar.newWorkspace"),
+		isAutoNamed: explicitName === null && sourceName === null,
 		branch: workspace.source?.headBranch ?? workspace.baseBranch,
 		status,
 		projectId: workspace.projectId,
@@ -175,6 +193,7 @@ export function daemonCombToWorkspaceSummary(comb: DaemonComb): WorkspaceSummary
 	return {
 		id: comb.id,
 		name,
+		isAutoNamed: !comb.name?.trim(),
 		branch,
 		status,
 		projectId: comb.projectId,
@@ -194,6 +213,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 	const [statusOverrides, setStatusOverrides] = useState<
 		Partial<Record<string, WorkspaceStatus>>
 	>({});
+	const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
 	const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
 	const workspaceList = useMemo(
 		() =>
@@ -201,9 +221,10 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 				workspaces,
 				optimisticCreated,
 				statusOverrides,
+				nameOverrides,
 				hiddenWorkspaceIds,
 			),
-		[hiddenWorkspaceIds, optimisticCreated, statusOverrides, workspaces],
+		[hiddenWorkspaceIds, nameOverrides, optimisticCreated, statusOverrides, workspaces],
 	);
 	const workspaceListRef = useRef(workspaceList);
 	const selectedWorkspaceIdRef = useRef(selectedWorkspaceId);
@@ -252,6 +273,11 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 		) {
 			setSelectedWorkspaceIdState(workspaceId);
 		}
+	}, []);
+	const applyWorkspaceTitle = useCallback((workspaceId: string, title: string) => {
+		const name = title.trim();
+		if (!name) return;
+		setNameOverrides((current) => ({ ...current, [workspaceId]: name }));
 	}, []);
 
 	const createWorkspace = useCallback(async (input: CreateWorkspaceForRepoInput) => {
@@ -329,6 +355,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 				const primaryWorkspace: WorkspaceSummary = {
 					...createdPrimaryWorkspace,
 					name: result.summary.bundle.name,
+					isAutoNamed: false,
 					bundleId: result.summary.bundle.id,
 					additionalWorkspaceIds: result.summary.members
 						.map((member) => member.workspaceId)
@@ -507,6 +534,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 
 	return {
 		allWorkspaces: workspaceList,
+		applyWorkspaceTitle,
 		archiveWorkspace,
 		cloneWorkspaceFromUrl,
 		completeWorkspace,

@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use crate::repo_config::read_workspace_setup_command;
 
@@ -34,9 +37,16 @@ pub fn detect_workspace_setup_suggestions(workspace_root: &str) -> Vec<Workspace
             .collect();
     };
 
+    let explicit_command = if workspace_root.join("package.json").is_file()
+        && !explicit_script_selects_runtime(&explicit_setup.command)
+    {
+        terminal_setup_command(workspace_root, &explicit_setup.command)
+    } else {
+        explicit_setup.command.clone()
+    };
     let mut suggestions = vec![WorkspaceSetupSuggestion {
         label: "Run repository setup script".to_string(),
-        command: explicit_setup.command.clone(),
+        command: explicit_command,
         source_path: explicit_setup.source_path,
     }];
 
@@ -67,7 +77,10 @@ fn detect_heuristic_setup_steps(workspace_root: &Path) -> Vec<DetectedSetupStep>
             kind: WorkspaceSetupKind::JavaScriptDeps,
             suggestion: WorkspaceSetupSuggestion {
                 label: "Install JavaScript dependencies".to_string(),
-                command: detect_package_manager_install_command(workspace_root).to_string(),
+                command: terminal_setup_command(
+                    workspace_root,
+                    &detect_package_manager_install_command(workspace_root),
+                ),
                 source_path: normalize_source_path(package_json),
             },
         });
@@ -88,18 +101,68 @@ fn detect_heuristic_setup_steps(workspace_root: &Path) -> Vec<DetectedSetupStep>
     suggestions
 }
 
-fn detect_package_manager_install_command(workspace_root: &Path) -> &'static str {
+fn detect_package_manager_install_command(workspace_root: &Path) -> String {
+    if let Some(package_manager) = read_package_manager(workspace_root) {
+        return match package_manager.as_str() {
+            "pnpm" => "corepack pnpm install".to_string(),
+            "yarn" => "corepack yarn install".to_string(),
+            "npm" => "npm install".to_string(),
+            "bun" => "bun install".to_string(),
+            _ => "npm install".to_string(),
+        };
+    }
     if workspace_root.join("pnpm-lock.yaml").is_file() {
-        "pnpm install"
+        "pnpm install".to_string()
     } else if workspace_root.join("yarn.lock").is_file() {
-        "yarn install"
+        "yarn install".to_string()
     } else if workspace_root.join("bun.lock").is_file()
         || workspace_root.join("bun.lockb").is_file()
     {
-        "bun install"
+        "bun install".to_string()
     } else {
-        "npm install"
+        "npm install".to_string()
     }
+}
+
+fn read_package_manager(workspace_root: &Path) -> Option<String> {
+    let raw = fs::read_to_string(workspace_root.join("package.json")).ok()?;
+    let parsed = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    parsed
+        .get("packageManager")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| value.split('@').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+}
+
+fn terminal_setup_command(workspace_root: &Path, install_command: &str) -> String {
+    if cfg!(windows) {
+        return install_command.to_string();
+    }
+
+    let has_nvmrc = workspace_root.join(".nvmrc").is_file();
+    let has_node_version = workspace_root.join(".node-version").is_file();
+    let has_tool_version_file = workspace_root.join(".tool-versions").is_file()
+        || workspace_root.join("mise.toml").is_file()
+        || workspace_root.join("mise.local.toml").is_file();
+
+    if has_tool_version_file {
+        return format!(
+            "if command -v mise >/dev/null 2>&1; then mise exec -- {install_command}; elif command -v asdf >/dev/null 2>&1; then asdf exec {install_command}; else echo 'DCC: configure mise/asdf for this project before setup' >&2; false; fi"
+        );
+    }
+    if has_nvmrc {
+        return format!(
+            "if command -v nvm >/dev/null 2>&1; then nvm use && {install_command}; elif command -v fnm >/dev/null 2>&1; then fnm use && {install_command}; elif command -v mise >/dev/null 2>&1; then mise exec -- {install_command}; elif command -v volta >/dev/null 2>&1; then {install_command}; else echo 'DCC: no compatible Node version manager is available' >&2; false; fi"
+        );
+    }
+    if has_node_version {
+        return format!(
+            "if command -v fnm >/dev/null 2>&1; then fnm use && {install_command}; elif command -v mise >/dev/null 2>&1; then mise exec -- {install_command}; elif command -v asdf >/dev/null 2>&1; then asdf exec {install_command}; elif command -v nvm >/dev/null 2>&1; then nvm use \"$(cat .node-version)\" && {install_command}; elif command -v volta >/dev/null 2>&1; then {install_command}; else echo 'DCC: no compatible Node version manager is available' >&2; false; fi"
+        );
+    }
+    install_command.to_string()
 }
 
 fn explicit_script_covers_javascript(command: &str) -> bool {
@@ -111,6 +174,13 @@ fn explicit_script_covers_javascript(command: &str) -> bool {
 
 fn explicit_script_covers_rust(command: &str) -> bool {
     command.to_ascii_lowercase().contains("cargo")
+}
+
+fn explicit_script_selects_runtime(command: &str) -> bool {
+    let command = command.to_ascii_lowercase();
+    ["nvm use", "fnm use", "mise exec", "asdf exec", "volta run"]
+        .iter()
+        .any(|selector| command.contains(selector))
 }
 
 fn normalize_source_path(path: PathBuf) -> String {
@@ -137,6 +207,84 @@ mod tests {
 
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].command, "yarn install");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_node_version_manager_activation_for_terminal_setup() {
+        let root = temp_test_dir("setup-node-version");
+        fs::create_dir_all(&root).expect("create temp dir");
+        fs::write(root.join("package.json"), "{}").expect("write package.json");
+        fs::write(root.join("pnpm-lock.yaml"), "").expect("write lockfile");
+        fs::write(root.join(".nvmrc"), "22\n").expect("write nvmrc");
+
+        let suggestions =
+            detect_workspace_setup_suggestions(root.to_str().expect("temp path should be utf-8"));
+
+        assert_eq!(suggestions.len(), 1);
+        assert!(suggestions[0].command.contains("nvm use"));
+        assert!(suggestions[0].command.contains("fnm use"));
+        assert!(suggestions[0].command.contains("pnpm install"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn passes_node_version_file_value_to_nvm() {
+        let root = temp_test_dir("setup-node-version-file");
+        fs::create_dir_all(&root).expect("create temp dir");
+        fs::write(root.join("package.json"), "{}").expect("write package.json");
+        fs::write(root.join(".node-version"), "22.18.0\n").expect("write node version");
+
+        let suggestions =
+            detect_workspace_setup_suggestions(root.to_str().expect("temp path should be utf-8"));
+
+        assert_eq!(suggestions.len(), 1);
+        assert!(suggestions[0]
+            .command
+            .contains("nvm use \"$(cat .node-version)\""));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn activates_project_node_version_before_explicit_setup_script() {
+        let root = temp_test_dir("setup-explicit-node-version");
+        fs::create_dir_all(&root).expect("create temp dir");
+        fs::write(root.join("package.json"), "{}").expect("write package.json");
+        fs::write(root.join(".nvmrc"), "22\n").expect("write nvmrc");
+        fs::write(
+            root.join(".dcc.toml"),
+            "[scripts]\nsetup = \"pnpm bootstrap\"\n",
+        )
+        .expect("write repo config");
+
+        let suggestions =
+            detect_workspace_setup_suggestions(root.to_str().expect("temp path should be utf-8"));
+
+        assert_eq!(suggestions.len(), 1);
+        assert!(suggestions[0].command.contains("nvm use"));
+        assert!(suggestions[0].command.contains("pnpm bootstrap"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn respects_package_manager_field_via_corepack() {
+        let root = temp_test_dir("setup-package-manager");
+        fs::create_dir_all(&root).expect("create temp dir");
+        fs::write(
+            root.join("package.json"),
+            r#"{"packageManager":"pnpm@10.15.0"}"#,
+        )
+        .expect("write package.json");
+
+        let suggestions =
+            detect_workspace_setup_suggestions(root.to_str().expect("temp path should be utf-8"));
+
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].command, "corepack pnpm install");
 
         let _ = fs::remove_dir_all(root);
     }

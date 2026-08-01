@@ -114,9 +114,15 @@ export function getTerminalRuntimeId(scopeKey: string, terminalId: string) {
 	return `${scopeKey}:${terminalId}`;
 }
 
-export function addTerminal(scopeKey: string): string | null {
+export function addTerminal(
+	scopeKey: string,
+	options: { reuseAtCapacity?: boolean } = {},
+): string | null {
 	const current = read(scopeKey);
 	if (current.tabs.length >= MAX_TERMINAL_TABS) {
+		if (options.reuseAtCapacity === false) {
+			return null;
+		}
 		// At the soft cap: focus the last tab instead of spawning another PTY.
 		const last = current.tabs[current.tabs.length - 1];
 		if (last && current.activeId !== last.id) {

@@ -20,10 +20,13 @@ use dcc_core::{
         mcp::{McpDefinitionId, McpErrorCategory, McpRuntimeState, McpRuntimeStatus},
         provider::McpOauthSupport,
         session::{SessionEventRecord, SessionId, SessionSearchResult, WorkspaceSessionSummary},
+        thread::Thread,
+        workspace::{Workspace, WorkspaceId},
     },
     ports::{
         provider::ProviderPermissionResponse, provider::ProviderUserInputAnswer,
         provider::ProviderUserInputResponse, Input, ProviderTurnInput, SessionEventRepo,
+        SessionRepo, ThreadRepo, WorkspaceRepo,
     },
 };
 
@@ -65,6 +68,22 @@ pub struct SearchSessionsInput {
     pub query: String,
     #[serde(default = "default_search_limit")]
     pub limit: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyTaskTitleInput {
+    pub workspace_id: String,
+    pub session_id: String,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyTaskTitleOutput {
+    pub applied: bool,
+    pub workspace: Workspace,
+    pub thread: Thread,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
@@ -564,6 +583,74 @@ pub async fn list_workspace_sessions(
         .map_err(|error| error.to_string())
 }
 
+fn normalize_task_title(title: &str) -> Result<String, String> {
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    if title.is_empty() {
+        return Err("task title cannot be empty".to_string());
+    }
+    if title.chars().count() > 120 {
+        return Err("task title cannot exceed 120 characters".to_string());
+    }
+    Ok(title)
+}
+
+fn workspace_accepts_automatic_title(workspace: &Workspace) -> bool {
+    workspace
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .is_none()
+}
+
+#[tauri::command]
+pub async fn apply_task_title(
+    state: State<'_, SessionCommandState>,
+    input: ApplyTaskTitleInput,
+) -> Result<ApplyTaskTitleOutput, String> {
+    let title = normalize_task_title(&input.title)?;
+
+    let workspace_id = WorkspaceId(input.workspace_id);
+    let session_id = SessionId(input.session_id);
+    let session = SessionRepo::get_session(&*state, &session_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("session not found: {}", session_id.0))?;
+    if session.workspace_id != workspace_id {
+        return Err("session does not belong to the requested workspace".to_string());
+    }
+
+    let mut workspace = WorkspaceRepo::get_workspace(&*state, &workspace_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("workspace not found: {}", workspace_id.0))?;
+    let mut thread = ThreadRepo::find_thread_by_session_id(&*state, &session_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("thread not found for session: {}", session_id.0))?;
+
+    let applied = workspace_accepts_automatic_title(&workspace);
+    if applied {
+        workspace.name = Some(title.clone());
+        workspace.updated_at = chrono::Utc::now().to_rfc3339();
+        thread.title = title;
+        // Persist the thread first. If the workspace write fails, the workspace
+        // remains untitled and a later first-turn retry can safely finish both.
+        ThreadRepo::save_thread(&*state, &thread)
+            .await
+            .map_err(|error| error.to_string())?;
+        WorkspaceRepo::save_workspace(&*state, &workspace)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok(ApplyTaskTitleOutput {
+        applied,
+        workspace,
+        thread,
+    })
+}
+
 #[tauri::command]
 pub async fn search_sessions(
     state: State<'_, SessionCommandState>,
@@ -636,6 +723,36 @@ mod tests {
                 dcc_core::domain::mcp::McpRuntimeError::bounded(category, message)
             }),
         }
+    }
+
+    #[test]
+    fn automatic_title_normalizes_whitespace_and_rejects_empty_input() {
+        assert_eq!(
+            normalize_task_title("  Corrigir   login\n do checkout ").unwrap(),
+            "Corrigir login do checkout"
+        );
+        assert!(normalize_task_title("   ").is_err());
+    }
+
+    #[test]
+    fn automatic_title_never_overwrites_a_manual_workspace_name() {
+        let mut workspace = Workspace {
+            id: WorkspaceId("workspace-1".to_string()),
+            project_id: dcc_core::domain::project::ProjectId("project-1".to_string()),
+            name: None,
+            root_path: "/tmp/project".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: Some("/tmp/worktree".to_string()),
+            source: None,
+            state: dcc_core::domain::workspace::WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-07-31T00:00:00Z".to_string(),
+            updated_at: "2026-07-31T00:00:00Z".to_string(),
+        };
+        assert!(workspace_accepts_automatic_title(&workspace));
+
+        workspace.name = Some("Nome escolhido".to_string());
+        assert!(!workspace_accepts_automatic_title(&workspace));
     }
 
     #[test]

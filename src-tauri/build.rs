@@ -85,10 +85,11 @@ use dcc_tauri::commands::{
         ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
     },
     session_commands::{
-        ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput, McpTurnPreflightState,
-        PrepareTurnOutput, RespondToPermissionRequestInput, RespondToPermissionRequestOutput,
-        RespondToUserInputInput, RespondToUserInputOutput, SearchSessionsInput, StartMcpOauthInput,
-        StartMcpOauthOutput, WaitMcpOauthInput, WaitMcpOauthOutput,
+        ApplyTaskTitleInput, ApplyTaskTitleOutput, ListMcpRuntimeStatusesInput,
+        ListMcpRuntimeStatusesOutput, McpTurnPreflightState, PrepareTurnOutput,
+        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
+        RespondToUserInputOutput, SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput,
+        WaitMcpOauthInput, WaitMcpOauthOutput,
     },
     workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -118,10 +119,10 @@ use dcc_tauri::commands::{
         WorkspaceGitValidationReport, WorkspaceGitValidationStatus, WorkspaceGitValidationStep,
         WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
         WorkspaceProjectAutomationConfigOutput, WorkspaceProjectTask, WorkspaceProjectTaskKind,
-        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunProjectTasksInput,
-        WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
-        WorkspaceSaveProjectAutomationInput, WorkspaceSetupHint, WorkspaceSourceUrlResolution,
-        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
+        WorkspaceRecordSetupOutcomeInput, WorkspaceRemoveDelegationWorktreeInput,
+        WorkspaceRunProjectTasksInput, WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput,
+        WorkspaceRunSetupOutput, WorkspaceSaveProjectAutomationInput, WorkspaceSetupHint,
+        WorkspaceSourceUrlResolution, WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
     },
 };
 use dcc_tauri::delivery_failure::{
@@ -211,7 +212,9 @@ struct WorkspaceMethods {
     workspace_git_unstage_file: String,
     workspace_prepare_delegation_worktree: String,
     workspace_remove_delegation_worktree: String,
+    workspace_record_setup_outcome: String,
     workspace_run_setup: String,
+    workspace_skip_setup: String,
     workspace_coderabbit_cli_status: String,
     workspace_coderabbit_logout: String,
     workspace_coderabbit_doctor: String,
@@ -230,6 +233,7 @@ struct WorkspaceMethods {
 #[serde(rename_all = "camelCase")]
 struct SessionMethods {
     start_thread: String,
+    apply_task_title: String,
     prepare_turn: String,
     send_turn: String,
     approve_plan: String,
@@ -369,6 +373,7 @@ fn main() {
         .typ::<CreateWorkspaceFromUrlInput>()
         .typ::<CreateWorkspaceFromUrlOutput>()
         .typ::<WorkspaceRunSetupInput>()
+        .typ::<WorkspaceRecordSetupOutcomeInput>()
         .typ::<WorkspaceRunSetupOutput>()
         .typ::<WorkspaceSetupHint>()
         .typ::<WorkspaceSetupStatus>()
@@ -533,6 +538,8 @@ fn main() {
         .typ::<SetMcpToolPolicyOutput>()
         .typ::<StartThreadInput>()
         .typ::<StartThreadOutput>()
+        .typ::<ApplyTaskTitleInput>()
+        .typ::<ApplyTaskTitleOutput>()
         .typ::<McpTurnPreflightState>()
         .typ::<PrepareTurnOutput>()
         .typ::<SendTurnInput>()
@@ -664,7 +671,9 @@ fn main() {
                     .to_string(),
                 workspace_remove_delegation_worktree: "workspace_remove_delegation_worktree"
                     .to_string(),
+                workspace_record_setup_outcome: "workspace_record_setup_outcome".to_string(),
                 workspace_run_setup: "workspace_run_setup".to_string(),
+                workspace_skip_setup: "workspace_skip_setup".to_string(),
                 workspace_coderabbit_cli_status: "workspace_coderabbit_cli_status".to_string(),
                 workspace_coderabbit_logout: "workspace_coderabbit_logout".to_string(),
                 workspace_coderabbit_doctor: "workspace_coderabbit_doctor".to_string(),
@@ -687,6 +696,7 @@ fn main() {
         "SESSION_METHODS",
         SessionMethods {
             start_thread: "start_thread".to_string(),
+            apply_task_title: "apply_task_title".to_string(),
             prepare_turn: "prepare_turn".to_string(),
             send_turn: "send_turn".to_string(),
             approve_plan: "approve_plan".to_string(),

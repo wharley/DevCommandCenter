@@ -6,6 +6,26 @@ import {
 } from "./use-workspaces";
 
 describe("workspaceToSummary", () => {
+	it("keeps the base branch out of an untitled task name", () => {
+		const summary = workspaceToSummary({
+			id: "blank-1",
+			projectId: "widgets",
+			name: null,
+			rootPath: "/repo/widgets",
+			baseBranch: "main",
+			worktreePath: "/repo/.dcc-worktrees/blank-1",
+			source: null,
+			state: "ready",
+			setupReport: null,
+			createdAt: "2026-01-01T00:00:00Z",
+			updatedAt: "2026-01-01T00:00:00Z",
+		});
+
+		expect(summary.name).toBe("Nova tarefa");
+		expect(summary.isAutoNamed).toBe(true);
+		expect(summary.branch).toBe("main");
+	});
+
 	it("uses the imported branch as the active workspace branch", () => {
 		const summary = workspaceToSummary({
 			id: "review-42",

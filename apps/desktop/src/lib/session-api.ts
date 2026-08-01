@@ -13,6 +13,8 @@ import type {
 import type {
 	AbortRunInput,
 	AbortRunOutput,
+	ApplyTaskTitleInput,
+	ApplyTaskTitleOutput,
 	ApprovePlanInput,
 	ApprovePlanOutput,
 	CloseSessionInput,
@@ -44,6 +46,10 @@ export const REMOTE_CORE_EVENT_NAME = "dcc:remote-core-event";
 
 export function startThread(input: StartThreadInput) {
 	return invoke<StartThreadOutput>(SESSION_METHODS.startThread, { input });
+}
+
+export function applyTaskTitle(input: ApplyTaskTitleInput) {
+	return invoke<ApplyTaskTitleOutput>(SESSION_METHODS.applyTaskTitle, { input });
 }
 
 function prepareTurn(input: SendTurnInput) {

@@ -25,10 +25,11 @@ use dcc_tauri::{
         WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput,
         WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput, WorkspaceIdInput,
         WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
-        WorkspaceProjectAutomationConfigOutput, WorkspaceRemoveDelegationWorktreeInput,
-        WorkspaceRunProjectTasksInput, WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput,
-        WorkspaceRunSetupOutput, WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution,
-        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
+        WorkspaceProjectAutomationConfigOutput, WorkspaceRecordSetupOutcomeInput,
+        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunProjectTasksInput,
+        WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution, WriteWorkspaceFileInput,
+        WriteWorkspaceFileOutput,
     },
     delivery_failure::{
         WorkspaceDeliveryFailureInput, WorkspaceDeliveryFailureOutput,
@@ -121,6 +122,22 @@ pub async fn workspace_run_setup(
     input: WorkspaceRunSetupInput,
 ) -> Result<WorkspaceRunSetupOutput, String> {
     dcc_tauri::commands::workspace_commands::workspace_run_setup(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_skip_setup(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRunSetupInput,
+) -> Result<WorkspaceRunSetupOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_skip_setup(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_record_setup_outcome(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRecordSetupOutcomeInput,
+) -> Result<WorkspaceRunSetupOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_record_setup_outcome(state, input).await
 }
 
 #[tauri::command]

@@ -95,8 +95,9 @@ use workspace_commands::{
     workspace_git_stage_all, workspace_git_stage_file, workspace_git_status,
     workspace_git_sync_base, workspace_git_unstage_file, workspace_git_validation_config,
     workspace_prepare_delegation_worktree, workspace_project_automation_config,
-    workspace_remove_delegation_worktree, workspace_run_project_tasks, workspace_run_setup,
-    workspace_save_project_automation, write_workspace_file,
+    workspace_record_setup_outcome, workspace_remove_delegation_worktree,
+    workspace_run_project_tasks, workspace_run_setup, workspace_save_project_automation,
+    workspace_skip_setup, write_workspace_file,
 };
 
 /// Schema SQLite embutido (`src-tauri/sql/schema.sql`, CREATE IF NOT EXISTS).
@@ -6933,7 +6934,9 @@ pub fn run() {
             workspace_pr_review_comments,
             workspace_pr_status,
             workspace_review_state,
+            workspace_record_setup_outcome,
             workspace_run_setup,
+            workspace_skip_setup,
             workspace_continue_from_base_branch,
             create_delegation,
             list_delegations,
@@ -6952,6 +6955,7 @@ pub fn run() {
             mcp_commands::set_mcp_tool_policy,
             provider_commands::provider_account_usage,
             session_commands::start_thread,
+            session_commands::apply_task_title,
             session_commands::prepare_turn,
             session_commands::send_turn,
             session_commands::abort_run,

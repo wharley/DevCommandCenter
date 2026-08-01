@@ -50,9 +50,8 @@ export function humanizeWorkspaceBranchLabel(branch: string): string {
 }
 
 /**
- * Label shown in the workspace rail. Prefers the custom display name set in the
- * "Create workspace" dialog; falls back to the humanized base branch when none
- * was provided (the summary defaults `name` → branch in that case).
+ * Label shown in the workspace rail. Prefers the task title; imported branches
+ * whose title still equals the branch are humanized for readability.
  */
 export function workspaceRailDisplayTitle(
 	workspace: Pick<WorkspaceSummary, "name" | "branch">,

@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 
 export function BranchToolbar({
 	branch,
+	baseBranch,
 	workspacePath,
 	behindOfRemoteCount = 0,
 	isSyncingBase = false,
@@ -20,6 +21,7 @@ export function BranchToolbar({
 	className,
 }: {
 	branch: string;
+	baseBranch?: string | null;
 	workspacePath: string | null;
 	behindOfRemoteCount?: number;
 	isSyncingBase?: boolean;
@@ -29,6 +31,7 @@ export function BranchToolbar({
 	const { t } = useTranslation("common");
 	const canSyncBase = Boolean(onSyncBase);
 	const canCopyBranchName = Boolean(branch);
+	const isDetached = !branch;
 	const isBehind = behindOfRemoteCount > 0;
 	// When the branch is behind its base, surface the fix as a first-class
 	// inline action right next to the signal. Otherwise it stays in the overflow.
@@ -53,10 +56,16 @@ export function BranchToolbar({
 			<div className="min-w-0 flex-1">
 				<div className="flex min-w-0 items-center gap-1.5">
 					<span className="truncate text-[12px] font-medium text-foreground">
-						{branch || t("branchToolbar.noBranch")}
+						{isDetached && baseBranch
+							? t("branchToolbar.detachedFrom", { branch: baseBranch })
+							: branch || t("branchToolbar.noBranch")}
 					</span>
 					<Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">
-						{t("branchToolbar.activeBadge")}
+						{t(
+							isDetached
+								? "branchToolbar.detachedBadge"
+								: "branchToolbar.activeBadge",
+						)}
 					</Badge>
 				</div>
 				<p

@@ -13,6 +13,7 @@ export type WorkspaceStatus =
 export interface WorkspaceSummary {
 	id: string;
 	name: string;
+	isAutoNamed?: boolean;
 	branch: string;
 	status: WorkspaceStatus;
 	unreadSessionCount?: number;

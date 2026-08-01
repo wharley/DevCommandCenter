@@ -712,11 +712,49 @@ function ensureDiffMachineAnnotationStyles() {
 	outline: 2px solid var(--ring);
 	outline-offset: 2px;
 }
+.dcc-diff-line-annotate-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: 18px;
+	height: 18px;
+	margin-top: 1px;
+	padding: 0;
+	font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+	font-size: 16px;
+	font-weight: 400;
+	line-height: 1;
+	color: var(--muted-foreground);
+	background: var(--popover);
+	border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+	border-radius: 5px;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+	cursor: pointer;
+	opacity: 0.92;
+	transition:
+		color 100ms ease,
+		background 100ms ease,
+		border-color 100ms ease,
+		transform 100ms ease;
+}
+.dcc-diff-line-annotate-button:hover {
+	color: var(--foreground);
+	background: var(--accent);
+	border-color: color-mix(in oklch, var(--ring) 55%, var(--border));
+	transform: scale(1.04);
+}
+.dcc-diff-line-annotate-button:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 1px;
+}
 @media (prefers-reduced-motion: reduce) {
-	.dcc-review-comment-floating-button {
+	.dcc-review-comment-floating-button,
+	.dcc-diff-line-annotate-button {
 		transition: none;
 	}
-	.dcc-review-comment-floating-button:hover {
+	.dcc-review-comment-floating-button:hover,
+	.dcc-diff-line-annotate-button:hover {
 		transform: none;
 	}
 }
@@ -740,12 +778,128 @@ function attachDiffAnnotateAffordance(
 	const disposables = [
 		attachAnnotateButton(monaco, diffEditor.getModifiedEditor(), "modified", options),
 		attachAnnotateButton(monaco, diffEditor.getOriginalEditor(), "original", options),
+		attachLineAnnotateButton(monaco, diffEditor.getModifiedEditor(), "modified", options),
+		attachLineAnnotateButton(monaco, diffEditor.getOriginalEditor(), "original", options),
 	];
 	return {
 		dispose() {
 			for (const disposable of disposables) {
 				disposable.dispose();
 			}
+		},
+	};
+}
+
+/**
+ * Shows a compact plus button in Monaco's native glyph margin for the line
+ * currently under the pointer. The existing selection affordance remains the
+ * range workflow; this one makes the common single-line action discoverable.
+ */
+function attachLineAnnotateButton(
+	monaco: MonacoModule,
+	editor: StandaloneEditor,
+	side: DiffAnnotationPayload["side"],
+	options: {
+		label: string;
+		onAnnotate: (payload: DiffAnnotationPayload) => void;
+	},
+): DisposableLike {
+	let lineNumber: number | null = null;
+	let mounted = false;
+
+	const button = document.createElement("button");
+	button.type = "button";
+	button.textContent = "+";
+	button.className = "dcc-diff-line-annotate-button";
+
+	const widget: Monaco.editor.IGlyphMarginWidget = {
+		getId: () => `dcc.diff.annotate.line-widget.${side}`,
+		getDomNode: () => button,
+		getPosition: () => ({
+			lane: monaco.editor.GlyphMarginLane.Center,
+			zIndex: 100,
+			range: new monaco.Range(lineNumber ?? 1, 1, lineNumber ?? 1, 1),
+		}),
+	};
+
+	const hide = () => {
+		lineNumber = null;
+		if (mounted) {
+			editor.removeGlyphMarginWidget(widget);
+			mounted = false;
+		}
+	};
+
+	const show = (nextLine: number) => {
+		const model = editor.getModel();
+		if (!model || nextLine < 1 || nextLine > model.getLineCount()) {
+			hide();
+			return;
+		}
+		if (lineNumber === nextLine && mounted) {
+			return;
+		}
+		lineNumber = nextLine;
+		const accessibleLabel = `${options.label} · L${nextLine}`;
+		button.setAttribute("aria-label", accessibleLabel);
+		button.title = accessibleLabel;
+		if (!mounted) {
+			editor.addGlyphMarginWidget(widget);
+			mounted = true;
+		} else {
+			editor.layoutGlyphMarginWidget(widget);
+		}
+	};
+
+	button.addEventListener("mousedown", (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+	});
+	button.addEventListener("click", (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		const activeLine = lineNumber;
+		const model = editor.getModel();
+		if (!activeLine || !model || activeLine > model.getLineCount()) {
+			return;
+		}
+		const rect = button.getBoundingClientRect();
+		options.onAnnotate({
+			side,
+			startLine: activeLine,
+			endLine: activeLine,
+			snippet: model.getLineContent(activeLine),
+			anchor: { top: rect.top, left: rect.left },
+		});
+		hide();
+	});
+
+	const mouseMoveListener = editor.onMouseMove((event) => {
+		const selection = editor.getSelection();
+		if (!selection?.isEmpty()) {
+			hide();
+			return;
+		}
+		const hoveredLine = event.target.position?.lineNumber;
+		if (hoveredLine) {
+			show(hoveredLine);
+		} else {
+			hide();
+		}
+	});
+	const mouseLeaveListener = editor.onMouseLeave(hide);
+	const selectionListener = editor.onDidChangeCursorSelection((event) => {
+		if (!event.selection.isEmpty()) {
+			hide();
+		}
+	});
+
+	return {
+		dispose() {
+			mouseMoveListener.dispose();
+			mouseLeaveListener.dispose();
+			selectionListener.dispose();
+			hide();
 		},
 	};
 }

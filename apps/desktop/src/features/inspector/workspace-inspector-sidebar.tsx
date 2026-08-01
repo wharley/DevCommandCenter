@@ -3183,7 +3183,8 @@ export function WorkspaceInspectorSidebar({
 						<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 pb-3 pt-2">
 							<div className="shrink-0">
 								<BranchToolbar
-									branch={currentBranch}
+									branch={gitBranch ?? ""}
+									baseBranch={workspaceBranch}
 									workspacePath={changesWorkspaceRoot}
 									behindOfRemoteCount={gitStatusQuery.data?.behindOfRemoteCount ?? 0}
 									isSyncingBase={isSyncingBase}

@@ -197,6 +197,13 @@ pub struct WorkspaceRunSetupInput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceRecordSetupOutcomeInput {
+    pub workspace_root: String,
+    pub success: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceRunSetupOutput {
     pub workspace: Workspace,
     pub setup_hints: Vec<WorkspaceSetupHint>,
@@ -829,6 +836,33 @@ fn collect_workspace_setup_suggestions(
     detect_workspace_setup_suggestions(resolve_workspace_setup_root(workspace))
 }
 
+fn recommended_workspace_setup_report(workspace: &Workspace) -> WorkspaceSetupReport {
+    let suggestions = collect_workspace_setup_suggestions(workspace);
+    if suggestions.is_empty() {
+        return WorkspaceSetupReport {
+            status: WorkspaceSetupStatus::Skipped,
+            steps: Vec::new(),
+            message: None,
+        };
+    }
+    WorkspaceSetupReport {
+        status: WorkspaceSetupStatus::Pending,
+        steps: suggestions
+            .into_iter()
+            .map(|suggestion| WorkspaceSetupStepReport {
+                label: suggestion.label,
+                command: suggestion.command,
+                source_path: suggestion.source_path,
+                status: WorkspaceSetupStatus::Pending,
+                detail: None,
+            })
+            .collect(),
+        message: Some(
+            "Workspace setup is recommended and will run only after user confirmation.".to_string(),
+        ),
+    }
+}
+
 async fn execute_workspace_setup_report(workspace: &Workspace) -> WorkspaceSetupReport {
     let setup_suggestions = collect_workspace_setup_suggestions(workspace);
     match run_detected_workspace_setup(
@@ -841,9 +875,7 @@ async fn execute_workspace_setup_report(workspace: &Workspace) -> WorkspaceSetup
         Err(error) => WorkspaceSetupReport {
             status: WorkspaceSetupStatus::Failed,
             steps: Vec::new(),
-            message: Some(format!(
-                "Workspace was created, but the automatic setup runner failed: {error}"
-            )),
+            message: Some(format!("The workspace setup runner failed: {error}")),
         },
     }
 }
@@ -855,9 +887,9 @@ async fn persist_workspace_setup_outcome(
 ) -> Result<(), String> {
     workspace.state = match setup_report.status {
         WorkspaceSetupStatus::Completed | WorkspaceSetupStatus::Skipped => WorkspaceState::Ready,
-        WorkspaceSetupStatus::Warning | WorkspaceSetupStatus::Failed => {
-            WorkspaceState::SetupPending
-        }
+        WorkspaceSetupStatus::Pending
+        | WorkspaceSetupStatus::Warning
+        | WorkspaceSetupStatus::Failed => WorkspaceState::SetupPending,
     };
     workspace.setup_report = Some(setup_report.clone());
     workspace.updated_at = Utc::now().to_rfc3339();
@@ -4665,7 +4697,7 @@ pub async fn create_workspace_from_source_url(
     refresh_repository_forge_metadata(&repo, &workspace).await?;
 
     let setup_hints = collect_workspace_setup_hints(&workspace);
-    let setup_report = execute_workspace_setup_report(&workspace).await;
+    let setup_report = recommended_workspace_setup_report(&workspace);
     let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
     let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
@@ -4690,7 +4722,7 @@ async fn create_workspace_for_repo_with_repo(
         .map_err(|error| error.to_string())?;
     refresh_repository_forge_metadata(repo, &finalized.workspace).await?;
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
-    let setup_report = execute_workspace_setup_report(&finalized.workspace).await;
+    let setup_report = recommended_workspace_setup_report(&finalized.workspace);
     let mut workspace = finalized.workspace;
     let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
     let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
@@ -4878,7 +4910,7 @@ pub async fn create_workspace_from_url(
         .map_err(|error| error.to_string())?;
     refresh_repository_forge_metadata(&repo, &finalized.workspace).await?;
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
-    let setup_report = execute_workspace_setup_report(&finalized.workspace).await;
+    let setup_report = recommended_workspace_setup_report(&finalized.workspace);
     let mut workspace = finalized.workspace;
     let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
     let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
@@ -4908,6 +4940,71 @@ pub async fn workspace_run_setup(
     let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
 
+    Ok(WorkspaceRunSetupOutput {
+        workspace,
+        setup_hints,
+        setup_report,
+    })
+}
+
+pub async fn workspace_skip_setup(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRunSetupInput,
+) -> Result<WorkspaceRunSetupOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let mut workspace = find_workspace_by_root(&repo, &input.workspace_root)
+        .await?
+        .ok_or_else(|| format!("workspace not found for root {}", input.workspace_root))?;
+    let setup_hints = collect_workspace_setup_hints(&workspace);
+    let setup_report = WorkspaceSetupReport {
+        status: WorkspaceSetupStatus::Skipped,
+        steps: Vec::new(),
+        message: Some("Workspace setup was skipped by the user.".to_string()),
+    };
+    persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
+    Ok(WorkspaceRunSetupOutput {
+        workspace,
+        setup_hints,
+        setup_report,
+    })
+}
+
+pub async fn workspace_record_setup_outcome(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRecordSetupOutcomeInput,
+) -> Result<WorkspaceRunSetupOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let mut workspace = find_workspace_by_root(&repo, &input.workspace_root)
+        .await?
+        .ok_or_else(|| format!("workspace not found for root {}", input.workspace_root))?;
+    let setup_hints = collect_workspace_setup_hints(&workspace);
+    let step_status = if input.success {
+        WorkspaceSetupStatus::Completed
+    } else {
+        WorkspaceSetupStatus::Failed
+    };
+    let setup_report = WorkspaceSetupReport {
+        status: step_status.clone(),
+        steps: setup_hints
+            .iter()
+            .map(|hint| WorkspaceSetupStepReport {
+                label: hint.label.clone(),
+                command: hint.command.clone(),
+                source_path: hint.source_path.clone(),
+                status: step_status.clone(),
+                detail: (!input.success)
+                    .then(|| "Setup command failed in the task terminal.".to_string()),
+            })
+            .collect(),
+        message: Some(if input.success {
+            "Workspace setup completed in the task terminal.".to_string()
+        } else {
+            "Workspace setup failed in the task terminal.".to_string()
+        }),
+    };
+    persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
     Ok(WorkspaceRunSetupOutput {
         workspace,
         setup_hints,

@@ -168,8 +168,19 @@ function WorkspaceRepoPicker({
 								setOpen(false);
 								onCreateWorkspace();
 							}}
+							className="items-start gap-2 py-2"
 						>
-							{t("sidebar.openRepoPickerAction")}
+							<span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+								<Plus className="size-3.5" strokeWidth={2} aria-hidden />
+							</span>
+							<span className="min-w-0">
+								<strong className="block text-[12px] font-medium text-foreground">
+									{t("sidebar.openRepoPickerAction")}
+								</strong>
+								<small className="mt-0.5 block text-[10px] leading-4 text-muted-foreground">
+									{t("sidebar.multiProjectActionDescription")}
+								</small>
+							</span>
 						</CommandItem>
 						<CommandItem
 							value="clone from url"
@@ -198,6 +209,7 @@ type WorkspacesSidebarProps = {
 	onCreateWorkspaceFromProject?: (input: {
 		projectId: string;
 		workspaceRoot: string;
+		baseBranch: string;
 		label: string;
 	}) => void;
 	repositories: Repository[];
@@ -662,14 +674,15 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 											label: item.label,
 										})}
 										className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/dccRailHeader:opacity-100 group-focus-within/dccRailHeader:opacity-100"
-								onClick={(event) => {
-									event.stopPropagation();
-									onCreateWorkspaceFromProject?.({
-										projectId: repository.projectId,
-										workspaceRoot: repository.rootPath,
-										label: repository.name,
-									});
-								}}
+									onClick={(event) => {
+										event.stopPropagation();
+										onCreateWorkspaceFromProject?.({
+											projectId: repository.projectId,
+											workspaceRoot: repository.rootPath,
+											baseBranch: repository.baseBranch,
+											label: repository.name,
+										});
+									}}
 									>
 										<Plus className="size-4" strokeWidth={2.1} aria-hidden />
 									</Button>
@@ -705,6 +718,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 												onCreateWorkspaceFromProject({
 													projectId: repository.projectId,
 													workspaceRoot: repository.rootPath,
+													baseBranch: repository.baseBranch,
 													label: repository.name,
 												});
 											}}
@@ -817,6 +831,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								onCreateWorkspaceFromProject?.({
 									projectId: repository.projectId,
 									workspaceRoot: repository.rootPath,
+									baseBranch: repository.baseBranch,
 									label: repository.name,
 								});
 							}}
@@ -1004,6 +1019,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								onCreateWorkspaceFromProject?.({
 									projectId: repository.projectId,
 									workspaceRoot: repository.rootPath,
+									baseBranch: repository.baseBranch,
 									label: repository.name,
 								});
 							}}

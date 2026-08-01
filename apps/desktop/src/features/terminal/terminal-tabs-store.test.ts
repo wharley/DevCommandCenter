@@ -36,4 +36,17 @@ describe("terminal tab names", () => {
 
 		expect(renameTerminal("project-1", tabId!, "   ")).toBe(false);
 	});
+
+	it("does not reuse a busy tab when a caller requires a fresh terminal", async () => {
+		const { addTerminal, MAX_TERMINAL_TABS } = await import(
+			"./terminal-tabs-store"
+		);
+		for (let index = 0; index < MAX_TERMINAL_TABS; index += 1) {
+			expect(addTerminal("project-1")).not.toBeNull();
+		}
+
+		expect(
+			addTerminal("project-1", { reuseAtCapacity: false }),
+		).toBeNull();
+	});
 });

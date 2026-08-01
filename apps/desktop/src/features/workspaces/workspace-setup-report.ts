@@ -2,6 +2,14 @@ import type { WorkspaceSetupHint, WorkspaceSetupReport } from "@dcc/contracts";
 
 type Translate = (key: string, options?: Record<string, string>) => string;
 
+export function setupDisplayCommand(command: string) {
+	return (
+		command.match(/(?:corepack\s+)?(?:pnpm|yarn|npm|bun)\s+install\b/)?.[0] ??
+		command.match(/cargo\s+build\b/)?.[0] ??
+		command
+	);
+}
+
 export function setupHintsDescription(
 	t: Translate,
 	setupHints: WorkspaceSetupHint[],
@@ -11,7 +19,7 @@ export function setupHintsDescription(
 	}
 
 	return t("workspaceDialog.toastSetupSuggestions", {
-		commands: setupHints.map((hint) => hint.command).join(" • "),
+		commands: setupHints.map((hint) => setupDisplayCommand(hint.command)).join(" • "),
 	});
 }
 
@@ -20,12 +28,14 @@ export function setupReportDescription(
 	setupReport: WorkspaceSetupReport,
 	setupHints: WorkspaceSetupHint[],
 ) {
-	const commands = setupHints.map((hint) => hint.command).join(" • ");
+	const commands = setupHints.map((hint) => setupDisplayCommand(hint.command)).join(" • ");
 	const firstProblem = setupReport.steps.find(
 		(step) => step.status === "warning" || step.status === "failed",
 	);
 
 	switch (setupReport.status) {
+		case "pending":
+			return t("workspaceDialog.toastSetupRecommended", { commands });
 		case "completed":
 			return t("workspaceDialog.toastSetupCompleted", { commands });
 		case "warning":

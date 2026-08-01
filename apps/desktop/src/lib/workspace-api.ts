@@ -81,6 +81,7 @@ import type {
 	WorkspaceProjectAutomationConfigOutput,
 	WorkspaceRunProjectTasksInput,
 	WorkspaceRunProjectTasksOutput,
+	WorkspaceRecordSetupOutcomeInput,
 	WorkspaceSaveProjectAutomationInput,
 	WorkspaceApplyDelegationWorktreeInput,
 	WorkspaceApplyDelegationWorktreeOutput,
@@ -553,6 +554,19 @@ export function workspaceRunSetup(input: WorkspaceRunSetupInput) {
 	return invoke<WorkspaceRunSetupOutput>(WORKSPACE_METHODS.workspaceRunSetup, {
 		input,
 	});
+}
+
+export function workspaceSkipSetup(input: WorkspaceRunSetupInput) {
+	return invoke<WorkspaceRunSetupOutput>(WORKSPACE_METHODS.workspaceSkipSetup, {
+		input,
+	});
+}
+
+export function workspaceRecordSetupOutcome(input: WorkspaceRecordSetupOutcomeInput) {
+	return invoke<WorkspaceRunSetupOutput>(
+		WORKSPACE_METHODS.workspaceRecordSetupOutcome,
+		{ input },
+	);
 }
 
 export function workspaceChangeRequestViewWeb(input: WorkspaceGitPushInput) {

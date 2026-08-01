@@ -19,6 +19,7 @@ pub enum WorkspaceState {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceSetupStatus {
+    Pending,
     Skipped,
     Completed,
     Warning,
