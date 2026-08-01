@@ -186,7 +186,6 @@ type WorkspacePanelProps = {
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
 	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
-	onCreateTaskFromSourceUrl?: (url: string) => Promise<void>;
 	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
 	onSkipRecommendedSetup?: () => Promise<void>;
 	/** Opens the inspector and previews an implementation delegation diff. */
@@ -256,7 +255,6 @@ export function WorkspacePanel({
 	onToggleInspector,
 	onReviewChanges,
 	onCreateTaskFromBranch,
-	onCreateTaskFromSourceUrl,
 	onRunRecommendedSetup,
 	onSkipRecommendedSetup,
 	onReviewDelegation,
@@ -898,7 +896,6 @@ export function WorkspacePanel({
 						onReviewPlan={onOpenPlanSurface}
 						onReviewChanges={onReviewChanges ?? onToggleInspector}
 						onCreateTaskFromBranch={onCreateTaskFromBranch}
-						onCreateTaskFromSourceUrl={onCreateTaskFromSourceUrl}
 						onRunRecommendedSetup={onRunRecommendedSetup}
 						onSkipRecommendedSetup={onSkipRecommendedSetup}
 					/>

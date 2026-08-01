@@ -483,6 +483,96 @@ pub(crate) fn list_pull_review_comments(
     Ok(pages.into_iter().flatten().collect())
 }
 
+pub(crate) fn pull_request_review_threads_json(
+    root: &str,
+    host: &str,
+    owner: &str,
+    repo: &str,
+    pull_number: u32,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    const QUERY: &str = r#"query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved path line originalLine comments(first:100){nodes{databaseId body createdAt url author{login avatarUrl url} path line originalLine side}}}pageInfo{hasNextPage endCursor}}}}}"#;
+    run_hub_gh_json(
+        root,
+        host,
+        login,
+        &[
+            "api",
+            "graphql",
+            "--hostname",
+            host,
+            "--paginate",
+            "--slurp",
+            "--raw-field",
+            &format!("query={QUERY}"),
+            "--raw-field",
+            &format!("owner={owner}"),
+            "--raw-field",
+            &format!("repo={repo}"),
+            "--field",
+            &format!("number={pull_number}"),
+        ],
+    )
+}
+
+pub(crate) fn reply_to_pull_review_comment_json(
+    root: &str,
+    host: &str,
+    owner: &str,
+    repo: &str,
+    pull_number: u32,
+    comment_id: i64,
+    body: &str,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let endpoint =
+        format!("/repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies");
+    run_hub_gh_json(
+        root,
+        host,
+        login,
+        &[
+            "api",
+            "--hostname",
+            host,
+            "--method",
+            "POST",
+            &endpoint,
+            "--raw-field",
+            &format!("body={body}"),
+        ],
+    )
+}
+
+pub(crate) fn set_pull_review_thread_resolved_json(
+    root: &str,
+    host: &str,
+    thread_id: &str,
+    resolved: bool,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let mutation = if resolved {
+        "mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}"
+    } else {
+        "mutation($threadId:ID!){unresolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}"
+    };
+    run_hub_gh_json(
+        root,
+        host,
+        login,
+        &[
+            "api",
+            "graphql",
+            "--hostname",
+            host,
+            "--raw-field",
+            &format!("query={mutation}"),
+            "--raw-field",
+            &format!("threadId={thread_id}"),
+        ],
+    )
+}
+
 pub(crate) fn resolve_pull_review_state_json(
     root: &str,
     host: &str,

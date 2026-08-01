@@ -208,6 +208,7 @@ pub struct PullRequestHubFile {
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestHubInlineComment {
     pub id: String,
+    pub thread_id: Option<String>,
     pub path: String,
     pub line: Option<u32>,
     pub side: Option<String>,
@@ -224,6 +225,8 @@ pub struct PullRequestHubReviewCapabilities {
     pub inline_comments: bool,
     pub approve: bool,
     pub request_changes: bool,
+    pub reply_to_threads: bool,
+    pub resolve_threads: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -319,6 +322,39 @@ pub struct PullRequestHubCommentInput {
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestHubCommentOutput {
     pub comment: PullRequestHubComment,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubThreadReplyInput {
+    pub repository_root: String,
+    pub number: u32,
+    pub comment_id: String,
+    pub thread_id: String,
+    pub body: String,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubThreadReplyOutput {
+    pub submitted: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubThreadResolveInput {
+    pub repository_root: String,
+    pub number: u32,
+    pub thread_id: String,
+    pub resolved: bool,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubThreadResolveOutput {
+    pub resolved: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -1521,6 +1557,7 @@ fn github_inline_comment(
         .and_then(|line| u32::try_from(line).ok());
     PullRequestHubInlineComment {
         id: comment.id.to_string(),
+        thread_id: None,
         path: comment.path,
         line,
         side: comment.side.map(|side| side.to_ascii_lowercase()),
@@ -1540,41 +1577,139 @@ fn github_inline_comment(
     }
 }
 
+fn github_thread_inline_comments(raw: &Value) -> Vec<PullRequestHubInlineComment> {
+    let pages = raw
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_else(|| std::slice::from_ref(raw));
+    pages
+        .iter()
+        .flat_map(|page| {
+            page.pointer("/data/repository/pullRequest/reviewThreads/nodes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .flat_map(|thread| {
+            let thread_id = thread
+                .get("id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            let resolved = thread.get("isResolved").and_then(Value::as_bool);
+            let thread_path = thread
+                .get("path")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            let thread_line = thread
+                .get("line")
+                .or_else(|| thread.get("originalLine"))
+                .and_then(Value::as_u64)
+                .and_then(|line| u32::try_from(line).ok());
+            thread
+                .pointer("/comments/nodes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(move |comment| {
+                    let id = comment.get("databaseId")?.as_i64()?.to_string();
+                    let path = comment
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string)
+                        .or_else(|| thread_path.clone())?;
+                    let line = comment
+                        .get("line")
+                        .or_else(|| comment.get("originalLine"))
+                        .and_then(Value::as_u64)
+                        .and_then(|line| u32::try_from(line).ok())
+                        .or(thread_line);
+                    let author = comment.get("author").and_then(|author| {
+                        let login = author.get("login")?.as_str()?.trim().to_string();
+                        (!login.is_empty()).then_some(PullRequestHubActor {
+                            login,
+                            name: None,
+                            avatar_url: author
+                                .get("avatarUrl")
+                                .and_then(Value::as_str)
+                                .map(ToString::to_string),
+                            html_url: author
+                                .get("url")
+                                .and_then(Value::as_str)
+                                .map(ToString::to_string),
+                        })
+                    });
+                    Some(PullRequestHubInlineComment {
+                        id,
+                        thread_id: thread_id.clone(),
+                        path,
+                        line,
+                        side: comment
+                            .get("side")
+                            .and_then(Value::as_str)
+                            .map(|side| side.to_ascii_lowercase()),
+                        body: comment
+                            .get("body")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        author,
+                        created_at: comment
+                            .get("createdAt")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string),
+                        url: comment
+                            .get("url")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string),
+                        resolved,
+                    })
+                })
+        })
+        .collect()
+}
+
 fn gitlab_inline_comments(
     discussions: Vec<crate::commands::forge::gitlab::GitlabDiscussion>,
 ) -> Vec<PullRequestHubInlineComment> {
     discussions
         .into_iter()
-        .flat_map(|discussion| discussion.notes)
-        .filter_map(|note| {
-            if note.system.unwrap_or(false) {
-                return None;
-            }
-            let position = note.position?;
-            let path = position.new_path.or(position.old_path)?;
-            let (line, side) = match (position.new_line, position.old_line) {
-                (Some(line), _) => (u32::try_from(line).ok(), Some("right".to_string())),
-                (None, Some(line)) => (u32::try_from(line).ok(), Some("left".to_string())),
-                _ => (None, None),
-            };
-            Some(PullRequestHubInlineComment {
-                id: note.id.to_string(),
-                path,
-                line,
-                side,
-                body: note.body.unwrap_or_default(),
-                author: note.author.and_then(|author| {
-                    let login = author.username?.trim().to_string();
-                    (!login.is_empty()).then_some(PullRequestHubActor {
-                        login,
-                        name: None,
-                        avatar_url: author.avatar_url,
-                        html_url: author.web_url,
-                    })
-                }),
-                created_at: note.created_at,
-                url: None,
-                resolved: note.resolved,
+        .flat_map(|discussion| {
+            let thread_id = discussion.id;
+            let anchor = discussion
+                .notes
+                .iter()
+                .find_map(|note| note.position.clone());
+            discussion.notes.into_iter().filter_map(move |note| {
+                if note.system.unwrap_or(false) {
+                    return None;
+                }
+                let position = note.position.or_else(|| anchor.clone())?;
+                let path = position.new_path.or(position.old_path)?;
+                let (line, side) = match (position.new_line, position.old_line) {
+                    (Some(line), _) => (u32::try_from(line).ok(), Some("right".to_string())),
+                    (None, Some(line)) => (u32::try_from(line).ok(), Some("left".to_string())),
+                    _ => (None, None),
+                };
+                Some(PullRequestHubInlineComment {
+                    id: note.id.to_string(),
+                    thread_id: Some(thread_id.clone()),
+                    path,
+                    line,
+                    side,
+                    body: note.body.unwrap_or_default(),
+                    author: note.author.and_then(|author| {
+                        let login = author.username?.trim().to_string();
+                        (!login.is_empty()).then_some(PullRequestHubActor {
+                            login,
+                            name: None,
+                            avatar_url: author.avatar_url,
+                            html_url: author.web_url,
+                        })
+                    }),
+                    created_at: note.created_at,
+                    url: None,
+                    resolved: note.resolved,
+                })
             })
         })
         .collect()
@@ -1624,17 +1759,29 @@ pub async fn pull_request_hub_detail(
                     .flatten()
                     .filter_map(github_hub_file)
                     .collect();
-                let inline_comments = crate::commands::forge::github::list_pull_review_comments(
-                    &context.host,
-                    &context.namespace,
-                    &context.repo,
-                    input.number,
-                    context.effective_login.as_deref(),
-                )
-                .unwrap_or_default()
-                .into_iter()
-                .map(github_inline_comment)
-                .collect();
+                let inline_comments =
+                    crate::commands::forge::github::pull_request_review_threads_json(
+                        root,
+                        &context.host,
+                        &context.namespace,
+                        &context.repo,
+                        input.number,
+                        context.effective_login.as_deref(),
+                    )
+                    .map(|raw| github_thread_inline_comments(&raw))
+                    .unwrap_or_else(|_| {
+                        crate::commands::forge::github::list_pull_review_comments(
+                            &context.host,
+                            &context.namespace,
+                            &context.repo,
+                            input.number,
+                            context.effective_login.as_deref(),
+                        )
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(github_inline_comment)
+                        .collect()
+                    });
                 (files, inline_comments)
             } else {
                 (Vec::new(), Vec::new())
@@ -1652,6 +1799,8 @@ pub async fn pull_request_hub_detail(
                     inline_comments: true,
                     approve: true,
                     request_changes: true,
+                    reply_to_threads: true,
+                    resolve_threads: true,
                 },
             })
         }
@@ -1738,10 +1887,110 @@ pub async fn pull_request_hub_detail(
                     inline_comments: true,
                     approve: true,
                     request_changes: false,
+                    reply_to_threads: true,
+                    resolve_threads: true,
                 },
             })
         }
     }
+}
+
+#[tauri::command]
+pub async fn pull_request_hub_reply_thread(
+    state: State<'_, WorkspaceCommandState>,
+    input: PullRequestHubThreadReplyInput,
+) -> Result<PullRequestHubThreadReplyOutput, String> {
+    let body = input.body.trim();
+    if body.is_empty() {
+        return Err("Reply cannot be empty.".to_string());
+    }
+    let root = input.repository_root.trim();
+    let thread_id = input.thread_id.trim();
+    if thread_id.is_empty() {
+        return Err("Review thread is missing.".to_string());
+    }
+    let context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?
+    .ok_or_else(|| "No GitHub or GitLab remote was found.".to_string())?;
+    match context.provider {
+        ForgeCliProvider::Github => {
+            let comment_id = input
+                .comment_id
+                .trim()
+                .parse::<i64>()
+                .map_err(|_| "GitHub review comment is invalid.".to_string())?;
+            crate::commands::forge::github::reply_to_pull_review_comment_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                input.number,
+                comment_id,
+                body,
+                context.effective_login.as_deref(),
+            )?;
+        }
+        ForgeCliProvider::Gitlab => {
+            crate::commands::forge::gitlab::reply_to_merge_request_discussion_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                input.number,
+                thread_id,
+                body,
+                context.effective_login.as_deref(),
+            )?;
+        }
+    }
+    Ok(PullRequestHubThreadReplyOutput { submitted: true })
+}
+
+#[tauri::command]
+pub async fn pull_request_hub_resolve_thread(
+    state: State<'_, WorkspaceCommandState>,
+    input: PullRequestHubThreadResolveInput,
+) -> Result<PullRequestHubThreadResolveOutput, String> {
+    let root = input.repository_root.trim();
+    let thread_id = input.thread_id.trim();
+    if thread_id.is_empty() {
+        return Err("Review thread is missing.".to_string());
+    }
+    let context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?
+    .ok_or_else(|| "No GitHub or GitLab remote was found.".to_string())?;
+    match context.provider {
+        ForgeCliProvider::Github => {
+            crate::commands::forge::github::set_pull_review_thread_resolved_json(
+                root,
+                &context.host,
+                thread_id,
+                input.resolved,
+                context.effective_login.as_deref(),
+            )?;
+        }
+        ForgeCliProvider::Gitlab => {
+            crate::commands::forge::gitlab::set_merge_request_discussion_resolved_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                input.number,
+                thread_id,
+                input.resolved,
+                context.effective_login.as_deref(),
+            )?;
+        }
+    }
+    Ok(PullRequestHubThreadResolveOutput {
+        resolved: input.resolved,
+    })
 }
 
 #[tauri::command]
@@ -3203,8 +3452,9 @@ fn map_gitlab_review_comments(
 #[cfg(test)]
 mod tests {
     use super::{
-        github_checks, github_comment, github_hub_file, gitlab_hub_file, map_github_review_state,
-        map_gitlab_review_comments, map_gitlab_review_state,
+        github_checks, github_comment, github_hub_file, github_thread_inline_comments,
+        gitlab_hub_file, map_github_review_state, map_gitlab_review_comments,
+        map_gitlab_review_state,
     };
     use crate::commands::forge::gitlab::{
         GitlabApproval, GitlabApprovals, GitlabDiscussion, GitlabDiscussionAuthor,
@@ -3246,6 +3496,35 @@ mod tests {
         assert_eq!(comment.id, "987");
         assert_eq!(comment.body, "Looks good");
         assert_eq!(comment.author.expect("comment author").login, "alice");
+    }
+
+    #[test]
+    fn maps_paginated_github_review_threads_with_resolution_state() {
+        let comments = github_thread_inline_comments(&json!([{
+            "data": { "repository": { "pullRequest": { "reviewThreads": { "nodes": [{
+                "id": "PRRT_thread",
+                "isResolved": true,
+                "path": "src/review.ts",
+                "line": 12,
+                "originalLine": 10,
+                "comments": { "nodes": [{
+                    "databaseId": 101,
+                    "body": "Please keep this a draft.",
+                    "createdAt": "2026-08-01T10:00:00Z",
+                    "url": "https://github.com/acme/app/pull/12#discussion_r101",
+                    "author": { "login": "alice", "avatarUrl": null, "url": null },
+                    "path": "src/review.ts",
+                    "line": 12,
+                    "side": "RIGHT"
+                }] }
+            }] } } } }
+        }]));
+
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].id, "101");
+        assert_eq!(comments[0].thread_id.as_deref(), Some("PRRT_thread"));
+        assert_eq!(comments[0].side.as_deref(), Some("right"));
+        assert_eq!(comments[0].resolved, Some(true));
     }
 
     #[test]

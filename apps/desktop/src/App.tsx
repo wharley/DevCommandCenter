@@ -1252,34 +1252,6 @@ export default function App() {
 			t,
 		],
 	);
-	const handleCreateTaskFromDockSource = useCallback(
-		async (url: string) => {
-			if (!activeProjectRootPath || !activeProjectId) {
-				throw new Error(t("composer.executionDock.origin.unavailable"));
-			}
-			const result = await createWorkspaceFromSourceUrl({
-				projectId: activeProjectId,
-				workspaceRoot: activeProjectRootPath,
-				url,
-				name: null,
-				forgeLogin: null,
-			});
-			notifyWorkspaceCreationResult(t, "open", result);
-			void queryClient.invalidateQueries({
-				queryKey: ["workspaces", backendCacheKey],
-			});
-			requestNewTaskComposerFocus(result.workspace.id);
-		},
-		[
-			activeProjectId,
-			activeProjectRootPath,
-			backendCacheKey,
-			createWorkspaceFromSourceUrl,
-			queryClient,
-			requestNewTaskComposerFocus,
-			t,
-		],
-	);
 	const handleSelectWorkspaceSurface = useCallback(
 		(workspaceId: string) => {
 			setGlobalSurface(null);
@@ -4128,6 +4100,12 @@ export default function App() {
 								<PullRequestsHub
 									onOpenWorkspace={handleSelectWorkspaceSurface}
 									onWorkOnPullRequest={handleWorkOnPullRequest}
+									providers={providerChoices}
+									selectedProviderId={selectedProviderId}
+									selectedModelId={selectedModelId}
+									selectedProviderRuntime={selectedProviderRuntime}
+									onSelectProvider={handleSelectProvider}
+									onSelectModel={handleSelectModel}
 								/>
 							) : hasWorkspace && selectedWorkspace ? (
 								<SessionWorkbench
@@ -4202,11 +4180,6 @@ export default function App() {
 									onCreateTaskFromBranch={
 										canCreateTaskFromDock
 											? handleCreateTaskFromDockBranch
-											: undefined
-									}
-									onCreateTaskFromSourceUrl={
-										canCreateTaskFromDock
-											? handleCreateTaskFromDockSource
 											: undefined
 									}
 									onReviewDelegation={handleReviewDelegation}

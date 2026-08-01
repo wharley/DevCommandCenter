@@ -21,6 +21,8 @@ import type {
 	CloseSessionOutput,
 	RecordPlanHandoffInput,
 	RecordPlanHandoffOutput,
+	RunPullRequestReviewAgentInput,
+	RunPullRequestReviewAgentOutput,
 	RespondToUserInputInput,
 	RespondToUserInputOutput,
 	RespondToPermissionRequestInput,
@@ -46,6 +48,10 @@ export const REMOTE_CORE_EVENT_NAME = "dcc:remote-core-event";
 
 export function startThread(input: StartThreadInput) {
 	return invoke<StartThreadOutput>(SESSION_METHODS.startThread, { input });
+}
+
+export function runPullRequestReviewAgent(input: RunPullRequestReviewAgentInput) {
+	return invoke<RunPullRequestReviewAgentOutput>(SESSION_METHODS.runPullRequestReviewAgent, { input });
 }
 
 export function applyTaskTitle(input: ApplyTaskTitleInput) {

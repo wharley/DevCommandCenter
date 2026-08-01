@@ -72,7 +72,9 @@ use dcc_tauri::commands::{
         PullRequestHubDetailOutput, PullRequestHubDraftComment, PullRequestHubFile,
         PullRequestHubInlineComment, PullRequestHubItem, PullRequestHubListInput,
         PullRequestHubListOutput, PullRequestHubReviewCapabilities, PullRequestHubReviewEvent,
-        PullRequestHubSubmitReviewInput, PullRequestHubSubmitReviewOutput, PullRequestHubWarning,
+        PullRequestHubSubmitReviewInput, PullRequestHubSubmitReviewOutput,
+        PullRequestHubThreadReplyInput, PullRequestHubThreadReplyOutput,
+        PullRequestHubThreadResolveInput, PullRequestHubThreadResolveOutput, PullRequestHubWarning,
         WorkspaceForgeContextInput, WorkspaceForgeContextOutput, WorkspacePipeline,
         WorkspacePipelineJob, WorkspacePipelineJobInput, WorkspacePipelineJobLogOutput,
         WorkspacePipelineStatusInput, WorkspacePipelineStatusOutput, WorkspacePrReviewComment,
@@ -94,8 +96,9 @@ use dcc_tauri::commands::{
         ApplyTaskTitleInput, ApplyTaskTitleOutput, ListMcpRuntimeStatusesInput,
         ListMcpRuntimeStatusesOutput, McpTurnPreflightState, PrepareTurnOutput,
         RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput,
-        WaitMcpOauthInput, WaitMcpOauthOutput,
+        RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
+        SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput, WaitMcpOauthInput,
+        WaitMcpOauthOutput,
     },
     workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -193,6 +196,8 @@ struct WorkspaceMethods {
     pull_request_hub_detail: String,
     pull_request_hub_comment: String,
     pull_request_hub_submit_review: String,
+    pull_request_hub_reply_thread: String,
+    pull_request_hub_resolve_thread: String,
     workspace_pipeline_status: String,
     workspace_pipeline_job_log: String,
     workspace_pipeline_job_retry: String,
@@ -243,6 +248,7 @@ struct WorkspaceMethods {
 #[serde(rename_all = "camelCase")]
 struct SessionMethods {
     start_thread: String,
+    run_pull_request_review_agent: String,
     apply_task_title: String,
     prepare_turn: String,
     send_turn: String,
@@ -488,6 +494,12 @@ fn main() {
         .typ::<PullRequestHubDraftComment>()
         .typ::<PullRequestHubSubmitReviewInput>()
         .typ::<PullRequestHubSubmitReviewOutput>()
+        .typ::<PullRequestHubThreadReplyInput>()
+        .typ::<PullRequestHubThreadReplyOutput>()
+        .typ::<PullRequestHubThreadResolveInput>()
+        .typ::<PullRequestHubThreadResolveOutput>()
+        .typ::<RunPullRequestReviewAgentInput>()
+        .typ::<RunPullRequestReviewAgentOutput>()
         .typ::<WorkspaceGitBranchDiffInput>()
         .typ::<WorkspaceGitBranchDiffOutput>()
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitPreviewScope>()
@@ -666,6 +678,8 @@ fn main() {
                 pull_request_hub_detail: "pull_request_hub_detail".to_string(),
                 pull_request_hub_comment: "pull_request_hub_comment".to_string(),
                 pull_request_hub_submit_review: "pull_request_hub_submit_review".to_string(),
+                pull_request_hub_reply_thread: "pull_request_hub_reply_thread".to_string(),
+                pull_request_hub_resolve_thread: "pull_request_hub_resolve_thread".to_string(),
                 workspace_pipeline_status: "workspace_pipeline_status".to_string(),
                 workspace_pipeline_job_log: "workspace_pipeline_job_log".to_string(),
                 workspace_pipeline_job_retry: "workspace_pipeline_job_retry".to_string(),
@@ -728,6 +742,7 @@ fn main() {
         "SESSION_METHODS",
         SessionMethods {
             start_thread: "start_thread".to_string(),
+            run_pull_request_review_agent: "run_pull_request_review_agent".to_string(),
             apply_task_title: "apply_task_title".to_string(),
             prepare_turn: "prepare_turn".to_string(),
             send_turn: "send_turn".to_string(),

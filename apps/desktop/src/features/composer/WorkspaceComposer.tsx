@@ -149,7 +149,6 @@ type WorkspaceComposerProps = {
 	onReviewPlan: () => void;
 	onReviewChanges?: () => void;
 	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
-	onCreateTaskFromSourceUrl?: (url: string) => Promise<void>;
 	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
 	onSkipRecommendedSetup?: () => Promise<void>;
 };
@@ -188,7 +187,6 @@ export function WorkspaceComposer({
 	onReviewPlan,
 	onReviewChanges,
 	onCreateTaskFromBranch,
-	onCreateTaskFromSourceUrl,
 	onRunRecommendedSetup,
 	onSkipRecommendedSetup,
 }: WorkspaceComposerProps) {
@@ -630,7 +628,6 @@ export function WorkspaceComposer({
 			setupReport={workspaceSetupReport}
 			onReviewChanges={onReviewChanges}
 			onCreateTaskFromBranch={onCreateTaskFromBranch}
-			onCreateTaskFromSourceUrl={onCreateTaskFromSourceUrl}
 			onRunRecommendedSetup={onRunRecommendedSetup}
 			onSkipRecommendedSetup={onSkipRecommendedSetup}
 		/>,

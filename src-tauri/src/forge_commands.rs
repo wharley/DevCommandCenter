@@ -50,6 +50,22 @@ pub async fn pull_request_hub_submit_review(
 }
 
 #[tauri::command]
+pub async fn pull_request_hub_reply_thread(
+    state: State<'_, WorkspaceCommandState>,
+    input: dcc_tauri::commands::forge_commands::PullRequestHubThreadReplyInput,
+) -> Result<dcc_tauri::commands::forge_commands::PullRequestHubThreadReplyOutput, String> {
+    dcc_tauri::commands::forge_commands::pull_request_hub_reply_thread(state, input).await
+}
+
+#[tauri::command]
+pub async fn pull_request_hub_resolve_thread(
+    state: State<'_, WorkspaceCommandState>,
+    input: dcc_tauri::commands::forge_commands::PullRequestHubThreadResolveInput,
+) -> Result<dcc_tauri::commands::forge_commands::PullRequestHubThreadResolveOutput, String> {
+    dcc_tauri::commands::forge_commands::pull_request_hub_resolve_thread(state, input).await
+}
+
+#[tauri::command]
 pub async fn workspace_github_cli_status(
     state: State<'_, WorkspaceCommandState>,
     input: GithubCliStatusInput,

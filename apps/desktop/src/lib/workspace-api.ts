@@ -47,6 +47,10 @@ import type {
 	PullRequestHubListOutput,
 	PullRequestHubSubmitReviewInput,
 	PullRequestHubSubmitReviewOutput,
+	PullRequestHubThreadReplyInput,
+	PullRequestHubThreadReplyOutput,
+	PullRequestHubThreadResolveInput,
+	PullRequestHubThreadResolveOutput,
 	ListChildDirectoriesInput,
 	ListChildDirectoriesOutput,
 	ListGitTrackedFilesInput,
@@ -630,6 +634,14 @@ export function pullRequestHubSubmitReview(input: PullRequestHubSubmitReviewInpu
 		WORKSPACE_METHODS.pullRequestHubSubmitReview,
 		{ input },
 	);
+}
+
+export function pullRequestHubReplyThread(input: PullRequestHubThreadReplyInput) {
+	return invoke<PullRequestHubThreadReplyOutput>(WORKSPACE_METHODS.pullRequestHubReplyThread, { input });
+}
+
+export function pullRequestHubResolveThread(input: PullRequestHubThreadResolveInput) {
+	return invoke<PullRequestHubThreadResolveOutput>(WORKSPACE_METHODS.pullRequestHubResolveThread, { input });
 }
 
 export function workspacePrReviewComments(input: WorkspacePrReviewCommentsInput) {

@@ -23,14 +23,15 @@ pub use delegation_commands::{
 };
 pub use forge_commands::{
     pull_request_hub_comment, pull_request_hub_detail, pull_request_hub_list,
-    pull_request_hub_submit_review, workspace_backfill_forge_repo_bindings,
-    workspace_change_request_create, workspace_change_request_merge,
-    workspace_change_request_view_web, workspace_forge_cli_accounts, workspace_forge_cli_hosts,
-    workspace_forge_cli_select_login, workspace_forge_cli_status, workspace_forge_context,
-    workspace_gh_pr_create_fill, workspace_gh_pr_merge, workspace_gh_pr_view_web,
-    workspace_github_cli_status, workspace_pipeline_job_log, workspace_pipeline_job_retry,
-    workspace_pipeline_status, workspace_pr_review_comments, workspace_pr_status,
-    workspace_retry_repository_forge_binding, workspace_review_state,
+    pull_request_hub_reply_thread, pull_request_hub_resolve_thread, pull_request_hub_submit_review,
+    workspace_backfill_forge_repo_bindings, workspace_change_request_create,
+    workspace_change_request_merge, workspace_change_request_view_web,
+    workspace_forge_cli_accounts, workspace_forge_cli_hosts, workspace_forge_cli_select_login,
+    workspace_forge_cli_status, workspace_forge_context, workspace_gh_pr_create_fill,
+    workspace_gh_pr_merge, workspace_gh_pr_view_web, workspace_github_cli_status,
+    workspace_pipeline_job_log, workspace_pipeline_job_retry, workspace_pipeline_status,
+    workspace_pr_review_comments, workspace_pr_status, workspace_retry_repository_forge_binding,
+    workspace_review_state,
 };
 pub use mcp_commands::{
     activate_mcp_integration, create_mcp_integration, disable_mcp_integration,
@@ -40,7 +41,8 @@ pub use provider_commands::{list_providers, provider_account_usage};
 pub use session_commands::{
     abort_run, apply_task_title, approve_plan, list_mcp_runtime_statuses, list_thread_events,
     prepare_turn, record_plan_handoff, respond_to_permission_request, respond_to_user_input,
-    resume_session, send_turn, start_mcp_oauth, start_thread, wait_mcp_oauth,
+    resume_session, run_pull_request_review_agent, send_turn, start_mcp_oauth, start_thread,
+    wait_mcp_oauth,
 };
 pub use workspace_commands::{
     archive_workspace, archive_workspace_bundle, compile_mission_spec_context, complete_workspace,

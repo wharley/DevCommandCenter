@@ -271,6 +271,89 @@ impl SessionCommandState {
         Ok(runtime)
     }
 
+    pub async fn run_ephemeral_read_only_turn(
+        &self,
+        working_directory: String,
+        provider_id: String,
+        model: Option<String>,
+        runtime_config: Option<ProviderRuntimeConfig>,
+        prompt: String,
+    ) -> Result<String> {
+        let provider = provider_runtime(&provider_id).ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!("unknown provider runtime: {provider_id}"))
+        })?;
+        if !provider.capabilities().supports_read_only_delegation {
+            return Err(dcc_core::CoreError::InvalidInput(format!(
+                "provider {provider_id} does not support read-only review runs"
+            )));
+        }
+        let runtime = self.provider_runtime_config(&provider_id, runtime_config.as_ref())?;
+        let ephemeral_id = Uuid::new_v4().to_string();
+        let handle = provider
+            .prepare_session(SessionConfig {
+                workspace_id: WorkspaceId(format!("pr-review:{ephemeral_id}")),
+                session_id: SessionId(ephemeral_id),
+                model,
+                working_directory: Some(working_directory),
+                additional_working_directories: Vec::new(),
+                provider_runtime: Some(runtime),
+                mcp_servers: Vec::new(),
+            })
+            .await?;
+        let mut events = provider.stream_events(&handle);
+        provider
+            .send_input(
+                &handle,
+                Input::Turn(dcc_core::ports::ProviderTurnInput {
+                    prompt,
+                    tool_instructions: Some(
+                        "Read-only pull request review. Do not edit files, execute mutating commands, create branches, commits, tasks, worktrees, or publish anything. Return only the requested draft response."
+                            .to_string(),
+                    ),
+                    plan_mode: Some(true),
+                    effort: None,
+                    fast_mode: None,
+                }),
+            )
+            .await?;
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(300), async {
+            let mut response = String::new();
+            while let Some(event) = events.next().await {
+                match event? {
+                    ProviderEvent::TextDelta { content } => response.push_str(&content),
+                    ProviderEvent::Completed { .. } => return Ok(response),
+                    ProviderEvent::Failed { message, .. } => {
+                        return Err(dcc_core::CoreError::Provider(message));
+                    }
+                    ProviderEvent::PermissionRequested { .. }
+                    | ProviderEvent::UserInputRequested { .. } => {
+                        return Err(dcc_core::CoreError::Provider(
+                            "The review agent requested an interactive or mutating action. The run was cancelled."
+                                .to_string(),
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            Err(dcc_core::CoreError::Provider(
+                "The review agent ended without a completed response.".to_string(),
+            ))
+        })
+        .await
+        .map_err(|_| {
+            dcc_core::CoreError::Provider("The review agent timed out after 5 minutes.".to_string())
+        });
+        let _ = provider.cancel(&handle).await;
+        let response = result??;
+        if response.trim().is_empty() {
+            return Err(dcc_core::CoreError::Provider(
+                "The review agent returned an empty response.".to_string(),
+            ));
+        }
+        Ok(response)
+    }
+
     fn provider_home_root(&self) -> PathBuf {
         self.app_data_dir.join("provider-homes")
     }

@@ -25,12 +25,59 @@ use dcc_core::{
     },
     ports::{
         provider::ProviderPermissionResponse, provider::ProviderUserInputAnswer,
-        provider::ProviderUserInputResponse, Input, ProviderTurnInput, SessionEventRepo,
-        SessionRepo, ThreadRepo, WorkspaceRepo,
+        provider::ProviderUserInputResponse, Input, ProviderRuntimeConfig, ProviderTurnInput,
+        SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
     },
 };
 
 use crate::state::SessionCommandState;
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RunPullRequestReviewAgentInput {
+    pub working_directory: String,
+    pub provider_id: String,
+    pub model: Option<String>,
+    pub provider_runtime: Option<ProviderRuntimeConfig>,
+    pub prompt: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RunPullRequestReviewAgentOutput {
+    pub response: String,
+}
+
+#[tauri::command]
+pub async fn run_pull_request_review_agent(
+    state: State<'_, SessionCommandState>,
+    input: RunPullRequestReviewAgentInput,
+) -> Result<RunPullRequestReviewAgentOutput, String> {
+    let working_directory = input.working_directory.trim();
+    let root = std::path::Path::new(working_directory);
+    if working_directory.is_empty() || !root.is_absolute() || !root.is_dir() {
+        return Err("Pull request repository directory is invalid.".to_string());
+    }
+    let provider_id = input.provider_id.trim();
+    if provider_id.is_empty() {
+        return Err("Select a provider for the review.".to_string());
+    }
+    let prompt = input.prompt.trim();
+    if prompt.is_empty() || prompt.len() > 120_000 {
+        return Err("Pull request review context is empty or too large.".to_string());
+    }
+    let response = state
+        .run_ephemeral_read_only_turn(
+            working_directory.to_string(),
+            provider_id.to_string(),
+            input.model,
+            input.provider_runtime,
+            prompt.to_string(),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(RunPullRequestReviewAgentOutput { response })
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

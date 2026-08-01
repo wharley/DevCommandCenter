@@ -1,6 +1,9 @@
 import type {
+	ProviderCatalog,
+	ProviderRuntimeConfig,
 	PullRequestHubDetailOutput,
 	PullRequestHubDraftComment,
+	PullRequestHubInlineComment,
 	PullRequestHubItem,
 	PullRequestHubReviewEvent,
 } from "@dcc/contracts";
@@ -13,15 +16,31 @@ import {
 	Loader2,
 	MessageSquarePlus,
 	Plus,
+	Reply,
 	Send,
+	Sparkles,
 	Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { pullRequestHubSubmitReview } from "@/lib/workspace-api";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ComposerProviderModelMenu } from "@/features/composer/ComposerProviderModelMenu";
+import { runPullRequestReviewAgent } from "@/lib/session-api";
+import {
+	pullRequestHubReplyThread,
+	pullRequestHubResolveThread,
+	pullRequestHubSubmitReview,
+} from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
+import {
+	buildInlineAgentPrompt,
+	buildReviewAgentPrompt,
+	buildThreadReplyAgentPrompt,
+	parseAgentReply,
+	parseAgentReview,
+} from "./pull-request-agent";
 import { parseUnifiedDiff, type UnifiedDiffLine } from "./unified-diff";
 
 type PullRequestCodeReviewProps = {
@@ -29,6 +48,12 @@ type PullRequestCodeReviewProps = {
 	detail: PullRequestHubDetailOutput | undefined;
 	isLoading: boolean;
 	error: Error | null;
+	providers: ProviderCatalog["providers"];
+	selectedProviderId: string | null;
+	selectedModelId: string | null;
+	selectedProviderRuntime: ProviderRuntimeConfig | null;
+	onSelectProvider: (providerId: string) => void;
+	onSelectModel: (modelId: string) => void;
 };
 
 function draftKey(path: string, line: number, side: string) {
@@ -47,6 +72,16 @@ function DiffRow({
 	onCancelComment,
 	onSaveComment,
 	onRemoveDraft,
+	onPrepareInlineWithAgent,
+	agentPendingKey,
+	replyingToId,
+	replyBody,
+	onReplyBodyChange,
+	onStartReply,
+	onCancelReply,
+	onSubmitReply,
+	onPrepareReplyWithAgent,
+	onToggleResolved,
 }: {
 	path: string;
 	row: UnifiedDiffLine;
@@ -59,6 +94,16 @@ function DiffRow({
 	onCancelComment: () => void;
 	onSaveComment: () => void;
 	onRemoveDraft: () => void;
+	onPrepareInlineWithAgent: () => void;
+	agentPendingKey: string | null;
+	replyingToId: string | null;
+	replyBody: string;
+	onReplyBodyChange: (value: string) => void;
+	onStartReply: (comment: PullRequestHubInlineComment) => void;
+	onCancelReply: () => void;
+	onSubmitReply: (comment: PullRequestHubInlineComment) => void;
+	onPrepareReplyWithAgent: (comment: PullRequestHubInlineComment) => void;
+	onToggleResolved: (comment: PullRequestHubInlineComment) => void;
 }) {
 	const { t } = useTranslation("common");
 	const canComment = row.reviewLine != null && row.reviewSide != null;
@@ -135,6 +180,29 @@ function DiffRow({
 						) : null}
 					</div>
 					<p className="mt-1.5 whitespace-pre-wrap text-[11px] leading-4">{comment.body}</p>
+					{comment.threadId ? (
+						<div className="mt-2 flex items-center gap-1.5">
+							<Button size="xs" variant="ghost" onClick={() => onStartReply(comment)}>
+								<Reply className="mr-1 size-3" />{t("pullRequests.code.reply")}
+							</Button>
+							<Button size="xs" variant="ghost" onClick={() => onPrepareReplyWithAgent(comment)} disabled={agentPendingKey === `reply:${comment.id}`}>
+								{agentPendingKey === `reply:${comment.id}` ? <Loader2 className="mr-1 size-3 animate-spin" /> : <Sparkles className="mr-1 size-3" />}
+								{t("pullRequests.code.prepareWithAgent")}
+							</Button>
+							<Button size="xs" variant="ghost" onClick={() => onToggleResolved(comment)}>
+								<Check className="mr-1 size-3" />{comment.resolved ? t("pullRequests.code.reopenThread") : t("pullRequests.code.resolveThread")}
+							</Button>
+						</div>
+					) : null}
+					{replyingToId === comment.id ? (
+						<div className="mt-2 rounded-lg border border-border bg-background/70 p-2">
+							<Textarea autoFocus value={replyBody} onChange={(event) => onReplyBodyChange(event.target.value)} placeholder={t("pullRequests.code.replyPlaceholder")} className="min-h-16 resize-y text-[11px]" />
+							<div className="mt-2 flex justify-end gap-2">
+								<Button size="xs" variant="ghost" onClick={onCancelReply}>{t("pullRequests.code.cancel")}</Button>
+								<Button size="xs" disabled={!replyBody.trim()} onClick={() => onSubmitReply(comment)}><Send className="mr-1 size-3" />{t("pullRequests.code.publishReply")}</Button>
+							</div>
+						</div>
+					) : null}
 				</div>
 			))}
 
@@ -167,6 +235,10 @@ function DiffRow({
 						className="min-h-20 resize-y text-[12px]"
 					/>
 					<div className="mt-2 flex justify-end gap-2">
+						<Button size="xs" variant="ghost" onClick={onPrepareInlineWithAgent} disabled={agentPendingKey?.startsWith("inline:")}>
+							{agentPendingKey?.startsWith("inline:") ? <Loader2 className="mr-1 size-3 animate-spin" /> : <Sparkles className="mr-1 size-3" />}
+							{t("pullRequests.code.prepareWithAgent")}
+						</Button>
 						<Button size="xs" variant="ghost" onClick={onCancelComment}>
 							{t("pullRequests.code.cancel")}
 						</Button>
@@ -185,6 +257,12 @@ export function PullRequestCodeReview({
 	detail,
 	isLoading,
 	error,
+	providers,
+	selectedProviderId,
+	selectedModelId,
+	selectedProviderRuntime,
+	onSelectProvider,
+	onSelectModel,
 }: PullRequestCodeReviewProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -196,7 +274,16 @@ export function PullRequestCodeReview({
 	const [reviewEvent, setReviewEvent] = useState<PullRequestHubReviewEvent>("comment");
 	const [submitted, setSubmitted] = useState(false);
 	const [submitWarning, setSubmitWarning] = useState<string | null>(null);
+	const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+	const [agentInstruction, setAgentInstruction] = useState("");
+	const [agentPendingKey, setAgentPendingKey] = useState<string | null>(null);
+	const [agentError, setAgentError] = useState<string | null>(null);
+	const [replyingToId, setReplyingToId] = useState<string | null>(null);
+	const [replyBody, setReplyBody] = useState("");
 	const files = detail?.files ?? [];
+	const reviewProviders = providers.filter((provider) => provider.capabilities.supportsReadOnlyDelegation);
+	const reviewProvider = reviewProviders.find((provider) => provider.id === selectedProviderId) ?? reviewProviders[0] ?? null;
+	const reviewModel = reviewProvider?.models.find((model) => model.id === selectedModelId) ?? reviewProvider?.models[0] ?? null;
 
 	useEffect(() => {
 		if (files.length === 0) {
@@ -233,6 +320,94 @@ export function PullRequestCodeReview({
 			]);
 		},
 	});
+	const replyMutation = useMutation({
+		mutationFn: (comment: PullRequestHubInlineComment) => {
+			const threadRoot = detail?.inlineComments.find((entry) => entry.threadId === comment.threadId) ?? comment;
+			return pullRequestHubReplyThread({
+			repositoryRoot: item.repositoryRoot,
+			number: item.number,
+			commentId: threadRoot.id,
+			threadId: comment.threadId ?? "",
+			body: replyBody,
+			forgeLogin: item.forgeLogin,
+			});
+		},
+		onSuccess: async () => {
+			setReplyingToId(null);
+			setReplyBody("");
+			await queryClient.invalidateQueries({ queryKey: ["pullRequestHub", "detailCode", item.id] });
+		},
+	});
+	const resolveMutation = useMutation({
+		mutationFn: (comment: PullRequestHubInlineComment) => pullRequestHubResolveThread({
+			repositoryRoot: item.repositoryRoot,
+			number: item.number,
+			threadId: comment.threadId ?? "",
+			resolved: !comment.resolved,
+			forgeLogin: item.forgeLogin,
+		}),
+		onSuccess: async () => {
+			await queryClient.invalidateQueries({ queryKey: ["pullRequestHub", "detailCode", item.id] });
+		},
+	});
+
+	const runAgent = async (prompt: string) => {
+		if (!reviewProvider) throw new Error(t("pullRequests.code.noReviewProvider"));
+		const result = await runPullRequestReviewAgent({
+			workingDirectory: item.repositoryRoot,
+			providerId: reviewProvider.id,
+			model: reviewModel?.id ?? null,
+			providerRuntime: reviewProvider.id === selectedProviderId ? selectedProviderRuntime : null,
+			prompt,
+		});
+		return result.response;
+	};
+	const prepareFullReview = async () => {
+		if (!detail || agentPendingKey) return;
+		setAgentPendingKey("review");
+		setAgentError(null);
+		try {
+			const result = parseAgentReview(await runAgent(buildReviewAgentPrompt(item, detail, agentInstruction)), detail);
+			setReviewBody(result.summary);
+			setDrafts((current) => {
+				const generatedKeys = new Set(result.comments.map((draft) => draftKey(draft.path, draft.line, draft.side)));
+				return [...current.filter((draft) => !generatedKeys.has(draftKey(draft.path, draft.line, draft.side))), ...result.comments];
+			});
+			setAgentPanelOpen(false);
+			setSubmitted(false);
+		} catch (error) {
+			setAgentError(error instanceof Error ? error.message : t("pullRequests.code.agentError"));
+		} finally {
+			setAgentPendingKey(null);
+		}
+	};
+	const prepareInline = async (row: UnifiedDiffLine) => {
+		if (!selectedFile || row.reviewLine == null || row.reviewSide == null || agentPendingKey) return;
+		const key = draftKey(selectedFile.path, row.reviewLine, row.reviewSide);
+		setAgentPendingKey(`inline:${key}`);
+		setAgentError(null);
+		try {
+			setDraftBody(parseAgentReply(await runAgent(buildInlineAgentPrompt(item, selectedFile.path, row, selectedFile.patch, agentInstruction))));
+			setEditingKey(key);
+		} catch (error) {
+			setAgentError(error instanceof Error ? error.message : t("pullRequests.code.agentError"));
+		} finally {
+			setAgentPendingKey(null);
+		}
+	};
+	const prepareReply = async (comment: PullRequestHubInlineComment) => {
+		if (!selectedFile || agentPendingKey) return;
+		setAgentPendingKey(`reply:${comment.id}`);
+		setAgentError(null);
+		try {
+			setReplyBody(parseAgentReply(await runAgent(buildThreadReplyAgentPrompt(item, comment, selectedFile.patch, agentInstruction))));
+			setReplyingToId(comment.id);
+		} catch (error) {
+			setAgentError(error instanceof Error ? error.message : t("pullRequests.code.agentError"));
+		} finally {
+			setAgentPendingKey(null);
+		}
+	};
 
 	const startComment = (row: UnifiedDiffLine) => {
 		if (row.reviewLine == null || row.reviewSide == null || !selectedFile) return;
@@ -287,6 +462,24 @@ export function PullRequestCodeReview({
 
 	return (
 		<div className="flex h-full min-h-0 flex-col">
+			{agentPanelOpen ? (
+				<section className="shrink-0 border-b border-violet-500/20 bg-violet-500/5 px-4 py-3">
+					<div className="flex items-center gap-2">
+						<Sparkles className="size-4 text-violet-500" />
+						<div className="min-w-0 flex-1">
+							<strong className="text-[12px] font-medium">{t("pullRequests.code.agentReviewTitle")}</strong>
+							<p className="text-[10px] text-muted-foreground">{t("pullRequests.code.agentReviewHint")}</p>
+						</div>
+						<ComposerProviderModelMenu providers={reviewProviders} selectedProviderId={reviewProvider?.id ?? null} selectedModelId={reviewModel?.id ?? null} onSelectProvider={onSelectProvider} onSelectModel={onSelectModel} disabled={agentPendingKey != null} />
+						<Button size="xs" variant="ghost" onClick={() => setAgentPanelOpen(false)} disabled={agentPendingKey != null}>{t("pullRequests.code.cancel")}</Button>
+						<Button size="xs" onClick={() => void prepareFullReview()} disabled={!reviewProvider || agentPendingKey != null}>
+							{agentPendingKey === "review" ? <Loader2 className="mr-1 size-3 animate-spin" /> : <Sparkles className="mr-1 size-3" />}
+							{t("pullRequests.code.generateDrafts")}
+						</Button>
+					</div>
+					<Textarea value={agentInstruction} onChange={(event) => setAgentInstruction(event.target.value)} placeholder={t("pullRequests.code.agentInstructionPlaceholder")} className="mt-2 min-h-14 resize-y bg-background/70 text-[11px]" />
+				</section>
+			) : null}
 			<div className="flex min-h-0 flex-1">
 				<aside className="w-52 shrink-0 overflow-y-auto border-r border-border/70 bg-sidebar/25 p-2 [scrollbar-width:thin]">
 					<div className="px-2 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
@@ -338,6 +531,16 @@ export function PullRequestCodeReview({
 										onCancelComment={() => { setEditingKey(null); setDraftBody(""); }}
 										onSaveComment={() => saveComment(row)}
 										onRemoveDraft={() => key && setDrafts((current) => current.filter((entry) => draftKey(entry.path, entry.line, entry.side) !== key))}
+										onPrepareInlineWithAgent={() => void prepareInline(row)}
+										agentPendingKey={agentPendingKey}
+										replyingToId={replyingToId}
+										replyBody={replyBody}
+										onReplyBodyChange={setReplyBody}
+										onStartReply={(comment) => { setReplyingToId(comment.id); setReplyBody(""); }}
+										onCancelReply={() => { setReplyingToId(null); setReplyBody(""); }}
+										onSubmitReply={(comment) => replyMutation.mutate(comment)}
+										onPrepareReplyWithAgent={(comment) => void prepareReply(comment)}
+										onToggleResolved={(comment) => resolveMutation.mutate(comment)}
 									/>
 								);
 							}) : (
@@ -356,6 +559,21 @@ export function PullRequestCodeReview({
 					<strong className="text-[12px] font-medium">{t("pullRequests.code.submitReview")}</strong>
 					{drafts.length > 0 ? <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400">{t("pullRequests.code.pendingCount", { count: drafts.length })}</span> : null}
 					{item.forgeLogin ? <span className="text-[9px] text-muted-foreground">{t("pullRequests.code.submittingAs", { login: item.forgeLogin })}</span> : null}
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								size="icon-xs"
+								variant="outline"
+								aria-label={t("pullRequests.code.reviewWithAgent")}
+								aria-expanded={agentPanelOpen}
+								onClick={() => { setAgentPanelOpen((current) => !current); setAgentError(null); }}
+								disabled={reviewProviders.length === 0 || agentPendingKey != null}
+							>
+								<Sparkles className="size-3" />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="top">{t("pullRequests.code.reviewWithAgent")}</TooltipContent>
+					</Tooltip>
 					<div className="ml-auto flex items-center gap-1 rounded-lg bg-muted/50 p-1">
 						{(["comment", "approve", "request_changes"] as const).map((event) => {
 							const unsupported = event === "approve" ? !detail?.reviewCapabilities.approve : event === "request_changes" ? !detail?.reviewCapabilities.requestChanges : false;
@@ -402,6 +620,7 @@ export function PullRequestCodeReview({
 					</Button>
 				</div>
 				{submitMutation.isError ? <p className="mt-2 flex items-center gap-1.5 text-[10px] text-red-500"><CircleAlert className="size-3" />{submitMutation.error instanceof Error ? submitMutation.error.message : t("pullRequests.code.reviewError")}</p> : null}
+				{replyMutation.isError || resolveMutation.isError || agentError ? <p className="mt-2 flex items-center gap-1.5 text-[10px] text-red-500"><CircleAlert className="size-3" />{agentError ?? (replyMutation.error instanceof Error ? replyMutation.error.message : resolveMutation.error instanceof Error ? resolveMutation.error.message : t("pullRequests.code.reviewError"))}</p> : null}
 				{submitWarning ? <p className="mt-2 flex items-center gap-1.5 text-[10px] text-amber-500"><CircleAlert className="size-3" />{submitWarning}</p> : null}
 				{submitted ? <p className="mt-2 flex items-center gap-1.5 text-[10px] text-emerald-500"><Check className="size-3" />{t("pullRequests.code.reviewSent")}</p> : null}
 			</footer>

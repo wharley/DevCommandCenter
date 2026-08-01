@@ -40,7 +40,6 @@ type ExecutionDockProps = {
 	setupReport?: WorkspaceSetupReport | null;
 	onReviewChanges?: () => void;
 	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
-	onCreateTaskFromSourceUrl?: (url: string) => Promise<void>;
 	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
 	onSkipRecommendedSetup?: () => Promise<void>;
 };
@@ -73,7 +72,6 @@ export const ExecutionDock = memo(function ExecutionDock({
 	setupReport = null,
 	onReviewChanges,
 	onCreateTaskFromBranch,
-	onCreateTaskFromSourceUrl,
 	onRunRecommendedSetup,
 	onSkipRecommendedSetup,
 }: ExecutionDockProps) {
@@ -96,8 +94,7 @@ export const ExecutionDock = memo(function ExecutionDock({
 	const canChangeOrigin = Boolean(
 		!multiProject &&
 			projectRootPath &&
-			onCreateTaskFromBranch &&
-			onCreateTaskFromSourceUrl,
+			onCreateTaskFromBranch,
 	);
 	const setupCommands =
 		setupReport?.steps
@@ -330,16 +327,12 @@ export const ExecutionDock = memo(function ExecutionDock({
 			</Popover>
 
 			<div className="min-w-0 max-sm:col-span-2 max-sm:row-start-2 max-sm:border-t max-sm:border-emerald-700/15">
-				{canChangeOrigin &&
-				projectRootPath &&
-				onCreateTaskFromBranch &&
-				onCreateTaskFromSourceUrl ? (
+				{canChangeOrigin && projectRootPath && onCreateTaskFromBranch ? (
 					<ExecutionOriginPicker
 						trigger={projectContextControl}
 						projectRootPath={projectRootPath}
 						baseBranch={baseBranch}
 						onCreateFromBranch={onCreateTaskFromBranch}
-						onCreateFromSourceUrl={onCreateTaskFromSourceUrl}
 					/>
 				) : (
 					projectContextControl

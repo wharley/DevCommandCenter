@@ -843,6 +843,66 @@ pub(crate) fn list_merge_request_discussions(
         .map_err(|error| format!("Failed to decode GitLab merge request discussions: {error}"))
 }
 
+pub(crate) fn reply_to_merge_request_discussion_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    merge_request_iid: u32,
+    discussion_id: &str,
+    body: &str,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let project_path = format!("{namespace}/{repo}");
+    let endpoint = format!(
+        "projects/{}/merge_requests/{merge_request_iid}/discussions/{discussion_id}/notes",
+        encode_percent(&project_path),
+    );
+    run_hub_glab_json(
+        root,
+        host,
+        login,
+        &[
+            "api",
+            "--method",
+            "POST",
+            &endpoint,
+            "--raw-field",
+            &format!("body={body}"),
+        ],
+    )
+}
+
+pub(crate) fn set_merge_request_discussion_resolved_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    merge_request_iid: u32,
+    discussion_id: &str,
+    resolved: bool,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let project_path = format!("{namespace}/{repo}");
+    let endpoint = format!(
+        "projects/{}/merge_requests/{merge_request_iid}/discussions/{discussion_id}",
+        encode_percent(&project_path),
+    );
+    run_hub_glab_json(
+        root,
+        host,
+        login,
+        &[
+            "api",
+            "--method",
+            "PUT",
+            &endpoint,
+            "--raw-field",
+            &format!("resolved={resolved}"),
+        ],
+    )
+}
+
 fn run_api_json<T: serde::de::DeserializeOwned>(
     root: &str,
     host: &str,

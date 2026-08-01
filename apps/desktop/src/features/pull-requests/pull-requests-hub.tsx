@@ -1,4 +1,4 @@
-import type { PullRequestHubItem } from "@dcc/contracts";
+import type { ProviderCatalog, ProviderRuntimeConfig, PullRequestHubItem } from "@dcc/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	ArrowUpRight,
@@ -35,6 +35,12 @@ type PullRequestTab = "summary" | "code";
 type PullRequestsHubProps = {
 	onOpenWorkspace: (workspaceId: string) => void;
 	onWorkOnPullRequest: (item: PullRequestHubItem) => Promise<void>;
+	providers: ProviderCatalog["providers"];
+	selectedProviderId: string | null;
+	selectedModelId: string | null;
+	selectedProviderRuntime: ProviderRuntimeConfig | null;
+	onSelectProvider: (providerId: string) => void;
+	onSelectModel: (modelId: string) => void;
 };
 
 const LIST_QUERY_KEY = ["pullRequestHub", "list"] as const;
@@ -86,6 +92,12 @@ function ActorAvatar({ item }: { item: PullRequestHubItem }) {
 export function PullRequestsHub({
 	onOpenWorkspace,
 	onWorkOnPullRequest,
+	providers,
+	selectedProviderId,
+	selectedModelId,
+	selectedProviderRuntime,
+	onSelectProvider,
+	onSelectModel,
 }: PullRequestsHubProps) {
 	const { t, i18n } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -380,6 +392,12 @@ export function PullRequestsHub({
 											? codeDetailQuery.error
 											: null
 									}
+									providers={providers}
+									selectedProviderId={selectedProviderId}
+									selectedModelId={selectedModelId}
+									selectedProviderRuntime={selectedProviderRuntime}
+									onSelectProvider={onSelectProvider}
+									onSelectModel={onSelectModel}
 								/>
 							) : (
 								<div className="mx-auto max-w-4xl space-y-6">

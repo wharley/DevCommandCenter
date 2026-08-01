@@ -156,7 +156,6 @@ type SessionWorkbenchProps = {
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
 	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
-	onCreateTaskFromSourceUrl?: (url: string) => Promise<void>;
 	/** Opens the inspector and previews an implementation delegation diff. */
 	onReviewDelegation?: (delegationId: string) => void;
 	onRerunDelegation?: (input: {
@@ -228,7 +227,6 @@ export function SessionWorkbench({
 	onToggleInspector,
 	onReviewChanges,
 	onCreateTaskFromBranch,
-	onCreateTaskFromSourceUrl,
 	onReviewDelegation,
 	onRerunDelegation,
 	onResolveConflictWithAgent,
@@ -631,7 +629,6 @@ export function SessionWorkbench({
 						onToggleInspector={onToggleInspector}
 						onReviewChanges={onReviewChanges}
 						onCreateTaskFromBranch={onCreateTaskFromBranch}
-						onCreateTaskFromSourceUrl={onCreateTaskFromSourceUrl}
 						onRunRecommendedSetup={handleRunRecommendedSetup}
 						onSkipRecommendedSetup={handleSkipRecommendedSetup}
 						onReviewDelegation={onReviewDelegation}

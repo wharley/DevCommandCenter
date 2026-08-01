@@ -12,8 +12,9 @@ use dcc_tauri::{
         self as session_command_impl, ApplyTaskTitleInput, ApplyTaskTitleOutput,
         ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput, PrepareTurnOutput,
         RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput,
-        WaitMcpOauthInput, WaitMcpOauthOutput,
+        RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
+        SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput, WaitMcpOauthInput,
+        WaitMcpOauthOutput,
     },
     state::SessionCommandState,
 };
@@ -25,6 +26,14 @@ pub async fn start_thread(
     input: StartThreadInput,
 ) -> Result<StartThreadOutput, String> {
     session_command_impl::start_thread(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn run_pull_request_review_agent(
+    state: State<'_, SessionCommandState>,
+    input: RunPullRequestReviewAgentInput,
+) -> Result<RunPullRequestReviewAgentOutput, String> {
+    session_command_impl::run_pull_request_review_agent(state, input).await
 }
 
 #[tauri::command]
