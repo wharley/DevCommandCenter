@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { LazyStreamdown } from "@/components/streamdown-loader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { openExternal } from "@/lib/shell-api";
 import {
 	pullRequestHubComment,
 	pullRequestHubDetail,
@@ -355,7 +356,7 @@ export function PullRequestsHub({
 										size="icon-sm"
 										variant="ghost"
 										aria-label={t("pullRequests.openOnForge")}
-										onClick={() => window.open(selected.url, "_blank", "noopener,noreferrer")}
+										onClick={() => void openExternal(selected.url)}
 									>
 										<ArrowUpRight className="size-3.5" />
 									</Button>
