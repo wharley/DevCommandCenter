@@ -226,7 +226,7 @@ function DiffRow({
 			) : null}
 
 			{isEditing ? (
-				<div className="ml-7 border-b border-l-2 border-sky-500 bg-card px-4 py-3 shadow-sm">
+				<div className="ml-7 w-[348px] rounded-br-xl border-b border-l-2 border-sky-500 bg-card px-3 py-3 shadow-sm">
 					<Textarea
 						autoFocus
 						value={draftBody}
@@ -235,10 +235,20 @@ function DiffRow({
 						className="min-h-20 resize-y text-[12px]"
 					/>
 					<div className="mt-2 flex justify-end gap-2">
-						<Button size="xs" variant="ghost" onClick={onPrepareInlineWithAgent} disabled={agentPendingKey?.startsWith("inline:")}>
-							{agentPendingKey?.startsWith("inline:") ? <Loader2 className="mr-1 size-3 animate-spin" /> : <Sparkles className="mr-1 size-3" />}
-							{t("pullRequests.code.prepareWithAgent")}
-						</Button>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									size="icon-xs"
+									variant="ghost"
+									aria-label={t("pullRequests.code.prepareWithAgent")}
+									onClick={onPrepareInlineWithAgent}
+									disabled={agentPendingKey?.startsWith("inline:")}
+								>
+									{agentPendingKey?.startsWith("inline:") ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent side="top">{t("pullRequests.code.prepareWithAgent")}</TooltipContent>
+						</Tooltip>
 						<Button size="xs" variant="ghost" onClick={onCancelComment}>
 							{t("pullRequests.code.cancel")}
 						</Button>
