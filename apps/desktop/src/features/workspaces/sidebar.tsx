@@ -1003,7 +1003,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						onClick={onOpenPullRequests}
 						aria-current={pullRequestsActive ? "page" : undefined}
 						className={cn(
-							"flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] font-medium transition-colors",
+							"flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] font-medium transition-colors",
 							pullRequestsActive
 								? "bg-accent text-foreground shadow-sm"
 								: "text-muted-foreground hover:bg-accent/50 hover:text-foreground",

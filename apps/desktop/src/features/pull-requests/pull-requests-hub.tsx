@@ -16,8 +16,9 @@ import {
 	Send,
 	UserRoundCheck,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LazyStreamdown } from "@/components/streamdown-loader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -411,13 +412,21 @@ export function PullRequestsHub({
 
 									<section className="border-t border-border/70 pt-5">
 										<h3 className="mb-3 text-[14px] font-medium">{t("pullRequests.activity")}</h3>
-										{detailQuery.isError ? <p className="text-[11px] text-red-500">{detailQuery.error instanceof Error ? detailQuery.error.message : t("pullRequests.detailError")}</p> : (detailQuery.data?.comments.length ?? 0) > 0 ? (
-											<div className="space-y-3">{detailQuery.data?.comments.map((entry) => (
-												<article key={entry.id} className="rounded-xl border border-border/70 bg-card/35 p-3">
-													<div className="flex items-center gap-2 text-[10px] text-muted-foreground"><strong className="font-medium text-foreground">@{entry.author?.login ?? t("pullRequests.unknownAuthor")}</strong><span>·</span><span>{relativeDate(entry.createdAt, i18n.language)}</span></div>
-													<p className="mt-2 whitespace-pre-wrap text-[12px] leading-5">{entry.body}</p>
-												</article>
-											))}</div>
+						{detailQuery.isError ? <p className="text-[11px] text-red-500">{detailQuery.error instanceof Error ? detailQuery.error.message : t("pullRequests.detailError")}</p> : (detailQuery.data?.comments.length ?? 0) > 0 ? (
+							<div className="space-y-3">{detailQuery.data?.comments.map((entry) => (
+								<article key={entry.id} className="rounded-xl border border-border/70 bg-card/35 p-3">
+									<div className="flex items-center gap-2 text-[10px] text-muted-foreground"><strong className="font-medium text-foreground">@{entry.author?.login ?? t("pullRequests.unknownAuthor")}</strong><span>·</span><span>{relativeDate(entry.createdAt, i18n.language)}</span></div>
+									<Suspense fallback={<div className="mt-3 h-12 animate-pulse rounded-lg bg-muted/50" />}>
+										<LazyStreamdown
+											mode="static"
+											controls={false}
+											className="mt-2 min-w-0 overflow-hidden text-[12px] leading-5 [&_a]:break-words [&_img]:max-w-full [&_p]:my-2 [&_table]:my-3 [&_table]:text-[11px]"
+										>
+											{entry.body}
+										</LazyStreamdown>
+									</Suspense>
+								</article>
+							))}</div>
 										) : <p className="text-[11px] text-muted-foreground">{t("pullRequests.noActivity")}</p>}
 									</section>
 								</div>
