@@ -1,8 +1,36 @@
 export function inferProjectIdFromWorkspaceRoot(workspaceRoot: string): string {
-	const normalized = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
+	const normalized = normalizeWorkspaceRoot(workspaceRoot);
 	const lastSegment = normalized.split("/").filter(Boolean).pop() ?? "";
 
 	return sanitizeProjectIdSegment(lastSegment);
+}
+
+export function normalizeWorkspaceRoot(workspaceRoot: string) {
+	return workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
+}
+
+export function repositoryNameFromWorkspaceRoot(workspaceRoot: string) {
+	return (
+		normalizeWorkspaceRoot(workspaceRoot).split("/").filter(Boolean).pop() ??
+		"Project"
+	);
+}
+
+export function includePickedRepository<Repository extends { rootPath: string }>(
+	repositories: readonly Repository[],
+	pickedRepository: Repository | null,
+): Repository[] {
+	if (
+		!pickedRepository ||
+		repositories.some(
+			(repository) =>
+				normalizeWorkspaceRoot(repository.rootPath) ===
+				normalizeWorkspaceRoot(pickedRepository.rootPath),
+		)
+	) {
+		return [...repositories];
+	}
+	return [pickedRepository, ...repositories];
 }
 
 function sanitizeProjectIdSegment(value: string): string {

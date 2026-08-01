@@ -9,7 +9,7 @@ import {
 	LoaderCircle,
 	ShieldCheck,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -35,7 +35,12 @@ import type {
 	WorkspaceBundleCreationResult,
 	WorkspaceCreationResult,
 } from "./use-workspaces";
-import { inferProjectIdFromWorkspaceRoot } from "./create-workspace-dialog.logic";
+import {
+	includePickedRepository,
+	inferProjectIdFromWorkspaceRoot,
+	normalizeWorkspaceRoot,
+	repositoryNameFromWorkspaceRoot,
+} from "./create-workspace-dialog.logic";
 import { listLocalBranches, resolveWorkspaceSourceUrl } from "../../lib/workspace-api";
 import {
 	setupHintsDescription,
@@ -44,6 +49,11 @@ import {
 import { cn } from "@/lib/utils";
 
 type WorkspaceCreationMode = "open" | "clone";
+
+type RepositoryOption = Pick<
+	Repository,
+	"id" | "projectId" | "name" | "rootPath" | "baseBranch"
+>;
 
 export type ExistingRepositoryContext = {
 	projectId: string;
@@ -167,9 +177,19 @@ export function CreateWorkspaceDialog({
 	const [selectedSingleRepositoryId, setSelectedSingleRepositoryId] = useState<
 		string | null
 	>(null);
+	const [pickedRepository, setPickedRepository] =
+		useState<RepositoryOption | null>(null);
+	const branchLoadSequenceRef = useRef(0);
+	const suppressCloseAutoFocusRef = useRef(false);
+	const singleRepositoryOptions = useMemo<RepositoryOption[]>(
+		() => includePickedRepository(repositories, pickedRepository),
+		[pickedRepository, repositories],
+	);
 
 	useEffect(() => {
 		if (open) {
+			branchLoadSequenceRef.current += 1;
+			suppressCloseAutoFocusRef.current = false;
 			const contextRepository = repositoryContext
 				? repositories.find(
 						(repository) => repository.rootPath === repositoryContext.workspaceRoot,
@@ -196,13 +216,14 @@ export function CreateWorkspaceDialog({
 			setIsResolvingSource(false);
 			setSelectedRepositoryIds([]);
 			setSelectedSingleRepositoryId(initialRepository?.id ?? null);
+			setPickedRepository(null);
 			if (mode === "open" && initialForm.workspaceRoot.trim().length > 0) {
 				void loadBranchesForWorkspaceRoot(initialForm.workspaceRoot);
 			}
 		}
 	}, [mode, open, repositoryContext]);
 
-	function selectSingleRepository(repository: Repository) {
+	function selectSingleRepository(repository: RepositoryOption) {
 		setSelectedSingleRepositoryId(repository.id);
 		setForm((current) => ({
 			...current,
@@ -213,20 +234,36 @@ export function CreateWorkspaceDialog({
 		void loadBranchesForWorkspaceRoot(repository.rootPath);
 	}
 
-	async function loadBranchesForWorkspaceRoot(workspaceRoot: string) {
+	async function loadBranchesForWorkspaceRoot(
+		workspaceRoot: string,
+	): Promise<string[] | null> {
 		if (mode !== "open" || workspaceRoot.trim().length === 0) {
 			setAvailableBranches([]);
-			return;
+			return [];
 		}
 
+		const requestSequence = ++branchLoadSequenceRef.current;
+		const requestedRoot = workspaceRoot.trim();
 		setIsLoadingBranches(true);
 		try {
 			const result = await listLocalBranches({
-				workspaceRoot: workspaceRoot.trim(),
+				workspaceRoot: requestedRoot,
 			});
+			if (requestSequence !== branchLoadSequenceRef.current) {
+				return null;
+			}
 			setAvailableBranches(result.branches);
 			setForm((current) => {
-				if (current.baseBranch.trim().length > 0 && result.branches.includes(current.baseBranch)) {
+				if (
+					normalizeWorkspaceRoot(current.workspaceRoot) !==
+					normalizeWorkspaceRoot(requestedRoot)
+				) {
+					return current;
+				}
+				if (
+					current.baseBranch.trim().length > 0 &&
+					result.branches.includes(current.baseBranch)
+				) {
 					return current;
 				}
 
@@ -235,19 +272,27 @@ export function CreateWorkspaceDialog({
 					baseBranch: result.branches[0] ?? "",
 				};
 			});
+			return result.branches;
 		} catch (error) {
+			if (requestSequence !== branchLoadSequenceRef.current) {
+				return null;
+			}
 			setAvailableBranches([]);
-			setForm((current) => ({
-				...current,
-				baseBranch: "",
-			}));
-			setSelectedSingleRepositoryId(null);
+			setForm((current) =>
+				normalizeWorkspaceRoot(current.workspaceRoot) ===
+				normalizeWorkspaceRoot(requestedRoot)
+					? { ...current, baseBranch: "" }
+					: current,
+			);
 			const message = error instanceof Error ? error.message : String(error);
 			toast.error(t("workspaceDialog.toastLoadBranchesError"), {
 				description: message,
 			});
+			return null;
 		} finally {
-			setIsLoadingBranches(false);
+			if (requestSequence === branchLoadSequenceRef.current) {
+				setIsLoadingBranches(false);
+			}
 		}
 	}
 
@@ -269,17 +314,53 @@ export function CreateWorkspaceDialog({
 			if (!pickedPath) {
 				return;
 			}
+			if (mode === "clone") {
+				setForm((current) => ({
+					...current,
+					workspaceRoot: pickedPath,
+					projectId:
+						current.projectId.trim().length > 0
+							? current.projectId
+							: inferProjectIdFromWorkspaceRoot(pickedPath),
+				}));
+				return;
+			}
+
+			const normalizedPickedPath = normalizeWorkspaceRoot(pickedPath);
+			const trackedRepository = repositories.find(
+				(repository) =>
+					normalizeWorkspaceRoot(repository.rootPath) === normalizedPickedPath,
+			);
+			if (trackedRepository) {
+				setPickedRepository(null);
+				selectSingleRepository(trackedRepository);
+				return;
+			}
+
+			const projectId = inferProjectIdFromWorkspaceRoot(pickedPath);
+			const repositoryOption: RepositoryOption = {
+				id: `picked:${normalizedPickedPath}`,
+				projectId,
+				name: repositoryNameFromWorkspaceRoot(pickedPath),
+				rootPath: pickedPath,
+				baseBranch: "",
+			};
+			setPickedRepository(repositoryOption);
+			setSelectedSingleRepositoryId(repositoryOption.id);
 
 			setForm((current) => ({
 				...current,
 				workspaceRoot: pickedPath,
-				projectId:
-					current.projectId.trim().length > 0
-						? current.projectId
-						: inferProjectIdFromWorkspaceRoot(pickedPath),
+				projectId,
+				baseBranch: "",
 			}));
-			if (mode === "open") {
-				void loadBranchesForWorkspaceRoot(pickedPath);
+			const branches = await loadBranchesForWorkspaceRoot(pickedPath);
+			if (branches) {
+				setPickedRepository((current) =>
+					current?.id === repositoryOption.id
+						? { ...current, baseBranch: branches[0] ?? "" }
+						: current,
+				);
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -374,6 +455,10 @@ export function CreateWorkspaceDialog({
 			return;
 		}
 
+		// Workspace selection can close this dialog before the async submit handler
+		// resumes. Mark the close up front so Radix never restores focus to the
+		// trigger after the newly selected task has focused its composer.
+		suppressCloseAutoFocusRef.current = true;
 		try {
 			if (mode === "open" && creationScope === "multi") {
 				const selectedRepositories = repositories.filter((repository) =>
@@ -422,6 +507,7 @@ export function CreateWorkspaceDialog({
 			}
 			onOpenChange(false);
 		} catch (error) {
+			suppressCloseAutoFocusRef.current = false;
 			const message = error instanceof Error ? error.message : String(error);
 			toast.error(
 				mode === "clone" ? t("workspaceDialog.toastCloneError") : t("workspaceDialog.toastCreateError"),
@@ -442,7 +528,15 @@ export function CreateWorkspaceDialog({
 				onOpenChange(nextOpen);
 			}}
 		>
-			<DialogContent className="max-h-[min(46rem,calc(100vh-2rem))] w-[min(calc(100vw-2rem),38rem)] max-w-[38rem] gap-4 overflow-y-auto overflow-x-hidden p-5 sm:w-[38rem] sm:max-w-[38rem]">
+			<DialogContent
+				onCloseAutoFocus={(event) => {
+					if (suppressCloseAutoFocusRef.current) {
+						event.preventDefault();
+						suppressCloseAutoFocusRef.current = false;
+					}
+				}}
+				className="max-h-[min(46rem,calc(100vh-2rem))] w-[min(calc(100vw-2rem),38rem)] max-w-[38rem] gap-4 overflow-y-auto overflow-x-hidden p-5 sm:w-[38rem] sm:max-w-[38rem]"
+			>
 				<DialogHeader className="min-w-0 space-y-1">
 					<DialogTitle className="text-[15px] font-medium tracking-[-0.015em]">
 						{mode === "clone" ? t("workspaceDialog.cloneTitle") : t("workspaceDialog.createTitle")}
@@ -550,7 +644,7 @@ export function CreateWorkspaceDialog({
 					{mode === "open" &&
 					creationScope === "single" &&
 					repositoryContext === null &&
-					repositories.length > 0 ? (
+					(repositories.length > 0 || pickedRepository !== null) ? (
 						<div className="space-y-2">
 							<div className="flex items-center justify-between gap-3">
 								<div>
@@ -574,7 +668,7 @@ export function CreateWorkspaceDialog({
 								</Button>
 							</div>
 							<div className="grid max-h-36 grid-cols-2 gap-1.5 overflow-y-auto rounded-xl border border-border/60 bg-muted/10 p-2 max-[500px]:grid-cols-1">
-								{repositories.map((repository) => {
+								{singleRepositoryOptions.map((repository) => {
 									const selected = selectedSingleRepositoryId === repository.id;
 									return (
 										<button
@@ -598,9 +692,11 @@ export function CreateWorkspaceDialog({
 													{repository.name}
 												</strong>
 												<small className="block truncate text-[9.5px] text-muted-foreground">
-													{t("workspaceDialog.basePreview", {
-														branch: repository.baseBranch,
-													})}
+													{selected && isLoadingBranches && !repository.baseBranch
+														? t("workspaceDialog.loadingBranches")
+														: t("workspaceDialog.basePreview", {
+																branch: repository.baseBranch,
+															})}
 												</small>
 											</span>
 											{selected ? (

@@ -4034,6 +4034,9 @@ export default function App() {
 								onOpenChange={handleWorkspaceDialogOpenChange}
 								onCreateWorkspace={async (input) => {
 									const result = await createWorkspace(input);
+									void queryClient.invalidateQueries({
+										queryKey: ["repositories", backendCacheKey],
+									});
 									requestNewTaskComposerFocus(result.workspace.id);
 									return result;
 								}}
@@ -4053,6 +4056,9 @@ export default function App() {
 								}}
 								onCloneWorkspace={async (input) => {
 									const result = await cloneWorkspaceFromUrl(input);
+									void queryClient.invalidateQueries({
+										queryKey: ["repositories", backendCacheKey],
+									});
 									requestNewTaskComposerFocus(result.workspace.id);
 									return result;
 								}}
