@@ -384,16 +384,21 @@ export function PullRequestCodeReview({
 						})}
 					</div>
 				</div>
-				<div className="mt-2 flex items-end gap-2">
+				<div className="mt-2 flex items-end gap-2 rounded-xl border border-border bg-muted/25 p-2 focus-within:border-ring">
 					<Textarea
 						value={reviewBody}
 						onChange={(event) => { setReviewBody(event.target.value); setSubmitted(false); setSubmitWarning(null); }}
 						placeholder={t(`pullRequests.code.reviewPlaceholders.${reviewEvent}`)}
-						className="min-h-14 flex-1 resize-y text-[11px]"
+						className="min-h-14 flex-1 resize-y border-0 bg-transparent text-[11px] shadow-none focus-visible:ring-0 dark:bg-transparent"
 					/>
-					<Button disabled={!canSubmit} onClick={() => submitMutation.mutate()}>
-						{submitMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Send className="mr-1.5 size-3.5" />}
-						{t("pullRequests.code.sendReview")}
+					<Button
+						size="icon-sm"
+						aria-label={t("pullRequests.code.sendReview")}
+						title={t("pullRequests.code.sendReview")}
+						disabled={!canSubmit}
+						onClick={() => submitMutation.mutate()}
+					>
+						{submitMutation.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
 					</Button>
 				</div>
 				{submitMutation.isError ? <p className="mt-2 flex items-center gap-1.5 text-[10px] text-red-500"><CircleAlert className="size-3" />{submitMutation.error instanceof Error ? submitMutation.error.message : t("pullRequests.code.reviewError")}</p> : null}
