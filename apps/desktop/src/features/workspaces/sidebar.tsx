@@ -4,6 +4,7 @@ import {
 	ChevronRight,
 	Clock3,
 	FolderPlus,
+	GitPullRequest,
 	Loader2,
 	MoreHorizontal,
 	PanelLeft,
@@ -216,6 +217,8 @@ type WorkspacesSidebarProps = {
 	skillCount?: number;
 	onOpenSettings: () => void;
 	onOpenSkills: () => void;
+	onOpenPullRequests: () => void;
+	pullRequestsActive?: boolean;
 	onToggleCollapsed: () => void;
 	onArchiveWorkspace?: (workspaceId: string) => void;
 	onCompleteWorkspace?: (workspaceId: string) => void | Promise<void>;
@@ -257,6 +260,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	skillCount = 0,
 	onOpenSettings,
 	onOpenSkills,
+	onOpenPullRequests,
+	pullRequestsActive = false,
 	onToggleCollapsed,
 	onArchiveWorkspace,
 	onCompleteWorkspace,
@@ -805,6 +810,25 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					</TooltipTrigger>
 					<TooltipContent side="right">{t("sidebar.expandSidebar")}</TooltipContent>
 				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-xs"
+							onClick={onOpenPullRequests}
+							aria-current={pullRequestsActive ? "page" : undefined}
+							aria-label={t("sidebar.pullRequests")}
+							className={cn(
+								"text-muted-foreground hover:text-foreground",
+								pullRequestsActive && "bg-accent text-foreground",
+							)}
+						>
+							<GitPullRequest className="size-4" strokeWidth={1.9} />
+						</Button>
+					</TooltipTrigger>
+					<TooltipContent side="right">{t("sidebar.pullRequests")}</TooltipContent>
+				</Tooltip>
 
 				{workspaces.length > 0 ? (
 					<>
@@ -971,6 +995,23 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						</TooltipTrigger>
 						<TooltipContent side="bottom">{t("sidebar.collapseSidebar")}</TooltipContent>
 					</Tooltip>
+				</div>
+
+				<div className="px-2 pb-3 pt-1">
+					<button
+						type="button"
+						onClick={onOpenPullRequests}
+						aria-current={pullRequestsActive ? "page" : undefined}
+						className={cn(
+							"flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] font-medium transition-colors",
+							pullRequestsActive
+								? "bg-accent text-foreground shadow-sm"
+								: "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+						)}
+					>
+						<GitPullRequest className="size-4" strokeWidth={1.9} />
+						<span>{t("sidebar.pullRequests")}</span>
+					</button>
 				</div>
 
 				<div className="flex items-center justify-between px-3">

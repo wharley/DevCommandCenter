@@ -1,4 +1,5 @@
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -935,6 +936,187 @@ pub(crate) fn create_change_request(
         "gh pr create failed: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     ))
+}
+
+fn run_hub_gh_json(
+    root: &str,
+    host: &str,
+    login: Option<&str>,
+    args: &[&str],
+) -> Result<Value, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let gh = resolve_cli_binary("gh")?;
+    let mut command = Command::new(gh);
+    command.current_dir(root).args(args).env("GH_HOST", host);
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "GitHub CLI request failed.".to_string()
+        } else {
+            stderr
+        });
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitHub response: {error}"))
+}
+
+pub(crate) fn list_pull_requests_json(
+    root: &str,
+    host: &str,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    run_hub_gh_json(
+        root,
+        host,
+        login,
+        &[
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,title,url,state,isDraft,headRefName,baseRefName,author,reviewDecision,reviewRequests,latestReviews,additions,deletions,changedFiles,comments,statusCheckRollup,updatedAt,body",
+        ],
+    )
+}
+
+pub(crate) fn pull_request_detail_json(
+    root: &str,
+    host: &str,
+    number: u32,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    run_hub_gh_json(
+        root,
+        host,
+        login,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "body,comments,statusCheckRollup",
+        ],
+    )
+}
+
+pub(crate) fn pull_request_files_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    number: u32,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let endpoint = format!("/repos/{namespace}/{repo}/pulls/{number}/files?per_page=100");
+    let pages = run_hub_gh_json(
+        root,
+        host,
+        login,
+        &[
+            "api",
+            "--hostname",
+            host,
+            "--paginate",
+            "--slurp",
+            &endpoint,
+        ],
+    )?;
+    let files = pages
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|page| page.as_array().into_iter().flatten().cloned())
+        .collect();
+    Ok(Value::Array(files))
+}
+
+pub(crate) fn submit_pull_request_review_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    number: u32,
+    payload: &Value,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let endpoint = format!("/repos/{namespace}/{repo}/pulls/{number}/reviews");
+    let gh = resolve_cli_binary("gh")?;
+    let mut command = Command::new(gh);
+    command
+        .current_dir(root)
+        .args([
+            "api",
+            "--hostname",
+            host,
+            "--method",
+            "POST",
+            &endpoint,
+            "--input",
+            "-",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let payload = serde_json::to_vec(payload)
+        .map_err(|error| format!("Failed to encode GitHub review: {error}"))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| "Failed to open GitHub review input.".to_string())?
+        .write_all(&payload)
+        .map_err(|error| error.to_string())?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let detail = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Err(detail.trim().to_string());
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitHub review response: {error}"))
+}
+
+pub(crate) fn create_pull_request_comment_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    number: u32,
+    body: &str,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let endpoint = format!("/repos/{namespace}/{repo}/issues/{number}/comments");
+    run_hub_gh_json(
+        root,
+        host,
+        login,
+        &[
+            "api",
+            "--hostname",
+            host,
+            "--method",
+            "POST",
+            &endpoint,
+            "--raw-field",
+            &format!("body={body}"),
+        ],
+    )
 }
 
 #[cfg(test)]

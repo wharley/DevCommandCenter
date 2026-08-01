@@ -1344,6 +1344,194 @@ pub(crate) fn create_change_request(
     ))
 }
 
+fn run_hub_glab_json(
+    root: &str,
+    host: &str,
+    login: Option<&str>,
+    args: &[&str],
+) -> Result<Value, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let glab = resolve_cli_binary("glab")?;
+    let mut command = Command::new(glab);
+    command
+        .current_dir(root)
+        .args(args)
+        .arg("--hostname")
+        .arg(host);
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "GitLab CLI request failed.".to_string()
+        } else {
+            stderr
+        });
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitLab response: {error}"))
+}
+
+pub(crate) fn list_merge_requests_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let project_path = format!("{namespace}/{repo}");
+    let endpoint = format!(
+        "projects/{}/merge_requests?state=opened&scope=all&order_by=updated_at&sort=desc&per_page=100",
+        encode_percent(&project_path)
+    );
+    run_hub_glab_json(root, host, login, &["api", &endpoint])
+}
+
+pub(crate) fn merge_request_detail_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    number: u32,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let project_path = format!("{namespace}/{repo}");
+    let project = encode_percent(&project_path);
+    let detail_endpoint = format!("projects/{project}/merge_requests/{number}");
+    let notes_endpoint = format!("projects/{project}/merge_requests/{number}/notes?per_page=100");
+    let pipelines_endpoint =
+        format!("projects/{project}/merge_requests/{number}/pipelines?per_page=100");
+    let detail = run_hub_glab_json(root, host, login, &["api", &detail_endpoint])?;
+    let notes = run_hub_glab_json(root, host, login, &["api", &notes_endpoint])
+        .unwrap_or_else(|_| Value::Array(Vec::new()));
+    let pipelines = run_hub_glab_json(root, host, login, &["api", &pipelines_endpoint])
+        .unwrap_or_else(|_| Value::Array(Vec::new()));
+    Ok(serde_json::json!({
+        "detail": detail,
+        "comments": notes,
+        "pipelines": pipelines,
+    }))
+}
+
+pub(crate) fn merge_request_changes_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    number: u32,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let project_path = format!("{namespace}/{repo}");
+    let endpoint = format!(
+        "projects/{}/merge_requests/{number}/changes",
+        encode_percent(&project_path)
+    );
+    run_hub_glab_json(root, host, login, &["api", &endpoint])
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_merge_request_discussion_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    number: u32,
+    body: &str,
+    old_path: &str,
+    new_path: &str,
+    line: u32,
+    side: &str,
+    base_sha: &str,
+    start_sha: &str,
+    head_sha: &str,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let project_path = format!("{namespace}/{repo}");
+    let endpoint = format!(
+        "projects/{}/merge_requests/{number}/discussions",
+        encode_percent(&project_path)
+    );
+    let line_field = if side.eq_ignore_ascii_case("left") {
+        format!("position[old_line]={line}")
+    } else {
+        format!("position[new_line]={line}")
+    };
+    run_hub_glab_json(
+        root,
+        host,
+        login,
+        &[
+            "api",
+            "--method",
+            "POST",
+            &endpoint,
+            "--raw-field",
+            &format!("body={body}"),
+            "--raw-field",
+            "position[position_type]=text",
+            "--raw-field",
+            &format!("position[base_sha]={base_sha}"),
+            "--raw-field",
+            &format!("position[start_sha]={start_sha}"),
+            "--raw-field",
+            &format!("position[head_sha]={head_sha}"),
+            "--raw-field",
+            &format!("position[old_path]={old_path}"),
+            "--raw-field",
+            &format!("position[new_path]={new_path}"),
+            "--raw-field",
+            &line_field,
+        ],
+    )
+}
+
+pub(crate) fn approve_merge_request_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    number: u32,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let project_path = format!("{namespace}/{repo}");
+    let endpoint = format!(
+        "projects/{}/merge_requests/{number}/approve",
+        encode_percent(&project_path)
+    );
+    run_hub_glab_json(root, host, login, &["api", "--method", "POST", &endpoint])
+}
+
+pub(crate) fn create_merge_request_comment_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    number: u32,
+    body: &str,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let project_path = format!("{namespace}/{repo}");
+    let endpoint = format!(
+        "projects/{}/merge_requests/{number}/notes",
+        encode_percent(&project_path)
+    );
+    run_hub_glab_json(
+        root,
+        host,
+        login,
+        &[
+            "api",
+            "--method",
+            "POST",
+            &endpoint,
+            "--raw-field",
+            &format!("body={body}"),
+        ],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

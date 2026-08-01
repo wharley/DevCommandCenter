@@ -41,6 +41,7 @@
   },
   "sidebar": {
     "title": "Projetos",
+    "pullRequests": "Pull Requests",
     "waiting": "Em espera",
     "completed": "Concluídos",
     "workspaceCount_one": "{{count}} workspace",
@@ -142,6 +143,97 @@
       "inspectorFiles": "Abrir arquivos no Inspector",
       "inspectorActivity": "Abrir atividade da sessão",
       "inspectorDetails": "Abrir detalhes do workspace"
+    }
+  },
+  "pullRequests": {
+    "title": "Pull Requests",
+    "subtitle": "Todos os projetos, sem criar uma tarefa",
+    "refresh": "Atualizar pull requests",
+    "search": "Buscar pull requests",
+    "filters": {
+      "all": "Todos",
+      "reviewing": "Revisando",
+      "mine": "Criados por você"
+    },
+    "tabs": {
+      "summary": "Resumo",
+      "code": "Código"
+    },
+    "empty": "Nenhum pull request encontrado",
+    "emptyHint": "Abra um PR nos projetos adicionados ou ajuste os filtros.",
+    "loadError": "Não foi possível carregar os pull requests.",
+    "detailError": "Não foi possível carregar os detalhes deste PR.",
+    "partialWarning": "{{count}} projeto(s) não pôde/puderam ser consultado(s)",
+    "selectPrompt": "Selecione um pull request para revisar",
+    "unknownAuthor": "autor desconhecido",
+    "noSelection": "Nenhum pull request selecionado.",
+    "openTask": "Abrir tarefa",
+    "workOn": "Trabalhar neste PR",
+    "openOnForge": "Abrir no provedor Git",
+    "branch": "Branch",
+    "reviewers": "Revisores",
+    "noReviewers": "Nenhum revisor solicitado",
+    "comments": "Comentários",
+    "checks": "Verificações",
+    "description": "Descrição",
+    "noDescription": "Nenhuma descrição fornecida.",
+    "noChecks": "Nenhuma verificação encontrada.",
+    "activity": "Atividade",
+    "noActivity": "Ainda não há comentários neste pull request.",
+    "commentPlaceholder": "Deixe um comentário no pull request…",
+    "sendComment": "Enviar comentário",
+    "commentError": "Não foi possível enviar o comentário.",
+    "checkStates": {
+      "success": "Bem-sucedidas",
+      "failure": "Com falhas",
+      "pending": "Em andamento",
+      "skipped": "Ignoradas",
+      "unknown": "Sem status"
+    },
+    "code": {
+      "title": "Visão da alteração",
+      "description": "Resumo do impacto antes de decidir abrir um worktree protegido.",
+      "files": "arquivos",
+      "additions": "adições",
+      "deletions": "remoções",
+      "changedFiles": "{{count}} arquivos alterados",
+      "noFiles": "Nenhum arquivo alterado encontrado",
+      "noFilesHint": "O provedor não retornou mudanças para este pull request.",
+      "patchUnavailable": "O patch deste arquivo não está disponível no provedor.",
+      "addInlineComment": "Comentar na linha {{line}}",
+      "inlinePlaceholder": "Comentário sobre {{path}}…",
+      "cancel": "Cancelar",
+      "addToReview": "Adicionar à revisão",
+      "pendingComment": "Comentário pendente",
+      "removePendingComment": "Remover comentário pendente",
+      "resolved": "Resolvido",
+      "submitReview": "Enviar revisão",
+      "pendingCount_one": "{{count}} comentário pendente",
+      "pendingCount_other": "{{count}} comentários pendentes",
+      "reviewEvents": {
+        "comment": "Comentar",
+        "approve": "Aprovar",
+        "request_changes": "Solicitar alterações"
+      },
+      "reviewPlaceholders": {
+        "comment": "Resumo opcional da revisão…",
+        "approve": "Mensagem opcional de aprovação…",
+        "request_changes": "Explique quais alterações são necessárias…"
+      },
+      "sendReview": "Enviar revisão",
+      "reviewError": "Não foi possível enviar a revisão.",
+      "reviewSent": "Revisão enviada com sucesso.",
+      "unsupportedReviewAction": "Esta ação formal não é suportada pelo provedor.",
+      "ownPullRequestRestriction": "Você não pode aprovar ou solicitar alterações no próprio PR.",
+      "draftRestriction": "PRs em rascunho ainda não podem receber esta decisão.",
+      "submittingAs": "Enviando como @{{login}}",
+      "fileStatuses": {
+        "added": "adicionado",
+        "modified": "modificado",
+        "removed": "removido",
+        "renamed": "renomeado",
+        "changed": "alterado"
+      }
     }
   },
   "workspaceDialog": {

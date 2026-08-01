@@ -39,6 +39,14 @@ import type {
 	ForgeCliStatusOutput,
 	GithubCliStatusInput,
 	GithubCliStatusOutput,
+	PullRequestHubCommentInput,
+	PullRequestHubCommentOutput,
+	PullRequestHubDetailInput,
+	PullRequestHubDetailOutput,
+	PullRequestHubListInput,
+	PullRequestHubListOutput,
+	PullRequestHubSubmitReviewInput,
+	PullRequestHubSubmitReviewOutput,
 	ListChildDirectoriesInput,
 	ListChildDirectoriesOutput,
 	ListGitTrackedFilesInput,
@@ -597,6 +605,31 @@ export function workspacePrStatus(input: WorkspacePrStatusInput) {
 	return invoke<WorkspacePrStatusOutput>(WORKSPACE_METHODS.workspacePrStatus, {
 		input,
 	});
+}
+
+export function pullRequestHubList(input: PullRequestHubListInput = {}) {
+	return invoke<PullRequestHubListOutput>(WORKSPACE_METHODS.pullRequestHubList, {
+		input,
+	});
+}
+
+export function pullRequestHubDetail(input: PullRequestHubDetailInput) {
+	return invoke<PullRequestHubDetailOutput>(WORKSPACE_METHODS.pullRequestHubDetail, {
+		input,
+	});
+}
+
+export function pullRequestHubComment(input: PullRequestHubCommentInput) {
+	return invoke<PullRequestHubCommentOutput>(WORKSPACE_METHODS.pullRequestHubComment, {
+		input,
+	});
+}
+
+export function pullRequestHubSubmitReview(input: PullRequestHubSubmitReviewInput) {
+	return invoke<PullRequestHubSubmitReviewOutput>(
+		WORKSPACE_METHODS.pullRequestHubSubmitReview,
+		{ input },
+	);
 }
 
 export function workspacePrReviewComments(input: WorkspacePrReviewCommentsInput) {

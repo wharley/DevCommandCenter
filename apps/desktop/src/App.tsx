@@ -17,6 +17,7 @@ import type {
 	Delegation,
 	DelegationContextPolicy,
 	MissionSpecEntry,
+	PullRequestHubItem,
 	ProviderCatalog,
 	Repository,
 	SessionEventRecord,
@@ -80,6 +81,7 @@ import {
 } from "./features/sessions/session-workbench";
 import { SessionSearchDialog } from "./features/sessions/session-search-dialog";
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
+import { PullRequestsHub } from "./features/pull-requests/pull-requests-hub";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
 import {
 	workspaceSessionSnapshotFromSummary,
@@ -927,6 +929,7 @@ export default function App() {
 		useState<ExistingRepositoryContext | null>(null);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [isSkillsOpen, setIsSkillsOpen] = useState(false);
+	const [globalSurface, setGlobalSurface] = useState<"pullRequests" | null>(null);
 	const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
 	const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
 	const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
@@ -1270,6 +1273,42 @@ export default function App() {
 		[
 			activeProjectId,
 			activeProjectRootPath,
+			backendCacheKey,
+			createWorkspaceFromSourceUrl,
+			queryClient,
+			requestNewTaskComposerFocus,
+			t,
+		],
+	);
+	const handleSelectWorkspaceSurface = useCallback(
+		(workspaceId: string) => {
+			setGlobalSurface(null);
+			setSelectedWorkspaceId(workspaceId);
+		},
+		[setSelectedWorkspaceId],
+	);
+	const handleWorkOnPullRequest = useCallback(
+		async (pullRequest: PullRequestHubItem) => {
+			const result = await createWorkspaceFromSourceUrl({
+				projectId: pullRequest.projectId,
+				workspaceRoot: pullRequest.repositoryRoot,
+				url: pullRequest.url,
+				name: null,
+				forgeLogin: pullRequest.forgeLogin,
+			});
+			notifyWorkspaceCreationResult(t, "open", result);
+			await Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: ["workspaces", backendCacheKey],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["pullRequestHub", "list"],
+				}),
+			]);
+			setGlobalSurface(null);
+			requestNewTaskComposerFocus(result.workspace.id);
+		},
+		[
 			backendCacheKey,
 			createWorkspaceFromSourceUrl,
 			queryClient,
@@ -3223,6 +3262,7 @@ export default function App() {
 	const handleSelectSessionSearchResult = useCallback(
 		async (result: SessionSearchResult) => {
 			try {
+				setGlobalSurface(null);
 				if (result.archivedAt) {
 					await restoreSession({ sessionId: result.sessionId });
 				}
@@ -3932,16 +3972,27 @@ export default function App() {
 							isCreatingWorkspace={isCreatingWorkspace}
 							showAgentStates={!isRemoteBackend}
 							sessionQueryScope={backendCacheKey}
-							onSelectWorkspace={setSelectedWorkspaceId}
-							onCreateWorkspace={() => openWorkspaceDialog("open")}
-							onCloneWorkspace={() => openWorkspaceDialog("clone")}
+							onSelectWorkspace={handleSelectWorkspaceSurface}
+							onCreateWorkspace={() => {
+								setGlobalSurface(null);
+								openWorkspaceDialog("open");
+							}}
+							onCloneWorkspace={() => {
+								setGlobalSurface(null);
+								openWorkspaceDialog("clone");
+							}}
 							onCreateWorkspaceFromProject={
 								isRemoteBackend
 									? undefined
-									: (repository) => void handleQuickCreateTask(repository)
+									: (repository) => {
+										setGlobalSurface(null);
+										void handleQuickCreateTask(repository);
+									}
 							}
 							onOpenSettings={() => setIsSettingsOpen(true)}
 							onOpenSkills={() => setIsSkillsOpen(true)}
+							onOpenPullRequests={() => setGlobalSurface("pullRequests")}
+							pullRequestsActive={globalSurface === "pullRequests"}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
 							onArchiveWorkspace={
 								isRemoteBackend ? handleRemoteWorkspaceMutation : handleArchiveWorkspace
@@ -3958,7 +4009,9 @@ export default function App() {
 							onDeleteProject={isRemoteBackend ? undefined : handleDeleteProject}
 							repositories={repositoriesFromBackend}
 							skillCount={skillContextCount}
-							selectedWorkspaceId={selectedWorkspaceId}
+							selectedWorkspaceId={
+								globalSurface === "pullRequests" ? null : selectedWorkspaceId
+							}
 							workspaces={filteredWorkspaces}
 						/>
 					</aside>
@@ -3994,9 +4047,15 @@ export default function App() {
 								onOpenChange={setIsCommandPaletteOpen}
 								workspaces={allWorkspaces}
 								selectedWorkspaceId={selectedWorkspaceId}
-								onSelectWorkspace={setSelectedWorkspaceId}
-								onCreateWorkspace={() => openWorkspaceDialog("open")}
-								onCloneWorkspace={() => openWorkspaceDialog("clone")}
+								onSelectWorkspace={handleSelectWorkspaceSurface}
+								onCreateWorkspace={() => {
+									setGlobalSurface(null);
+									openWorkspaceDialog("open");
+								}}
+								onCloneWorkspace={() => {
+									setGlobalSurface(null);
+									openWorkspaceDialog("clone");
+								}}
 								onOpenSettings={() => setIsSettingsOpen(true)}
 								onOpenOnboarding={() => setIsOnboardingOpen(true)}
 								onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
@@ -4065,7 +4124,12 @@ export default function App() {
 								repositories={repositoriesFromBackend}
 								isSubmitting={isCreatingWorkspace}
 							/>
-							{hasWorkspace && selectedWorkspace ? (
+							{globalSurface === "pullRequests" ? (
+								<PullRequestsHub
+									onOpenWorkspace={handleSelectWorkspaceSurface}
+									onWorkOnPullRequest={handleWorkOnPullRequest}
+								/>
+							) : hasWorkspace && selectedWorkspace ? (
 								<SessionWorkbench
 									workspaceId={selectedWorkspace.id}
 									workspaceName={selectedWorkspace.name}
@@ -4171,7 +4235,7 @@ export default function App() {
 						</div>
 					</section>
 
-					{!inspectorCollapsed && (
+					{globalSurface !== "pullRequests" && !inspectorCollapsed && (
 						<>
 							<ResizeSeparator
 								side="right"

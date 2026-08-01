@@ -41,6 +41,7 @@
   },
   "sidebar": {
     "title": "Projects",
+    "pullRequests": "Pull Requests",
     "waiting": "On hold",
     "completed": "Completed",
     "workspaceCount_one": "{{count}} workspace",
@@ -142,6 +143,97 @@
       "inspectorFiles": "Open Inspector files",
       "inspectorActivity": "Open session activity",
       "inspectorDetails": "Open workspace details"
+    }
+  },
+  "pullRequests": {
+    "title": "Pull Requests",
+    "subtitle": "Every project, without creating a task",
+    "refresh": "Refresh pull requests",
+    "search": "Search pull requests",
+    "filters": {
+      "all": "All",
+      "reviewing": "Reviewing",
+      "mine": "Created by you"
+    },
+    "tabs": {
+      "summary": "Summary",
+      "code": "Code"
+    },
+    "empty": "No pull requests found",
+    "emptyHint": "Open a PR in an added project or adjust the filters.",
+    "loadError": "Pull requests could not be loaded.",
+    "detailError": "This pull request's details could not be loaded.",
+    "partialWarning": "{{count}} project(s) could not be queried",
+    "selectPrompt": "Select a pull request to review",
+    "unknownAuthor": "unknown author",
+    "noSelection": "No pull request selected.",
+    "openTask": "Open task",
+    "workOn": "Work on this PR",
+    "openOnForge": "Open on Git provider",
+    "branch": "Branch",
+    "reviewers": "Reviewers",
+    "noReviewers": "No reviewers requested",
+    "comments": "Comments",
+    "checks": "Checks",
+    "description": "Description",
+    "noDescription": "No description provided.",
+    "noChecks": "No checks found.",
+    "activity": "Activity",
+    "noActivity": "There are no comments on this pull request yet.",
+    "commentPlaceholder": "Leave a comment on the pull request…",
+    "sendComment": "Send comment",
+    "commentError": "The comment could not be sent.",
+    "checkStates": {
+      "success": "Successful",
+      "failure": "Failed",
+      "pending": "In progress",
+      "skipped": "Skipped",
+      "unknown": "No status"
+    },
+    "code": {
+      "title": "Change overview",
+      "description": "Understand the impact before deciding to open a protected worktree.",
+      "files": "files",
+      "additions": "additions",
+      "deletions": "deletions",
+      "changedFiles": "{{count}} changed files",
+      "noFiles": "No changed files found",
+      "noFilesHint": "The provider did not return changes for this pull request.",
+      "patchUnavailable": "The patch for this file is not available from the provider.",
+      "addInlineComment": "Comment on line {{line}}",
+      "inlinePlaceholder": "Comment on {{path}}…",
+      "cancel": "Cancel",
+      "addToReview": "Add to review",
+      "pendingComment": "Pending comment",
+      "removePendingComment": "Remove pending comment",
+      "resolved": "Resolved",
+      "submitReview": "Submit review",
+      "pendingCount_one": "{{count}} pending comment",
+      "pendingCount_other": "{{count}} pending comments",
+      "reviewEvents": {
+        "comment": "Comment",
+        "approve": "Approve",
+        "request_changes": "Request changes"
+      },
+      "reviewPlaceholders": {
+        "comment": "Optional review summary…",
+        "approve": "Optional approval message…",
+        "request_changes": "Explain which changes are required…"
+      },
+      "sendReview": "Submit review",
+      "reviewError": "The review could not be submitted.",
+      "reviewSent": "Review submitted successfully.",
+      "unsupportedReviewAction": "The provider does not support this formal review action.",
+      "ownPullRequestRestriction": "You cannot approve or request changes on your own PR.",
+      "draftRestriction": "Draft pull requests cannot receive this decision yet.",
+      "submittingAs": "Submitting as @{{login}}",
+      "fileStatuses": {
+        "added": "added",
+        "modified": "modified",
+        "removed": "removed",
+        "renamed": "renamed",
+        "changed": "changed"
+      }
     }
   },
   "workspaceDialog": {

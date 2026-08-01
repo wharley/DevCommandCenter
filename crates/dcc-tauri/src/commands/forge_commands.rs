@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use specta::Type;
 use tauri::State;
 
 use dcc_core::domain::workspace::{WorkspaceSource, WorkspaceSourceKind};
+use dcc_core::ports::{RepositoryRepo, WorkspaceRepo};
 use dcc_infra::db::SqliteWorkspaceRepo;
 
 use crate::{
@@ -167,6 +169,195 @@ pub struct WorkspacePrReviewCommentsInput {
     pub workspace_root: String,
     pub branch: Option<String>,
     pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubListInput {}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubActor {
+    pub login: String,
+    pub name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub html_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubCheck {
+    pub name: String,
+    pub state: String,
+    pub details_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubFile {
+    pub path: String,
+    pub previous_path: Option<String>,
+    pub status: String,
+    pub additions: u64,
+    pub deletions: u64,
+    pub patch: Option<String>,
+    pub blob_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubInlineComment {
+    pub id: String,
+    pub path: String,
+    pub line: Option<u32>,
+    pub side: Option<String>,
+    pub body: String,
+    pub author: Option<PullRequestHubActor>,
+    pub created_at: Option<String>,
+    pub url: Option<String>,
+    pub resolved: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubReviewCapabilities {
+    pub inline_comments: bool,
+    pub approve: bool,
+    pub request_changes: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubComment {
+    pub id: String,
+    pub body: String,
+    pub author: Option<PullRequestHubActor>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub url: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubItem {
+    pub id: String,
+    pub provider: String,
+    pub host: String,
+    pub repository_id: String,
+    pub project_id: String,
+    pub repository_name: String,
+    pub repository_root: String,
+    pub forge_login: Option<String>,
+    pub number: u32,
+    pub title: String,
+    pub body: Option<String>,
+    pub url: String,
+    pub author: Option<PullRequestHubActor>,
+    pub head_branch: String,
+    pub base_branch: String,
+    pub state: String,
+    pub is_draft: bool,
+    pub review_decision: Option<String>,
+    pub review_requested_for_viewer: bool,
+    pub created_by_viewer: bool,
+    pub reviewers: Vec<PullRequestHubActor>,
+    pub additions: Option<u64>,
+    pub deletions: Option<u64>,
+    pub changed_files: Option<u64>,
+    pub comment_count: u64,
+    pub checks_state: String,
+    pub updated_at: Option<String>,
+    pub linked_workspace_id: Option<String>,
+    pub linked_workspace_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubWarning {
+    pub repository_name: String,
+    pub repository_root: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubListOutput {
+    pub items: Vec<PullRequestHubItem>,
+    pub warnings: Vec<PullRequestHubWarning>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubDetailInput {
+    pub repository_root: String,
+    pub number: u32,
+    pub forge_login: Option<String>,
+    pub include_code: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubDetailOutput {
+    pub body: Option<String>,
+    pub comments: Vec<PullRequestHubComment>,
+    pub checks: Vec<PullRequestHubCheck>,
+    pub files: Vec<PullRequestHubFile>,
+    pub inline_comments: Vec<PullRequestHubInlineComment>,
+    pub review_capabilities: PullRequestHubReviewCapabilities,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubCommentInput {
+    pub repository_root: String,
+    pub number: u32,
+    pub body: String,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubCommentOutput {
+    pub comment: PullRequestHubComment,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestHubReviewEvent {
+    Comment,
+    Approve,
+    RequestChanges,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubDraftComment {
+    pub path: String,
+    pub body: String,
+    pub line: u32,
+    pub side: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubSubmitReviewInput {
+    pub repository_root: String,
+    pub number: u32,
+    pub body: Option<String>,
+    pub event: PullRequestHubReviewEvent,
+    pub comments: Vec<PullRequestHubDraftComment>,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubSubmitReviewOutput {
+    pub submitted: bool,
+    pub url: Option<String>,
+    pub submitted_comment_count: u32,
+    pub body_submitted: bool,
+    pub decision_submitted: bool,
+    pub warning: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -734,6 +925,1118 @@ pub async fn workspace_gh_pr_create_fill(
     input: WorkspaceGitPushInput,
 ) -> Result<(), String> {
     workspace_change_request_create(state, input).await
+}
+
+fn hub_actor(value: &Value, provider: ForgeCliProvider) -> Option<PullRequestHubActor> {
+    let login_key = match provider {
+        ForgeCliProvider::Github => "login",
+        ForgeCliProvider::Gitlab => "username",
+    };
+    let login = value.get(login_key)?.as_str()?.trim();
+    if login.is_empty() {
+        return None;
+    }
+    Some(PullRequestHubActor {
+        login: login.to_string(),
+        name: value
+            .get("name")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        avatar_url: value
+            .get("avatarUrl")
+            .or_else(|| value.get("avatar_url"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        html_url: value
+            .get("url")
+            .or_else(|| value.get("html_url"))
+            .or_else(|| value.get("web_url"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+    })
+}
+
+fn github_check_state(value: &Value) -> String {
+    let conclusion = value
+        .get("conclusion")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let status = value
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(conclusion.as_str(), "success" | "neutral") {
+        "success".to_string()
+    } else if matches!(
+        conclusion.as_str(),
+        "failure" | "timed_out" | "cancelled" | "action_required"
+    ) {
+        "failure".to_string()
+    } else if conclusion == "skipped" {
+        "skipped".to_string()
+    } else if matches!(
+        status.as_str(),
+        "queued" | "in_progress" | "pending" | "waiting"
+    ) {
+        "pending".to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
+fn aggregate_checks_state(states: impl Iterator<Item = String>) -> String {
+    let states = states.collect::<Vec<_>>();
+    if states.iter().any(|state| state == "failure") {
+        "failure".to_string()
+    } else if states.iter().any(|state| state == "pending") {
+        "pending".to_string()
+    } else if !states.is_empty()
+        && states
+            .iter()
+            .all(|state| matches!(state.as_str(), "success" | "skipped"))
+    {
+        "success".to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
+fn github_checks(value: &Value) -> Vec<PullRequestHubCheck> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|check| PullRequestHubCheck {
+            name: check
+                .get("name")
+                .or_else(|| check.get("context"))
+                .and_then(Value::as_str)
+                .unwrap_or("Check")
+                .to_string(),
+            state: github_check_state(check),
+            details_url: check
+                .get("detailsUrl")
+                .or_else(|| check.get("targetUrl"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+        })
+        .collect()
+}
+
+fn gitlab_pipeline_state(status: &str) -> String {
+    match status.to_ascii_lowercase().as_str() {
+        "success" => "success".to_string(),
+        "failed" | "canceled" => "failure".to_string(),
+        "pending" | "running" | "created" | "preparing" | "waiting_for_resource" | "scheduled" => {
+            "pending".to_string()
+        }
+        "skipped" | "manual" => "skipped".to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
+fn linked_workspace_for_pr(
+    workspaces: &[dcc_core::domain::workspace::Workspace],
+    repository_root: &str,
+    provider: &str,
+    number: u32,
+    head_branch: &str,
+) -> (Option<String>, Option<String>) {
+    workspaces
+        .iter()
+        .find(|workspace| {
+            if workspace.root_path != repository_root {
+                return false;
+            }
+            workspace.source.as_ref().is_some_and(|source| {
+                (source.kind == WorkspaceSourceKind::PullRequest
+                    && source.provider.eq_ignore_ascii_case(provider)
+                    && source.change_request_number == Some(number))
+                    || source.head_branch == head_branch
+            })
+        })
+        .map(|workspace| (Some(workspace.id.0.clone()), workspace.name.clone()))
+        .unwrap_or((None, None))
+}
+
+fn github_hub_item(
+    raw: &Value,
+    context: &forge_context::ResolvedWorkspaceForgeContext,
+    repository: &dcc_core::domain::repository::Repository,
+    workspaces: &[dcc_core::domain::workspace::Workspace],
+) -> Option<PullRequestHubItem> {
+    let number = raw.get("number")?.as_u64()? as u32;
+    let head_branch = raw.get("headRefName")?.as_str()?.to_string();
+    let login = context.effective_login.as_deref().unwrap_or_default();
+    let author = raw
+        .get("author")
+        .and_then(|value| hub_actor(value, ForgeCliProvider::Github));
+    let review_requests = raw
+        .get("reviewRequests")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut reviewers = review_requests
+        .iter()
+        .filter_map(|value| hub_actor(value, ForgeCliProvider::Github))
+        .collect::<Vec<_>>();
+    for review in raw
+        .get("latestReviews")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(actor) = review
+            .get("author")
+            .and_then(|value| hub_actor(value, ForgeCliProvider::Github))
+        {
+            if !reviewers
+                .iter()
+                .any(|candidate| candidate.login == actor.login)
+            {
+                reviewers.push(actor);
+            }
+        }
+    }
+    let checks = github_checks(raw.get("statusCheckRollup").unwrap_or(&Value::Null));
+    let (linked_workspace_id, linked_workspace_name) = linked_workspace_for_pr(
+        workspaces,
+        &repository.root_path,
+        "github",
+        number,
+        &head_branch,
+    );
+    Some(PullRequestHubItem {
+        id: format!("github:{}:{}:{}", context.host, repository.id.0, number),
+        provider: "github".to_string(),
+        host: context.host.clone(),
+        repository_id: repository.id.0.clone(),
+        project_id: repository.project_id.0.clone(),
+        repository_name: repository.name.clone(),
+        repository_root: repository.root_path.clone(),
+        forge_login: context.effective_login.clone(),
+        number,
+        title: raw
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("Pull request")
+            .to_string(),
+        body: raw
+            .get("body")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        url: raw
+            .get("url")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        created_by_viewer: author
+            .as_ref()
+            .is_some_and(|actor| actor.login.eq_ignore_ascii_case(login)),
+        review_requested_for_viewer: review_requests.iter().any(|value| {
+            value
+                .get("login")
+                .and_then(Value::as_str)
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(login))
+        }),
+        author,
+        head_branch,
+        base_branch: raw
+            .get("baseRefName")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        state: raw
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or("OPEN")
+            .to_ascii_lowercase(),
+        is_draft: raw.get("isDraft").and_then(Value::as_bool).unwrap_or(false),
+        review_decision: raw
+            .get("reviewDecision")
+            .and_then(Value::as_str)
+            .map(|value| value.to_ascii_lowercase()),
+        reviewers,
+        additions: raw.get("additions").and_then(Value::as_u64),
+        deletions: raw.get("deletions").and_then(Value::as_u64),
+        changed_files: raw.get("changedFiles").and_then(Value::as_u64),
+        comment_count: raw
+            .get("comments")
+            .and_then(Value::as_array)
+            .map(|comments| comments.len() as u64)
+            .unwrap_or(0),
+        checks_state: aggregate_checks_state(checks.into_iter().map(|check| check.state)),
+        updated_at: raw
+            .get("updatedAt")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        linked_workspace_id,
+        linked_workspace_name,
+    })
+}
+
+fn gitlab_hub_item(
+    raw: &Value,
+    context: &forge_context::ResolvedWorkspaceForgeContext,
+    repository: &dcc_core::domain::repository::Repository,
+    workspaces: &[dcc_core::domain::workspace::Workspace],
+) -> Option<PullRequestHubItem> {
+    let number = raw.get("iid")?.as_u64()? as u32;
+    let head_branch = raw.get("source_branch")?.as_str()?.to_string();
+    let login = context.effective_login.as_deref().unwrap_or_default();
+    let author = raw
+        .get("author")
+        .and_then(|value| hub_actor(value, ForgeCliProvider::Gitlab));
+    let reviewers = raw
+        .get("reviewers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| hub_actor(value, ForgeCliProvider::Gitlab))
+        .collect::<Vec<_>>();
+    let checks_state = raw
+        .get("head_pipeline")
+        .and_then(|value| value.get("status"))
+        .and_then(Value::as_str)
+        .map(gitlab_pipeline_state)
+        .unwrap_or_else(|| "unknown".to_string());
+    let (linked_workspace_id, linked_workspace_name) = linked_workspace_for_pr(
+        workspaces,
+        &repository.root_path,
+        "gitlab",
+        number,
+        &head_branch,
+    );
+    Some(PullRequestHubItem {
+        id: format!("gitlab:{}:{}:{}", context.host, repository.id.0, number),
+        provider: "gitlab".to_string(),
+        host: context.host.clone(),
+        repository_id: repository.id.0.clone(),
+        project_id: repository.project_id.0.clone(),
+        repository_name: repository.name.clone(),
+        repository_root: repository.root_path.clone(),
+        forge_login: context.effective_login.clone(),
+        number,
+        title: raw
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("Merge request")
+            .to_string(),
+        body: raw
+            .get("description")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        url: raw
+            .get("web_url")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        created_by_viewer: author
+            .as_ref()
+            .is_some_and(|actor| actor.login.eq_ignore_ascii_case(login)),
+        review_requested_for_viewer: reviewers
+            .iter()
+            .any(|actor| actor.login.eq_ignore_ascii_case(login)),
+        author,
+        head_branch,
+        base_branch: raw
+            .get("target_branch")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        state: raw
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or("opened")
+            .to_string(),
+        is_draft: raw
+            .get("draft")
+            .or_else(|| raw.get("work_in_progress"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        review_decision: raw
+            .get("detailed_merge_status")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        reviewers,
+        additions: None,
+        deletions: None,
+        changed_files: raw
+            .get("changes_count")
+            .and_then(Value::as_str)
+            .and_then(|value| value.parse().ok()),
+        comment_count: raw
+            .get("user_notes_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        checks_state,
+        updated_at: raw
+            .get("updated_at")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        linked_workspace_id,
+        linked_workspace_name,
+    })
+}
+
+#[tauri::command]
+pub async fn pull_request_hub_list(
+    state: State<'_, WorkspaceCommandState>,
+    _input: PullRequestHubListInput,
+) -> Result<PullRequestHubListOutput, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let repositories = repo
+        .list_repositories()
+        .await
+        .map_err(|error| error.to_string())?;
+    let workspaces = repo
+        .list_workspaces()
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut items = Vec::new();
+    let mut warnings = Vec::new();
+    for repository in repositories {
+        let root = repository.root_path.trim();
+        if root.is_empty() {
+            continue;
+        }
+        let result = (|| -> Result<Vec<PullRequestHubItem>, String> {
+            let context = forge_context::resolve_workspace_forge_context(
+                &state.db_path,
+                root,
+                repository.forge_login.as_deref(),
+            )?
+            .ok_or_else(|| "No GitHub or GitLab remote was found.".to_string())?;
+            let raw = match context.provider {
+                ForgeCliProvider::Github => {
+                    crate::commands::forge::github::list_pull_requests_json(
+                        root,
+                        &context.host,
+                        context.effective_login.as_deref(),
+                    )?
+                }
+                ForgeCliProvider::Gitlab => {
+                    crate::commands::forge::gitlab::list_merge_requests_json(
+                        root,
+                        &context.host,
+                        &context.namespace,
+                        &context.repo,
+                        context.effective_login.as_deref(),
+                    )?
+                }
+            };
+            let values = raw
+                .as_array()
+                .ok_or_else(|| "Forge returned an unexpected pull request list.".to_string())?;
+            Ok(values
+                .iter()
+                .filter_map(|value| match context.provider {
+                    ForgeCliProvider::Github => {
+                        github_hub_item(value, &context, &repository, &workspaces)
+                    }
+                    ForgeCliProvider::Gitlab => {
+                        gitlab_hub_item(value, &context, &repository, &workspaces)
+                    }
+                })
+                .collect())
+        })();
+        match result {
+            Ok(mut repository_items) => items.append(&mut repository_items),
+            Err(message) => warnings.push(PullRequestHubWarning {
+                repository_name: repository.name.clone(),
+                repository_root: repository.root_path.clone(),
+                message,
+            }),
+        }
+    }
+    items.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    Ok(PullRequestHubListOutput { items, warnings })
+}
+
+fn github_comment(value: &Value) -> Option<PullRequestHubComment> {
+    Some(PullRequestHubComment {
+        id: value
+            .get("id")?
+            .as_str()
+            .map(ToString::to_string)
+            .or_else(|| {
+                value
+                    .get("id")
+                    .and_then(Value::as_u64)
+                    .map(|id| id.to_string())
+            })
+            .or_else(|| {
+                value
+                    .get("databaseId")
+                    .and_then(Value::as_u64)
+                    .map(|id| id.to_string())
+            })?,
+        body: value
+            .get("body")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        author: value
+            .get("author")
+            .and_then(|actor| hub_actor(actor, ForgeCliProvider::Github))
+            .or_else(|| {
+                value
+                    .get("user")
+                    .and_then(|actor| hub_actor(actor, ForgeCliProvider::Github))
+            }),
+        created_at: value
+            .get("createdAt")
+            .or_else(|| value.get("created_at"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        updated_at: value
+            .get("updatedAt")
+            .or_else(|| value.get("updated_at"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        url: value
+            .get("url")
+            .or_else(|| value.get("html_url"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+    })
+}
+
+fn gitlab_comment(value: &Value) -> Option<PullRequestHubComment> {
+    if value
+        .get("system")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    Some(PullRequestHubComment {
+        id: value.get("id")?.as_u64()?.to_string(),
+        body: value
+            .get("body")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        author: value
+            .get("author")
+            .and_then(|actor| hub_actor(actor, ForgeCliProvider::Gitlab)),
+        created_at: value
+            .get("created_at")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        updated_at: value
+            .get("updated_at")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        url: None,
+    })
+}
+
+fn github_hub_file(value: &Value) -> Option<PullRequestHubFile> {
+    Some(PullRequestHubFile {
+        path: value.get("filename")?.as_str()?.to_string(),
+        previous_path: value
+            .get("previous_filename")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        status: value
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("modified")
+            .to_string(),
+        additions: value.get("additions").and_then(Value::as_u64).unwrap_or(0),
+        deletions: value.get("deletions").and_then(Value::as_u64).unwrap_or(0),
+        patch: value
+            .get("patch")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        blob_url: value
+            .get("blob_url")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+    })
+}
+
+fn gitlab_hub_file(value: &Value) -> Option<PullRequestHubFile> {
+    let old_path = value.get("old_path").and_then(Value::as_str);
+    let new_path = value.get("new_path").and_then(Value::as_str);
+    let path = new_path.or(old_path)?.to_string();
+    let patch = value
+        .get("diff")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let mut additions = 0;
+    let mut deletions = 0;
+    if let Some(patch) = patch.as_deref() {
+        for line in patch.lines() {
+            if line.starts_with('+') && !line.starts_with("+++") {
+                additions += 1;
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                deletions += 1;
+            }
+        }
+    }
+    let status = if value
+        .get("new_file")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        "added"
+    } else if value
+        .get("deleted_file")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        "removed"
+    } else if value
+        .get("renamed_file")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        "renamed"
+    } else {
+        "modified"
+    };
+    Some(PullRequestHubFile {
+        path,
+        previous_path: old_path
+            .filter(|old_path| Some(*old_path) != new_path)
+            .map(ToString::to_string),
+        status: status.to_string(),
+        additions,
+        deletions,
+        patch,
+        blob_url: None,
+    })
+}
+
+fn github_inline_comment(
+    comment: crate::commands::forge::github::GithubReviewComment,
+) -> PullRequestHubInlineComment {
+    let line = comment
+        .line
+        .or(comment.original_line)
+        .and_then(|line| u32::try_from(line).ok());
+    PullRequestHubInlineComment {
+        id: comment.id.to_string(),
+        path: comment.path,
+        line,
+        side: comment.side.map(|side| side.to_ascii_lowercase()),
+        body: comment.body.unwrap_or_default(),
+        author: comment.user.and_then(|user| {
+            let login = user.login?.trim().to_string();
+            (!login.is_empty()).then_some(PullRequestHubActor {
+                login,
+                name: None,
+                avatar_url: user.avatar_url,
+                html_url: user.html_url,
+            })
+        }),
+        created_at: comment.created_at,
+        url: comment.html_url,
+        resolved: None,
+    }
+}
+
+fn gitlab_inline_comments(
+    discussions: Vec<crate::commands::forge::gitlab::GitlabDiscussion>,
+) -> Vec<PullRequestHubInlineComment> {
+    discussions
+        .into_iter()
+        .flat_map(|discussion| discussion.notes)
+        .filter_map(|note| {
+            if note.system.unwrap_or(false) {
+                return None;
+            }
+            let position = note.position?;
+            let path = position.new_path.or(position.old_path)?;
+            let (line, side) = match (position.new_line, position.old_line) {
+                (Some(line), _) => (u32::try_from(line).ok(), Some("right".to_string())),
+                (None, Some(line)) => (u32::try_from(line).ok(), Some("left".to_string())),
+                _ => (None, None),
+            };
+            Some(PullRequestHubInlineComment {
+                id: note.id.to_string(),
+                path,
+                line,
+                side,
+                body: note.body.unwrap_or_default(),
+                author: note.author.and_then(|author| {
+                    let login = author.username?.trim().to_string();
+                    (!login.is_empty()).then_some(PullRequestHubActor {
+                        login,
+                        name: None,
+                        avatar_url: author.avatar_url,
+                        html_url: author.web_url,
+                    })
+                }),
+                created_at: note.created_at,
+                url: None,
+                resolved: note.resolved,
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn pull_request_hub_detail(
+    state: State<'_, WorkspaceCommandState>,
+    input: PullRequestHubDetailInput,
+) -> Result<PullRequestHubDetailOutput, String> {
+    let root = input.repository_root.trim();
+    let include_code = input.include_code.unwrap_or(false);
+    let context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?
+    .ok_or_else(|| "No GitHub or GitLab remote was found.".to_string())?;
+    match context.provider {
+        ForgeCliProvider::Github => {
+            let raw = crate::commands::forge::github::pull_request_detail_json(
+                root,
+                &context.host,
+                input.number,
+                context.effective_login.as_deref(),
+            )?;
+            let checks = github_checks(raw.get("statusCheckRollup").unwrap_or(&Value::Null));
+            let comments = raw
+                .get("comments")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(github_comment)
+                .collect();
+            let (files, inline_comments) = if include_code {
+                let files_raw = crate::commands::forge::github::pull_request_files_json(
+                    root,
+                    &context.host,
+                    &context.namespace,
+                    &context.repo,
+                    input.number,
+                    context.effective_login.as_deref(),
+                )?;
+                let files = files_raw
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(github_hub_file)
+                    .collect();
+                let inline_comments = crate::commands::forge::github::list_pull_review_comments(
+                    &context.host,
+                    &context.namespace,
+                    &context.repo,
+                    input.number,
+                    context.effective_login.as_deref(),
+                )
+                .unwrap_or_default()
+                .into_iter()
+                .map(github_inline_comment)
+                .collect();
+                (files, inline_comments)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+            Ok(PullRequestHubDetailOutput {
+                body: raw
+                    .get("body")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+                comments,
+                checks,
+                files,
+                inline_comments,
+                review_capabilities: PullRequestHubReviewCapabilities {
+                    inline_comments: true,
+                    approve: true,
+                    request_changes: true,
+                },
+            })
+        }
+        ForgeCliProvider::Gitlab => {
+            let raw = crate::commands::forge::gitlab::merge_request_detail_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                input.number,
+                context.effective_login.as_deref(),
+            )?;
+            let detail = raw.get("detail").unwrap_or(&Value::Null);
+            let comments = raw
+                .get("comments")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(gitlab_comment)
+                .collect();
+            let checks = raw
+                .get("pipelines")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|pipeline| PullRequestHubCheck {
+                    name: pipeline
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| "Pipeline".to_string()),
+                    state: pipeline
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .map(gitlab_pipeline_state)
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    details_url: pipeline
+                        .get("web_url")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string),
+                })
+                .collect();
+            let (files, inline_comments) = if include_code {
+                let changes = crate::commands::forge::gitlab::merge_request_changes_json(
+                    root,
+                    &context.host,
+                    &context.namespace,
+                    &context.repo,
+                    input.number,
+                    context.effective_login.as_deref(),
+                )?;
+                let files = changes
+                    .get("changes")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(gitlab_hub_file)
+                    .collect();
+                let inline_comments =
+                    crate::commands::forge::gitlab::list_merge_request_discussions(
+                        root,
+                        &context.host,
+                        &context.namespace,
+                        &context.repo,
+                        input.number,
+                        context.effective_login.as_deref(),
+                    )
+                    .map(gitlab_inline_comments)
+                    .unwrap_or_default();
+                (files, inline_comments)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+            Ok(PullRequestHubDetailOutput {
+                body: detail
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+                comments,
+                checks,
+                files,
+                inline_comments,
+                review_capabilities: PullRequestHubReviewCapabilities {
+                    inline_comments: true,
+                    approve: true,
+                    request_changes: false,
+                },
+            })
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn pull_request_hub_comment(
+    state: State<'_, WorkspaceCommandState>,
+    input: PullRequestHubCommentInput,
+) -> Result<PullRequestHubCommentOutput, String> {
+    let body = input.body.trim();
+    if body.is_empty() {
+        return Err("Comment cannot be empty.".to_string());
+    }
+    let root = input.repository_root.trim();
+    let context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?
+    .ok_or_else(|| "No GitHub or GitLab remote was found.".to_string())?;
+    let comment = match context.provider {
+        ForgeCliProvider::Github => {
+            let raw = crate::commands::forge::github::create_pull_request_comment_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                input.number,
+                body,
+                context.effective_login.as_deref(),
+            )?;
+            github_comment(&raw).ok_or_else(|| "GitHub returned an invalid comment.".to_string())?
+        }
+        ForgeCliProvider::Gitlab => {
+            let raw = crate::commands::forge::gitlab::create_merge_request_comment_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                input.number,
+                body,
+                context.effective_login.as_deref(),
+            )?;
+            gitlab_comment(&raw).ok_or_else(|| "GitLab returned an invalid comment.".to_string())?
+        }
+    };
+    Ok(PullRequestHubCommentOutput { comment })
+}
+
+#[tauri::command]
+pub async fn pull_request_hub_submit_review(
+    state: State<'_, WorkspaceCommandState>,
+    input: PullRequestHubSubmitReviewInput,
+) -> Result<PullRequestHubSubmitReviewOutput, String> {
+    let body = input
+        .body
+        .as_deref()
+        .map(str::trim)
+        .filter(|body| !body.is_empty());
+    if input.comments.is_empty()
+        && body.is_none()
+        && input.event == PullRequestHubReviewEvent::Comment
+    {
+        return Err("Add a review comment or an inline comment before submitting.".to_string());
+    }
+    if input.event == PullRequestHubReviewEvent::RequestChanges && body.is_none() {
+        return Err("A summary is required when requesting changes.".to_string());
+    }
+    if input
+        .comments
+        .iter()
+        .any(|comment| comment.body.trim().is_empty() || comment.path.trim().is_empty())
+    {
+        return Err("Inline review comments must include a file and a message.".to_string());
+    }
+
+    let root = input.repository_root.trim();
+    let context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?
+    .ok_or_else(|| "No GitHub or GitLab remote was found.".to_string())?;
+
+    match context.provider {
+        ForgeCliProvider::Github => {
+            let event = match input.event {
+                PullRequestHubReviewEvent::Comment => "COMMENT",
+                PullRequestHubReviewEvent::Approve => "APPROVE",
+                PullRequestHubReviewEvent::RequestChanges => "REQUEST_CHANGES",
+            };
+            let comments = input
+                .comments
+                .iter()
+                .map(|comment| {
+                    serde_json::json!({
+                        "path": comment.path,
+                        "body": comment.body.trim(),
+                        "line": comment.line,
+                        "side": comment.side.to_ascii_uppercase(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            let mut payload = serde_json::json!({
+                "event": event,
+                "comments": comments,
+            });
+            if let Some(body) = body {
+                payload["body"] = Value::String(body.to_string());
+            }
+            let response = crate::commands::forge::github::submit_pull_request_review_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                input.number,
+                &payload,
+                context.effective_login.as_deref(),
+            )?;
+            Ok(PullRequestHubSubmitReviewOutput {
+                submitted: true,
+                url: response
+                    .get("html_url")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+                submitted_comment_count: input.comments.len() as u32,
+                body_submitted: body.is_some(),
+                decision_submitted: true,
+                warning: None,
+            })
+        }
+        ForgeCliProvider::Gitlab => {
+            if input.event == PullRequestHubReviewEvent::RequestChanges {
+                return Err(
+                    "GitLab does not expose a formal request-changes review action.".to_string(),
+                );
+            }
+            let mut submitted_comment_count = 0_u32;
+            if !input.comments.is_empty() {
+                let detail = crate::commands::forge::gitlab::merge_request_detail_json(
+                    root,
+                    &context.host,
+                    &context.namespace,
+                    &context.repo,
+                    input.number,
+                    context.effective_login.as_deref(),
+                )?;
+                let diff_refs = detail
+                    .get("detail")
+                    .and_then(|detail| detail.get("diff_refs"))
+                    .ok_or_else(|| {
+                        "GitLab did not return diff references for this MR.".to_string()
+                    })?;
+                let base_sha = diff_refs
+                    .get("base_sha")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "GitLab did not return the base diff SHA.".to_string())?;
+                let start_sha = diff_refs
+                    .get("start_sha")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "GitLab did not return the start diff SHA.".to_string())?;
+                let head_sha = diff_refs
+                    .get("head_sha")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "GitLab did not return the head diff SHA.".to_string())?;
+                let changes_response = crate::commands::forge::gitlab::merge_request_changes_json(
+                    root,
+                    &context.host,
+                    &context.namespace,
+                    &context.repo,
+                    input.number,
+                    context.effective_login.as_deref(),
+                )?;
+                let changes = changes_response
+                    .get("changes")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| {
+                        "GitLab did not return changed files for this MR.".to_string()
+                    })?;
+                for comment in &input.comments {
+                    let change = changes
+                        .iter()
+                        .find(|change| {
+                            change.get("new_path").and_then(Value::as_str)
+                                == Some(comment.path.as_str())
+                                || change.get("old_path").and_then(Value::as_str)
+                                    == Some(comment.path.as_str())
+                        })
+                        .ok_or_else(|| {
+                            format!("GitLab no longer lists `{}` in this MR diff.", comment.path)
+                        })?;
+                    let old_path = change
+                        .get("old_path")
+                        .and_then(Value::as_str)
+                        .unwrap_or(&comment.path);
+                    let new_path = change
+                        .get("new_path")
+                        .and_then(Value::as_str)
+                        .unwrap_or(&comment.path);
+                    let result =
+                        crate::commands::forge::gitlab::create_merge_request_discussion_json(
+                            root,
+                            &context.host,
+                            &context.namespace,
+                            &context.repo,
+                            input.number,
+                            comment.body.trim(),
+                            old_path,
+                            new_path,
+                            comment.line,
+                            &comment.side,
+                            base_sha,
+                            start_sha,
+                            head_sha,
+                            context.effective_login.as_deref(),
+                        );
+                    if let Err(error) = result {
+                        return Ok(PullRequestHubSubmitReviewOutput {
+                            submitted: false,
+                            url: None,
+                            submitted_comment_count,
+                            body_submitted: false,
+                            decision_submitted: false,
+                            warning: Some(format!(
+                                "GitLab accepted {submitted_comment_count} inline comment(s), then stopped: {error}"
+                            )),
+                        });
+                    }
+                    submitted_comment_count += 1;
+                }
+            }
+            let mut url = None;
+            let mut body_submitted = false;
+            if let Some(body) = body {
+                let response =
+                    match crate::commands::forge::gitlab::create_merge_request_comment_json(
+                        root,
+                        &context.host,
+                        &context.namespace,
+                        &context.repo,
+                        input.number,
+                        body,
+                        context.effective_login.as_deref(),
+                    ) {
+                        Ok(response) => response,
+                        Err(error) => {
+                            return Ok(PullRequestHubSubmitReviewOutput {
+                                submitted: false,
+                                url: None,
+                                submitted_comment_count,
+                                body_submitted: false,
+                                decision_submitted: false,
+                                warning: Some(format!(
+                                    "Inline comments were accepted, but the review summary failed: {error}"
+                                )),
+                            });
+                        }
+                    };
+                url = response
+                    .get("web_url")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string);
+                body_submitted = true;
+            }
+            let mut decision_submitted = input.event == PullRequestHubReviewEvent::Comment;
+            if input.event == PullRequestHubReviewEvent::Approve {
+                if let Err(error) = crate::commands::forge::gitlab::approve_merge_request_json(
+                    root,
+                    &context.host,
+                    &context.namespace,
+                    &context.repo,
+                    input.number,
+                    context.effective_login.as_deref(),
+                ) {
+                    return Ok(PullRequestHubSubmitReviewOutput {
+                        submitted: false,
+                        url,
+                        submitted_comment_count,
+                        body_submitted,
+                        decision_submitted: false,
+                        warning: Some(format!(
+                            "Review comments were accepted, but GitLab did not approve the MR: {error}"
+                        )),
+                    });
+                }
+                decision_submitted = true;
+            }
+            Ok(PullRequestHubSubmitReviewOutput {
+                submitted: true,
+                url,
+                submitted_comment_count,
+                body_submitted,
+                decision_submitted,
+                warning: None,
+            })
+        }
+    }
 }
 
 #[tauri::command]
@@ -1899,7 +3202,10 @@ fn map_gitlab_review_comments(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_github_review_state, map_gitlab_review_comments, map_gitlab_review_state};
+    use super::{
+        github_checks, github_comment, github_hub_file, gitlab_hub_file, map_github_review_state,
+        map_gitlab_review_comments, map_gitlab_review_state,
+    };
     use crate::commands::forge::gitlab::{
         GitlabApproval, GitlabApprovals, GitlabDiscussion, GitlabDiscussionAuthor,
         GitlabDiscussionLinePosition, GitlabDiscussionLineRange, GitlabDiscussionNote,
@@ -1924,6 +3230,69 @@ mod tests {
             resolved: Some(false),
             position,
         }
+    }
+
+    #[test]
+    fn maps_github_issue_comment_with_numeric_rest_id() {
+        let comment = github_comment(&json!({
+            "id": 987,
+            "body": "Looks good",
+            "user": { "login": "alice", "avatar_url": "https://example.test/alice.png" },
+            "created_at": "2026-08-01T10:00:00Z",
+            "html_url": "https://github.com/acme/app/pull/12#issuecomment-987"
+        }))
+        .expect("map REST issue comment");
+
+        assert_eq!(comment.id, "987");
+        assert_eq!(comment.body, "Looks good");
+        assert_eq!(comment.author.expect("comment author").login, "alice");
+    }
+
+    #[test]
+    fn normalizes_github_check_rollup_for_hub() {
+        let checks = github_checks(&json!([
+            { "name": "tests", "status": "COMPLETED", "conclusion": "SUCCESS" },
+            { "context": "deploy", "status": "IN_PROGRESS", "conclusion": "" }
+        ]));
+
+        assert_eq!(checks.len(), 2);
+        assert_eq!(checks[0].state, "success");
+        assert_eq!(checks[1].name, "deploy");
+        assert_eq!(checks[1].state, "pending");
+    }
+
+    #[test]
+    fn maps_github_changed_file_patch() {
+        let file = github_hub_file(&json!({
+            "filename": "src/app.ts",
+            "status": "modified",
+            "additions": 3,
+            "deletions": 1,
+            "patch": "@@ -1 +1 @@\n-old\n+new"
+        }))
+        .expect("map GitHub file");
+
+        assert_eq!(file.path, "src/app.ts");
+        assert_eq!(file.additions, 3);
+        assert_eq!(file.deletions, 1);
+        assert!(file.patch.is_some());
+    }
+
+    #[test]
+    fn counts_gitlab_patch_lines_and_preserves_rename() {
+        let file = gitlab_hub_file(&json!({
+            "old_path": "src/old.ts",
+            "new_path": "src/new.ts",
+            "renamed_file": true,
+            "diff": "@@ -1,2 +1,2 @@\n-old\n+new\n context"
+        }))
+        .expect("map GitLab file");
+
+        assert_eq!(file.path, "src/new.ts");
+        assert_eq!(file.previous_path.as_deref(), Some("src/old.ts"));
+        assert_eq!(file.status, "renamed");
+        assert_eq!(file.additions, 1);
+        assert_eq!(file.deletions, 1);
     }
 
     #[test]

@@ -67,10 +67,16 @@ use dcc_tauri::commands::{
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
         ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput,
-        GithubCliStatusOutput, WorkspaceForgeContextInput, WorkspaceForgeContextOutput,
-        WorkspacePipeline, WorkspacePipelineJob, WorkspacePipelineJobInput,
-        WorkspacePipelineJobLogOutput, WorkspacePipelineStatusInput, WorkspacePipelineStatusOutput,
-        WorkspacePrReviewComment, WorkspacePrReviewCommentAuthor, WorkspacePrReviewCommentsInput,
+        GithubCliStatusOutput, PullRequestHubActor, PullRequestHubCheck, PullRequestHubComment,
+        PullRequestHubCommentInput, PullRequestHubCommentOutput, PullRequestHubDetailInput,
+        PullRequestHubDetailOutput, PullRequestHubDraftComment, PullRequestHubFile,
+        PullRequestHubInlineComment, PullRequestHubItem, PullRequestHubListInput,
+        PullRequestHubListOutput, PullRequestHubReviewCapabilities, PullRequestHubReviewEvent,
+        PullRequestHubSubmitReviewInput, PullRequestHubSubmitReviewOutput, PullRequestHubWarning,
+        WorkspaceForgeContextInput, WorkspaceForgeContextOutput, WorkspacePipeline,
+        WorkspacePipelineJob, WorkspacePipelineJobInput, WorkspacePipelineJobLogOutput,
+        WorkspacePipelineStatusInput, WorkspacePipelineStatusOutput, WorkspacePrReviewComment,
+        WorkspacePrReviewCommentAuthor, WorkspacePrReviewCommentsInput,
         WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
         WorkspaceReviewStateInput, WorkspaceReviewStateOutput, WorkspaceReviewer,
     },
@@ -183,6 +189,10 @@ struct WorkspaceMethods {
     workspace_gh_pr_view_web: String,
     workspace_pr_review_comments: String,
     workspace_pr_status: String,
+    pull_request_hub_list: String,
+    pull_request_hub_detail: String,
+    pull_request_hub_comment: String,
+    pull_request_hub_submit_review: String,
     workspace_pipeline_status: String,
     workspace_pipeline_job_log: String,
     workspace_pipeline_job_retry: String,
@@ -460,6 +470,24 @@ fn main() {
         .typ::<WorkspaceContinueFromBaseBranchOutput>()
         .typ::<WorkspacePrStatusInput>()
         .typ::<WorkspacePrStatusOutput>()
+        .typ::<PullRequestHubListInput>()
+        .typ::<PullRequestHubActor>()
+        .typ::<PullRequestHubCheck>()
+        .typ::<PullRequestHubComment>()
+        .typ::<PullRequestHubItem>()
+        .typ::<PullRequestHubWarning>()
+        .typ::<PullRequestHubListOutput>()
+        .typ::<PullRequestHubDetailInput>()
+        .typ::<PullRequestHubDetailOutput>()
+        .typ::<PullRequestHubCommentInput>()
+        .typ::<PullRequestHubCommentOutput>()
+        .typ::<PullRequestHubFile>()
+        .typ::<PullRequestHubInlineComment>()
+        .typ::<PullRequestHubReviewCapabilities>()
+        .typ::<PullRequestHubReviewEvent>()
+        .typ::<PullRequestHubDraftComment>()
+        .typ::<PullRequestHubSubmitReviewInput>()
+        .typ::<PullRequestHubSubmitReviewOutput>()
         .typ::<WorkspaceGitBranchDiffInput>()
         .typ::<WorkspaceGitBranchDiffOutput>()
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitPreviewScope>()
@@ -634,6 +662,10 @@ fn main() {
                 workspace_gh_pr_view_web: "workspace_gh_pr_view_web".to_string(),
                 workspace_pr_review_comments: "workspace_pr_review_comments".to_string(),
                 workspace_pr_status: "workspace_pr_status".to_string(),
+                pull_request_hub_list: "pull_request_hub_list".to_string(),
+                pull_request_hub_detail: "pull_request_hub_detail".to_string(),
+                pull_request_hub_comment: "pull_request_hub_comment".to_string(),
+                pull_request_hub_submit_review: "pull_request_hub_submit_review".to_string(),
                 workspace_pipeline_status: "workspace_pipeline_status".to_string(),
                 workspace_pipeline_job_log: "workspace_pipeline_job_log".to_string(),
                 workspace_pipeline_job_retry: "workspace_pipeline_job_retry".to_string(),
