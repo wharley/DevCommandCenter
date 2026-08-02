@@ -31,7 +31,6 @@ import {
 	type ComposerDelegationRequest,
 	type ComposerSubmittedTurn,
 } from "@/features/composer/composer-turn";
-import type { AppUpdateInfo } from "@/features/updater";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import type {
 	OpenTerminalRequest,
@@ -163,9 +162,6 @@ type WorkspacePanelProps = {
 	onDelegatePrompt: (request: ComposerDelegationRequest) => Promise<void>;
 	onAgentDelegate: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
-	updateInfo: AppUpdateInfo;
-	isInstallingUpdate: boolean;
-	onInstallUpdate: () => void;
 	surfaceSelection: WorkspaceSurfaceSelection | null;
 	onCloseSurface: () => void;
 	onOpenPlanSurface: () => void;
@@ -236,9 +232,6 @@ export function WorkspacePanel({
 	onDelegatePrompt,
 	onAgentDelegate,
 	sessionActionSessionId,
-	updateInfo,
-	isInstallingUpdate,
-	onInstallUpdate,
 	surfaceSelection,
 	onCloseSurface,
 	onOpenPlanSurface,
@@ -801,9 +794,6 @@ export function WorkspacePanel({
 					onResumeSession={onResumeSession}
 					onOpenDelegate={handleOpenManualDelegation}
 					sessionActionSessionId={sessionActionSessionId}
-					updateInfo={updateInfo}
-					isInstallingUpdate={isInstallingUpdate}
-					onInstallUpdate={onInstallUpdate}
 					onOpenTerminal={onOpenTerminal ? openPreferredTerminal : undefined}
 					terminalScopes={terminalScopes}
 					workspacePath={workspacePath}

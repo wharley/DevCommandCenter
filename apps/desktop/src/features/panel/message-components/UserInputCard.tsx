@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { CheckCircle2, LoaderCircle } from "lucide-react";
 import type {
 	ProviderUserInputAnswer,
@@ -31,6 +32,7 @@ export function UserInputCard({
 	answers,
 	isLive,
 }: UserInputCardProps) {
+	const { t } = useTranslation("common");
 	const [draft, setDraft] = useState<Record<string, string>>(() => answersToDraft(answers));
 	const [submitting, setSubmitting] = useState(false);
 	const normalizedQuestions = questions.filter((question) => question.question.trim().length > 0);
@@ -51,18 +53,18 @@ export function UserInputCard({
 			<div className="mb-3 flex items-center justify-between gap-3">
 				<div>
 					<p className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground/80">
-						User input
+						{t("conversation.userInput.label")}
 					</p>
 					<p className="mt-1 text-sm text-foreground">
 						{resolved
-							? "Answers delivered to the running agent."
-							: "The agent is waiting for your answer before it can continue."}
+							? t("conversation.userInput.delivered")
+							: t("conversation.userInput.waiting")}
 					</p>
 				</div>
 				{resolved ? (
 					<span className="inline-flex items-center gap-1 text-xs text-emerald-600">
 						<CheckCircle2 className="size-4" aria-hidden />
-						Resolved
+						{t("conversation.userInput.resolved")}
 					</span>
 				) : null}
 			</div>
@@ -75,7 +77,7 @@ export function UserInputCard({
 						<div key={question.id} className="space-y-2">
 							<div>
 								<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-									{question.header || "Question"}
+									{question.header || t("conversation.userInput.question")}
 								</p>
 								<p className="mt-1 text-sm text-foreground">{question.question}</p>
 							</div>
@@ -112,7 +114,7 @@ export function UserInputCard({
 							<Input
 								value={selected}
 								disabled={!isLive || submitting}
-								placeholder="Type your answer"
+								placeholder={t("conversation.userInput.placeholder")}
 								onChange={(event) =>
 									setDraft((current) => ({
 										...current,
@@ -149,7 +151,7 @@ export function UserInputCard({
 								toast.error(
 									error instanceof Error
 										? error.message
-										: "Unable to send the answer to the agent.",
+										: t("conversation.userInput.submitError"),
 								);
 							} finally {
 								setSubmitting(false);
@@ -157,7 +159,9 @@ export function UserInputCard({
 						}}
 					>
 						{submitting ? <LoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
-						{submitting ? "Sending" : "Send answer"}
+					{submitting
+						? t("conversation.userInput.sending")
+						: t("conversation.userInput.send")}
 					</Button>
 				</div>
 			) : null}

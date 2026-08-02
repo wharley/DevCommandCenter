@@ -29,8 +29,6 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { AppUpdateButton } from "@/features/updater";
-import type { AppUpdateInfo } from "@/features/updater";
 import { WorkspaceEditorPicker } from "./workspace-editor-picker";
 import type { DccRuntimeSessionSnapshot } from "./workbench-types";
 import { canResumeSession } from "./session-chrome-state";
@@ -56,9 +54,6 @@ export type DccWorkbenchChatHeaderProps = {
 	onResumeSession: () => void;
 	onOpenDelegate: () => void;
 	sessionActionSessionId: string | null;
-	updateInfo: AppUpdateInfo;
-	isInstallingUpdate: boolean;
-	onInstallUpdate: () => void;
 	onOpenTerminal?: () => void;
 	terminalScopes?: TerminalScopeTarget[];
 	/** Current inspector visibility — picks the open vs. close affordance. */
@@ -85,9 +80,6 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	onResumeSession,
 	onOpenDelegate,
 	sessionActionSessionId,
-	updateInfo,
-	isInstallingUpdate,
-	onInstallUpdate,
 	onOpenTerminal,
 	terminalScopes,
 	inspectorCollapsed,
@@ -155,11 +147,6 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 							</TooltipContent>
 						</Tooltip>
 					</div>
-					<AppUpdateButton
-						update={updateInfo}
-						installing={isInstallingUpdate}
-						onInstallNow={onInstallUpdate}
-					/>
 					<Tooltip>
 						<TooltipTrigger asChild>
 							{/* Span wrapper keeps the tooltip alive while the button is

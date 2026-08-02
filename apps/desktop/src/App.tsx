@@ -4248,9 +4248,6 @@ export default function App() {
 									onDelegatePrompt={handleComposerDelegate}
 									onAgentDelegate={handleAgentDelegate}
 									sessionActionSessionId={sessionActionSessionId}
-									updateInfo={appUpdateInfo}
-									isInstallingUpdate={isInstallingUpdate}
-									onInstallUpdate={installUpdate}
 									surfaceSelection={surfaceSelection}
 									onCloseSurface={handleCloseSurface}
 									onOpenPlanSurface={openPlanSurface}

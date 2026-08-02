@@ -1,4 +1,5 @@
 import { Copy } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { MessageTimestamp } from "./message-metadata";
@@ -12,6 +13,7 @@ export function UserMessage({
 	label: string;
 	createdAt?: string;
 }) {
+	const { t } = useTranslation("common");
 	return (
 		<div
 			data-message-role="user"
@@ -31,7 +33,7 @@ export function UserMessage({
 						type="button"
 						variant="ghost"
 						size="icon-xs"
-						aria-label={`Copy ${label.toLowerCase()} message`}
+						aria-label={t("conversation.message.copyUser", { label })}
 						className={cn(
 							"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
 							"bg-transparent hover:bg-transparent",

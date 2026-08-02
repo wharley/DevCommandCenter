@@ -193,7 +193,7 @@ export function AssistantMessage({
 			<div
 				className={cn(
 					"relative flex min-w-0 flex-col pb-5",
-					showPlanCard ? "w-full max-w-3xl" : "max-w-[75%]",
+					showPlanCard ? "w-full max-w-3xl" : "w-full max-w-[52rem]",
 				)}
 			>
 				{activityAnnotations.length ? (
@@ -336,7 +336,7 @@ export function AssistantMessage({
 					{status?.type === "incomplete" ? (
 						<span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1.5 py-0.5 text-destructive">
 							<AlertCircle className="size-3" aria-hidden />
-							<span>{status.reason ?? "Incomplete"}</span>
+							<span>{status.reason ?? t("conversation.message.incomplete")}</span>
 						</span>
 					) : null}
 				</div>
@@ -346,7 +346,7 @@ export function AssistantMessage({
 							type="button"
 							variant="ghost"
 							size="icon-xs"
-							aria-label="Copy assistant message"
+							aria-label={t("conversation.message.copyAssistant")}
 							className={cn(
 								"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
 								"bg-transparent hover:bg-transparent",

@@ -978,6 +978,18 @@
       "spec": "Criar ou atualizar a mission spec desta tarefa",
       "clear": "Limpar o rascunho atual do composer"
     },
+    "model": {
+      "select": "Selecionar modelo",
+      "search": "Pesquisar modelos…",
+      "empty": "Nenhum modelo encontrado."
+    },
+    "commandMenu": {
+      "title": "Comandos",
+      "loading": "Carregando comandos…",
+      "error": "Falha ao carregar comandos · clique para tentar novamente",
+      "noMatches": "Nenhum resultado",
+      "empty": "Nenhum comando disponível"
+    },
     "placeholder": {
       "default": "Peça mudanças, mencione arquivos com @ e use /comandos",
       "plan": "Descreva o que mudar e depois clique em Solicitar mudanças"
@@ -1780,6 +1792,26 @@
   "conversation": {
     "scrollToBottom": "Rolar para o fim",
     "starting": "Preparando o agente…",
+    "loading": {
+      "title": "Carregando conversa",
+      "description": "Preparando o histórico desta tarefa."
+    },
+    "message": {
+      "incomplete": "Incompleta",
+      "copyAssistant": "Copiar mensagem do assistente",
+      "copyUser": "Copiar mensagem de {{label}}"
+    },
+    "userInput": {
+      "label": "Resposta necessária",
+      "delivered": "Respostas enviadas ao agente em execução.",
+      "waiting": "O agente está aguardando sua resposta para continuar.",
+      "resolved": "Respondido",
+      "question": "Pergunta",
+      "placeholder": "Digite sua resposta",
+      "submitError": "Não foi possível enviar a resposta ao agente.",
+      "sending": "Enviando",
+      "send": "Enviar resposta"
+    },
     "roles": {
       "user": "Usuário"
     },

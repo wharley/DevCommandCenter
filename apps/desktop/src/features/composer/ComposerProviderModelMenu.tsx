@@ -107,7 +107,7 @@ export function ComposerProviderModelMenu({
 	const triggerTitle =
 		selectedModel && selectedProvider
 			? `${selectedModel.label} — ${selectedProvider.label}`
-			: (selectedModel?.label ?? selectedModelId ?? "Select model");
+			: (selectedModel?.label ?? selectedModelId ?? t("composer.model.select"));
 
 	return (
 		<Popover
@@ -148,7 +148,7 @@ export function ComposerProviderModelMenu({
 							</>
 						) : (
 							<span className="block truncate text-[13px] text-muted-foreground">
-								{selectedModelId ?? "Select model"}
+								{selectedModelId ?? t("composer.model.select")}
 							</span>
 						)}
 					</div>
@@ -163,9 +163,9 @@ export function ComposerProviderModelMenu({
 				onCloseAutoFocus={(event) => event.preventDefault()}
 			>
 				<Command className="rounded-lg border-0 shadow-none">
-					<CommandInput placeholder="Search models…" className="h-9" />
+					<CommandInput placeholder={t("composer.model.search")} className="h-9" />
 					<CommandList>
-						<CommandEmpty>No model found.</CommandEmpty>
+						<CommandEmpty>{t("composer.model.empty")}</CommandEmpty>
 						{providers.map((provider) => (
 							<CommandGroup key={provider.id} heading={provider.label}>
 								{provider.models.map((model) => {

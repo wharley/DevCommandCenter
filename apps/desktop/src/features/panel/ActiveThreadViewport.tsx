@@ -92,8 +92,8 @@ export function ActiveThreadViewport({
 		return (
 			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
 				<EmptyState
-					title="Loading conversation"
-					description="Preparing the thread history for this workspace."
+					title={t("conversation.loading.title")}
+					description={t("conversation.loading.description")}
 				/>
 			</div>
 		);

@@ -13,6 +13,7 @@ import {
 	useMemo,
 	useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -87,6 +88,7 @@ export function SlashCommandPlugin({
 	>;
 }) {
 	const [editor] = useLexicalComposerContext();
+	const { t } = useTranslation("common");
 	const [query, setQuery] = useState<string | null>(null);
 
 	const deduped = useMemo(() => dedupeByName(commands), [commands]);
@@ -152,7 +154,7 @@ export function SlashCommandPlugin({
 						stateRow = (
 							<div className="flex items-center gap-2 px-3 py-2 text-[13px] text-muted-foreground">
 								<Loader2 className="size-3.5 shrink-0 animate-spin" />
-								<span>Loading commands…</span>
+								<span>{t("composer.commandMenu.loading")}</span>
 							</div>
 						);
 					} else if (isError) {
@@ -169,19 +171,19 @@ export function SlashCommandPlugin({
 									data-icon="inline-start"
 									className="size-3.5 shrink-0"
 								/>
-								<span>Failed to load commands · click to retry</span>
+								<span>{t("composer.commandMenu.error")}</span>
 							</Button>
 						);
 					} else if (queryActive) {
 						stateRow = (
 							<div className="px-3 py-2 text-[13px] text-muted-foreground">
-								No matches
+								{t("composer.commandMenu.noMatches")}
 							</div>
 						);
 					} else {
 						stateRow = (
 							<div className="px-3 py-2 text-[13px] text-muted-foreground">
-								No commands available
+								{t("composer.commandMenu.empty")}
 							</div>
 						);
 					}
@@ -202,7 +204,7 @@ export function SlashCommandPlugin({
 							<CommandList className="max-h-72">
 								{stateRow}
 								{hasOptions ? (
-									<CommandGroup heading="Commands">
+									<CommandGroup heading={t("composer.commandMenu.title")}>
 										{options.map((opt, index) => {
 											const cmd = opt.entry;
 											const isSelected = index === selectedIndex;

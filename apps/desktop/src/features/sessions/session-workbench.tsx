@@ -32,7 +32,6 @@ import {
 } from "@/features/terminal/terminal-store";
 import { WorkspacePanel } from "@/features/panel";
 import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surface";
-import type { AppUpdateInfo } from "@/features/updater";
 import type {
 	ComposerDelegationRequest,
 	ComposerSubmittedTurn,
@@ -137,9 +136,6 @@ type SessionWorkbenchProps = {
 	onDelegatePrompt: (request: ComposerDelegationRequest) => Promise<void>;
 	onAgentDelegate: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
-	updateInfo: AppUpdateInfo;
-	isInstallingUpdate: boolean;
-	onInstallUpdate: () => void;
 	surfaceSelection: WorkspaceSurfaceSelection | null;
 	onCloseSurface: () => void;
 	onOpenPlanSurface: () => void;
@@ -214,9 +210,6 @@ export function SessionWorkbench({
 	onDelegatePrompt,
 	onAgentDelegate,
 	sessionActionSessionId,
-	updateInfo,
-	isInstallingUpdate,
-	onInstallUpdate,
 	surfaceSelection,
 	onCloseSurface,
 	onOpenPlanSurface,
@@ -612,9 +605,6 @@ export function SessionWorkbench({
 						onDelegatePrompt={onDelegatePrompt}
 						onAgentDelegate={onAgentDelegate}
 						sessionActionSessionId={sessionActionSessionId}
-						updateInfo={updateInfo}
-						isInstallingUpdate={isInstallingUpdate}
-						onInstallUpdate={onInstallUpdate}
 						surfaceSelection={surfaceSelection}
 						onCloseSurface={onCloseSurface}
 						onOpenPlanSurface={onOpenPlanSurface}

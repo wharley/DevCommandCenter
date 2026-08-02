@@ -978,6 +978,18 @@
       "spec": "Draft or update this task's mission spec",
       "clear": "Clear the current composer draft"
     },
+    "model": {
+      "select": "Select model",
+      "search": "Search models…",
+      "empty": "No model found."
+    },
+    "commandMenu": {
+      "title": "Commands",
+      "loading": "Loading commands…",
+      "error": "Failed to load commands · click to retry",
+      "noMatches": "No matches",
+      "empty": "No commands available"
+    },
     "placeholder": {
       "default": "Ask for changes, @mention files, and run /commands",
       "plan": "Describe what to change, then click Request Changes"
@@ -1780,6 +1792,26 @@
   "conversation": {
     "scrollToBottom": "Scroll to bottom",
     "starting": "Preparing the agent…",
+    "loading": {
+      "title": "Loading conversation",
+      "description": "Preparing the thread history for this workspace."
+    },
+    "message": {
+      "incomplete": "Incomplete",
+      "copyAssistant": "Copy assistant message",
+      "copyUser": "Copy {{label}} message"
+    },
+    "userInput": {
+      "label": "User input",
+      "delivered": "Answers delivered to the running agent.",
+      "waiting": "The agent is waiting for your answer before it can continue.",
+      "resolved": "Resolved",
+      "question": "Question",
+      "placeholder": "Type your answer",
+      "submitError": "Unable to send the answer to the agent.",
+      "sending": "Sending",
+      "send": "Send answer"
+    },
     "roles": {
       "user": "User"
     },
