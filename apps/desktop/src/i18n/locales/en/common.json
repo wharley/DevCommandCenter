@@ -143,7 +143,6 @@
     "workbench": {
       "title": "Current workspace",
       "focusComposer": "Focus composer",
-      "addContext": "Add composer context",
       "execution": "Open execution settings",
       "togglePlan": "Toggle Plan mode",
       "terminalWorktree": "Open Worktree terminal",
@@ -986,19 +985,11 @@
       "plan": "Describe what to change, then click Request Changes"
     },
     "controls": {
-      "addContext": "Add context",
-      "context": "Context",
-      "contextCount": "Context {{count}}",
       "plan": "Plan",
       "planMode": "Plan mode",
       "send": "Send",
       "steer": "Send guidance",
       "stop": "Stop"
-    },
-    "context": {
-      "label": "Context",
-      "empty": "No extra context",
-      "remove": "Remove {{label}}"
     },
     "execution": {
       "title": "Execution",
@@ -1622,7 +1613,6 @@
       "title": "Composer slash commands",
       "body": "When you type `/`, DCC offers local actions to enrich context, compact history, and start specific flows like SDD.",
       "items": {
-        "add-dir": "Attach extra directories as conversation context.",
         "compact": "Request a compaction pass for the current thread context.",
         "spec": "Writes the starter prompt used to create or update the mission spec.",
         "context": "Shows the current context budget and usage.",

@@ -148,37 +148,3 @@ export function buildSpecDraftPrompt({
 		"Request:",
 	].join("\n");
 }
-
-export type ComposerContextDirectory = {
-	id: string;
-	label: string;
-	path: string;
-};
-
-export function buildComposerContextDirectories({
-	workspacePath,
-	workspaceBranch,
-}: {
-	workspacePath: string | null;
-	workspaceBranch: string | null;
-}): ComposerContextDirectory[] {
-	const directories: ComposerContextDirectory[] = [];
-
-	if (workspacePath) {
-		directories.push({
-			id: "workspace-path",
-			label: "workspace",
-			path: workspacePath,
-		});
-	}
-
-	if (workspaceBranch) {
-		directories.push({
-			id: "workspace-branch",
-			label: "branch",
-			path: workspaceBranch,
-		});
-	}
-
-	return directories;
-}

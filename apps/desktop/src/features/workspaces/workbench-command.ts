@@ -1,6 +1,5 @@
 export type WorkbenchCommand =
 	| "composer.focus"
-	| "composer.addContext"
 	| "composer.execution"
 	| "composer.togglePlan"
 	| "terminal.toggle"

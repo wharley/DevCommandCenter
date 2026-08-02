@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
 	ArrowUp,
@@ -8,7 +7,6 @@ import {
 	ChevronUp,
 	ClipboardList,
 	CornerUpRight,
-	Plus,
 	SlidersHorizontal,
 	Square,
 } from "lucide-react";
@@ -33,7 +31,6 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { pathBasename } from "@/lib/path-basename";
 import { cn } from "@/lib/utils";
 import type {
 	ProviderCatalog,
@@ -48,7 +45,6 @@ import {
 	type ExecutionDockChangeSummary,
 } from "./ExecutionDock";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
-import { ContextBar } from "./ContextBar";
 import { ComposerProviderModelMenu } from "./ComposerProviderModelMenu";
 import { EffortBrainIcon } from "./EffortBrainIcon";
 import { ComposerButton } from "./ComposerButton";
@@ -59,7 +55,6 @@ import {
 	resolveEffectiveEffort,
 } from "./effort";
 import {
-	buildComposerContextDirectories,
 	buildSpecDraftPrompt,
 	composerToolbarTriggerClassName,
 	getComposerDraftKey,
@@ -71,12 +66,6 @@ import {
 	setPlanModeState,
 } from "./WorkspaceComposer.logic";
 import { DEFAULT_SLASH_COMMANDS } from "./default-slash-commands";
-import {
-	AddDirTypeaheadPlugin,
-	type AddDirPickEntry,
-} from "./editor/add-dir/add-dir-typeahead-plugin";
-import { $insertAddDirTrigger } from "./editor/add-dir/insert";
-import { AddDirTriggerNode } from "./editor/add-dir/trigger-node";
 import { FileBadgeNode } from "./editor/file-badge-node";
 import { ImageBadgeNode } from "./editor/image-badge-node";
 import { PastedSnippetBadgeNode } from "./editor/pasted-snippet-badge-node";
@@ -91,7 +80,6 @@ import { HasContentPlugin } from "./editor/plugins/HasContentPlugin";
 import { PasteImagePlugin } from "./editor/plugins/PasteImagePlugin";
 import { SlashCommandPlugin } from "./editor/plugins/slash-command-plugin";
 import { SubmitPlugin } from "./editor/plugins/SubmitPlugin";
-import { workspaceChildDirsQueryOptions } from "./workspace-child-dirs-query";
 import type {
 	ComposerDelegationRequest,
 	ComposerSubmittedTurn,
@@ -208,9 +196,6 @@ export function WorkspaceComposer({
 	const effort = effortSelection.effort;
 	const ultrathinkSelected = effortSelection.ultrathink;
 	const [planModeByScope, setPlanModeByScope] = useState<Record<string, boolean>>({});
-	const [contextDirectories, setContextDirectories] = useState(() =>
-		buildComposerContextDirectories({ workspacePath, workspaceBranch }),
-	);
 	const composerDraftKey = useMemo(() => getComposerDraftKey(draftKey), [draftKey]);
 	const composerEffortKey = useMemo(
 		() => getComposerEffortKey(draftKey),
@@ -464,59 +449,12 @@ export function WorkspaceComposer({
 			onError(error: Error) {
 				throw error;
 			},
-			nodes: [
-				AddDirTriggerNode,
-				FileBadgeNode,
-				ImageBadgeNode,
-				PastedSnippetBadgeNode,
-			],
+			nodes: [FileBadgeNode, ImageBadgeNode, PastedSnippetBadgeNode],
 			theme: {
 				paragraph: "min-h-[1.25rem]",
 			},
 		}),
 		[],
-	);
-
-	const childDirsQuery = useQuery(workspaceChildDirsQueryOptions(workspacePath));
-
-	const appendContextDirectory = useCallback((dirPath: string) => {
-		setContextDirectories((prev) => {
-			if (prev.some((d) => d.path === dirPath)) {
-				return prev;
-			}
-			return [
-				...prev,
-				{
-					id: `ctx-${dirPath}`,
-					label: pathBasename(dirPath) || dirPath,
-					path: dirPath,
-				},
-			];
-		});
-	}, []);
-
-	const handleAddDirPick = useCallback(
-		(entry: AddDirPickEntry) => {
-			void (async () => {
-				if (entry.kind === "browse") {
-					const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
-					const selected = await openDialog({
-						directory: true,
-						multiple: false,
-						title: "Add directory to context",
-					});
-					const pickedPath = Array.isArray(selected)
-						? selected[0] ?? ""
-						: selected ?? "";
-					if (pickedPath) {
-						appendContextDirectory(pickedPath);
-					}
-					return;
-				}
-				appendContextDirectory(entry.candidate.absolutePath);
-			})();
-		},
-		[appendContextDirectory],
 	);
 
 	const insertSpecDraftPrompt = useCallback(
@@ -525,22 +463,12 @@ export function WorkspaceComposer({
 		},
 		[workspaceBranch],
 	);
-	const openContextPicker = useCallback(() => {
-		const editor = editorRef.current;
-		if (!editor) return;
-		$insertAddDirTrigger(editor, null);
-		editor.focus();
-	}, []);
-
 	useEffect(
 		() =>
 			subscribeWorkbenchCommand((command) => {
 				switch (command) {
 					case "composer.focus":
 						editorRef.current?.focus();
-						return;
-					case "composer.addContext":
-						openContextPicker();
 						return;
 					case "composer.execution":
 						recordUxMetric("advanced_composer_control_used");
@@ -551,7 +479,7 @@ export function WorkspaceComposer({
 						return;
 				}
 			}),
-		[openContextPicker, togglePlanMode],
+		[togglePlanMode],
 	);
 
 	const inputDisabled = disabled;
@@ -602,17 +530,6 @@ export function WorkspaceComposer({
 	const translatedEffortLabel = t(`composer.effort.${selectedEffortId}`, {
 		defaultValue: effortLabel,
 	});
-	const extraContextDirectories = contextDirectories.filter(
-		(directory) =>
-			directory.id !== "workspace-path" && directory.id !== "workspace-branch",
-	);
-
-	useEffect(() => {
-		setContextDirectories(
-			buildComposerContextDirectories({ workspacePath, workspaceBranch }),
-		);
-	}, [workspaceBranch, workspacePath]);
-
 	return [
 		<ExecutionDock
 			key="execution-dock"
@@ -652,17 +569,6 @@ export function WorkspaceComposer({
 					onReviewPlan={onReviewPlan}
 				/>
 			) : null}
-			{extraContextDirectories.length > 0 ? (
-				<ContextBar
-					directories={extraContextDirectories}
-					disabled={inputDisabled}
-					onRemove={(directoryId) => {
-						setContextDirectories((current) =>
-							current.filter((directory) => directory.id !== directoryId),
-						);
-					}}
-				/>
-			) : null}
 			{selectedProviderBlockReason ? (
 				<div className="mt-2 rounded-2xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-[12px] leading-5 text-destructive">
 					{selectedProviderBlockReason}
@@ -695,15 +601,8 @@ export function WorkspaceComposer({
 					commands={DEFAULT_SLASH_COMMANDS}
 					popupAnchorRef={composerRootRef}
 					clientActionHandlers={{
-						"add-dir": $insertAddDirTrigger,
 						spec: insertSpecDraftPrompt,
 					}}
-				/>
-				<AddDirTypeaheadPlugin
-					candidates={childDirsQuery.data ?? []}
-					linkedDirectoryPaths={contextDirectories.map((d) => d.path)}
-					onPick={handleAddDirPick}
-					popupAnchorRef={composerRootRef}
 				/>
 				<FileMentionPlugin
 					workspaceRootPath={workspacePath}
@@ -744,22 +643,6 @@ export function WorkspaceComposer({
 						onSelectModel={onSelectModel}
 						disabled={toolbarDisabled}
 					/>
-					<ComposerButton
-						type="button"
-						aria-label={t("composer.controls.addContext")}
-						disabled={toolbarDisabled}
-						className="h-7 shrink-0 gap-1 px-1.5 text-[var(--dcc-daily-meta-size)] text-muted-foreground"
-						onClick={openContextPicker}
-					>
-						<Plus className="size-[13px]" strokeWidth={1.8} />
-						<span className="dcc-composer-context-label">
-							{extraContextDirectories.length > 0
-								? t("composer.controls.contextCount", {
-										count: extraContextDirectories.length,
-									})
-								: t("composer.controls.context")}
-						</span>
-					</ComposerButton>
 					<ComposerButton
 						type="button"
 						aria-label={t("composer.controls.planMode")}

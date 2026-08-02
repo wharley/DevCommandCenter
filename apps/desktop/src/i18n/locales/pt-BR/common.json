@@ -143,7 +143,6 @@
     "workbench": {
       "title": "Workspace atual",
       "focusComposer": "Focar no composer",
-      "addContext": "Adicionar contexto ao composer",
       "execution": "Abrir configurações de execução",
       "togglePlan": "Alternar modo Plano",
       "terminalWorktree": "Abrir terminal da worktree",
@@ -986,19 +985,11 @@
       "plan": "Descreva o que mudar e depois clique em Solicitar mudanças"
     },
     "controls": {
-      "addContext": "Adicionar contexto",
-      "context": "Contexto",
-      "contextCount": "Contexto {{count}}",
       "plan": "Planejar",
       "planMode": "Modo de planejamento",
       "send": "Enviar",
       "steer": "Enviar orientação",
       "stop": "Interromper"
-    },
-    "context": {
-      "label": "Contexto",
-      "empty": "Nenhum contexto adicional",
-      "remove": "Remover {{label}}"
     },
     "execution": {
       "title": "Execução",
@@ -1622,7 +1613,6 @@
       "title": "Slash commands do composer",
       "body": "Ao digitar `/`, o DCC oferece ações locais para enriquecer contexto, compactar histórico e iniciar fluxos específicos como o SDD.",
       "items": {
-        "add-dir": "Anexa diretórios extras ao contexto da conversa.",
         "compact": "Pede uma compactação do contexto da thread atual.",
         "spec": "Escreve o prompt-base para criar ou atualizar a mission spec.",
         "context": "Mostra o orçamento e o uso atual de contexto.",

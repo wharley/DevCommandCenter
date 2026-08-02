@@ -9,11 +9,6 @@ export type SlashCommandEntry = {
 
 export const DEFAULT_SLASH_COMMANDS: readonly SlashCommandEntry[] = [
 	{
-		name: "add-dir",
-		description: "Attach extra directories as context",
-		source: "client-action",
-	},
-	{
 		name: "compact",
 		description: "Summarize conversation context",
 		source: "builtin",

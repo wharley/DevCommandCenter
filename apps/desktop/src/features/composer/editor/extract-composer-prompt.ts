@@ -4,7 +4,6 @@ import {
 	$isLineBreakNode,
 	$isTextNode,
 } from "lexical";
-import { $isAddDirTriggerNode } from "./add-dir/trigger-node";
 import { $isFileBadgeNode } from "./file-badge-node";
 import { $isImageBadgeNode } from "./image-badge-node";
 import { $isPastedSnippetBadgeNode } from "./pasted-snippet-badge-node";
@@ -30,13 +29,7 @@ export function $extractComposerPrompt(): string {
 		if ($isElementNode(paragraph)) {
 			for (const child of paragraph.getChildren()) {
 				if ($isTextNode(child)) {
-					const prev = child.getPreviousSibling();
-					if ($isAddDirTriggerNode(prev)) {
-						continue;
-					}
 					textParts.push(child.getTextContent());
-				} else if ($isAddDirTriggerNode(child)) {
-					continue;
 				} else if ($isImageBadgeNode(child)) {
 					const path = child.getImagePath();
 					const last = textParts[textParts.length - 1];

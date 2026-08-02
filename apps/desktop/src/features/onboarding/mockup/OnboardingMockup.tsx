@@ -143,7 +143,6 @@ export function OnboardingMockup({ step }: { step: OnboardingStep }) {
 								<div className="mt-3 rounded-xl border border-border/60 bg-background/88 p-2.5">
 									<div className="grid gap-1.5">
 										{[
-											"/add-dir",
 											"/compact",
 											"/spec",
 											"/context",

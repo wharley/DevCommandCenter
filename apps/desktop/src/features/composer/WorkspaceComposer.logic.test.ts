@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-	buildComposerContextDirectories,
 	buildMissionSpecFilename,
 	buildSpecDraftPrompt,
 	canSendPrompt,
@@ -61,26 +60,6 @@ describe("WorkspaceComposer.logic", () => {
 		expect(isSendDisabled(ok, true)).toBe(true);
 		expect(isSteerDisabled(ok, false)).toBe(true);
 		expect(isSteerDisabled(ok, true)).toBe(false);
-	});
-
-	it("reports context directories for workspace path and branch", () => {
-		expect(
-			buildComposerContextDirectories({
-				workspacePath: "/projects/alpha",
-				workspaceBranch: "feature/phase-2",
-			}),
-		).toEqual([
-			{
-				id: "workspace-path",
-				label: "workspace",
-				path: "/projects/alpha",
-			},
-			{
-				id: "workspace-branch",
-				label: "branch",
-				path: "feature/phase-2",
-			},
-		]);
 	});
 
 	it("blocks send when no content is present", () => {

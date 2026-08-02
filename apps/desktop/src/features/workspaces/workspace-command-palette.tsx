@@ -68,7 +68,6 @@ export function WorkspaceCommandPalette({
 	const workbenchCommands = useMemo<Array<{ command: WorkbenchCommand; label: string; keywords: string; shortcut?: string }>>(
 		() => [
 			{ command: "composer.focus", label: t("commandPalette.workbench.focusComposer"), keywords: "composer prompt focus", shortcut: getFocusComposerShortcutKeys().join("+") },
-			{ command: "composer.addContext", label: t("commandPalette.workbench.addContext"), keywords: "composer context directory" },
 			{ command: "composer.execution", label: t("commandPalette.workbench.execution"), keywords: "composer effort fast ultrathink" },
 			{ command: "composer.togglePlan", label: t("commandPalette.workbench.togglePlan"), keywords: "composer plan mode" },
 			{ command: "terminal.openWorktree", label: t("commandPalette.workbench.terminalWorktree"), keywords: "terminal worktree", shortcut: getToggleTerminalShortcutKeys().join("+") },
