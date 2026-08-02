@@ -29,6 +29,7 @@ use dcc_core::{
         SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
     },
 };
+use dcc_infra::db::SqliteWorkspaceRepo;
 
 use crate::state::SessionCommandState;
 
@@ -642,12 +643,12 @@ fn normalize_task_title(title: &str) -> Result<String, String> {
 }
 
 fn workspace_accepts_automatic_title(workspace: &Workspace) -> bool {
-    workspace
-        .name
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .is_none()
+    let Some(name) = workspace.name.as_deref().map(str::trim) else {
+        return true;
+    };
+    name.is_empty()
+        || name.eq_ignore_ascii_case("new task")
+        || name.eq_ignore_ascii_case("nova tarefa")
 }
 
 #[tauri::command]
@@ -655,11 +656,18 @@ pub async fn apply_task_title(
     state: State<'_, SessionCommandState>,
     input: ApplyTaskTitleInput,
 ) -> Result<ApplyTaskTitleOutput, String> {
+    apply_task_title_to_state(&state, input).await
+}
+
+async fn apply_task_title_to_state(
+    state: &SessionCommandState,
+    input: ApplyTaskTitleInput,
+) -> Result<ApplyTaskTitleOutput, String> {
     let title = normalize_task_title(&input.title)?;
 
     let workspace_id = WorkspaceId(input.workspace_id);
     let session_id = SessionId(input.session_id);
-    let session = SessionRepo::get_session(&*state, &session_id)
+    let session = SessionRepo::get_session(state, &session_id)
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("session not found: {}", session_id.0))?;
@@ -667,11 +675,16 @@ pub async fn apply_task_title(
         return Err("session does not belong to the requested workspace".to_string());
     }
 
-    let mut workspace = WorkspaceRepo::get_workspace(&*state, &workspace_id)
+    // Task names belong to the durable workspace store. The session command state
+    // keeps a separate repository for sessions and threads, so open the workspace
+    // repository explicitly instead of using its compatibility trait adapter.
+    let workspace_repo =
+        SqliteWorkspaceRepo::open(state.db_path()).map_err(|error| error.to_string())?;
+    let mut workspace = WorkspaceRepo::get_workspace(&workspace_repo, &workspace_id)
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("workspace not found: {}", workspace_id.0))?;
-    let mut thread = ThreadRepo::find_thread_by_session_id(&*state, &session_id)
+    let mut thread = ThreadRepo::find_thread_by_session_id(state, &session_id)
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("thread not found for session: {}", session_id.0))?;
@@ -683,10 +696,10 @@ pub async fn apply_task_title(
         thread.title = title;
         // Persist the thread first. If the workspace write fails, the workspace
         // remains untitled and a later first-turn retry can safely finish both.
-        ThreadRepo::save_thread(&*state, &thread)
+        ThreadRepo::save_thread(state, &thread)
             .await
             .map_err(|error| error.to_string())?;
-        WorkspaceRepo::save_workspace(&*state, &workspace)
+        WorkspaceRepo::save_workspace(&workspace_repo, &workspace)
             .await
             .map_err(|error| error.to_string())?;
     }
@@ -800,6 +813,79 @@ mod tests {
 
         workspace.name = Some("Nome escolhido".to_string());
         assert!(!workspace_accepts_automatic_title(&workspace));
+
+        workspace.name = Some("Nova tarefa".to_string());
+        assert!(workspace_accepts_automatic_title(&workspace));
+    }
+
+    #[tokio::test]
+    async fn automatic_title_persists_in_the_workspace_repository() {
+        let db_path = std::env::temp_dir().join(format!(
+            "dcc-automatic-task-title-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace_repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
+        let workspace = Workspace {
+            id: WorkspaceId("workspace-title-test".to_string()),
+            project_id: dcc_core::domain::project::ProjectId("project-title-test".to_string()),
+            name: Some("Nova tarefa".to_string()),
+            root_path: "/tmp/project-title-test".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: Some("/tmp/worktree-title-test".to_string()),
+            source: None,
+            state: dcc_core::domain::workspace::WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-08-01T00:00:00Z".to_string(),
+            updated_at: "2026-08-01T00:00:00Z".to_string(),
+        };
+        WorkspaceRepo::save_workspace(&workspace_repo, &workspace)
+            .await
+            .expect("save workspace");
+
+        let state = SessionCommandState::new_headless(db_path.clone(), std::env::temp_dir());
+        let started = run_start_thread(
+            &state,
+            &state,
+            &state,
+            &state,
+            StartThreadInput {
+                workspace_id: workspace.id.clone(),
+                additional_workspace_ids: Vec::new(),
+                project_id: workspace.project_id.clone(),
+                provider_id: "codex".to_string(),
+                model: None,
+                provider_runtime: None,
+                working_directory_override: None,
+                title: Some("Nova tarefa".to_string()),
+            },
+        )
+        .await
+        .expect("start thread");
+
+        let titled = apply_task_title_to_state(
+            &state,
+            ApplyTaskTitleInput {
+                workspace_id: workspace.id.0.clone(),
+                session_id: started.session.id.0,
+                title: "Corrigir título da sidebar".to_string(),
+            },
+        )
+        .await
+        .expect("apply task title");
+        assert!(titled.applied);
+
+        let persisted = WorkspaceRepo::get_workspace(&workspace_repo, &workspace.id)
+            .await
+            .expect("read workspace")
+            .expect("workspace exists");
+        assert_eq!(
+            persisted.name.as_deref(),
+            Some("Corrigir título da sidebar")
+        );
+
+        drop(state);
+        drop(workspace_repo);
+        let _ = std::fs::remove_file(db_path);
     }
 
     #[test]

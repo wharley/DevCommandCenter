@@ -27,6 +27,7 @@ import type {
 	WorkspaceSetupHint,
 	WorkspaceSetupReport,
 } from "@dcc/contracts";
+import { isAutomaticTaskTitle } from "./task-title";
 
 export type WorkspaceCreationResult = {
 	workspace: WorkspaceSummary;
@@ -165,7 +166,9 @@ export function workspaceToSummary(
 	return {
 		id: workspace.id,
 		name: explicitName ?? sourceName ?? i18n.t("sidebar.newWorkspace"),
-		isAutoNamed: explicitName === null && sourceName === null,
+		isAutoNamed:
+			(explicitName === null && sourceName === null) ||
+			(explicitName !== null && isAutomaticTaskTitle(explicitName)),
 		branch: workspace.source?.headBranch ?? workspace.baseBranch,
 		status,
 		projectId: workspace.projectId,

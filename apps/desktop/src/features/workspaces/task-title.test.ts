@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveTaskTitle } from "./task-title";
+import { deriveTaskTitle, isAutomaticTaskTitle } from "./task-title";
 
 describe("deriveTaskTitle", () => {
 	it("removes conversational Portuguese boilerplate", () => {
@@ -20,5 +20,12 @@ describe("deriveTaskTitle", () => {
 		);
 		expect(title.endsWith("…")).toBe(true);
 		expect(title.length).toBeLessThanOrEqual(57);
+	});
+
+	it("recognizes localized provisional task titles", () => {
+		expect(isAutomaticTaskTitle("Nova tarefa")).toBe(true);
+		expect(isAutomaticTaskTitle("  NEW   TASK ")).toBe(true);
+		expect(isAutomaticTaskTitle(null)).toBe(true);
+		expect(isAutomaticTaskTitle("Corrigir autenticação")).toBe(false);
 	});
 });

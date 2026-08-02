@@ -1368,12 +1368,16 @@ pub(crate) fn create_change_request(
     root: &str,
     base_branch: &str,
     head_branch: &str,
+    title: Option<&str>,
     host: &str,
     login: Option<&str>,
 ) -> Result<(), String> {
     let glab = resolve_cli_binary("glab")?;
     let auth = resolve_auth_context(host, login)?;
-    let title = last_commit_title(root)?;
+    let title = match title.map(str::trim).filter(|title| !title.is_empty()) {
+        Some(title) => title.to_string(),
+        None => last_commit_title(root)?,
+    };
     let mut output = Command::new(glab);
     output.current_dir(root);
     output.stdin(Stdio::null());

@@ -26,6 +26,25 @@ describe("workspaceToSummary", () => {
 		expect(summary.branch).toBe("main");
 	});
 
+	it("keeps a persisted provisional name eligible for the first-prompt title", () => {
+		const summary = workspaceToSummary({
+			id: "placeholder-1",
+			projectId: "widgets",
+			name: "Nova tarefa",
+			rootPath: "/repo/widgets",
+			baseBranch: "main",
+			worktreePath: "/repo/.dcc-worktrees/placeholder-1",
+			source: null,
+			state: "ready",
+			setupReport: null,
+			createdAt: "2026-01-01T00:00:00Z",
+			updatedAt: "2026-01-01T00:00:00Z",
+		});
+
+		expect(summary.name).toBe("Nova tarefa");
+		expect(summary.isAutoNamed).toBe(true);
+	});
+
 	it("uses the imported branch as the active workspace branch", () => {
 		const summary = workspaceToSummary({
 			id: "review-42",
@@ -53,6 +72,7 @@ describe("workspaceToSummary", () => {
 		});
 
 		expect(summary.name).toBe("Improve review flow");
+		expect(summary.isAutoNamed).toBe(false);
 		expect(summary.branch).toBe("feature/review");
 	});
 

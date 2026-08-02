@@ -1,5 +1,6 @@
 const MAX_TASK_TITLE_LENGTH = 56;
 const MAX_TASK_TITLE_WORDS = 8;
+const AUTOMATIC_TASK_TITLES = new Set(["new task", "nova tarefa"]);
 
 const REQUEST_PREFIXES = [
 	/^por\s+favor[,\s:]*/iu,
@@ -16,6 +17,12 @@ const REQUEST_PREFIXES = [
 function capitalize(value: string) {
 	const [first, ...rest] = Array.from(value);
 	return first ? `${first.toLocaleUpperCase()}${rest.join("")}` : value;
+}
+
+/** Recognizes localized placeholders that must be replaced by the first prompt. */
+export function isAutomaticTaskTitle(title: string | null | undefined): boolean {
+	const normalized = title?.replace(/\s+/gu, " ").trim().toLocaleLowerCase() ?? "";
+	return normalized.length === 0 || AUTOMATIC_TASK_TITLES.has(normalized);
 }
 
 /** Builds an immediate, local task title from the first meaningful prompt. */

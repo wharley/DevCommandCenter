@@ -152,7 +152,7 @@ import {
 	daemonCombToWorkspaceSummary,
 	workspaceToSummary,
 } from "./features/workspaces/use-workspaces";
-import { deriveTaskTitle } from "./features/workspaces/task-title";
+import { deriveTaskTitle, isAutomaticTaskTitle } from "./features/workspaces/task-title";
 import { removeProjectFromDcc } from "./features/workspaces/project-removal";
 import type { WorkspaceSummary } from "./features/workspaces/types";
 import {
@@ -1569,6 +1569,75 @@ export default function App() {
 			null,
 		[effectiveSelectedSessionId, workspaceSessions],
 	);
+	const persistAutomaticTaskTitle = useCallback(
+		async (workspaceId: string, sessionId: string, title: string) => {
+			const titled = await applyTaskTitle({
+				workspaceId,
+				sessionId,
+				title,
+			});
+			if (!titled.applied) {
+				return false;
+			}
+
+			applyWorkspaceTitle(workspaceId, title);
+			queryClient.setQueryData<WorkspaceSummary[]>(
+				["workspaces", backendCacheKey],
+				(current = []) =>
+					current.map((workspace) =>
+						workspace.id === workspaceId
+							? { ...workspace, name: title, isAutoNamed: false }
+							: workspace,
+					),
+			);
+			queryClient.setQueryData<WorkspaceSessionSummary[]>(
+				getWorkspaceSessionsCacheKey(backendCacheKey, workspaceId),
+				(current = []) =>
+					current.map((summary) =>
+						summary.session.id === sessionId
+							? { ...summary, thread: titled.thread }
+							: summary,
+					),
+			);
+			return true;
+		},
+		[applyWorkspaceTitle, backendCacheKey, queryClient],
+	);
+	const automaticTaskTitleRepairAttemptsRef = useRef(new Set<string>());
+	useEffect(() => {
+		if (!selectedWorkspace || !selectedSessionSummary) {
+			return;
+		}
+		if (
+			!selectedWorkspace.isAutoNamed &&
+			!isAutomaticTaskTitle(selectedWorkspace.name)
+		) {
+			return;
+		}
+
+		const threadTitle = selectedSessionSummary.thread.title.trim();
+		if (
+			!threadTitle ||
+			isAutomaticTaskTitle(threadTitle) ||
+			threadTitle.toLocaleLowerCase() === "new session"
+		) {
+			return;
+		}
+
+		const repairKey = `${selectedWorkspace.id}:${selectedSessionSummary.session.id}:${threadTitle}`;
+		if (automaticTaskTitleRepairAttemptsRef.current.has(repairKey)) {
+			return;
+		}
+		automaticTaskTitleRepairAttemptsRef.current.add(repairKey);
+		void persistAutomaticTaskTitle(
+			selectedWorkspace.id,
+			selectedSessionSummary.session.id,
+			threadTitle,
+		).catch((error) => {
+			automaticTaskTitleRepairAttemptsRef.current.delete(repairKey);
+			console.error("[dcc] automatic task title repair failed:", error);
+		});
+	}, [persistAutomaticTaskTitle, selectedSessionSummary, selectedWorkspace]);
 	const selectedSessionSnapshot = useMemo(() => {
 		if (!effectiveSelectedSessionId) {
 			return null;
@@ -2713,7 +2782,8 @@ export default function App() {
 		if (trimmedPrompt.length === 0) {
 			return;
 		}
-		const automaticTaskTitle = selectedWorkspace?.isAutoNamed
+		const automaticTaskTitle = selectedWorkspace &&
+			(selectedWorkspace.isAutoNamed || isAutomaticTaskTitle(selectedWorkspace.name))
 			? deriveTaskTitle(trimmedPrompt, selectedWorkspace.name)
 			: null;
 
@@ -2815,47 +2885,6 @@ export default function App() {
 				return;
 			}
 
-			if (automaticTaskTitle && selectedWorkspace) {
-				try {
-					const titled = await applyTaskTitle({
-						workspaceId: selectedWorkspace.id,
-						sessionId: currentSessionId,
-						title: automaticTaskTitle,
-					});
-					if (titled.applied) {
-						applyWorkspaceTitle(selectedWorkspace.id, automaticTaskTitle);
-						queryClient.setQueryData<WorkspaceSummary[]>(
-							["workspaces", backendCacheKey],
-							(current = []) =>
-								current.map((workspace) =>
-									workspace.id === selectedWorkspace.id
-										? {
-											...workspace,
-											name: automaticTaskTitle,
-											isAutoNamed: false,
-										}
-										: workspace,
-								),
-						);
-						queryClient.setQueryData<WorkspaceSessionSummary[]>(
-							getWorkspaceSessionsCacheKey(
-								backendCacheKey,
-								selectedWorkspace.id,
-							),
-							(current = []) =>
-								current.map((summary) =>
-									summary.session.id === currentSessionId
-										? { ...summary, thread: titled.thread }
-										: summary,
-								),
-						);
-					}
-				} catch (error) {
-					// Naming is UX metadata and must never block the user's first turn.
-					console.error("[dcc] automatic task title failed:", error);
-				}
-			}
-
 			const turnProvider = targetSessionProvider ?? selectedProvider;
 			const turnModel =
 				targetSessionSummary != null
@@ -2886,6 +2915,19 @@ export default function App() {
 				fastMode: turn.envelope.fastMode,
 			});
 			recordUxMetric("first_prompt");
+
+			if (automaticTaskTitle && selectedWorkspace) {
+				try {
+					await persistAutomaticTaskTitle(
+						selectedWorkspace.id,
+						currentSessionId,
+						automaticTaskTitle,
+					);
+				} catch (error) {
+					// Naming is UX metadata and must never discard an accepted first turn.
+					console.error("[dcc] automatic task title failed:", error);
+				}
+			}
 
 			const resultSnapshot: RuntimeSessionSnapshot = {
 				sessionId: result.session.id,
@@ -3049,8 +3091,8 @@ export default function App() {
 			);
 		}
 	}, [
-			applyWorkspaceTitle,
 			backendCacheKey,
+			persistAutomaticTaskTitle,
 			providerChoices,
 			queryClient,
 			registerMissionSpecAutoCompileAttempt,

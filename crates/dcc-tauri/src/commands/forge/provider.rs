@@ -291,6 +291,7 @@ pub(crate) fn create_workspace_change_request(
     root: &str,
     base_branch: &str,
     head_branch: &str,
+    title: Option<&str>,
     login: Option<&str>,
 ) -> Result<(), String> {
     match resolve_workspace_forge_target(root)? {
@@ -299,6 +300,7 @@ pub(crate) fn create_workspace_change_request(
                 root,
                 base_branch,
                 head_branch,
+                title,
                 &target.remote.host,
                 login,
             )
@@ -307,9 +309,17 @@ pub(crate) fn create_workspace_change_request(
             root,
             base_branch,
             head_branch,
+            title,
             &target.remote.host,
             login,
         ),
-        None => github::create_change_request(root, base_branch, head_branch, "github.com", login),
+        None => github::create_change_request(
+            root,
+            base_branch,
+            head_branch,
+            title,
+            "github.com",
+            login,
+        ),
     }
 }

@@ -995,6 +995,7 @@ pub(crate) fn create_change_request(
     root: &str,
     base_branch: &str,
     head_branch: &str,
+    title: Option<&str>,
     host: &str,
     login: Option<&str>,
 ) -> Result<(), String> {
@@ -1005,20 +1006,21 @@ pub(crate) fn create_change_request(
     if let Some(auth) = auth.as_ref() {
         output.envs(auth.envs.iter().map(|(key, value)| (key, value)));
     }
-    let output = output
-        .args([
-            "pr",
-            "create",
-            "--fill",
-            "--base",
-            base_branch,
-            "--head",
-            head_branch,
-            "--assignee",
-            "@me",
-        ])
-        .output()
-        .map_err(|e| e.to_string())?;
+    output.args([
+        "pr",
+        "create",
+        "--fill",
+        "--base",
+        base_branch,
+        "--head",
+        head_branch,
+        "--assignee",
+        "@me",
+    ]);
+    if let Some(title) = title.map(str::trim).filter(|title| !title.is_empty()) {
+        output.args(["--title", title]);
+    }
+    let output = output.output().map_err(|e| e.to_string())?;
     if output.status.success() {
         return Ok(());
     }

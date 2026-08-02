@@ -248,6 +248,10 @@ impl SessionCommandState {
         }
     }
 
+    pub(crate) fn db_path(&self) -> &std::path::Path {
+        &self.db_path
+    }
+
     fn lock_store(&self) -> Result<std::sync::MutexGuard<'_, SessionStore>> {
         self.store
             .lock()

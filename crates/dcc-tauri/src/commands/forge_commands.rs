@@ -5,7 +5,7 @@ use tauri::State;
 
 use dcc_core::domain::workspace::{WorkspaceSource, WorkspaceSourceKind};
 use dcc_core::ports::{RepositoryRepo, WorkspaceRepo};
-use dcc_infra::db::SqliteWorkspaceRepo;
+use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 
 use crate::{
     commands::forge::context as forge_context,
@@ -31,6 +31,50 @@ async fn imported_workspace_source(
     Ok(find_workspace_by_root(&repo, root)
         .await?
         .and_then(|workspace| workspace.source))
+}
+
+fn is_provisional_task_title(title: &str) -> bool {
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    title.is_empty()
+        || title.eq_ignore_ascii_case("new task")
+        || title.eq_ignore_ascii_case("nova tarefa")
+}
+
+fn preferred_change_request_title(
+    workspace_name: Option<&str>,
+    thread_titles: impl IntoIterator<Item = String>,
+) -> Option<String> {
+    if let Some(title) = workspace_name
+        .map(str::trim)
+        .filter(|title| !is_provisional_task_title(title))
+    {
+        return Some(title.to_string());
+    }
+    thread_titles.into_iter().find_map(|title| {
+        let title = title.trim();
+        (!is_provisional_task_title(title) && !title.eq_ignore_ascii_case("new session"))
+            .then(|| title.to_string())
+    })
+}
+
+async fn workspace_change_request_title(
+    state: &WorkspaceCommandState,
+    root: &str,
+) -> Result<Option<String>, String> {
+    let workspace_repo =
+        SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let Some(workspace) = find_workspace_by_root(&workspace_repo, root).await? else {
+        return Ok(None);
+    };
+    let session_repo =
+        SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let sessions = session_repo
+        .list_workspace_sessions(&workspace.id)
+        .map_err(|error| error.to_string())?;
+    Ok(preferred_change_request_title(
+        workspace.name.as_deref(),
+        sessions.into_iter().map(|summary| summary.thread.title),
+    ))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -926,6 +970,7 @@ pub async fn workspace_change_request_create(
         input.forge_login.as_deref(),
     )?
     .and_then(|context| context.effective_login);
+    let title = workspace_change_request_title(&state, root).await?;
 
     push_current_branch(&state, root, protected_branch.as_deref(), login.as_deref())
         .await
@@ -935,6 +980,7 @@ pub async fn workspace_change_request_create(
         root,
         &base_branch,
         &head_branch,
+        title.as_deref(),
         login.as_deref(),
     )
 }
@@ -3453,8 +3499,8 @@ fn map_gitlab_review_comments(
 mod tests {
     use super::{
         github_checks, github_comment, github_hub_file, github_thread_inline_comments,
-        gitlab_hub_file, map_github_review_state, map_gitlab_review_comments,
-        map_gitlab_review_state,
+        gitlab_hub_file, is_provisional_task_title, map_github_review_state,
+        map_gitlab_review_comments, map_gitlab_review_state, preferred_change_request_title,
     };
     use crate::commands::forge::gitlab::{
         GitlabApproval, GitlabApprovals, GitlabDiscussion, GitlabDiscussionAuthor,
@@ -3496,6 +3542,31 @@ mod tests {
         assert_eq!(comment.id, "987");
         assert_eq!(comment.body, "Looks good");
         assert_eq!(comment.author.expect("comment author").login, "alice");
+    }
+
+    #[test]
+    fn recognizes_only_provisional_task_titles() {
+        assert!(is_provisional_task_title("Nova tarefa"));
+        assert!(is_provisional_task_title("  NEW   TASK "));
+        assert!(!is_provisional_task_title("Corrigir autenticação"));
+    }
+
+    #[test]
+    fn pull_request_title_falls_back_from_placeholder_to_thread() {
+        assert_eq!(
+            preferred_change_request_title(
+                Some("Nova tarefa"),
+                vec!["Corrigir autenticação".to_string()],
+            ),
+            Some("Corrigir autenticação".to_string()),
+        );
+        assert_eq!(
+            preferred_change_request_title(
+                Some("Atualizar checkout"),
+                vec!["Outro título".to_string()],
+            ),
+            Some("Atualizar checkout".to_string()),
+        );
     }
 
     #[test]
