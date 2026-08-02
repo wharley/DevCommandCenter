@@ -5,9 +5,9 @@ import {
 	ArrowUp,
 	AlertTriangle,
 	ChevronDown,
-	ChevronUp,
 	ClipboardList,
 	CornerUpRight,
+	GitFork,
 	Paperclip,
 	SlidersHorizontal,
 	Square,
@@ -136,7 +136,7 @@ type WorkspaceComposerProps = {
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	/** Absent when the surface cannot delegate (no parent session yet). */
 	onDelegatePrompt?: (request: ComposerDelegationRequest) => Promise<void>;
-	/** Increment to open the delegate menu from outside (header, command palette). */
+	/** Increment to open the delegate menu from outside (for example, the command palette). */
 	openDelegateMenuSignal?: number;
 	onAbortSession: () => void;
 	onReviewPlan: () => void;
@@ -896,7 +896,7 @@ export function WorkspaceComposer({
 												"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
 										)}
 									>
-										<ChevronUp className="size-3.5" strokeWidth={2} />
+										<GitFork className="size-3.5" strokeWidth={2} />
 									</DropdownMenuTrigger>
 									<DropdownMenuContent
 										side="top"

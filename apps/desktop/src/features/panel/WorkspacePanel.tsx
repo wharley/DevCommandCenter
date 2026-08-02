@@ -366,14 +366,6 @@ export function WorkspacePanel({
 		},
 		[buildAnnotationTurn, onCloseSurface, onSubmitPrompt, reviewAnnotations],
 	);
-	// Both the header button and the command palette now point at the composer's
-	// delegate menu. Summing the external signal with local presses keeps the value
-	// monotonic, so the composer can treat any increase as "open me".
-	const [localDelegateMenuBumps, setLocalDelegateMenuBumps] = useState(0);
-	const handleOpenManualDelegation = useCallback(() => {
-		setLocalDelegateMenuBumps((current) => current + 1);
-	}, []);
-
 	const selectedSessionBelongsToWorkspace = Boolean(
 		selectedSessionId &&
 			sessions.some(
@@ -800,7 +792,6 @@ export function WorkspacePanel({
 					onRestoreSession={onRestoreSession}
 					onOpenSessionSearch={onOpenSessionSearch}
 					onResumeSession={onResumeSession}
-					onOpenDelegate={handleOpenManualDelegation}
 					sessionActionSessionId={sessionActionSessionId}
 					onOpenTerminal={onOpenTerminal ? openPreferredTerminal : undefined}
 					terminalScopes={terminalScopes}
@@ -881,7 +872,7 @@ export function WorkspacePanel({
 						onSelectModel={onSelectModel}
 						onSubmitPrompt={onSubmitPrompt}
 						onDelegatePrompt={sessionSnapshot ? onDelegatePrompt : undefined}
-						openDelegateMenuSignal={(delegateSignal ?? 0) + localDelegateMenuBumps}
+						openDelegateMenuSignal={delegateSignal ?? 0}
 						onAbortSession={onAbortSession}
 						onReviewPlan={onOpenPlanSurface}
 						onReviewChanges={onReviewChanges ?? onToggleInspector}
