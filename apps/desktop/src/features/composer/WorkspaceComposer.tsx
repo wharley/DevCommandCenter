@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
 	ArrowUp,
 	AlertTriangle,
@@ -7,6 +8,7 @@ import {
 	ChevronUp,
 	ClipboardList,
 	CornerUpRight,
+	Paperclip,
 	SlidersHorizontal,
 	Square,
 } from "lucide-react";
@@ -32,6 +34,8 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { isImageFilePath } from "@/lib/is-image-path";
+import { pathRelativeToWorkspace } from "@/lib/path-basename";
 import type {
 	ProviderCatalog,
 	ProviderRuntimeConfig,
@@ -66,9 +70,10 @@ import {
 	setPlanModeState,
 } from "./WorkspaceComposer.logic";
 import { DEFAULT_SLASH_COMMANDS } from "./default-slash-commands";
-import { FileBadgeNode } from "./editor/file-badge-node";
-import { ImageBadgeNode } from "./editor/image-badge-node";
+import { $createFileBadgeNode, FileBadgeNode } from "./editor/file-badge-node";
+import { $createImageBadgeNode, ImageBadgeNode } from "./editor/image-badge-node";
 import { PastedSnippetBadgeNode } from "./editor/pasted-snippet-badge-node";
+import { $appendNodesToComposerEnd } from "./editor/append-to-end";
 import { AutoResizePlugin } from "./editor/plugins/AutoResizePlugin";
 import { EditorRefPlugin } from "./editor/plugins/EditorRefPlugin";
 import { DraftPersistencePlugin } from "./editor/plugins/DraftPersistencePlugin";
@@ -463,6 +468,47 @@ export function WorkspaceComposer({
 		},
 		[workspaceBranch],
 	);
+	const clearComposerDraft = useCallback(
+		(editor: LexicalEditor) => {
+			clearDraft(composerDraftKey);
+			setEditorText(editor, "");
+		},
+		[composerDraftKey],
+	);
+	const openAttachmentPicker = useCallback(async () => {
+		const editor = editorRef.current;
+		if (!editor) return;
+		try {
+			const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
+			const selected = await openDialog({
+				directory: false,
+				multiple: true,
+				title: t("composer.attachments.pickerTitle"),
+			});
+			const paths = Array.isArray(selected)
+				? selected
+				: selected
+					? [selected]
+					: [];
+			if (paths.length === 0) return;
+
+			editor.update(() => {
+				const nodes = paths.map((absolutePath) => {
+					const storedPath = pathRelativeToWorkspace(workspacePath, absolutePath);
+					return isImageFilePath(absolutePath)
+						? $createImageBadgeNode(storedPath)
+						: $createFileBadgeNode(storedPath);
+				});
+				$appendNodesToComposerEnd(...nodes);
+			});
+		} catch (error) {
+			toast.error(t("composer.attachments.error"), {
+				description: error instanceof Error ? error.message : undefined,
+			});
+		} finally {
+			editor.focus();
+		}
+	}, [t, workspacePath]);
 	useEffect(
 		() =>
 			subscribeWorkbenchCommand((command) => {
@@ -530,6 +576,16 @@ export function WorkspaceComposer({
 	const translatedEffortLabel = t(`composer.effort.${selectedEffortId}`, {
 		defaultValue: effortLabel,
 	});
+	const slashCommands = useMemo(
+		() =>
+			DEFAULT_SLASH_COMMANDS.map((command) => ({
+				...command,
+				description: t(`composer.slashCommands.${command.name}`, {
+					defaultValue: command.description,
+				}),
+			})),
+		[t],
+	);
 	return [
 		<ExecutionDock
 			key="execution-dock"
@@ -598,9 +654,10 @@ export function WorkspaceComposer({
 				</div>
 				<HistoryPlugin />
 				<SlashCommandPlugin
-					commands={DEFAULT_SLASH_COMMANDS}
+					commands={slashCommands}
 					popupAnchorRef={composerRootRef}
 					clientActionHandlers={{
+						clear: clearComposerDraft,
 						spec: insertSpecDraftPrompt,
 					}}
 				/>
@@ -627,6 +684,22 @@ export function WorkspaceComposer({
 
 			<div className="mt-2.5 flex items-end justify-between gap-3">
 				<div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<ComposerButton
+								type="button"
+								aria-label={t("composer.attachments.add")}
+								disabled={toolbarDisabled}
+								className="w-7 shrink-0 px-0 text-muted-foreground"
+								onClick={() => void openAttachmentPicker()}
+							>
+								<Paperclip className="size-[13px]" strokeWidth={1.8} />
+							</ComposerButton>
+						</TooltipTrigger>
+						<TooltipContent side="top">
+							{t("composer.attachments.add")}
+						</TooltipContent>
+					</Tooltip>
 					<ComposerProviderModelMenu
 						providers={providerChoices}
 						selectedProviderId={selectedProviderId}

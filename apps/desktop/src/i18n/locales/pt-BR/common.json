@@ -969,6 +969,15 @@
   "composer": {
     "ariaLabel": "Composer do workspace",
     "inputAriaLabel": "Prompt do workspace",
+    "attachments": {
+      "add": "Anexar arquivo ou imagem",
+      "pickerTitle": "Anexar arquivos a esta mensagem",
+      "error": "Não foi possível anexar o arquivo selecionado"
+    },
+    "slashCommands": {
+      "spec": "Criar ou atualizar a mission spec desta tarefa",
+      "clear": "Limpar o rascunho atual do composer"
+    },
     "placeholder": {
       "default": "Peça mudanças, mencione arquivos com @ e use /comandos",
       "plan": "Descreva o que mudar e depois clique em Solicitar mudanças"
@@ -1600,12 +1609,9 @@
     },
     "slashCommands": {
       "title": "Slash commands do composer",
-      "body": "Ao digitar `/`, o DCC oferece ações locais para enriquecer contexto, compactar histórico e iniciar fluxos específicos como o SDD.",
+      "body": "Ao digitar `/`, o DCC oferece ações que consegue executar de forma consistente sem depender do provider selecionado.",
       "items": {
-        "compact": "Pede uma compactação do contexto da thread atual.",
         "spec": "Escreve o prompt-base para criar ou atualizar a mission spec.",
-        "context": "Mostra o orçamento e o uso atual de contexto.",
-        "commit": "Prepara uma mensagem de commit a partir do estado atual.",
         "clear": "Limpa o rascunho atual do composer."
       }
     },

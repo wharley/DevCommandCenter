@@ -969,6 +969,15 @@
   "composer": {
     "ariaLabel": "Workspace composer",
     "inputAriaLabel": "Workspace prompt",
+    "attachments": {
+      "add": "Attach file or image",
+      "pickerTitle": "Attach files to this message",
+      "error": "Unable to attach the selected file"
+    },
+    "slashCommands": {
+      "spec": "Draft or update this task's mission spec",
+      "clear": "Clear the current composer draft"
+    },
     "placeholder": {
       "default": "Ask for changes, @mention files, and run /commands",
       "plan": "Describe what to change, then click Request Changes"
@@ -1600,12 +1609,9 @@
     },
     "slashCommands": {
       "title": "Composer slash commands",
-      "body": "When you type `/`, DCC offers local actions to enrich context, compact history, and start specific flows like SDD.",
+      "body": "When you type `/`, DCC offers actions it can execute consistently without depending on the selected provider.",
       "items": {
-        "compact": "Request a compaction pass for the current thread context.",
         "spec": "Writes the starter prompt used to create or update the mission spec.",
-        "context": "Shows the current context budget and usage.",
-        "commit": "Prepares a commit message from the current state.",
         "clear": "Clears the current composer draft."
       }
     },

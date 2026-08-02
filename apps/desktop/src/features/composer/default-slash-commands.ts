@@ -1,4 +1,4 @@
-/** Default slash-command rows exposed before SDK-loaded skills arrive. */
+/** Provider-independent slash commands owned and executed by DCC. */
 
 export type SlashCommandEntry = {
 	name: string;
@@ -9,28 +9,13 @@ export type SlashCommandEntry = {
 
 export const DEFAULT_SLASH_COMMANDS: readonly SlashCommandEntry[] = [
 	{
-		name: "compact",
-		description: "Summarize conversation context",
-		source: "builtin",
-	},
-	{
 		name: "spec",
 		description: "Draft or update this mission spec",
 		source: "client-action",
 	},
 	{
-		name: "context",
-		description: "Show current context budget",
-		source: "builtin",
-	},
-	{
-		name: "commit",
-		description: "Prepare a git commit message",
-		source: "builtin",
-	},
-	{
 		name: "clear",
 		description: "Clear composer draft",
-		source: "builtin",
+		source: "client-action",
 	},
 ];
