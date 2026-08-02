@@ -221,6 +221,7 @@ type WorkspacesSidebarProps = {
 	pullRequestsActive?: boolean;
 	onToggleCollapsed: () => void;
 	onArchiveWorkspace?: (workspaceId: string) => void;
+	onRenameWorkspace?: (workspaceId: string, name: string) => void | Promise<void>;
 	onCompleteWorkspace?: (workspaceId: string) => void | Promise<void>;
 	onRestoreWorkspace?: (workspaceId: string) => void;
 	onDeleteWorkspace?: (
@@ -264,6 +265,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	pullRequestsActive = false,
 	onToggleCollapsed,
 	onArchiveWorkspace,
+	onRenameWorkspace,
 	onCompleteWorkspace,
 	onRestoreWorkspace,
 	onDeleteWorkspace,
@@ -282,7 +284,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		[repositories, workspaces],
 	);
 	const repositoriesBySourceKey = useMemo(
-		() => new Map(repositories.map((repository) => [repository.rootPath, repository])),
+		() =>
+			new Map(
+				repositories.map((repository) => [repository.rootPath.trim(), repository]),
+			),
 		[repositories],
 	);
 	const [projectRemovalTarget, setProjectRemovalTarget] = useState<ProjectRemovalTarget | null>(
@@ -755,6 +760,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					selected={selectedWorkspaceId === item.workspace.id}
 					activity={workspaceAgentActivities[item.workspace.id] ?? null}
 					metadataEnabled={showAgentStates}
+					projectLabel={
+						item.workspace.rootPath
+							? repositoriesBySourceKey.get(item.workspace.rootPath.trim())?.name ?? null
+							: null
+					}
 					onSelect={
 						item.workspace.status === "archived" ||
 						item.workspace.status === "completed"
@@ -762,6 +772,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							: onSelectWorkspace
 					}
 					onArchiveWorkspace={onArchiveWorkspace}
+					onRenameWorkspace={onRenameWorkspace}
 					onCompleteWorkspace={onCompleteWorkspace}
 					onRestoreWorkspace={onRestoreWorkspace}
 					onDeleteWorkspace={
@@ -774,6 +785,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			isCreatingWorkspace,
 			isRemovingProject,
 			onArchiveWorkspace,
+			onRenameWorkspace,
 			onCompleteWorkspace,
 			onCreateWorkspaceFromProject,
 			onDeleteProject,

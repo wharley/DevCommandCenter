@@ -89,6 +89,16 @@
     "deleteWorkspaceConfirm": "Excluir workspace",
     "deleteWorkspaceError": "Falha ao excluir workspace",
     "moveWorkspaceToWaiting": "Colocar workspace em espera",
+    "renameWorkspace": "Renomear tarefa",
+    "renameWorkspaceInput": "Novo nome da tarefa",
+    "renameWorkspaceEmpty": "O nome da tarefa não pode ficar vazio.",
+    "renameWorkspaceError": "Não foi possível renomear a tarefa.",
+    "workspaceIdentity": {
+      "base": "base · {{branch}}",
+      "protectedWorktree": "Worktree protegido",
+      "coordinatedProjects_one": "{{count}} projeto coordenado · {{projects}}",
+      "coordinatedProjects_other": "{{count}} projetos coordenados · {{projects}}"
+    },
     "cancel": "Cancelar",
     "settings": "Configurações",
     "settingsShort": "Configurações",

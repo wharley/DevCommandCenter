@@ -89,6 +89,16 @@
     "deleteWorkspaceConfirm": "Delete workspace",
     "deleteWorkspaceError": "Failed to delete workspace",
     "moveWorkspaceToWaiting": "Put workspace on hold",
+    "renameWorkspace": "Rename task",
+    "renameWorkspaceInput": "New task name",
+    "renameWorkspaceEmpty": "The task name cannot be empty.",
+    "renameWorkspaceError": "The task could not be renamed.",
+    "workspaceIdentity": {
+      "base": "base · {{branch}}",
+      "protectedWorktree": "Protected worktree",
+      "coordinatedProjects_one": "{{count}} coordinated project · {{projects}}",
+      "coordinatedProjects_other": "{{count}} coordinated projects · {{projects}}"
+    },
     "cancel": "Cancel",
     "settings": "Settings",
     "settingsShort": "Settings",

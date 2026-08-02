@@ -1,6 +1,7 @@
 use tauri::{AppHandle, State};
 
 use dcc_core::application::{CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput};
+use dcc_core::domain::workspace::Workspace;
 use dcc_tauri::{
     commands::workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -12,24 +13,24 @@ use dcc_tauri::{
         ListMissionSpecsInput, ListMissionSpecsOutput, ListRepositoriesOutput,
         ListWorkspaceBundlesOutput, ListWorkspacesOutput, MissionSpecContextStatusInput,
         MissionSpecContextStatusOutput, ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
-        RepositoryIdInput, ResolveWorkspaceSourceUrlInput, SaveMissionValidationInput,
-        SaveMissionValidationOutput, SearchWorkspaceInput, SearchWorkspaceOutput,
-        WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
-        WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
-        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitAcceptConflictInput,
-        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
-        WorkspaceGitCompleteMergeInput, WorkspaceGitCompleteMergeOutput,
-        WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
-        WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput,
-        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
-        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput,
-        WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput, WorkspaceIdInput,
-        WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
-        WorkspaceProjectAutomationConfigOutput, WorkspaceRecordSetupOutcomeInput,
-        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunProjectTasksInput,
-        WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
-        WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution, WriteWorkspaceFileInput,
-        WriteWorkspaceFileOutput,
+        RenameWorkspaceInput, RepositoryIdInput, ResolveWorkspaceSourceUrlInput,
+        SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
+        SearchWorkspaceOutput, WorkspaceApplyDelegationWorktreeInput,
+        WorkspaceApplyDelegationWorktreeOutput, WorkspaceBundleIdInput, WorkspaceBundleStateOutput,
+        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
+        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
+        WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
+        WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictStateInput,
+        WorkspaceGitConflictStateOutput, WorkspaceGitFilePreviewContentOutput,
+        WorkspaceGitFilePreviewInput, WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput,
+        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
+        WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput,
+        WorkspaceIdInput, WorkspacePrepareDelegationWorktreeInput,
+        WorkspacePrepareDelegationWorktreeOutput, WorkspaceProjectAutomationConfigOutput,
+        WorkspaceRecordSetupOutcomeInput, WorkspaceRemoveDelegationWorktreeInput,
+        WorkspaceRunProjectTasksInput, WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput,
+        WorkspaceRunSetupOutput, WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution,
+        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
     },
     delivery_failure::{
         WorkspaceDeliveryFailureInput, WorkspaceDeliveryFailureOutput,
@@ -473,6 +474,14 @@ pub async fn restore_workspace(
     input: WorkspaceIdInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::workspace_commands::restore_workspace(state, input).await
+}
+
+#[tauri::command]
+pub async fn rename_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: RenameWorkspaceInput,
+) -> Result<Workspace, String> {
+    dcc_tauri::commands::workspace_commands::rename_workspace(state, input).await
 }
 
 #[tauri::command]

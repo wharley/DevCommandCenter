@@ -31,6 +31,11 @@ export type WorkspaceRailRecap = {
 	prTitle: string | null;
 };
 
+export type WorkspaceRailState = {
+	currentBranch: string;
+	recap: WorkspaceRailRecap | null;
+};
+
 export function buildWorkspaceRailRecap(input: {
 	branch: string;
 	activity: WorkspaceAgentActivity | null;
@@ -88,7 +93,7 @@ export function useWorkspaceRailRecap(input: {
 	activity: WorkspaceAgentActivity | null;
 	enabled: boolean;
 	onPullRequestMerged?: () => void | Promise<void>;
-}): WorkspaceRailRecap | null {
+}): WorkspaceRailState {
 	const root = input.enabled ? input.workspacePath : null;
 	const gitStatusQuery = useWorkspaceGitStatus(root, RAIL_GIT_QUERY_OPTIONS);
 	const currentBranch = gitStatusQuery.data?.currentBranch ?? input.branch;
@@ -141,18 +146,21 @@ export function useWorkspaceRailRecap(input: {
 				input.activity?.state !== "active" &&
 				(gitStatusQuery.isPending || prStatusQuery.isPending)
 			) {
-				return null;
+				return { currentBranch, recap: null };
 			}
 			if (needsBranchDiff && branchDiffQuery.isPending) {
-				return null;
+				return { currentBranch, recap: null };
 			}
-			return buildWorkspaceRailRecap({
-				branch: currentBranch,
-				activity: input.activity,
-				gitStatus: gitStatusQuery.data ?? null,
-				prStatus: prStatusQuery.data ?? null,
-				committedVsBaseCount: branchDiffQuery.data?.changes.length ?? 0,
-			});
+			return {
+				currentBranch,
+				recap: buildWorkspaceRailRecap({
+					branch: currentBranch,
+					activity: input.activity,
+					gitStatus: gitStatusQuery.data ?? null,
+					prStatus: prStatusQuery.data ?? null,
+					committedVsBaseCount: branchDiffQuery.data?.changes.length ?? 0,
+				}),
+			};
 		},
 		[
 			branchDiffQuery.data?.changes.length,

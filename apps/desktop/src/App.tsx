@@ -872,6 +872,21 @@ export default function App() {
 								workspacesFromBackend.find((candidate) => candidate.id === workspaceId)?.name,
 						)
 						.filter((name): name is string => Boolean(name)),
+					memberProjectNames: memberWorkspaceIds
+						.map((workspaceId) => {
+							const member = workspacesFromBackend.find(
+								(candidate) => candidate.id === workspaceId,
+							);
+							if (!member?.rootPath) return null;
+							return (
+								repositoriesFromBackend.find(
+									(repository) => repository.rootPath === member.rootPath,
+								)?.name ??
+								member.rootPath.split(/[\\/]/gu).filter(Boolean).at(-1) ??
+								null
+							);
+						})
+						.filter((name): name is string => Boolean(name)),
 					remoteDeletionTargets: deletableMemberWorkspaceIds.flatMap(
 						(workspaceId) =>
 							workspacesFromBackend.find(
@@ -880,7 +895,7 @@ export default function App() {
 					),
 				};
 			});
-	}, [workspaceBundlesFromBackend, workspacesFromBackend]);
+	}, [repositoriesFromBackend, workspaceBundlesFromBackend, workspacesFromBackend]);
 	const {
 		allWorkspaces,
 		applyWorkspaceTitle,
@@ -893,6 +908,7 @@ export default function App() {
 		deleteWorkspace,
 		filteredWorkspaces,
 		isCreatingWorkspace,
+		renameWorkspace,
 		restoreWorkspace,
 		selectedWorkspace,
 		selectedWorkspaceId,
@@ -3857,6 +3873,13 @@ export default function App() {
 		},
 		[archiveWorkspace, refreshWorkspaceCollections],
 	);
+	const handleRenameWorkspace = useCallback(
+		async (workspaceId: string, name: string) => {
+			await renameWorkspace(workspaceId, name);
+			await refreshWorkspaceCollections();
+		},
+		[refreshWorkspaceCollections, renameWorkspace],
+	);
 	const handleRestoreWorkspace = useCallback(
 		async (workspaceId: string) => {
 			await restoreWorkspace(workspaceId);
@@ -4010,6 +4033,9 @@ export default function App() {
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
 							onArchiveWorkspace={
 								isRemoteBackend ? handleRemoteWorkspaceMutation : handleArchiveWorkspace
+							}
+							onRenameWorkspace={
+								isRemoteBackend ? undefined : handleRenameWorkspace
 							}
 							onCompleteWorkspace={
 								isRemoteBackend ? undefined : handleCompleteWorkspace

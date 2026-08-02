@@ -57,6 +57,7 @@ import type {
 	ListGitTrackedFilesOutput,
 	ReadWorkspaceFileInput,
 	ReadWorkspaceFileOutput,
+	RenameWorkspaceInput,
 	ResolveWorkspaceSourceUrlInput,
 	WriteWorkspaceFileInput,
 	WriteWorkspaceFileOutput,
@@ -122,6 +123,7 @@ import type {
 	WorkspaceRunSetupOutput,
 	WorkspaceBundleStateOutput,
 	WorkspaceSourceUrlResolution,
+	Workspace,
 } from "@dcc/contracts";
 
 export const CODERABBIT_REVIEW_EVENT_NAME = "dcc/coderabbit/review/event";
@@ -165,6 +167,10 @@ export function completeWorkspace(workspaceId: string) {
 
 export function restoreWorkspace(workspaceId: string) {
 	return invoke<void>(WORKSPACE_METHODS.restoreWorkspace, { input: { workspaceId } });
+}
+
+export function renameWorkspace(input: RenameWorkspaceInput) {
+	return invoke<Workspace>(WORKSPACE_METHODS.renameWorkspace, { input });
 }
 
 export function deleteWorkspace(

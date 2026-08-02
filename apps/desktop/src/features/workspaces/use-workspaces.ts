@@ -14,6 +14,7 @@ import {
 	deleteWorkspace as apiDeleteWorkspace,
 	deleteWorkspaceBundle as apiDeleteWorkspaceBundle,
 	restoreWorkspace as apiRestoreWorkspace,
+	renameWorkspace as apiRenameWorkspace,
 	restoreWorkspaceBundle as apiRestoreWorkspaceBundle,
 } from "../../lib/workspace-api";
 import type {
@@ -170,6 +171,7 @@ export function workspaceToSummary(
 			(explicitName === null && sourceName === null) ||
 			(explicitName !== null && isAutomaticTaskTitle(explicitName)),
 		branch: workspace.source?.headBranch ?? workspace.baseBranch,
+		baseBranch: workspace.baseBranch,
 		status,
 		projectId: workspace.projectId,
 		rootPath: workspace.rootPath,
@@ -198,6 +200,7 @@ export function daemonCombToWorkspaceSummary(comb: DaemonComb): WorkspaceSummary
 		name,
 		isAutoNamed: !comb.name?.trim(),
 		branch,
+		baseBranch: comb.baseBranch ?? branch,
 		status,
 		projectId: comb.projectId,
 		rootPath: null,
@@ -281,6 +284,24 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 		const name = title.trim();
 		if (!name) return;
 		setNameOverrides((current) => ({ ...current, [workspaceId]: name }));
+	}, []);
+	const renameWorkspace = useCallback(async (workspaceId: string, title: string) => {
+		const name = title.replace(/\s+/gu, " ").trim();
+		if (!name) {
+			throw new Error(i18n.t("sidebar.renameWorkspaceEmpty"));
+		}
+		const previousName =
+			workspaceListRef.current.find((workspace) => workspace.id === workspaceId)?.name ?? "";
+		setNameOverrides((current) => ({ ...current, [workspaceId]: name }));
+		try {
+			await apiRenameWorkspace({ workspaceId, name });
+		} catch (error) {
+			setNameOverrides((current) => ({
+				...current,
+				[workspaceId]: previousName,
+			}));
+			throw error;
+		}
 	}, []);
 
 	const createWorkspace = useCallback(async (input: CreateWorkspaceForRepoInput) => {
@@ -547,6 +568,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 		deleteWorkspace,
 		deleteWorkspaces,
 		isCreatingWorkspace,
+		renameWorkspace,
 		filteredWorkspaces,
 		restoreWorkspace,
 		selectedWorkspace,

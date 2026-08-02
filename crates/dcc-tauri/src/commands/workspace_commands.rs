@@ -5409,6 +5409,85 @@ mod editor_workspace_file_tests {
         }
     }
 
+    fn workspace_for_rename(id: &str, name: &str) -> Workspace {
+        Workspace {
+            id: WorkspaceId(id.to_string()),
+            project_id: dcc_core::domain::project::ProjectId(format!("project-{id}")),
+            name: Some(name.to_string()),
+            root_path: format!("/tmp/{id}"),
+            base_branch: "main".to_string(),
+            worktree_path: Some(format!("/tmp/{id}-worktree")),
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            created_at: "2026-08-01T00:00:00Z".to_string(),
+            updated_at: "2026-08-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn renaming_a_task_persists_the_workspace_and_multi_project_label() {
+        use std::sync::{Arc, Mutex};
+
+        let connection = Arc::new(Mutex::new(
+            rusqlite::Connection::open_in_memory().expect("in-memory database"),
+        ));
+        let repo = SqliteWorkspaceRepo::from_connection(connection).expect("workspace repo");
+        let primary = workspace_for_rename("primary", "Old task");
+        let secondary = workspace_for_rename("secondary", "Secondary");
+        repo.save_workspace(&primary).await.expect("save primary");
+        repo.save_workspace(&secondary)
+            .await
+            .expect("save secondary");
+        let bundle_id = WorkspaceBundleId("bundle-rename".to_string());
+        repo.save_workspace_bundle(
+            &dcc_core::domain::workspace_bundle::WorkspaceBundle {
+                id: bundle_id.clone(),
+                name: "Old task".to_string(),
+                primary_workspace_id: primary.id.clone(),
+                state: WorkspaceBundleState::Ready,
+                created_at: "2026-08-01T00:00:00Z".to_string(),
+                updated_at: "2026-08-01T00:00:00Z".to_string(),
+            },
+            &[
+                dcc_core::domain::workspace_bundle::WorkspaceBundleMember {
+                    bundle_id: bundle_id.clone(),
+                    workspace_id: primary.id.clone(),
+                    created_for_bundle: true,
+                    position: 0,
+                },
+                dcc_core::domain::workspace_bundle::WorkspaceBundleMember {
+                    bundle_id: bundle_id.clone(),
+                    workspace_id: secondary.id.clone(),
+                    created_for_bundle: true,
+                    position: 1,
+                },
+            ],
+        )
+        .await
+        .expect("save bundle");
+
+        let renamed = rename_workspace_in_repo(
+            &repo,
+            RenameWorkspaceInput {
+                workspace_id: primary.id.0.clone(),
+                name: "  Checkout   sem conflito  ".to_string(),
+            },
+        )
+        .await
+        .expect("rename task");
+
+        assert_eq!(renamed.name.as_deref(), Some("Checkout sem conflito"));
+        let bundle = repo
+            .get_workspace_bundle(&bundle_id)
+            .await
+            .expect("read bundle")
+            .expect("bundle exists");
+        assert_eq!(bundle.bundle.name, "Checkout sem conflito");
+        assert_eq!(bundle.members.len(), 2);
+        assert!(normalize_workspace_name("   ").is_err());
+    }
+
     #[test]
     fn project_removal_cleans_nested_worktree_before_deleting_records() {
         use std::sync::{Arc, Mutex};
@@ -7343,6 +7422,24 @@ pub struct WorkspaceIdInput {
 
 #[derive(Clone, Debug, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct RenameWorkspaceInput {
+    pub workspace_id: String,
+    pub name: String,
+}
+
+fn normalize_workspace_name(name: &str) -> Result<String, String> {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    if name.is_empty() {
+        return Err("workspace name cannot be empty".to_string());
+    }
+    if name.chars().count() > 120 {
+        return Err("workspace name cannot exceed 120 characters".to_string());
+    }
+    Ok(name)
+}
+
+#[derive(Clone, Debug, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteWorkspaceInput {
     pub workspace_id: String,
     #[serde(default)]
@@ -7396,6 +7493,51 @@ pub async fn archive_workspace(
     repo.save_workspace(&workspace)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rename_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: RenameWorkspaceInput,
+) -> Result<Workspace, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    rename_workspace_in_repo(&repo, input).await
+}
+
+async fn rename_workspace_in_repo(
+    repo: &SqliteWorkspaceRepo,
+    input: RenameWorkspaceInput,
+) -> Result<Workspace, String> {
+    let name = normalize_workspace_name(&input.name)?;
+    let id = WorkspaceId(input.workspace_id);
+    let mut workspace = repo
+        .get_workspace(&id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    let now = Utc::now().to_rfc3339();
+
+    if let Some(mut summary) = repo
+        .get_workspace_bundle_for_workspace(&id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        if summary.bundle.primary_workspace_id != id {
+            return Err("only the primary multi-project workspace can rename the task".to_string());
+        }
+        summary.bundle.name = name.clone();
+        summary.bundle.updated_at = now.clone();
+        repo.save_workspace_bundle(&summary.bundle, &summary.members)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+
+    workspace.name = Some(name);
+    workspace.updated_at = now;
+    repo.save_workspace(&workspace)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(workspace)
 }
 
 #[tauri::command]

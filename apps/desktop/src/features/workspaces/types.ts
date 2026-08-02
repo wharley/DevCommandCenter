@@ -15,6 +15,7 @@ export interface WorkspaceSummary {
 	name: string;
 	isAutoNamed?: boolean;
 	branch: string;
+	baseBranch?: string;
 	status: WorkspaceStatus;
 	unreadSessionCount?: number;
 	projectId?: string | null;
@@ -27,6 +28,7 @@ export interface WorkspaceSummary {
 	additionalWorkspaceIds?: string[];
 	memberWorkspaceIds?: string[];
 	memberNames?: string[];
+	memberProjectNames?: string[];
 	remoteDeletionTargets?: WorkspaceRemoteBranchDeletionTarget[];
 }
 

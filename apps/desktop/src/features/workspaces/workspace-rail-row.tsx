@@ -1,7 +1,19 @@
 import { cva } from "class-variance-authority";
-import { CircleCheck, CirclePause, Loader2, RotateCcw, Trash2 } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import {
+	CircleCheck,
+	CirclePause,
+	Folder,
+	GitBranch,
+	Layers3,
+	Loader2,
+	Pencil,
+	RotateCcw,
+	ShieldCheck,
+	Trash2,
+} from "lucide-react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
 	Tooltip,
@@ -43,7 +55,9 @@ export type WorkspaceRailRowProps = {
 	selected: boolean;
 	activity?: WorkspaceAgentActivity | null;
 	metadataEnabled?: boolean;
+	projectLabel?: string | null;
 	onSelect?: (workspaceId: string) => void;
+	onRenameWorkspace?: (workspaceId: string, name: string) => void | Promise<void>;
 	onArchiveWorkspace?: (workspaceId: string) => void;
 	onCompleteWorkspace?: (workspaceId: string) => void | Promise<void>;
 	onRestoreWorkspace?: (workspaceId: string) => void;
@@ -66,8 +80,10 @@ const recapToneClass: Record<WorkspaceRecapTone, string> = {
 
 function WorkspaceActivityTime({
 	activity,
+	bare = false,
 }: {
 	activity: WorkspaceAgentActivity;
+	bare?: boolean;
 }) {
 	const { t } = useTranslation("common");
 	const timestamp = workspaceActivityTimestamp(activity);
@@ -100,12 +116,106 @@ function WorkspaceActivityTime({
 	}
 
 	const time = formatCompactElapsedTime(now - timestampMs, unitLabels);
-	return activity.state === "active" ? (
+	return activity.state === "active" || bare ? (
 		<span className="tabular-nums">{time}</span>
 	) : (
 		<span className="tabular-nums">
 			{t("sidebar.activityTime.ago", { time })}
 		</span>
+	);
+}
+
+function pathLeaf(path: string | null | undefined): string | null {
+	const normalized = path?.trim().replace(/[\\/]+$/gu, "") ?? "";
+	if (!normalized) return null;
+	return normalized.split(/[\\/]/gu).filter(Boolean).at(-1) ?? normalized;
+}
+
+function WorkspaceIdentityCard({
+	workspace,
+	displayTitle,
+	projectLabel,
+	currentBranch,
+	activity,
+}: {
+	workspace: WorkspaceSummary;
+	displayTitle: string;
+	projectLabel?: string | null;
+	currentBranch: string;
+	activity?: WorkspaceAgentActivity | null;
+}) {
+	const { t } = useTranslation("common");
+	const repositoryName = pathLeaf(workspace.rootPath);
+	const projectName = projectLabel?.trim() || repositoryName;
+	const showRepositoryName =
+		repositoryName && repositoryName.toLocaleLowerCase() !== projectName?.toLocaleLowerCase();
+	const memberProjects = [...new Set(workspace.memberProjectNames ?? [])];
+	const identityActivity =
+		activity ??
+		(workspace.updatedAt || workspace.createdAt
+			? {
+					state: "completed" as const,
+					startedAt: null,
+					completedAt: workspace.updatedAt ?? workspace.createdAt ?? null,
+				}
+			: null);
+
+	return (
+		<div className="w-[292px] space-y-2.5 p-0.5">
+			<div className="flex min-w-0 items-center justify-between gap-4">
+				<strong className="truncate text-[12px] font-semibold text-popover-foreground">
+					{displayTitle}
+				</strong>
+				{identityActivity ? (
+					<span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+						<WorkspaceActivityTime activity={identityActivity} bare />
+					</span>
+				) : null}
+			</div>
+
+			<div className="space-y-1.5 border-t border-border/70 pt-2 text-[11px]">
+				{projectName ? (
+					<div className="flex min-w-0 items-center gap-2">
+						<WorkspaceRailAvatar title={projectName} subtitle={projectName} />
+						<span className="truncate font-medium">{projectName}</span>
+					</div>
+				) : null}
+				{showRepositoryName ? (
+					<div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+						<Folder className="size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+						<span className="truncate">{repositoryName}</span>
+					</div>
+				) : null}
+				<div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+					<GitBranch className="size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+					<span className="min-w-0 truncate text-popover-foreground/90">
+						{currentBranch}
+					</span>
+					{workspace.baseBranch && workspace.baseBranch !== currentBranch ? (
+						<span className="ml-auto shrink-0 text-[9.5px]">
+							{t("sidebar.workspaceIdentity.base", {
+								branch: workspace.baseBranch,
+							})}
+						</span>
+					) : null}
+				</div>
+				<div className="flex min-w-0 items-center gap-2 text-emerald-600 dark:text-emerald-400">
+					<ShieldCheck className="size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+					<span>{t("sidebar.workspaceIdentity.protectedWorktree")}</span>
+				</div>
+				{memberProjects.length > 1 ? (
+					<div className="flex min-w-0 items-start gap-2 border-t border-border/60 pt-1.5 text-muted-foreground">
+						<Layers3 className="mt-px size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+						<span className="line-clamp-2">
+							{t("sidebar.workspaceIdentity.coordinatedProjects", {
+								count: memberProjects.length,
+								projects: memberProjects.join(" · "),
+							})}
+						</span>
+					</div>
+				) : null}
+			</div>
+		</div>
 	);
 }
 
@@ -134,7 +244,9 @@ export const WorkspaceRailRowItem = memo(
 		selected,
 		activity,
 		metadataEnabled = true,
+		projectLabel,
 		onSelect,
+		onRenameWorkspace,
 		onArchiveWorkspace,
 		onCompleteWorkspace,
 		onRestoreWorkspace,
@@ -143,7 +255,7 @@ export const WorkspaceRailRowItem = memo(
 		const { t } = useTranslation("common");
 		const displayTitle = workspaceRailDisplayTitle(workspace);
 		const workspacePath = workspace.worktreePath ?? workspace.rootPath ?? null;
-		const railRecap = useWorkspaceRailRecap({
+		const railState = useWorkspaceRailRecap({
 			workspacePath,
 			branch: workspace.branch,
 			activity: activity ?? null,
@@ -158,16 +270,13 @@ export const WorkspaceRailRowItem = memo(
 					? () => onCompleteWorkspace(workspace.id)
 					: undefined,
 		});
+		const railRecap = railState.recap;
 		const recapMessage = railRecap
 			? t(
 					`inspector.recap.messages.${railRecap.recap.messageKey}`,
 					railRecap.recap.params,
 				)
 			: null;
-		const recapTitle =
-			recapMessage && railRecap?.prTitle
-				? `${recapMessage} — ${railRecap.prTitle}`
-				: recapMessage ?? undefined;
 		const hasPriorityWorkspaceStatus = workspaceRailStatusTakesRecapSlot(
 			workspace.status,
 			Boolean(recapMessage),
@@ -184,6 +293,54 @@ export const WorkspaceRailRowItem = memo(
 		const [pendingAction, setPendingAction] = useState<
 			"restore" | "complete" | null
 		>(null);
+		const [isEditing, setIsEditing] = useState(false);
+		const [draftName, setDraftName] = useState(displayTitle);
+		const [isRenaming, setIsRenaming] = useState(false);
+		const [identityOpen, setIdentityOpen] = useState(false);
+		const renameInputRef = useRef<HTMLInputElement>(null);
+		const renameSubmissionRef = useRef(false);
+
+		useEffect(() => {
+			if (!isEditing) {
+				setDraftName(displayTitle);
+				return;
+			}
+			renameInputRef.current?.focus();
+			renameInputRef.current?.select();
+		}, [displayTitle, isEditing]);
+
+		const cancelRename = () => {
+			if (isRenaming) return;
+			setDraftName(displayTitle);
+			setIsEditing(false);
+		};
+		const submitRename = async () => {
+			if (renameSubmissionRef.current || !onRenameWorkspace) return;
+			const name = draftName.replace(/\s+/gu, " ").trim();
+			if (!name) {
+				toast.error(t("sidebar.renameWorkspaceEmpty"));
+				renameInputRef.current?.focus();
+				return;
+			}
+			if (name === displayTitle) {
+				setIsEditing(false);
+				return;
+			}
+			renameSubmissionRef.current = true;
+			setIsRenaming(true);
+			try {
+				await onRenameWorkspace(workspace.id, name);
+				setIsEditing(false);
+			} catch (error) {
+				toast.error(
+					error instanceof Error ? error.message : t("sidebar.renameWorkspaceError"),
+				);
+				renameInputRef.current?.focus();
+			} finally {
+				renameSubmissionRef.current = false;
+				setIsRenaming(false);
+			}
+		};
 
 		const runRowAction = (
 			action: "restore" | "complete",
@@ -252,23 +409,59 @@ export const WorkspaceRailRowItem = memo(
 					) : null}
 					<div className="flex min-w-0 items-start gap-2">
 						<WorkspaceRailAvatar title={displayTitle} subtitle={workspace.name} />
-						<div className="min-w-0 flex-1">
+						<Tooltip
+							open={!isEditing && identityOpen}
+							onOpenChange={setIdentityOpen}
+							delayDuration={450}
+						>
+							<TooltipTrigger asChild>
+								<div className="min-w-0 flex-1">
 							<div
 								className={cn(
 									"flex min-w-0 items-center gap-1.5 transition-[padding]",
-									workspace.status === "ready" &&
+									onRenameWorkspace &&
+										workspace.status === "ready" &&
 										onCompleteWorkspace &&
 										onArchiveWorkspace
-										? "group-hover/dccRailRow:pr-12 group-focus-within/dccRailRow:pr-12"
-										: "group-hover/dccRailRow:pr-6 group-focus-within/dccRailRow:pr-6",
+										? "group-hover/dccRailRow:pr-[4.5rem] group-focus-within/dccRailRow:pr-[4.5rem]"
+										: onRenameWorkspace
+											? "group-hover/dccRailRow:pr-12 group-focus-within/dccRailRow:pr-12"
+											: workspace.status === "ready" &&
+													onCompleteWorkspace &&
+													onArchiveWorkspace
+												? "group-hover/dccRailRow:pr-12 group-focus-within/dccRailRow:pr-12"
+												: "group-hover/dccRailRow:pr-6 group-focus-within/dccRailRow:pr-6",
 								)}
 							>
-								<span
-									className="min-w-0 truncate font-medium leading-5 text-foreground"
-									title={displayTitle}
-								>
-									{displayTitle}
-								</span>
+								{isEditing ? (
+									<input
+										ref={renameInputRef}
+										value={draftName}
+										disabled={isRenaming}
+										maxLength={120}
+										aria-label={t("sidebar.renameWorkspaceInput")}
+										className="h-6 min-w-0 flex-1 rounded border border-ring/60 bg-background px-1.5 text-[12px] font-medium text-foreground outline-none ring-2 ring-ring/15 disabled:opacity-60"
+										onClick={(event) => event.stopPropagation()}
+										onChange={(event) => setDraftName(event.target.value)}
+										onBlur={() => void submitRename()}
+										onKeyDown={(event) => {
+											event.stopPropagation();
+											if (event.key === "Enter") {
+												event.preventDefault();
+												void submitRename();
+											} else if (event.key === "Escape") {
+												event.preventDefault();
+												cancelRename();
+											}
+										}}
+									/>
+								) : (
+									<span
+										className="min-w-0 truncate font-medium leading-5 text-foreground"
+									>
+										{displayTitle}
+									</span>
+								)}
 								{workspace.memberWorkspaceIds &&
 								workspace.memberWorkspaceIds.length > 1 ? (
 									<span className="shrink-0 rounded-full bg-foreground/[0.08] px-1.5 text-[9.5px] font-semibold tabular-nums text-muted-foreground">
@@ -338,18 +531,58 @@ export const WorkspaceRailRowItem = memo(
 										"truncate text-[10.5px] leading-4",
 										recapToneClass[railRecap.recap.tone],
 									)}
-									title={recapTitle}
 								>
 									{recapMessage}
 								</p>
 							) : null}
-						</div>
+								</div>
+							</TooltipTrigger>
+							<TooltipContent
+								side="right"
+								align="start"
+								sideOffset={10}
+								className="!block !w-auto !max-w-none !items-stretch !rounded-xl !bg-popover !p-3 !text-popover-foreground shadow-xl ring-1 ring-border/80"
+							>
+								<WorkspaceIdentityCard
+									workspace={workspace}
+									displayTitle={displayTitle}
+									projectLabel={projectLabel}
+									currentBranch={railState.currentBranch}
+									activity={activity}
+								/>
+							</TooltipContent>
+						</Tooltip>
 						<div
 							className={cn(
 								"group/actions absolute right-2 top-1.5 flex items-center gap-0.5 rounded-md bg-sidebar/90 pl-1 transition-opacity group-hover/dccRailRow:opacity-100 group-focus-within/dccRailRow:opacity-100",
 								isPending ? "opacity-100" : "opacity-0",
 							)}
 						>
+							{onRenameWorkspace ? (
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon-xs"
+											aria-label={t("sidebar.renameWorkspace")}
+											disabled={isPending || isRenaming}
+											className="text-muted-foreground/60 hover:text-foreground"
+											onClick={(event) => {
+												event.stopPropagation();
+												setIdentityOpen(false);
+												setDraftName(displayTitle);
+												setIsEditing(true);
+											}}
+										>
+											<Pencil className="size-3.5" strokeWidth={2} aria-hidden />
+										</Button>
+									</TooltipTrigger>
+									<TooltipContent side="top">
+										{t("sidebar.renameWorkspace")}
+									</TooltipContent>
+								</Tooltip>
+							) : null}
 							{workspace.status === "archived" ? (
 								onRestoreWorkspace && (
 									<Button
@@ -485,8 +718,10 @@ export const WorkspaceRailRowItem = memo(
 		previous.activity?.startedAt === next.activity?.startedAt &&
 		previous.activity?.completedAt === next.activity?.completedAt &&
 		previous.metadataEnabled === next.metadataEnabled &&
+		previous.projectLabel === next.projectLabel &&
 		previous.workspace === next.workspace &&
 		previous.onSelect === next.onSelect &&
+		previous.onRenameWorkspace === next.onRenameWorkspace &&
 		previous.onArchiveWorkspace === next.onArchiveWorkspace &&
 		previous.onCompleteWorkspace === next.onCompleteWorkspace &&
 		previous.onRestoreWorkspace === next.onRestoreWorkspace &&
