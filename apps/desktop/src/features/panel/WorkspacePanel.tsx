@@ -71,9 +71,14 @@ import {
 	parseMissionValidationPersistence,
 } from "@/features/spec/mission-spec-content";
 import type { WorkspaceSurfaceSelection } from "./workspace-surface";
+import { buildSafeContinuationPrompt } from "./conversation-recovery";
 
 /** Composer draft injection request; the nonce lets a repeated annotation re-fire. */
-type ComposerPrefill = { text: string; nonce: number };
+type ComposerPrefill = {
+	text: string;
+	nonce: number;
+	mode?: "append" | "replace";
+};
 
 /** Formats a diff selection as a markdown context block for the agent prompt. */
 function buildAnnotationContextBlock(request: DiffAnnotationRequest): string {
@@ -157,7 +162,7 @@ type WorkspacePanelProps = {
 	) => Promise<void>;
 	onSteerPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onQueuePrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
-	onResumeSession: () => void;
+	onResumeSession: () => Promise<void>;
 	onAbortSession: () => void;
 	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
 	/** Composer-initiated delegation; mode and context policy are derived upstream. */
@@ -427,6 +432,35 @@ export function WorkspacePanel({
 				pendingPrompt,
 			),
 		[effectiveSessionId, historyEvents, pendingPrompt, sessionEvents],
+	);
+	const replaceComposerDraft = useCallback((text: string) => {
+		if (!text.trim()) return;
+		setComposerPrefill((previous) => ({
+			text,
+			nonce: (previous?.nonce ?? 0) + 1,
+			mode: "replace",
+		}));
+	}, []);
+	const handleContinueInterrupted = useCallback(
+		async (originalPrompt: string | null) => {
+			try {
+				if (sessionState === "aborted") {
+					await onResumeSession();
+				}
+				replaceComposerDraft(
+					buildSafeContinuationPrompt({
+						originalPrompt,
+						preamble: t("conversation.message.continuePrompt"),
+						originalLabel: t("conversation.message.originalPrompt"),
+					}),
+				);
+			} catch (error) {
+				toast.error(t("conversation.message.resumeFailed"), {
+					description: error instanceof Error ? error.message : undefined,
+				});
+			}
+		},
+		[onResumeSession, replaceComposerDraft, sessionState, t],
 	);
 	const pendingPermissionRequests = useMemo(
 		() => collectPendingPermissionRequests(messages),
@@ -829,6 +863,8 @@ export function WorkspacePanel({
 					onReviewDelegation={onReviewDelegation}
 					onRerunDelegation={onRerunDelegation}
 					onDelegateTaskApprove={onAgentDelegate}
+					onEditPrompt={replaceComposerDraft}
+					onContinueInterrupted={handleContinueInterrupted}
 					onOpenPlan={onOpenPlanSurface}
 				/>
 

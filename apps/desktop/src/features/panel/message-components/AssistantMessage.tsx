@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertCircle, ChevronRight, Copy } from "lucide-react";
+import { Activity, AlertCircle, ChevronRight, Copy, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
 import { Button } from "@/components/ui/button";
@@ -128,6 +128,7 @@ export function AssistantMessage({
 	activeMissionSpecHash,
 	autoSaveMissionValidation,
 	onDelegateTaskApprove,
+	onContinue,
 	onOpenPlan,
 	hidePendingApprovals = false,
 }: {
@@ -146,6 +147,7 @@ export function AssistantMessage({
 	activeMissionSpecHash?: string | null;
 	autoSaveMissionValidation?: boolean;
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
+	onContinue?: () => void;
 	onOpenPlan?: () => void;
 	hidePendingApprovals?: boolean;
 }) {
@@ -333,13 +335,32 @@ export function AssistantMessage({
 				)}
 				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
 					<MessageTimestamp createdAt={createdAt} />
-					{status?.type === "incomplete" ? (
-						<span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1.5 py-0.5 text-destructive">
-							<AlertCircle className="size-3" aria-hidden />
-							<span>{status.reason ?? t("conversation.message.incomplete")}</span>
-						</span>
-					) : null}
 				</div>
+				{status?.type === "incomplete" ? (
+					<div className="mt-2 flex max-w-2xl items-start gap-2.5 rounded-lg border border-destructive/20 bg-destructive/[0.045] px-3 py-2.5">
+						<AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
+						<div className="min-w-0 flex-1">
+							<div className="text-[12px] font-medium text-foreground">
+								{t("conversation.message.interrupted")}
+							</div>
+							<div className="mt-0.5 line-clamp-2 break-words text-[11px] leading-4 text-muted-foreground">
+								{status.reason ?? t("conversation.message.incomplete")}
+							</div>
+						</div>
+						{onContinue ? (
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="h-7 shrink-0 gap-1.5 px-2 text-[11px]"
+								onClick={onContinue}
+							>
+								<RotateCcw className="size-3" aria-hidden />
+								{t("conversation.message.continue")}
+							</Button>
+						) : null}
+					</div>
+				) : null}
 				{showPlanCard ? null : (
 					<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/assistant:pointer-events-auto group-hover/assistant:opacity-100 group-focus-within/assistant:pointer-events-auto group-focus-within/assistant:opacity-100">
 						<Button

@@ -289,6 +289,7 @@ type WorkspaceComposerPrefillRequest = {
 	workspaceId: string;
 	text: string;
 	nonce: number;
+	mode?: "append" | "replace";
 };
 
 type DelegationChildBinding = {
@@ -4362,7 +4363,8 @@ export default function App() {
 											? {
 													text: workspaceComposerPrefill.text,
 													nonce: workspaceComposerPrefill.nonce,
-											  }
+													mode: workspaceComposerPrefill.mode,
+												}
 											: null
 									}
 								/>

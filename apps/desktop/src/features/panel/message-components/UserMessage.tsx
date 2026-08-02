@@ -1,4 +1,4 @@
-import { Copy } from "lucide-react";
+import { Copy, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -8,10 +8,12 @@ export function UserMessage({
 	content,
 	label,
 	createdAt,
+	onEdit,
 }: {
 	content: string;
 	label: string;
 	createdAt?: string;
+	onEdit?: () => void;
 }) {
 	const { t } = useTranslation("common");
 	return (
@@ -29,6 +31,21 @@ export function UserMessage({
 					<MessageTimestamp createdAt={createdAt} />
 				</div>
 				<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/user:pointer-events-auto group-hover/user:opacity-100 group-focus-within/user:pointer-events-auto group-focus-within/user:opacity-100">
+					{onEdit ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-xs"
+							aria-label={t("conversation.message.editUser")}
+							className={cn(
+								"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
+								"bg-transparent hover:bg-transparent",
+							)}
+							onClick={onEdit}
+						>
+							<Pencil className="size-3.5" aria-hidden />
+						</Button>
+					) : null}
 					<Button
 						type="button"
 						variant="ghost"

@@ -125,8 +125,12 @@ type WorkspaceComposerProps = {
 	selectedProviderRuntime: ProviderRuntimeConfig | null;
 	sessionSnapshot: RuntimeSessionSnapshot | null;
 	pendingPrompt: string | null;
-	/** Text to append to the draft (e.g. a diff annotation); nonce re-fires it. */
-	prefill?: { text: string; nonce: number } | null;
+	/** External draft injection; annotations append and recovery actions replace. */
+	prefill?: {
+		text: string;
+		nonce: number;
+		mode?: "append" | "replace";
+	} | null;
 	focusRequestKey?: number | null;
 	workspacePath: string | null;
 	workspaceSetupReport?: WorkspaceSetupReport | null;
@@ -582,7 +586,9 @@ export function WorkspaceComposer({
 		}
 	}, [delegateAllowFileEdits]);
 
-	// Append externally-supplied context (e.g. a diff annotation) to the draft.
+	// Inject externally-supplied context. Diff annotations append; message
+	// recovery explicitly replaces the draft so stale text cannot be mixed into
+	// a retry without the user noticing.
 	// Keyed on nonce so the same selection can be re-sent, and so it fires once.
 	useEffect(() => {
 		if (!prefill || prefill.text.length === 0) {
@@ -596,7 +602,11 @@ export function WorkspaceComposer({
 			return;
 		}
 		lastPrefillNonceRef.current = prefill.nonce;
-		appendComposerText(editor, prefill.text);
+		if (prefill.mode === "replace") {
+			setEditorText(editor, prefill.text);
+		} else {
+			appendComposerText(editor, prefill.text);
+		}
 		editor.focus();
 	}, [prefill]);
 

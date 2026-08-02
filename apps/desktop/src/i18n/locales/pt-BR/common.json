@@ -1837,6 +1837,7 @@
   },
   "conversation": {
     "scrollToBottom": "Rolar para o fim",
+    "newActivity": "Nova atividade",
     "starting": "Preparando o agente…",
     "loading": {
       "title": "Carregando conversa",
@@ -1844,6 +1845,12 @@
     },
     "message": {
       "incomplete": "Incompleta",
+      "interrupted": "Execução interrompida",
+      "continue": "Continuar",
+      "continuePrompt": "Continue a tarefa anterior a partir do estado atual. Antes de fazer novas alterações, verifique o que já foi concluído e o que ficou incompleto durante a interrupção.",
+      "originalPrompt": "Pedido original",
+      "resumeFailed": "Não foi possível retomar esta conversa.",
+      "editUser": "Editar no Composer",
       "copyAssistant": "Copiar mensagem do assistente",
       "copyUser": "Copiar mensagem de {{label}}"
     },

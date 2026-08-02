@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { useStickToBottom } from "use-stick-to-bottom";
@@ -15,6 +15,10 @@ import {
 } from "./message-components";
 import { EmptyState } from "./EmptyState";
 import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
+import {
+	latestConversationActivitySignature,
+	precedingUserPrompt,
+} from "./conversation-recovery";
 
 type ActiveThreadViewportProps = {
 	messages: WorkspaceMessage[];
@@ -43,6 +47,8 @@ type ActiveThreadViewportProps = {
 		targetProviderId: string;
 	}) => Promise<void>;
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
+	onEditPrompt?: (prompt: string) => void;
+	onContinueInterrupted?: (originalPrompt: string | null) => Promise<void> | void;
 	onOpenPlan: () => void;
 };
 
@@ -69,22 +75,50 @@ export function ActiveThreadViewport({
 	onReviewDelegation,
 	onRerunDelegation,
 	onDelegateTaskApprove,
+	onEditPrompt,
+	onContinueInterrupted,
 	onOpenPlan,
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
+	const [hasNewActivity, setHasNewActivity] = useState(false);
 	const { contentRef, scrollRef, scrollToBottom, isAtBottom } = useStickToBottom({
 		initial: "instant",
 		resize: "smooth",
 	});
 
-	const latestMessageKey = messages[messages.length - 1]?.id ?? "empty";
+	const activitySignature = latestConversationActivitySignature(messages);
+	const latestAssistantMessageId = [...messages]
+		.reverse()
+		.find((message) => message.role === "assistant")?.id;
+	const previousActivityRef = useRef<string | null>(null);
+	const wasAtBottomRef = useRef(true);
 
 	useEffect(() => {
+		previousActivityRef.current = activitySignature;
+		wasAtBottomRef.current = true;
+		setHasNewActivity(false);
 		void scrollToBottom("instant");
-	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [latestMessageKey]);
+		// A session switch is the only time the viewport intentionally resets.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [sessionId]);
+
+	useEffect(() => {
+		const previous = previousActivityRef.current;
+		previousActivityRef.current = activitySignature;
+		if (previous !== null && previous !== activitySignature && !wasAtBottomRef.current) {
+			setHasNewActivity(true);
+		}
+	}, [activitySignature]);
+
+	useEffect(() => {
+		wasAtBottomRef.current = isAtBottom;
+		if (isAtBottom) {
+			setHasNewActivity(false);
+		}
+	}, [isAtBottom]);
 
 	const handleScrollToBottom = useCallback(() => {
+		setHasNewActivity(false);
 		void scrollToBottom("smooth");
 	}, [scrollToBottom]);
 
@@ -137,7 +171,7 @@ export function ActiveThreadViewport({
 						</div>
 					) : (
 						<div className="flex flex-col gap-0 px-5">
-							{messages.map((message) => {
+							{messages.map((message, messageIndex) => {
 								if (message.role === "user") {
 									return (
 										<div key={message.id} className="pb-4">
@@ -145,6 +179,11 @@ export function ActiveThreadViewport({
 												label={message.label}
 												content={message.content}
 												createdAt={message.createdAt}
+												onEdit={
+													onEditPrompt
+														? () => onEditPrompt(message.content)
+														: undefined
+												}
 											/>
 										</div>
 									);
@@ -172,6 +211,17 @@ export function ActiveThreadViewport({
 												activeMissionSpecHash={activeMissionSpecHash}
 												autoSaveMissionValidation={autoSaveMissionValidation}
 												onDelegateTaskApprove={onDelegateTaskApprove}
+												onContinue={
+													message.id === latestAssistantMessageId &&
+													message.status?.type === "incomplete" &&
+													onContinueInterrupted
+														? () => {
+																void onContinueInterrupted(
+																	precedingUserPrompt(messages, messageIndex),
+																);
+															}
+														: undefined
+												}
 												onOpenPlan={onOpenPlan}
 												hidePendingApprovals
 											/>
@@ -229,7 +279,9 @@ export function ActiveThreadViewport({
 						onClick={handleScrollToBottom}
 					>
 						<ChevronDown className="size-3.5" strokeWidth={2} />
-						{t("conversation.scrollToBottom")}
+						{hasNewActivity
+							? t("conversation.newActivity")
+							: t("conversation.scrollToBottom")}
 					</Button>
 				</div>
 			) : null}

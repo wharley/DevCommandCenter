@@ -1837,6 +1837,7 @@
   },
   "conversation": {
     "scrollToBottom": "Scroll to bottom",
+    "newActivity": "New activity",
     "starting": "Preparing the agent…",
     "loading": {
       "title": "Loading conversation",
@@ -1844,6 +1845,12 @@
     },
     "message": {
       "incomplete": "Incomplete",
+      "interrupted": "Run interrupted",
+      "continue": "Continue",
+      "continuePrompt": "Continue the previous task from the current state. Before making new changes, verify what was already completed and what remained incomplete when the run was interrupted.",
+      "originalPrompt": "Original request",
+      "resumeFailed": "Unable to resume this conversation.",
+      "editUser": "Edit in Composer",
       "copyAssistant": "Copy assistant message",
       "copyUser": "Copy {{label}} message"
     },

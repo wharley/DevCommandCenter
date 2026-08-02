@@ -132,7 +132,7 @@ type SessionWorkbenchProps = {
 	) => Promise<void>;
 	onSteerPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onQueuePrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
-	onResumeSession: () => void;
+	onResumeSession: () => Promise<void>;
 	onAbortSession: () => void;
 	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
 	onDelegatePrompt: (request: ComposerDelegationRequest) => Promise<void>;
@@ -145,7 +145,11 @@ type SessionWorkbenchProps = {
 		planMarkdown: string;
 		planTitle: string | null;
 	}) => Promise<boolean>;
-	composerPrefill?: { text: string; nonce: number } | null;
+	composerPrefill?: {
+		text: string;
+		nonce: number;
+		mode?: "append" | "replace";
+	} | null;
 	composerFocusRequestKey?: number | null;
 	/** Current inspector visibility — picks the open vs. close affordance. */
 	inspectorCollapsed?: boolean;
