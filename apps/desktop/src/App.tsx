@@ -4183,6 +4183,11 @@ export default function App() {
 							}
 							repositories={repositoriesFromBackend}
 							skillCount={skillContextCount}
+							appUpdate={appUpdateInfo}
+							isInstallingUpdate={isInstallingUpdate}
+							onInstallUpdate={() => {
+								void installUpdate();
+							}}
 							selectedWorkspaceId={
 								globalSurface === "pullRequests" ? null : selectedWorkspaceId
 							}

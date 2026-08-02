@@ -2,6 +2,7 @@ import { Download, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 type AppUpdateButtonProps = {
 	update:
@@ -12,12 +13,16 @@ type AppUpdateButtonProps = {
 		  }
 		| null;
 	installing?: boolean;
+	collapsed?: boolean;
+	className?: string;
 	onInstallNow: () => void;
 };
 
 export function AppUpdateButton({
 	update,
 	installing = false,
+	collapsed = false,
+	className,
 	onInstallNow,
 }: AppUpdateButtonProps) {
 	const { t } = useTranslation("common");
@@ -25,31 +30,46 @@ export function AppUpdateButton({
 		return null;
 	}
 
+	const button = (
+		<Button
+			type="button"
+			variant="ghost"
+			size={collapsed ? "icon-xs" : "sm"}
+			className={cn(
+				"group/update relative shrink-0 justify-start gap-0 overflow-hidden rounded-lg bg-sky-500 px-2 text-[11px] font-medium tracking-[0.01em] text-white shadow-sm transition-[max-width,background-color] duration-200 hover:bg-sky-400 hover:text-white dark:hover:bg-sky-400",
+				collapsed ? "size-7 justify-center px-0" : "h-8 max-w-8 hover:max-w-28",
+				className,
+			)}
+			aria-label={installing ? t("updater.installing") : t("updater.update")}
+			disabled={installing}
+			onClick={onInstallNow}
+		>
+			{installing ? (
+				<Loader2 className="size-4 shrink-0 animate-spin" />
+			) : (
+				<Download className="size-4 shrink-0" strokeWidth={2.1} />
+			)}
+			{collapsed ? null : (
+				<span className="ml-0 max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,margin,opacity] duration-200 group-hover/update:ml-1.5 group-hover/update:max-w-20 group-hover/update:opacity-100">
+					{installing ? t("updater.installing") : t("updater.update")}
+				</span>
+			)}
+		</Button>
+	);
+
+	if (!collapsed) {
+		return button;
+	}
+
 	return (
 		<Tooltip>
-			<TooltipTrigger asChild>
-				<Button
-					type="button"
-					variant="ghost"
-					size="xs"
-					className="relative h-6 gap-1 overflow-hidden rounded-sm px-1.5 text-[11px] font-medium tracking-[0.01em] text-muted-foreground shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--border)_36%,transparent)] hover:bg-accent/60 hover:text-foreground hover:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--foreground)_12%,transparent)] dark:hover:bg-muted/45"
-					disabled={installing}
-					onClick={onInstallNow}
-				>
-					{installing ? (
-						<Loader2 className="size-3 animate-spin text-foreground/70" />
-					) : (
-						<Download className="size-3 text-foreground/72" />
-					)}
-					<span>{installing ? t("updater.installing") : t("updater.update")}</span>
-				</Button>
-			</TooltipTrigger>
+			<TooltipTrigger asChild>{button}</TooltipTrigger>
 			<TooltipContent
-				side="top"
+				side="right"
 				sideOffset={4}
 				className="flex h-[22px] items-center gap-1 rounded-md px-1.5 text-[11px] leading-none"
 			>
-				{update.currentVersion} → {update.version}
+				{t("updater.update")} · {update.currentVersion} → {update.version}
 			</TooltipContent>
 		</Tooltip>
 	);

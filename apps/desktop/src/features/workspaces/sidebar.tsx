@@ -52,6 +52,7 @@ import {
 import { Popover, PopoverTrigger } from "../../components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import type { Repository, WorkspaceRemoteBranchDeletionTarget } from "@dcc/contracts";
+import { AppUpdateButton, type AppUpdateInfo } from "@/features/updater";
 import { cn } from "@/lib/utils";
 import type { WorkspaceSummary } from "./types";
 import {
@@ -219,6 +220,9 @@ type WorkspacesSidebarProps = {
 	}) => void;
 	repositories: Repository[];
 	skillCount?: number;
+	appUpdate?: AppUpdateInfo;
+	isInstallingUpdate?: boolean;
+	onInstallUpdate?: () => void;
 	onOpenSettings: () => void;
 	onOpenSkills: () => void;
 	onOpenPullRequests: () => void;
@@ -267,6 +271,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onCreateWorkspaceFromProject,
 	repositories,
 	skillCount = 0,
+	appUpdate = null,
+	isInstallingUpdate = false,
+	onInstallUpdate,
 	onOpenSettings,
 	onOpenSkills,
 	onOpenPullRequests,
@@ -1015,6 +1022,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						</TooltipTrigger>
 						<TooltipContent side="right">{t("sidebar.openSettings")}</TooltipContent>
 					</Tooltip>
+					{onInstallUpdate ? (
+						<AppUpdateButton
+							update={appUpdate}
+							installing={isInstallingUpdate}
+							collapsed
+							onInstallNow={onInstallUpdate}
+						/>
+					) : null}
 				</div>
 			</div>
 		);
@@ -1223,6 +1238,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						</TooltipTrigger>
 						<TooltipContent side="top">{t("sidebar.openSettings")}</TooltipContent>
 					</Tooltip>
+					{onInstallUpdate ? (
+						<AppUpdateButton
+							update={appUpdate}
+							installing={isInstallingUpdate}
+							className="ml-auto"
+							onInstallNow={onInstallUpdate}
+						/>
+					) : null}
 				</div>
 			</div>
 
