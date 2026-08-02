@@ -44,6 +44,7 @@ describe("projectWorkspaceRailGroups", () => {
 					id: "/projects/alpha",
 					projectId: "alpha",
 					name: "alpha",
+					displayName: "Customer Portal",
 					rootPath: "/projects/alpha",
 					baseBranch: "main",
 					remote: null,
@@ -58,7 +59,7 @@ describe("projectWorkspaceRailGroups", () => {
 
 		expect(activeGroups).toHaveLength(1);
 		expect(activeGroups[0]).toMatchObject({
-			label: "alpha",
+			label: "Customer Portal",
 			rows: [
 				{ id: "b", name: "Alpha hotfix" },
 				{ id: "a", name: "Alpha" },
@@ -92,6 +93,7 @@ describe("projectWorkspaceRailGroups", () => {
 					id: "/projects/alpha",
 					projectId: "alpha",
 					name: "alpha",
+					displayName: null,
 					rootPath: "/projects/alpha",
 					baseBranch: "main",
 					remote: null,

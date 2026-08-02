@@ -73,6 +73,8 @@ import {
 } from "./workspace-rail-shared";
 import { WorkspaceRailRowItem } from "./workspace-rail-row";
 import { useWorkspaceAgentActivities } from "./use-workspace-agent-states";
+import { ProjectEditDialog } from "./project-edit-dialog";
+import { repositoryDisplayName } from "./repository-display-name";
 
 type VirtualItem =
 	| {
@@ -145,13 +147,15 @@ function WorkspaceRepoPicker({
 						{repositories.map((repository) => (
 							<CommandItem
 								key={repository.id}
-								value={`${repository.name} ${repository.projectId} ${repository.baseBranch} ${repository.rootPath}`}
+								value={`${repositoryDisplayName(repository)} ${repository.name} ${repository.projectId} ${repository.baseBranch} ${repository.rootPath}`}
 								onSelect={() => {
 									setOpen(false);
 									onCreateWorkspaceFromRepository(repository);
 								}}
 							>
-								<strong className="truncate">{repository.name}</strong>
+								<strong className="truncate">
+									{repositoryDisplayName(repository)}
+								</strong>
 								<span className="truncate text-[var(--dcc-text-muted)]">
 									{repository.baseBranch}
 								</span>
@@ -236,6 +240,10 @@ type WorkspacesSidebarProps = {
 		repositoryId: string;
 		workspaceIds: string[];
 	}) => Promise<void> | void;
+	onUpdateProjectDisplayName?: (
+		repositoryId: string,
+		displayName: string | null,
+	) => Promise<void>;
 	selectedWorkspaceId: string | null;
 	workspaces: WorkspaceSummary[];
 };
@@ -270,6 +278,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onRestoreWorkspace,
 	onDeleteWorkspace,
 	onDeleteProject,
+	onUpdateProjectDisplayName,
 	selectedWorkspaceId,
 	workspaces,
 }: WorkspacesSidebarProps) {
@@ -293,6 +302,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	const [projectRemovalTarget, setProjectRemovalTarget] = useState<ProjectRemovalTarget | null>(
 		null,
 	);
+	const [projectEditTarget, setProjectEditTarget] = useState<Repository | null>(null);
 	const [isRemovingProject, setIsRemovingProject] = useState(false);
 	const [workspaceDeletionTarget, setWorkspaceDeletionTarget] =
 		useState<WorkspaceSummary | null>(null);
@@ -619,6 +629,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					Boolean(item.sourceKey) &&
 					Boolean(onDeleteProject) &&
 					!isRemovingProject;
+				const canEditProject =
+					item.headerVariant === "project" &&
+					repository !== null &&
+					Boolean(onUpdateProjectDisplayName);
+				const canManageProject =
+					canCreateProjectWorkspace || canEditProject || canRemoveProject;
 
 				return (
 					<div
@@ -684,15 +700,15 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 											label: item.label,
 										})}
 										className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/dccRailHeader:opacity-100 group-focus-within/dccRailHeader:opacity-100"
-									onClick={(event) => {
-										event.stopPropagation();
-										onCreateWorkspaceFromProject?.({
-											projectId: repository.projectId,
-											workspaceRoot: repository.rootPath,
-											baseBranch: repository.baseBranch,
-											label: repository.name,
-										});
-									}}
+										onClick={(event) => {
+											event.stopPropagation();
+											onCreateWorkspaceFromProject?.({
+												projectId: repository.projectId,
+												workspaceRoot: repository.rootPath,
+												baseBranch: repository.baseBranch,
+												label: repositoryDisplayName(repository),
+											});
+										}}
 									>
 										<Plus className="size-4" strokeWidth={2.1} aria-hidden />
 									</Button>
@@ -703,7 +719,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							</Tooltip>
 						) : null}
 
-						{canRemoveProject ? (
+						{canManageProject ? (
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
 									<Button
@@ -720,6 +736,18 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									</Button>
 								</DropdownMenuTrigger>
 								<DropdownMenuContent align="end" sideOffset={6}>
+									{canEditProject ? (
+										<DropdownMenuItem
+											className="gap-2 text-[13px]"
+											onSelect={(event) => {
+												event.preventDefault();
+												setProjectEditTarget(repository);
+											}}
+										>
+											<Settings2 className="size-3.5" strokeWidth={1.9} aria-hidden />
+											{t("sidebar.editProject")}
+										</DropdownMenuItem>
+									) : null}
 									{repository && onCreateWorkspaceFromProject ? (
 										<DropdownMenuItem
 											className="gap-2 text-[13px]"
@@ -729,7 +757,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 													projectId: repository.projectId,
 													workspaceRoot: repository.rootPath,
 													baseBranch: repository.baseBranch,
-													label: repository.name,
+													label: repositoryDisplayName(repository),
 												});
 											}}
 										>
@@ -737,16 +765,18 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 											{t("sidebar.newWorkspace")}
 										</DropdownMenuItem>
 									) : null}
-									<DropdownMenuItem
-										className="gap-2 text-[13px] text-destructive focus:text-destructive"
-										onSelect={(event) => {
-											event.preventDefault();
-											openProjectRemovalDialog(item.sourceKey!, item.label);
-										}}
-									>
-										<Trash2 className="size-3.5" strokeWidth={2} aria-hidden />
-										{t("sidebar.removeProject")}
-									</DropdownMenuItem>
+									{canRemoveProject ? (
+										<DropdownMenuItem
+											className="gap-2 text-[13px] text-destructive focus:text-destructive"
+											onSelect={(event) => {
+												event.preventDefault();
+												openProjectRemovalDialog(item.sourceKey!, item.label);
+											}}
+										>
+											<Trash2 className="size-3.5" strokeWidth={2} aria-hidden />
+											{t("sidebar.removeProject")}
+										</DropdownMenuItem>
+									) : null}
 								</DropdownMenuContent>
 							</DropdownMenu>
 						) : null}
@@ -761,8 +791,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					activity={workspaceAgentActivities[item.workspace.id] ?? null}
 					metadataEnabled={showAgentStates}
 					projectLabel={
-						item.workspace.rootPath
-							? repositoriesBySourceKey.get(item.workspace.rootPath.trim())?.name ?? null
+						item.workspace.rootPath &&
+						repositoriesBySourceKey.has(item.workspace.rootPath.trim())
+							? repositoryDisplayName(
+									repositoriesBySourceKey.get(item.workspace.rootPath.trim())!,
+								)
 							: null
 					}
 					onSelect={
@@ -789,6 +822,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			onCompleteWorkspace,
 			onCreateWorkspaceFromProject,
 			onDeleteProject,
+			onUpdateProjectDisplayName,
 			onDeleteWorkspace,
 			onRestoreWorkspace,
 			onSelectWorkspace,
@@ -868,7 +902,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									projectId: repository.projectId,
 									workspaceRoot: repository.rootPath,
 									baseBranch: repository.baseBranch,
-									label: repository.name,
+									label: repositoryDisplayName(repository),
 								});
 							}}
 							onCreateWorkspace={onCreateWorkspace}
@@ -1073,7 +1107,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									projectId: repository.projectId,
 									workspaceRoot: repository.rootPath,
 									baseBranch: repository.baseBranch,
-									label: repository.name,
+									label: repositoryDisplayName(repository),
 								});
 							}}
 							onCreateWorkspace={onCreateWorkspace}
@@ -1191,6 +1225,18 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					</Tooltip>
 				</div>
 			</div>
+
+			<ProjectEditDialog
+				repository={projectEditTarget}
+				open={projectEditTarget !== null}
+				onOpenChange={(open) => {
+					if (!open) setProjectEditTarget(null);
+				}}
+				onSave={async (repositoryId, displayName) => {
+					if (!onUpdateProjectDisplayName) return;
+					await onUpdateProjectDisplayName(repositoryId, displayName);
+				}}
+			/>
 
 			<Dialog
 				open={projectRemovalTarget !== null}

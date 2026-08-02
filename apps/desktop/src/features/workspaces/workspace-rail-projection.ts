@@ -1,5 +1,6 @@
 import type { Repository } from "@dcc/contracts";
 import type { WorkspaceSummary } from "./types";
+import { repositoryDisplayName } from "./repository-display-name";
 
 export type DccWorkspaceRailRow = WorkspaceSummary;
 
@@ -134,7 +135,11 @@ export function projectWorkspaceRailGroups(
 				return tb.localeCompare(ta);
 			});
 			const repository = repositories.find((candidate) => candidate.rootPath.trim() === key) ?? null;
-			const label = repository?.name?.trim() || (sorted[0] ? projectGroupingLabel(sorted[0]) : key);
+			const label = repository
+				? repositoryDisplayName(repository)
+				: sorted[0]
+					? projectGroupingLabel(sorted[0])
+					: key;
 			return {
 				id: `dcc.proj.${hashId(key)}`,
 				label,

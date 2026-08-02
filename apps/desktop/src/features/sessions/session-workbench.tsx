@@ -94,6 +94,8 @@ type SessionWorkbenchProps = {
 	projectId?: string | null;
 	/** Project root (`rootPath`) — terminals open here, outside the worktree. */
 	terminalRootPath?: string | null;
+	/** Optional user-facing project identity; falls back to the technical root name. */
+	projectLabel?: string | null;
 	/** Active mission worktree path. Unlike workspacePath, this does not fall back to rootPath. */
 	terminalWorktreePath?: string | null;
 	workspaceScopeOptions?: Array<{
@@ -184,6 +186,7 @@ export function SessionWorkbench({
 	terminalWorkspaceBranch,
 	projectId,
 	terminalRootPath,
+	projectLabel,
 	terminalWorktreePath,
 	workspaceScopeOptions = [],
 	selectedWorkspaceScopeId = null,
@@ -246,9 +249,9 @@ export function SessionWorkbench({
 	>(null);
 	const [deliveryError, setDeliveryError] = useState<string | null>(null);
 	const sessionState = sessionSnapshot?.state ?? "idle";
-	const projectLabel = terminalRootPath
-		? pathBasename(terminalRootPath)
-		: (projectId ?? workspaceName);
+	const resolvedProjectLabel =
+		projectLabel?.trim() ||
+		(terminalRootPath ? pathBasename(terminalRootPath) : (projectId ?? workspaceName));
 	const sessionId = sessionSnapshot?.sessionId ?? null;
 	const terminalWorkspaceKey = terminalWorkspaceId ?? workspaceId;
 	const terminalUiState = getWorkspaceTerminalUiState(
@@ -585,7 +588,7 @@ export function SessionWorkbench({
 						workspacePath={workspacePath}
 						workspaceSetupReport={workspaceSetupReport}
 						projectRootPath={terminalRootPath}
-						projectLabel={projectLabel}
+						projectLabel={resolvedProjectLabel}
 						isIsolatedWorkspace={Boolean(terminalWorktreePath)}
 						workspaceContextProjects={workspaceScopeOptions}
 						sessionQueryScope={sessionQueryScope}

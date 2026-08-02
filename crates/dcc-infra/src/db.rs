@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS dcc_repositories (
 	id TEXT PRIMARY KEY NOT NULL,
 	project_id TEXT NOT NULL,
 	name TEXT NOT NULL,
+	display_name TEXT NULL,
 	root_path TEXT NOT NULL UNIQUE,
 	base_branch TEXT NOT NULL,
 	remote TEXT NULL,
@@ -280,6 +281,7 @@ impl SqliteWorkspaceRepo {
         Self::ensure_column(&conn, "dcc_repositories", "remote_url", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_repositories", "forge_provider", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_repositories", "forge_login", "TEXT NULL")?;
+        Self::ensure_column(&conn, "dcc_repositories", "display_name", "TEXT NULL")?;
         Ok(())
     }
 
@@ -341,6 +343,27 @@ impl SqliteWorkspaceRepo {
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(())
+    }
+
+    pub fn update_repository_display_name(
+        &self,
+        repository_id: &RepositoryId,
+        display_name: Option<&str>,
+    ) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                "UPDATE dcc_repositories SET display_name = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![
+                    display_name.map(str::trim).filter(|value| !value.is_empty()),
+                    repository_id.0.clone()
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed > 0)
     }
 
     pub fn list_repositories_needing_forge_binding(&self) -> Result<Vec<RepositoryId>> {
@@ -570,14 +593,15 @@ impl SqliteWorkspaceRepo {
             id: RepositoryId(row.get::<_, String>(0)?),
             project_id: ProjectId(row.get::<_, String>(1)?),
             name: row.get::<_, String>(2)?,
-            root_path: row.get::<_, String>(3)?,
-            base_branch: row.get::<_, String>(4)?,
-            remote: row.get::<_, Option<String>>(5)?,
-            remote_url: row.get::<_, Option<String>>(6)?,
-            forge_provider: row.get::<_, Option<String>>(7)?,
-            forge_login: row.get::<_, Option<String>>(8)?,
-            created_at: row.get::<_, String>(9)?,
-            updated_at: row.get::<_, String>(10)?,
+            display_name: row.get::<_, Option<String>>(3)?,
+            root_path: row.get::<_, String>(4)?,
+            base_branch: row.get::<_, String>(5)?,
+            remote: row.get::<_, Option<String>>(6)?,
+            remote_url: row.get::<_, Option<String>>(7)?,
+            forge_provider: row.get::<_, Option<String>>(8)?,
+            forge_login: row.get::<_, Option<String>>(9)?,
+            created_at: row.get::<_, String>(10)?,
+            updated_at: row.get::<_, String>(11)?,
         })
     }
 }
@@ -1964,12 +1988,13 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         conn.execute(
             r#"
 			INSERT INTO dcc_repositories (
-				id, project_id, name, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+				id, project_id, name, display_name, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
 			ON CONFLICT(root_path) DO UPDATE SET
 				id = excluded.id,
 				project_id = excluded.project_id,
 				name = excluded.name,
+				display_name = COALESCE(excluded.display_name, dcc_repositories.display_name),
 				base_branch = excluded.base_branch,
 				remote = excluded.remote,
 				remote_url = excluded.remote_url,
@@ -1982,6 +2007,7 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
                 repository.id.0.clone(),
                 repository.project_id.0.clone(),
                 repository.name.clone(),
+                repository.display_name.clone(),
                 repository.root_path.clone(),
                 repository.base_branch.clone(),
                 repository.remote.clone(),
@@ -2005,7 +2031,7 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         let repository = conn
             .query_row(
                 r#"
-				SELECT id, project_id, name, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
+				SELECT id, project_id, name, display_name, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
 				  FROM dcc_repositories
 				 WHERE id = ?1
 				"#,
@@ -2026,7 +2052,7 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         let mut stmt = conn
             .prepare(
                 r#"
-				SELECT id, project_id, name, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
+				SELECT id, project_id, name, display_name, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
 				  FROM dcc_repositories
 				 ORDER BY updated_at DESC, created_at DESC, name ASC
 				"#,
@@ -2907,6 +2933,7 @@ mod tests {
             id: RepositoryId("/tmp/repo".to_string()),
             project_id: ProjectId("project-1".to_string()),
             name: "repo".to_string(),
+            display_name: None,
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
             remote: Some("origin".to_string()),
@@ -2939,6 +2966,31 @@ mod tests {
         assert_eq!(repositories[0].root_path, "/tmp/repo");
         assert_eq!(repositories[0].remote.as_deref(), Some("origin"));
         assert_eq!(repositories[0].forge_login.as_deref(), Some("octocat"));
+
+        assert!(repo
+            .update_repository_display_name(
+                &RepositoryId("/tmp/repo".to_string()),
+                Some("Customer Portal"),
+            )
+            .expect("rename project"));
+        let renamed = futures::executor::block_on(
+            repo.get_repository(&RepositoryId("/tmp/repo".to_string())),
+        )
+        .expect("read renamed project")
+        .expect("renamed project exists");
+        assert_eq!(renamed.display_name.as_deref(), Some("Customer Portal"));
+
+        futures::executor::block_on(repo.save_repository(&repository))
+            .expect("re-register repository");
+        let rediscovered = futures::executor::block_on(
+            repo.get_repository(&RepositoryId("/tmp/repo".to_string())),
+        )
+        .expect("read rediscovered project")
+        .expect("rediscovered project exists");
+        assert_eq!(
+            rediscovered.display_name.as_deref(),
+            Some("Customer Portal")
+        );
 
         futures::executor::block_on(repo.delete_repository(&RepositoryId("/tmp/repo".to_string())))
             .expect("delete repository");
@@ -3051,6 +3103,7 @@ mod tests {
             id: RepositoryId("/tmp/repo".to_string()),
             project_id: ProjectId("project-1".to_string()),
             name: "repo".to_string(),
+            display_name: None,
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
             remote: Some("origin".to_string()),

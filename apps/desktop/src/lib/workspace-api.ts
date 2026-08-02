@@ -58,6 +58,7 @@ import type {
 	ReadWorkspaceFileInput,
 	ReadWorkspaceFileOutput,
 	RenameWorkspaceInput,
+	UpdateRepositoryDisplayNameInput,
 	ResolveWorkspaceSourceUrlInput,
 	WriteWorkspaceFileInput,
 	WriteWorkspaceFileOutput,
@@ -123,6 +124,7 @@ import type {
 	WorkspaceRunSetupOutput,
 	WorkspaceBundleStateOutput,
 	WorkspaceSourceUrlResolution,
+	Repository,
 	Workspace,
 } from "@dcc/contracts";
 
@@ -191,6 +193,10 @@ export function deleteWorkspace(
 
 export function deleteRepository(repositoryId: string) {
 	return invoke<void>(WORKSPACE_METHODS.deleteRepository, { input: { repositoryId } });
+}
+
+export function updateRepositoryDisplayName(input: UpdateRepositoryDisplayNameInput) {
+	return invoke<Repository>(WORKSPACE_METHODS.updateRepositoryDisplayName, { input });
 }
 
 export function createWorkspaceFromUrl(input: CreateWorkspaceFromUrlInput) {

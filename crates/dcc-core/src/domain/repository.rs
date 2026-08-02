@@ -12,6 +12,9 @@ pub struct Repository {
     pub id: RepositoryId,
     pub project_id: ProjectId,
     pub name: String,
+    /// Optional user-facing project name. The technical repository name stays
+    /// stable so re-discovery never overwrites the user's chosen identity.
+    pub display_name: Option<String>,
     pub root_path: String,
     pub base_branch: String,
     pub remote: Option<String>,

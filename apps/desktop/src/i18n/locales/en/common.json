@@ -64,6 +64,7 @@
     "manageSkills": "Manage skills",
     "openProjectMenu": "Open project menu",
     "projectActions": "Project actions",
+    "editProject": "Edit project",
     "noWorkspacesYet": "No workspaces yet",
     "noWorkspacesHint": "Open a project or clone from URL to start from zero.",
     "removeProject": "Remove project",
@@ -123,6 +124,19 @@
         "months": "mo"
       }
     }
+  },
+  "projectEditor": {
+    "title": "Edit project",
+    "description": "Customize how this project appears in DCC without changing its folder, repository, or branches.",
+    "nameLabel": "Project name",
+    "nameHint": "This name is used in the sidebar, header, Dock, and pickers. The technical name stays intact.",
+    "useRepositoryName": "Use original name",
+    "technicalIdentity": "Technical identity",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Project updated",
+    "saveError": "The project could not be updated."
   },
   "commandPalette": {
     "title": "Workspace command palette",

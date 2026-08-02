@@ -47,12 +47,13 @@ import {
 	setupReportDescription,
 } from "./workspace-setup-report";
 import { cn } from "@/lib/utils";
+import { repositoryDisplayName } from "./repository-display-name";
 
 type WorkspaceCreationMode = "open" | "clone";
 
 type RepositoryOption = Pick<
 	Repository,
-	"id" | "projectId" | "name" | "rootPath" | "baseBranch"
+	"id" | "projectId" | "name" | "displayName" | "rootPath" | "baseBranch"
 >;
 
 export type ExistingRepositoryContext = {
@@ -342,6 +343,7 @@ export function CreateWorkspaceDialog({
 				id: `picked:${normalizedPickedPath}`,
 				projectId,
 				name: repositoryNameFromWorkspaceRoot(pickedPath),
+				displayName: null,
 				rootPath: pickedPath,
 				baseBranch: "",
 			};
@@ -470,7 +472,7 @@ export function CreateWorkspaceDialog({
 						projectId: repository.projectId,
 						workspaceRoot: repository.rootPath,
 						baseBranch: repository.baseBranch,
-						name: repository.name,
+						name: repositoryDisplayName(repository),
 					})),
 				});
 				toast.success(t("workspaceDialog.multiToastSuccess"), {
@@ -685,11 +687,11 @@ export function CreateWorkspaceDialog({
 											onClick={() => selectSingleRepository(repository)}
 										>
 											<span className="grid size-6 shrink-0 place-items-center rounded-md bg-background text-[9px] font-semibold ring-1 ring-border/50">
-												{repository.name.slice(0, 2).toUpperCase()}
+											{repositoryDisplayName(repository).slice(0, 2).toUpperCase()}
 											</span>
 											<span className="min-w-0 flex-1">
 												<strong className="block truncate text-[11px] font-medium text-foreground">
-													{repository.name}
+												{repositoryDisplayName(repository)}
 												</strong>
 												<small className="block truncate text-[9.5px] text-muted-foreground">
 													{selected && isLoadingBranches && !repository.baseBranch
@@ -785,7 +787,7 @@ export function CreateWorkspaceDialog({
 											</span>
 											<span className="min-w-0">
 												<span className="block truncate text-[12px] font-medium">
-													{repository.name}
+													{repositoryDisplayName(repository)}
 												</span>
 												<span className="flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground">
 													<span className="truncate font-mono">{repository.rootPath}</span>

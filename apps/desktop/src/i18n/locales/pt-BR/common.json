@@ -64,6 +64,7 @@
     "manageSkills": "Gerenciar skills",
     "openProjectMenu": "Menu de abrir projeto",
     "projectActions": "Ações do projeto",
+    "editProject": "Editar projeto",
     "noWorkspacesYet": "Ainda não há workspaces",
     "noWorkspacesHint": "Abra um projeto ou faça clone pela URL para começar.",
     "removeProject": "Remover projeto",
@@ -123,6 +124,19 @@
         "months": "meses"
       }
     }
+  },
+  "projectEditor": {
+    "title": "Editar projeto",
+    "description": "Personalize como este projeto aparece no DCC sem alterar a pasta, o repositório ou as branches.",
+    "nameLabel": "Nome do projeto",
+    "nameHint": "Este nome será usado na sidebar, no cabeçalho, no Dock e nos seletores. O nome técnico permanece intacto.",
+    "useRepositoryName": "Usar nome original",
+    "technicalIdentity": "Identidade técnica",
+    "cancel": "Cancelar",
+    "save": "Salvar",
+    "saving": "Salvando…",
+    "saved": "Projeto atualizado",
+    "saveError": "Não foi possível atualizar o projeto."
   },
   "commandPalette": {
     "title": "Paleta de comandos do workspace",

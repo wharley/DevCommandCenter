@@ -97,12 +97,14 @@ import {
 	listRepositories,
 	listWorkspaceBundles,
 	listWorkspaces,
+	updateRepositoryDisplayName,
 	workspaceGitBranchDiff,
 	workspaceGitStatus,
 	workspacePrStatus,
 	workspacePrepareDelegationWorktree,
 	workspaceRemoveDelegationWorktree,
 } from "./lib/workspace-api";
+import { repositoryDisplayName } from "./features/workspaces/repository-display-name";
 import {
 	abortRun,
 	applyTaskTitle,
@@ -896,10 +898,11 @@ export default function App() {
 								(candidate) => candidate.id === workspaceId,
 							);
 							if (!member?.rootPath) return null;
+							const repository = repositoriesFromBackend.find(
+								(candidate) => candidate.rootPath === member.rootPath,
+							);
 							return (
-								repositoriesFromBackend.find(
-									(repository) => repository.rootPath === member.rootPath,
-								)?.name ??
+								(repository ? repositoryDisplayName(repository) : null) ??
 								member.rootPath.split(/[\\/]/gu).filter(Boolean).at(-1) ??
 								null
 							);
@@ -4082,6 +4085,22 @@ export default function App() {
 			showRemoteUnsupported,
 		],
 	);
+	const handleUpdateProjectDisplayName = useCallback(
+		async (repositoryId: string, displayName: string | null) => {
+			const updated = await updateRepositoryDisplayName({
+				repositoryId,
+				displayName,
+			});
+			queryClient.setQueryData<Repository[]>(
+				["repositories", backendCacheKey],
+				(current = []) =>
+					current.map((repository) =>
+						repository.id === updated.id ? updated : repository,
+					),
+			);
+		},
+		[backendCacheKey, queryClient],
+	);
 	const handleRemoteWorkspaceMutation = useCallback(() => {
 		showRemoteUnsupported("workspaces");
 	}, [showRemoteUnsupported]);
@@ -4093,6 +4112,15 @@ export default function App() {
 			: null;
 	const sidebarRailWidth = sidebarCollapsed ? 76 : sidebarWidth;
 	const hasWorkspace = Boolean(selectedWorkspace);
+	const activeProjectRoot = activeWorkspace?.rootPath ?? selectedWorkspace?.rootPath ?? null;
+	const activeProjectRepository = activeProjectRoot
+		? repositoriesFromBackend.find(
+				(repository) => repository.rootPath === activeProjectRoot,
+			) ?? null
+		: null;
+	const activeProjectLabel = activeProjectRepository
+		? repositoryDisplayName(activeProjectRepository)
+		: null;
 
 	return (
 		<>
@@ -4150,6 +4178,9 @@ export default function App() {
 								isRemoteBackend ? handleRemoteWorkspaceMutation : handleDeleteWorkspace
 							}
 							onDeleteProject={isRemoteBackend ? undefined : handleDeleteProject}
+							onUpdateProjectDisplayName={
+								isRemoteBackend ? undefined : handleUpdateProjectDisplayName
+							}
 							repositories={repositoriesFromBackend}
 							skillCount={skillContextCount}
 							selectedWorkspaceId={
@@ -4293,6 +4324,7 @@ export default function App() {
 									terminalWorkspaceBranch={activeWorkspace?.branch ?? selectedWorkspace.branch}
 									projectId={activeWorkspace?.projectId ?? selectedWorkspace.projectId ?? selectedWorkspace.id}
 									terminalRootPath={activeWorkspace?.rootPath ?? selectedWorkspace.rootPath ?? null}
+									projectLabel={activeProjectLabel}
 									terminalWorktreePath={
 										selectedWorkspacePath ??
 										(isRemoteBackend ? null : (activeWorkspace?.worktreePath ?? null))

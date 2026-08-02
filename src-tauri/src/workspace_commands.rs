@@ -1,7 +1,7 @@
 use tauri::{AppHandle, State};
 
 use dcc_core::application::{CreateWorkspaceForRepoInput, CreateWorkspaceFromUrlInput};
-use dcc_core::domain::workspace::Workspace;
+use dcc_core::domain::{repository::Repository, workspace::Workspace};
 use dcc_tauri::{
     commands::workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -15,22 +15,23 @@ use dcc_tauri::{
         MissionSpecContextStatusOutput, ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
         RenameWorkspaceInput, RepositoryIdInput, ResolveWorkspaceSourceUrlInput,
         SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
-        SearchWorkspaceOutput, WorkspaceApplyDelegationWorktreeInput,
-        WorkspaceApplyDelegationWorktreeOutput, WorkspaceBundleIdInput, WorkspaceBundleStateOutput,
-        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
-        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
-        WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
-        WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictStateInput,
-        WorkspaceGitConflictStateOutput, WorkspaceGitFilePreviewContentOutput,
-        WorkspaceGitFilePreviewInput, WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput,
-        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
-        WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput,
-        WorkspaceIdInput, WorkspacePrepareDelegationWorktreeInput,
-        WorkspacePrepareDelegationWorktreeOutput, WorkspaceProjectAutomationConfigOutput,
-        WorkspaceRecordSetupOutcomeInput, WorkspaceRemoveDelegationWorktreeInput,
-        WorkspaceRunProjectTasksInput, WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput,
-        WorkspaceRunSetupOutput, WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution,
-        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
+        SearchWorkspaceOutput, UpdateRepositoryDisplayNameInput,
+        WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
+        WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
+        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitAcceptConflictInput,
+        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
+        WorkspaceGitCompleteMergeInput, WorkspaceGitCompleteMergeOutput,
+        WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
+        WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput,
+        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
+        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput,
+        WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput, WorkspaceIdInput,
+        WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
+        WorkspaceProjectAutomationConfigOutput, WorkspaceRecordSetupOutcomeInput,
+        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunProjectTasksInput,
+        WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution, WriteWorkspaceFileInput,
+        WriteWorkspaceFileOutput,
     },
     delivery_failure::{
         WorkspaceDeliveryFailureInput, WorkspaceDeliveryFailureOutput,
@@ -153,6 +154,14 @@ pub async fn list_repositories(
     state: State<'_, WorkspaceCommandState>,
 ) -> Result<ListRepositoriesOutput, String> {
     dcc_tauri::commands::workspace_commands::list_repositories(state).await
+}
+
+#[tauri::command]
+pub async fn update_repository_display_name(
+    state: State<'_, WorkspaceCommandState>,
+    input: UpdateRepositoryDisplayNameInput,
+) -> Result<Repository, String> {
+    dcc_tauri::commands::workspace_commands::update_repository_display_name(state, input).await
 }
 
 #[tauri::command]

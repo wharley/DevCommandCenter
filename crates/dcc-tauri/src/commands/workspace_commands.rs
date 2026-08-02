@@ -456,6 +456,13 @@ pub struct RepositoryIdInput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct UpdateRepositoryDisplayNameInput {
+    pub repository_id: String,
+    pub display_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceGitStatusInput {
     pub workspace_root: String,
 }
@@ -5058,6 +5065,43 @@ pub async fn list_repositories(
     Ok(ListRepositoriesOutput { repositories })
 }
 
+fn normalize_repository_display_name(
+    display_name: Option<&str>,
+    technical_name: &str,
+) -> Option<String> {
+    display_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter(|value| !value.eq_ignore_ascii_case(technical_name.trim()))
+        .map(ToString::to_string)
+}
+
+#[tauri::command]
+pub async fn update_repository_display_name(
+    state: State<'_, WorkspaceCommandState>,
+    input: UpdateRepositoryDisplayNameInput,
+) -> Result<Repository, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let repository_id = RepositoryId(input.repository_id.trim().to_string());
+    let existing = repo
+        .get_repository(&repository_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "project not found".to_string())?;
+    let display_name =
+        normalize_repository_display_name(input.display_name.as_deref(), &existing.name);
+    let updated = repo
+        .update_repository_display_name(&repository_id, display_name.as_deref())
+        .map_err(|error| error.to_string())?;
+    if !updated {
+        return Err("project not found".to_string());
+    }
+    repo.get_repository(&repository_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "project not found".to_string())
+}
+
 #[tauri::command]
 pub async fn list_workspace_bundles(
     state: State<'_, WorkspaceCommandState>,
@@ -5398,6 +5442,7 @@ mod editor_workspace_file_tests {
             id: RepositoryId(root.to_string()),
             project_id: dcc_core::domain::project::ProjectId(project_id.to_string()),
             name: project_id.to_string(),
+            display_name: None,
             root_path: root.to_string(),
             base_branch: "main".to_string(),
             remote: None,
@@ -5407,6 +5452,20 @@ mod editor_workspace_file_tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
+    }
+
+    #[test]
+    fn project_display_name_is_optional_and_does_not_duplicate_the_repository_name() {
+        assert_eq!(
+            normalize_repository_display_name(Some(" Customer Portal "), "repo"),
+            Some("Customer Portal".to_string())
+        );
+        assert_eq!(
+            normalize_repository_display_name(Some("repo"), "repo"),
+            None
+        );
+        assert_eq!(normalize_repository_display_name(Some("  "), "repo"), None);
+        assert_eq!(normalize_repository_display_name(None, "repo"), None);
     }
 
     fn workspace_for_rename(id: &str, name: &str) -> Workspace {

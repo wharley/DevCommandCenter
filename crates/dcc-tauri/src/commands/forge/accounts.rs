@@ -354,6 +354,7 @@ mod tests {
             id: RepositoryId("/tmp/repo".to_string()),
             project_id: ProjectId("project-1".to_string()),
             name: "repo".to_string(),
+            display_name: None,
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
             remote: Some("origin".to_string()),
