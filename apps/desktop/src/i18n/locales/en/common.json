@@ -963,19 +963,8 @@
     "terminalNote": "Terminal sessions stay in the workbench drawer at the bottom of the layout - they are not mirrored here so the inspector stays focused on Git and session signals."
   },
   "conversationLaunch": {
-    "badge": "New conversation",
-    "hint": "Start from scratch with a blank thread. Use one of the prompts below or launch the session first and build from there.",
-    "startSession": "Start session",
-    "provider": "Provider",
-    "selectProvider": "Select a provider below",
-    "model": "Model",
-    "selectModel": "Select a model",
-    "footerHint": "The conversation will appear here once you send the first prompt.",
-    "prompts": {
-      "summarize": "Summarize what this workspace already contains.",
-      "entryPoints": "Find the main entry points in this repo.",
-      "nextAction": "Show me the next best action to continue from zero."
-    }
+    "title": "What should we do in {{workspaceName}}?",
+    "hint": "Describe the outcome in the composer below. DCC will prepare the conversation and protected worktree automatically."
   },
   "composer": {
     "ariaLabel": "Workspace composer",
@@ -1784,6 +1773,10 @@
   },
   "conversation": {
     "scrollToBottom": "Scroll to bottom",
+    "starting": "Preparing the agent…",
+    "roles": {
+      "user": "User"
+    },
     "activity": {
       "running": "Working",
       "completed": "Activity",

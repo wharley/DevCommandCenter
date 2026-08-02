@@ -135,8 +135,6 @@ type WorkspacePanelProps = {
 	isIsolatedWorkspace?: boolean;
 	workspaceContextProjects?: Array<{ id: string; name: string; branch: string }>;
 	sessionQueryScope?: string;
-	selectedProviderLabel: string | null;
-	selectedModelLabel: string | null;
 	selectedProviderId: string | null;
 	selectedModelId: string | null;
 	selectedProviderRuntime: ProviderRuntimeConfig | null;
@@ -214,8 +212,6 @@ export function WorkspacePanel({
 	isIsolatedWorkspace = true,
 	workspaceContextProjects = [],
 	sessionQueryScope = "local",
-	selectedProviderLabel,
-	selectedModelLabel,
 	selectedProviderId,
 	selectedModelId,
 	selectedProviderRuntime,
@@ -822,8 +818,6 @@ export function WorkspacePanel({
 					hasLoaded={hasLoaded}
 					isEmpty={hasEmptyThread}
 					workspaceName={workspaceName}
-					selectedProviderLabel={selectedProviderLabel}
-					selectedModelLabel={selectedModelLabel}
 					sessionState={sessionState}
 					lastTurnState={lastTurnState}
 					pendingPrompt={pendingPrompt}
@@ -837,9 +831,7 @@ export function WorkspacePanel({
 					activeMissionSpecRelativePath={activeMissionSpecRelativePath}
 					activeMissionSpecHash={activeMissionSpecHash}
 					autoSaveMissionValidation={autoSaveMissionValidation}
-					onStartSession={onStartSession}
 					onSelectSession={onSelectSession}
-					onSubmitPrompt={onSubmitPrompt}
 					onReviewChanges={onReviewChanges}
 					onReviewDelegation={onReviewDelegation}
 					onRerunDelegation={onRerunDelegation}

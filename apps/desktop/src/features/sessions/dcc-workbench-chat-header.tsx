@@ -246,7 +246,12 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 				</div>
 			</div>
 
-			<div className="flex items-center gap-2">
+			<div
+				className={cn(
+					"flex items-center gap-2",
+					!isLoadingSessions && sessions.length === 0 && "hidden",
+				)}
+			>
 				<div className="group/tabs-scroll relative min-w-0 flex-1">
 					<div className="scrollbar-none min-w-0 flex-1 overflow-x-auto">
 						{isLoadingSessions ? (

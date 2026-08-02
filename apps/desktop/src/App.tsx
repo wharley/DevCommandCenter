@@ -2834,6 +2834,16 @@ export default function App() {
 				? workspaceSessionSnapshotFromSummary(targetSessionSummary)
 				: selectedSessionSnapshot;
 		let currentSessionId = targetSessionSummary?.session.id ?? selectedSessionId;
+		const willStartSession = Boolean(
+			options?.forceNewSession || !currentSession || !currentSessionId,
+		);
+		if (willStartSession && selectedProvider && selectedWorkspace) {
+			// Render the first user turn before `start_thread` returns. The prompt is
+			// temporarily workspace-scoped and is anchored to the real session as
+			// soon as the backend creates it.
+			setPendingPrompt(trimmedPrompt);
+			setPendingPromptSessionId(null);
+		}
 
 		try {
 			// `forceNewSession` always spins up a fresh thread (used by the diff
@@ -3100,7 +3110,7 @@ export default function App() {
 			toast.error(message);
 		} finally {
 			setPendingPrompt((current) =>
-				currentSessionId && current === trimmedPrompt ? null : current,
+				current === trimmedPrompt ? null : current,
 			);
 			setPendingPromptSessionId((current) =>
 				current === currentSessionId ? null : current,
@@ -3987,7 +3997,10 @@ export default function App() {
 	}, [showRemoteUnsupported]);
 
 	const visiblePendingPrompt =
-		effectiveSelectedSessionId === pendingPromptSessionId ? pendingPrompt : null;
+		effectiveSelectedSessionId === pendingPromptSessionId ||
+		(!effectiveSelectedSessionId && !pendingPromptSessionId)
+			? pendingPrompt
+			: null;
 	const sidebarRailWidth = sidebarCollapsed ? 76 : sidebarWidth;
 	const hasWorkspace = Boolean(selectedWorkspace);
 

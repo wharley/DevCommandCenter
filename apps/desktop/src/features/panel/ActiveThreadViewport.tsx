@@ -14,7 +14,6 @@ import {
 	UserMessage,
 } from "./message-components";
 import { EmptyState } from "./EmptyState";
-import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 
 type ActiveThreadViewportProps = {
@@ -22,8 +21,6 @@ type ActiveThreadViewportProps = {
 	hasLoaded: boolean;
 	isEmpty: boolean;
 	workspaceName: string;
-	selectedProviderLabel: string | null;
-	selectedModelLabel: string | null;
 	sessionState: string | null;
 	lastTurnState: string | null;
 	pendingPrompt: string | null;
@@ -37,12 +34,7 @@ type ActiveThreadViewportProps = {
 	activeMissionSpecRelativePath: string | null;
 	activeMissionSpecHash: string | null;
 	autoSaveMissionValidation: boolean;
-	onStartSession: () => void;
 	onSelectSession: (sessionId: string) => void;
-	onSubmitPrompt: (
-		turn: ComposerSubmittedTurn,
-		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
-	) => Promise<void>;
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
 	onReviewDelegation?: (delegationId: string) => void;
@@ -59,8 +51,6 @@ export function ActiveThreadViewport({
 	hasLoaded,
 	isEmpty,
 	workspaceName,
-	selectedProviderLabel,
-	selectedModelLabel,
 	sessionState,
 	lastTurnState,
 	pendingPrompt,
@@ -74,9 +64,7 @@ export function ActiveThreadViewport({
 	activeMissionSpecRelativePath,
 	activeMissionSpecHash,
 	autoSaveMissionValidation,
-	onStartSession,
 	onSelectSession,
-	onSubmitPrompt,
 	onReviewChanges,
 	onReviewDelegation,
 	onRerunDelegation,
@@ -112,30 +100,21 @@ export function ActiveThreadViewport({
 	}
 
 	if (isEmpty) {
-		if (sessionState === "active" || lastTurnState === "running") {
+		if (
+			pendingPrompt ||
+			sessionState === "active" ||
+			lastTurnState === "running"
+		) {
 			return (
 				<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-					<ConversationExecutionState
-						workspaceName={workspaceName}
-						selectedProviderLabel={selectedProviderLabel}
-						selectedModelLabel={selectedModelLabel}
-						sessionState={sessionState}
-						lastTurnState={lastTurnState}
-						pendingPrompt={pendingPrompt}
-					/>
+					<ConversationExecutionState pendingPrompt={pendingPrompt} />
 				</div>
 			);
 		}
 
 		return (
 			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-				<ConversationLaunchState
-					workspaceName={workspaceName}
-					selectedProviderLabel={selectedProviderLabel}
-					selectedModelLabel={selectedModelLabel}
-					onStartSession={onStartSession}
-					onSubmitPrompt={onSubmitPrompt}
-				/>
+				<ConversationLaunchState workspaceName={workspaceName} />
 			</div>
 		);
 	}

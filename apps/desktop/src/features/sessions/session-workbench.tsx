@@ -588,8 +588,6 @@ export function SessionWorkbench({
 						isIsolatedWorkspace={Boolean(terminalWorktreePath)}
 						workspaceContextProjects={workspaceScopeOptions}
 						sessionQueryScope={sessionQueryScope}
-						selectedProviderLabel={selectedProviderLabel}
-						selectedModelLabel={selectedModelLabel}
 						selectedProviderId={selectedProviderId}
 						selectedModelId={selectedModelId}
 						selectedProviderRuntime={selectedProviderRuntime}

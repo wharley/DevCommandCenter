@@ -963,19 +963,8 @@
     "terminalNote": "As sessões de terminal ficam na gaveta de workbench na parte inferior do layout — elas não são espelhadas aqui para o inspetor ficar focado em sinais do Git e da sessão."
   },
   "conversationLaunch": {
-    "badge": "Nova conversa",
-    "hint": "Comece do zero com uma conversa em branco. Use um dos prompts abaixo ou inicie a sessão primeiro e construa a partir daí.",
-    "startSession": "Iniciar sessão",
-    "provider": "Provedor",
-    "selectProvider": "Selecione um provedor abaixo",
-    "model": "Modelo",
-    "selectModel": "Selecione um modelo",
-    "footerHint": "A conversa aparecerá aqui depois que você enviar o primeiro prompt.",
-    "prompts": {
-      "summarize": "Resuma o que este workspace já contém.",
-      "entryPoints": "Encontre os principais pontos de entrada neste repositório.",
-      "nextAction": "Mostre a próxima melhor ação para continuar do zero."
-    }
+    "title": "O que vamos fazer em {{workspaceName}}?",
+    "hint": "Descreva o resultado no composer abaixo. O DCC prepara automaticamente a conversa e a worktree protegida."
   },
   "composer": {
     "ariaLabel": "Composer do workspace",
@@ -1784,6 +1773,10 @@
   },
   "conversation": {
     "scrollToBottom": "Rolar para o fim",
+    "starting": "Preparando o agente…",
+    "roles": {
+      "user": "Usuário"
+    },
     "activity": {
       "running": "Trabalhando",
       "completed": "Atividade",
