@@ -357,6 +357,7 @@ mod tests {
             display_name: None,
             icon: None,
             color: None,
+            pinned_at: None,
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
             remote: Some("origin".to_string()),

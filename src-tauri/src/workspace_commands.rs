@@ -15,23 +15,23 @@ use dcc_tauri::{
         MissionSpecContextStatusOutput, ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
         RenameWorkspaceInput, RepositoryIdInput, ResolveWorkspaceSourceUrlInput,
         SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
-        SearchWorkspaceOutput, UpdateRepositoryIdentityInput,
-        WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
-        WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
-        WorkspaceContinueFromBaseBranchOutput, WorkspaceGitAcceptConflictInput,
-        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
-        WorkspaceGitCompleteMergeInput, WorkspaceGitCompleteMergeOutput,
-        WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
-        WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput,
-        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
-        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput,
-        WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput, WorkspaceIdInput,
-        WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
-        WorkspaceProjectAutomationConfigOutput, WorkspaceRecordSetupOutcomeInput,
-        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunProjectTasksInput,
-        WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
-        WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution, WriteWorkspaceFileInput,
-        WriteWorkspaceFileOutput,
+        SearchWorkspaceOutput, SetRepositoryPinnedInput, SetWorkspacePinnedInput,
+        UpdateRepositoryIdentityInput, WorkspaceApplyDelegationWorktreeInput,
+        WorkspaceApplyDelegationWorktreeOutput, WorkspaceBundleIdInput, WorkspaceBundleStateOutput,
+        WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
+        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
+        WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
+        WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictStateInput,
+        WorkspaceGitConflictStateOutput, WorkspaceGitFilePreviewContentOutput,
+        WorkspaceGitFilePreviewInput, WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput,
+        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
+        WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput,
+        WorkspaceIdInput, WorkspacePrepareDelegationWorktreeInput,
+        WorkspacePrepareDelegationWorktreeOutput, WorkspaceProjectAutomationConfigOutput,
+        WorkspaceRecordSetupOutcomeInput, WorkspaceRemoveDelegationWorktreeInput,
+        WorkspaceRunProjectTasksInput, WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput,
+        WorkspaceRunSetupOutput, WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution,
+        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
     },
     delivery_failure::{
         WorkspaceDeliveryFailureInput, WorkspaceDeliveryFailureOutput,
@@ -162,6 +162,22 @@ pub async fn update_repository_identity(
     input: UpdateRepositoryIdentityInput,
 ) -> Result<Repository, String> {
     dcc_tauri::commands::workspace_commands::update_repository_identity(state, input).await
+}
+
+#[tauri::command]
+pub async fn set_repository_pinned(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetRepositoryPinnedInput,
+) -> Result<Repository, String> {
+    dcc_tauri::commands::workspace_commands::set_repository_pinned(state, input).await
+}
+
+#[tauri::command]
+pub async fn set_workspace_pinned(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetWorkspacePinnedInput,
+) -> Result<Workspace, String> {
+    dcc_tauri::commands::workspace_commands::set_workspace_pinned(state, input).await
 }
 
 #[tauri::command]

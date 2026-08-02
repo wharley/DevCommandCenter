@@ -8,6 +8,7 @@ export type DccWorkspaceRailGroup = {
 	id: string;
 	label: string;
 	sourceKey: string;
+	pinnedAt: string | null;
 	rows: DccWorkspaceRailRow[];
 };
 
@@ -130,6 +131,8 @@ export function projectWorkspaceRailGroups(
 	const activeGroups: DccWorkspaceRailGroup[] = [...byKey.entries()]
 		.map(([key, rows]) => {
 			const sorted = [...rows].sort((a, b) => {
+				const pinnedOrder = Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt));
+				if (pinnedOrder !== 0) return pinnedOrder;
 				const ta = a.updatedAt ?? a.createdAt ?? a.name;
 				const tb = b.updatedAt ?? b.createdAt ?? b.name;
 				return tb.localeCompare(ta);
@@ -144,10 +147,14 @@ export function projectWorkspaceRailGroups(
 				id: `dcc.proj.${hashId(key)}`,
 				label,
 				sourceKey: key,
+				pinnedAt: repository?.pinnedAt ?? null,
 				rows: sorted,
 			};
 		})
-		.sort((a, b) => a.label.localeCompare(b.label));
+		.sort((a, b) => {
+			const pinnedOrder = Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt));
+			return pinnedOrder || a.label.localeCompare(b.label);
+		});
 
 	return { activeGroups, waitingRows, completedRows };
 }

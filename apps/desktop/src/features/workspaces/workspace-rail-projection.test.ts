@@ -47,6 +47,7 @@ describe("projectWorkspaceRailGroups", () => {
 					displayName: "Customer Portal",
 					icon: "rocket",
 					color: "violet",
+					pinnedAt: null,
 					rootPath: "/projects/alpha",
 					baseBranch: "main",
 					remote: null,
@@ -98,6 +99,7 @@ describe("projectWorkspaceRailGroups", () => {
 					displayName: null,
 					icon: null,
 					color: null,
+					pinnedAt: null,
 					rootPath: "/projects/alpha",
 					baseBranch: "main",
 					remote: null,
@@ -115,11 +117,79 @@ describe("projectWorkspaceRailGroups", () => {
 				id: expect.any(String),
 				label: "alpha",
 				sourceKey: "/projects/alpha",
+				pinnedAt: null,
 				rows: [],
 			},
 		]);
 		expect(waitingRows).toEqual([]);
 		expect(completedRows).toEqual([]);
+	});
+
+	it("promotes pinned projects and pinned tasks without changing the remaining order", () => {
+		const { activeGroups } = projectWorkspaceRailGroups(
+			[
+				{
+					id: "newer",
+					name: "Newer task",
+					branch: "main",
+					status: "ready",
+					rootPath: "/projects/zeta",
+					pinnedAt: null,
+					updatedAt: "2026-04-12T10:00:00.000Z",
+				},
+				{
+					id: "pinned",
+					name: "Pinned task",
+					branch: "main",
+					status: "ready",
+					rootPath: "/projects/zeta",
+					pinnedAt: "2026-04-10T10:00:00.000Z",
+					updatedAt: "2026-04-10T10:00:00.000Z",
+				},
+			],
+			[
+				{
+					id: "/projects/alpha",
+					projectId: "alpha",
+					name: "alpha",
+					displayName: null,
+					icon: null,
+					color: null,
+					pinnedAt: null,
+					rootPath: "/projects/alpha",
+					baseBranch: "main",
+					remote: null,
+					remoteUrl: null,
+					forgeProvider: null,
+					forgeLogin: null,
+					createdAt: "2026-04-11T10:00:00.000Z",
+					updatedAt: "2026-04-11T10:00:00.000Z",
+				},
+				{
+					id: "/projects/zeta",
+					projectId: "zeta",
+					name: "zeta",
+					displayName: null,
+					icon: null,
+					color: null,
+					pinnedAt: "2026-04-10T10:00:00.000Z",
+					rootPath: "/projects/zeta",
+					baseBranch: "main",
+					remote: null,
+					remoteUrl: null,
+					forgeProvider: null,
+					forgeLogin: null,
+					createdAt: "2026-04-10T10:00:00.000Z",
+					updatedAt: "2026-04-10T10:00:00.000Z",
+				},
+			],
+		);
+
+		expect(activeGroups.map((group) => group.label)).toEqual(["zeta", "alpha"]);
+		expect(activeGroups[0]?.rows.map((workspace) => workspace.id)).toEqual([
+			"pinned",
+			"newer",
+		]);
 	});
 
 	it("builds repository-level options for quick workspace creation", () => {

@@ -6,7 +6,10 @@ import {
 	GitBranch,
 	Layers3,
 	Loader2,
+	MoreHorizontal,
 	Pencil,
+	Pin,
+	PinOff,
 	RotateCcw,
 	ShieldCheck,
 	Trash2,
@@ -15,6 +18,12 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
 	Tooltip,
 	TooltipContent,
@@ -62,6 +71,7 @@ export type WorkspaceRailRowProps = {
 	onCompleteWorkspace?: (workspaceId: string) => void | Promise<void>;
 	onRestoreWorkspace?: (workspaceId: string) => void;
 	onDeleteWorkspace?: (workspaceId: string) => void;
+	onSetWorkspacePinned?: (workspaceId: string, pinned: boolean) => Promise<void>;
 };
 
 /**
@@ -251,6 +261,7 @@ export const WorkspaceRailRowItem = memo(
 		onCompleteWorkspace,
 		onRestoreWorkspace,
 		onDeleteWorkspace,
+		onSetWorkspacePinned,
 	}: WorkspaceRailRowProps) {
 		const { t } = useTranslation("common");
 		const displayTitle = workspaceRailDisplayTitle(workspace);
@@ -359,6 +370,8 @@ export const WorkspaceRailRowItem = memo(
 		const isPending = pendingAction !== null;
 		const canSelect =
 			workspace.status !== "archived" && workspace.status !== "completed";
+		const canPin = canSelect && Boolean(onSetWorkspacePinned);
+		const hasWorkspaceMenu = Boolean(onRenameWorkspace) || canPin;
 
 		return (
 			<div className="px-[2px]">
@@ -468,6 +481,13 @@ export const WorkspaceRailRowItem = memo(
 										{workspace.memberWorkspaceIds.length}
 									</span>
 								) : null}
+								{workspace.pinnedAt ? (
+									<Pin
+										className="size-3 shrink-0 rotate-[-12deg] text-muted-foreground/65"
+										strokeWidth={1.9}
+										aria-label={t("sidebar.pinnedWorkspace")}
+									/>
+								) : null}
 							</div>
 							{workspaceStatusMessage ? (
 								<div className="mt-px flex min-w-0 items-center gap-1.5">
@@ -558,30 +578,65 @@ export const WorkspaceRailRowItem = memo(
 								isPending ? "opacity-100" : "opacity-0",
 							)}
 						>
-							{onRenameWorkspace ? (
-								<Tooltip>
-									<TooltipTrigger asChild>
+							{hasWorkspaceMenu ? (
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
 										<Button
 											type="button"
 											variant="ghost"
 											size="icon-xs"
-											aria-label={t("sidebar.renameWorkspace")}
+											aria-label={t("sidebar.workspaceActions")}
 											disabled={isPending || isRenaming}
 											className="text-muted-foreground/60 hover:text-foreground"
-											onClick={(event) => {
-												event.stopPropagation();
-												setIdentityOpen(false);
-												setDraftName(displayTitle);
-												setIsEditing(true);
-											}}
+											onClick={(event) => event.stopPropagation()}
 										>
-											<Pencil className="size-3.5" strokeWidth={2} aria-hidden />
+											<MoreHorizontal className="size-3.5" strokeWidth={2} aria-hidden />
 										</Button>
-									</TooltipTrigger>
-									<TooltipContent side="top">
-										{t("sidebar.renameWorkspace")}
-									</TooltipContent>
-								</Tooltip>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end" sideOffset={5}>
+										{canPin ? (
+											<DropdownMenuItem
+												className="gap-2 text-[13px]"
+												onSelect={(event) => {
+													event.preventDefault();
+													void onSetWorkspacePinned?.(
+														workspace.id,
+														!workspace.pinnedAt,
+													).catch((error) =>
+														toast.error(
+															error instanceof Error
+																? error.message
+																: t("sidebar.pinWorkspaceError"),
+														),
+													);
+												}}
+											>
+												{workspace.pinnedAt ? (
+													<PinOff className="size-3.5" strokeWidth={1.9} aria-hidden />
+												) : (
+													<Pin className="size-3.5" strokeWidth={1.9} aria-hidden />
+												)}
+												{workspace.pinnedAt
+													? t("sidebar.unpinWorkspace")
+													: t("sidebar.pinWorkspace")}
+											</DropdownMenuItem>
+										) : null}
+										{onRenameWorkspace ? (
+											<DropdownMenuItem
+												className="gap-2 text-[13px]"
+												onSelect={(event) => {
+													event.preventDefault();
+													setIdentityOpen(false);
+													setDraftName(displayTitle);
+													setIsEditing(true);
+												}}
+											>
+												<Pencil className="size-3.5" strokeWidth={2} aria-hidden />
+												{t("sidebar.renameWorkspace")}
+											</DropdownMenuItem>
+										) : null}
+									</DropdownMenuContent>
+								</DropdownMenu>
 							) : null}
 							{workspace.status === "archived" ? (
 								onRestoreWorkspace && (
@@ -725,5 +780,6 @@ export const WorkspaceRailRowItem = memo(
 		previous.onArchiveWorkspace === next.onArchiveWorkspace &&
 		previous.onCompleteWorkspace === next.onCompleteWorkspace &&
 		previous.onRestoreWorkspace === next.onRestoreWorkspace &&
-		previous.onDeleteWorkspace === next.onDeleteWorkspace,
+		previous.onDeleteWorkspace === next.onDeleteWorkspace &&
+		previous.onSetWorkspacePinned === next.onSetWorkspacePinned,
 );

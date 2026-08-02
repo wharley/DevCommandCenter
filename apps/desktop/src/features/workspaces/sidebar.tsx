@@ -9,6 +9,8 @@ import {
 	MoreHorizontal,
 	PanelLeft,
 	PanelRight,
+	Pin,
+	PinOff,
 	Plus,
 	Settings2,
 	Sparkles,
@@ -87,6 +89,7 @@ type VirtualItem =
 			rowCount: number;
 			canCollapse: boolean;
 			headerVariant: "project" | "waiting" | "completed";
+			pinnedAt?: string | null;
 	  }
 	| { kind: "row"; groupId: string; workspace: WorkspaceSummary }
 	| { kind: "group-gap"; size: number }
@@ -121,6 +124,13 @@ function WorkspaceRepoPicker({
 }) {
 	const { t } = useTranslation("common");
 	const [open, setOpen] = useState(false);
+	const orderedRepositories = useMemo(
+		() =>
+			[...repositories].sort(
+				(a, b) => Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt)),
+			),
+		[repositories],
+	);
 
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
@@ -146,7 +156,7 @@ function WorkspaceRepoPicker({
 				<CommandList>
 					<CommandEmpty>{t("sidebar.noRepoFound")}</CommandEmpty>
 					<CommandGroup heading={t("sidebar.recentRepos")}>
-						{repositories.map((repository) => (
+						{orderedRepositories.map((repository) => (
 							<CommandItem
 								key={repository.id}
 								value={`${repositoryDisplayName(repository)} ${repository.name} ${repository.projectId} ${repository.baseBranch} ${repository.rootPath}`}
@@ -258,6 +268,8 @@ type WorkspacesSidebarProps = {
 		icon: string | null;
 		color: string | null;
 	}) => Promise<void>;
+	onSetProjectPinned?: (repositoryId: string, pinned: boolean) => Promise<void>;
+	onSetWorkspacePinned?: (workspaceId: string, pinned: boolean) => Promise<void>;
 	selectedWorkspaceId: string | null;
 	workspaces: WorkspaceSummary[];
 };
@@ -296,6 +308,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onDeleteWorkspace,
 	onDeleteProject,
 	onUpdateProjectIdentity,
+	onSetProjectPinned,
+	onSetWorkspacePinned,
 	selectedWorkspaceId,
 	workspaces,
 }: WorkspacesSidebarProps) {
@@ -417,6 +431,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				rowCount: group.rows.length,
 				canCollapse,
 				headerVariant: "project",
+				pinnedAt: group.pinnedAt,
 			});
 
 			if (sectionOpenState[group.id] !== false && group.rows.length > 0) {
@@ -650,8 +665,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					item.headerVariant === "project" &&
 					repository !== null &&
 					Boolean(onUpdateProjectIdentity);
+				const canPinProject =
+					item.headerVariant === "project" &&
+					repository !== null &&
+					Boolean(onSetProjectPinned);
 				const canManageProject =
-					canCreateProjectWorkspace || canEditProject || canRemoveProject;
+					canCreateProjectWorkspace || canEditProject || canPinProject || canRemoveProject;
 
 				return (
 					<div
@@ -699,6 +718,13 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									<ProjectGroupGlyph className="size-[13px] text-muted-foreground/75" />
 								)}
 								<span className="truncate">{item.label}</span>
+								{item.pinnedAt ? (
+									<Pin
+										className="size-3 shrink-0 rotate-[-12deg] text-muted-foreground/65"
+										strokeWidth={1.9}
+										aria-label={t("sidebar.pinnedProject")}
+									/>
+								) : null}
 							</span>
 
 							{item.rowCount > 0 ? (
@@ -760,6 +786,33 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									</Button>
 								</DropdownMenuTrigger>
 								<DropdownMenuContent align="end" sideOffset={6}>
+									{canPinProject ? (
+										<DropdownMenuItem
+											className="gap-2 text-[13px]"
+											onSelect={(event) => {
+												event.preventDefault();
+												void onSetProjectPinned?.(
+													repository.id,
+													!repository.pinnedAt,
+												).catch((error) =>
+													toast.error(
+														error instanceof Error
+															? error.message
+															: t("sidebar.pinProjectError"),
+													),
+												);
+											}}
+										>
+											{repository.pinnedAt ? (
+												<PinOff className="size-3.5" strokeWidth={1.9} aria-hidden />
+											) : (
+												<Pin className="size-3.5" strokeWidth={1.9} aria-hidden />
+											)}
+											{repository.pinnedAt
+												? t("sidebar.unpinProject")
+												: t("sidebar.pinProject")}
+										</DropdownMenuItem>
+									) : null}
 									{canEditProject ? (
 										<DropdownMenuItem
 											className="gap-2 text-[13px]"
@@ -835,6 +888,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					onDeleteWorkspace={
 						onDeleteWorkspace ? openWorkspaceDeletionDialog : undefined
 					}
+					onSetWorkspacePinned={onSetWorkspacePinned}
 				/>
 			);
 		},
@@ -847,6 +901,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			onCreateWorkspaceFromProject,
 			onDeleteProject,
 			onUpdateProjectIdentity,
+			onSetProjectPinned,
+			onSetWorkspacePinned,
 			onDeleteWorkspace,
 			onRestoreWorkspace,
 			onSelectWorkspace,

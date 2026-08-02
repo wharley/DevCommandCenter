@@ -19,6 +19,8 @@ pub struct Repository {
     pub icon: Option<String>,
     /// Optional visual identity selected from DCC's controlled color palette.
     pub color: Option<String>,
+    /// When present, this project is promoted ahead of unpinned projects in the sidebar.
+    pub pinned_at: Option<String>,
     pub root_path: String,
     pub base_branch: String,
     pub remote: Option<String>,

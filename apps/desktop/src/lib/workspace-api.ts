@@ -58,6 +58,8 @@ import type {
 	ReadWorkspaceFileInput,
 	ReadWorkspaceFileOutput,
 	RenameWorkspaceInput,
+	SetRepositoryPinnedInput,
+	SetWorkspacePinnedInput,
 	UpdateRepositoryIdentityInput,
 	ResolveWorkspaceSourceUrlInput,
 	WriteWorkspaceFileInput,
@@ -197,6 +199,14 @@ export function deleteRepository(repositoryId: string) {
 
 export function updateRepositoryIdentity(input: UpdateRepositoryIdentityInput) {
 	return invoke<Repository>(WORKSPACE_METHODS.updateRepositoryIdentity, { input });
+}
+
+export function setRepositoryPinned(input: SetRepositoryPinnedInput) {
+	return invoke<Repository>(WORKSPACE_METHODS.setRepositoryPinned, { input });
+}
+
+export function setWorkspacePinned(input: SetWorkspacePinnedInput) {
+	return invoke<Workspace>(WORKSPACE_METHODS.setWorkspacePinned, { input });
 }
 
 export function createWorkspaceFromUrl(input: CreateWorkspaceFromUrlInput) {

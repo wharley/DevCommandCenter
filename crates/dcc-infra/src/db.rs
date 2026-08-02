@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS dcc_workspaces (
 	source_json TEXT NULL,
 	state TEXT NOT NULL,
 	setup_report_json TEXT NULL,
+	pinned_at TEXT NULL,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
@@ -59,6 +60,7 @@ CREATE TABLE IF NOT EXISTS dcc_repositories (
 	display_name TEXT NULL,
 	icon TEXT NULL,
 	color TEXT NULL,
+	pinned_at TEXT NULL,
 	root_path TEXT NOT NULL UNIQUE,
 	base_branch TEXT NOT NULL,
 	remote TEXT NULL,
@@ -255,6 +257,7 @@ impl SqliteWorkspaceRepo {
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_workspaces", "source_json", "TEXT NULL")?;
+        Self::ensure_column(&conn, "dcc_workspaces", "pinned_at", "TEXT NULL")?;
         Self::ensure_column(
             &conn,
             "dcc_workspace_bundle_members",
@@ -286,6 +289,7 @@ impl SqliteWorkspaceRepo {
         Self::ensure_column(&conn, "dcc_repositories", "display_name", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_repositories", "icon", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_repositories", "color", "TEXT NULL")?;
+        Self::ensure_column(&conn, "dcc_repositories", "pinned_at", "TEXT NULL")?;
         Ok(())
     }
 
@@ -369,6 +373,24 @@ impl SqliteWorkspaceRepo {
                     color.map(str::trim).filter(|value| !value.is_empty()),
                     repository_id.0.clone()
                 ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed > 0)
+    }
+
+    pub fn update_repository_pinned_at(
+        &self,
+        repository_id: &RepositoryId,
+        pinned_at: Option<&str>,
+    ) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                "UPDATE dcc_repositories SET pinned_at = ?1 WHERE id = ?2",
+                params![pinned_at, repository_id.0.clone()],
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(changed > 0)
@@ -591,8 +613,9 @@ impl SqliteWorkspaceRepo {
             source,
             state,
             setup_report,
-            created_at: row.get::<_, String>(9)?,
-            updated_at: row.get::<_, String>(10)?,
+            pinned_at: row.get::<_, Option<String>>(9)?,
+            created_at: row.get::<_, String>(10)?,
+            updated_at: row.get::<_, String>(11)?,
         })
     }
 
@@ -604,14 +627,15 @@ impl SqliteWorkspaceRepo {
             display_name: row.get::<_, Option<String>>(3)?,
             icon: row.get::<_, Option<String>>(4)?,
             color: row.get::<_, Option<String>>(5)?,
-            root_path: row.get::<_, String>(6)?,
-            base_branch: row.get::<_, String>(7)?,
-            remote: row.get::<_, Option<String>>(8)?,
-            remote_url: row.get::<_, Option<String>>(9)?,
-            forge_provider: row.get::<_, Option<String>>(10)?,
-            forge_login: row.get::<_, Option<String>>(11)?,
-            created_at: row.get::<_, String>(12)?,
-            updated_at: row.get::<_, String>(13)?,
+            pinned_at: row.get::<_, Option<String>>(6)?,
+            root_path: row.get::<_, String>(7)?,
+            base_branch: row.get::<_, String>(8)?,
+            remote: row.get::<_, Option<String>>(9)?,
+            remote_url: row.get::<_, Option<String>>(10)?,
+            forge_provider: row.get::<_, Option<String>>(11)?,
+            forge_login: row.get::<_, Option<String>>(12)?,
+            created_at: row.get::<_, String>(13)?,
+            updated_at: row.get::<_, String>(14)?,
         })
     }
 }
@@ -1578,8 +1602,8 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             r#"
 			INSERT INTO dcc_workspaces (
 				id, project_id, name, root_path, base_branch, worktree_path,
-				source_json, state, setup_report_json, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+				source_json, state, setup_report_json, pinned_at, created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
 			ON CONFLICT(id) DO UPDATE SET
 				project_id = excluded.project_id,
 				name = excluded.name,
@@ -1589,6 +1613,7 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
 				source_json = excluded.source_json,
 				state = excluded.state,
 				setup_report_json = excluded.setup_report_json,
+				pinned_at = excluded.pinned_at,
 				created_at = excluded.created_at,
 				updated_at = excluded.updated_at
 			"#,
@@ -1612,6 +1637,7 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
                     .map(to_string)
                     .transpose()
                     .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+                workspace.pinned_at.clone(),
                 workspace.created_at.clone(),
                 workspace.updated_at.clone(),
             ],
@@ -1630,7 +1656,7 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             .query_row(
                 r#"
 				SELECT id, project_id, name, root_path, base_branch, worktree_path,
-				       source_json, state, setup_report_json, created_at, updated_at
+				       source_json, state, setup_report_json, pinned_at, created_at, updated_at
 				  FROM dcc_workspaces
 				 WHERE id = ?1
 				"#,
@@ -1652,7 +1678,7 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             .prepare(
                 r#"
 				SELECT id, project_id, name, root_path, base_branch, worktree_path,
-				       source_json, state, setup_report_json, created_at, updated_at
+				       source_json, state, setup_report_json, pinned_at, created_at, updated_at
 				  FROM dcc_workspaces
 				 ORDER BY updated_at DESC, created_at DESC
 				"#,
@@ -1910,7 +1936,7 @@ impl WorkspaceBundleRepo for SqliteWorkspaceRepo {
                     tx.execute(
                         r#"
 						UPDATE dcc_workspaces
-						   SET state = 'archived', updated_at = ?1
+						   SET state = 'archived', pinned_at = NULL, updated_at = ?1
 						 WHERE id IN (
 						       SELECT workspace_id
 						         FROM dcc_workspace_bundle_members
@@ -1925,7 +1951,7 @@ impl WorkspaceBundleRepo for SqliteWorkspaceRepo {
                     tx.execute(
                         r#"
 						UPDATE dcc_workspaces
-						   SET state = 'completed', updated_at = ?1
+						   SET state = 'completed', pinned_at = NULL, updated_at = ?1
 						 WHERE id IN (
 						       SELECT workspace_id
 						         FROM dcc_workspace_bundle_members
@@ -1998,8 +2024,8 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         conn.execute(
             r#"
 			INSERT INTO dcc_repositories (
-				id, project_id, name, display_name, icon, color, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+				id, project_id, name, display_name, icon, color, pinned_at, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
 			ON CONFLICT(root_path) DO UPDATE SET
 				id = excluded.id,
 				project_id = excluded.project_id,
@@ -2007,6 +2033,7 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
 				display_name = COALESCE(excluded.display_name, dcc_repositories.display_name),
 				icon = COALESCE(excluded.icon, dcc_repositories.icon),
 				color = COALESCE(excluded.color, dcc_repositories.color),
+				pinned_at = COALESCE(excluded.pinned_at, dcc_repositories.pinned_at),
 				base_branch = excluded.base_branch,
 				remote = excluded.remote,
 				remote_url = excluded.remote_url,
@@ -2022,6 +2049,7 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
                 repository.display_name.clone(),
                 repository.icon.clone(),
                 repository.color.clone(),
+                repository.pinned_at.clone(),
                 repository.root_path.clone(),
                 repository.base_branch.clone(),
                 repository.remote.clone(),
@@ -2045,7 +2073,7 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         let repository = conn
             .query_row(
                 r#"
-				SELECT id, project_id, name, display_name, icon, color, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
+				SELECT id, project_id, name, display_name, icon, color, pinned_at, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
 				  FROM dcc_repositories
 				 WHERE id = ?1
 				"#,
@@ -2066,7 +2094,7 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         let mut stmt = conn
             .prepare(
                 r#"
-				SELECT id, project_id, name, display_name, icon, color, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
+				SELECT id, project_id, name, display_name, icon, color, pinned_at, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
 				  FROM dcc_repositories
 				 ORDER BY updated_at DESC, created_at DESC, name ASC
 				"#,
@@ -2665,6 +2693,7 @@ mod tests {
             source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
+            pinned_at: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -2725,6 +2754,7 @@ mod tests {
             source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
+            pinned_at: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -2838,6 +2868,7 @@ mod tests {
             source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
+            pinned_at: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -2950,6 +2981,7 @@ mod tests {
             display_name: None,
             icon: None,
             color: None,
+            pinned_at: None,
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
             remote: Some("origin".to_string()),
@@ -2969,6 +3001,7 @@ mod tests {
             source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
+            pinned_at: Some("2026-01-01T00:00:30Z".to_string()),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -2982,6 +3015,14 @@ mod tests {
         assert_eq!(repositories[0].root_path, "/tmp/repo");
         assert_eq!(repositories[0].remote.as_deref(), Some("origin"));
         assert_eq!(repositories[0].forge_login.as_deref(), Some("octocat"));
+        assert_eq!(
+            futures::executor::block_on(repo.get_workspace(&workspace.id))
+                .expect("read workspace")
+                .expect("workspace exists")
+                .pinned_at
+                .as_deref(),
+            Some("2026-01-01T00:00:30Z")
+        );
 
         assert!(repo
             .update_repository_identity(
@@ -2999,6 +3040,12 @@ mod tests {
         assert_eq!(renamed.display_name.as_deref(), Some("Customer Portal"));
         assert_eq!(renamed.icon.as_deref(), Some("rocket"));
         assert_eq!(renamed.color.as_deref(), Some("violet"));
+        assert!(repo
+            .update_repository_pinned_at(
+                &RepositoryId("/tmp/repo".to_string()),
+                Some("2026-01-01T00:00:40Z"),
+            )
+            .expect("pin project"));
 
         futures::executor::block_on(repo.save_repository(&repository))
             .expect("re-register repository");
@@ -3013,6 +3060,10 @@ mod tests {
         );
         assert_eq!(rediscovered.icon.as_deref(), Some("rocket"));
         assert_eq!(rediscovered.color.as_deref(), Some("violet"));
+        assert_eq!(
+            rediscovered.pinned_at.as_deref(),
+            Some("2026-01-01T00:00:40Z")
+        );
 
         futures::executor::block_on(repo.delete_repository(&RepositoryId("/tmp/repo".to_string())))
             .expect("delete repository");
@@ -3056,6 +3107,7 @@ mod tests {
             }),
             state: WorkspaceState::Ready,
             setup_report: None,
+            pinned_at: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -3128,6 +3180,7 @@ mod tests {
             display_name: None,
             icon: None,
             color: None,
+            pinned_at: None,
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
             remote: Some("origin".to_string()),
@@ -3178,6 +3231,7 @@ mod tests {
                 }],
                 message: Some("Workspace was created, but setup needs attention.".to_string()),
             }),
+            pinned_at: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -3216,6 +3270,7 @@ mod tests {
                 source: None,
                 state: WorkspaceState::SetupPending,
                 setup_report: None,
+                pinned_at: Some("2026-01-01T00:00:30Z".to_string()),
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },
@@ -3229,6 +3284,7 @@ mod tests {
                 source: None,
                 state: WorkspaceState::Ready,
                 setup_report: None,
+                pinned_at: Some("2026-01-01T00:00:30Z".to_string()),
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },
@@ -3288,6 +3344,9 @@ mod tests {
         assert!(archived_workspaces
             .iter()
             .all(|workspace| workspace.state == WorkspaceState::Archived));
+        assert!(archived_workspaces
+            .iter()
+            .all(|workspace| workspace.pinned_at.is_none()));
 
         let ready = futures::executor::block_on(repo.set_workspace_bundle_state(
             &bundle.id,

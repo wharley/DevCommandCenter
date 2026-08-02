@@ -22,6 +22,7 @@ export interface WorkspaceSummary {
 	rootPath?: string | null;
 	worktreePath?: string | null;
 	setupReport?: WorkspaceSetupReport | null;
+	pinnedAt?: string | null;
 	createdAt?: string;
 	updatedAt?: string;
 	bundleId?: string | null;

@@ -93,6 +93,8 @@ pub struct Workspace {
     pub source: Option<WorkspaceSource>,
     pub state: WorkspaceState,
     pub setup_report: Option<WorkspaceSetupReport>,
+    /// When present, this task is promoted within its project in the sidebar.
+    pub pinned_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

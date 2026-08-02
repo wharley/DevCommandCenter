@@ -115,7 +115,8 @@ use dcc_tauri::commands::{
         MissionValidationEntry, ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
         RenameWorkspaceInput, RepositoryIdInput, ResolveWorkspaceSourceUrlInput,
         SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
-        SearchWorkspaceMatch, SearchWorkspaceOutput, UpdateRepositoryIdentityInput,
+        SearchWorkspaceMatch, SearchWorkspaceOutput, SetRepositoryPinnedInput,
+        SetWorkspacePinnedInput, UpdateRepositoryIdentityInput,
         WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
         WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceContinueFromBaseBranchOutput, WorkspaceDeliveryPolicy,
@@ -166,6 +167,8 @@ struct WorkspaceMethods {
     delete_workspace: String,
     delete_repository: String,
     update_repository_identity: String,
+    set_repository_pinned: String,
+    set_workspace_pinned: String,
     workspace_github_cli_status: String,
     workspace_forge_cli_status: String,
     workspace_forge_cli_accounts: String,
@@ -437,6 +440,8 @@ fn main() {
         .typ::<ListWorkspaceBundlesOutput>()
         .typ::<RepositoryIdInput>()
         .typ::<UpdateRepositoryIdentityInput>()
+        .typ::<SetRepositoryPinnedInput>()
+        .typ::<SetWorkspacePinnedInput>()
         .typ::<GithubCliStatusInput>()
         .typ::<GithubCliStatusOutput>()
         .typ::<ForgeCliProvider>()
@@ -661,6 +666,8 @@ fn main() {
                 delete_workspace: "delete_workspace".to_string(),
                 delete_repository: "delete_repository".to_string(),
                 update_repository_identity: "update_repository_identity".to_string(),
+                set_repository_pinned: "set_repository_pinned".to_string(),
+                set_workspace_pinned: "set_workspace_pinned".to_string(),
                 workspace_github_cli_status: "workspace_github_cli_status".to_string(),
                 workspace_forge_cli_status: "workspace_forge_cli_status".to_string(),
                 workspace_forge_cli_accounts: "workspace_forge_cli_accounts".to_string(),

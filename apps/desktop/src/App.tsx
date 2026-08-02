@@ -97,6 +97,8 @@ import {
 	listRepositories,
 	listWorkspaceBundles,
 	listWorkspaces,
+	setRepositoryPinned,
+	setWorkspacePinned,
 	updateRepositoryIdentity,
 	workspaceGitBranchDiff,
 	workspaceGitStatus,
@@ -4105,6 +4107,34 @@ export default function App() {
 		},
 		[backendCacheKey, queryClient],
 	);
+	const handleSetProjectPinned = useCallback(
+		async (repositoryId: string, pinned: boolean) => {
+			const updated = await setRepositoryPinned({ repositoryId, pinned });
+			queryClient.setQueryData<Repository[]>(
+				["repositories", backendCacheKey],
+				(current = []) =>
+					current.map((repository) =>
+						repository.id === updated.id ? updated : repository,
+					),
+			);
+		},
+		[backendCacheKey, queryClient],
+	);
+	const handleSetWorkspacePinned = useCallback(
+		async (workspaceId: string, pinned: boolean) => {
+			const updated = await setWorkspacePinned({ workspaceId, pinned });
+			queryClient.setQueryData<WorkspaceSummary[]>(
+				["workspaces", backendCacheKey],
+				(current = []) =>
+					current.map((workspace) =>
+						workspace.id === updated.id
+							? { ...workspace, pinnedAt: updated.pinnedAt }
+							: workspace,
+					),
+			);
+		},
+		[backendCacheKey, queryClient],
+	);
 	const handleRemoteWorkspaceMutation = useCallback(() => {
 		showRemoteUnsupported("workspaces");
 	}, [showRemoteUnsupported]);
@@ -4186,6 +4216,12 @@ export default function App() {
 							onDeleteProject={isRemoteBackend ? undefined : handleDeleteProject}
 							onUpdateProjectIdentity={
 								isRemoteBackend ? undefined : handleUpdateProjectIdentity
+							}
+							onSetProjectPinned={
+								isRemoteBackend ? undefined : handleSetProjectPinned
+							}
+							onSetWorkspacePinned={
+								isRemoteBackend ? undefined : handleSetWorkspacePinned
 							}
 							repositories={repositoriesFromBackend}
 							skillCount={skillContextCount}

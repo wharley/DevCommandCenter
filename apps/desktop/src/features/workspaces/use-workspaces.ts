@@ -177,6 +177,7 @@ export function workspaceToSummary(
 		rootPath: workspace.rootPath,
 		worktreePath: workspace.worktreePath,
 		setupReport: workspace.setupReport,
+		pinnedAt: workspace.pinnedAt,
 		remoteDeletionTargets: remoteDeletionTarget ? [remoteDeletionTarget] : [],
 		createdAt: workspace.createdAt,
 		updatedAt: workspace.updatedAt,

@@ -60,6 +60,7 @@ fn repository_from_workspace(workspace: &Workspace) -> Repository {
         display_name: None,
         icon: None,
         color: None,
+        pinned_at: workspace.pinned_at.clone(),
         root_path,
         base_branch: workspace.base_branch.clone(),
         remote: None,
@@ -112,6 +113,7 @@ where
         source: None,
         state: WorkspaceState::SetupPending,
         setup_report: None,
+        pinned_at: None,
         created_at: created_at,
         updated_at: now,
     };

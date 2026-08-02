@@ -465,6 +465,20 @@ pub struct UpdateRepositoryIdentityInput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct SetRepositoryPinnedInput {
+    pub repository_id: String,
+    pub pinned: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SetWorkspacePinnedInput {
+    pub workspace_id: String,
+    pub pinned: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceGitStatusInput {
     pub workspace_root: String,
 }
@@ -5139,6 +5153,26 @@ pub async fn update_repository_identity(
 }
 
 #[tauri::command]
+pub async fn set_repository_pinned(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetRepositoryPinnedInput,
+) -> Result<Repository, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let repository_id = RepositoryId(input.repository_id.trim().to_string());
+    let pinned_at = input.pinned.then(|| Utc::now().to_rfc3339());
+    let updated = repo
+        .update_repository_pinned_at(&repository_id, pinned_at.as_deref())
+        .map_err(|error| error.to_string())?;
+    if !updated {
+        return Err("project not found".to_string());
+    }
+    repo.get_repository(&repository_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "project not found".to_string())
+}
+
+#[tauri::command]
 pub async fn list_workspace_bundles(
     state: State<'_, WorkspaceCommandState>,
 ) -> Result<ListWorkspaceBundlesOutput, String> {
@@ -5481,6 +5515,7 @@ mod editor_workspace_file_tests {
             display_name: None,
             icon: None,
             color: None,
+            pinned_at: None,
             root_path: root.to_string(),
             base_branch: "main".to_string(),
             remote: None,
@@ -5533,6 +5568,7 @@ mod editor_workspace_file_tests {
             source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
+            pinned_at: None,
             created_at: "2026-08-01T00:00:00Z".to_string(),
             updated_at: "2026-08-01T00:00:00Z".to_string(),
         }
@@ -5632,6 +5668,7 @@ mod editor_workspace_file_tests {
             source: None,
             state: WorkspaceState::Ready,
             setup_report: None,
+            pinned_at: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -5887,6 +5924,7 @@ mod editor_workspace_file_tests {
             }),
             state: WorkspaceState::Ready,
             setup_report: None,
+            pinned_at: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
@@ -7603,6 +7641,8 @@ pub async fn archive_workspace(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("workspace not found: {}", id.0))?;
     workspace.state = WorkspaceState::Archived;
+    workspace.pinned_at = None;
+    workspace.updated_at = Utc::now().to_rfc3339();
     repo.save_workspace(&workspace)
         .await
         .map_err(|e| e.to_string())
@@ -7615,6 +7655,33 @@ pub async fn rename_workspace(
 ) -> Result<Workspace, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     rename_workspace_in_repo(&repo, input).await
+}
+
+#[tauri::command]
+pub async fn set_workspace_pinned(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetWorkspacePinnedInput,
+) -> Result<Workspace, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let id = WorkspaceId(input.workspace_id);
+    let mut workspace = repo
+        .get_workspace(&id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    if input.pinned
+        && matches!(
+            workspace.state,
+            WorkspaceState::Archived | WorkspaceState::Completed
+        )
+    {
+        return Err("only active tasks can be pinned".to_string());
+    }
+    workspace.pinned_at = input.pinned.then(|| Utc::now().to_rfc3339());
+    repo.save_workspace(&workspace)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(workspace)
 }
 
 async fn rename_workspace_in_repo(
@@ -7667,6 +7734,7 @@ pub async fn complete_workspace(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("workspace not found: {}", id.0))?;
     workspace.state = WorkspaceState::Completed;
+    workspace.pinned_at = None;
     workspace.updated_at = Utc::now().to_rfc3339();
     repo.save_workspace(&workspace)
         .await
