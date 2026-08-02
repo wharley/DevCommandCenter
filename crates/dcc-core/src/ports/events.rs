@@ -48,6 +48,28 @@ pub enum CoreEvent {
         prompt: String,
         plan_mode: Option<bool>,
     },
+    SessionTurnSteered {
+        session_id: String,
+        turn_id: String,
+        prompt: String,
+    },
+    SessionTurnQueued {
+        session_id: String,
+        queued_turn: crate::domain::session::QueuedTurn,
+    },
+    SessionQueuedTurnRemoved {
+        session_id: String,
+        queued_turn_id: String,
+    },
+    SessionTurnQueueReordered {
+        session_id: String,
+        queued_turn_ids: Vec<String>,
+    },
+    SessionQueuedTurnDispatched {
+        session_id: String,
+        queued_turn_id: String,
+        turn_id: String,
+    },
     SessionTurnDelta {
         session_id: String,
         turn_id: String,

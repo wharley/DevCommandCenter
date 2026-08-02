@@ -14,6 +14,8 @@ pub mod restore_session;
 pub mod resume_session;
 pub mod send_turn;
 pub mod start_thread;
+pub mod steer_turn;
+pub mod turn_queue;
 
 pub use abort_run::{abort_run, AbortRunInput, AbortRunOutput};
 pub use agent_turn_prompt::{
@@ -45,3 +47,5 @@ pub use send_turn::{
     send_turn_selection_differs_from_session, SendTurnInput, SendTurnOutput,
 };
 pub use start_thread::{start_thread, StartThreadInput, StartThreadOutput};
+pub use steer_turn::{active_turn_for_steer, record_turn_steer, SteerTurnInput, SteerTurnOutput};
+pub use turn_queue::*;

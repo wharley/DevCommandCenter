@@ -257,6 +257,11 @@ pub trait Provider: Send + Sync {
     }
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle>;
     async fn send_input(&self, handle: &SessionHandle, input: Input) -> Result<()>;
+    async fn steer(&self, _handle: &SessionHandle, _prompt: &str) -> Result<()> {
+        Err(crate::CoreError::Provider(
+            "This provider does not support steering an active turn".to_string(),
+        ))
+    }
     async fn start_mcp_oauth(
         &self,
         _handle: &SessionHandle,

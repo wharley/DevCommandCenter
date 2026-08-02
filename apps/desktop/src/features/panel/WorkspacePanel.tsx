@@ -155,6 +155,8 @@ type WorkspacePanelProps = {
 		turn: ComposerSubmittedTurn,
 		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
 	) => Promise<void>;
+	onSteerPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
+	onQueuePrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
@@ -226,6 +228,8 @@ export function WorkspacePanel({
 	onRestoreSession,
 	onOpenSessionSearch,
 	onSubmitPrompt,
+	onSteerPrompt,
+	onQueuePrompt,
 	onResumeSession,
 	onAbortSession,
 	onDelegate,
@@ -871,6 +875,8 @@ export function WorkspacePanel({
 						onSelectProvider={onSelectProvider}
 						onSelectModel={onSelectModel}
 						onSubmitPrompt={onSubmitPrompt}
+						onSteerPrompt={onSteerPrompt}
+						onQueuePrompt={onQueuePrompt}
 						onDelegatePrompt={sessionSnapshot ? onDelegatePrompt : undefined}
 						openDelegateMenuSignal={delegateSignal ?? 0}
 						onAbortSession={onAbortSession}

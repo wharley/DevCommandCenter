@@ -3,14 +3,19 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
 	ArrowUp,
+	ArrowDown,
 	AlertTriangle,
 	ChevronDown,
 	ClipboardList,
 	CornerUpRight,
 	GitFork,
+	ListPlus,
 	Paperclip,
+	Pencil,
+	Play,
 	SlidersHorizontal,
 	Square,
+	X,
 } from "lucide-react";
 import type { LexicalEditor } from "lexical";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
@@ -39,6 +44,7 @@ import { pathRelativeToWorkspace } from "@/lib/path-basename";
 import type {
 	ProviderCatalog,
 	ProviderRuntimeConfig,
+	QueuedTurn,
 	WorkspaceSetupReport,
 } from "@dcc/contracts";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
@@ -65,7 +71,6 @@ import {
 	getComposerEffortKey,
 	isComposerSubmitEnabled,
 	isSendDisabled,
-	isSteerDisabled,
 	resolvePlanModeState,
 	setPlanModeState,
 } from "./WorkspaceComposer.logic";
@@ -104,6 +109,12 @@ import {
 	supportsProviderAccountUsage,
 	useProviderAccountUsage,
 } from "@/features/providers/provider-account-usage";
+import {
+	dispatchNextQueuedTurn,
+	loadTurnQueue,
+	removeQueuedTurn,
+	reorderTurnQueue,
+} from "@/lib/session-api";
 
 type WorkspaceComposerProps = {
 	draftKey: string;
@@ -134,6 +145,8 @@ type WorkspaceComposerProps = {
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
+	onSteerPrompt?: (turn: ComposerSubmittedTurn) => Promise<void>;
+	onQueuePrompt?: (turn: ComposerSubmittedTurn) => Promise<void>;
 	/** Absent when the surface cannot delegate (no parent session yet). */
 	onDelegatePrompt?: (request: ComposerDelegationRequest) => Promise<void>;
 	/** Increment to open the delegate menu from outside (for example, the command palette). */
@@ -174,6 +187,8 @@ export function WorkspaceComposer({
 	onSelectProvider,
 	onSelectModel,
 	onSubmitPrompt,
+	onSteerPrompt,
+	onQueuePrompt,
 	onDelegatePrompt,
 	openDelegateMenuSignal,
 	onAbortSession,
@@ -186,6 +201,8 @@ export function WorkspaceComposer({
 	const { t } = useTranslation("common");
 	const [hasContent, setHasContent] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [queuedTurns, setQueuedTurns] = useState<QueuedTurn[]>([]);
+	const [queueActionId, setQueueActionId] = useState<string | null>(null);
 	const [isFastMode, setIsFastMode] = useState(true);
 	const [executionMenuOpen, setExecutionMenuOpen] = useState(false);
 	const [sendMenuOpen, setSendMenuOpen] = useState(false);
@@ -244,12 +261,36 @@ export function WorkspaceComposer({
 			null
 		);
 	}, [selectedProvider, selectedModelId]);
+	const sessionId = sessionSnapshot?.sessionId ?? null;
+	const activeTurnId = sessionSnapshot?.activeTurnId ?? null;
+	const hasActiveTurn = Boolean(sessionSnapshot?.activeTurnId);
+	const canSteerActiveTurn = Boolean(
+		hasActiveTurn &&
+			onSteerPrompt &&
+			selectedProvider?.capabilities.supportsSteering,
+	);
+	const canQueueActiveTurn = Boolean(hasActiveTurn && onQueuePrompt);
+
+	const refreshTurnQueue = useCallback(async () => {
+		if (!sessionId) {
+			setQueuedTurns([]);
+			return;
+		}
+		try {
+			setQueuedTurns(await loadTurnQueue(sessionId));
+		} catch (error) {
+			console.error("[dcc] failed to load turn queue:", error);
+		}
+	}, [sessionId]);
+
+	useEffect(() => {
+		void refreshTurnQueue();
+	}, [activeTurnId, refreshTurnQueue]);
 
 	const availableEffortLevels = useMemo(
 		() => selectedModel?.effortLevels ?? DEFAULT_EFFORT_LEVELS,
 		[selectedModel],
 	);
-	const sessionId = sessionSnapshot?.sessionId ?? null;
 	const isPlanMode = useMemo(
 		() =>
 			resolvePlanModeState(planModeByScope, {
@@ -278,49 +319,161 @@ export function WorkspaceComposer({
 	}, [availableEffortLevels, effort, ultrathinkSelected, updateEffortSelection]);
 
 	const submitFromComposer = useCallback(
-		async (rawPrompt: string) => {
+		async (
+			rawPrompt: string,
+			behavior: "send" | "queue" | "steer" = "send",
+		) => {
 			const effectiveEffort = resolveEffectiveEffort({
 				selectedEffort: effort,
 				supportedEfforts: availableEffortLevels,
 				ultrathinkSelected,
 				rawPrompt,
 			});
-			await onSubmitPrompt({
+			const turn = {
 				rawPrompt,
 				envelope: {
 					planMode: isPlanMode,
 					effort: effectiveEffort,
 					fastMode: isFastMode,
 				},
-			});
+			};
+			if (hasActiveTurn) {
+				if (behavior === "steer") {
+					if (!canSteerActiveTurn || !onSteerPrompt) return false;
+					await onSteerPrompt(turn);
+				} else {
+					if (!canQueueActiveTurn || !onQueuePrompt) return false;
+					await onQueuePrompt(turn);
+					await refreshTurnQueue();
+				}
+				return true;
+			}
+			await onSubmitPrompt(turn);
+			return true;
 		},
-		[availableEffortLevels, effort, isFastMode, isPlanMode, onSubmitPrompt, ultrathinkSelected],
+		[
+			availableEffortLevels,
+			canSteerActiveTurn,
+			canQueueActiveTurn,
+			effort,
+			hasActiveTurn,
+			isFastMode,
+			isPlanMode,
+			onSteerPrompt,
+			onQueuePrompt,
+			onSubmitPrompt,
+			refreshTurnQueue,
+			ultrathinkSelected,
+		],
 	);
 
-	const handleSubmitDraft = useCallback(async () => {
-		if (isSubmitting) {
-			return;
-		}
+	const handleSubmitDraft = useCallback(
+		async (behavior: "send" | "queue" | "steer" = "send") => {
+			if (isSubmitting) {
+				return;
+			}
 
-		const editor = editorRef.current;
-		if (!editor) {
-			return;
-		}
+			const editor = editorRef.current;
+			if (!editor) {
+				return;
+			}
 
-		const prompt = readComposerPrompt(editor).trim();
-		if (prompt.length === 0) {
-			return;
-		}
+			const prompt = readComposerPrompt(editor).trim();
+			if (prompt.length === 0) {
+				return;
+			}
 
-		setIsSubmitting(true);
+			setIsSubmitting(true);
+			try {
+				const accepted = await submitFromComposer(prompt, behavior);
+				if (!accepted) {
+					return;
+				}
+				clearDraft(composerDraftKey);
+				setEditorText(editor, "");
+			} finally {
+				setIsSubmitting(false);
+			}
+		},
+		[composerDraftKey, isSubmitting, submitFromComposer],
+	);
+
+	const handleRemoveQueuedTurn = useCallback(
+		async (queuedTurnId: string) => {
+			if (!sessionId || queueActionId) return false;
+			setQueueActionId(queuedTurnId);
+			try {
+				setQueuedTurns(await removeQueuedTurn({ sessionId, queuedTurnId }));
+				return true;
+			} catch (error) {
+				toast.error(t("composer.followUp.queueActionFailed"), {
+					description: error instanceof Error ? error.message : undefined,
+				});
+				return false;
+			} finally {
+				setQueueActionId(null);
+			}
+		},
+		[queueActionId, sessionId, t],
+	);
+
+	const handleEditQueuedTurn = useCallback(
+		async (queuedTurn: QueuedTurn) => {
+			if (!(await handleRemoveQueuedTurn(queuedTurn.id))) return;
+			const editor = editorRef.current;
+			if (editor) {
+				setEditorText(editor, queuedTurn.prompt);
+				editor.focus();
+			}
+		},
+		[handleRemoveQueuedTurn],
+	);
+
+	const handleDispatchNextQueuedTurn = useCallback(async () => {
+		if (!sessionId || queueActionId || hasActiveTurn) return;
+		setQueueActionId(queuedTurns[0]?.id ?? "dispatch");
 		try {
-			await submitFromComposer(prompt);
-			clearDraft(composerDraftKey);
-			setEditorText(editor, "");
+			await dispatchNextQueuedTurn(sessionId);
+			await refreshTurnQueue();
+		} catch (error) {
+			toast.error(t("composer.followUp.dispatchFailed"), {
+				description: error instanceof Error ? error.message : undefined,
+			});
 		} finally {
-			setIsSubmitting(false);
+			setQueueActionId(null);
 		}
-	}, [composerDraftKey, isSubmitting, submitFromComposer]);
+	}, [
+		hasActiveTurn,
+		queueActionId,
+		queuedTurns,
+		refreshTurnQueue,
+		sessionId,
+		t,
+	]);
+
+	const handleMoveQueuedTurn = useCallback(
+		async (index: number, direction: -1 | 1) => {
+			if (!sessionId || queueActionId) return;
+			const target = index + direction;
+			if (target < 0 || target >= queuedTurns.length) return;
+			const reordered = [...queuedTurns];
+			[reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+			setQueueActionId(queuedTurns[index].id);
+			try {
+				setQueuedTurns(await reorderTurnQueue({
+					sessionId,
+					queuedTurnIds: reordered.map((turn) => turn.id),
+				}));
+			} catch (error) {
+				toast.error(t("composer.followUp.queueActionFailed"), {
+					description: error instanceof Error ? error.message : undefined,
+				});
+			} finally {
+				setQueueActionId(null);
+			}
+		},
+		[queueActionId, queuedTurns, sessionId, t],
+	);
 
 	// Delegation targets narrow when the run is allowed to write files, since edit
 	// delegations land in an isolated worktree and need provider edit support. The
@@ -530,13 +683,13 @@ export function WorkspaceComposer({
 
 	const inputDisabled = disabled;
 	const toolbarDisabled = disabled;
+	const turnSettingsDisabled = disabled || hasActiveTurn;
 	const hasProvider = Boolean(selectedProviderId);
 	const turnCount = sessionSnapshot?.turnCount ?? 0;
 	const accountUsageQuery = useProviderAccountUsage(
 		selectedProviderId,
 		selectedProviderRuntime,
 	);
-	const activeTurnId = sessionSnapshot?.activeTurnId ?? null;
 	useEffect(() => {
 		if (
 			turnCount > 0 &&
@@ -558,12 +711,12 @@ export function WorkspaceComposer({
 		canAbortRun(sessionSnapshot, pendingPrompt) || isSubmitting;
 
 	const submitEnabled = isComposerSubmitEnabled({
-		disabled: toolbarDisabled,
+		disabled: toolbarDisabled || (hasActiveTurn && !canQueueActiveTurn),
 		hasProvider,
 		hasContent,
 	});
 	const sendDisabled = isSendDisabled(submitEnabled, isSubmitting);
-	const steerDisabled = isSteerDisabled(submitEnabled, isSubmitting);
+	const steerDisabled = !submitEnabled || isSubmitting;
 	const submitDisabledForPlugin = !submitEnabled;
 
 	const planActive = isPlanMode;
@@ -628,6 +781,85 @@ export function WorkspaceComposer({
 			{selectedProviderBlockReason ? (
 				<div className="mt-2 rounded-2xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-[12px] leading-5 text-destructive">
 					{selectedProviderBlockReason}
+				</div>
+			) : null}
+			{queuedTurns.length > 0 ? (
+				<div className="mb-2 rounded-xl border border-border/45 bg-background/30 px-2.5 py-2">
+					<div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+						<ListPlus className="size-3" strokeWidth={2} />
+						<span>{t("composer.followUp.queueTitle", { count: queuedTurns.length })}</span>
+						{!hasActiveTurn ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="ml-auto h-6 gap-1 px-2 text-[11px]"
+								disabled={queueActionId !== null}
+								onClick={() => void handleDispatchNextQueuedTurn()}
+							>
+								<Play className="size-3" fill="currentColor" />
+								{t("composer.followUp.sendNext")}
+							</Button>
+						) : null}
+					</div>
+					<div className="max-h-36 space-y-1 overflow-y-auto">
+						{queuedTurns.map((queuedTurn, index) => (
+							<div
+								key={queuedTurn.id}
+								className="group flex min-w-0 items-center gap-1 rounded-lg bg-muted/35 px-2 py-1.5"
+							>
+								<span className="min-w-0 flex-1 truncate text-[12px] text-foreground/85">
+									{queuedTurn.prompt}
+								</span>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="size-6"
+									disabled={index === 0 || queueActionId !== null}
+									aria-label={t("composer.followUp.moveUp")}
+									onClick={() => void handleMoveQueuedTurn(index, -1)}
+								>
+									<ArrowUp className="size-3" />
+								</Button>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="size-6"
+									disabled={
+										index === queuedTurns.length - 1 || queueActionId !== null
+									}
+									aria-label={t("composer.followUp.moveDown")}
+									onClick={() => void handleMoveQueuedTurn(index, 1)}
+								>
+									<ArrowDown className="size-3" />
+								</Button>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="size-6"
+									disabled={queueActionId !== null}
+									aria-label={t("composer.followUp.edit")}
+									onClick={() => void handleEditQueuedTurn(queuedTurn)}
+								>
+									<Pencil className="size-3" />
+								</Button>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className="size-6"
+									disabled={queueActionId !== null}
+									aria-label={t("composer.followUp.remove")}
+									onClick={() => void handleRemoveQueuedTurn(queuedTurn.id)}
+								>
+									<X className="size-3" />
+								</Button>
+							</div>
+						))}
+					</div>
 				</div>
 			) : null}
 
@@ -714,12 +946,12 @@ export function WorkspaceComposer({
 						}}
 						onSelectProvider={onSelectProvider}
 						onSelectModel={onSelectModel}
-						disabled={toolbarDisabled}
+						disabled={turnSettingsDisabled}
 					/>
 					<ComposerButton
 						type="button"
 						aria-label={t("composer.controls.planMode")}
-						disabled={toolbarDisabled}
+						disabled={turnSettingsDisabled}
 						className={cn(
 							"h-7 gap-1 px-1.5 text-[var(--dcc-daily-meta-size)]",
 							isPlanMode
@@ -744,11 +976,11 @@ export function WorkspaceComposer({
 						<DropdownMenuTrigger
 							type="button"
 							aria-label={t("composer.execution.open")}
-							disabled={toolbarDisabled}
+							disabled={turnSettingsDisabled}
 							className={cn(
 								`flex h-7 items-center gap-1.5 ${composerToolbarTriggerClassName}`,
 								"max-w-[9rem] text-muted-foreground",
-								toolbarDisabled &&
+								turnSettingsDisabled &&
 									"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
 							)}
 						>
@@ -856,20 +1088,41 @@ export function WorkspaceComposer({
 							>
 								<Square className="size-3 fill-current" strokeWidth={0} />
 							</Button>
-							{hasContent ? (
+							{hasContent && canQueueActiveTurn ? (
 								<Button
 									type="button"
 									variant="outline"
 									size="icon"
-									aria-label={t("composer.controls.steer")}
-									disabled={steerDisabled}
+									aria-label={t("composer.followUp.queue")}
+									disabled={sendDisabled}
 									className="rounded-[9px]"
 									onClick={() => {
-										void handleSubmitDraft();
+										void handleSubmitDraft("queue");
 									}}
 								>
-									<ArrowUp className="size-[15px]" strokeWidth={2.2} />
+									<ListPlus className="size-[15px]" strokeWidth={2.2} />
 								</Button>
+							) : null}
+							{hasContent && canSteerActiveTurn ? (
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon"
+											aria-label={t("composer.controls.steer")}
+											disabled={steerDisabled}
+											className="rounded-[9px]"
+											onClick={() => void handleSubmitDraft("steer")}
+										>
+											<CornerUpRight
+												className="size-[15px]"
+												strokeWidth={2.1}
+											/>
+										</Button>
+									</TooltipTrigger>
+									<TooltipContent side="top">{t("composer.followUp.steerNow")}</TooltipContent>
+								</Tooltip>
 							) : null}
 						</div>
 					) : (

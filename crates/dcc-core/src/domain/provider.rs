@@ -101,6 +101,10 @@ fn validate_provider_version(provider_version: &str) -> Result<(), McpConformanc
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     pub streaming: bool,
+    /// The provider can append user guidance to an in-flight turn without
+    /// interrupting it or starting a second turn.
+    #[serde(default)]
+    pub supports_steering: bool,
     pub mcp_support: McpSupportLevel,
     #[serde(default)]
     pub mcp_oauth_support: McpOauthSupport,

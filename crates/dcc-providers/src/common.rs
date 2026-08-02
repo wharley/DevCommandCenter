@@ -1462,6 +1462,7 @@ impl Provider for CliProviderAdapter {
 pub fn stable_cli_capabilities() -> Capabilities {
     Capabilities {
         streaming: true,
+        supports_steering: false,
         mcp_support: McpSupportLevel::Unsupported,
         mcp_oauth_support: dcc_core::domain::provider::McpOauthSupport::Unsupported,
         tools: true,
@@ -1479,6 +1480,7 @@ pub fn stable_cli_capabilities() -> Capabilities {
 pub fn experimental_cli_capabilities() -> Capabilities {
     Capabilities {
         streaming: true,
+        supports_steering: false,
         mcp_support: McpSupportLevel::Unsupported,
         mcp_oauth_support: dcc_core::domain::provider::McpOauthSupport::Unsupported,
         tools: true,

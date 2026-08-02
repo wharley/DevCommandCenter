@@ -14,7 +14,8 @@ use uuid::Uuid;
 
 use dcc_core::{
     application::{
-        prepare_session_for_turn, resolve_session_mcp_servers,
+        list_turn_queue, mark_queued_turn_dispatched, prepare_session_for_turn,
+        resolve_session_mcp_servers, send_turn as run_send_turn,
         send_turn_selection_differs_from_session, ResolveSessionMcpInput, SendTurnInput,
         StartThreadInput,
     },
@@ -1331,6 +1332,9 @@ impl SessionCommandState {
                                 )
                                 .await;
                         }
+                        if let Err(error) = state.dispatch_next_queued_turn(&session_id).await {
+                            eprintln!("[DCC] queued turn dispatch failed: {error}");
+                        }
                     }
                     Ok(ProviderEvent::Failed { message, .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.take();
@@ -1434,6 +1438,86 @@ impl SessionCommandState {
             other => other,
         };
         provider.send_input(&binding.handle, input).await
+    }
+
+    /// Dispatch the oldest durable follow-up after a provider completes. The
+    /// queue is projected from session events, so it survives UI remounts and
+    /// app restarts instead of living in composer state.
+    pub async fn dispatch_next_queued_turn(&self, session_id: &SessionId) -> Result<bool> {
+        let Some(queued) = list_turn_queue(self, session_id).await?.into_iter().next() else {
+            return Ok(false);
+        };
+        let input = SendTurnInput {
+            session_id: session_id.clone(),
+            prompt: queued.prompt.clone(),
+            tool_instructions: queued.tool_instructions.clone(),
+            provider_id: None,
+            model: None,
+            provider_runtime: None,
+            plan_mode: queued.plan_mode,
+            effort: queued.effort.clone(),
+            fast_mode: queued.fast_mode,
+        };
+        let provider_input = dcc_core::ports::ProviderTurnInput {
+            prompt: input.prompt.clone(),
+            tool_instructions: input.tool_instructions.clone(),
+            plan_mode: input.plan_mode,
+            effort: input.effort.clone(),
+            fast_mode: input.fast_mode,
+        };
+        let output = run_send_turn(self, self, self, input).await?;
+        let turn_id = output.turn.id.clone();
+        if let Err(error) = self
+            .set_active_turn(session_id, Some(turn_id.0.clone()))
+            .await
+        {
+            let _ = self
+                .emit_turn_aborted(session_id, &turn_id, Some(error.to_string()))
+                .await;
+            return Err(error);
+        }
+        if let Err(error) =
+            mark_queued_turn_dispatched(self, self, session_id, queued.id, turn_id.clone()).await
+        {
+            let _ = self.set_active_turn(session_id, None).await;
+            let _ = self
+                .emit_turn_aborted(session_id, &turn_id, Some(error.to_string()))
+                .await;
+            return Err(error);
+        }
+        if let Err(error) = self
+            .send_provider_input(session_id, Input::Turn(provider_input))
+            .await
+        {
+            let _ = self.set_active_turn(session_id, None).await;
+            let _ = self
+                .emit_turn_aborted(session_id, &turn_id, Some(error.to_string()))
+                .await;
+            return Err(error);
+        }
+        Ok(true)
+    }
+
+    pub async fn steer_provider_turn(&self, session_id: &SessionId, prompt: &str) -> Result<()> {
+        let binding = self.provider_binding(session_id)?.ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "no provider binding for session {}",
+                session_id.0
+            ))
+        })?;
+        let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "unknown provider runtime: {}",
+                binding.provider_id
+            ))
+        })?;
+        if !provider.capabilities().supports_steering {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider {} does not support steering an active turn",
+                binding.provider_id
+            )));
+        }
+        provider.steer(&binding.handle, prompt).await
     }
 
     pub async fn start_mcp_oauth(

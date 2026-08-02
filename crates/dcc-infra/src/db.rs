@@ -937,6 +937,15 @@ impl SqliteSessionRepo {
                 SessionEventKind::TurnStarted { prompt, .. } => {
                     push_fragment(&mut fragments, format!("User: {prompt}"));
                 }
+                SessionEventKind::TurnSteered { prompt, .. } => {
+                    push_fragment(&mut fragments, format!("User guidance: {prompt}"));
+                }
+                SessionEventKind::TurnQueued { queued_turn } => {
+                    push_fragment(
+                        &mut fragments,
+                        format!("Queued follow-up: {}", queued_turn.prompt),
+                    );
+                }
                 SessionEventKind::TurnDelta { turn_id, content } => {
                     assistant_by_turn
                         .entry(turn_id.0.clone())
@@ -1075,6 +1084,9 @@ impl SqliteSessionRepo {
                     push_fragment(&mut fragments, format!("Checkpoint: {label}"));
                 }
                 SessionEventKind::SessionStarted { .. }
+                | SessionEventKind::QueuedTurnRemoved { .. }
+                | SessionEventKind::TurnQueueReordered { .. }
+                | SessionEventKind::QueuedTurnDispatched { .. }
                 | SessionEventKind::TurnReasoningStarted { .. }
                 | SessionEventKind::TurnReasoningCompleted { .. }
                 | SessionEventKind::TurnToolCallCompleted { .. }

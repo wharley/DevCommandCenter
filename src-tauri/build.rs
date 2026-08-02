@@ -4,9 +4,10 @@ use dcc_core::{
     application::{
         AbortRunInput, AbortRunOutput, ActivateMcpDefinitionInput, ApprovePlanInput,
         ApprovePlanOutput, CloseSessionInput, CloseSessionOutput, CreateWorkspaceForRepoInput,
-        CreateWorkspaceFromUrlInput, RecordPlanHandoffInput, RecordPlanHandoffOutput,
-        RestoreSessionInput, RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput,
-        SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
+        CreateWorkspaceFromUrlInput, QueueTurnInput, RecordPlanHandoffInput,
+        RecordPlanHandoffOutput, RemoveQueuedTurnInput, ReorderTurnQueueInput, RestoreSessionInput,
+        RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput,
+        SendTurnOutput, StartThreadInput, StartThreadOutput, SteerTurnInput, SteerTurnOutput,
     },
     domain::{
         delegation::{
@@ -25,9 +26,9 @@ use dcc_core::{
         provider::{McpOauthSupport, McpSupportLevel, ProviderCatalog, ProviderDescriptor},
         repository::{Repository, RepositoryId},
         session::{
-            Checkpoint, CheckpointId, Session, SessionEventKind, SessionEventRecord, SessionId,
-            SessionProjection, SessionSearchResult, SessionState, Turn, TurnId, TurnState,
-            WorkspaceSessionSummary,
+            Checkpoint, CheckpointId, QueuedTurn, Session, SessionEventKind, SessionEventRecord,
+            SessionId, SessionProjection, SessionSearchResult, SessionState, Turn, TurnId,
+            TurnState, WorkspaceSessionSummary,
         },
         workspace::{
             Workspace, WorkspaceId, WorkspacePushTarget, WorkspaceSetupReport,
@@ -254,6 +255,12 @@ struct SessionMethods {
     apply_task_title: String,
     prepare_turn: String,
     send_turn: String,
+    steer_turn: String,
+    queue_turn: String,
+    list_turn_queue: String,
+    remove_queued_turn: String,
+    reorder_turn_queue: String,
+    dispatch_next_queued_turn: String,
     approve_plan: String,
     record_plan_handoff: String,
     abort_run: String,
@@ -587,6 +594,12 @@ fn main() {
         .typ::<PrepareTurnOutput>()
         .typ::<SendTurnInput>()
         .typ::<SendTurnOutput>()
+        .typ::<SteerTurnInput>()
+        .typ::<SteerTurnOutput>()
+        .typ::<QueuedTurn>()
+        .typ::<QueueTurnInput>()
+        .typ::<RemoveQueuedTurnInput>()
+        .typ::<ReorderTurnQueueInput>()
         .typ::<ApprovePlanInput>()
         .typ::<ApprovePlanOutput>()
         .typ::<RecordPlanHandoffInput>()
@@ -750,6 +763,12 @@ fn main() {
             apply_task_title: "apply_task_title".to_string(),
             prepare_turn: "prepare_turn".to_string(),
             send_turn: "send_turn".to_string(),
+            steer_turn: "steer_turn".to_string(),
+            queue_turn: "queue_turn".to_string(),
+            list_turn_queue: "list_turn_queue".to_string(),
+            remove_queued_turn: "remove_queued_turn".to_string(),
+            reorder_turn_queue: "reorder_turn_queue".to_string(),
+            dispatch_next_queued_turn: "dispatch_next_queued_turn".to_string(),
             approve_plan: "approve_plan".to_string(),
             record_plan_handoff: "record_plan_handoff".to_string(),
             abort_run: "abort_run".to_string(),

@@ -772,6 +772,7 @@ struct SessionRuntime {
     stdin: Mutex<ChildStdin>,
     child: Mutex<Child>,
     thread_id: Mutex<Option<String>>,
+    active_turn_id: Mutex<Option<String>>,
     mcp_definitions_by_wire_name: Mutex<CodexMcpDefinitionMap>,
     mcp_tool_policies: Mutex<CodexMcpToolPolicyMap>,
     mcp_status_snapshot: StdRwLock<Option<Vec<McpRuntimeStatus>>>,
@@ -1315,6 +1316,7 @@ impl CodexAppServerAdapter {
             stdin: Mutex::new(stdin),
             child: Mutex::new(child),
             thread_id: Mutex::new(None),
+            active_turn_id: Mutex::new(None),
             mcp_definitions_by_wire_name: Mutex::new(HashMap::new()),
             mcp_tool_policies: Mutex::new(HashMap::new()),
             mcp_status_snapshot: StdRwLock::new(None),
@@ -1482,6 +1484,9 @@ impl CodexAppServerAdapter {
 
                 // Notification: has method + params and no response payload.
                 if let (Some(method), Some(params)) = (&msg.method, &msg.params) {
+                    if method == "turn/completed" || method == "error" {
+                        *runtime.active_turn_id.lock().await = None;
+                    }
                     if let Some(completed_item_id) = update_active_codex_mcp_tool_calls(
                         method,
                         params,
@@ -1754,7 +1759,7 @@ impl Provider for CodexAppServerAdapter {
             json!("never")
         };
 
-        runtime
+        let result = runtime
             .send_request(
                 "turn/start",
                 json!({
@@ -1768,6 +1773,48 @@ impl Provider for CodexAppServerAdapter {
             )
             .await?;
 
+        let turn_id = result
+            .get("turn")
+            .and_then(|turn| turn.get("id"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| CoreError::Provider("codex turn/start missing turn.id".to_string()))?
+            .to_string();
+        *runtime.active_turn_id.lock().await = Some(turn_id);
+
+        Ok(())
+    }
+
+    async fn steer(&self, handle: &SessionHandle, prompt: &str) -> Result<()> {
+        let runtime = self
+            .session_runtime(&handle.session_id)
+            .await
+            .ok_or_else(|| {
+                CoreError::Provider(format!(
+                    "no codex runtime for session {}",
+                    handle.session_id.0
+                ))
+            })?;
+        let thread_id = runtime
+            .thread_id
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| CoreError::Provider("codex session has no thread ID".to_string()))?;
+        let expected_turn_id =
+            runtime.active_turn_id.lock().await.clone().ok_or_else(|| {
+                CoreError::Provider("codex session has no active turn".to_string())
+            })?;
+
+        runtime
+            .send_request(
+                "turn/steer",
+                json!({
+                    "threadId": thread_id,
+                    "input": [{ "type": "text", "text": prompt }],
+                    "expectedTurnId": expected_turn_id,
+                }),
+            )
+            .await?;
         Ok(())
     }
 

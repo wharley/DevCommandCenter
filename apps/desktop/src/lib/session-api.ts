@@ -33,6 +33,12 @@ import type {
 	ResumeSessionOutput,
 	SendTurnInput,
 	SendTurnOutput,
+	SteerTurnInput,
+	SteerTurnOutput,
+	QueueTurnInput,
+	QueuedTurn,
+	RemoveQueuedTurnInput,
+	ReorderTurnQueueInput,
 	StartMcpOauthInput,
 	StartMcpOauthOutput,
 	StartThreadInput,
@@ -76,6 +82,30 @@ export async function sendTurn(input: SendTurnInput) {
 			waitMcpOauth(sessionId, definitionId),
 	});
 	return invoke<SendTurnOutput>(SESSION_METHODS.sendTurn, { input });
+}
+
+export function steerTurn(input: SteerTurnInput) {
+	return invoke<SteerTurnOutput>(SESSION_METHODS.steerTurn, { input });
+}
+
+export function queueTurn(input: QueueTurnInput) {
+	return invoke<QueuedTurn>(SESSION_METHODS.queueTurn, { input });
+}
+
+export function loadTurnQueue(sessionId: string) {
+	return invoke<QueuedTurn[]>(SESSION_METHODS.listTurnQueue, { sessionId });
+}
+
+export function removeQueuedTurn(input: RemoveQueuedTurnInput) {
+	return invoke<QueuedTurn[]>(SESSION_METHODS.removeQueuedTurn, { input });
+}
+
+export function reorderTurnQueue(input: ReorderTurnQueueInput) {
+	return invoke<QueuedTurn[]>(SESSION_METHODS.reorderTurnQueue, { input });
+}
+
+export function dispatchNextQueuedTurn(sessionId: string) {
+	return invoke<boolean>(SESSION_METHODS.dispatchNextQueuedTurn, { sessionId });
 }
 
 export function abortRun(input: AbortRunInput) {
@@ -177,6 +207,11 @@ const SESSION_EVENT_NAMES = [
 	"dcc/session/resumed",
 	"dcc/session/mcp/runtime-status",
 	"dcc/session/turn/started",
+	"dcc/session/turn/steered",
+	"dcc/session/turn/queued",
+	"dcc/session/turn/queue/removed",
+	"dcc/session/turn/queue/reordered",
+	"dcc/session/turn/queue/dispatched",
 	"dcc/session/turn/delta",
 	"dcc/session/turn/reasoning/started",
 	"dcc/session/turn/reasoning/delta",

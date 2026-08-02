@@ -2,11 +2,14 @@ use tauri::{AppHandle, State};
 
 use dcc_core::application::{
     AbortRunInput, AbortRunOutput, ApprovePlanInput, ApprovePlanOutput, CloseSessionInput,
-    CloseSessionOutput, RecordPlanHandoffInput, RecordPlanHandoffOutput, RestoreSessionInput,
-    RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput,
-    StartThreadInput, StartThreadOutput,
+    CloseSessionOutput, QueueTurnInput, RecordPlanHandoffInput, RecordPlanHandoffOutput,
+    RemoveQueuedTurnInput, ReorderTurnQueueInput, RestoreSessionInput, RestoreSessionOutput,
+    ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput,
+    StartThreadOutput, SteerTurnInput, SteerTurnOutput,
 };
-use dcc_core::domain::session::{SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary};
+use dcc_core::domain::session::{
+    QueuedTurn, SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary,
+};
 use dcc_tauri::{
     commands::session_commands::{
         self as session_command_impl, ApplyTaskTitleInput, ApplyTaskTitleOutput,
@@ -51,6 +54,54 @@ pub async fn send_turn(
     input: SendTurnInput,
 ) -> Result<SendTurnOutput, String> {
     session_command_impl::send_turn(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn steer_turn(
+    state: State<'_, SessionCommandState>,
+    input: SteerTurnInput,
+) -> Result<SteerTurnOutput, String> {
+    session_command_impl::steer_turn(state, input).await
+}
+
+#[tauri::command]
+pub async fn queue_turn(
+    state: State<'_, SessionCommandState>,
+    input: QueueTurnInput,
+) -> Result<QueuedTurn, String> {
+    session_command_impl::queue_turn(state, input).await
+}
+
+#[tauri::command]
+pub async fn list_turn_queue(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<Vec<QueuedTurn>, String> {
+    session_command_impl::list_turn_queue(state, session_id).await
+}
+
+#[tauri::command]
+pub async fn remove_queued_turn(
+    state: State<'_, SessionCommandState>,
+    input: RemoveQueuedTurnInput,
+) -> Result<Vec<QueuedTurn>, String> {
+    session_command_impl::remove_queued_turn(state, input).await
+}
+
+#[tauri::command]
+pub async fn reorder_turn_queue(
+    state: State<'_, SessionCommandState>,
+    input: ReorderTurnQueueInput,
+) -> Result<Vec<QueuedTurn>, String> {
+    session_command_impl::reorder_turn_queue(state, input).await
+}
+
+#[tauri::command]
+pub async fn dispatch_next_queued_turn(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<bool, String> {
+    session_command_impl::dispatch_next_queued_turn(state, session_id).await
 }
 
 #[tauri::command]

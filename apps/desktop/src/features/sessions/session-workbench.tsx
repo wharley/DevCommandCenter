@@ -130,6 +130,8 @@ type SessionWorkbenchProps = {
 		turn: ComposerSubmittedTurn,
 		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
 	) => Promise<void>;
+	onSteerPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
+	onQueuePrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => void;
 	onAbortSession: () => void;
 	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
@@ -204,6 +206,8 @@ export function SessionWorkbench({
 	onRestoreSession,
 	onOpenSessionSearch,
 	onSubmitPrompt,
+	onSteerPrompt,
+	onQueuePrompt,
 	onResumeSession,
 	onAbortSession,
 	onDelegate,
@@ -599,6 +603,8 @@ export function SessionWorkbench({
 						onRestoreSession={onRestoreSession}
 						onOpenSessionSearch={onOpenSessionSearch}
 						onSubmitPrompt={onSubmitPrompt}
+						onSteerPrompt={onSteerPrompt}
+						onQueuePrompt={onQueuePrompt}
 						onResumeSession={onResumeSession}
 						onAbortSession={onAbortSession}
 						onDelegate={onDelegate}

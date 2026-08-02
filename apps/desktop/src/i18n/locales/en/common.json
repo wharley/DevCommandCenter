@@ -1001,6 +1001,22 @@
       "steer": "Send guidance",
       "stop": "Stop"
     },
+    "followUp": {
+      "noActiveTurn": "The active turn already finished.",
+      "steerUnsupported": "This provider cannot receive guidance during an active turn.",
+      "steerFailed": "Unable to steer the active turn.",
+      "steerNow": "Guide the agent now",
+      "queue": "Queue for later",
+      "queueTitle": "Next messages · {{count}}",
+      "queueFailed": "Unable to queue the message.",
+      "queueActionFailed": "Unable to update the queue.",
+      "dispatchFailed": "Unable to send the next message.",
+      "sendNext": "Send next",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "edit": "Edit message",
+      "remove": "Remove from queue"
+    },
     "execution": {
       "title": "Execution",
       "open": "Open execution settings",

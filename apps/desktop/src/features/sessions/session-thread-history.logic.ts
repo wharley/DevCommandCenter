@@ -111,6 +111,14 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					plan_mode: record.kind.planMode ?? null,
 				},
 			};
+		case "turn_steered":
+			return {
+				sessionTurnSteered: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId,
+					prompt: record.kind.prompt,
+				},
+			};
 		case "turn_delta":
 			return {
 				sessionTurnDelta: {
@@ -358,6 +366,9 @@ function getEventSessionId(event: CoreEvent): string | null {
 	if ("sessionTurnStarted" in event && event.sessionTurnStarted) {
 		return event.sessionTurnStarted.session_id;
 	}
+	if ("sessionTurnSteered" in event && event.sessionTurnSteered) {
+		return event.sessionTurnSteered.session_id;
+	}
 	if ("sessionTurnDelta" in event && event.sessionTurnDelta) {
 		return event.sessionTurnDelta.session_id;
 	}
@@ -437,6 +448,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionResumed" in event) return "session.resumed";
 	if ("sessionMcpRuntimeStatusChanged" in event) return "session.mcp.runtime-status";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
+	if ("sessionTurnSteered" in event) return "session.turn.steered";
 	if ("sessionTurnDelta" in event) return "session.turn.delta";
 	if ("sessionTurnReasoningStarted" in event) return "session.turn.reasoning.started";
 	if ("sessionTurnReasoningDelta" in event) return "session.turn.reasoning.delta";
@@ -471,6 +483,9 @@ function eventSummary(event: CoreEvent): string {
 	}
 	if ("sessionTurnStarted" in event && event.sessionTurnStarted) {
 		return event.sessionTurnStarted.prompt;
+	}
+	if ("sessionTurnSteered" in event && event.sessionTurnSteered) {
+		return event.sessionTurnSteered.prompt;
 	}
 	if ("sessionTurnDelta" in event && event.sessionTurnDelta) {
 		return event.sessionTurnDelta.content;
@@ -731,6 +746,17 @@ export function projectWorkspaceMessages(
 				content: event.sessionTurnStarted.prompt,
 				createdAt: occurredAt,
 				planMode: event.sessionTurnStarted.plan_mode === true,
+			});
+			continue;
+		}
+
+		if ("sessionTurnSteered" in event && event.sessionTurnSteered) {
+			messages.push({
+				id: `user-steer-${event.sessionTurnSteered.session_id}-${event.sessionTurnSteered.turn_id}-${timelineEvent.signature}`,
+				role: "user",
+				label: "User",
+				content: event.sessionTurnSteered.prompt,
+				createdAt: occurredAt,
 			});
 			continue;
 		}

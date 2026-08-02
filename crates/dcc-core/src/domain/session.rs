@@ -54,6 +54,23 @@ pub struct Checkpoint {
     pub created_at: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedTurn {
+    pub id: String,
+    pub session_id: SessionId,
+    pub prompt: String,
+    #[serde(default)]
+    pub tool_instructions: Option<String>,
+    #[serde(default)]
+    pub plan_mode: Option<bool>,
+    #[serde(default)]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub fast_mode: Option<bool>,
+    pub created_at: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
@@ -93,6 +110,29 @@ pub enum SessionEventKind {
         prompt: String,
         #[serde(rename = "planMode", default)]
         plan_mode: Option<bool>,
+    },
+    TurnSteered {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        prompt: String,
+    },
+    TurnQueued {
+        #[serde(rename = "queuedTurn")]
+        queued_turn: QueuedTurn,
+    },
+    QueuedTurnRemoved {
+        #[serde(rename = "queuedTurnId")]
+        queued_turn_id: String,
+    },
+    TurnQueueReordered {
+        #[serde(rename = "queuedTurnIds")]
+        queued_turn_ids: Vec<String>,
+    },
+    QueuedTurnDispatched {
+        #[serde(rename = "queuedTurnId")]
+        queued_turn_id: String,
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
     },
     TurnDelta {
         #[serde(rename = "turnId")]
@@ -321,7 +361,12 @@ impl SessionProjection {
                 self.state = SessionState::Active;
                 self.active_turn_id = Some(turn_id.clone());
             }
-            SessionEventKind::TurnDelta { .. }
+            SessionEventKind::TurnSteered { .. }
+            | SessionEventKind::TurnQueued { .. }
+            | SessionEventKind::QueuedTurnRemoved { .. }
+            | SessionEventKind::TurnQueueReordered { .. }
+            | SessionEventKind::QueuedTurnDispatched { .. }
+            | SessionEventKind::TurnDelta { .. }
             | SessionEventKind::TurnReasoningStarted { .. }
             | SessionEventKind::TurnReasoningDelta { .. }
             | SessionEventKind::TurnReasoningCompleted { .. }

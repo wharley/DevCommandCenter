@@ -6,6 +6,8 @@ export type DccUxMetricName =
 	| "terminal_discovered"
 	| "terminal_scope_switched"
 	| "advanced_composer_control_used"
+	| "steer_prompt"
+	| "queue_prompt"
 	| "command_palette_action";
 
 export type DccUxMetric = {

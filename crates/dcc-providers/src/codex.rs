@@ -29,6 +29,7 @@ pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
 
 pub fn stable_codex_capabilities() -> Capabilities {
     let mut capabilities = stable_cli_capabilities();
+    capabilities.supports_steering = true;
     capabilities.mcp_support = McpSupportLevel::NativeConfig;
     capabilities.mcp_oauth_support = McpOauthSupport::InteractivePreflight;
     capabilities.can_request_delegation = true;

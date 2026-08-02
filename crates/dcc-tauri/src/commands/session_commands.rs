@@ -7,19 +7,26 @@ use tokio::time::sleep;
 
 use dcc_core::{
     application::{
-        abort_run as run_abort_run, approve_plan as run_approve_plan,
-        close_session as run_close_session, record_plan_handoff as run_record_plan_handoff,
-        restore_session as run_restore_session, resume_session as run_resume_session,
-        send_turn as run_send_turn, start_thread as run_start_thread, AbortRunInput,
-        AbortRunOutput, ApprovePlanInput, ApprovePlanOutput, CloseSessionInput, CloseSessionOutput,
-        RecordPlanHandoffInput, RecordPlanHandoffOutput, RestoreSessionInput, RestoreSessionOutput,
-        ResumeSessionInput, ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput,
-        StartThreadOutput,
+        abort_run as run_abort_run, active_turn_for_steer, approve_plan as run_approve_plan,
+        close_session as run_close_session, list_turn_queue as run_list_turn_queue,
+        queue_turn as run_queue_turn, record_plan_handoff as run_record_plan_handoff,
+        record_turn_steer, remove_queued_turn as run_remove_queued_turn,
+        reorder_turn_queue as run_reorder_turn_queue, restore_session as run_restore_session,
+        resume_session as run_resume_session, send_turn as run_send_turn,
+        start_thread as run_start_thread, AbortRunInput, AbortRunOutput, ApprovePlanInput,
+        ApprovePlanOutput, CloseSessionInput, CloseSessionOutput, QueueTurnInput,
+        RecordPlanHandoffInput, RecordPlanHandoffOutput, RemoveQueuedTurnInput,
+        ReorderTurnQueueInput, RestoreSessionInput, RestoreSessionOutput, ResumeSessionInput,
+        ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
+        SteerTurnInput, SteerTurnOutput,
     },
     domain::{
         mcp::{McpDefinitionId, McpErrorCategory, McpRuntimeState, McpRuntimeStatus},
         provider::McpOauthSupport,
-        session::{SessionEventRecord, SessionId, SessionSearchResult, WorkspaceSessionSummary},
+        session::{
+            QueuedTurn, SessionEventRecord, SessionId, SessionProjection, SessionSearchResult,
+            WorkspaceSessionSummary,
+        },
         thread::Thread,
         workspace::{Workspace, WorkspaceId},
     },
@@ -370,6 +377,82 @@ pub async fn send_turn(
     }
 
     Ok(output)
+}
+
+#[tauri::command]
+pub async fn steer_turn(
+    state: State<'_, SessionCommandState>,
+    input: SteerTurnInput,
+) -> Result<SteerTurnOutput, String> {
+    let (_, turn_id) = active_turn_for_steer(&*state, &*state, &input)
+        .await
+        .map_err(|error| error.to_string())?;
+    state
+        .steer_provider_turn(&input.session_id, input.prompt.trim())
+        .await
+        .map_err(|error| error.to_string())?;
+    record_turn_steer(&*state, &*state, &*state, input, turn_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn queue_turn(
+    state: State<'_, SessionCommandState>,
+    input: QueueTurnInput,
+) -> Result<QueuedTurn, String> {
+    let history = SessionEventRepo::list_events_by_session(&*state, &input.turn.session_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let projection =
+        SessionProjection::fold(&history).ok_or_else(|| "session history is empty".to_string())?;
+    if projection.active_turn_id.is_none() {
+        return Err("follow-ups can only be queued while a turn is active".to_string());
+    }
+    run_queue_turn(&*state, &*state, input)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn list_turn_queue(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<Vec<QueuedTurn>, String> {
+    run_list_turn_queue(&*state, &SessionId(session_id))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_queued_turn(
+    state: State<'_, SessionCommandState>,
+    input: RemoveQueuedTurnInput,
+) -> Result<Vec<QueuedTurn>, String> {
+    run_remove_queued_turn(&*state, &*state, input)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn reorder_turn_queue(
+    state: State<'_, SessionCommandState>,
+    input: ReorderTurnQueueInput,
+) -> Result<Vec<QueuedTurn>, String> {
+    run_reorder_turn_queue(&*state, &*state, input)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn dispatch_next_queued_turn(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<bool, String> {
+    state
+        .dispatch_next_queued_turn(&SessionId(session_id))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

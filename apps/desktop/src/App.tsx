@@ -108,10 +108,12 @@ import {
 	applyTaskTitle,
 	closeSession,
 	loadSessionThreadEvents,
+	queueTurn,
 	resumeSession,
 	restoreSession,
 	sendTurn,
 	startThread,
+	steerTurn,
 } from "./lib/session-api";
 import {
 	completeDelegation,
@@ -696,6 +698,21 @@ function getCoreEventSessionId(event: CoreEvent): string | null {
 	}
 	if ("sessionTurnStarted" in event && event.sessionTurnStarted) {
 		return event.sessionTurnStarted.session_id;
+	}
+	if ("sessionTurnSteered" in event && event.sessionTurnSteered) {
+		return event.sessionTurnSteered.session_id;
+	}
+	if ("sessionTurnQueued" in event && event.sessionTurnQueued) {
+		return event.sessionTurnQueued.session_id;
+	}
+	if ("sessionQueuedTurnRemoved" in event && event.sessionQueuedTurnRemoved) {
+		return event.sessionQueuedTurnRemoved.session_id;
+	}
+	if ("sessionTurnQueueReordered" in event && event.sessionTurnQueueReordered) {
+		return event.sessionTurnQueueReordered.session_id;
+	}
+	if ("sessionQueuedTurnDispatched" in event && event.sessionQueuedTurnDispatched) {
+		return event.sessionQueuedTurnDispatched.session_id;
 	}
 	if ("sessionTurnDelta" in event && event.sessionTurnDelta) {
 		return event.sessionTurnDelta.session_id;
@@ -3136,6 +3153,78 @@ export default function App() {
 			workspaceSessions,
 	]);
 
+	const handleSteerPrompt = useCallback(
+		async (turn: ComposerSubmittedTurn) => {
+			const prompt = turn.rawPrompt.trim();
+			const snapshot = selectedSessionSnapshot;
+			if (!snapshot?.activeTurnId || prompt.length === 0) {
+				throw new Error(t("composer.followUp.noActiveTurn"));
+			}
+			const provider = providerChoices.find(
+				(candidate) => candidate.id === snapshot.providerId,
+			);
+			if (!provider?.capabilities.supportsSteering) {
+				throw new Error(t("composer.followUp.steerUnsupported"));
+			}
+
+			try {
+				await steerTurn({
+					sessionId: snapshot.sessionId,
+					prompt,
+				});
+				recordUxMetric("steer_prompt");
+			} catch (error) {
+				const message =
+					error instanceof Error
+						? error.message
+						: t("composer.followUp.steerFailed");
+				toast.error(message);
+				throw error;
+			}
+		},
+		[providerChoices, selectedSessionSnapshot, t],
+	);
+
+	const handleQueuePrompt = useCallback(
+		async (turn: ComposerSubmittedTurn) => {
+			const prompt = turn.rawPrompt.trim();
+			const snapshot = selectedSessionSnapshot;
+			if (!snapshot?.activeTurnId || prompt.length === 0) {
+				throw new Error(t("composer.followUp.noActiveTurn"));
+			}
+			const provider = providerChoices.find(
+				(candidate) => candidate.id === snapshot.providerId,
+			) ?? selectedProvider;
+			try {
+				await queueTurn({
+					turn: {
+						sessionId: snapshot.sessionId,
+						prompt,
+						toolInstructions: resolveDelegateTaskToolInstructions({
+							provider,
+							providers: providerChoices,
+						}),
+						providerId: null,
+						model: null,
+						providerRuntime: null,
+						planMode: turn.envelope.planMode,
+						effort: turn.envelope.effort,
+						fastMode: turn.envelope.fastMode,
+					},
+				});
+				recordUxMetric("queue_prompt");
+			} catch (error) {
+				const message =
+					error instanceof Error
+						? error.message
+						: t("composer.followUp.queueFailed");
+				toast.error(message);
+				throw error;
+			}
+		},
+		[providerChoices, selectedProvider, selectedSessionSnapshot, t],
+	);
+
 	const handleGeneratePlanFromSpec = useCallback(
 		(specMarkdown: string) => {
 			const prompt = buildPlanFromSpecPrompt(specMarkdown);
@@ -4242,6 +4331,8 @@ export default function App() {
 									onRestoreSession={handleRestoreSession}
 									onOpenSessionSearch={handleOpenSessionSearch}
 									onSubmitPrompt={handleSubmitPrompt}
+									onSteerPrompt={handleSteerPrompt}
+									onQueuePrompt={handleQueuePrompt}
 									onResumeSession={handleResumeSession}
 									onAbortSession={handleAbortSession}
 									onDelegate={handleDelegate}

@@ -19,6 +19,17 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
             format!("{SESSION_EVENT_PREFIX}/mcp/runtime-status")
         }
         CoreEvent::SessionTurnStarted { .. } => format!("{SESSION_EVENT_PREFIX}/turn/started"),
+        CoreEvent::SessionTurnSteered { .. } => format!("{SESSION_EVENT_PREFIX}/turn/steered"),
+        CoreEvent::SessionTurnQueued { .. } => format!("{SESSION_EVENT_PREFIX}/turn/queued"),
+        CoreEvent::SessionQueuedTurnRemoved { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/queue/removed")
+        }
+        CoreEvent::SessionTurnQueueReordered { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/queue/reordered")
+        }
+        CoreEvent::SessionQueuedTurnDispatched { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/queue/dispatched")
+        }
         CoreEvent::SessionTurnDelta { .. } => format!("{SESSION_EVENT_PREFIX}/turn/delta"),
         CoreEvent::SessionTurnReasoningStarted { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/reasoning/started")
@@ -141,5 +152,16 @@ mod tests {
         };
 
         assert_eq!(core_event_name(&event), "dcc/session/mcp/runtime-status");
+    }
+
+    #[test]
+    fn queued_turn_events_share_the_turn_queue_namespace() {
+        let event = CoreEvent::SessionQueuedTurnDispatched {
+            session_id: "session-1".to_string(),
+            queued_turn_id: "queued-1".to_string(),
+            turn_id: "turn-2".to_string(),
+        };
+
+        assert_eq!(core_event_name(&event), "dcc/session/turn/queue/dispatched");
     }
 }

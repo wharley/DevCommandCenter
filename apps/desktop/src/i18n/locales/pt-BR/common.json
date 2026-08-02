@@ -1001,6 +1001,22 @@
       "steer": "Enviar orientação",
       "stop": "Interromper"
     },
+    "followUp": {
+      "noActiveTurn": "O turno ativo já terminou.",
+      "steerUnsupported": "Este provedor não aceita orientações durante um turno ativo.",
+      "steerFailed": "Não foi possível orientar o turno ativo.",
+      "steerNow": "Orientar o agente agora",
+      "queue": "Enfileirar para depois",
+      "queueTitle": "Próximas mensagens · {{count}}",
+      "queueFailed": "Não foi possível enfileirar a mensagem.",
+      "queueActionFailed": "Não foi possível atualizar a fila.",
+      "dispatchFailed": "Não foi possível enviar a próxima mensagem.",
+      "sendNext": "Enviar próxima",
+      "moveUp": "Mover para cima",
+      "moveDown": "Mover para baixo",
+      "edit": "Editar mensagem",
+      "remove": "Remover da fila"
+    },
     "execution": {
       "title": "Execução",
       "open": "Abrir configurações de execução",
