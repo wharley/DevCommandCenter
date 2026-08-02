@@ -15,7 +15,7 @@ use dcc_tauri::{
         MissionSpecContextStatusOutput, ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
         RenameWorkspaceInput, RepositoryIdInput, ResolveWorkspaceSourceUrlInput,
         SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
-        SearchWorkspaceOutput, UpdateRepositoryDisplayNameInput,
+        SearchWorkspaceOutput, UpdateRepositoryIdentityInput,
         WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
         WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceContinueFromBaseBranchOutput, WorkspaceGitAcceptConflictInput,
@@ -157,11 +157,11 @@ pub async fn list_repositories(
 }
 
 #[tauri::command]
-pub async fn update_repository_display_name(
+pub async fn update_repository_identity(
     state: State<'_, WorkspaceCommandState>,
-    input: UpdateRepositoryDisplayNameInput,
+    input: UpdateRepositoryIdentityInput,
 ) -> Result<Repository, String> {
-    dcc_tauri::commands::workspace_commands::update_repository_display_name(state, input).await
+    dcc_tauri::commands::workspace_commands::update_repository_identity(state, input).await
 }
 
 #[tauri::command]

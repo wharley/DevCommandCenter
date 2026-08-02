@@ -48,12 +48,20 @@ import {
 } from "./workspace-setup-report";
 import { cn } from "@/lib/utils";
 import { repositoryDisplayName } from "./repository-display-name";
+import { ProjectIdentityGlyph } from "./project-identity";
 
 type WorkspaceCreationMode = "open" | "clone";
 
 type RepositoryOption = Pick<
 	Repository,
-	"id" | "projectId" | "name" | "displayName" | "rootPath" | "baseBranch"
+	| "id"
+	| "projectId"
+	| "name"
+	| "displayName"
+	| "icon"
+	| "color"
+	| "rootPath"
+	| "baseBranch"
 >;
 
 export type ExistingRepositoryContext = {
@@ -344,6 +352,8 @@ export function CreateWorkspaceDialog({
 				projectId,
 				name: repositoryNameFromWorkspaceRoot(pickedPath),
 				displayName: null,
+				icon: null,
+				color: null,
 				rootPath: pickedPath,
 				baseBranch: "",
 			};
@@ -686,12 +696,15 @@ export function CreateWorkspaceDialog({
 											disabled={isSubmitting}
 											onClick={() => selectSingleRepository(repository)}
 										>
-											<span className="grid size-6 shrink-0 place-items-center rounded-md bg-background text-[9px] font-semibold ring-1 ring-border/50">
-											{repositoryDisplayName(repository).slice(0, 2).toUpperCase()}
-											</span>
+											<ProjectIdentityGlyph
+												icon={repository.icon}
+												color={repository.color}
+												size="sm"
+												className="size-6"
+											/>
 											<span className="min-w-0 flex-1">
 												<strong className="block truncate text-[11px] font-medium text-foreground">
-												{repositoryDisplayName(repository)}
+													{repositoryDisplayName(repository)}
 												</strong>
 												<small className="block truncate text-[9.5px] text-muted-foreground">
 													{selected && isLoadingBranches && !repository.baseBranch
@@ -785,6 +798,11 @@ export function CreateWorkspaceDialog({
 											>
 												<Check className="size-3" strokeWidth={2.4} />
 											</span>
+											<ProjectIdentityGlyph
+												icon={repository.icon}
+												color={repository.color}
+												size="sm"
+											/>
 											<span className="min-w-0">
 												<span className="block truncate text-[12px] font-medium">
 													{repositoryDisplayName(repository)}

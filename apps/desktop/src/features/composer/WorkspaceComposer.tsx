@@ -137,11 +137,19 @@ type WorkspaceComposerProps = {
 	projectRootPath: string | null;
 	workspaceBranch: string | null;
 	projectLabel: string | null;
+	projectIcon?: string | null;
+	projectColor?: string | null;
 	currentBranch: string | null;
 	isIsolatedWorkspace: boolean;
 	gitChangeSummary: ExecutionDockChangeSummary | null;
 	gitStatusState?: "loading" | "ready" | "error";
-	contextProjects?: Array<{ id: string; name: string; branch: string }>;
+	contextProjects?: Array<{
+		id: string;
+		name: string;
+		branch: string;
+		icon?: string | null;
+		color?: string | null;
+	}>;
 	showPlanFollowUpPrompt: boolean;
 	planTitle: string | null;
 	planNeedsInput: boolean;
@@ -179,6 +187,8 @@ export function WorkspaceComposer({
 	projectRootPath,
 	workspaceBranch,
 	projectLabel,
+	projectIcon = null,
+	projectColor = null,
 	currentBranch,
 	isIsolatedWorkspace,
 	gitChangeSummary,
@@ -753,6 +763,8 @@ export function WorkspaceComposer({
 		<ExecutionDock
 			key="execution-dock"
 			projectLabel={projectLabel}
+			projectIcon={projectIcon}
+			projectColor={projectColor}
 			workspacePath={workspacePath}
 			projectRootPath={projectRootPath}
 			baseBranch={workspaceBranch}

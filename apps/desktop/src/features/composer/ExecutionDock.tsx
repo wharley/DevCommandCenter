@@ -9,7 +9,7 @@ import {
 	Terminal,
 	X,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSetupReport } from "@dcc/contracts";
 import {
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { setupDisplayCommand } from "@/features/workspaces/workspace-setup-report";
+import { ProjectIdentityGlyph } from "@/features/workspaces/project-identity";
 import { ExecutionOriginPicker } from "./ExecutionOriginPicker";
 
 export type ExecutionDockChangeSummary = {
@@ -29,6 +30,8 @@ export type ExecutionDockChangeSummary = {
 
 type ExecutionDockProps = {
 	projectLabel: string | null;
+	projectIcon?: string | null;
+	projectColor?: string | null;
 	workspacePath: string | null;
 	projectRootPath?: string | null;
 	baseBranch: string | null;
@@ -36,23 +39,19 @@ type ExecutionDockProps = {
 	isIsolatedWorkspace: boolean;
 	changeSummary: ExecutionDockChangeSummary | null;
 	gitStatusState?: "loading" | "ready" | "error";
-	contextProjects?: Array<{ id: string; name: string; branch: string }>;
+	contextProjects?: Array<{
+		id: string;
+		name: string;
+		branch: string;
+		icon?: string | null;
+		color?: string | null;
+	}>;
 	setupReport?: WorkspaceSetupReport | null;
 	onReviewChanges?: () => void;
 	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
 	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
 	onSkipRecommendedSetup?: () => Promise<void>;
 };
-
-function projectInitials(label: string): string {
-	const words = label
-		.split(/[\s._/-]+/)
-		.map((word) => word.trim())
-		.filter(Boolean);
-	if (words.length === 0) return "DCC";
-	if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-	return `${words[0][0] ?? ""}${words[1][0] ?? ""}`.toUpperCase();
-}
 
 /**
  * Persistent task execution context attached to the composer. It exposes the
@@ -61,6 +60,8 @@ function projectInitials(label: string): string {
  */
 export const ExecutionDock = memo(function ExecutionDock({
 	projectLabel,
+	projectIcon = null,
+	projectColor = null,
 	workspacePath,
 	projectRootPath = null,
 	baseBranch,
@@ -87,10 +88,17 @@ export const ExecutionDock = memo(function ExecutionDock({
 		: baseBranch
 			? t("composer.executionDock.baseBranch", { branch: baseBranch })
 			: t("composer.executionDock.branchUnavailable");
-	const initials = useMemo(() => projectInitials(displayedProject), [displayedProject]);
 	const visibleProjects = multiProject
 		? contextProjects.slice(0, 3)
-		: [{ id: "active", name: displayedProject, branch: baseBranch ?? "" }];
+		: [
+				{
+					id: "active",
+					name: displayedProject,
+					branch: baseBranch ?? "",
+					icon: projectIcon,
+					color: projectColor,
+				},
+			];
 	const canChangeOrigin = Boolean(
 		!multiProject &&
 			projectRootPath &&
@@ -152,16 +160,17 @@ export const ExecutionDock = memo(function ExecutionDock({
 		>
 			<span className="flex shrink-0 items-center pl-1">
 				{visibleProjects.map((project, index) => (
-					<span
+					<ProjectIdentityGlyph
 						key={project.id}
+						icon={project.icon}
+						color={project.color}
+						size="sm"
+						title={project.name}
 						className={cn(
-							"grid size-6 place-items-center rounded-md border border-emerald-700/15 bg-background text-[9px] font-semibold text-foreground/80",
+							"size-6",
 							index > 0 && "-ml-1.5",
 						)}
-						title={project.name}
-					>
-						{multiProject ? projectInitials(project.name) : initials}
-					</span>
+					/>
 				))}
 			</span>
 			<span className="min-w-0 flex-1">

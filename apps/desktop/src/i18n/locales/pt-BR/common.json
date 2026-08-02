@@ -130,6 +130,28 @@
     "description": "Personalize como este projeto aparece no DCC sem alterar a pasta, o repositório ou as branches.",
     "nameLabel": "Nome do projeto",
     "nameHint": "Este nome será usado na sidebar, no cabeçalho, no Dock e nos seletores. O nome técnico permanece intacto.",
+    "iconLabel": "Ícone",
+    "colorLabel": "Cor",
+    "icons": {
+      "folder": "Pasta",
+      "terminal": "Terminal",
+      "code": "Código",
+      "layers": "Camadas",
+      "package": "Pacote",
+      "database": "Banco de dados",
+      "globe": "Web",
+      "rocket": "Foguete"
+    },
+    "colors": {
+      "slate": "Ardósia",
+      "sky": "Azul",
+      "cyan": "Ciano",
+      "emerald": "Esmeralda",
+      "amber": "Âmbar",
+      "orange": "Laranja",
+      "rose": "Rosa",
+      "violet": "Violeta"
+    },
     "useRepositoryName": "Usar nome original",
     "technicalIdentity": "Identidade técnica",
     "cancel": "Cancelar",

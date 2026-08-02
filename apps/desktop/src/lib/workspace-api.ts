@@ -58,7 +58,7 @@ import type {
 	ReadWorkspaceFileInput,
 	ReadWorkspaceFileOutput,
 	RenameWorkspaceInput,
-	UpdateRepositoryDisplayNameInput,
+	UpdateRepositoryIdentityInput,
 	ResolveWorkspaceSourceUrlInput,
 	WriteWorkspaceFileInput,
 	WriteWorkspaceFileOutput,
@@ -195,8 +195,8 @@ export function deleteRepository(repositoryId: string) {
 	return invoke<void>(WORKSPACE_METHODS.deleteRepository, { input: { repositoryId } });
 }
 
-export function updateRepositoryDisplayName(input: UpdateRepositoryDisplayNameInput) {
-	return invoke<Repository>(WORKSPACE_METHODS.updateRepositoryDisplayName, { input });
+export function updateRepositoryIdentity(input: UpdateRepositoryIdentityInput) {
+	return invoke<Repository>(WORKSPACE_METHODS.updateRepositoryIdentity, { input });
 }
 
 export function createWorkspaceFromUrl(input: CreateWorkspaceFromUrlInput) {

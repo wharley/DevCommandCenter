@@ -75,6 +75,7 @@ import {
 import { WorkspaceRailRowItem } from "./workspace-rail-row";
 import { useWorkspaceAgentActivities } from "./use-workspace-agent-states";
 import { ProjectEditDialog } from "./project-edit-dialog";
+import { ProjectIdentityGlyph } from "./project-identity";
 import { repositoryDisplayName } from "./repository-display-name";
 
 type VirtualItem =
@@ -154,14 +155,21 @@ function WorkspaceRepoPicker({
 									onCreateWorkspaceFromRepository(repository);
 								}}
 							>
-								<strong className="truncate">
-									{repositoryDisplayName(repository)}
-								</strong>
-								<span className="truncate text-[var(--dcc-text-muted)]">
-									{repository.baseBranch}
-								</span>
-								<span className="truncate text-[10px] text-muted-foreground">
-									{repository.rootPath}
+								<ProjectIdentityGlyph
+									icon={repository.icon}
+									color={repository.color}
+									size="sm"
+								/>
+								<span className="flex min-w-0 flex-1 flex-col">
+									<strong className="truncate">
+										{repositoryDisplayName(repository)}
+									</strong>
+									<span className="truncate text-[var(--dcc-text-muted)]">
+										{repository.baseBranch}
+									</span>
+									<span className="truncate text-[10px] text-muted-foreground">
+										{repository.rootPath}
+									</span>
 								</span>
 							</CommandItem>
 						))}
@@ -244,10 +252,12 @@ type WorkspacesSidebarProps = {
 		repositoryId: string;
 		workspaceIds: string[];
 	}) => Promise<void> | void;
-	onUpdateProjectDisplayName?: (
-		repositoryId: string,
-		displayName: string | null,
-	) => Promise<void>;
+	onUpdateProjectIdentity?: (input: {
+		repositoryId: string;
+		displayName: string | null;
+		icon: string | null;
+		color: string | null;
+	}) => Promise<void>;
 	selectedWorkspaceId: string | null;
 	workspaces: WorkspaceSummary[];
 };
@@ -285,7 +295,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onRestoreWorkspace,
 	onDeleteWorkspace,
 	onDeleteProject,
-	onUpdateProjectDisplayName,
+	onUpdateProjectIdentity,
 	selectedWorkspaceId,
 	workspaces,
 }: WorkspacesSidebarProps) {
@@ -639,7 +649,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				const canEditProject =
 					item.headerVariant === "project" &&
 					repository !== null &&
-					Boolean(onUpdateProjectDisplayName);
+					Boolean(onUpdateProjectIdentity);
 				const canManageProject =
 					canCreateProjectWorkspace || canEditProject || canRemoveProject;
 
@@ -677,6 +687,13 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 										className="size-[13px] shrink-0 text-muted-foreground/75"
 										strokeWidth={1.9}
 										aria-hidden
+									/>
+								) : repository ? (
+									<ProjectIdentityGlyph
+										icon={repository.icon}
+										color={repository.color}
+										size="sm"
+										className="size-[18px]"
 									/>
 								) : (
 									<ProjectGroupGlyph className="size-[13px] text-muted-foreground/75" />
@@ -829,7 +846,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			onCompleteWorkspace,
 			onCreateWorkspaceFromProject,
 			onDeleteProject,
-			onUpdateProjectDisplayName,
+			onUpdateProjectIdentity,
 			onDeleteWorkspace,
 			onRestoreWorkspace,
 			onSelectWorkspace,
@@ -1255,9 +1272,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				onOpenChange={(open) => {
 					if (!open) setProjectEditTarget(null);
 				}}
-				onSave={async (repositoryId, displayName) => {
-					if (!onUpdateProjectDisplayName) return;
-					await onUpdateProjectDisplayName(repositoryId, displayName);
+				onSave={async (input) => {
+					if (!onUpdateProjectIdentity) return;
+					await onUpdateProjectIdentity(input);
 				}}
 			/>
 

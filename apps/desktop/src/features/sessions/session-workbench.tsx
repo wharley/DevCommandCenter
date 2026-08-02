@@ -96,6 +96,8 @@ type SessionWorkbenchProps = {
 	terminalRootPath?: string | null;
 	/** Optional user-facing project identity; falls back to the technical root name. */
 	projectLabel?: string | null;
+	projectIcon?: string | null;
+	projectColor?: string | null;
 	/** Active mission worktree path. Unlike workspacePath, this does not fall back to rootPath. */
 	terminalWorktreePath?: string | null;
 	workspaceScopeOptions?: Array<{
@@ -104,6 +106,8 @@ type SessionWorkbenchProps = {
 		branch: string;
 		hasChanges: boolean | null;
 		needsDelivery: boolean | null;
+		icon?: string | null;
+		color?: string | null;
 	}>;
 	selectedWorkspaceScopeId?: string | null;
 	onSelectWorkspaceScope?: (workspaceId: string) => void;
@@ -187,6 +191,8 @@ export function SessionWorkbench({
 	projectId,
 	terminalRootPath,
 	projectLabel,
+	projectIcon,
+	projectColor,
 	terminalWorktreePath,
 	workspaceScopeOptions = [],
 	selectedWorkspaceScopeId = null,
@@ -589,6 +595,8 @@ export function SessionWorkbench({
 						workspaceSetupReport={workspaceSetupReport}
 						projectRootPath={terminalRootPath}
 						projectLabel={resolvedProjectLabel}
+						projectIcon={projectIcon}
+						projectColor={projectColor}
 						isIsolatedWorkspace={Boolean(terminalWorktreePath)}
 						workspaceContextProjects={workspaceScopeOptions}
 						sessionQueryScope={sessionQueryScope}

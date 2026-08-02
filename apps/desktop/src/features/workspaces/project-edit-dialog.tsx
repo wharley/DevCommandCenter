@@ -14,6 +14,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import {
+	PROJECT_COLOR_OPTIONS,
+	PROJECT_ICON_OPTIONS,
+	ProjectIdentityGlyph,
+	projectColorId,
+	projectIconId,
+} from "./project-identity";
 import { repositoryDisplayName } from "./repository-display-name";
 
 function normalizedDisplayName(value: string, repository: Repository) {
@@ -33,15 +41,24 @@ export function ProjectEditDialog({
 	repository: Repository | null;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onSave: (repositoryId: string, displayName: string | null) => Promise<void>;
+	onSave: (input: {
+		repositoryId: string;
+		displayName: string | null;
+		icon: string | null;
+		color: string | null;
+	}) => Promise<void>;
 }) {
 	const { t } = useTranslation("common");
 	const [name, setName] = useState("");
+	const [icon, setIcon] = useState("folder");
+	const [color, setColor] = useState("slate");
 	const [isSaving, setIsSaving] = useState(false);
 
 	useEffect(() => {
 		if (open && repository) {
 			setName(repositoryDisplayName(repository));
+			setIcon(projectIconId(repository.icon));
+			setColor(projectColorId(repository.color));
 			setIsSaving(false);
 		}
 	}, [open, repository]);
@@ -50,9 +67,23 @@ export function ProjectEditDialog({
 		? normalizedDisplayName(name, repository)
 		: null;
 	const currentDisplayName = repository?.displayName?.trim() || null;
+	const nextIcon = icon === "folder" ? null : icon;
+	const nextColor = color === "slate" ? null : color;
+	const currentIcon = repository?.icon?.trim() || null;
+	const currentColor = repository?.color?.trim() || null;
 	const isDirty = useMemo(
-		() => nextDisplayName !== currentDisplayName,
-		[currentDisplayName, nextDisplayName],
+		() =>
+			nextDisplayName !== currentDisplayName ||
+			nextIcon !== currentIcon ||
+			nextColor !== currentColor,
+		[
+			currentColor,
+			currentDisplayName,
+			currentIcon,
+			nextColor,
+			nextDisplayName,
+			nextIcon,
+		],
 	);
 
 	async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -60,7 +91,12 @@ export function ProjectEditDialog({
 		if (!repository || !isDirty || isSaving) return;
 		setIsSaving(true);
 		try {
-			await onSave(repository.id, nextDisplayName);
+			await onSave({
+				repositoryId: repository.id,
+				displayName: nextDisplayName,
+				icon: nextIcon,
+				color: nextColor,
+			});
 			toast.success(t("projectEditor.saved"));
 			onOpenChange(false);
 		} catch (error) {
@@ -89,35 +125,92 @@ export function ProjectEditDialog({
 
 				{repository ? (
 					<form className="space-y-5" onSubmit={handleSubmit}>
-						<div className="space-y-2">
-							<div className="flex items-center justify-between gap-3">
-								<Label htmlFor="project-display-name" className="text-[12px] font-medium">
-									{t("projectEditor.nameLabel")}
-								</Label>
-								<Button
-									type="button"
-									variant="ghost"
-									size="sm"
-									className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground"
-									disabled={name === repository.name || isSaving}
-									onClick={() => setName(repository.name)}
-								>
-									<RotateCcw className="size-3" aria-hidden />
-									{t("projectEditor.useRepositoryName")}
-								</Button>
+						<div className="grid grid-cols-[auto_1fr] items-center gap-3">
+							<ProjectIdentityGlyph icon={icon} color={color} size="lg" className="mb-0.5" />
+							<div className="min-w-0 space-y-2">
+								<div className="flex items-center justify-between gap-3">
+									<Label htmlFor="project-display-name" className="text-[12px] font-medium">
+										{t("projectEditor.nameLabel")}
+									</Label>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground"
+										disabled={name === repository.name || isSaving}
+										onClick={() => setName(repository.name)}
+									>
+										<RotateCcw className="size-3" aria-hidden />
+										{t("projectEditor.useRepositoryName")}
+									</Button>
+								</div>
+								<Input
+									id="project-display-name"
+									value={name}
+									autoFocus
+									maxLength={80}
+									disabled={isSaving}
+									placeholder={repository.name}
+									onChange={(event) => setName(event.target.value)}
+								/>
+								<p className="text-[10.5px] leading-4 text-muted-foreground">
+									{t("projectEditor.nameHint")}
+								</p>
 							</div>
-							<Input
-								id="project-display-name"
-								value={name}
-								autoFocus
-								maxLength={80}
-								disabled={isSaving}
-								placeholder={repository.name}
-								onChange={(event) => setName(event.target.value)}
-							/>
-							<p className="text-[10.5px] leading-4 text-muted-foreground">
-								{t("projectEditor.nameHint")}
-							</p>
+						</div>
+
+						<div className="grid gap-4 sm:grid-cols-2">
+							<fieldset className="min-w-0 space-y-2">
+								<legend className="text-[12px] font-medium">
+									{t("projectEditor.iconLabel")}
+								</legend>
+								<div className="grid grid-cols-4 gap-1.5">
+									{PROJECT_ICON_OPTIONS.map((option) => (
+										<button
+											type="button"
+											key={option.id}
+											aria-label={t(`projectEditor.icons.${option.id}`)}
+											aria-pressed={icon === option.id}
+											disabled={isSaving}
+											className={cn(
+												"grid h-9 place-items-center rounded-lg border transition-colors hover:bg-muted/40",
+												icon === option.id
+													? "border-foreground/30 bg-muted/45 ring-1 ring-foreground/10"
+													: "border-border/55",
+											)}
+											onClick={() => setIcon(option.id)}
+										>
+											<ProjectIdentityGlyph icon={option.id} color={color} size="sm" />
+										</button>
+									))}
+								</div>
+							</fieldset>
+
+							<fieldset className="min-w-0 space-y-2">
+								<legend className="text-[12px] font-medium">
+									{t("projectEditor.colorLabel")}
+								</legend>
+								<div className="grid grid-cols-4 gap-1.5">
+									{PROJECT_COLOR_OPTIONS.map((option) => (
+										<button
+											type="button"
+											key={option}
+											aria-label={t(`projectEditor.colors.${option}`)}
+											aria-pressed={color === option}
+											disabled={isSaving}
+											className={cn(
+												"grid h-9 place-items-center rounded-lg border transition-colors hover:bg-muted/40",
+												color === option
+													? "border-foreground/30 bg-muted/45 ring-1 ring-foreground/10"
+													: "border-border/55",
+											)}
+											onClick={() => setColor(option)}
+										>
+											<ProjectIdentityGlyph icon={icon} color={option} size="sm" />
+										</button>
+									))}
+								</div>
+							</fieldset>
 						</div>
 
 						<div className="space-y-2 rounded-xl border border-border/60 bg-muted/15 p-3">

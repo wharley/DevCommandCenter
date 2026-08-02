@@ -136,8 +136,16 @@ type WorkspacePanelProps = {
 	workspaceSetupReport?: WorkspaceSetupReport | null;
 	projectRootPath?: string | null;
 	projectLabel?: string | null;
+	projectIcon?: string | null;
+	projectColor?: string | null;
 	isIsolatedWorkspace?: boolean;
-	workspaceContextProjects?: Array<{ id: string; name: string; branch: string }>;
+	workspaceContextProjects?: Array<{
+		id: string;
+		name: string;
+		branch: string;
+		icon?: string | null;
+		color?: string | null;
+	}>;
 	sessionQueryScope?: string;
 	selectedProviderId: string | null;
 	selectedModelId: string | null;
@@ -212,6 +220,8 @@ export function WorkspacePanel({
 	workspaceSetupReport = null,
 	projectRootPath = null,
 	projectLabel = null,
+	projectIcon = null,
+	projectColor = null,
 	isIsolatedWorkspace = true,
 	workspaceContextProjects = [],
 	sessionQueryScope = "local",
@@ -893,6 +903,8 @@ export function WorkspacePanel({
 						projectRootPath={projectRootPath}
 						workspaceBranch={workspaceBranch}
 						projectLabel={projectLabel}
+						projectIcon={projectIcon}
+						projectColor={projectColor}
 						currentBranch={gitStatusQuery.data?.currentBranch ?? null}
 						isIsolatedWorkspace={isIsolatedWorkspace}
 						gitChangeSummary={gitChangeSummary}

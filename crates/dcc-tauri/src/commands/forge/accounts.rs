@@ -355,6 +355,8 @@ mod tests {
             project_id: ProjectId("project-1".to_string()),
             name: "repo".to_string(),
             display_name: None,
+            icon: None,
+            color: None,
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
             remote: Some("origin".to_string()),

@@ -130,6 +130,28 @@
     "description": "Customize how this project appears in DCC without changing its folder, repository, or branches.",
     "nameLabel": "Project name",
     "nameHint": "This name is used in the sidebar, header, Dock, and pickers. The technical name stays intact.",
+    "iconLabel": "Icon",
+    "colorLabel": "Color",
+    "icons": {
+      "folder": "Folder",
+      "terminal": "Terminal",
+      "code": "Code",
+      "layers": "Layers",
+      "package": "Package",
+      "database": "Database",
+      "globe": "Web",
+      "rocket": "Rocket"
+    },
+    "colors": {
+      "slate": "Slate",
+      "sky": "Blue",
+      "cyan": "Cyan",
+      "emerald": "Emerald",
+      "amber": "Amber",
+      "orange": "Orange",
+      "rose": "Rose",
+      "violet": "Violet"
+    },
     "useRepositoryName": "Use original name",
     "technicalIdentity": "Technical identity",
     "cancel": "Cancel",

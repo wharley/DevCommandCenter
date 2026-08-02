@@ -456,9 +456,11 @@ pub struct RepositoryIdInput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateRepositoryDisplayNameInput {
+pub struct UpdateRepositoryIdentityInput {
     pub repository_id: String,
     pub display_name: Option<String>,
+    pub icon: Option<String>,
+    pub color: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -5076,10 +5078,35 @@ fn normalize_repository_display_name(
         .map(ToString::to_string)
 }
 
+const PROJECT_ICONS: [&str; 8] = [
+    "folder", "terminal", "code", "layers", "package", "database", "globe", "rocket",
+];
+const PROJECT_COLORS: [&str; 8] = [
+    "slate", "sky", "cyan", "emerald", "amber", "orange", "rose", "violet",
+];
+
+fn normalize_repository_visual(
+    value: Option<&str>,
+    default: &str,
+    allowed: &[&str],
+    field: &str,
+) -> Result<Option<String>, String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if value == default {
+        return Ok(None);
+    }
+    if allowed.contains(&value) {
+        return Ok(Some(value.to_string()));
+    }
+    Err(format!("unsupported project {field}"))
+}
+
 #[tauri::command]
-pub async fn update_repository_display_name(
+pub async fn update_repository_identity(
     state: State<'_, WorkspaceCommandState>,
-    input: UpdateRepositoryDisplayNameInput,
+    input: UpdateRepositoryIdentityInput,
 ) -> Result<Repository, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let repository_id = RepositoryId(input.repository_id.trim().to_string());
@@ -5090,8 +5117,17 @@ pub async fn update_repository_display_name(
         .ok_or_else(|| "project not found".to_string())?;
     let display_name =
         normalize_repository_display_name(input.display_name.as_deref(), &existing.name);
+    let icon =
+        normalize_repository_visual(input.icon.as_deref(), "folder", &PROJECT_ICONS, "icon")?;
+    let color =
+        normalize_repository_visual(input.color.as_deref(), "slate", &PROJECT_COLORS, "color")?;
     let updated = repo
-        .update_repository_display_name(&repository_id, display_name.as_deref())
+        .update_repository_identity(
+            &repository_id,
+            display_name.as_deref(),
+            icon.as_deref(),
+            color.as_deref(),
+        )
         .map_err(|error| error.to_string())?;
     if !updated {
         return Err("project not found".to_string());
@@ -5443,6 +5479,8 @@ mod editor_workspace_file_tests {
             project_id: dcc_core::domain::project::ProjectId(project_id.to_string()),
             name: project_id.to_string(),
             display_name: None,
+            icon: None,
+            color: None,
             root_path: root.to_string(),
             base_branch: "main".to_string(),
             remote: None,
@@ -5455,7 +5493,7 @@ mod editor_workspace_file_tests {
     }
 
     #[test]
-    fn project_display_name_is_optional_and_does_not_duplicate_the_repository_name() {
+    fn project_identity_is_optional_controlled_and_does_not_duplicate_defaults() {
         assert_eq!(
             normalize_repository_display_name(Some(" Customer Portal "), "repo"),
             Some("Customer Portal".to_string())
@@ -5466,6 +5504,22 @@ mod editor_workspace_file_tests {
         );
         assert_eq!(normalize_repository_display_name(Some("  "), "repo"), None);
         assert_eq!(normalize_repository_display_name(None, "repo"), None);
+        assert_eq!(
+            normalize_repository_visual(Some("rocket"), "folder", &PROJECT_ICONS, "icon"),
+            Ok(Some("rocket".to_string()))
+        );
+        assert_eq!(
+            normalize_repository_visual(Some("folder"), "folder", &PROJECT_ICONS, "icon"),
+            Ok(None)
+        );
+        assert!(
+            normalize_repository_visual(Some("custom-svg"), "folder", &PROJECT_ICONS, "icon")
+                .is_err()
+        );
+        assert_eq!(
+            normalize_repository_visual(Some("violet"), "slate", &PROJECT_COLORS, "color"),
+            Ok(Some("violet".to_string()))
+        );
     }
 
     fn workspace_for_rename(id: &str, name: &str) -> Workspace {

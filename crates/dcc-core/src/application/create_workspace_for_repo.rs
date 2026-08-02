@@ -58,6 +58,8 @@ fn repository_from_workspace(workspace: &Workspace) -> Repository {
         project_id: workspace.project_id.clone(),
         name: repository_name_from_root_path(&root_path),
         display_name: None,
+        icon: None,
+        color: None,
         root_path,
         base_branch: workspace.base_branch.clone(),
         remote: None,

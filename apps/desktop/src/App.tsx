@@ -97,7 +97,7 @@ import {
 	listRepositories,
 	listWorkspaceBundles,
 	listWorkspaces,
-	updateRepositoryDisplayName,
+	updateRepositoryIdentity,
 	workspaceGitBranchDiff,
 	workspaceGitStatus,
 	workspacePrStatus,
@@ -4085,11 +4085,15 @@ export default function App() {
 			showRemoteUnsupported,
 		],
 	);
-	const handleUpdateProjectDisplayName = useCallback(
-		async (repositoryId: string, displayName: string | null) => {
-			const updated = await updateRepositoryDisplayName({
-				repositoryId,
-				displayName,
+	const handleUpdateProjectIdentity = useCallback(
+		async (input: {
+			repositoryId: string;
+			displayName: string | null;
+			icon: string | null;
+			color: string | null;
+		}) => {
+			const updated = await updateRepositoryIdentity({
+				...input,
 			});
 			queryClient.setQueryData<Repository[]>(
 				["repositories", backendCacheKey],
@@ -4121,6 +4125,8 @@ export default function App() {
 	const activeProjectLabel = activeProjectRepository
 		? repositoryDisplayName(activeProjectRepository)
 		: null;
+	const activeProjectIcon = activeProjectRepository?.icon ?? null;
+	const activeProjectColor = activeProjectRepository?.color ?? null;
 
 	return (
 		<>
@@ -4178,8 +4184,8 @@ export default function App() {
 								isRemoteBackend ? handleRemoteWorkspaceMutation : handleDeleteWorkspace
 							}
 							onDeleteProject={isRemoteBackend ? undefined : handleDeleteProject}
-							onUpdateProjectDisplayName={
-								isRemoteBackend ? undefined : handleUpdateProjectDisplayName
+							onUpdateProjectIdentity={
+								isRemoteBackend ? undefined : handleUpdateProjectIdentity
 							}
 							repositories={repositoriesFromBackend}
 							skillCount={skillContextCount}
@@ -4330,19 +4336,30 @@ export default function App() {
 									projectId={activeWorkspace?.projectId ?? selectedWorkspace.projectId ?? selectedWorkspace.id}
 									terminalRootPath={activeWorkspace?.rootPath ?? selectedWorkspace.rootPath ?? null}
 									projectLabel={activeProjectLabel}
+									projectIcon={activeProjectIcon}
+									projectColor={activeProjectColor}
 									terminalWorktreePath={
 										selectedWorkspacePath ??
 										(isRemoteBackend ? null : (activeWorkspace?.worktreePath ?? null))
 									}
-									workspaceScopeOptions={selectedBundleMembers.map((workspace, index) => ({
-										id: workspace.id,
-										name: workspace.name,
-										branch: workspace.branch,
-										hasChanges:
-											bundleMemberChangeQueries[index]?.data?.hasChanges ?? null,
-										needsDelivery:
-											bundleMemberChangeQueries[index]?.data?.needsDelivery ?? null,
-									}))}
+									workspaceScopeOptions={selectedBundleMembers.map((workspace, index) => {
+										const repository = repositoriesFromBackend.find(
+											(candidate) => candidate.rootPath === workspace.rootPath,
+										);
+										return {
+											id: workspace.id,
+											name: repository
+												? repositoryDisplayName(repository)
+												: workspace.name,
+											branch: workspace.branch,
+											icon: repository?.icon ?? null,
+											color: repository?.color ?? null,
+											hasChanges:
+												bundleMemberChangeQueries[index]?.data?.hasChanges ?? null,
+											needsDelivery:
+												bundleMemberChangeQueries[index]?.data?.needsDelivery ?? null,
+										};
+									})}
 									selectedWorkspaceScopeId={activeWorkspace?.id ?? selectedWorkspace.id}
 									onSelectWorkspaceScope={setSelectedBundleMemberId}
 									onDeliverWorkspaceScope={
