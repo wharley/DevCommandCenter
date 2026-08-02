@@ -21,6 +21,7 @@ export function PlanSummaryCard({
 }: PlanSummaryCardProps) {
 	const { t } = useTranslation("common");
 	const stepCount = plan.steps.length;
+	const title = plan.title === "Plan" ? t("planSurface.label") : plan.title;
 
 	return (
 		<article className="w-full rounded-2xl border border-border/70 bg-card/80 p-4 shadow-[0_10px_32px_rgba(0,0,0,0.05)]">
@@ -47,7 +48,7 @@ export function PlanSummaryCard({
 						) : null}
 					</div>
 					<h3 className="mt-2 text-sm font-semibold leading-5 text-foreground">
-						{plan.title}
+						{title}
 					</h3>
 					{plan.summary ? (
 						<p className="mt-1 line-clamp-2 text-[12px] leading-5 text-muted-foreground">

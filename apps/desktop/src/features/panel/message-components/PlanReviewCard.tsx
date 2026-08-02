@@ -91,7 +91,6 @@ function savePlanToWorkspace(
 		api.desktopAPI?.worktree?.writeFile?.(workspacePath, relativePath, contents) ??
 		Promise.resolve({
 			success: false,
-			error: "Workspace file API unavailable",
 		})
 	);
 }
@@ -132,6 +131,8 @@ export function PlanReviewCard({
 	const savePathInputId = useId();
 	const revisionCommentInputId = useId();
 	const { t } = useTranslation("common");
+	const displayTitle =
+		plan.title === "Plan" ? t("planSurface.label") : plan.title;
 
 	const captureSelection = () => {
 		if (!onRequestRevision) return;
@@ -160,17 +161,17 @@ export function PlanReviewCard({
 	const handleCopy = async () => {
 		try {
 			await navigator.clipboard.writeText(exportContents);
-			toast.success("Plan copied");
+			toast.success(t("planSurface.copySuccess"));
 		} catch (error) {
 			toast.error(
-				error instanceof Error ? error.message : "Unable to copy the plan.",
+				error instanceof Error ? error.message : t("planSurface.copyError"),
 			);
 		}
 	};
 
 	const handleDownload = () => {
 		downloadPlanAsTextFile(exportFilename, exportContents);
-		toast.success("Plan downloaded");
+		toast.success(t("planSurface.downloadSuccess"));
 	};
 
 	const openSaveDialog = () => {
@@ -180,12 +181,12 @@ export function PlanReviewCard({
 
 	const handleSave = () => {
 		if (!workspacePath) {
-			toast.error("Workspace path is unavailable");
+			toast.error(t("planSurface.workspacePathUnavailable"));
 			return;
 		}
 		const relativePath = savePath.trim();
 		if (!relativePath) {
-			toast.error("Enter a workspace path");
+			toast.error(t("planSurface.workspacePathRequired"));
 			return;
 		}
 
@@ -193,15 +194,15 @@ export function PlanReviewCard({
 		void savePlanToWorkspace(workspacePath, relativePath, exportContents)
 			.then((result: { success: boolean; relativePath?: string; error?: string }) => {
 					if (!result?.success) {
-						throw new Error(result?.error ?? "Unable to save plan.");
+						throw new Error(result?.error ?? t("planSurface.saveError"));
 					}
-					toast.success("Plan saved to workspace", {
+					toast.success(t("planSurface.saveSuccess"), {
 						description: result?.relativePath ?? relativePath,
 					});
 				})
 				.catch((error: unknown) => {
 					toast.error(
-						error instanceof Error ? error.message : "Unable to save the plan.",
+						error instanceof Error ? error.message : t("planSurface.saveError"),
 					);
 				})
 			.finally(() => {
@@ -258,18 +259,24 @@ export function PlanReviewCard({
 							variant="secondary"
 							className="rounded-md px-2 py-0 text-[10px] font-semibold uppercase tracking-[0.08em]"
 						>
-							Plan
+							{t("planSurface.label")}
 						</Badge>
 						<p className="truncate text-sm font-medium text-foreground">
-							{plan.title}
+							{displayTitle}
 						</p>
 					</div>
 					<p className="mt-1 text-[11px] leading-5 text-muted-foreground">
 						{acceptanceCriteriaCoverage.length > 0
-							? `${coveredCriteria}/${acceptanceCriteriaCoverage.length} criteria covered`
+							? t("planSurface.criteriaCovered", {
+									covered: coveredCriteria,
+									total: acceptanceCriteriaCoverage.length,
+								})
 							: hasSteps
-							? `${completedSteps}/${plan.steps.length} steps tracked`
-							: "Structured plan preview"}
+								? t("planSurface.stepsTracked", {
+										completed: completedSteps,
+										total: plan.steps.length,
+									})
+								: t("planSurface.structuredPreview")}
 					</p>
 				</div>
 
@@ -279,7 +286,7 @@ export function PlanReviewCard({
 							type="button"
 							variant="outline"
 							size="icon-xs"
-							aria-label="Plan actions"
+							aria-label={t("planSurface.actions")}
 						>
 							<Ellipsis className="size-3.5" aria-hidden />
 						</Button>
@@ -287,18 +294,18 @@ export function PlanReviewCard({
 					<DropdownMenuContent align="end" className="min-w-52">
 						<DropdownMenuItem onClick={() => void handleCopy()}>
 							<Copy className="size-3.5" />
-							Copy to clipboard
+							{t("planSurface.copy")}
 						</DropdownMenuItem>
 						<DropdownMenuItem onClick={handleDownload}>
 							<Download className="size-3.5" />
-							Download as markdown
+							{t("planSurface.download")}
 						</DropdownMenuItem>
 						<DropdownMenuItem
 							onClick={openSaveDialog}
 							disabled={!workspacePath}
 						>
 							<Save className="size-3.5" />
-							Save as markdown
+							{t("planSurface.saveAs")}
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
@@ -307,7 +314,7 @@ export function PlanReviewCard({
 			{plan.summary && !documentMode ? (
 				<div className="mt-4">
 					<p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-						Summary
+						{t("planSurface.summary")}
 					</p>
 					<div className="conversation-markdown max-w-none break-words text-[13px] leading-6 text-foreground">
 						<Suspense fallback={<p className="whitespace-pre-wrap">{plan.summary}</p>}>
@@ -322,7 +329,7 @@ export function PlanReviewCard({
 			{acceptanceCriteriaCoverage.length > 0 ? (
 				<div className="mt-4">
 					<p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-						Acceptance criteria coverage
+						{t("planSurface.criteriaCoverage")}
 					</p>
 					<div className="grid gap-1.5">
 						{acceptanceCriteriaCoverage.map((criterion) => (
@@ -345,7 +352,9 @@ export function PlanReviewCard({
 										{criterion.id}
 									</span>
 									<span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
-										{criterion.covered ? "covered" : "uncovered"}
+										{criterion.covered
+											? t("planSurface.covered")
+											: t("planSurface.uncovered")}
 									</span>
 								</div>
 								{criterion.description ? (
@@ -362,7 +371,7 @@ export function PlanReviewCard({
 			{hasSteps && !documentMode ? (
 				<div className="mt-4">
 					<p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-						Steps
+						{t("planSurface.steps")}
 					</p>
 					<div className="grid gap-1.5">
 						{plan.steps.map((step) => (
@@ -407,7 +416,7 @@ export function PlanReviewCard({
 			{plan.approvedPrompts.length > 0 && !documentMode ? (
 				<div className="mt-4">
 					<p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-						Approved prompts
+						{t("planSurface.approvedPrompts")}
 					</p>
 					<div className="grid gap-2 rounded-2xl border border-border/50 bg-muted/20 p-2.5">
 						{plan.approvedPrompts.map((prompt) => (
@@ -476,18 +485,19 @@ export function PlanReviewCard({
 							data-scroll-anchor-ignore
 							onClick={() => setExpanded((value) => !value)}
 						>
-							{expanded ? "Collapse plan" : "Expand plan"}
+							{expanded
+								? t("planSurface.collapse")
+								: t("planSurface.expand")}
 						</Button>
 					</div>
 				</div>
 			) : plan.isPlanLike ? null : (
 				<div className="mt-4 rounded-2xl border border-dashed border-border/60 bg-muted/10 p-3">
 					<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-						Plan preview
+						{t("planSurface.preview")}
 					</p>
 					<p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-						No structured steps were detected. The raw assistant response is still
-						available in the full plan view.
+						{t("planSurface.previewFallback")}
 					</p>
 				</div>
 			)}
@@ -548,16 +558,18 @@ export function PlanReviewCard({
 					}
 				}}
 			>
-					<DialogContent className="max-w-xl" showCloseButton={false}>
-						<DialogHeader>
-							<DialogTitle>Save plan as markdown</DialogTitle>
-							<DialogDescription>
-							Enter a path relative to the workspace root.
-							</DialogDescription>
-						</DialogHeader>
+				<DialogContent className="max-w-xl" showCloseButton={false}>
+					<DialogHeader>
+						<DialogTitle>{t("planSurface.saveTitle")}</DialogTitle>
+						<DialogDescription>
+							{t("planSurface.saveDescription")}
+						</DialogDescription>
+					</DialogHeader>
 					<div className="space-y-3">
 						<label htmlFor={savePathInputId} className="grid gap-1.5">
-							<span className="text-xs font-medium text-foreground">Workspace path</span>
+							<span className="text-xs font-medium text-foreground">
+								{t("planSurface.workspacePath")}
+							</span>
 							<Input
 								id={savePathInputId}
 								value={savePath}
@@ -575,14 +587,16 @@ export function PlanReviewCard({
 							onClick={() => setIsSaveDialogOpen(false)}
 							disabled={isSavingToWorkspace}
 						>
-							Cancel
+							{t("planSurface.cancel")}
 						</Button>
 						<Button
 							size="sm"
 							onClick={() => void handleSave()}
 							disabled={isSavingToWorkspace}
 						>
-							{isSavingToWorkspace ? "Saving..." : "Save"}
+							{isSavingToWorkspace
+								? t("planSurface.saving")
+								: t("planSurface.save")}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

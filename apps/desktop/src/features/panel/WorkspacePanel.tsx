@@ -442,15 +442,23 @@ export function WorkspacePanel({
 	);
 	const activePlanMessage = planFollowUpState.activePlanMessage;
 	const latestPlanMessage = planFollowUpState.latestPlanMessage;
-	const activePlanTitle =
-		activePlanMessage?.plan?.title ?? (activePlanMessage ? "Plan" : null);
+	const activePlanRawTitle = activePlanMessage?.plan?.title ?? null;
+	const activePlanTitle = activePlanMessage
+		? activePlanRawTitle === "Plan" || activePlanRawTitle === null
+			? t("planSurface.label")
+			: activePlanRawTitle
+		: null;
 	const activePlanNeedsInput = activePlanMessage
 		? planNeedsInput(activePlanMessage.plan?.rawMarkdown ?? activePlanMessage.content)
 		: false;
 	const latestPlanMarkdown =
 		latestPlanMessage?.plan?.markdown ?? latestPlanMessage?.content ?? null;
-	const latestPlanTitle =
-		latestPlanMessage?.plan?.title ?? (latestPlanMessage ? "Plan" : null);
+	const latestPlanRawTitle = latestPlanMessage?.plan?.title ?? null;
+	const latestPlanTitle = latestPlanMessage
+		? latestPlanRawTitle === "Plan" || latestPlanRawTitle === null
+			? t("planSurface.label")
+			: latestPlanRawTitle
+		: null;
 	const latestPlan =
 		latestPlanMessage?.plan ??
 		(latestPlanMessage ? parsePlanContent(latestPlanMessage.content) : null);
