@@ -11,7 +11,6 @@ import {
 	dccMcpQueryOptions,
 	failedDccMcpStatus,
 	normalizeDccMcpServers,
-	resolveDccMcpToolPolicy,
 } from "./mcp-config.mjs";
 import {
 	createEphemeralMcpOAuthBridge,
@@ -22,6 +21,8 @@ import {
 	waitForDccMcpReadiness,
 } from "./mcp-readiness.mjs";
 import { handlePermissionRequest } from "./permission-bridge.mjs";
+import { resolveClaudeApprovalOptions } from "./approval-policy.mjs";
+import { createDccMcpPermissionHooks } from "./mcp-permission-hook.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
 
 const SIDECAR_VERSION = "0.1.37";
@@ -250,7 +251,6 @@ async function handleAskUserQuestion(input, options, state) {
 
 async function runTurn(payload, state) {
 	const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
-	const permissionMode = payload?.planMode === true ? "plan" : "acceptEdits";
 	let additionalDirectories = [];
 	try {
 		const configuredDirectories = JSON.parse(
@@ -270,6 +270,10 @@ async function runTurn(payload, state) {
 	const mcpOptions = dccMcpQueryOptions(runtimeMcpProjection);
 	const hasDccMcpServers =
 		Object.keys(runtimeMcpProjection.servers).length > 0;
+	const approvalOptions = resolveClaudeApprovalOptions(
+		payload,
+		additionalDirectories,
+	);
 	const deferredPrompt = hasDccMcpServers
 		? createDeferredUserPrompt(prompt)
 		: null;
@@ -281,19 +285,13 @@ async function runTurn(payload, state) {
 			pathToClaudeCodeExecutable: CLAUDE_BIN_PATH,
 			model: process.env.DCC_MODEL || undefined,
 			...(state.resumeSessionId ? { resume: state.resumeSessionId } : {}),
-			permissionMode,
-			sandbox: {
-				enabled: true,
-				failIfUnavailable: true,
-				autoAllowBashIfSandboxed: true,
-				allowUnsandboxedCommands: false,
-				filesystem: {
-					allowWrite: [process.cwd(), ...additionalDirectories],
-				},
-			},
+			...approvalOptions,
 			includePartialMessages: true,
 			settingSources: ["user", "project", "local"],
 			...mcpOptions,
+			...(hasDccMcpServers
+				? { hooks: createDccMcpPermissionHooks(state, emit) }
+				: {}),
 			effort: normalizeEffort(payload?.effort),
 			systemPrompt: buildSystemPrompt(payload?.fastMode, payload?.toolInstructions),
 			canUseTool: async (toolName, input, options) => {
@@ -313,44 +311,6 @@ async function runTurn(payload, state) {
 						behavior: "deny",
 						message:
 							"The client captured your proposed plan. Stop here and wait for the user's next turn.",
-					};
-				}
-				const mcpPolicy = resolveDccMcpToolPolicy(
-					state.mcpProjection,
-					toolName,
-				);
-				if (
-					mcpPolicy?.decision === "allow" ||
-					mcpPolicy?.decision === "deny"
-				) {
-					const requestId =
-						typeof options?.toolUseID === "string" &&
-						options.toolUseID.trim().length > 0
-							? options.toolUseID.trim()
-							: randomUUID();
-					emit({
-						type: "dcc_permission_request",
-						request_id: requestId,
-						tool_name: mcpPolicy.toolName,
-						title: "DCC MCP tool policy",
-						description:
-							"An explicit DCC policy was applied without exposing tool arguments.",
-						command: null,
-						file: null,
-					});
-					emit({
-						type: "dcc_permission_resolved",
-						request_id: requestId,
-						behavior: mcpPolicy.decision,
-					});
-				}
-				if (mcpPolicy?.decision === "allow") {
-					return { behavior: "allow", updatedInput: input };
-				}
-				if (mcpPolicy?.decision === "deny") {
-					return {
-						behavior: "deny",
-						message: "DCC tool policy denied this MCP tool.",
 					};
 				}
 				return handlePermissionRequest(toolName, input, options, state, emit);

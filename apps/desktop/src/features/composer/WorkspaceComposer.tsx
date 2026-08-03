@@ -42,6 +42,7 @@ import { cn } from "@/lib/utils";
 import { isImageFilePath } from "@/lib/is-image-path";
 import { pathRelativeToWorkspace } from "@/lib/path-basename";
 import type {
+	ProviderApprovalPolicy,
 	ProviderCatalog,
 	ProviderRuntimeConfig,
 	QueuedTurn,
@@ -56,6 +57,7 @@ import {
 } from "./ExecutionDock";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
 import { ComposerProviderModelMenu } from "./ComposerProviderModelMenu";
+import { ComposerApprovalPolicyMenu } from "./ComposerApprovalPolicyMenu";
 import { EffortBrainIcon } from "./EffortBrainIcon";
 import { ComposerButton } from "./ComposerButton";
 import {
@@ -67,6 +69,7 @@ import {
 import {
 	buildSpecDraftPrompt,
 	composerToolbarTriggerClassName,
+	getComposerApprovalPolicyKey,
 	getComposerDraftKey,
 	getComposerEffortKey,
 	isComposerSubmitEnabled,
@@ -97,7 +100,9 @@ import type {
 import { delegationTargetsFor } from "@/features/sessions/delegation-targets";
 import {
 	clearDraft,
+	loadApprovalPolicy,
 	loadEffortSelection,
+	saveApprovalPolicy,
 	saveEffortSelection,
 } from "./draftStorage";
 import { appendComposerText, readComposerPrompt, setEditorText } from "./editorOps";
@@ -265,6 +270,33 @@ export function WorkspaceComposer({
 		() => getProviderUnhealthyReason(selectedProvider),
 		[selectedProvider],
 	);
+	const supportedApprovalPolicies = useMemo(
+		() => selectedProvider?.capabilities.approvalPolicies ?? [],
+		[selectedProvider],
+	);
+	const approvalPolicyKey = useMemo(
+		() => getComposerApprovalPolicyKey(draftKey, selectedProviderId),
+		[draftKey, selectedProviderId],
+	);
+	const [approvalPolicyByScope, setApprovalPolicyByScope] = useState<
+		Record<string, ProviderApprovalPolicy>
+	>({});
+	const scopedApprovalPolicy = approvalPolicyByScope[approvalPolicyKey];
+	const approvalPolicy =
+		scopedApprovalPolicy && supportedApprovalPolicies.includes(scopedApprovalPolicy)
+			? scopedApprovalPolicy
+			: loadApprovalPolicy(approvalPolicyKey, supportedApprovalPolicies);
+	const selectApprovalPolicy = useCallback(
+		(policy: ProviderApprovalPolicy) => {
+			if (!supportedApprovalPolicies.includes(policy)) return;
+			setApprovalPolicyByScope((current) => ({
+				...current,
+				[approvalPolicyKey]: policy,
+			}));
+			saveApprovalPolicy(approvalPolicyKey, policy);
+		},
+		[approvalPolicyKey, supportedApprovalPolicies],
+	);
 
 	// Resolve the model within the selected provider — model IDs like "auto"
 	// are not unique across providers (droid and cursor both expose "auto").
@@ -349,6 +381,7 @@ export function WorkspaceComposer({
 					planMode: isPlanMode,
 					effort: effectiveEffort,
 					fastMode: isFastMode,
+					approvalPolicy,
 				},
 			};
 			if (hasActiveTurn) {
@@ -371,6 +404,7 @@ export function WorkspaceComposer({
 			canQueueActiveTurn,
 			effort,
 			hasActiveTurn,
+			approvalPolicy,
 			isFastMode,
 			isPlanMode,
 			onSteerPrompt,
@@ -969,6 +1003,14 @@ export function WorkspaceComposer({
 						onSelectProvider={onSelectProvider}
 						onSelectModel={onSelectModel}
 						disabled={turnSettingsDisabled}
+					/>
+					<ComposerApprovalPolicyMenu
+						providerName={selectedProvider?.label ?? null}
+						supportedPolicies={supportedApprovalPolicies}
+						selectedPolicy={approvalPolicy}
+						disabled={turnSettingsDisabled}
+						planMode={isPlanMode}
+						onSelect={selectApprovalPolicy}
 					/>
 					<ComposerButton
 						type="button"

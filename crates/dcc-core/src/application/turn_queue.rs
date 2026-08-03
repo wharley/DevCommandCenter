@@ -96,6 +96,7 @@ where
         plan_mode: input.turn.plan_mode,
         effort: input.turn.effort,
         fast_mode: input.turn.fast_mode,
+        approval_policy: input.turn.approval_policy,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     append(
@@ -254,6 +255,7 @@ mod tests {
             plan_mode: None,
             effort: None,
             fast_mode: None,
+            approval_policy: None,
             created_at: "2026-08-02T10:00:00Z".to_string(),
         }
     }

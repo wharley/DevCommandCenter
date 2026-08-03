@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::{
     domain::{
         model_registry,
+        provider::ProviderApprovalPolicy,
         session::{
             Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection,
             SessionState, Turn, TurnId, TurnState,
@@ -40,6 +41,9 @@ pub struct SendTurnInput {
     pub effort: Option<String>,
     #[serde(default)]
     pub fast_mode: Option<bool>,
+    /// Normalized user intent; each adapter maps this to its native mechanism.
+    #[serde(default)]
+    pub approval_policy: Option<ProviderApprovalPolicy>,
 }
 
 /// Merge UI selection into session fields for per-turn model routing.
@@ -348,6 +352,7 @@ mod tests {
                 plan_mode: None,
                 effort: None,
                 fast_mode: None,
+                approval_policy: None,
             },
         ))
         .expect("send_turn should succeed");
@@ -428,6 +433,7 @@ mod tests {
                 plan_mode: None,
                 effort: None,
                 fast_mode: None,
+                approval_policy: None,
             },
         ))
         .expect("send_turn should succeed");
@@ -481,6 +487,7 @@ mod tests {
                 plan_mode: None,
                 effort: None,
                 fast_mode: None,
+                approval_policy: None,
             },
         ))
         .expect("preflight should update the provider selection");

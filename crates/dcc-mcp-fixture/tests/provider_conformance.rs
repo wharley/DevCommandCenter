@@ -287,6 +287,7 @@ where
                     plan_mode: Some(false),
                     effort: Some("low".to_string()),
                     fast_mode: Some(true),
+                    approval_policy: None,
                 }),
             )
             .await

@@ -786,6 +786,7 @@ impl Provider for ClaudeSdkSidecarAdapter {
                     "planMode": turn.plan_mode,
                     "effort": Self::sidecar_effort(turn.effort.as_deref()),
                     "fastMode": turn.fast_mode,
+                    "approvalPolicy": turn.approval_policy,
                 });
                 let serialized = serde_json::to_string(&payload).map_err(|error| {
                     CoreError::Provider(format!("failed to encode Claude sidecar input: {error}"))

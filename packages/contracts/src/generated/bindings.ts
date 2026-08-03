@@ -98,6 +98,8 @@ export type Capabilities = {
 	supportsEditDelegation: boolean,
 	// The adapter can safely expose more than one DCC-managed workspace root.
 	supportsMultiRoot?: boolean,
+	// User-selectable approval policies that this adapter can enforce natively.
+	approvalPolicies?: ProviderApprovalPolicy[],
 };
 
 export type Checkpoint = {
@@ -976,6 +978,8 @@ export type ProviderAccountUsageOutput = {
 
 export type ProviderAccountUsageState = "available" | "awaitingActivity";
 
+export type ProviderApprovalPolicy = "ask" | "auto" | "full_access";
+
 export type ProviderCatalog = {
 	providers: ProviderDescriptor[],
 };
@@ -1224,6 +1228,7 @@ export type QueuedTurn = {
 	planMode?: boolean | null,
 	effort?: string | null,
 	fastMode?: boolean | null,
+	approvalPolicy?: ProviderApprovalPolicy | null,
 	createdAt: string,
 };
 
@@ -1410,6 +1415,8 @@ export type SendTurnInput = {
 	// `minimal` | `low` | `medium` | `high` | `xhigh` | `max`
 	effort?: string | null,
 	fastMode?: boolean | null,
+	// Normalized user intent; each adapter maps this to its native mechanism.
+	approvalPolicy?: ProviderApprovalPolicy | null,
 };
 
 export type SendTurnOutput = {

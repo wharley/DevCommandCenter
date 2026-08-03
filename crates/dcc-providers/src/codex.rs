@@ -1,8 +1,8 @@
 use dcc_core::domain::{
     model_registry,
     provider::{
-        Capabilities, HealthStatus, McpOauthSupport, McpSupportLevel, ProviderDescriptor,
-        ProviderId,
+        Capabilities, HealthStatus, McpOauthSupport, McpSupportLevel, ProviderApprovalPolicy,
+        ProviderDescriptor, ProviderId,
     },
 };
 
@@ -34,5 +34,10 @@ pub fn stable_codex_capabilities() -> Capabilities {
     capabilities.mcp_oauth_support = McpOauthSupport::InteractivePreflight;
     capabilities.can_request_delegation = true;
     capabilities.supports_multi_root = true;
+    capabilities.approval_policies = vec![
+        ProviderApprovalPolicy::Ask,
+        ProviderApprovalPolicy::Auto,
+        ProviderApprovalPolicy::FullAccess,
+    ];
     capabilities
 }

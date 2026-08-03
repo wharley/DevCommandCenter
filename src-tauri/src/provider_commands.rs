@@ -1,6 +1,11 @@
 use dcc_tauri::commands::provider_commands::{
-    ProviderAccountUsageInput, ProviderAccountUsageOutput,
+    ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
 };
+
+#[tauri::command]
+pub async fn list_providers() -> Result<ListProvidersOutput, String> {
+    dcc_tauri::commands::provider_commands::list_providers().await
+}
 
 #[tauri::command]
 pub async fn provider_account_usage(

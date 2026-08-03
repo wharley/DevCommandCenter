@@ -2216,6 +2216,7 @@ export default function App() {
 					planMode: false,
 					effort: "medium",
 					fastMode: false,
+					approvalPolicy: "ask",
 				});
 				const resultSnapshot: RuntimeSessionSnapshot = {
 					sessionId: result.session.id,
@@ -2521,6 +2522,7 @@ export default function App() {
 						planMode: false,
 						effort: request.effort ?? "medium",
 						fastMode: request.fastMode ?? true,
+						approvalPolicy: "auto",
 					});
 					startedCount += 1;
 				} catch (error) {
@@ -2808,6 +2810,7 @@ export default function App() {
 					planMode: false,
 					effort: "medium",
 					fastMode: true,
+					approvalPolicy: "auto",
 				});
 
 				const resultSnapshot: RuntimeSessionSnapshot = {
@@ -3029,6 +3032,7 @@ export default function App() {
 				planMode: turn.envelope.planMode,
 				effort: turn.envelope.effort,
 				fastMode: turn.envelope.fastMode,
+				approvalPolicy: turn.envelope.approvalPolicy,
 			});
 			recordUxMetric("first_prompt");
 
@@ -3137,6 +3141,7 @@ export default function App() {
 							planMode: false,
 							effort: "medium",
 							fastMode: true,
+							approvalPolicy: "auto",
 						});
 
 						const reanchorSnapshot: RuntimeSessionSnapshot = {
@@ -3283,6 +3288,7 @@ export default function App() {
 						planMode: turn.envelope.planMode,
 						effort: turn.envelope.effort,
 						fastMode: turn.envelope.fastMode,
+						approvalPolicy: turn.envelope.approvalPolicy,
 					},
 				});
 				recordUxMetric("queue_prompt");
@@ -3307,6 +3313,7 @@ export default function App() {
 					planMode: true,
 					effort: "medium",
 					fastMode: true,
+					approvalPolicy: "auto",
 				},
 			});
 		},
@@ -3329,6 +3336,7 @@ export default function App() {
 					planMode: false,
 					effort: "medium",
 					fastMode: true,
+					approvalPolicy: "auto",
 				},
 			});
 		},
@@ -3363,6 +3371,7 @@ export default function App() {
 					planMode: false,
 					effort: "medium",
 					fastMode: true,
+					approvalPolicy: "auto",
 				},
 			});
 		},
@@ -3404,6 +3413,7 @@ export default function App() {
 					planMode: false,
 					effort: "medium",
 					fastMode: true,
+					approvalPolicy: "auto",
 				},
 			});
 		},

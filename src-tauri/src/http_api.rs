@@ -2085,6 +2085,7 @@ async fn send_turn_handler(
         plan_mode: input.plan_mode,
         effort: input.effort.clone(),
         fast_mode: input.fast_mode,
+        approval_policy: input.approval_policy,
     };
     let output = send_turn(&*state, &*state, &*state, input)
         .await

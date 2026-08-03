@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::{project::ProjectId, thread::Thread, workspace::WorkspaceId};
+use super::{
+    project::ProjectId, provider::ProviderApprovalPolicy, thread::Thread, workspace::WorkspaceId,
+};
 use crate::ports::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
 use crate::ports::ProviderRuntimeConfig;
 
@@ -68,6 +70,8 @@ pub struct QueuedTurn {
     pub effort: Option<String>,
     #[serde(default)]
     pub fast_mode: Option<bool>,
+    #[serde(default)]
+    pub approval_policy: Option<ProviderApprovalPolicy>,
     pub created_at: String,
 }
 

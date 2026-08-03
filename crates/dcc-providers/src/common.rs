@@ -1474,6 +1474,7 @@ pub fn stable_cli_capabilities() -> Capabilities {
         supports_read_only_delegation: true,
         supports_edit_delegation: true,
         supports_multi_root: false,
+        approval_policies: Vec::new(),
     }
 }
 
@@ -1492,6 +1493,7 @@ pub fn experimental_cli_capabilities() -> Capabilities {
         supports_read_only_delegation: true,
         supports_edit_delegation: true,
         supports_multi_root: false,
+        approval_policies: Vec::new(),
     }
 }
 

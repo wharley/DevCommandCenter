@@ -79,12 +79,19 @@ struct CodexMcpGranularApprovalPolicy {
 }
 
 pub(crate) const fn codex_mcp_approval_policy() -> CodexMcpApprovalPolicy {
+    codex_mcp_approval_policy_with_native(false, false)
+}
+
+pub(crate) const fn codex_mcp_approval_policy_with_native(
+    sandbox_approval: bool,
+    rules: bool,
+) -> CodexMcpApprovalPolicy {
     CodexMcpApprovalPolicy {
         granular: CodexMcpGranularApprovalPolicy {
-            sandbox_approval: false,
-            rules: false,
+            sandbox_approval,
+            rules,
             skill_approval: false,
-            request_permissions: false,
+            request_permissions: sandbox_approval,
             mcp_elicitations: true,
         },
     }

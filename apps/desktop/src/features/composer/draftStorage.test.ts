@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_EFFORT_LEVEL } from "./effort";
-import { loadEffortSelection, saveEffortSelection } from "./draftStorage";
+import {
+	loadApprovalPolicy,
+	loadEffortSelection,
+	saveApprovalPolicy,
+	saveEffortSelection,
+} from "./draftStorage";
 
 function createLocalStorageStub() {
 	const store = new Map<string, string>();
@@ -61,5 +66,33 @@ describe("effort selection persistence", () => {
 			effort: DEFAULT_EFFORT_LEVEL,
 			ultrathink: false,
 		});
+	});
+});
+
+describe("approval policy persistence", () => {
+	beforeEach(() => {
+		vi.stubGlobal("window", { localStorage: createLocalStorageStub() });
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("defaults to auto when the provider supports it", () => {
+		expect(loadApprovalPolicy("approval.codex", ["ask", "auto", "full_access"])).toBe(
+			"auto",
+		);
+	});
+
+	it("keeps a saved selection only while the provider supports it", () => {
+		saveApprovalPolicy("approval.claude", "full_access");
+		expect(
+			loadApprovalPolicy("approval.claude", ["ask", "auto", "full_access"]),
+		).toBe("full_access");
+		expect(loadApprovalPolicy("approval.claude", ["ask", "auto"])).toBe("auto");
+	});
+
+	it("returns null for provider-managed permissions", () => {
+		expect(loadApprovalPolicy("approval.cursor", [])).toBeNull();
 	});
 });

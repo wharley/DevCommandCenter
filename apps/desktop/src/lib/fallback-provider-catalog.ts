@@ -1,4 +1,4 @@
-import type { ProviderCatalog } from "@dcc/contracts";
+import type { ProviderApprovalPolicy, ProviderCatalog } from "@dcc/contracts";
 import { PROVIDER_MODEL_REGISTRY } from "./provider-model-registry";
 
 /**
@@ -7,6 +7,11 @@ import { PROVIDER_MODEL_REGISTRY } from "./provider-model-registry";
  * Model lists are sourced from provider-model-registry — update there, not here.
  */
 const stableHealth = "Healthy" as const;
+const interactiveApprovalPolicies: ProviderApprovalPolicy[] = [
+	"ask",
+	"auto",
+	"full_access",
+];
 
 const stableCapabilities = {
 	streaming: true,
@@ -35,6 +40,7 @@ const multiRootDelegationRequesterCapabilities = {
 
 const claudeRuntimeMcpCapabilities = {
 	...multiRootDelegationRequesterCapabilities,
+	approvalPolicies: interactiveApprovalPolicies,
 	mcpOauthSupport: "managedDuringTurn",
 	mcpSupport: {
 		runtimeBridge: {
@@ -45,6 +51,7 @@ const claudeRuntimeMcpCapabilities = {
 
 const codexRuntimeMcpCapabilities = {
 	...multiRootDelegationRequesterCapabilities,
+	approvalPolicies: interactiveApprovalPolicies,
 	mcpOauthSupport: "interactivePreflight",
 	mcpSupport: {
 		runtimeBridge: {
@@ -116,7 +123,11 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...stableCapabilities, supportsMultiRoot: true },
+			capabilities: {
+				...stableCapabilities,
+				supportsMultiRoot: true,
+				approvalPolicies: interactiveApprovalPolicies,
+			},
 			health: stableHealth,
 			stable: true,
 		},

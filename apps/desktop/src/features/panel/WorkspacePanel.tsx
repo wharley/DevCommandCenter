@@ -48,6 +48,7 @@ import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-st
 import { workspaceRailDisplayTitle } from "@/features/workspaces/workspace-rail-shared";
 import {
 	buildMissionSpecFilename,
+	getComposerApprovalPolicyKey,
 	getComposerEffortKey,
 } from "@/features/composer/WorkspaceComposer.logic";
 import {
@@ -61,7 +62,10 @@ import {
 	isPlanVersionHandedOff,
 } from "./plan-approval";
 import { approvePlan, recordPlanHandoff } from "@/lib/session-api";
-import { loadEffortSelection } from "@/features/composer/draftStorage";
+import {
+	loadApprovalPolicy,
+	loadEffortSelection,
+} from "@/features/composer/draftStorage";
 import {
 	DEFAULT_EFFORT_LEVELS,
 	resolveEffectiveEffort,
@@ -325,7 +329,11 @@ export function WorkspacePanel({
 				ultrathinkSelected: persisted.ultrathink,
 				rawPrompt: content,
 			});
-			return composerTurnFromRaw(content, { effort });
+			const approvalPolicy = loadApprovalPolicy(
+				getComposerApprovalPolicyKey(workspaceId, selectedProviderId),
+				selectedProvider?.capabilities.approvalPolicies ?? [],
+			);
+			return composerTurnFromRaw(content, { effort, approvalPolicy });
 		},
 		[providerChoices, selectedModelId, selectedProviderId, workspaceId],
 	);

@@ -318,6 +318,7 @@ impl SessionCommandState {
                     plan_mode: Some(true),
                     effort: None,
                     fast_mode: None,
+                    approval_policy: None,
                 }),
             )
             .await?;
@@ -1457,6 +1458,7 @@ impl SessionCommandState {
             plan_mode: queued.plan_mode,
             effort: queued.effort.clone(),
             fast_mode: queued.fast_mode,
+            approval_policy: queued.approval_policy,
         };
         let provider_input = dcc_core::ports::ProviderTurnInput {
             prompt: input.prompt.clone(),
@@ -1464,6 +1466,7 @@ impl SessionCommandState {
             plan_mode: input.plan_mode,
             effort: input.effort.clone(),
             fast_mode: input.fast_mode,
+            approval_policy: input.approval_policy,
         };
         let output = run_send_turn(self, self, self, input).await?;
         let turn_id = output.turn.id.clone();

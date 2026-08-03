@@ -1088,6 +1088,33 @@
       "fastModeHint": "Prefere respostas mais curtas e diretas.",
       "effort": "Esforço de raciocínio"
     },
+    "approval": {
+      "open": "Escolher como as ações devem ser aprovadas",
+      "managed": "Gerenciado",
+      "managedHint": "As permissões são gerenciadas diretamente pelo {{provider}}.",
+      "planOverride": "Enquanto Planejar estiver ativo, o agente opera em modo somente leitura.",
+      "options": {
+        "ask": {
+          "label": "Solicitar aprovação",
+          "description": "Pede sua confirmação antes de editar ou executar ações que exigem acesso."
+        },
+        "auto": {
+          "label": "Aprovar por mim",
+          "description": "O provedor libera ações comuns no workspace e pergunta quando houver risco."
+        },
+        "full_access": {
+          "label": "Acesso completo",
+          "description": "Permite ao agente acessar arquivos, comandos e rede sem pedir aprovação."
+        }
+      },
+      "confirm": {
+        "title": "Ativar acesso completo?",
+        "description": "O agente poderá executar comandos e acessar arquivos e rede sem solicitar sua confirmação.",
+        "worktreeWarning": "O worktree protege o checkout Git original, mas não protege outros arquivos, credenciais ou recursos da sua máquina.",
+        "cancel": "Cancelar",
+        "enable": "Ativar acesso completo"
+      }
+    },
     "executionDock": {
       "ariaLabel": "Contexto de execução da tarefa",
       "protectedTitle": "Worktree protegido",

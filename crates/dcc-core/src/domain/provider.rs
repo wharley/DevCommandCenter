@@ -119,6 +119,17 @@ pub struct Capabilities {
     /// The adapter can safely expose more than one DCC-managed workspace root.
     #[serde(default)]
     pub supports_multi_root: bool,
+    /// User-selectable approval policies that this adapter can enforce natively.
+    #[serde(default)]
+    pub approval_policies: Vec<ProviderApprovalPolicy>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderApprovalPolicy {
+    Ask,
+    Auto,
+    FullAccess,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

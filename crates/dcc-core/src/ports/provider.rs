@@ -6,7 +6,8 @@ use specta::Type;
 use crate::{
     domain::mcp::{McpDefinitionId, McpToolPolicyDecision},
     domain::provider::{
-        Capabilities, HealthStatus, ProviderAccountUsage, ProviderEvent, ProviderId, SessionHandle,
+        Capabilities, HealthStatus, ProviderAccountUsage, ProviderApprovalPolicy, ProviderEvent,
+        ProviderId, SessionHandle,
     },
     domain::session::SessionId,
     domain::workspace::WorkspaceId,
@@ -178,6 +179,8 @@ pub struct ProviderTurnInput {
     pub effort: Option<String>,
     #[serde(default)]
     pub fast_mode: Option<bool>,
+    #[serde(default)]
+    pub approval_policy: Option<ProviderApprovalPolicy>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]

@@ -1,4 +1,5 @@
 import { DEFAULT_EFFORT_LEVEL } from "./effort";
+import type { ProviderApprovalPolicy } from "@dcc/contracts";
 
 export type EffortSelection = {
 	effort: string;
@@ -45,6 +46,29 @@ export function saveEffortSelection(key: string, selection: EffortSelection) {
 	}
 
 	window.localStorage.setItem(key, JSON.stringify(selection));
+}
+
+export function loadApprovalPolicy(
+	key: string,
+	supportedPolicies: readonly ProviderApprovalPolicy[],
+): ProviderApprovalPolicy | null {
+	if (supportedPolicies.length === 0) return null;
+
+	const fallback = supportedPolicies.includes("auto")
+		? "auto"
+		: (supportedPolicies[0] ?? null);
+	if (typeof window === "undefined") return fallback;
+
+	const stored = window.localStorage.getItem(key) as ProviderApprovalPolicy | null;
+	return stored && supportedPolicies.includes(stored) ? stored : fallback;
+}
+
+export function saveApprovalPolicy(
+	key: string,
+	policy: ProviderApprovalPolicy,
+) {
+	if (typeof window === "undefined") return;
+	window.localStorage.setItem(key, policy);
 }
 
 export function loadDraft(key: string) {

@@ -11,6 +11,13 @@ export function getComposerEffortKey(workspaceId: string) {
 	return `dcc.workspace.composer.effort.${workspaceId}`;
 }
 
+export function getComposerApprovalPolicyKey(
+	workspaceId: string,
+	providerId: string | null,
+) {
+	return `dcc.workspace.composer.approval.${workspaceId}.${providerId ?? "provider-managed"}`;
+}
+
 function getWorkspacePlanModeScopeKey(workspaceId: string | null) {
 	return workspaceId ? `workspace:${workspaceId}` : null;
 }

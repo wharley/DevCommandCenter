@@ -16,7 +16,10 @@ use dcc_core::{
         PromptInjectionOptions,
     },
     domain::{
-        provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
+        provider::{
+            Capabilities, HealthStatus, ProviderApprovalPolicy, ProviderEvent, ProviderId,
+            SessionHandle,
+        },
         session::SessionId,
     },
     ports::{Input, Provider, SessionConfig},
@@ -160,6 +163,7 @@ impl HeadlessCliProviderAdapter {
         model: Option<&str>,
         prompt: &str,
         plan_mode: Option<bool>,
+        approval_policy: Option<ProviderApprovalPolicy>,
         additional_directories: &[String],
     ) -> Vec<String> {
         match self.kind {
@@ -193,7 +197,11 @@ impl HeadlessCliProviderAdapter {
                 let approval_mode = if plan_mode.unwrap_or(false) {
                     "plan"
                 } else {
-                    "yolo"
+                    match approval_policy {
+                        Some(ProviderApprovalPolicy::Ask) => "default",
+                        Some(ProviderApprovalPolicy::Auto) => "auto_edit",
+                        Some(ProviderApprovalPolicy::FullAccess) | None => "yolo",
+                    }
                 };
                 let mut args = vec![
                     "--prompt".to_string(),
@@ -201,10 +209,12 @@ impl HeadlessCliProviderAdapter {
                     "--output-format".to_string(),
                     "stream-json".to_string(),
                     "--skip-trust".to_string(),
-                    "--sandbox".to_string(),
                     "--approval-mode".to_string(),
                     approval_mode.to_string(),
                 ];
+                if approval_policy != Some(ProviderApprovalPolicy::FullAccess) {
+                    args.push("--sandbox".to_string());
+                }
                 if let Some(continuation_id) =
                     continuation_id.filter(|value| !value.trim().is_empty())
                 {
@@ -229,6 +239,7 @@ impl HeadlessCliProviderAdapter {
         runtime: Arc<SessionRuntime>,
         prompt: String,
         plan_mode: Option<bool>,
+        approval_policy: Option<ProviderApprovalPolicy>,
     ) -> Result<()> {
         {
             let active_turn = runtime.active_turn.lock().await;
@@ -246,6 +257,7 @@ impl HeadlessCliProviderAdapter {
             runtime.model.as_deref(),
             &prompt,
             plan_mode,
+            approval_policy,
             &runtime.cfg.additional_working_directories,
         );
         let mut command = self.turn_command();
@@ -655,7 +667,7 @@ impl Provider for HeadlessCliProviderAdapter {
             })?;
 
         match input {
-            Input::Text(text) => self.spawn_turn(runtime, text, None).await,
+            Input::Text(text) => self.spawn_turn(runtime, text, None, None).await,
             Input::Turn(turn) => {
                 let prompt = match self.kind {
                     HeadlessCliKind::Claude => compose_wire_prompt_for_provider(
@@ -679,7 +691,8 @@ impl Provider for HeadlessCliProviderAdapter {
                     ),
                 };
                 let prompt = append_tool_instructions(prompt, turn.tool_instructions.as_deref());
-                self.spawn_turn(runtime, prompt, turn.plan_mode).await
+                self.spawn_turn(runtime, prompt, turn.plan_mode, turn.approval_policy)
+                    .await
             }
             Input::UserInputResponse(_) => Err(CoreError::Provider(format!(
                 "{} does not support mid-turn user input responses",
@@ -876,20 +889,66 @@ mod tests {
                 supports_read_only_delegation: true,
                 supports_edit_delegation: true,
                 supports_multi_root: true,
+                approval_policies: vec![
+                    ProviderApprovalPolicy::Ask,
+                    ProviderApprovalPolicy::Auto,
+                    ProviderApprovalPolicy::FullAccess,
+                ],
             },
             true,
             HeadlessCliKind::Gemini,
         );
 
-        let plan_args = provider.build_turn_args(None, None, "ship it", Some(true), &[]);
+        let plan_args = provider.build_turn_args(
+            None,
+            None,
+            "ship it",
+            Some(true),
+            Some(ProviderApprovalPolicy::FullAccess),
+            &[],
+        );
         assert!(plan_args
             .windows(2)
             .any(|pair| pair == ["--approval-mode", "plan"]));
 
-        let execute_args = provider.build_turn_args(None, None, "ship it", Some(false), &[]);
+        let execute_args = provider.build_turn_args(
+            None,
+            None,
+            "ship it",
+            Some(false),
+            Some(ProviderApprovalPolicy::FullAccess),
+            &[],
+        );
         assert!(execute_args
             .windows(2)
             .any(|pair| pair == ["--approval-mode", "yolo"]));
+        assert!(!execute_args.iter().any(|arg| arg == "--sandbox"));
+
+        let ask_args = provider.build_turn_args(
+            None,
+            None,
+            "ship it",
+            Some(false),
+            Some(ProviderApprovalPolicy::Ask),
+            &[],
+        );
+        assert!(ask_args
+            .windows(2)
+            .any(|pair| pair == ["--approval-mode", "default"]));
+        assert!(ask_args.iter().any(|arg| arg == "--sandbox"));
+
+        let auto_args = provider.build_turn_args(
+            None,
+            None,
+            "ship it",
+            Some(false),
+            Some(ProviderApprovalPolicy::Auto),
+            &[],
+        );
+        assert!(auto_args
+            .windows(2)
+            .any(|pair| pair == ["--approval-mode", "auto_edit"]));
+        assert!(auto_args.iter().any(|arg| arg == "--sandbox"));
     }
 
     #[test]
@@ -904,7 +963,14 @@ mod tests {
             HeadlessCliKind::Gemini,
         );
         let directories = vec!["/tmp/api".to_string(), "/tmp/web".to_string()];
-        let args = provider.build_turn_args(None, None, "ship it", Some(false), &directories);
+        let args = provider.build_turn_args(
+            None,
+            None,
+            "ship it",
+            Some(false),
+            Some(ProviderApprovalPolicy::Auto),
+            &directories,
+        );
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--include-directories", "/tmp/api"]));

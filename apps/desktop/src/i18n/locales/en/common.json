@@ -1088,6 +1088,33 @@
       "fastModeHint": "Prefer shorter, more direct replies.",
       "effort": "Reasoning effort"
     },
+    "approval": {
+      "open": "Choose how actions should be approved",
+      "managed": "Managed",
+      "managedHint": "Permissions are managed directly by {{provider}}.",
+      "planOverride": "While Plan is enabled, the agent runs in read-only mode.",
+      "options": {
+        "ask": {
+          "label": "Request approval",
+          "description": "Asks before editing or running actions that require access."
+        },
+        "auto": {
+          "label": "Approve for me",
+          "description": "The provider allows common workspace actions and asks when risk is detected."
+        },
+        "full_access": {
+          "label": "Full access",
+          "description": "Lets the agent access files, commands, and network without asking."
+        }
+      },
+      "confirm": {
+        "title": "Enable full access?",
+        "description": "The agent can run commands and access files and network without requesting confirmation.",
+        "worktreeWarning": "A worktree protects the original Git checkout, but it does not protect other files, credentials, or resources on your machine.",
+        "cancel": "Cancel",
+        "enable": "Enable full access"
+      }
+    },
     "executionDock": {
       "ariaLabel": "Task execution context",
       "protectedTitle": "Protected worktree",

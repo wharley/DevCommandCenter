@@ -12,6 +12,8 @@ export type ComposerTurnEnvelope = {
 	effort: ComposerEffortLevel;
 	/** Short replies when true. */
 	fastMode: boolean;
+	/** User-selected approval boundary, normalized across supported providers. */
+	approvalPolicy: ProviderApprovalPolicy | null;
 };
 
 export type ComposerSubmittedTurn = {
@@ -37,6 +39,7 @@ export const DEFAULT_COMPOSER_ENVELOPE: ComposerTurnEnvelope = {
 	planMode: false,
 	effort: "medium",
 	fastMode: true,
+	approvalPolicy: null,
 };
 
 export function composerTurnFromRaw(
@@ -48,3 +51,4 @@ export function composerTurnFromRaw(
 		envelope: { ...DEFAULT_COMPOSER_ENVELOPE, ...overrides },
 	};
 }
+import type { ProviderApprovalPolicy } from "@dcc/contracts";

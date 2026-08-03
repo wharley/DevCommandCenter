@@ -35,7 +35,7 @@ use dcc_core::{
         },
         provider::{
             Capabilities, HealthStatus, ProviderAccountUsage, ProviderAccountUsageState,
-            ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
+            ProviderApprovalPolicy, ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
         },
         session::SessionId,
     },
@@ -47,10 +47,10 @@ use dcc_core::{
 };
 
 use crate::codex_mcp::{
-    codex_mcp_approval_policy, codex_mcp_runtime_version, failed_codex_mcp_status_snapshot,
-    initial_codex_mcp_status_snapshot, merge_codex_mcp_status, parse_codex_mcp_startup_status,
-    parse_codex_mcp_status_snapshot, prepare_thread_start_request, CodexMcpDefinitionMap,
-    CodexMcpToolPolicyMap,
+    codex_mcp_approval_policy, codex_mcp_approval_policy_with_native, codex_mcp_runtime_version,
+    failed_codex_mcp_status_snapshot, initial_codex_mcp_status_snapshot, merge_codex_mcp_status,
+    parse_codex_mcp_startup_status, parse_codex_mcp_status_snapshot, prepare_thread_start_request,
+    CodexMcpDefinitionMap, CodexMcpToolPolicyMap,
 };
 use crate::common::{append_tool_instructions, augmented_path};
 
@@ -578,6 +578,7 @@ fn notification_to_event(
 // ── Per-session runtime ─────────────────────────────────────────────────────
 
 const MAX_PENDING_CODEX_MCP_APPROVALS: usize = 64;
+const MAX_PENDING_CODEX_NATIVE_APPROVALS: usize = 64;
 const MAX_ACTIVE_CODEX_MCP_TOOL_CALLS: usize = 128;
 const MAX_CODEX_RPC_STRING_ID_CHARS: usize = 256;
 const MAX_CODEX_MCP_ITEM_ID_CHARS: usize = 256;
@@ -596,6 +597,19 @@ struct ActiveCodexMcpToolCall {
 struct PendingCodexMcpApproval {
     rpc_id: Value,
     item_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum CodexNativeApprovalKind {
+    Command,
+    FileChange,
+    Permissions { requested: Value },
+}
+
+#[derive(Debug)]
+struct PendingCodexNativeApproval {
+    rpc_id: Value,
+    kind: CodexNativeApprovalKind,
 }
 
 fn bounded_nonempty_string(value: &Value, max_chars: usize) -> Option<String> {
@@ -763,6 +777,135 @@ fn codex_mcp_tool_policy(
         .unwrap_or(McpToolPolicyDecision::Ask)
 }
 
+fn codex_turn_execution_policy(
+    approval_policy: Option<ProviderApprovalPolicy>,
+    plan_mode: Option<bool>,
+    has_dcc_mcp_servers: bool,
+) -> (Value, Value) {
+    if plan_mode == Some(true) {
+        let approval = if has_dcc_mcp_servers {
+            json!(codex_mcp_approval_policy())
+        } else {
+            json!("never")
+        };
+        return (approval, json!({ "type": "readOnly" }));
+    }
+
+    let sandbox_approval = matches!(
+        approval_policy,
+        Some(ProviderApprovalPolicy::Ask | ProviderApprovalPolicy::Auto)
+    );
+    let rules = approval_policy == Some(ProviderApprovalPolicy::Ask);
+    let approval = if has_dcc_mcp_servers {
+        json!(codex_mcp_approval_policy_with_native(
+            sandbox_approval,
+            rules
+        ))
+    } else {
+        json!(match approval_policy {
+            Some(ProviderApprovalPolicy::Ask) => "untrusted",
+            Some(ProviderApprovalPolicy::Auto) => "on-request",
+            Some(ProviderApprovalPolicy::FullAccess) | None => "never",
+        })
+    };
+    let sandbox = match approval_policy {
+        Some(ProviderApprovalPolicy::Ask | ProviderApprovalPolicy::Auto) => {
+            json!({ "type": "workspaceWrite" })
+        }
+        Some(ProviderApprovalPolicy::FullAccess) | None => {
+            json!({ "type": "dangerFullAccess" })
+        }
+    };
+    (approval, sandbox)
+}
+
+fn bounded_codex_approval_text(value: Option<&Value>, max_chars: usize) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| {
+            !value.is_empty() && value.chars().count() <= max_chars && !value.contains('\0')
+        })
+        .map(str::to_string)
+}
+
+fn claim_codex_native_approval(
+    rpc_id: &Value,
+    method: &str,
+    params: &Value,
+    current_thread_id: Option<&str>,
+    current_turn_id: Option<&str>,
+) -> Option<(
+    String,
+    PendingCodexNativeApproval,
+    ProviderPermissionRequest,
+)> {
+    let rpc_id = validated_codex_server_request_id(rpc_id)?;
+    if params.get("threadId").and_then(Value::as_str) != current_thread_id
+        || params.get("turnId").and_then(Value::as_str) != current_turn_id
+    {
+        return None;
+    }
+    bounded_nonempty_string(params.get("itemId")?, MAX_CODEX_MCP_ITEM_ID_CHARS)?;
+
+    let (kind, tool_name, title, command, file) = match method {
+        "item/commandExecution/requestApproval" => (
+            CodexNativeApprovalKind::Command,
+            "codex_command",
+            "Approve command",
+            bounded_codex_approval_text(params.get("command"), 16_384),
+            bounded_codex_approval_text(params.get("cwd"), 4_096),
+        ),
+        "item/fileChange/requestApproval" => (
+            CodexNativeApprovalKind::FileChange,
+            "codex_file_change",
+            "Approve file change",
+            None,
+            bounded_codex_approval_text(params.get("grantRoot"), 4_096),
+        ),
+        "item/permissions/requestApproval" => (
+            CodexNativeApprovalKind::Permissions {
+                requested: params.get("permissions")?.clone(),
+            },
+            "codex_permissions",
+            "Approve additional access",
+            None,
+            bounded_codex_approval_text(params.get("cwd"), 4_096),
+        ),
+        _ => return None,
+    };
+    let request_id = Uuid::new_v4().to_string();
+    Some((
+        request_id.clone(),
+        PendingCodexNativeApproval { rpc_id, kind },
+        ProviderPermissionRequest {
+            request_id,
+            tool_name: tool_name.to_string(),
+            title: Some(title.to_string()),
+            description: bounded_codex_approval_text(params.get("reason"), 2_048),
+            command,
+            file,
+        },
+    ))
+}
+
+fn codex_native_approval_result(kind: CodexNativeApprovalKind, behavior: &str) -> Option<Value> {
+    let decision = match behavior {
+        "allow" => "accept",
+        "deny" => "decline",
+        _ => return None,
+    };
+    match kind {
+        CodexNativeApprovalKind::Command | CodexNativeApprovalKind::FileChange => {
+            Some(json!({ "decision": decision }))
+        }
+        CodexNativeApprovalKind::Permissions { requested } => Some(json!({
+            "permissions": if behavior == "allow" { requested } else { json!({}) },
+            "scope": "turn",
+        })),
+    }
+}
+
 type PendingResponse = oneshot::Sender<std::result::Result<Value, String>>;
 type PendingMap = Arc<Mutex<HashMap<u64, PendingResponse>>>;
 
@@ -778,6 +921,7 @@ struct SessionRuntime {
     mcp_status_snapshot: StdRwLock<Option<Vec<McpRuntimeStatus>>>,
     pending: PendingMap,
     pending_mcp_approvals: Mutex<HashMap<String, PendingCodexMcpApproval>>,
+    pending_native_approvals: Mutex<HashMap<String, PendingCodexNativeApproval>>,
     next_id: AtomicU64,
     events_tx: broadcast::Sender<ProviderEvent>,
     last_retry_at: Mutex<Option<Instant>>,
@@ -878,6 +1022,28 @@ impl SessionRuntime {
         Ok(())
     }
 
+    async fn resolve_permission(&self, response: ProviderPermissionResponse) -> Result<()> {
+        let native = self
+            .pending_native_approvals
+            .lock()
+            .await
+            .remove(&response.request_id);
+        let Some(pending) = native else {
+            return self.resolve_mcp_approval(response).await;
+        };
+        let result =
+            codex_native_approval_result(pending.kind, &response.behavior).ok_or_else(|| {
+                CoreError::InvalidInput("Codex permission behavior is invalid".to_string())
+            })?;
+        self.send_server_result(&pending.rpc_id, result).await?;
+        let _ = self.events_tx.send(ProviderEvent::PermissionResolved {
+            id: response.request_id,
+            behavior: response.behavior,
+            at: now_iso(),
+        });
+        Ok(())
+    }
+
     async fn resolve_cleared_mcp_approval(&self, rpc_id: &Value) {
         let cleared_id = {
             let mut pending = self.pending_mcp_approvals.lock().await;
@@ -938,6 +1104,25 @@ impl SessionRuntime {
         }
     }
 
+    async fn cancel_pending_native_approvals(&self) {
+        let pending = self
+            .pending_native_approvals
+            .lock()
+            .await
+            .drain()
+            .collect::<Vec<_>>();
+        for (request_id, approval) in pending {
+            if let Some(result) = codex_native_approval_result(approval.kind, "deny") {
+                let _ = self.send_server_result(&approval.rpc_id, result).await;
+            }
+            let _ = self.events_tx.send(ProviderEvent::PermissionResolved {
+                id: request_id,
+                behavior: "deny".to_string(),
+                at: now_iso(),
+            });
+        }
+    }
+
     async fn has_dcc_mcp_servers(&self) -> bool {
         !self.mcp_definitions_by_wire_name.lock().await.is_empty()
     }
@@ -972,6 +1157,58 @@ impl SessionRuntime {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
+    }
+}
+
+async fn handle_codex_native_approval_request(
+    runtime: &Arc<SessionRuntime>,
+    rpc_id: &Value,
+    method: &str,
+    params: &Value,
+) {
+    let current_thread_id = runtime.thread_id.lock().await.clone();
+    let current_turn_id = runtime.active_turn_id.lock().await.clone();
+    let claimed = claim_codex_native_approval(
+        rpc_id,
+        method,
+        params,
+        current_thread_id.as_deref(),
+        current_turn_id.as_deref(),
+    );
+
+    if let Some((request_id, pending, request)) = claimed {
+        let inserted = {
+            let mut approvals = runtime.pending_native_approvals.lock().await;
+            if approvals.len() >= MAX_PENDING_CODEX_NATIVE_APPROVALS {
+                false
+            } else {
+                approvals.insert(request_id.clone(), pending);
+                true
+            }
+        };
+        if inserted {
+            let _ = runtime.events_tx.send(ProviderEvent::PermissionRequested {
+                request,
+                at: now_iso(),
+            });
+            return;
+        }
+    }
+
+    if let Some(rpc_id) = validated_codex_server_request_id(rpc_id) {
+        let kind = match method {
+            "item/fileChange/requestApproval" => CodexNativeApprovalKind::FileChange,
+            "item/permissions/requestApproval" => CodexNativeApprovalKind::Permissions {
+                requested: params
+                    .get("permissions")
+                    .cloned()
+                    .unwrap_or_else(|| json!({})),
+            },
+            _ => CodexNativeApprovalKind::Command,
+        };
+        if let Some(result) = codex_native_approval_result(kind, "deny") {
+            let _ = runtime.send_server_result(&rpc_id, result).await;
+        }
     }
 }
 
@@ -1322,6 +1559,7 @@ impl CodexAppServerAdapter {
             mcp_status_snapshot: StdRwLock::new(None),
             pending: Arc::new(Mutex::new(HashMap::new())),
             pending_mcp_approvals: Mutex::new(HashMap::new()),
+            pending_native_approvals: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             events_tx: events_tx.clone(),
             last_retry_at: Mutex::new(None),
@@ -1470,6 +1708,15 @@ impl CodexAppServerAdapter {
                 // audited tool-approval elicitation shape.
                 if let (Some(id), Some(method), Some(params)) = (&msg.id, &msg.method, &msg.params)
                 {
+                    if matches!(
+                        method.as_str(),
+                        "item/commandExecution/requestApproval"
+                            | "item/fileChange/requestApproval"
+                            | "item/permissions/requestApproval"
+                    ) {
+                        handle_codex_native_approval_request(&runtime, id, method, params).await;
+                        continue;
+                    }
                     if method == "mcpServer/elicitation/request" {
                         handle_codex_mcp_elicitation_request(
                             &runtime,
@@ -1587,6 +1834,13 @@ impl CodexAppServerAdapter {
                 let _ = tx.send(Err("codex process exited".to_string()));
             }
             for (request_id, _) in runtime.pending_mcp_approvals.lock().await.drain() {
+                let _ = runtime.events_tx.send(ProviderEvent::PermissionResolved {
+                    id: request_id,
+                    behavior: "deny".to_string(),
+                    at: now_iso(),
+                });
+            }
+            for (request_id, _) in runtime.pending_native_approvals.lock().await.drain() {
                 let _ = runtime.events_tx.send(ProviderEvent::PermissionResolved {
                     id: request_id,
                     behavior: "deny".to_string(),
@@ -1711,7 +1965,7 @@ impl Provider for CodexAppServerAdapter {
             })?;
 
         if let Input::PermissionResponse(response) = input {
-            return runtime.resolve_mcp_approval(response).await;
+            return runtime.resolve_permission(response).await;
         }
 
         let thread_id = runtime
@@ -1721,31 +1975,47 @@ impl Provider for CodexAppServerAdapter {
             .clone()
             .ok_or_else(|| CoreError::Provider("codex session has no thread ID".to_string()))?;
 
-        let (prompt, effort, summary) = match input {
-            Input::Text(text) => (text, None, None),
-            Input::Turn(turn) => (
-                append_tool_instructions(
-                    compose_fallback_prompt_for_provider(
-                        "codex",
-                        &turn.prompt,
-                        turn.plan_mode,
-                        turn.effort.as_deref(),
-                        turn.fast_mode,
-                        PromptInjectionOptions {
-                            plan: true,
-                            effort: false,
-                            fast: false,
-                        },
-                    ),
-                    turn.tool_instructions.as_deref(),
-                ),
-                codex_reasoning_effort(turn.effort.as_deref()),
-                if turn.fast_mode.unwrap_or(true) {
-                    Some("concise")
-                } else {
-                    Some("auto")
-                },
+        let has_dcc_mcp_servers = runtime.has_dcc_mcp_servers().await;
+        let (prompt, effort, summary, approval_policy, sandbox_policy) = match input {
+            Input::Text(text) => (
+                text,
+                None,
+                None,
+                json!("never"),
+                json!({ "type": "dangerFullAccess" }),
             ),
+            Input::Turn(turn) => {
+                let (approval_policy, sandbox_policy) = codex_turn_execution_policy(
+                    turn.approval_policy,
+                    turn.plan_mode,
+                    has_dcc_mcp_servers,
+                );
+                (
+                    append_tool_instructions(
+                        compose_fallback_prompt_for_provider(
+                            "codex",
+                            &turn.prompt,
+                            turn.plan_mode,
+                            turn.effort.as_deref(),
+                            turn.fast_mode,
+                            PromptInjectionOptions {
+                                plan: true,
+                                effort: false,
+                                fast: false,
+                            },
+                        ),
+                        turn.tool_instructions.as_deref(),
+                    ),
+                    codex_reasoning_effort(turn.effort.as_deref()),
+                    if turn.fast_mode.unwrap_or(true) {
+                        Some("concise")
+                    } else {
+                        Some("auto")
+                    },
+                    approval_policy,
+                    sandbox_policy,
+                )
+            }
             Input::UserInputResponse(_) => {
                 return Err(CoreError::Provider(
                     "Codex does not support mid-turn user input responses".to_string(),
@@ -1753,12 +2023,6 @@ impl Provider for CodexAppServerAdapter {
             }
             Input::PermissionResponse(_) => unreachable!("handled before starting a turn"),
         };
-        let approval_policy = if runtime.has_dcc_mcp_servers().await {
-            json!(codex_mcp_approval_policy())
-        } else {
-            json!("never")
-        };
-
         let result = runtime
             .send_request(
                 "turn/start",
@@ -1767,7 +2031,7 @@ impl Provider for CodexAppServerAdapter {
                     "input": [{ "type": "text", "text": prompt }],
                     "effort": effort,
                     "approvalPolicy": approval_policy,
-                    "sandboxPolicy": { "type": "dangerFullAccess" },
+                    "sandboxPolicy": sandbox_policy,
                     "summary": summary,
                 }),
             )
@@ -1901,6 +2165,7 @@ impl Provider for CodexAppServerAdapter {
             })?;
 
         runtime.cancel_pending_mcp_approvals().await;
+        runtime.cancel_pending_native_approvals().await;
         let mut child = runtime.child.lock().await;
         child
             .kill()
@@ -2084,6 +2349,92 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn maps_normalized_approval_policies_to_codex_execution_boundaries() {
+        assert_eq!(
+            codex_turn_execution_policy(Some(ProviderApprovalPolicy::Ask), Some(false), false),
+            (json!("untrusted"), json!({ "type": "workspaceWrite" }))
+        );
+        assert_eq!(
+            codex_turn_execution_policy(Some(ProviderApprovalPolicy::Auto), Some(false), false),
+            (json!("on-request"), json!({ "type": "workspaceWrite" }))
+        );
+        assert_eq!(
+            codex_turn_execution_policy(
+                Some(ProviderApprovalPolicy::FullAccess),
+                Some(false),
+                false,
+            ),
+            (json!("never"), json!({ "type": "dangerFullAccess" }))
+        );
+        assert_eq!(
+            codex_turn_execution_policy(
+                Some(ProviderApprovalPolicy::FullAccess),
+                Some(true),
+                false,
+            ),
+            (json!("never"), json!({ "type": "readOnly" }))
+        );
+
+        let (mcp_approval, sandbox) =
+            codex_turn_execution_policy(Some(ProviderApprovalPolicy::Auto), Some(false), true);
+        assert_eq!(sandbox, json!({ "type": "workspaceWrite" }));
+        assert_eq!(
+            mcp_approval.pointer("/granular/mcp_elicitations"),
+            Some(&json!(true))
+        );
+        assert_eq!(
+            mcp_approval.pointer("/granular/sandbox_approval"),
+            Some(&json!(true))
+        );
+        assert_eq!(
+            mcp_approval.pointer("/granular/request_permissions"),
+            Some(&json!(true))
+        );
+        assert_eq!(mcp_approval.pointer("/granular/rules"), Some(&json!(false)));
+
+        let (ask_mcp_approval, _) =
+            codex_turn_execution_policy(Some(ProviderApprovalPolicy::Ask), Some(false), true);
+        assert_eq!(
+            ask_mcp_approval.pointer("/granular/rules"),
+            Some(&json!(true))
+        );
+    }
+
+    #[test]
+    fn claims_only_native_approval_requests_for_the_active_codex_turn() {
+        let claimed = claim_codex_native_approval(
+            &json!(41),
+            "item/commandExecution/requestApproval",
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "item-1",
+                "command": "pnpm test",
+                "cwd": "/tmp/app",
+                "reason": "Run tests"
+            }),
+            Some("thread-1"),
+            Some("turn-1"),
+        )
+        .expect("active turn request should be claimed");
+        assert_eq!(claimed.1.rpc_id, json!(41));
+        assert_eq!(claimed.2.command.as_deref(), Some("pnpm test"));
+        assert_eq!(claimed.2.file.as_deref(), Some("/tmp/app"));
+        assert!(claim_codex_native_approval(
+            &json!(42),
+            "item/commandExecution/requestApproval",
+            &json!({
+                "threadId": "another-thread",
+                "turnId": "turn-1",
+                "itemId": "item-2"
+            }),
+            Some("thread-1"),
+            Some("turn-1"),
+        )
+        .is_none());
     }
 
     #[test]

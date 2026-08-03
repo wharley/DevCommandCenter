@@ -1,6 +1,6 @@
 use dcc_core::domain::{
     model_registry,
-    provider::{HealthStatus, ProviderDescriptor, ProviderId},
+    provider::{HealthStatus, ProviderApprovalPolicy, ProviderDescriptor, ProviderId},
 };
 
 use crate::{
@@ -11,6 +11,11 @@ use crate::{
 fn gemini_capabilities() -> dcc_core::domain::provider::Capabilities {
     let mut capabilities = stable_cli_capabilities();
     capabilities.supports_multi_root = true;
+    capabilities.approval_policies = vec![
+        ProviderApprovalPolicy::Ask,
+        ProviderApprovalPolicy::Auto,
+        ProviderApprovalPolicy::FullAccess,
+    ];
     capabilities
 }
 
