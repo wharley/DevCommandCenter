@@ -861,6 +861,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				);
 			}
 
+			const workspaceRepository = item.workspace.rootPath
+				? repositoriesBySourceKey.get(item.workspace.rootPath.trim()) ?? null
+				: null;
+
 			return (
 				<WorkspaceRailRowItem
 					workspace={item.workspace}
@@ -868,13 +872,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					activity={workspaceAgentActivities[item.workspace.id] ?? null}
 					metadataEnabled={showAgentStates}
 					projectLabel={
-						item.workspace.rootPath &&
-						repositoriesBySourceKey.has(item.workspace.rootPath.trim())
-							? repositoryDisplayName(
-									repositoriesBySourceKey.get(item.workspace.rootPath.trim())!,
-								)
+						workspaceRepository
+							? repositoryDisplayName(workspaceRepository)
 							: null
 					}
+					projectIcon={workspaceRepository?.icon ?? null}
+					projectColor={workspaceRepository?.color ?? null}
 					onSelect={
 						item.workspace.status === "archived" ||
 						item.workspace.status === "completed"

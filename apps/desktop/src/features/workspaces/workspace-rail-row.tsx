@@ -45,6 +45,7 @@ import {
 	workspaceRailStatusTakesRecapSlot,
 } from "./workspace-rail-shared";
 import { useWorkspaceActiveTerminalCount } from "@/features/terminal/use-active-terminal-count";
+import { ProjectIdentityGlyph } from "./project-identity";
 
 const rowVariants = cva(
 	"group/dccRailRow relative min-h-[70px] select-none cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
@@ -67,6 +68,8 @@ export type WorkspaceRailRowProps = {
 	activity?: WorkspaceAgentActivity | null;
 	metadataEnabled?: boolean;
 	projectLabel?: string | null;
+	projectIcon?: string | null;
+	projectColor?: string | null;
 	onSelect?: (workspaceId: string) => void;
 	onRenameWorkspace?: (workspaceId: string, name: string) => void | Promise<void>;
 	onArchiveWorkspace?: (workspaceId: string) => void;
@@ -147,12 +150,16 @@ function WorkspaceIdentityCard({
 	workspace,
 	displayTitle,
 	projectLabel,
+	projectIcon,
+	projectColor,
 	currentBranch,
 	activity,
 }: {
 	workspace: WorkspaceSummary;
 	displayTitle: string;
 	projectLabel?: string | null;
+	projectIcon?: string | null;
+	projectColor?: string | null;
 	currentBranch: string;
 	activity?: WorkspaceAgentActivity | null;
 }) {
@@ -188,7 +195,12 @@ function WorkspaceIdentityCard({
 			<div className="space-y-1.5 border-t border-border/70 pt-2 text-[11px]">
 				{projectName ? (
 					<div className="flex min-w-0 items-center gap-2">
-						<WorkspaceRailAvatar title={projectName} subtitle={projectName} />
+						<ProjectIdentityGlyph
+							icon={projectIcon}
+							color={projectColor}
+							size="sm"
+							title={projectName}
+						/>
 						<span className="truncate font-medium">{projectName}</span>
 					</div>
 				) : null}
@@ -257,6 +269,8 @@ export const WorkspaceRailRowItem = memo(
 		activity,
 		metadataEnabled = true,
 		projectLabel,
+		projectIcon,
+		projectColor,
 		onSelect,
 		onRenameWorkspace,
 		onArchiveWorkspace,
@@ -581,6 +595,8 @@ export const WorkspaceRailRowItem = memo(
 									workspace={workspace}
 									displayTitle={displayTitle}
 									projectLabel={projectLabel}
+									projectIcon={projectIcon}
+									projectColor={projectColor}
 									currentBranch={railState.currentBranch}
 									activity={activity}
 								/>
@@ -788,6 +804,8 @@ export const WorkspaceRailRowItem = memo(
 		previous.activity?.completedAt === next.activity?.completedAt &&
 		previous.metadataEnabled === next.metadataEnabled &&
 		previous.projectLabel === next.projectLabel &&
+		previous.projectIcon === next.projectIcon &&
+		previous.projectColor === next.projectColor &&
 		previous.workspace === next.workspace &&
 		previous.onSelect === next.onSelect &&
 		previous.onRenameWorkspace === next.onRenameWorkspace &&
