@@ -12,7 +12,7 @@ import {
 import { REMOTE_CORE_EVENT_NAME } from "./session-api";
 
 export const DCC_QUERY_CACHE_STORAGE_KEY = "dcc-query-cache";
-export const DCC_QUERY_CACHE_BUSTER = "dcc-query-cache-v2";
+export const DCC_QUERY_CACHE_BUSTER = "dcc-query-cache-v3";
 
 /**
  * WebKit gives localStorage a small, shared per-origin quota. Keep the query

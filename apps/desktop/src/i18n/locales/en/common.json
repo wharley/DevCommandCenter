@@ -1043,7 +1043,9 @@
     "model": {
       "select": "Select model",
       "search": "Search models…",
-      "empty": "No model found."
+      "empty": "No model found.",
+      "cursorAdvanced": "Advanced Cursor models",
+      "cursorAdvancedHeading": "Cursor · advanced models"
     },
     "commandMenu": {
       "title": "Commands",
@@ -1082,11 +1084,20 @@
     "execution": {
       "title": "Execution",
       "open": "Open execution settings",
+      "openWithSelection": "Configure {{model}}, {{effort}} effort",
+      "model": "Model",
       "fast": "Fast",
       "standard": "Standard",
       "fastMode": "Fast responses",
       "fastModeHint": "Prefer shorter, more direct replies.",
-      "effort": "Reasoning effort"
+      "effort": "Effort",
+      "response": {
+        "title": "Response style",
+        "standard": "Standard",
+        "standardHint": "Adapts the level of detail to the task context.",
+        "direct": "Direct",
+        "directHint": "Prefers shorter, more concise responses."
+      }
     },
     "approval": {
       "open": "Choose how actions should be approved",

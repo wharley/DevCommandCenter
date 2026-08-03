@@ -1,6 +1,17 @@
 export const composerToolbarTriggerClassName =
 	"cursor-pointer rounded-[9px] px-1 py-0.5 text-[13px] font-medium transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50";
 
+export function getCompactComposerModelLabel(
+	providerId: string | null,
+	modelLabel: string,
+) {
+	const normalized = modelLabel.trim();
+	if (providerId === "claude_code") {
+		return normalized.replace(/^Claude\s+/i, "") || normalized;
+	}
+	return normalized;
+}
+
 export type PlanModeStateMap = Record<string, boolean>;
 
 export function getComposerDraftKey(workspaceId: string) {

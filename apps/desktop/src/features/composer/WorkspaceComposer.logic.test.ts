@@ -4,6 +4,7 @@ import {
 	buildSpecDraftPrompt,
 	canSendPrompt,
 	decideSend,
+	getCompactComposerModelLabel,
 	getComposerDraftKey,
 	isComposerSubmitEnabled,
 	isSendDisabled,
@@ -13,6 +14,18 @@ import {
 } from "./WorkspaceComposer.logic";
 
 describe("WorkspaceComposer.logic", () => {
+	it("removes only the redundant Claude brand from the compact model label", () => {
+		expect(getCompactComposerModelLabel("claude_code", "Claude Fable 5")).toBe(
+			"Fable 5",
+		);
+		expect(getCompactComposerModelLabel("codex", "GPT-5.6 Terra")).toBe(
+			"GPT-5.6 Terra",
+		);
+		expect(getCompactComposerModelLabel("cursor", "Claude Sonnet 5")).toBe(
+			"Claude Sonnet 5",
+		);
+	});
+
 	it("derives a stable mission spec filename from the workspace branch", () => {
 		expect(buildMissionSpecFilename("feature/SDD Spike")).toBe(
 			"feature-sdd-spike.spec.md",

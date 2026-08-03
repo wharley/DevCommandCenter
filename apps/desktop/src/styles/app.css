@@ -154,10 +154,26 @@
 }
 
 @layer utilities {
-	@container header-actions (max-width: 560px) {
-		.dcc-composer-approval-label,
-		.dcc-composer-plan-label,
-		.dcc-composer-execution-label {
+	@container header-actions (max-width: 720px) {
+		.dcc-composer-plan-label {
+			display: none;
+		}
+	}
+
+	@container header-actions (max-width: 620px) {
+		.dcc-composer-effort-summary {
+			display: none;
+		}
+	}
+
+	@container header-actions (max-width: 500px) {
+		.dcc-composer-approval-label {
+			display: none;
+		}
+	}
+
+	@container header-actions (max-width: 420px) {
+		.dcc-composer-model-summary {
 			display: none;
 		}
 	}

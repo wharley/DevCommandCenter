@@ -63,7 +63,9 @@ export function ComposerApprovalPolicyMenu({
 						)}
 					>
 						<Shield className="size-[13px]" strokeWidth={1.8} />
-						<span className="dcc-composer-approval-label">{t("composer.approval.managed")}</span>
+						<span className="dcc-composer-approval-label text-[12px] font-medium leading-4">
+							{t("composer.approval.managed")}
+						</span>
 					</span>
 				</TooltipTrigger>
 				<TooltipContent side="top">
@@ -91,7 +93,9 @@ export function ComposerApprovalPolicyMenu({
 			)}
 		>
 			<PolicyIcon policy={selectedPolicy} />
-			<span className="dcc-composer-approval-label max-w-28 truncate">{label}</span>
+			<span className="dcc-composer-approval-label text-[12px] font-medium leading-4 whitespace-nowrap">
+				{label}
+			</span>
 			<ChevronDown className="size-3 opacity-40" strokeWidth={2} />
 		</DropdownMenuTrigger>
 	);

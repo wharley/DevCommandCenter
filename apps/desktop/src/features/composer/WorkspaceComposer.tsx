@@ -13,7 +13,6 @@ import {
 	Paperclip,
 	Pencil,
 	Play,
-	SlidersHorizontal,
 	Square,
 	X,
 } from "lucide-react";
@@ -56,19 +55,16 @@ import {
 	type ExecutionDockChangeSummary,
 } from "./ExecutionDock";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
-import { ComposerProviderModelMenu } from "./ComposerProviderModelMenu";
 import { ComposerApprovalPolicyMenu } from "./ComposerApprovalPolicyMenu";
-import { EffortBrainIcon } from "./EffortBrainIcon";
+import { ComposerExecutionMenu } from "./ComposerExecutionMenu";
 import { ComposerButton } from "./ComposerButton";
 import {
 	clampEffort,
 	DEFAULT_EFFORT_LEVELS,
-	getEffortDisplay,
 	resolveEffectiveEffort,
 } from "./effort";
 import {
 	buildSpecDraftPrompt,
-	composerToolbarTriggerClassName,
 	getComposerApprovalPolicyKey,
 	getComposerDraftKey,
 	getComposerEffortKey,
@@ -779,10 +775,6 @@ export function WorkspaceComposer({
 		: t("composer.placeholder.default");
 
 	const selectedEffortId = ultrathinkSelected ? "ultrathink" : effort;
-	const effortLabel = getEffortDisplay(selectedEffortId).label;
-	const translatedEffortLabel = t(`composer.effort.${selectedEffortId}`, {
-		defaultValue: effortLabel,
-	});
 	const slashCommands = useMemo(
 		() =>
 			DEFAULT_SLASH_COMMANDS.map((command) => ({
@@ -988,22 +980,6 @@ export function WorkspaceComposer({
 							{t("composer.attachments.add")}
 						</TooltipContent>
 					</Tooltip>
-					<ComposerProviderModelMenu
-						providers={providerChoices}
-						selectedProviderId={selectedProviderId}
-						selectedModelId={selectedModelId}
-						accountUsage={accountUsageQuery.data}
-						isAccountUsageFetching={accountUsageQuery.isFetching}
-						hasAccountUsageError={accountUsageQuery.isError}
-						onRefreshAccountUsage={() => {
-							if (supportsProviderAccountUsage(selectedProviderId)) {
-								void accountUsageQuery.refetch();
-							}
-						}}
-						onSelectProvider={onSelectProvider}
-						onSelectModel={onSelectModel}
-						disabled={turnSettingsDisabled}
-					/>
 					<ComposerApprovalPolicyMenu
 						providerName={selectedProvider?.label ?? null}
 						supportedPolicies={supportedApprovalPolicies}
@@ -1025,96 +1001,44 @@ export function WorkspaceComposer({
 						onClick={togglePlanMode}
 					>
 						<ClipboardList className="size-[13px]" strokeWidth={1.8} />
-						<span className="dcc-composer-plan-label">{t("composer.controls.plan")}</span>
+						<span className="dcc-composer-plan-label text-[12px] font-medium leading-4">
+							{t("composer.controls.plan")}
+						</span>
 					</ComposerButton>
 				</div>
 
 				<div className="flex shrink-0 items-center gap-1.5">
-					<DropdownMenu
+					<ComposerExecutionMenu
 						open={executionMenuOpen}
 						onOpenChange={(open) => {
 							setExecutionMenuOpen(open);
 							if (open) recordUxMetric("advanced_composer_control_used");
 						}}
-					>
-						<DropdownMenuTrigger
-							type="button"
-							aria-label={t("composer.execution.open")}
-							disabled={turnSettingsDisabled}
-							className={cn(
-								`flex h-7 items-center gap-1.5 ${composerToolbarTriggerClassName}`,
-								"max-w-[9rem] text-muted-foreground",
-								turnSettingsDisabled &&
-									"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
-							)}
-						>
-							<SlidersHorizontal className="size-[13px] shrink-0" strokeWidth={1.8} />
-							<span className="dcc-composer-execution-label truncate text-[var(--dcc-daily-meta-size)]">
-								{isFastMode
-									? t("composer.execution.fast")
-									: t("composer.execution.standard")}
-								{" · "}
-								{translatedEffortLabel}
-							</span>
-							<ChevronDown className="size-3 shrink-0 opacity-40" strokeWidth={2} />
-						</DropdownMenuTrigger>
-						<DropdownMenuContent
-							side="top"
-							align="end"
-							sideOffset={4}
-							className="w-64"
-						>
-							<DropdownMenuLabel>{t("composer.execution.title")}</DropdownMenuLabel>
-							<DropdownMenuItem
-								className="flex items-center justify-between gap-3"
-								onClick={() => setIsFastMode((current) => !current)}
-							>
-								<div>
-									<div>{t("composer.execution.fastMode")}</div>
-									<div className="text-[12px] text-muted-foreground">
-										{t("composer.execution.fastModeHint")}
-									</div>
-								</div>
-								<span className="text-[12px] text-foreground">
-									{isFastMode ? "✓" : ""}
-								</span>
-							</DropdownMenuItem>
-							<DropdownMenuSeparator />
-							<DropdownMenuGroup>
-								<DropdownMenuLabel>{t("composer.execution.effort")}</DropdownMenuLabel>
-								{availableEffortLevels.map((id) => {
-									const display = getEffortDisplay(id);
-									return (
-										<DropdownMenuItem
-											key={id}
-											className="flex items-center justify-between gap-3"
-											onClick={() =>
-												updateEffortSelection({ effort: id, ultrathink: false })
-											}
-										>
-											<div className="flex items-center gap-2.5">
-												<EffortBrainIcon level={display.icon} />
-												<span>
-													{t(`composer.effort.${id}`, { defaultValue: display.label })}
-												</span>
-											</div>
-											{id === effort && !ultrathinkSelected ? "✓" : null}
-										</DropdownMenuItem>
-									);
-								})}
-								<DropdownMenuItem
-									className="flex items-center justify-between gap-3"
-									onClick={() => updateEffortSelection({ effort, ultrathink: true })}
-								>
-									<div className="flex items-center gap-2.5">
-										<EffortBrainIcon level="max" />
-										<span>{t("composer.effort.ultrathink")}</span>
-									</div>
-									{ultrathinkSelected ? "✓" : null}
-								</DropdownMenuItem>
-							</DropdownMenuGroup>
-						</DropdownMenuContent>
-					</DropdownMenu>
+						providers={providerChoices}
+						selectedProviderId={selectedProviderId}
+						selectedModelId={selectedModelId}
+						availableEffortLevels={availableEffortLevels}
+						selectedEffortId={selectedEffortId}
+						directResponse={isFastMode}
+						onSelectProvider={onSelectProvider}
+						onSelectModel={onSelectModel}
+						onSelectEffort={(id) =>
+							updateEffortSelection({ effort: id, ultrathink: false })
+						}
+						onSelectUltrathink={() =>
+							updateEffortSelection({ effort, ultrathink: true })
+						}
+						onSetDirectResponse={setIsFastMode}
+						accountUsage={accountUsageQuery.data}
+						isAccountUsageFetching={accountUsageQuery.isFetching}
+						hasAccountUsageError={accountUsageQuery.isError}
+						onRefreshAccountUsage={() => {
+							if (supportsProviderAccountUsage(selectedProviderId)) {
+								void accountUsageQuery.refetch();
+							}
+						}}
+						disabled={turnSettingsDisabled}
+					/>
 					{accountUsageAlert && accountUsageWindow ? (
 						<Tooltip>
 							<TooltipTrigger asChild>

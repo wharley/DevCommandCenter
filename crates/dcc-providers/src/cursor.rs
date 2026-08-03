@@ -715,7 +715,13 @@ fn parse_cursor_about_json_payload(raw: &str) -> Option<Value> {
     serde_json::from_str::<Value>(trimmed).ok()
 }
 
-fn parse_cursor_models(raw: &str) -> Vec<String> {
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DiscoveredCursorModel {
+    id: String,
+    label: String,
+}
+
+fn parse_cursor_models(raw: &str) -> Vec<DiscoveredCursorModel> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Vec::new();
@@ -740,7 +746,7 @@ fn parse_cursor_models(raw: &str) -> Vec<String> {
     models
 }
 
-fn collect_model_strings(value: &Value, output: &mut Vec<String>) {
+fn collect_model_strings(value: &Value, output: &mut Vec<DiscoveredCursorModel>) {
     match value {
         Value::Array(items) => {
             for item in items {
@@ -748,26 +754,41 @@ fn collect_model_strings(value: &Value, output: &mut Vec<String>) {
             }
         }
         Value::Object(object) => {
+            let id = object
+                .get("id")
+                .or_else(|| object.get("slug"))
+                .or_else(|| object.get("model"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            if let Some(id) = id {
+                let label = object
+                    .get("label")
+                    .or_else(|| object.get("name"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(id);
+                output.push(DiscoveredCursorModel {
+                    id: id.to_string(),
+                    label: label.to_string(),
+                });
+                return;
+            }
             for key in ["models", "recommendedModels", "data", "items"] {
                 if let Some(child) = object.get(key) {
                     collect_model_strings(child, output);
                 }
             }
-            if let Some(model) = object.get("model").and_then(Value::as_str) {
-                output.push(model.trim().to_string());
-            }
-            if let Some(id) = object.get("id").and_then(Value::as_str) {
-                output.push(id.trim().to_string());
-            }
-            if let Some(slug) = object.get("slug").and_then(Value::as_str) {
-                output.push(slug.trim().to_string());
-            }
-            if let Some(name) = object.get("name").and_then(Value::as_str) {
-                output.push(name.trim().to_string());
-            }
         }
         Value::String(string) => {
-            output.push(string.trim().to_string());
+            let value = string.trim();
+            if !value.is_empty() {
+                output.push(DiscoveredCursorModel {
+                    id: value.to_string(),
+                    label: value.to_string(),
+                });
+            }
         }
         _ => {}
     }
@@ -783,29 +804,29 @@ fn is_cursor_model_header(line: &str) -> bool {
         || lower.starts_with("---")
 }
 
-fn parse_cursor_model_line(line: &str) -> Option<String> {
+fn parse_cursor_model_line(line: &str) -> Option<DiscoveredCursorModel> {
     let trimmed = line.trim_start_matches(['-', '*', '•', ' ']).trim();
     if trimmed.is_empty() {
         return None;
     }
 
-    for delimiter in ['\t', '|'] {
-        if let Some((left, _)) = trimmed.split_once(delimiter) {
-            let candidate = left.trim();
-            if !candidate.is_empty() {
-                return Some(candidate.to_string());
+    for delimiter in [" - ", "\t", "|", "  "] {
+        if let Some((left, right)) = trimmed.split_once(delimiter) {
+            let id = left.trim();
+            let label = right.trim();
+            if !id.is_empty() {
+                return Some(DiscoveredCursorModel {
+                    id: id.to_string(),
+                    label: if label.is_empty() { id } else { label }.to_string(),
+                });
             }
         }
     }
 
-    if let Some((left, _)) = trimmed.split_once("  ") {
-        let candidate = left.trim();
-        if !candidate.is_empty() {
-            return Some(candidate.to_string());
-        }
-    }
-
-    Some(trimmed.to_string())
+    Some(DiscoveredCursorModel {
+        id: trimmed.to_string(),
+        label: trimmed.to_string(),
+    })
 }
 
 fn parse_cursor_models_to_descriptors(raw: &str) -> Vec<ProviderModelDescriptor> {
@@ -819,17 +840,22 @@ fn parse_cursor_models_to_descriptors(raw: &str) -> Vec<ProviderModelDescriptor>
     }];
 
     for model in parse_cursor_models(raw) {
-        let trimmed = model.trim().to_string();
-        if trimmed.is_empty() {
+        let id = model.id.trim().to_string();
+        if id.is_empty() {
             continue;
         }
-        let normalized = trimmed.to_lowercase();
-        if normalized == CURSOR_AUTODETECT_MODEL_ID || !seen.insert(trimmed.clone()) {
+        let normalized = id.to_lowercase();
+        if normalized == CURSOR_AUTODETECT_MODEL_ID || !seen.insert(id.clone()) {
             continue;
         }
+        let label = model.label.trim();
         models.push(ProviderModelDescriptor {
-            id: trimmed.clone(),
-            label: trimmed,
+            id: id.clone(),
+            label: if label.is_empty() {
+                id
+            } else {
+                label.to_string()
+            },
             description: CURSOR_MODEL_DESCRIPTION.to_string(),
             recommended: false,
             effort_levels: vec!["low".to_string(), "medium".to_string(), "high".to_string()],
@@ -1140,12 +1166,26 @@ mod tests {
         assert!(json_models.iter().any(|model| model.id == "o3"));
 
         let text_models = parse_cursor_models_to_descriptors(
-			"Available models\n- claude-4-sonnet-thinking   Balanced default\n- o3   Best reasoning",
-		);
+			"Available models\nauto - Auto (current, default)\nclaude-4-sonnet-thinking - Claude 4 Sonnet Thinking\no3 - Best reasoning",
+        );
+        assert_eq!(
+            text_models
+                .iter()
+                .filter(|model| model.id == "auto")
+                .count(),
+            1
+        );
         assert!(text_models
             .iter()
             .any(|model| model.id == "claude-4-sonnet-thinking"));
         assert!(text_models.iter().any(|model| model.id == "o3"));
+        assert_eq!(
+            text_models
+                .iter()
+                .find(|model| model.id == "claude-4-sonnet-thinking")
+                .map(|model| model.label.as_str()),
+            Some("Claude 4 Sonnet Thinking")
+        );
     }
 
     #[test]

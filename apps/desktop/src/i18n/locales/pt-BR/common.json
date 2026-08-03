@@ -1043,7 +1043,9 @@
     "model": {
       "select": "Selecionar modelo",
       "search": "Pesquisar modelos…",
-      "empty": "Nenhum modelo encontrado."
+      "empty": "Nenhum modelo encontrado.",
+      "cursorAdvanced": "Modelos avançados do Cursor",
+      "cursorAdvancedHeading": "Cursor · modelos avançados"
     },
     "commandMenu": {
       "title": "Comandos",
@@ -1082,11 +1084,20 @@
     "execution": {
       "title": "Execução",
       "open": "Abrir configurações de execução",
+      "openWithSelection": "Configurar {{model}}, esforço {{effort}}",
+      "model": "Modelo",
       "fast": "Rápida",
       "standard": "Padrão",
       "fastMode": "Respostas rápidas",
       "fastModeHint": "Prefere respostas mais curtas e diretas.",
-      "effort": "Esforço de raciocínio"
+      "effort": "Esforço",
+      "response": {
+        "title": "Estilo de resposta",
+        "standard": "Padrão",
+        "standardHint": "Adapta o nível de detalhe ao contexto da tarefa.",
+        "direct": "Direto",
+        "directHint": "Prefere respostas mais curtas e objetivas."
+      }
     },
     "approval": {
       "open": "Escolher como as ações devem ser aprovadas",
