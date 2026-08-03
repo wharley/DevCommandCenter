@@ -24,7 +24,7 @@ import {
 import { handlePermissionRequest } from "./permission-bridge.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
 
-const SIDECAR_VERSION = "0.1.36";
+const SIDECAR_VERSION = "0.1.37";
 
 function emit(value) {
 	process.stdout.write(`${JSON.stringify(value)}\n`);
