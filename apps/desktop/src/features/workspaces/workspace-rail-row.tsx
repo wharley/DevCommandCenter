@@ -12,6 +12,7 @@ import {
 	PinOff,
 	RotateCcw,
 	ShieldCheck,
+	SquareTerminal,
 	Trash2,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
@@ -43,6 +44,7 @@ import {
 	workspaceRailDisplayTitle,
 	workspaceRailStatusTakesRecapSlot,
 } from "./workspace-rail-shared";
+import { useWorkspaceActiveTerminalCount } from "@/features/terminal/use-active-terminal-count";
 
 const rowVariants = cva(
 	"group/dccRailRow relative min-h-[70px] select-none cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
@@ -264,6 +266,10 @@ export const WorkspaceRailRowItem = memo(
 		onSetWorkspacePinned,
 	}: WorkspaceRailRowProps) {
 		const { t } = useTranslation("common");
+		const activeTerminalCount = useWorkspaceActiveTerminalCount([
+			workspace.id,
+			...(workspace.memberWorkspaceIds ?? []),
+		]);
 		const displayTitle = workspaceRailDisplayTitle(workspace);
 		const workspacePath = workspace.worktreePath ?? workspace.rootPath ?? null;
 		const railState = useWorkspaceRailRecap({
@@ -302,7 +308,7 @@ export const WorkspaceRailRowItem = memo(
 						? t("sidebar.workspaceState.readyToStart")
 						: null;
 		const [pendingAction, setPendingAction] = useState<
-			"restore" | "complete" | null
+			"restore" | "complete" | "archive" | null
 		>(null);
 		const [isEditing, setIsEditing] = useState(false);
 		const [draftName, setDraftName] = useState(displayTitle);
@@ -354,15 +360,14 @@ export const WorkspaceRailRowItem = memo(
 		};
 
 		const runRowAction = (
-			action: "restore" | "complete",
+			action: "restore" | "complete" | "archive",
 			handler: (workspaceId: string) => void | Promise<void>,
 		) => {
 			if (pendingAction) {
 				return;
 			}
 			setPendingAction(action);
-			Promise.resolve(handler(workspace.id)).catch(() => {
-				// On failure the row stays; clear pending so it can be retried.
+			Promise.resolve(handler(workspace.id)).finally(() => {
 				setPendingAction(null);
 			});
 		};
@@ -487,6 +492,15 @@ export const WorkspaceRailRowItem = memo(
 										strokeWidth={1.9}
 										aria-label={t("sidebar.pinnedWorkspace")}
 									/>
+								) : null}
+								{activeTerminalCount > 0 ? (
+									<span
+										className="ml-auto inline-flex h-4 shrink-0 items-center gap-1 rounded-full bg-sky-500/12 px-1.5 text-[9.5px] font-semibold tabular-nums text-sky-700 dark:text-sky-300"
+										title={t("sidebar.activeTerminals", { count: activeTerminalCount })}
+									>
+										<SquareTerminal className="size-2.5" aria-hidden />
+										{activeTerminalCount}
+									</span>
 								) : null}
 							</div>
 							{workspaceStatusMessage ? (
@@ -705,12 +719,12 @@ export const WorkspaceRailRowItem = memo(
 															? t("sidebar.completingWorkspace")
 															: t("sidebar.completeWorkspace")
 													}
-													disabled={isPending}
-													className="text-muted-foreground/60 hover:text-emerald-600 disabled:opacity-100 dark:hover:text-emerald-400"
-													onClick={(event) => {
-														event.stopPropagation();
-														runRowAction("complete", onCompleteWorkspace);
-													}}
+												disabled={isPending}
+												className="text-muted-foreground/60 hover:text-emerald-600 disabled:opacity-100 dark:hover:text-emerald-400"
+												onClick={(event) => {
+													event.stopPropagation();
+													runRowAction("complete", onCompleteWorkspace);
+												}}
 												>
 													{pendingAction === "complete" ? (
 														<Loader2
@@ -740,12 +754,12 @@ export const WorkspaceRailRowItem = memo(
 													variant="ghost"
 													size="icon-xs"
 													aria-label={t("sidebar.moveWorkspaceToWaiting")}
-													disabled={isPending}
-													className="text-muted-foreground/60 hover:text-amber-600 dark:hover:text-amber-400"
-													onClick={(event) => {
-														event.stopPropagation();
-														onArchiveWorkspace(workspace.id);
-													}}
+												disabled={isPending}
+												className="text-muted-foreground/60 hover:text-amber-600 dark:hover:text-amber-400"
+												onClick={(event) => {
+													event.stopPropagation();
+													runRowAction("archive", onArchiveWorkspace);
+												}}
 												>
 													<CirclePause
 														className="size-3.5"
@@ -762,8 +776,8 @@ export const WorkspaceRailRowItem = memo(
 								</>
 							)}
 						</div>
+						</div>
 					</div>
-				</div>
 			</div>
 		);
 	},

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
@@ -15,7 +15,10 @@ import type {
 	ProviderRuntimeConfig,
 	WorkspaceSetupReport,
 } from "@dcc/contracts";
-import { WorkspaceTerminalDrawer } from "@/features/terminal";
+import {
+	WorkspaceTerminalDrawer,
+	type TerminalAgentContext,
+} from "@/features/terminal";
 import {
 	addTerminal as addTerminalTab,
 	ensureTerminal as ensureTerminalTab,
@@ -90,6 +93,7 @@ type SessionWorkbenchProps = {
 	/** Active worktree/member labels used by the terminal runtime context. */
 	terminalWorkspaceName?: string | null;
 	terminalWorkspaceBranch?: string | null;
+	terminalProjectBranch?: string | null;
 	/** Project id — terminals are scoped per project. */
 	projectId?: string | null;
 	/** Project root (`rootPath`) — terminals open here, outside the worktree. */
@@ -159,6 +163,7 @@ type SessionWorkbenchProps = {
 	composerFocusRequestKey?: number | null;
 	/** Current inspector visibility — picks the open vs. close affordance. */
 	inspectorCollapsed?: boolean;
+	onInspectorCollapsedChange?: (collapsed: boolean) => void;
 	/** Toggles the inspector open/closed — wired to the header control. */
 	onToggleInspector?: () => void;
 	/** Reveals the inspector to review the current Git changes. */
@@ -188,6 +193,7 @@ export function SessionWorkbench({
 	terminalWorkspaceId,
 	terminalWorkspaceName,
 	terminalWorkspaceBranch,
+	terminalProjectBranch,
 	projectId,
 	terminalRootPath,
 	projectLabel,
@@ -234,6 +240,7 @@ export function SessionWorkbench({
 	composerPrefill,
 	composerFocusRequestKey = null,
 	inspectorCollapsed,
+	onInspectorCollapsedChange,
 	onToggleInspector,
 	onReviewChanges,
 	onCreateTaskFromBranch,
@@ -248,6 +255,13 @@ export function SessionWorkbench({
 	const queryClient = useQueryClient();
 	const [terminalUiStates, setTerminalUiStates] =
 		useState<WorkspaceTerminalUiStates>({});
+	const [terminalComposerPrefill, setTerminalComposerPrefill] = useState<{
+		text: string;
+		nonce: number;
+		mode: "append";
+	} | null>(null);
+	const terminalPrefillNonceRef = useRef(0);
+	const inspectorBeforeTerminalExpandRef = useRef<boolean | null>(null);
 	const [deliveryOpen, setDeliveryOpen] = useState(false);
 	const [deliveryRunning, setDeliveryRunning] = useState(false);
 	const [deliveryResults, setDeliveryResults] = useState<
@@ -287,6 +301,9 @@ export function SessionWorkbench({
 				label: t("terminalDock.scopes.worktree"),
 				scopeKey: `worktree:${terminalWorkspaceKey}`,
 				cwd: terminalWorktreePath ?? null,
+				projectLabel: resolvedProjectLabel,
+				branchLabel: terminalWorkspaceBranch ?? workspaceBranch,
+				protected: true,
 				disabledReason: terminalWorktreePath
 					? null
 					: t("terminalDock.scopes.noWorktreePath"),
@@ -296,6 +313,9 @@ export function SessionWorkbench({
 				label: t("terminalDock.scopes.project"),
 				scopeKey: terminalProjectKey,
 				cwd: terminalRootPath ?? workspacePath,
+				projectLabel: resolvedProjectLabel,
+				branchLabel: terminalProjectBranch ?? null,
+				protected: false,
 				disabledReason:
 					terminalRootPath ?? workspacePath
 						? null
@@ -305,9 +325,13 @@ export function SessionWorkbench({
 		[
 			t,
 			terminalProjectKey,
+			terminalProjectBranch,
 			terminalRootPath,
 			terminalWorktreePath,
 			terminalWorkspaceKey,
+			terminalWorkspaceBranch,
+			resolvedProjectLabel,
+			workspaceBranch,
 			workspacePath,
 		],
 	);
@@ -449,21 +473,83 @@ export function SessionWorkbench({
 		await workspaceSkipSetup({ workspaceRoot });
 		await refreshWorkspaceSetupState();
 	}, [refreshWorkspaceSetupState, t, terminalWorktreePath, workspacePath]);
-	const handleTerminalOpenChange = useCallback((next: boolean) => {
-		updateTerminalUiState((current) => ({
-			...current,
-			open: next,
-			expanded: next ? current.expanded : false,
-		}));
-		if (!next) {
-			requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
+	const restoreInspectorAfterTerminal = useCallback(() => {
+		if (inspectorBeforeTerminalExpandRef.current === false) {
+			onInspectorCollapsedChange?.(false);
 		}
-	}, [updateTerminalUiState]);
+		inspectorBeforeTerminalExpandRef.current = null;
+	}, [onInspectorCollapsedChange]);
+	const handleTerminalOpenChange = useCallback(
+		(next: boolean) => {
+			updateTerminalUiState((current) => ({
+				...current,
+				open: next,
+				expanded: next ? current.expanded : false,
+			}));
+			if (!next) {
+				restoreInspectorAfterTerminal();
+				requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
+			}
+		},
+		[restoreInspectorAfterTerminal, updateTerminalUiState],
+	);
 	const handleTerminalExpandedChange = useCallback(
 		(expanded: boolean) => {
+			if (expanded) {
+				if (inspectorBeforeTerminalExpandRef.current === null) {
+					inspectorBeforeTerminalExpandRef.current = inspectorCollapsed ?? true;
+				}
+				if (inspectorCollapsed === false) {
+					onInspectorCollapsedChange?.(true);
+				}
+			} else {
+				restoreInspectorAfterTerminal();
+			}
 			updateTerminalUiState((current) => ({ ...current, expanded }));
 		},
-		[updateTerminalUiState],
+		[
+			inspectorCollapsed,
+			onInspectorCollapsedChange,
+			restoreInspectorAfterTerminal,
+			updateTerminalUiState,
+		],
+	);
+	const handleSendTerminalToAgent = useCallback(
+		(context: TerminalAgentContext) => {
+			terminalPrefillNonceRef.current += 1;
+			const branch = context.branchLabel ? ` · ${context.branchLabel}` : "";
+			const safeContent = context.content.replaceAll(
+				"</terminal_output>",
+				"&lt;/terminal_output&gt;",
+			);
+			const source = context.selectionOnly
+				? t("terminalDock.agentContext.selection")
+				: t("terminalDock.agentContext.recentOutput");
+			setTerminalComposerPrefill({
+				nonce: terminalPrefillNonceRef.current,
+				mode: "append",
+				text: [
+					t("terminalDock.agentContext.prompt", { source }),
+					"",
+					"<terminal_output>",
+					`project: ${context.projectLabel}`,
+					`scope: ${context.scopeLabel}${branch}`,
+					`cwd: ${context.cwd}`,
+					"---",
+					safeContent,
+					"</terminal_output>",
+				].join("\n"),
+			});
+			handleTerminalOpenChange(false);
+		},
+		[handleTerminalOpenChange, t],
+	);
+
+	useEffect(
+		() => () => {
+			restoreInspectorAfterTerminal();
+		},
+		[restoreInspectorAfterTerminal, terminalWorkspaceKey],
 	);
 
 	useEffect(
@@ -632,7 +718,7 @@ export function SessionWorkbench({
 						onImplementPlanInNewThread={onImplementPlanInNewThread}
 						terminalScopes={terminalScopes}
 						onOpenTerminal={handleOpenTerminal}
-						externalComposerPrefill={composerPrefill}
+						externalComposerPrefill={terminalComposerPrefill ?? composerPrefill}
 						composerFocusRequestKey={composerFocusRequestKey}
 						inspectorCollapsed={inspectorCollapsed}
 						onToggleInspector={onToggleInspector}
@@ -675,6 +761,7 @@ export function SessionWorkbench({
 					providerLabel={selectedProviderLabel}
 					sessionState={sessionState}
 					sessionId={sessionId}
+					onSendToAgent={handleSendTerminalToAgent}
 				/>
 			) : null}
 

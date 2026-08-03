@@ -20,6 +20,7 @@ export type TerminalHandle = {
 	dispose: () => void;
 	refit: () => void;
 	focus: () => void;
+	getSelection: () => string;
 };
 
 const URL_PATTERN = /https?:\/\/[^\s<>"'`]+/gi;
@@ -235,6 +236,7 @@ function TerminalOutputImpl({
 				dispose: () => terminal.dispose(),
 				refit: () => fitNow(),
 				focus: () => terminal.focus(),
+				getSelection: () => terminal.getSelection(),
 			};
 		}
 

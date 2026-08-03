@@ -35,7 +35,11 @@ import { isSessionArchived, visibleSessions } from "./session-close";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import { cn } from "@/lib/utils";
 import type { TerminalScopeTarget } from "@/features/terminal/terminal-scope";
-import { useActiveTerminalCount } from "@/features/terminal/use-active-terminal-count";
+import {
+	useActiveTerminalCount,
+	useGlobalActiveTerminalCount,
+} from "@/features/terminal/use-active-terminal-count";
+import { getToggleTerminalShortcutKeys } from "@/features/shortcuts/shortcut-utils";
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
@@ -91,12 +95,19 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	const archivedSessionList = sessions.filter(isSessionArchived);
 	const activeSessionId = selectedSessionId ?? visibleSessionList[0]?.session.id ?? "";
 	const activeTerminalCount = useActiveTerminalCount(terminalScopes);
+	const globalActiveTerminalCount = useGlobalActiveTerminalCount();
+	const terminalShortcut = getToggleTerminalShortcutKeys().join("+");
 	const terminalLabel =
-		activeTerminalCount > 0
-			? t("workbench.terminal.openWithActive", {
-					count: activeTerminalCount,
+		globalActiveTerminalCount > activeTerminalCount
+			? t("workbench.terminal.openWithBackground", {
+					total: globalActiveTerminalCount,
+					current: activeTerminalCount,
 				})
-			: t("workbench.terminal.open");
+			: activeTerminalCount > 0
+				? t("workbench.terminal.openWithActive", {
+						count: activeTerminalCount,
+					})
+				: t("workbench.terminal.open");
 
 	return (
 		<div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-2">
@@ -157,15 +168,20 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 									aria-label={terminalLabel}
 								>
 									<SquareTerminal className="size-3.5" strokeWidth={1.8} />
-									{activeTerminalCount > 0 ? (
-										<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">
-											{activeTerminalCount}
+									{globalActiveTerminalCount > 0 ? (
+										<span
+											className={cn(
+												"absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background px-1 text-[9px] font-medium leading-none text-white",
+												activeTerminalCount > 0 ? "bg-sky-500" : "bg-amber-500",
+											)}
+										>
+											{globalActiveTerminalCount}
 										</span>
 									) : null}
 								</Button>
 							</TooltipTrigger>
 							<TooltipContent side="bottom">
-								{terminalLabel}
+								{terminalLabel} · {terminalShortcut}
 							</TooltipContent>
 						</Tooltip>
 					) : null}

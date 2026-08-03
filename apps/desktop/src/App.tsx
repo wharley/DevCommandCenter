@@ -76,6 +76,10 @@ import { WorkspaceSearch } from "./features/editor/workspace-search";
 import { useDockUnreadBadge } from "./features/dock-badge/useDockUnreadBadge";
 import { useAppUpdate } from "./features/updater";
 import {
+	countWorkspaceActiveTerminals,
+	terminateWorkspaceTerminals,
+} from "./features/terminal/terminal-store";
+import {
 	SessionWorkbench,
 	type RuntimeSessionSnapshot,
 } from "./features/sessions/session-workbench";
@@ -797,6 +801,16 @@ function applyCoreEventToSnapshot(
 
 export default function App() {
 	const { t } = useTranslation("common");
+	const pendingTerminalLifecycleRef = useRef<{
+		perform: () => Promise<void>;
+		resolve: () => void;
+		reject: (error: unknown) => void;
+		workspaceIds: string[];
+	} | null>(null);
+	const [pendingTerminalLifecycle, setPendingTerminalLifecycle] = useState<{
+		action: "complete" | "archive";
+		count: number;
+	} | null>(null);
 	useZoom(1);
 	// Remote SSH backends were removed in the Connections cleanup. Keep the
 	// query keys stable (still LOCAL_BACKEND_CACHE_KEY) so cached data lives
@@ -3971,12 +3985,65 @@ export default function App() {
 			]),
 		[backendCacheKey, queryClient],
 	);
+	const requestWorkspaceTerminalLifecycle = useCallback(
+		(
+			action: "complete" | "archive",
+			workspaceIds: string[],
+			perform: () => Promise<void>,
+		) => {
+			const count = countWorkspaceActiveTerminals(workspaceIds);
+			if (count === 0) return perform();
+			return new Promise<void>((resolve, reject) => {
+				pendingTerminalLifecycleRef.current = {
+					perform,
+					resolve,
+					reject,
+					workspaceIds,
+				};
+				setPendingTerminalLifecycle({ action, count });
+			});
+		},
+		[],
+	);
+	const resolveWorkspaceTerminalLifecycle = useCallback(
+		async (decision: "cancel" | "keep" | "terminate") => {
+			const pending = pendingTerminalLifecycleRef.current;
+			pendingTerminalLifecycleRef.current = null;
+			setPendingTerminalLifecycle(null);
+			if (!pending) return;
+			if (decision === "cancel") {
+				pending.resolve();
+				return;
+			}
+			if (decision === "terminate") {
+				await terminateWorkspaceTerminals(pending.workspaceIds);
+			}
+			try {
+				await pending.perform();
+				pending.resolve();
+			} catch (error) {
+				pending.reject(error);
+			}
+		},
+		[],
+	);
 	const handleArchiveWorkspace = useCallback(
 		async (workspaceId: string) => {
-			await archiveWorkspace(workspaceId);
-			await refreshWorkspaceCollections();
+			const workspace = allWorkspaces.find((candidate) => candidate.id === workspaceId);
+			const workspaceIds = workspace?.memberWorkspaceIds?.length
+				? workspace.memberWorkspaceIds
+				: [workspaceId];
+			await requestWorkspaceTerminalLifecycle("archive", workspaceIds, async () => {
+				await archiveWorkspace(workspaceId);
+				await refreshWorkspaceCollections();
+			});
 		},
-		[archiveWorkspace, refreshWorkspaceCollections],
+		[
+			allWorkspaces,
+			archiveWorkspace,
+			refreshWorkspaceCollections,
+			requestWorkspaceTerminalLifecycle,
+		],
 	);
 	const handleRenameWorkspace = useCallback(
 		async (workspaceId: string, name: string) => {
@@ -3994,10 +4061,21 @@ export default function App() {
 	);
 	const handleCompleteWorkspace = useCallback(
 		async (workspaceId: string) => {
-			await completeWorkspace(workspaceId);
-			await refreshWorkspaceCollections();
+			const workspace = allWorkspaces.find((candidate) => candidate.id === workspaceId);
+			const workspaceIds = workspace?.memberWorkspaceIds?.length
+				? workspace.memberWorkspaceIds
+				: [workspaceId];
+			await requestWorkspaceTerminalLifecycle("complete", workspaceIds, async () => {
+				await completeWorkspace(workspaceId);
+				await refreshWorkspaceCollections();
+			});
 		},
-		[completeWorkspace, refreshWorkspaceCollections],
+		[
+			allWorkspaces,
+			completeWorkspace,
+			refreshWorkspaceCollections,
+			requestWorkspaceTerminalLifecycle,
+		],
 	);
 	const handleDeleteWorkspace = useCallback(
 		async (
@@ -4013,6 +4091,7 @@ export default function App() {
 				workspace?.bundleId && workspace.memberWorkspaceIds?.length
 					? workspace.memberWorkspaceIds
 					: [workspaceId];
+			await terminateWorkspaceTerminals(affectedWorkspaceIds);
 			await deleteWorkspace(workspaceId, options);
 			for (const affectedWorkspaceId of affectedWorkspaceIds) {
 				queryClient.removeQueries({
@@ -4369,6 +4448,7 @@ export default function App() {
 									terminalWorkspaceId={activeWorkspace?.id ?? selectedWorkspace.id}
 									terminalWorkspaceName={activeWorkspace?.name ?? selectedWorkspace.name}
 									terminalWorkspaceBranch={activeWorkspace?.branch ?? selectedWorkspace.branch}
+									terminalProjectBranch={activeWorkspace?.baseBranch ?? selectedWorkspace.baseBranch ?? null}
 									projectId={activeWorkspace?.projectId ?? selectedWorkspace.projectId ?? selectedWorkspace.id}
 									terminalRootPath={activeWorkspace?.rootPath ?? selectedWorkspace.rootPath ?? null}
 									projectLabel={activeProjectLabel}
@@ -4435,6 +4515,7 @@ export default function App() {
 									onOpenPlanSurface={openPlanSurface}
 									onImplementPlanInNewThread={handleImplementPlanInNewThread}
 									inspectorCollapsed={inspectorCollapsed}
+									onInspectorCollapsedChange={setInspectorCollapsed}
 									onToggleInspector={toggleGitInspector}
 									onReviewChanges={openGitInspector}
 									onCreateTaskFromBranch={
@@ -4552,6 +4633,52 @@ export default function App() {
 					)}
 				</div>
 			</main>
+			<Dialog
+				open={pendingTerminalLifecycle !== null}
+				onOpenChange={(open) => {
+					if (!open) void resolveWorkspaceTerminalLifecycle("cancel");
+				}}
+			>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle>
+							{t(
+								pendingTerminalLifecycle?.action === "archive"
+									? "sidebar.terminalLifecycle.archiveTitle"
+									: "sidebar.terminalLifecycle.completeTitle",
+							)}
+						</DialogTitle>
+						<DialogDescription>
+							{t("sidebar.terminalLifecycle.description", {
+								count: pendingTerminalLifecycle?.count ?? 0,
+							})}
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							type="button"
+							variant="outline"
+							onClick={() => void resolveWorkspaceTerminalLifecycle("cancel")}
+						>
+							{t("sidebar.terminalLifecycle.cancel")}
+						</Button>
+						<Button
+							type="button"
+							variant="secondary"
+							onClick={() => void resolveWorkspaceTerminalLifecycle("keep")}
+						>
+							{t("sidebar.terminalLifecycle.keep")}
+						</Button>
+						<Button
+							type="button"
+							variant="destructive"
+							onClick={() => void resolveWorkspaceTerminalLifecycle("terminate")}
+						>
+							{t("sidebar.terminalLifecycle.terminate")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 			<Dialog
 				open={pendingSessionClose != null}
 				onOpenChange={(open) => {

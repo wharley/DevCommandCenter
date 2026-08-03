@@ -110,7 +110,7 @@ const REPO_CONFIG_FILENAME: &str = ".dcc.toml";
 // Regex para detectar quando um terminal está esperando input do usuário
 lazy_static::lazy_static! {
     static ref WAIT_PATTERN: Regex = Regex::new(
-        r"(?i)(trust|workspace\s+trust|permission|approve|confirm|\(y/n\)|\[y/n\]|\by/n\b|press\s+enter|waiting\s+for|allow\s+edit|must\s+be\s+trusted|denied|blocked|requires?\s+your|intervention|open\s+.*\s+to\s+continue|do\s+you\s+want)"
+        r"(?i)(trust|workspace\s+trust|permission|approve|confirm|\(y/n\)|\[y/n\]|\by/n\b|press\s+enter|waiting\s+for|allow\s+edit|must\s+be\s+trusted|denied|blocked|requires?\s+your|intervention|open\s+.*\s+to\s+continue|do\s+you\s+want|aguardando|permiss[aã]o|aprovar|confirmar|pressione\s+enter|pressione\s+retorno|deseja\s+continuar|requer\s+sua\s+interven[cç][aã]o)"
     ).unwrap();
 }
 
@@ -1703,6 +1703,10 @@ fn daemon_get_status_internal(state: &AppState) -> Result<Value, String> {
             }
         }
     }
+    // Release terminal state before collecting system metrics. Terminal activity
+    // sampling acquires these locks in the opposite phase (system, then terminal),
+    // so keeping both here would allow an avoidable lock inversion.
+    drop(terminals);
 
     let last_tick_at = state
         .daemon
@@ -6280,7 +6284,18 @@ fn terminal_get_or_create(
     if let Some(pty_id) = existing_id {
         if let Some(t) = terminals.get_mut(&pty_id) {
             let session = terminal_session_json(&pty_id, t);
-            return Ok(serde_json::json!({ "ptyId": pty_id, "session": session }));
+            let chunks = t
+                .output_buffer
+                .lock()
+                .map(|buffer| buffer.iter().cloned().collect::<Vec<_>>())
+                .unwrap_or_default();
+            return Ok(serde_json::json!({
+                "ptyId": pty_id,
+                "existing": true,
+                "session": session,
+                "chunks": chunks,
+                "truncated": false
+            }));
         }
     }
 
@@ -6302,7 +6317,18 @@ fn terminal_get_or_create(
     if let Some(t) = terminals.get_mut(&pty_id) {
         t.mission_id = Some(mission_id);
         let session = terminal_session_json(&pty_id, t);
-        return Ok(serde_json::json!({ "ptyId": pty_id, "session": session }));
+        let chunks = t
+            .output_buffer
+            .lock()
+            .map(|buffer| buffer.iter().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        return Ok(serde_json::json!({
+            "ptyId": pty_id,
+            "existing": false,
+            "session": session,
+            "chunks": chunks,
+            "truncated": false
+        }));
     }
 
     Err(db_error("Failed to re-acquire spawned terminal"))
@@ -6493,6 +6519,7 @@ fn finalize_managed_terminal_removal(
     persist_managed_terminal_buffer(state, &terminal);
     terminal.stop_flag.store(true, Ordering::Relaxed);
     let _ = terminate_managed_terminal_tree(&terminal, true);
+    let _ = terminal.child.kill();
     drop(terminal.pty_master);
     // Não aguardamos o reader thread aqui. Se ele demorar a encerrar,
     // o delete ficaria preso e a UI pareceria travada.
@@ -6741,6 +6768,90 @@ fn terminal_get_backlog(state: State<'_, AppState>, pty_id: String) -> ApiResult
     Ok(serde_json::json!({ "lines": [] }))
 }
 
+fn process_is_descendant_of(system: &System, pid: Pid, root_pid: Pid) -> bool {
+    let mut current = system.process(pid).and_then(|process| process.parent());
+    for _ in 0..64 {
+        let Some(parent) = current else {
+            return false;
+        };
+        if parent == root_pid {
+            return true;
+        }
+        current = system.process(parent).and_then(|process| process.parent());
+    }
+    false
+}
+
+/// Returns semantic activity for every managed terminal. A live login shell is
+/// `idle`; only a descendant process makes it `running`. This keeps the UI from
+/// presenting an idle shell as active work and lets hidden workspaces surface
+/// real background resource usage.
+#[tauri::command]
+fn terminal_list_activity(state: State<'_, AppState>) -> ApiResult<Vec<Value>> {
+    let mut system = state
+        .daemon
+        .system
+        .lock()
+        .map_err(|_| db_error("system lock poisoned"))?;
+    system.refresh_processes();
+
+    let mut terminals = state
+        .terminals
+        .lock()
+        .map_err(|_| db_error("terminals lock poisoned"))?;
+    let mut result = Vec::with_capacity(terminals.len());
+
+    for (pty_id, terminal) in terminals.iter_mut() {
+        let shell_running = terminal.child.try_wait().ok().flatten().is_none();
+        let shell_pid = terminal.child.process_id().map(Pid::from_u32);
+        let descendants = shell_pid
+            .map(|root_pid| {
+                system
+                    .processes()
+                    .iter()
+                    .filter(|(pid, _)| process_is_descendant_of(&system, **pid, root_pid))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let active_process = descendants
+            .iter()
+            .copied()
+            .find(|(_, process)| {
+                shell_pid.is_some_and(|pid| process.parent() == Some(pid))
+                    && !process.name().trim().is_empty()
+            })
+            .or_else(|| descendants.first().copied());
+        let waiting = shell_running
+            && active_process.is_some()
+            && waiting_excerpt_from_buffer(&terminal.output_buffer).is_some();
+        let status = if !shell_running {
+            "exited"
+        } else if waiting {
+            "waiting"
+        } else if active_process.is_some() {
+            "running"
+        } else {
+            "idle"
+        };
+        let (process_id, process_label) = active_process
+            .map(|(pid, process)| (Some(pid.as_u32()), Some(process.name().to_string())))
+            .unwrap_or((None, None));
+
+        result.push(serde_json::json!({
+            "ptyId": pty_id,
+            "ptyOwnerKey": terminal.pty_owner_key,
+            "cwd": terminal.cwd,
+            "status": status,
+            "processLabel": process_label,
+            "processId": process_id,
+            "startedAt": terminal.started_at
+        }));
+    }
+
+    Ok(result)
+}
+
 #[tauri::command]
 fn terminal_get_project_activity(
     state: State<'_, AppState>,
@@ -6843,6 +6954,7 @@ pub fn run() {
             terminal_get_pane_session,
             terminal_kill_by_pane_id,
             terminal_get_backlog,
+            terminal_list_activity,
             terminal_clear_persisted_scrollback,
             terminal_get_project_activity,
             pair_init,

@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	forwardRef,
+	useCallback,
+	useEffect,
+	useImperativeHandle,
+	useRef,
+	useState,
+	type ForwardedRef,
+} from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,7 +47,13 @@ type TerminalPanelProps = {
 	autoFocus?: boolean;
 };
 
-export function TerminalPanel({
+export type TerminalPanelHandle = {
+	focus: () => void;
+	clear: () => void;
+	getSelection: () => string;
+};
+
+function TerminalPanelImpl({
 	terminalId,
 	title,
 	cwd,
@@ -50,7 +64,7 @@ export function TerminalPanel({
 	sessionId,
 	variant = "card",
 	autoFocus = false,
-}: TerminalPanelProps) {
+}: TerminalPanelProps, ref: ForwardedRef<TerminalPanelHandle>) {
 	const terminalRef = useRef<TerminalHandle | null>(null);
 	const pendingWritesRef = useRef<string[]>([]);
 	const pendingFlushFrameRef = useRef<number | null>(null);
@@ -229,17 +243,30 @@ export function TerminalPanel({
 		flushPendingWrites();
 	};
 
-	const handleClearTerminal = () => {
+	const handleClearTerminal = useCallback(() => {
 		clearTerminal(terminalId);
 		terminalRef.current?.clear();
 		pendingWritesRef.current = [];
-	};
+	}, [terminalId]);
+
+	useImperativeHandle(
+		ref,
+		() => ({
+			focus: handleFocusTerminal,
+			clear: handleClearTerminal,
+			getSelection: () => terminalRef.current?.getSelection() ?? "",
+		}),
+	);
 
 	const handleTerminalData = useCallback(
 		(data: string) => {
+			if (data === "\x0c") {
+				handleClearTerminal();
+				return;
+			}
 			writeTerminalInput(terminalId, data);
 		},
-		[terminalId],
+		[handleClearTerminal, terminalId],
 	);
 
 	const handleTerminalResize = useCallback(
@@ -250,7 +277,7 @@ export function TerminalPanel({
 	);
 
 	if (variant === "drawer") {
-		return (
+	return (
 			<div className="dcc-terminal dcc-terminal--drawer flex min-h-0 flex-1 flex-col">
 				<div className="dcc-terminal__viewport flex min-h-0 flex-1 flex-col overflow-hidden pt-1">
 					<TerminalOutput
@@ -265,7 +292,7 @@ export function TerminalPanel({
 		);
 	}
 
-	return (
+		return (
 		<Card className="dcc-terminal">
 			<CardHeader>
 				<div className="dcc-card__meta-row">
@@ -309,3 +336,7 @@ export function TerminalPanel({
 		</Card>
 	);
 }
+
+export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
+	TerminalPanelImpl,
+);

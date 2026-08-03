@@ -1,11 +1,19 @@
 import {
 	ChevronDown,
+	Eraser,
+	ExternalLink,
 	GripHorizontal,
 	Maximize2,
+	MoreHorizontal,
 	Minimize2,
-	PanelRightClose,
+	PanelBottomClose,
 	Pencil,
 	Plus,
+	RefreshCcw,
+	ShieldCheck,
+	Sparkles,
+	Square,
+	TriangleAlert,
 	X,
 } from "lucide-react";
 import {
@@ -41,7 +49,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { suspendTerminalFit } from "@/components/terminal-output";
-import { TerminalPanel } from "./terminal-panel";
+import { TerminalPanel, type TerminalPanelHandle } from "./terminal-panel";
 import {
 	addTerminal,
 	ensureTerminal,
@@ -54,12 +62,16 @@ import {
 } from "./terminal-tabs-store";
 import {
 	getTerminalSnapshot,
+	getTerminalContextExcerpt,
+	interruptTerminal,
+	restartTerminal,
 	subscribeTerminalStore,
-	type TerminalStatus,
+	type TerminalSnapshot,
 } from "./terminal-store";
 import type { TerminalScopeKind, TerminalScopeTarget } from "./terminal-scope";
 import { cn } from "@/lib/utils";
 import { getTerminalTabNavigationTarget } from "./terminal-tab-navigation";
+import { openTerminalAtPath } from "@/lib/shell-api";
 
 const HEIGHT_STORAGE_KEY = "dcc-workbench-terminal-dock-height-v1";
 const DEFAULT_HEIGHT_PX = 340;
@@ -81,13 +93,30 @@ function clampHeight(px: number, maxPx: number) {
 	return Math.round(Math.min(Math.max(safe, lower), upper));
 }
 
-function statusDotClass(status: TerminalStatus | "ready") {
-	if (status === "running") return "bg-emerald-500";
-	if (status === "starting") return "bg-amber-400";
+function statusDotClass(status: TerminalSnapshot["activityStatus"] | "ready") {
+	if (status === "running") return "bg-sky-500";
+	if (status === "waiting") return "bg-amber-400";
 	if (status === "error") return "bg-destructive";
 	if (status === "exited") return "bg-muted-foreground";
 	return "bg-muted-foreground/45";
 }
+
+function terminalDisplayTitle(title: string, snapshot: TerminalSnapshot | null) {
+	if (/^Terminal \d+$/u.test(title) && snapshot?.activityLabel) {
+		return snapshot.activityLabel;
+	}
+	return title;
+}
+
+export type TerminalAgentContext = {
+	title: string;
+	projectLabel: string;
+	scopeLabel: string;
+	branchLabel: string | null;
+	cwd: string;
+	content: string;
+	selectionOnly: boolean;
+};
 
 export type WorkspaceTerminalDrawerProps = {
 	open: boolean;
@@ -108,6 +137,7 @@ export type WorkspaceTerminalDrawerProps = {
 	providerLabel: string | null;
 	sessionState: string;
 	sessionId: string | null;
+	onSendToAgent?: (context: TerminalAgentContext) => void;
 	className?: string;
 };
 
@@ -134,6 +164,7 @@ export function WorkspaceTerminalDrawer({
 	providerLabel,
 	sessionState,
 	sessionId,
+	onSendToAgent,
 	className,
 }: WorkspaceTerminalDrawerProps) {
 	const { t } = useTranslation("common");
@@ -141,22 +172,23 @@ export function WorkspaceTerminalDrawer({
 	const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 	const releaseFitRef = useRef<(() => void) | null>(null);
 	const terminalTabRefs = useRef(new Map<string, HTMLButtonElement>());
+	const terminalPanelRef = useRef<TerminalPanelHandle | null>(null);
 	const heightRef = useRef(DEFAULT_HEIGHT_PX);
 	const [heightPx, setHeightPx] = useState(DEFAULT_HEIGHT_PX);
 	const [terminalStatusVersion, setTerminalStatusVersion] = useState(0);
 	const [renamingTab, setRenamingTab] = useState<{ id: string; title: string } | null>(null);
+	const [closingTab, setClosingTab] = useState<{ id: string; title: string } | null>(null);
 	const [tabTitleDraft, setTabTitleDraft] = useState("");
 
 	const { tabs, activeId } = useProjectTerminals(scopeKey);
 	const activeTab = tabs.find((tab) => tab.id === activeId) ?? tabs[0] ?? null;
 	const atCap = tabs.length >= MAX_TERMINAL_TABS;
-	const terminalStatuses = useMemo(
+	const terminalSnapshots = useMemo(
 		() =>
-			new Map<string, TerminalStatus | "ready">(
-				tabs.map((tab): [string, TerminalStatus | "ready"] => [
+			new Map<string, TerminalSnapshot | null>(
+				tabs.map((tab): [string, TerminalSnapshot | null] => [
 					tab.id,
-					getTerminalSnapshot(getTerminalRuntimeId(scopeKey, tab.id))?.status ??
-						"ready",
+					getTerminalSnapshot(getTerminalRuntimeId(scopeKey, tab.id)),
 				]),
 			),
 		[scopeKey, tabs, terminalStatusVersion],
@@ -275,6 +307,59 @@ export function WorkspaceTerminalDrawer({
 		[renamingTab, scopeKey, tabTitleDraft],
 	);
 
+	const activeRuntimeId = activeTab
+		? getTerminalRuntimeId(scopeKey, activeTab.id)
+		: null;
+	const activeSnapshot = activeTab ? terminalSnapshots.get(activeTab.id) ?? null : null;
+	const closingSnapshot = closingTab
+		? terminalSnapshots.get(closingTab.id) ?? null
+		: null;
+	const activeScope = scopes.find((scope) => scope.kind === activeScopeKind) ?? scopes[0];
+	const activeProcess =
+		activeSnapshot?.activityStatus === "running" ||
+		activeSnapshot?.activityStatus === "waiting";
+
+	const handleSendToAgent = useCallback(() => {
+		if (!activeTab || !activeRuntimeId || !cwd || !activeScope || !onSendToAgent) return;
+		const selection = (
+			terminalPanelRef.current?.getSelection().trim() ?? ""
+		).slice(-16_000);
+		const content = selection || getTerminalContextExcerpt(activeRuntimeId);
+		if (!content) return;
+		onSendToAgent({
+			title: activeTab.title,
+			projectLabel: activeScope.projectLabel,
+			scopeLabel: activeScope.label,
+			branchLabel: activeScope.branchLabel,
+			cwd,
+			content,
+			selectionOnly: Boolean(selection),
+		});
+	}, [activeRuntimeId, activeScope, activeTab, cwd, onSendToAgent]);
+
+	const handleRestart = useCallback(async () => {
+		if (!activeRuntimeId || !activeTab || !cwd) return;
+		terminalPanelRef.current?.clear();
+		await restartTerminal(activeRuntimeId, cwd, {
+			title: activeTab.title,
+			workspaceName,
+			workspaceBranch,
+			providerLabel,
+			sessionState,
+			sessionId,
+		});
+		requestAnimationFrame(() => terminalPanelRef.current?.focus());
+	}, [
+		activeRuntimeId,
+		activeTab,
+		cwd,
+		providerLabel,
+		sessionId,
+		sessionState,
+		workspaceBranch,
+		workspaceName,
+	]);
+
 	useEffect(() => {
 		const onMove = (event: MouseEvent) => {
 			if (dragRef.current) {
@@ -354,7 +439,16 @@ export function WorkspaceTerminalDrawer({
 									className="mr-1 h-7 shrink-0 gap-1 rounded-md bg-muted/30 px-2 text-[var(--dcc-daily-meta-size)] font-medium text-muted-foreground"
 									aria-label={t("terminalDock.scopeSelector", { scope: scopeLabel })}
 								>
-									{scopeLabel}
+									{activeScope?.protected ? (
+										<ShieldCheck className="size-3.5 text-emerald-500" />
+									) : (
+										<TriangleAlert className="size-3.5 text-amber-500" />
+									)}
+									<span className="max-w-[18rem] truncate">
+										{activeScope
+											? `${activeScope.label} · ${activeScope.projectLabel}${activeScope.branchLabel ? ` · ${activeScope.branchLabel}` : ""}`
+											: scopeLabel}
+									</span>
 									<ChevronDown className="size-3 opacity-50" />
 								</Button>
 							</DropdownMenuTrigger>
@@ -366,7 +460,21 @@ export function WorkspaceTerminalDrawer({
 										className="flex items-center justify-between gap-3"
 										onClick={() => onScopeChange(scope.kind)}
 									>
-										<span>{scope.label}</span>
+										<span className="flex min-w-0 items-start gap-2">
+											{scope.protected ? (
+												<ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-emerald-500" />
+											) : (
+												<TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
+											)}
+											<span className="min-w-0">
+												<span className="block truncate font-medium">
+													{scope.label} · {scope.projectLabel}
+												</span>
+												<span className="block truncate text-[11px] text-muted-foreground">
+													{scope.branchLabel ?? scope.cwd ?? scope.disabledReason}
+												</span>
+											</span>
+										</span>
 										{scope.kind === activeScopeKind ? <span>✓</span> : null}
 									</DropdownMenuItem>
 								))}
@@ -378,9 +486,11 @@ export function WorkspaceTerminalDrawer({
 							className="flex min-w-0 items-center gap-1"
 						>
 							{tabs.map((tab) => {
-							const isActive = tab.id === activeTab?.id;
-							const status = terminalStatuses.get(tab.id) ?? "ready";
-							return (
+								const isActive = tab.id === activeTab?.id;
+								const snapshot = terminalSnapshots.get(tab.id) ?? null;
+								const status = snapshot?.activityStatus ?? "ready";
+								const displayTitle = terminalDisplayTitle(tab.title, snapshot);
+								return (
 								<div
 									key={tab.id}
 									role="presentation"
@@ -403,12 +513,23 @@ export function WorkspaceTerminalDrawer({
 										aria-controls={`terminal-panel-${tab.id}`}
 										tabIndex={isActive ? 0 : -1}
 										className="max-w-[9rem] truncate"
+										title={
+											snapshot?.activityLabel
+												? `${tab.title} · ${snapshot.activityLabel}`
+												: tab.title
+										}
 										onClick={() => setActiveTerminal(scopeKey, tab.id)}
 										onKeyDown={(event) => handleTerminalTabKeyDown(event, tab.id)}
 									>
 										<span className="flex items-center gap-1.5">
-											<span className={cn("size-1.5 rounded-full", statusDotClass(status))} />
-											<span className="truncate">{tab.title}</span>
+											<span
+												className={cn(
+													"size-1.5 rounded-full",
+													status === "waiting" && "animate-pulse",
+													statusDotClass(status),
+												)}
+											/>
+											<span className="truncate">{displayTitle}</span>
 										</span>
 									</button>
 									<button
@@ -425,13 +546,17 @@ export function WorkspaceTerminalDrawer({
 										className="rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/tab:opacity-100"
 										onClick={(event) => {
 											event.stopPropagation();
-											removeTerminal(scopeKey, tab.id);
+											if (status === "running" || status === "waiting") {
+												setClosingTab(tab);
+											} else {
+												removeTerminal(scopeKey, tab.id);
+											}
 										}}
 									>
 										<X className="size-3" />
 									</button>
 								</div>
-							);
+								);
 							})}
 						</div>
 						<Tooltip>
@@ -441,7 +566,7 @@ export function WorkspaceTerminalDrawer({
 									size="sm"
 									variant="ghost"
 									className="h-7 shrink-0 px-1.5"
-								aria-label={t("terminalDock.newTab")}
+									aria-label={t("terminalDock.newTab")}
 									disabled={atCap || !cwd}
 									onClick={() => addTerminal(scopeKey)}
 								>
@@ -457,6 +582,58 @@ export function WorkspaceTerminalDrawer({
 							</TooltipContent>
 						</Tooltip>
 					</div>
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button
+								type="button"
+								size="sm"
+								variant="ghost"
+								className="h-8 shrink-0 px-2"
+								aria-label={t("terminalDock.actions")}
+							>
+								<MoreHorizontal className="size-4" />
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" className="w-56">
+							<DropdownMenuItem
+								disabled={!activeTab || !onSendToAgent}
+								onClick={handleSendToAgent}
+							>
+								<Sparkles className="size-4" />
+								{t("terminalDock.sendToAgent")}
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								disabled={!activeRuntimeId}
+								onClick={() => terminalPanelRef.current?.clear()}
+							>
+								<Eraser className="size-4" />
+								{t("terminalDock.clear")}
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								disabled={!activeRuntimeId || !activeProcess}
+								onClick={() =>
+									activeRuntimeId && void interruptTerminal(activeRuntimeId)
+								}
+							>
+								<Square className="size-4" />
+								{t("terminalDock.interrupt")}
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								disabled={!activeRuntimeId || !cwd || activeProcess}
+								onClick={() => void handleRestart()}
+							>
+								<RefreshCcw className="size-4" />
+								{t("terminalDock.restart")}
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								disabled={!cwd}
+								onClick={() => cwd && void openTerminalAtPath(cwd)}
+							>
+								<ExternalLink className="size-4" />
+								{t("terminalDock.openExternal")}
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button
@@ -464,7 +641,7 @@ export function WorkspaceTerminalDrawer({
 								size="sm"
 								variant="ghost"
 								className="h-8 shrink-0 px-2"
-							aria-label={
+								aria-label={
 								expanded ? t("terminalDock.collapse") : t("terminalDock.expand")
 							}
 								onClick={() => onExpandedChange(!expanded)}
@@ -487,13 +664,15 @@ export function WorkspaceTerminalDrawer({
 								size="sm"
 								variant="outline"
 								className="h-8 shrink-0 px-2"
-							aria-label={t("terminalDock.hide")}
+								aria-label={t("terminalDock.hide")}
 								onClick={() => onOpenChange(false)}
 							>
-								<PanelRightClose className="size-4" />
+								<PanelBottomClose className="size-4" />
 							</Button>
 						</TooltipTrigger>
-					<TooltipContent side="bottom">{t("terminalDock.hideHint")}</TooltipContent>
+						<TooltipContent side="bottom">
+							{t("terminalDock.hideHint")}
+						</TooltipContent>
 					</Tooltip>
 				</div>
 
@@ -505,6 +684,7 @@ export function WorkspaceTerminalDrawer({
 				>
 					{activeTab ? (
 						<TerminalPanel
+							ref={terminalPanelRef}
 							key={getTerminalRuntimeId(scopeKey, activeTab.id)}
 							variant="drawer"
 							autoFocus
@@ -553,6 +733,58 @@ export function WorkspaceTerminalDrawer({
 							</Button>
 						</DialogFooter>
 					</form>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog
+				open={closingTab !== null}
+				onOpenChange={(nextOpen) => {
+					if (!nextOpen) setClosingTab(null);
+				}}
+			>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle>{t("terminalDock.closeRunningTitle")}</DialogTitle>
+						<DialogDescription>
+							{t("terminalDock.closeRunningDescription", {
+								process:
+									closingSnapshot?.activityLabel ??
+									closingTab?.title ??
+									t("terminalDock.process"),
+							})}
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter className="sm:justify-between">
+						<Button
+							type="button"
+							variant="ghost"
+							onClick={() => {
+								setClosingTab(null);
+								onOpenChange(false);
+							}}
+						>
+							{t("terminalDock.hideInstead")}
+						</Button>
+						<div className="flex justify-end gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => setClosingTab(null)}
+							>
+								{t("terminalDock.cancelClose")}
+							</Button>
+							<Button
+								type="button"
+								variant="destructive"
+								onClick={() => {
+									if (closingTab) removeTerminal(scopeKey, closingTab.id);
+									setClosingTab(null);
+								}}
+							>
+								{t("terminalDock.terminateAndClose")}
+							</Button>
+						</div>
+					</DialogFooter>
 				</DialogContent>
 			</Dialog>
 		</div>

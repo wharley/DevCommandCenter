@@ -3,10 +3,12 @@ import {
 	getOrCreateTerminalByOwner,
 	getTerminalBackendScope,
 	killTerminal as killTerminalApi,
+	listTerminalRuntimeActivity,
 	listenTerminalExit,
 	listenTerminalOutput,
 	resizeTerminal as resizeTerminalApi,
 	writeTerminalStdin,
+	type TerminalRuntimeActivityStatus,
 } from "@/lib/terminal-api";
 
 export type TerminalStatus = "idle" | "starting" | "running" | "exited" | "error";
@@ -26,6 +28,9 @@ export type TerminalSnapshot = {
 	ptyId: string | null;
 	shell: string | null;
 	status: TerminalStatus;
+	activityStatus: TerminalRuntimeActivityStatus;
+	activityLabel: string | null;
+	activityProcessId: number | null;
 	exitCode: number | null;
 	chunks: string[];
 	bufferedBytes: number;
@@ -55,6 +60,8 @@ const storeListeners = new Set<() => void>();
 let bridgePromise: Promise<void> | null = null;
 let bridgeScope: string | null = null;
 let bridgeCleanup: (() => void) | null = null;
+let activityPollTimer: ReturnType<typeof setInterval> | null = null;
+let activityPollInFlight = false;
 
 function terminalEntryKey(terminalId: string) {
 	return `${getTerminalBackendScope()}:${terminalId}`;
@@ -73,6 +80,9 @@ function getOrCreateEntry(terminalId: string): TerminalEntry {
 		ptyId: null,
 		shell: null,
 		status: "idle",
+		activityStatus: "idle",
+		activityLabel: null,
+		activityProcessId: null,
 		exitCode: null,
 		chunks: [],
 		bufferedBytes: 0,
@@ -93,6 +103,9 @@ function snapshot(entry: TerminalEntry): TerminalSnapshot {
 		ptyId: entry.ptyId,
 		shell: entry.shell,
 		status: entry.status,
+		activityStatus: entry.activityStatus,
+		activityLabel: entry.activityLabel,
+		activityProcessId: entry.activityProcessId,
 		exitCode: entry.exitCode,
 		chunks: [...entry.chunks],
 		bufferedBytes: entry.bufferedBytes,
@@ -144,6 +157,47 @@ function notifyStatus(entry: TerminalEntry) {
 	}
 }
 
+async function refreshTerminalActivity() {
+	if (activityPollInFlight) return;
+	activityPollInFlight = true;
+	try {
+		const activity = await listTerminalRuntimeActivity();
+		const byPtyId = new Map(activity.map((item) => [item.ptyId, item]));
+		for (const entry of entries.values()) {
+			const item = entry.ptyId ? byPtyId.get(entry.ptyId) : null;
+			const nextStatus =
+				item?.status ?? (entry.status === "exited" ? "exited" : "idle");
+			const nextLabel = item?.processLabel ?? null;
+			const nextProcessId = item?.processId ?? null;
+			if (
+				entry.activityStatus === nextStatus &&
+				entry.activityLabel === nextLabel &&
+				entry.activityProcessId === nextProcessId
+			) {
+				continue;
+			}
+			entry.activityStatus = nextStatus;
+			entry.activityLabel = nextLabel;
+			entry.activityProcessId = nextProcessId;
+			notifyStatus(entry);
+		}
+	} catch {
+		// Activity is progressive enhancement; terminal input/output remains usable.
+	} finally {
+		activityPollInFlight = false;
+	}
+}
+
+function ensureActivityPolling() {
+	if (activityPollTimer !== null) return;
+	void refreshTerminalActivity();
+	activityPollTimer = setInterval(() => {
+		if ([...entries.values()].some((entry) => entry.ptyId !== null)) {
+			void refreshTerminalActivity();
+		}
+	}, 2_000);
+}
+
 export function subscribeTerminalStore(listener: () => void): () => void {
 	storeListeners.add(listener);
 	return () => {
@@ -162,6 +216,7 @@ async function ensureTerminalBridge() {
 	bridgeScope = scope;
 
 	bridgePromise = (async () => {
+		ensureActivityPolling();
 		const unlistenOutput = await listenTerminalOutput((event) => {
 			const entryKey = ptyToTerminal.get(event.ptyId);
 			if (!entryKey) {
@@ -190,6 +245,9 @@ async function ensureTerminalBridge() {
 			ptyToTerminal.delete(event.ptyId);
 			entry.ptyId = null;
 			entry.status = "exited";
+			entry.activityStatus = "exited";
+			entry.activityLabel = null;
+			entry.activityProcessId = null;
 			entry.exitCode = event.code;
 			appendChunk(
 				entry,
@@ -244,6 +302,9 @@ export async function ensureTerminal(
 	}
 
 	entry.status = "starting";
+	entry.activityStatus = "idle";
+	entry.activityLabel = null;
+	entry.activityProcessId = null;
 	entry.exitCode = null;
 	notifyStatus(entry);
 
@@ -264,6 +325,7 @@ export async function ensureTerminal(
 			entry.ptyId = result.ptyId;
 			entry.shell = shell;
 			entry.status = result.session.status === "exited" ? "exited" : "running";
+			entry.activityStatus = entry.status === "exited" ? "exited" : "idle";
 			entry.exitCode = result.session.lastExitCode ?? null;
 			ptyToTerminal.set(result.ptyId, terminalEntryKey(terminalId));
 			applyPendingResize(entry);
@@ -295,6 +357,7 @@ export async function ensureTerminal(
 			return snapshot(entry);
 		} catch (error) {
 			entry.status = "error";
+			entry.activityStatus = "error";
 			entry.exitCode = 1;
 			appendChunk(
 				entry,
@@ -315,6 +378,49 @@ export function getTerminalSnapshot(terminalId: string): TerminalSnapshot | null
 	return entry ? snapshot(entry) : null;
 }
 
+export function getAllTerminalSnapshots(): TerminalSnapshot[] {
+	return [...entries.values()].map(snapshot);
+}
+
+export async function terminateWorkspaceTerminals(workspaceIds: readonly string[]) {
+	const prefixes = workspaceIds.map((id) => `worktree:${id}:`);
+	const terminations: Array<Promise<boolean>> = [];
+	for (const entry of entries.values()) {
+		if (
+			entry.ptyId &&
+			prefixes.some((prefix) => entry.terminalId.startsWith(prefix))
+		) {
+			terminations.push(killTerminal(entry.terminalId));
+		}
+	}
+	const results = await Promise.all(terminations);
+	return results.filter(Boolean).length;
+}
+
+export function countWorkspaceActiveTerminals(workspaceIds: readonly string[]) {
+	const prefixes = workspaceIds.map((id) => `worktree:${id}:`);
+	return [...entries.values()].filter(
+		(entry) =>
+			prefixes.some((prefix) => entry.terminalId.startsWith(prefix)) &&
+			(entry.activityStatus === "running" || entry.activityStatus === "waiting"),
+	).length;
+}
+
+const ANSI_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
+
+export function getTerminalContextExcerpt(
+	terminalId: string,
+	options: { maxLines?: number; maxChars?: number } = {},
+): string {
+	const entry = entries.get(terminalEntryKey(terminalId));
+	if (!entry) return "";
+	const maxLines = options.maxLines ?? 120;
+	const maxChars = options.maxChars ?? 16_000;
+	const plain = entry.chunks.join("").replace(ANSI_SEQUENCE, "").replace(/\r/g, "");
+	const lines = plain.split("\n").slice(-maxLines).join("\n").trim();
+	return lines.slice(-maxChars);
+}
+
 export function clearTerminal(terminalId: string) {
 	const entry = entries.get(terminalEntryKey(terminalId));
 	if (!entry) {
@@ -329,7 +435,7 @@ export function clearTerminal(terminalId: string) {
 	});
 
 	if (entry.ptyId) {
-		void writeTerminalStdin(entry.ptyId, "\x1b[2J\x1b[H");
+		void writeTerminalStdin(entry.ptyId, "\x0c");
 	}
 }
 
@@ -357,17 +463,53 @@ export function resizeTerminalView(
 	applyPendingResize(entry);
 }
 
-export function killTerminal(terminalId: string) {
+export function killTerminal(terminalId: string): Promise<boolean> {
 	const entry = entries.get(terminalEntryKey(terminalId));
 	if (!entry?.ptyId) {
-		return;
+		return Promise.resolve(false);
 	}
 
 	const ptyId = entry.ptyId;
 	entry.ptyId = null;
 	entry.status = "exited";
+	entry.activityStatus = "exited";
+	entry.activityLabel = null;
+	entry.activityProcessId = null;
 	entry.exitCode = entry.exitCode ?? -1;
 	ptyToTerminal.delete(ptyId);
 	notifyStatus(entry);
-	void killTerminalApi(ptyId);
+	return killTerminalApi(ptyId)
+		.then((result) => result.ok)
+		.catch(() => false);
+}
+
+export async function interruptTerminal(terminalId: string) {
+	const entry = entries.get(terminalEntryKey(terminalId));
+	if (!entry?.ptyId) return false;
+	const result = await writeTerminalStdin(entry.ptyId, "\x03");
+	return result.ok;
+}
+
+export async function restartTerminal(
+	terminalId: string,
+	cwd: string,
+	context: TerminalContext,
+) {
+	const entry = getOrCreateEntry(terminalId);
+	if (entry.ptyId) {
+		const ptyId = entry.ptyId;
+		await killTerminalApi(ptyId);
+		ptyToTerminal.delete(ptyId);
+	}
+	entry.ptyId = null;
+	entry.status = "idle";
+	entry.activityStatus = "idle";
+	entry.activityLabel = null;
+	entry.activityProcessId = null;
+	entry.exitCode = null;
+	entry.chunks = [];
+	entry.bufferedBytes = 0;
+	entry.truncated = false;
+	notifyStatus(entry);
+	return ensureTerminal(terminalId, cwd, context);
 }

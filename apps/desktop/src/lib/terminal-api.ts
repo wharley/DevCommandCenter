@@ -36,6 +36,23 @@ export type TerminalEnsureResult = {
 	truncated: boolean;
 };
 
+export type TerminalRuntimeActivityStatus =
+	| "idle"
+	| "running"
+	| "waiting"
+	| "exited"
+	| "error";
+
+export type TerminalRuntimeActivity = {
+	ptyId: string;
+	ptyOwnerKey: string | null;
+	cwd: string;
+	status: TerminalRuntimeActivityStatus;
+	processLabel: string | null;
+	processId: number | null;
+	startedAt: string;
+};
+
 export type TerminalOutputEvent = {
 	ptyId: string;
 	data: string;
@@ -77,7 +94,10 @@ export async function getOrCreateTerminalByOwner(
 ): Promise<TerminalEnsureResult> {
 	const payload = await invoke<{
 		ptyId: string;
+		existing?: boolean;
 		session?: TerminalSessionResult | null;
+		chunks?: string[];
+		truncated?: boolean;
 	}>("terminal_get_or_create", {
 		missionId: ownerKey,
 		options: {
@@ -88,7 +108,7 @@ export async function getOrCreateTerminalByOwner(
 
 	return {
 		ptyId: payload.ptyId,
-		existing: false,
+		existing: payload.existing ?? false,
 		session:
 			payload.session ?? {
 				ptyId: payload.ptyId,
@@ -101,9 +121,13 @@ export async function getOrCreateTerminalByOwner(
 				exitedAt: null,
 				lastExitCode: null,
 			},
-		chunks: [],
-		truncated: false,
+		chunks: payload.chunks ?? [],
+		truncated: payload.truncated ?? false,
 	};
+}
+
+export function listTerminalRuntimeActivity() {
+	return invoke<TerminalRuntimeActivity[]>("terminal_list_activity");
 }
 
 export function writeTerminalStdin(ptyId: string, data: string) {

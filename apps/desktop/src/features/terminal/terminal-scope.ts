@@ -5,6 +5,9 @@ export type TerminalScopeTarget = {
 	label: string;
 	scopeKey: string;
 	cwd: string | null;
+	projectLabel: string;
+	branchLabel: string | null;
+	protected: boolean;
 	disabledReason?: string | null;
 };
 

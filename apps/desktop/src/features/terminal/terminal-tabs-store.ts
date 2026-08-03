@@ -159,7 +159,7 @@ export function removeTerminal(scopeKey: string, terminalId: string) {
 		return;
 	}
 
-	killTerminal(getTerminalRuntimeId(scopeKey, terminalId));
+	void killTerminal(getTerminalRuntimeId(scopeKey, terminalId));
 	const tabs = current.tabs.filter((tab) => tab.id !== terminalId);
 
 	let activeId = current.activeId;
