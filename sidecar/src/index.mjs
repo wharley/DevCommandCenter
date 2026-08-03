@@ -90,10 +90,11 @@ function normalizeEffort(effort) {
 }
 
 function buildSystemPrompt(fastMode, toolInstructions) {
-	const appendParts = [];
-	if (fastMode === true) {
-		appendParts.push("Prefer concise assistant replies unless the user explicitly needs detail.");
-	}
+	const appendParts = [
+		fastMode === true
+			? "Keep the final assistant reply concise. Lead with the outcome; use short descriptive Markdown headings only when the reply spans distinct topics."
+			: "Explain enough for the user to follow the result. In longer final replies, lead with the outcome and separate distinct topics with short descriptive Markdown headings and readable paragraphs.",
+	];
 	if (typeof toolInstructions === "string" && toolInstructions.trim().length > 0) {
 		appendParts.push(toolInstructions.trim());
 	}

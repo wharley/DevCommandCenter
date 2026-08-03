@@ -38,7 +38,7 @@ export type ComposerDelegationRequest = {
 export const DEFAULT_COMPOSER_ENVELOPE: ComposerTurnEnvelope = {
 	planMode: false,
 	effort: "medium",
-	fastMode: true,
+	fastMode: false,
 	approvalPolicy: null,
 };
 

@@ -97,8 +97,10 @@ import { delegationTargetsFor } from "@/features/sessions/delegation-targets";
 import {
 	clearDraft,
 	loadApprovalPolicy,
+	loadDirectResponse,
 	loadEffortSelection,
 	saveApprovalPolicy,
+	saveDirectResponse,
 	saveEffortSelection,
 } from "./draftStorage";
 import { appendComposerText, readComposerPrompt, setEditorText } from "./editorOps";
@@ -218,7 +220,7 @@ export function WorkspaceComposer({
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [queuedTurns, setQueuedTurns] = useState<QueuedTurn[]>([]);
 	const [queueActionId, setQueueActionId] = useState<string | null>(null);
-	const [isFastMode, setIsFastMode] = useState(true);
+	const [isFastMode, setIsFastMode] = useState(loadDirectResponse);
 	const [executionMenuOpen, setExecutionMenuOpen] = useState(false);
 	const [sendMenuOpen, setSendMenuOpen] = useState(false);
 	const [delegateAllowFileEdits, setDelegateAllowFileEdits] = useState(false);
@@ -253,6 +255,10 @@ export function WorkspaceComposer({
 		},
 		[composerEffortKey],
 	);
+	const updateDirectResponse = useCallback((direct: boolean) => {
+		setIsFastMode(direct);
+		saveDirectResponse(direct);
+	}, []);
 	const composerRootRef = useRef<HTMLDivElement | null>(null);
 	const editorRef = useRef<LexicalEditor | null>(null);
 	const lastPrefillNonceRef = useRef<number | null>(null);
@@ -1028,7 +1034,7 @@ export function WorkspaceComposer({
 						onSelectUltrathink={() =>
 							updateEffortSelection({ effort, ultrathink: true })
 						}
-						onSetDirectResponse={setIsFastMode}
+						onSetDirectResponse={updateDirectResponse}
 						accountUsage={accountUsageQuery.data}
 						isAccountUsageFetching={accountUsageQuery.isFetching}
 						hasAccountUsageError={accountUsageQuery.isError}

@@ -11,6 +11,27 @@ const DEFAULT_EFFORT_SELECTION: EffortSelection = {
 	ultrathink: false,
 };
 
+const RESPONSE_STYLE_STORAGE_KEY = "dcc.composer.response-style";
+
+export function loadDirectResponse() {
+	if (typeof window === "undefined") {
+		return false;
+	}
+
+	return window.localStorage.getItem(RESPONSE_STYLE_STORAGE_KEY) === "direct";
+}
+
+export function saveDirectResponse(direct: boolean) {
+	if (typeof window === "undefined") {
+		return;
+	}
+
+	window.localStorage.setItem(
+		RESPONSE_STYLE_STORAGE_KEY,
+		direct ? "direct" : "standard",
+	);
+}
+
 export function loadEffortSelection(key: string): EffortSelection {
 	if (typeof window === "undefined") {
 		return DEFAULT_EFFORT_SELECTION;

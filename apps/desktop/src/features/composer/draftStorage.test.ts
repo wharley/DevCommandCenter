@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_EFFORT_LEVEL } from "./effort";
 import {
 	loadApprovalPolicy,
+	loadDirectResponse,
 	loadEffortSelection,
 	saveApprovalPolicy,
+	saveDirectResponse,
 	saveEffortSelection,
 } from "./draftStorage";
 
@@ -15,6 +17,28 @@ function createLocalStorageStub() {
 		removeItem: (key: string) => void store.delete(key),
 	};
 }
+
+describe("response style persistence", () => {
+	beforeEach(() => {
+		vi.stubGlobal("window", { localStorage: createLocalStorageStub() });
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("defaults to the standard response style", () => {
+		expect(loadDirectResponse()).toBe(false);
+	});
+
+	it("persists the direct response style globally", () => {
+		saveDirectResponse(true);
+		expect(loadDirectResponse()).toBe(true);
+
+		saveDirectResponse(false);
+		expect(loadDirectResponse()).toBe(false);
+	});
+});
 
 describe("effort selection persistence", () => {
 	beforeEach(() => {

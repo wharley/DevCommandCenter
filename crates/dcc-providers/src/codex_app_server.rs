@@ -2001,13 +2001,13 @@ impl Provider for CodexAppServerAdapter {
                             PromptInjectionOptions {
                                 plan: true,
                                 effort: false,
-                                fast: false,
+                                fast: true,
                             },
                         ),
                         turn.tool_instructions.as_deref(),
                     ),
                     codex_reasoning_effort(turn.effort.as_deref()),
-                    if turn.fast_mode.unwrap_or(true) {
+                    if turn.fast_mode.unwrap_or(false) {
                         Some("concise")
                     } else {
                         Some("auto")

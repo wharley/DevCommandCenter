@@ -2521,7 +2521,7 @@ export default function App() {
 						providerRuntime: targetRuntime,
 						planMode: false,
 						effort: request.effort ?? "medium",
-						fastMode: request.fastMode ?? true,
+						fastMode: request.fastMode ?? false,
 						approvalPolicy: "auto",
 					});
 					startedCount += 1;

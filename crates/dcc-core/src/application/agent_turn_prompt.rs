@@ -13,7 +13,7 @@ fn normalized_effort(effort: Option<&str>) -> &'static str {
 }
 
 fn normalized_fast(fast_mode: Option<bool>) -> bool {
-    fast_mode.unwrap_or(true)
+    fast_mode.unwrap_or(false)
 }
 
 fn normalized_plan(plan_mode: Option<bool>) -> bool {
@@ -40,9 +40,9 @@ fn effort_lines(effort: &str) -> &'static str {
 
 fn fast_lines(fast: bool) -> &'static str {
     if fast {
-        "Fast style: prefer concise assistant replies unless the user needs detail."
+        "Direct response style: keep the final assistant reply concise. Lead with the outcome; use short descriptive Markdown headings only when the reply spans distinct topics."
     } else {
-        "Standard verbosity: explain enough for the user to follow along when useful."
+        "Standard response style: explain enough for the user to follow the result. In longer final replies, lead with the outcome and separate distinct topics with short descriptive Markdown headings and readable paragraphs."
     }
 }
 
@@ -363,8 +363,16 @@ mod tests {
     fn behavior_prompt_omits_effort_lines() {
         let out = compose_behavior_prompt_for_provider("codex", "x", Some(true), Some(true));
         assert!(out.contains("PLAN ON"));
-        assert!(out.contains("Fast style"));
+        assert!(out.contains("Direct response style"));
         assert!(!out.contains("Effort "));
+    }
+
+    #[test]
+    fn missing_response_style_defaults_to_standard() {
+        let out =
+            compose_wire_prompt_for_provider("gemini", "x", Some(false), Some("medium"), None);
+        assert!(out.contains("Standard response style"));
+        assert!(!out.contains("Direct response style"));
     }
 
     #[test]
@@ -384,7 +392,7 @@ mod tests {
         assert!(!out.contains("PLAN ON"));
         assert!(!out.contains("EXECUTION ON"));
         assert!(out.contains("Effort high"));
-        assert!(out.contains("Fast style"));
+        assert!(out.contains("Direct response style"));
     }
 
     #[test]
@@ -403,6 +411,6 @@ mod tests {
         );
         assert!(out.contains("PLAN ON"));
         assert!(!out.contains("Effort "));
-        assert!(!out.contains("Fast style"));
+        assert!(!out.contains("response style"));
     }
 }
