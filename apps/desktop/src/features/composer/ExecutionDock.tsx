@@ -150,9 +150,9 @@ export const ExecutionDock = memo(function ExecutionDock({
 			type="button"
 			disabled={!canChangeOrigin}
 			className={cn(
-				"flex h-full w-full min-w-0 items-center gap-2 border-r border-emerald-700/15 px-3 py-2 text-left max-sm:border-r-0",
+				"flex h-full w-full min-w-0 items-center gap-2 border-r border-border/55 px-3 py-2 text-left max-sm:border-r-0",
 				canChangeOrigin &&
-					"transition-colors hover:bg-emerald-500/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/35",
+					"transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40",
 			)}
 			aria-label={
 				canChangeOrigin ? t("composer.executionDock.origin.open") : undefined
@@ -197,14 +197,14 @@ export const ExecutionDock = memo(function ExecutionDock({
 
 	return (
 		<div
-			className="relative z-10 mx-2 -mb-px grid min-h-12 grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_auto] overflow-visible rounded-t-xl border border-emerald-700/20 border-b-border/40 bg-emerald-500/[0.055] shadow-[0_-10px_32px_-24px_rgba(16,185,129,0.55)] max-sm:grid-cols-[minmax(0,1fr)_auto]"
+			className="relative z-10 mx-2 -mb-px grid min-h-12 grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_auto] overflow-visible rounded-t-xl border border-border/65 border-b-border/40 bg-card/90 shadow-[0_-8px_24px_-22px_rgba(0,0,0,0.45)] backdrop-blur-sm max-sm:grid-cols-[minmax(0,1fr)_auto] dark:shadow-[0_-8px_24px_-22px_rgba(0,0,0,0.9)]"
 			aria-label={t("composer.executionDock.ariaLabel")}
 		>
 			<Popover>
 				<PopoverTrigger asChild>
 					<button
 						type="button"
-						className="group flex min-w-0 items-center gap-2.5 rounded-tl-xl border-r border-emerald-700/15 px-3 py-2 text-left transition-colors hover:bg-emerald-500/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/35"
+						className="group flex min-w-0 items-center gap-2.5 rounded-tl-xl border-r border-border/55 px-3 py-2 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
 					>
 						<span
 							className={cn(
@@ -335,7 +335,7 @@ export const ExecutionDock = memo(function ExecutionDock({
 				</PopoverContent>
 			</Popover>
 
-			<div className="min-w-0 max-sm:col-span-2 max-sm:row-start-2 max-sm:border-t max-sm:border-emerald-700/15">
+			<div className="min-w-0 max-sm:col-span-2 max-sm:row-start-2 max-sm:border-t max-sm:border-border/55">
 				{canChangeOrigin && projectRootPath && onCreateTaskFromBranch ? (
 					<ExecutionOriginPicker
 						trigger={projectContextControl}
@@ -352,7 +352,7 @@ export const ExecutionDock = memo(function ExecutionDock({
 				type="button"
 				onClick={onReviewChanges}
 				disabled={!onReviewChanges}
-				className="flex items-center gap-1.5 rounded-tr-xl px-3 py-2 text-[11px] text-muted-foreground/90 transition-colors hover:bg-emerald-500/[0.07] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/35 disabled:cursor-default disabled:opacity-70"
+				className="flex items-center gap-1.5 rounded-tr-xl px-3 py-2 text-[11px] text-muted-foreground/90 transition-colors hover:bg-muted/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-70"
 				aria-label={t("composer.executionDock.reviewChanges")}
 			>
 				<FileDiff className="size-3.5 shrink-0" strokeWidth={1.8} />
